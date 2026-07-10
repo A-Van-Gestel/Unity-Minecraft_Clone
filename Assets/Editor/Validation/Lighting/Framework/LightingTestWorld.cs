@@ -325,6 +325,16 @@ namespace Editor.Validation.Lighting.Framework
         public bool ChunkHasLightWork(Vector2Int chunkCoord) => GetChunk(chunkCoord).HasLightWork;
 
         /// <summary>
+        /// Read-only access to a chunk's REAL <see cref="ChunkData"/> backing store, for scenarios that
+        /// assert on section-level metadata (e.g. the LI-2 band derivation's
+        /// <see cref="ChunkData.GetLightingBandTop"/>). Inspection only — mutate through the harness
+        /// APIs so flag/queue bookkeeping stays faithful to production.
+        /// </summary>
+        /// <param name="chunkCoord">The chunk's grid coordinate.</param>
+        /// <returns>The chunk's live <see cref="ChunkData"/>.</returns>
+        public ChunkData GetChunkData(Vector2Int chunkCoord) => GetChunk(chunkCoord).Data;
+
+        /// <summary>
         /// Re-flags a chunk's pending light work — the harness analog of production setting
         /// <c>ChunkData.HasLightChangesToProcess = true</c> (a merge-fault re-flag, or a dynamic edit).
         /// Fires the <c>OnLightWorkFlagged</c> sink like production, so in scheduler mode the chunk stages

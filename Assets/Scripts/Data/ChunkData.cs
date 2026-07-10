@@ -1004,6 +1004,48 @@ namespace Data
             }
         }
 
+        /// <summary>
+        /// Summarizes this chunk's <b>uniform top region</b> for the LI-2 lighting Y-band derivation
+        /// (<see cref="LightingBandDecision"/>): scanning sections from the top down, the run of
+        /// sections that are voxel-empty (null — all air, job maps zero-filled) and share one uniform
+        /// light value (the compact <see cref="SectionUniformSkyLevel"/> byte, or all-zero when fully
+        /// unallocated). The banded lighting job answers reads at/above the returned Y from this
+        /// summary instead of gathered rows, so the semantics here must match what
+        /// <see cref="FillJobVoxelMap"/>/<see cref="FillJobLightMap"/> would have produced.
+        /// </summary>
+        /// <returns>The uniform-top summary (never <see cref="LightingBandChunkTop.Missing"/>).</returns>
+        public LightingBandChunkTop GetLightingBandTop()
+        {
+            int fromSection = sections.Length;
+            ushort regionLight = 0;
+
+            for (int s = sections.Length - 1; s >= 0; s--)
+            {
+                // A non-null section has voxels — the job map would carry real data, not uniform air.
+                if (sections[s] != null)
+                    break;
+
+                byte uniformSky = SectionUniformSkyLevel[s];
+                ushort light = uniformSky != UNIFORM_SKY_NONE
+                    ? LightBitMapping.PackLightData(uniformSky, 0, 0, 0)
+                    : (ushort)0;
+
+                if (fromSection == sections.Length)
+                    regionLight = light; // topmost section fixes the region's value
+                else if (light != regionLight)
+                    break; // uniform per-section but a different value — region ends above this one
+
+                fromSection = s;
+            }
+
+            return new LightingBandChunkTop
+            {
+                UniformFromY = fromSection * ChunkMath.SECTION_SIZE,
+                UniformLight = regionLight,
+                IsMissing = false,
+            };
+        }
+
         /// <summary>Zero-fills a full-chunk voxel job buffer (missing-chunk fallback).</summary>
         /// <param name="jobArray">A buffer of length ChunkWidth × ChunkHeight × ChunkWidth.</param>
         public static void FillEmptyVoxelMap(NativeArray<uint> jobArray)

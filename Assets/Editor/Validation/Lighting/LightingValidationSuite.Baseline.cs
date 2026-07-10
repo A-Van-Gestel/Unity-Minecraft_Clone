@@ -120,6 +120,12 @@ namespace Editor.Validation.Lighting
             // exercised with the fail-safe off. Lives in LightingValidationSuite.SchedulerMode.cs and
             // self-registers here. ---
             AddSchedulerModeBaselineScenarios(scenarios);
+
+            // --- LI-2 lighting Y-band derivation baselines (B71-B74): the pure LightingBandDecision
+            // rules + ChunkData.GetLightingBandTop metadata summary, guarded before the band is plumbed
+            // into the job. Lives in Baselines/LightingValidationSuite.Baseline.BandDecision.cs and
+            // self-registers here. ---
+            AddBandDecisionBaselineScenarios(scenarios);
         }
 
         /// <summary>Hook for the Bug-12 family baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug12.cs).</summary>
@@ -137,6 +143,10 @@ namespace Editor.Validation.Lighting
         /// <summary>Hook for the AS-2 scheduler-mode baselines (implemented in LightingValidationSuite.SchedulerMode.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddSchedulerModeBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the LI-2 band-derivation baselines (implemented in Baselines/LightingValidationSuite.Baseline.BandDecision.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBandDecisionBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the Bug-13 suspended-slab baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug13Slab.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
