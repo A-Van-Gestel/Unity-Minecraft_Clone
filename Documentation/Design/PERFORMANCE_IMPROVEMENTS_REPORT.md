@@ -26,6 +26,9 @@ debug-tooling exemption.
 on `Assets/Editor/WorldTools/` + quick pass on the remaining editor tools).
 **Seventh-pass audit:** 2026-07-02 — added `VS-1..3` (editor validation suites), completing the
 audit coverage: every system in the repository has now had at least one audit pass.
+**Review sync:** 2026-07-10 — branch code review of `feat/async-lighting-validation-suite` added
+`LI-3` (eager double neighbor-gate evaluation in the lighting ready-set scan; plan-owned by
+`LIGHTING_PIPELINE_STATE_REFACTOR.md` F7 → LP-6).
 Findings are from static code review unless stated otherwise — capture a baseline per
 `Documentation/Performance/README.md` before implementing the larger items.
 
@@ -177,6 +180,7 @@ gates.
 |------|--------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
 | LI-1 | ✅ Branchy 9-map dispatch + hashmap cache → halo-padded volume; layout validated, **shipped net-positive via P-2 Phase 1** (worker-thread gather) |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
 | LI-2 | Halo gather/extract copies the full 128-voxel column height regardless of content (Y-band / section-ranged volume)                               |   🟡   |  🔴  |   🟢    |  ⚠️  |  ✅   |
+| LI-3 | Ready-set scan eagerly evaluates BOTH neighbor gates for every ready chunk each visit (plan-owned by `LIGHTING_PIPELINE_STATE_REFACTOR.md` LP-6) |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 
 ### World Generation
 
@@ -808,6 +812,38 @@ design problem; the copy mechanics are done.
     > full-height copies prohibitive — `WORLD_SCALING_ANALYSIS.md` §2.2).
 > - **Seed/Save:** ⚠️ same contract as LI-1 (terrain-safe, but light output must remain identical —
     > any divergence re-dirties the edge-check cascade on old saves) / ✅.
+
+---
+
+### LI-3. Ready-set scan eagerly evaluates BOTH neighbor gates for every ready chunk
+
+*(Surfaced by the 2026-07-10 branch code review of `feat/async-lighting-validation-suite` — a cost
+introduced by the AS-2/HF-4 #1 `LightingScanDecision` extraction. Independently found by the LP
+census as `LIGHTING_PIPELINE_STATE_REFACTOR.md` **F7**, which owns the fix via **LP-6**; this entry
+exists so the master perf backlog lists it — details and the consolidation plan live there.)*
+
+**Observed:** the `World.Update` lighting ready-set scan (`World.cs:1630–1631`) computes both
+`AreNeighborsDataReady` *and* `AreNeighborsReadyAndLit` for **every** ready chunk on every visit to
+feed the pure `LightingScanDecision.EvaluateReadyChunk` call, where the pre-AS-2 code
+short-circuited: `AreNeighborsReadyAndLit` (the expensive gate — 8 neighbors × chunk-store lookup +
+in-flight probe + flag reads) ran only on the rare `NeedsEdgeCheck` arm, and neither gate ran when a
+job was already in flight (immediate park). During initial world load / heavy edit churn the ready
+set is large, so this is added cost in exactly the loop MT-2 was built to slim down.
+
+**Recommendation:** compute the gate booleans lazily at the call site — `neighborsReadyAndLit` only
+when `!jobInFlight && !needsInitialLighting && needsEdgeCheck`, `neighborsDataReady` only when an
+arm that reads it is reachable. `EvaluateReadyChunk` stays pure and its semantics are unchanged
+because each gate is only consulted on those paths (mirror the same lazy pattern in the frame
+simulator's `RunSchedulerPhase2` so the two call sites stay identical). LP-6 subsumes this if the
+gates are consolidated there first.
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — call-site-only change in two mirrored callers; the shared decision is untouched.
+> - **Risk:** 🟢 Low — no semantic change (gates are pure reads); guarded by the scheduler-mode
+    > baselines B66–B70 + the legacy fleet.
+> - **Benefit:** 🟡 Medium — O(ready-set) per frame; matters during world load and edit bursts,
+    > negligible at steady state.
+> - **Seed/Save:** ✅ / ✅ — scheduling-only; no lighting output or disk change.
 
 ---
 

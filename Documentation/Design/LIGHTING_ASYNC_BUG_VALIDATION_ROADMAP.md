@@ -667,6 +667,17 @@ extractions, both surfaced by the AS-2 trace above:
     > `dotnet build` both assemblies; in-game injection re-check (as HF-2: one error, no cascade — the
     > production side is not suite-covered). Doc-sync `CHUNK_LIFECYCLE_PIPELINE.md` §7 (completion pass)
     > with the shared-skeleton pointer; flip fidelity **B7** to CLOSED (full).
+>
+> **Review note (2026-07-10, branch code review — PLAUSIBLE fragility, no behavior change):** the
+> production driver passes per-job state between hooks through mutable scratch fields
+> (`WorldJobManager._curLightJob` / `_curLightChunk`, WJM:~142). That is correct only while the
+> skeleton invokes `IsComplete → CompleteJob → MergeJob → ReleaseJob` strictly per-candidate with no
+> interleaving — a contract `ILightingCompletionDriver<TKey>` does not encode. A future skeleton
+> reshape that looks safe from its own file (e.g. batching all `CompleteJob`s before any merge)
+> would make `ReleaseJob` release the *wrong* job's containers — the exact stranded/disposed-container
+> cascade (B7) this extraction guards against. If the skeleton ever changes shape, first pass the
+> job/chunk through the hook signatures (or a per-key context struct). Noted for the LP-3 / MP-4
+> executors, which touch this type.
 
 Both extractions are chunk-pipeline edits → `CHUNK_LIFECYCLE_PIPELINE.md` doc-sync in the same
 commit, and cross-check `_FIXED_BUGS.md` (flag-pairing / deadlock history) before merging.
