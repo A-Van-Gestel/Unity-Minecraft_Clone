@@ -126,6 +126,12 @@ namespace Editor.Validation.Lighting
             // into the job. Lives in Baselines/LightingValidationSuite.Baseline.BandDecision.cs and
             // self-registers here. ---
             AddBandDecisionBaselineScenarios(scenarios);
+
+            // --- LI-2 band differential gate (B75-B78): identical world scripts run banded vs full
+            // height must produce bit-identical fields with equal round counts; B78 is the gate's
+            // prove-red (a headroom-stripped band must be caught). Lives in
+            // Baselines/LightingValidationSuite.Baseline.BandDifferential.cs and self-registers here. ---
+            AddBandDifferentialBaselineScenarios(scenarios);
         }
 
         /// <summary>Hook for the Bug-12 family baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug12.cs).</summary>
@@ -147,6 +153,10 @@ namespace Editor.Validation.Lighting
         /// <summary>Hook for the LI-2 band-derivation baselines (implemented in Baselines/LightingValidationSuite.Baseline.BandDecision.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddBandDecisionBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the LI-2 band differential gate baselines (implemented in Baselines/LightingValidationSuite.Baseline.BandDifferential.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBandDifferentialBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the Bug-13 suspended-slab baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug13Slab.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>

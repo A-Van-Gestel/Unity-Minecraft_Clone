@@ -8,11 +8,23 @@ using Jobs.Data;
 using Serialization;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Pool;
 
 namespace Editor.Validation.Lighting.Framework
 {
+    /// <summary>How <see cref="LightingTestWorld.BeginLightingJob"/> selects each job's LI-2 Y-band.</summary>
+    public enum LightingBandGatherMode
+    {
+        /// <summary>Every job gathers the full chunk height (banding off — the pre-LI-2 behavior).</summary>
+        FullHeight,
+
+        /// <summary>Every job derives its band via <see cref="LightingBandDecision"/> from the live
+        /// chunk metadata + queue extents — the production banded path.</summary>
+        Derived,
+    }
+
     /// <summary>
     /// Self-contained, deterministic multi-chunk lighting harness for editor validation tests.
     /// Owns an N×N grid of chunk-shaped voxel/light buffers and replays the production lighting
@@ -54,6 +66,22 @@ namespace Editor.Validation.Lighting.Framework
         // Chunks with a lighting job currently in flight (mirror of production's LightingJobs keys,
         // minus the already-processed _completedLightJobs entries).
         private readonly HashSet<Vector2Int> _inFlightCoords = new HashSet<Vector2Int>();
+
+        /// <summary>
+        /// LI-2 band selection for every job this world schedules. Defaults to <see
+        /// cref="LightingBandGatherMode.FullHeight"/> until production flips its
+        /// <c>EnableLightingBandGather</c> default; the band differential scenarios set it explicitly
+        /// per run.
+        /// </summary>
+        public LightingBandGatherMode BandGatherMode = LightingBandGatherMode.FullHeight;
+
+        /// <summary>
+        /// TEST-ONLY sabotage hook for the band differential's prove-red: maps the honestly-derived
+        /// band height to a deliberately wrong one (applied only in <see
+        /// cref="LightingBandGatherMode.Derived"/> mode, clamped to a valid range). Lets a scenario
+        /// prove the differential DETECTS a too-tight band before trusting its green.
+        /// </summary>
+        internal Func<int, int> BandHeightSabotageHook;
 
         /// <summary>
         /// A deferred cross-chunk mod paired with its emitting chunk's voxel origin — the Bug 13
@@ -567,11 +595,23 @@ namespace Editor.Validation.Lighting.Framework
 
             // Seed queues: drain the chunk's managed queues into native ones (production flushes
             // ChunkData's queues into the job the same way; the chunk-side flag clears on schedule).
+            // LI-2: the drains also capture the highest queued node Y — a band-derivation input.
+            int maxQueuedNodeY = -1;
             NativeQueue<LightQueueNode> sunQueue = NewOwned(flight, new NativeQueue<LightQueueNode>(Allocator.Persistent));
-            while (chunk.SunQueue.Count > 0) sunQueue.Enqueue(chunk.SunQueue.Dequeue());
+            while (chunk.SunQueue.Count > 0)
+            {
+                LightQueueNode node = chunk.SunQueue.Dequeue();
+                if (node.Position.y > maxQueuedNodeY) maxQueuedNodeY = node.Position.y;
+                sunQueue.Enqueue(node);
+            }
 
             NativeQueue<LightQueueNode> blockQueue = NewOwned(flight, new NativeQueue<LightQueueNode>(Allocator.Persistent));
-            while (chunk.BlockQueue.Count > 0) blockQueue.Enqueue(chunk.BlockQueue.Dequeue());
+            while (chunk.BlockQueue.Count > 0)
+            {
+                LightQueueNode node = chunk.BlockQueue.Dequeue();
+                if (node.Position.y > maxQueuedNodeY) maxQueuedNodeY = node.Position.y;
+                blockQueue.Enqueue(node);
+            }
 
             NativeQueue<Vector2Int> sunColumnQueue = NewOwned(flight, new NativeQueue<Vector2Int>(Allocator.Persistent));
             while (chunk.SunColumnRecalcQueue.Count > 0) sunColumnQueue.Enqueue(chunk.SunColumnRecalcQueue.Dequeue());
@@ -592,15 +632,41 @@ namespace Editor.Validation.Lighting.Framework
                 LightSW = lSW, LightNW = lNW, LightSE = lSE, LightNE = lNE,
             };
 
-            // LI-2 Step 2: banding plumbed but not yet enabled — the harness mirrors production's
-            // full-height default until the derivation is wired into both schedule sites together.
+            // LI-2: select the job's Y-band. FullHeight = banding off; Derived = the production banded
+            // path (LightingBandDecision over live chunk metadata + queue extents). A neighbor's
+            // presence condition mirrors SnapshotNeighborVoxels exactly: in-grid → summarized,
+            // out-of-grid → Missing (the gather sentinel-fills its region).
+            uint3x3 bandTopLight = default;
             flight.BandHeight = ChunkMath.CHUNK_HEIGHT;
+            if (BandGatherMode == LightingBandGatherMode.Derived)
+            {
+                LightingBandChunkTop centerTop = chunk.Data.GetLightingBandTop();
+                LightingBandChunkTop w = NeighborBandTop(chunkCoord, -1, 0);
+                LightingBandChunkTop e = NeighborBandTop(chunkCoord, 1, 0);
+                LightingBandChunkTop s = NeighborBandTop(chunkCoord, 0, -1);
+                LightingBandChunkTop n = NeighborBandTop(chunkCoord, 0, 1);
+                LightingBandChunkTop sw = NeighborBandTop(chunkCoord, -1, -1);
+                LightingBandChunkTop nw = NeighborBandTop(chunkCoord, -1, 1);
+                LightingBandChunkTop se = NeighborBandTop(chunkCoord, 1, -1);
+                LightingBandChunkTop ne = NeighborBandTop(chunkCoord, 1, 1);
+
+                flight.BandHeight = LightingBandDecision.DeriveBandHeight(in centerTop,
+                    in w, in e, in s, in n, in sw, in nw, in se, in ne,
+                    maxQueuedNodeY, sunColumnQueue.Count > 0, edgeCheck);
+
+                if (BandHeightSabotageHook != null)
+                    flight.BandHeight = Mathf.Clamp(BandHeightSabotageHook(flight.BandHeight), 1, ChunkMath.CHUNK_HEIGHT);
+
+                bandTopLight = LightingBandDecision.BuildTopLightTable(in centerTop,
+                    in w, in e, in s, in n, in sw, in nw, in se, in ne);
+            }
 
             NeighborhoodLightingJob job = new NeighborhoodLightingJob
             {
                 PaddedVoxels = paddedVoxels,
                 PaddedLight = paddedLight,
                 BandHeight = flight.BandHeight,
+                BandTopLight = bandTopLight,
                 ChunkPosition = chunk.VoxelOrigin,
                 SunlightBfsQueue = sunQueue,
                 BlocklightBfsQueue = blockQueue,
@@ -1352,6 +1418,22 @@ namespace Editor.Validation.Lighting.Framework
             if (!_chunks.TryGetValue(chunkCoord, out TestChunk chunk))
                 throw new ArgumentOutOfRangeException(nameof(chunkCoord), $"Chunk {chunkCoord} is outside the {GridSize}x{GridSize} test grid.");
             return chunk;
+        }
+
+        /// <summary>
+        /// A neighbor's uniform-top summary for the band derivation. Presence mirrors
+        /// <see cref="SnapshotNeighborVoxels"/> exactly: an in-grid chunk is summarized from its live
+        /// <see cref="ChunkData"/>; an out-of-grid chunk is <see cref="LightingBandChunkTop.Missing"/>.
+        /// </summary>
+        /// <param name="chunkCoord">The center chunk's grid coordinate.</param>
+        /// <param name="dx">Neighbor X offset (−1..1).</param>
+        /// <param name="dz">Neighbor Z offset (−1..1).</param>
+        /// <returns>The neighbor's summary.</returns>
+        private LightingBandChunkTop NeighborBandTop(Vector2Int chunkCoord, int dx, int dz)
+        {
+            return _chunks.TryGetValue(chunkCoord + new Vector2Int(dx, dz), out TestChunk neighbor)
+                ? neighbor.Data.GetLightingBandTop()
+                : LightingBandChunkTop.Missing;
         }
 
         private static Vector2Int WorldToChunkCoord(Vector2Int worldXZ)

@@ -152,6 +152,45 @@ namespace Helpers
         }
 
         /// <summary>
+        /// Builds the job's 3×3 above-band uniform-light table (<c>NeighborhoodLightingJob.BandTopLight</c>)
+        /// from the nine uniform-top summaries. Layout matches the job's <c>BandColumn</c> mapping: column
+        /// index = the West/center/East third of the padded X axis, component index = the South/center/North
+        /// third of Z. A present chunk's entry is its uniform packed light; <c>uint.MaxValue</c> marks a
+        /// missing chunk (virtual reads return the out-of-world sentinels for its region).
+        /// </summary>
+        /// <param name="center">The center chunk's uniform-top summary.</param>
+        /// <param name="west">West neighbor summary.</param>
+        /// <param name="east">East neighbor summary.</param>
+        /// <param name="south">South neighbor summary.</param>
+        /// <param name="north">North neighbor summary.</param>
+        /// <param name="southWest">South-west neighbor summary.</param>
+        /// <param name="northWest">North-west neighbor summary.</param>
+        /// <param name="southEast">South-east neighbor summary.</param>
+        /// <param name="northEast">North-east neighbor summary.</param>
+        /// <returns>The [cx][cz]-indexed uniform-light table.</returns>
+        public static uint3x3 BuildTopLightTable(
+            in LightingBandChunkTop center,
+            in LightingBandChunkTop west, in LightingBandChunkTop east,
+            in LightingBandChunkTop south, in LightingBandChunkTop north,
+            in LightingBandChunkTop southWest, in LightingBandChunkTop northWest,
+            in LightingBandChunkTop southEast, in LightingBandChunkTop northEast)
+        {
+            return new uint3x3(
+                new uint3(TableEntry(in southWest), TableEntry(in west), TableEntry(in northWest)),
+                new uint3(TableEntry(in south), TableEntry(in center), TableEntry(in north)),
+                new uint3(TableEntry(in southEast), TableEntry(in east), TableEntry(in northEast)));
+        }
+
+        /// <summary>One chunk's <see cref="BuildTopLightTable"/> entry: its uniform packed light, or
+        /// <c>uint.MaxValue</c> for a missing chunk.</summary>
+        /// <param name="top">The chunk's uniform-top summary.</param>
+        /// <returns>The table entry value.</returns>
+        private static uint TableEntry(in LightingBandChunkTop top)
+        {
+            return top.IsMissing ? uint.MaxValue : top.UniformLight;
+        }
+
+        /// <summary>
         /// Whether the mutual uniform region of the center and one cardinal neighbor provably produces no
         /// cross-seam writes (see the cross-seam consistency rule on <see cref="DeriveBandHeight"/>).
         /// A missing neighbor is always consistent: the job's sentinel guards skip its cells before any
