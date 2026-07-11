@@ -68,11 +68,13 @@ namespace Helpers
         /// <param name="currentLight">The voxel's current packed ushort light value.</param>
         /// <param name="mod">The cross-chunk modification emitted by the lighting job.</param>
         /// <returns>The apply decision, including the new light value and wake-up node old values.</returns>
-        public static ApplyDecision Compute(ushort currentLight, in LightModification mod, byte independentSunlightSupport = 0)
+        public static ApplyDecision Compute(ushort currentLight, in LightModification mod, byte independentSunlightSupport = 0,
+            byte independentBlockR = 0, byte independentBlockG = 0, byte independentBlockB = 0)
         {
             return mod.Channel == LightChannel.Sun
                 ? ComputeSunlight(currentLight, mod.LightLevel, independentSunlightSupport)
-                : ComputeBlocklight(currentLight, mod.BlockR, mod.BlockG, mod.BlockB, mod.IsRemoval);
+                : ComputeBlocklight(currentLight, mod.BlockR, mod.BlockG, mod.BlockB, mod.IsRemoval,
+                    independentBlockR, independentBlockG, independentBlockB);
         }
 
         /// <summary>
@@ -233,6 +235,129 @@ namespace Helpers
         }
 
         /// <summary>
+        /// Per-channel RGB analog of <see cref="InChunkSunlightSupport"/> (the Bug 11 blocklight mirror):
+        /// the strongest blocklight an in-chunk neighbor could still supply the target voxel, per channel,
+        /// attenuated by the target's entry opacity. Vetoes a spurious cross-chunk RGB removal so a channel
+        /// an independent in-chunk source still backs is not cleared to 0 by a stale-snapshot removal. A
+        /// fully-opaque neighbor contributes only its OWN emission (it propagates emission but never
+        /// received surface light — mirror of <c>PropagateLightRGB</c>'s opaque-source arm); a
+        /// transparent/semi neighbor contributes its stored blocklight.
+        /// </summary>
+        /// <param name="chunk">The chunk receiving the cross-chunk modification.</param>
+        /// <param name="localPos">The local voxel position the modification targets.</param>
+        /// <param name="targetOpacity">The target voxel's opacity (entry cost, minimum 1).</param>
+        /// <param name="isBlockFullyOpaque">Predicate: is a block id fully opaque?</param>
+        /// <param name="blockEmission">Lookup: a block id's own RGB emission.</param>
+        /// <param name="suppR">Out: strongest attenuated red an in-chunk neighbor supplies.</param>
+        /// <param name="suppG">Out: strongest attenuated green.</param>
+        /// <param name="suppB">Out: strongest attenuated blue.</param>
+        public static void InChunkBlocklightSupport(ChunkData chunk, Vector3Int localPos, byte targetOpacity,
+            Func<ushort, bool> isBlockFullyOpaque, Func<ushort, (byte r, byte g, byte b)> blockEmission,
+            out byte suppR, out byte suppG, out byte suppB)
+        {
+            suppR = 0;
+            suppG = 0;
+            suppB = 0;
+            for (int i = 0; i < 6; i++)
+            {
+                Vector3Int n = localPos + VoxelData.FaceChecks[i];
+                if (n.x < 0 || n.x >= VoxelData.ChunkWidth ||
+                    n.z < 0 || n.z >= VoxelData.ChunkWidth ||
+                    n.y < 0 || n.y >= VoxelData.ChunkHeight)
+                    continue; // cross-chunk (untrusted) or out of vertical range
+
+                ResolveNeighborBlocklight(chunk.GetVoxel(n.x, n.y, n.z), chunk.GetLightData(n.x, n.y, n.z),
+                    isBlockFullyOpaque, blockEmission, out byte nR, out byte nG, out byte nB);
+
+                byte sR = LightAttenuation.Attenuate(nR, targetOpacity);
+                byte sG = LightAttenuation.Attenuate(nG, targetOpacity);
+                byte sB = LightAttenuation.Attenuate(nB, targetOpacity);
+                if (sR > suppR) suppR = sR;
+                if (sG > suppG) suppG = sG;
+                if (sB > suppB) suppB = sB;
+            }
+        }
+
+        /// <summary>
+        /// Per-channel RGB analog of <see cref="CrossChunkSunlightSupport"/> (the Bug 13 blocklight
+        /// mirror): the strongest blocklight a LIVE cross-chunk neighbor in a chunk OTHER than the emitter
+        /// could still supply the target, per channel. Completes the RGB removal veto for a border voxel
+        /// whose genuine support crosses a different seam. Live main-thread data is trustworthy; the
+        /// emitting chunk is excluded (it is the possibly-stale side the removal is collapsing).
+        /// </summary>
+        /// <param name="targetChunkOriginXZ">The receiving chunk's voxel origin (world XZ).</param>
+        /// <param name="localPos">The local voxel position the modification targets.</param>
+        /// <param name="targetOpacity">The target voxel's opacity (entry cost, minimum 1).</param>
+        /// <param name="emitterChunkOriginXZ">The voxel origin of the chunk whose job emitted the mod.</param>
+        /// <param name="getLoadedChunk">Lookup from a chunk voxel origin to its live loaded chunk, or null.</param>
+        /// <param name="isBlockFullyOpaque">Predicate: is a block id fully opaque?</param>
+        /// <param name="blockEmission">Lookup: a block id's own RGB emission.</param>
+        /// <param name="suppR">Out: strongest attenuated red a live third-party cross-chunk neighbor supplies.</param>
+        /// <param name="suppG">Out: strongest attenuated green.</param>
+        /// <param name="suppB">Out: strongest attenuated blue.</param>
+        public static void CrossChunkBlocklightSupport(Vector2Int targetChunkOriginXZ, Vector3Int localPos,
+            byte targetOpacity, Vector2Int emitterChunkOriginXZ,
+            Func<Vector2Int, ChunkData> getLoadedChunk, Func<ushort, bool> isBlockFullyOpaque,
+            Func<ushort, (byte r, byte g, byte b)> blockEmission,
+            out byte suppR, out byte suppG, out byte suppB)
+        {
+            suppR = 0;
+            suppG = 0;
+            suppB = 0;
+            for (int i = 0; i < 6; i++)
+            {
+                Vector3Int dir = VoxelData.FaceChecks[i];
+                if (dir.y != 0) continue; // vertical neighbors never cross a chunk boundary
+
+                Vector3Int n = localPos + dir;
+                if (n.x >= 0 && n.x < VoxelData.ChunkWidth &&
+                    n.z >= 0 && n.z < VoxelData.ChunkWidth)
+                    continue; // in-chunk neighbors are InChunkBlocklightSupport's job
+
+                Vector2Int ownerOrigin = targetChunkOriginXZ + new Vector2Int(dir.x, dir.z) * VoxelData.ChunkWidth;
+                if (ownerOrigin == emitterChunkOriginXZ) continue; // the emitter is the untrusted side
+
+                ChunkData owner = getLoadedChunk(ownerOrigin);
+                if (owner == null) continue;
+
+                int lx = n.x - dir.x * VoxelData.ChunkWidth;
+                int lz = n.z - dir.z * VoxelData.ChunkWidth;
+
+                ResolveNeighborBlocklight(owner.GetVoxel(lx, n.y, lz), owner.GetLightData(lx, n.y, lz),
+                    isBlockFullyOpaque, blockEmission, out byte nR, out byte nG, out byte nB);
+
+                byte sR = LightAttenuation.Attenuate(nR, targetOpacity);
+                byte sG = LightAttenuation.Attenuate(nG, targetOpacity);
+                byte sB = LightAttenuation.Attenuate(nB, targetOpacity);
+                if (sR > suppR) suppR = sR;
+                if (sG > suppG) suppG = sG;
+                if (sB > suppB) suppB = sB;
+            }
+        }
+
+        /// <summary>
+        /// Resolves a neighbor voxel's propagable blocklight per channel for the RGB removal veto: an
+        /// opaque block propagates only its own emission (mirror of <c>PropagateLightRGB</c>'s
+        /// opaque-source arm), a transparent/semi block propagates its stored blocklight.
+        /// </summary>
+        private static void ResolveNeighborBlocklight(uint neighborVoxel, ushort neighborLight,
+            Func<ushort, bool> isBlockFullyOpaque, Func<ushort, (byte r, byte g, byte b)> blockEmission,
+            out byte nR, out byte nG, out byte nB)
+        {
+            ushort neighborId = BurstVoxelDataBitMapping.GetId(neighborVoxel);
+            if (isBlockFullyOpaque(neighborId))
+            {
+                (nR, nG, nB) = blockEmission(neighborId);
+            }
+            else
+            {
+                nR = LightBitMapping.GetBlocklightR(neighborLight);
+                nG = LightBitMapping.GetBlocklightG(neighborLight);
+                nB = LightBitMapping.GetBlocklightB(neighborLight);
+            }
+        }
+
+        /// <summary>
         /// Evaluates a cross-chunk sunlight modification.
         /// </summary>
         /// <param name="currentLight">The voxel's current packed ushort light value.</param>
@@ -298,8 +423,14 @@ namespace Helpers
         /// <param name="isRemoval">True when the modification was emitted by a darkness/removal pass
         /// (zero channels mean "remove"); false for placement/edge-check mods (zero channels mean
         /// "no contribution" and may never lower the live value).</param>
+        /// <param name="independentR">Strongest attenuated red an independent source still supplies the
+        /// voxel — max of <see cref="InChunkBlocklightSupport"/> (Bug 11 analog) and
+        /// <see cref="CrossChunkBlocklightSupport"/> (Bug 13 analog). Consulted only by removals (Bug 17).</param>
+        /// <param name="independentG">Strongest attenuated green an independent source still supplies.</param>
+        /// <param name="independentB">Strongest attenuated blue an independent source still supplies.</param>
         /// <returns>The apply decision, including the new light value and wake-up node old values.</returns>
-        public static ApplyDecision ComputeBlocklight(ushort currentLight, byte modR, byte modG, byte modB, bool isRemoval)
+        public static ApplyDecision ComputeBlocklight(ushort currentLight, byte modR, byte modG, byte modB, bool isRemoval,
+            byte independentR = 0, byte independentG = 0, byte independentB = 0)
         {
             byte oldR = LightBitMapping.GetBlocklightR(currentLight);
             byte oldG = LightBitMapping.GetBlocklightG(currentLight);
@@ -310,12 +441,14 @@ namespace Helpers
             //   A zero channel means the emitting job had no light to contribute there — possibly
             //   a stale snapshot that never saw an independent source — never "remove"
             //   (Bug 07 secondary contributor).
-            // - Removal mods (darkness waves): a zero channel is a genuine removal and passes
-            //   through; non-zero channels still MAX-merge so a stale snapshot cannot lower
-            //   values owned by independent light sources.
-            byte applyR = isRemoval && modR == 0 ? (byte)0 : Max(oldR, modR);
-            byte applyG = isRemoval && modG == 0 ? (byte)0 : Max(oldG, modG);
-            byte applyB = isRemoval && modB == 0 ? (byte)0 : Max(oldB, modB);
+            // - Removal mods (darkness waves): a zero channel is a genuine removal — but is VETOED when
+            //   an independent source still supports the channel (the blocklight Bug 11/13 analog, Bug 17):
+            //   clearing an independently-fed channel to 0 against a stale snapshot re-arms the cross-seam
+            //   removal/re-light oscillation. A non-zero removal channel still MAX-merges so a stale
+            //   snapshot cannot lower values owned by independent sources.
+            byte applyR = ApplyRemovalChannel(oldR, modR, isRemoval, independentR);
+            byte applyG = ApplyRemovalChannel(oldG, modG, isRemoval, independentG);
+            byte applyB = ApplyRemovalChannel(oldB, modB, isRemoval, independentB);
 
             if (applyR == oldR && applyG == oldG && applyB == oldB)
             {
@@ -337,6 +470,23 @@ namespace Helpers
             return new ApplyDecision(
                 LightBitMapping.SetBlocklightRGB(currentLight, applyR, applyG, applyB),
                 wakeLevel, wakeR, wakeG, wakeB);
+        }
+
+        /// <summary>
+        /// Per-channel apply for a blocklight mod: a placement (or a non-zero removal channel) MAX-merges;
+        /// a genuine removal channel (removal mod, zero value) clears to 0 UNLESS an independent source
+        /// still supports the current value, in which case the value is kept (the Bug 17 removal veto).
+        /// </summary>
+        /// <param name="oldC">The voxel's current value on this channel.</param>
+        /// <param name="modC">The modification's value on this channel.</param>
+        /// <param name="isRemoval">Whether the mod came from a darkness/removal pass.</param>
+        /// <param name="independentC">The strongest attenuated value an independent source still supplies.</param>
+        /// <returns>The value to store on this channel.</returns>
+        private static byte ApplyRemovalChannel(byte oldC, byte modC, bool isRemoval, byte independentC)
+        {
+            if (isRemoval && modC == 0)
+                return independentC >= oldC ? oldC : (byte)0;
+            return Max(oldC, modC);
         }
 
         private static byte Max(byte a, byte b)

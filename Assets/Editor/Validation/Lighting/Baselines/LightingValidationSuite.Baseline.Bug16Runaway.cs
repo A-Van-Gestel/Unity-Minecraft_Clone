@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Text;
 using Editor.Validation.Lighting.Framework;
-using Jobs.BurstData;
 using UnityEngine;
 using Scenario = Editor.Validation.Framework.Scenario;
 
@@ -52,6 +50,9 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario(
                 "B87: Interrupted underwater break/re-place cycling of a seam lamp settles with bounded removal work — no runaway RGB removal loop (Bug 16 guard; promoted from K16a)",
                 Baseline_InterruptedCyclingSettlesWithBoundedRemovalWork));
+            scenarios.Add(new Scenario(
+                "B88: The settled field after interrupted seam-lamp cycling fully matches the borderless oracle — no sourceless RGB ghost island (Bug 17 guard; promoted from K17a)",
+                Baseline_InterruptedCyclingLeavesNoRgbGhostIsland));
         }
 
         /// <summary>
@@ -94,8 +95,8 @@ namespace Editor.Validation.Lighting
         /// <c>NeighborhoodLightingJob.MAX_BFS_NODES_PER_PASS</c> fail-safe. The fix masks re-enqueued
         /// removal nodes to the channels actually zeroed (per-channel strict-decrease termination).
         /// Asserts Bug 16's invariants: no job hits the fail-safe cap, reconciliation converges, and
-        /// the field matches the oracle up to Bug 17's independent ghost residue (dated exemption in
-        /// <see cref="MatchesOracleExceptBug17Ghost"/> — the open Bug 17 / K17a owns that defect).
+        /// the field matches the borderless oracle (Bug 17's RGB removal veto, July 2026, closed the
+        /// former ghost residue this baseline used to exempt — the plain oracle compare is restored).
         /// </summary>
         private static bool Baseline_InterruptedCyclingSettlesWithBoundedRemovalWork()
         {
@@ -115,8 +116,33 @@ namespace Editor.Validation.Lighting
                     $"{capAborts.Count.ToString()} work-cap abort(s) logged — the runaway removal cycle is back");
             }
 
-            passed &= MatchesOracleExceptBug17Ghost(world, LightingOracle.Solve(world),
-                "B87: the settled field matches the oracle up to Bug 17 ghost residue (red gone, green intact)");
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                "B87: the settled field matches the oracle (red gone, green intact)");
+            return passed;
+        }
+
+        /// <summary>
+        /// B88 (Bug 17 guard; promoted from known-bug scenario K17a after the July 2026 fix, oracle-only
+        /// confirmation): the interrupted-cycling recipe once left a small SOURCELESS over-bright RGB
+        /// island straddling the z31|32 seam — light whose source was gone, planted by a stale in-flight
+        /// job's re-instatement and left uncorrectable because RGB blocklight had no removal veto. The fix
+        /// mirrors the sky Bug 11/13 independent-support veto to RGB
+        /// (<see cref="CrossChunkLightModApplier.ComputeBlocklight"/> per-channel), which breaks the
+        /// stale-snapshot cross-seam removal oscillation so the removal completes and the field converges
+        /// to the borderless oracle with no orphan. Guards against the veto being weakened (its absence
+        /// re-plants the ~24-voxel ghost — prove-red confirmed).
+        /// </summary>
+        private static bool Baseline_InterruptedCyclingLeavesNoRgbGhostIsland()
+        {
+            using LightingTestWorld world = BuildBug16RgbSeamBlendWorld(withWater: true);
+            bool passed = SetUpBug16InitialBlend(world, "B88");
+
+            RunBug16InterruptedCyclingRecipe(world, cycles: 3);
+
+            passed &= LightingAssert.Converged(world.RunWaveToConvergence(),
+                "B88: post-cycling reconciliation reaches a stable field");
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                "B88: the settled field FULLY matches the borderless oracle (no sourceless RGB ghost island)");
             return passed;
         }
 
@@ -194,66 +220,6 @@ namespace Editor.Validation.Lighting
                 if (type == LogType.Error && condition.Contains("[LightingJob DIAG]"))
                     Count++;
             }
-        }
-
-        /// <summary>
-        /// Full-field oracle compare that exempts the <b>Bug 17</b> residue class: over-bright RED
-        /// voxels (actual R &gt; oracle R with sky/G/B exact) are tolerated and reported, everything
-        /// else (any sky/G/B mismatch, or under-bright R) fails. B87's field assertion runs through
-        /// this so it owns only Bug 16's invariants; K17a asserts the unexempted full compare.
-        /// RESTORE the plain <see cref="LightingAssert.MatchesOracle"/> in B87 once Bug 17 is fixed
-        /// (note dated 2026-07-11).
-        /// </summary>
-        /// <param name="world">The test world after convergence.</param>
-        /// <param name="expected">The borderless oracle solution.</param>
-        /// <param name="testName">The assertion name for console output.</param>
-        /// <returns>True when the field matches the oracle up to the exempted Bug 17 ghost class.</returns>
-        private static bool MatchesOracleExceptBug17Ghost(LightingTestWorld world, OracleLightField expected, string testName)
-        {
-            const int maxReported = 12;
-            int failures = 0;
-            int exempted = 0;
-            StringBuilder diffs = new StringBuilder();
-
-            int width = world.GridSize * VoxelData.ChunkWidth;
-            for (int x = 0; x < width; x++)
-            for (int y = 0; y < VoxelData.ChunkHeight; y++)
-            for (int z = 0; z < width; z++)
-            {
-                Vector3Int pos = new Vector3Int(x, y, z);
-                ushort act = world.GetLightData(pos);
-                ushort exp = expected.GetLightData(pos);
-                if (act == exp) continue;
-
-                bool onlyRedOverbright =
-                    LightBitMapping.GetSkyLight(act) == LightBitMapping.GetSkyLight(exp) &&
-                    LightBitMapping.GetBlocklightG(act) == LightBitMapping.GetBlocklightG(exp) &&
-                    LightBitMapping.GetBlocklightB(act) == LightBitMapping.GetBlocklightB(exp) &&
-                    LightBitMapping.GetBlocklightR(act) > LightBitMapping.GetBlocklightR(exp);
-                if (onlyRedOverbright)
-                {
-                    exempted++;
-                    continue;
-                }
-
-                failures++;
-                if (failures <= maxReported)
-                {
-                    diffs.AppendLine($"  {pos.ToString()}: sky {LightBitMapping.GetSkyLight(exp).ToString()}/{LightBitMapping.GetSkyLight(act).ToString()}, " +
-                                     $"R {LightBitMapping.GetBlocklightR(exp).ToString()}/{LightBitMapping.GetBlocklightR(act).ToString()}, " +
-                                     $"G {LightBitMapping.GetBlocklightG(exp).ToString()}/{LightBitMapping.GetBlocklightG(act).ToString()}, " +
-                                     $"B {LightBitMapping.GetBlocklightB(exp).ToString()}/{LightBitMapping.GetBlocklightB(act).ToString()} (expected/actual)");
-                }
-            }
-
-            if (failures > 0)
-            {
-                Debug.LogError($"[FAIL] {testName}\n{failures.ToString()} voxel(s) differ beyond the Bug 17 exemption:\n{diffs}");
-                return false;
-            }
-
-            Debug.Log($"[PASS] {testName}{(exempted > 0 ? $" ({exempted.ToString()} over-bright-R voxel(s) exempted as Bug 17 ghost residue)" : "")}");
-            return true;
         }
 
         /// <summary>

@@ -58,29 +58,3 @@ The Bug 07/08 cross-chunk mod delivery fixes were already present when Bug 09 wa
 symptom shape and is sync-testable), **AS-4** (real-`Schedule()` parallel-determinism gate covering pooled-buffer aliasing, the remaining plausible in-editor race), and **AS-5** (automated in-build stress rig — also the cheap way to **re-verify the bug still exists** before further investment).
 
 **Testing environment:** IL2CPP master build, ocean biome (underwater), June 2026.
-
-## Bug 17: Sourceless RGB Ghost-Light Island Survives Interrupted Cross-Seam Removal (No Over-Bright Corrector for Blocklight)
-
-**Severity:** Low-Medium (visual artifact: a faint sourceless color tint — observed R ≤ 3/15 — near chunk seams after rapid lamp place/break; stable, but self-heals on any full relight of the chunk, e.g. save/reload)
-**Status:** Open
-
-**Files:**
-
-- `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` — `PropagateDarknessRGB` (the `neighborVal >= oldVal` respread branch treats equal-value neighbors as independent support), `CheckEdgeVoxelRGB` when called from the darkness phase (snapshot-trusting re-light, not claim-verified — `PullBackClaim` carries `WrittenSky` only)
-- `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs` — `ComputeBlocklight` (no per-channel independent-support veto; no RGB analog of the Bug 12 cross-seam removal initiator exists anywhere)
-
-**Repro scenario:** `K17a` (`LightingValidationSuite.KnownBugs.cs`) — the Bug 16 interrupted-cycling recipe (`_FIXED_BUGS.md` Lighting #21) with the full-field oracle assertion; deterministic red (~24 ghost voxels, R 1–3, straddling the z31|32 seam). The ghost needs ≥2 interrupted cycles (cycles 0–1 settle clean); baseline `B87` (promoted from Bug 16's repro K16a) runs the same recipe with a dated exemption for exactly this residue class — **restore B87's plain oracle compare when this bug is fixed**.
-
-**Description:**
-Found 2026-07-11 as the post-fix residue of Bug 16's repro. Interrupted reconciliation (lighting edits landing while stale-snapshot jobs are in flight, e.g. rapid lamp place/break under load) can leave a small **orphaned over-bright RGB island**: light whose source is gone, disconnected from any live gradient by zero-valued cells. Nothing ever corrects it, for the reasons documented in `LIGHTING_SYSTEM_OVERVIEW.md` §3.7 — but on the RGB channel *none* of the sky-side machinery exists:
-
-1. A darkness wave cannot traverse the zero-valued gap around the island (removal only follows lit cells), and a wave that does reach it treats equal-value neighbors as independent support (`neighborVal >= oldVal` → respread) — the exact blind spot the **Bug 12** cross-seam initiator closed for sky light, never mirrored to RGB.
-2. Edge checks only ADD light, never remove (§3.6 design constraint) — over-bright is invisible to them.
-3. `ComputeBlocklight` has no independent-support veto (**Bug 11/13** analog) and RGB pull-backs are not claim-verified (**Bug 14** analog), so stale-snapshot re-lights during the churn window plant the island in the first place, and later passes have no path to question it.
-
-**Root cause:** confirmed as a *class* (the orphaned island and its non-correction are deterministic in K17a); the exact planting write during cycle 2 of the recipe (stale green-flight full-LightMap merge re-instating pre-break red vs. a darkness-phase pull-back from a stale halo) has not been attributed — both paths are unverified-by-design today and both are closed by the same fix direction.
-
-**Fix direction:** mirror the sky channel's removal machinery to RGB per channel — the Bug 12 exactly-equal cross-seam removal initiator, the Bug 11/13 independent-support veto in `ComputeBlocklight`, and Bug 14 claim verification for RGB pull-backs (extend `PullBackClaim` beyond `WrittenSky`; the struct is job-output only, not save format). Alternatively (or additionally) an authoritative RGB re-derivation pass for touched regions. Test-first against K17a with B86 + the Bug 07/09 family baselines as over-correction tripwires.
-
-**Testing environment:** editor validation harness, 2026-07-11 (deterministic, synchronous). Not yet knowingly observed in-game — the in-game footprint would be a faint colored tint near a seam that disappears on reload.
-

@@ -653,13 +653,61 @@ stale-snapshot jobs are in flight), matching the in-game rapid place/break trigg
    of an OOM crash. Documented in `LIGHTING_SYSTEM_OVERVIEW.md` §3.3.
 
 **Spawned follow-up:** the same repro exposed an independent second defect — a small sourceless over-bright
-RGB island that survives because RGB blocklight has none of the sky channel's removal machinery (Bug 12
-initiator / Bug 11+13 veto / Bug 14 claim verification) — filed as **Bug 17** (`LIGHTING_BUGS.md`, repro
-K17a). B87's oracle assertion carries a dated exemption for exactly that residue class; restore its plain
-oracle compare when Bug 17 is fixed.
+RGB island that survives because RGB blocklight lacked the sky channel's removal machinery — filed as
+**Bug 17** and fixed July 2026 (entry #22 below); B87's oracle assertion (which carried a dated exemption for
+exactly that residue class) has been restored to a plain oracle compare, and K17a promoted to **B88**.
 
 **Validation suite:** K16a red→green on the fix (no fail-safe aborts + convergence + oracle up to the Bug 17
-exemption), promoted to **B87**; B86 and all other baselines stayed green throughout (79 baselines total).
+exemption at the time), promoted to **B87**; B86 and all other baselines stayed green throughout.
+
+---
+
+### ~~22. Sourceless RGB ghost-light island survives interrupted cross-seam removal (no RGB removal veto)~~
+
+**Severity:** Low-Medium (visual artifact: a faint sourceless color tint — observed R ≤ 3/15 — near chunk
+seams after rapid lamp place/break; stable, but self-heals on any full relight, e.g. save/reload)
+**Fixed:** July 2026 (was Bug 17 in `LIGHTING_BUGS.md`; found 2026-07-11 as Bug 16's post-fix residue, fixed
+and oracle-confirmed 2026-07-12)
+**Status:** Resolved — confirmed via the validation suite (repro K17a flipped red→green, all baselines green);
+oracle-only confirmation (never knowingly observed in-game — in-game footprint would be a faint colored tint
+near a seam that disappears on reload, per the Bug 12 archive precedent, #16). Promoted from known-bug repro
+**K17a** to baseline **B88** (`Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug16Runaway.cs`,
+which shares the Bug 16 geometry + cycling recipe); B87's plain oracle compare restored in the same change.
+
+**Files:** `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs` — `ComputeBlocklight` per-channel removal
+veto + `InChunkBlocklightSupport` / `CrossChunkBlocklightSupport`; `Assets/Scripts/WorldJobManager.cs` +
+`Assets/Editor/Validation/Lighting/Framework/LightingTestWorld.cs` — the block-removal support wiring in the
+cross-chunk apply path (`ApplyCrossChunkLightMod` / `ApplyModToChunk`) + cached `_blockEmission` lookup.
+
+**Description:**
+The Bug 16 interrupted-cycling recipe (rapid lamp place/break under load, with stale-snapshot jobs in flight)
+left a small **orphaned over-bright RGB island** near a chunk seam: light whose source was gone, disconnected
+from any live gradient by zero-valued cells (K17a: ~24 voxels, R 1–3, straddling the z31|32 seam), which
+nothing ever corrected. RGB blocklight had **none** of the sky channel's cross-chunk removal machinery.
+
+**Root Cause (confirmed via instrumented attribution):** the planter is a **stale in-flight lighting job**
+re-instating pre-break red — both through its full-`LightData` center merge and through the cross-chunk RGB
+**uplift/placement mods** it emitted from a pre-break snapshot — which ordinary `PropagateLightRGB` re-spread
+then fanned outward. It survived because the RGB cross-chunk **removal** path had no independent-support veto:
+without it, a darkness-wave removal mod computed against a stale snapshot **over-cleared** channels that a live
+independent source still backed, and the receiver re-lit them — the same stale-snapshot cross-seam
+removal/re-light **oscillation** the sky channel's Bug 11/13 veto exists to break. The darkness-phase
+`CheckEdgeVoxelRGB` pull-back (the other candidate planter) was ruled out: cycle 0 of the recipe self-heals
+despite it, and neutering the RGB claim path changed nothing.
+
+**Fix (July 2026):** mirror the sky **Bug 11/13 independent-support veto** to RGB per channel. A cross-chunk
+RGB *removal* mod now consults the strongest attenuated blocklight an independent in-chunk neighbor
+(`InChunkBlocklightSupport`) or a live third-party cross-chunk neighbor in a chunk other than the emitter
+(`CrossChunkBlocklightSupport`) still supplies; `ComputeBlocklight` keeps a channel a live source still backs
+instead of clearing it to 0. This breaks the oscillation, so the removal completes and the field converges to
+the borderless oracle with no orphan. (An opaque neighbor contributes only its own emission, mirroring
+`PropagateLightRGB`'s opaque-source arm.) Only the veto was needed; the Bug 12 initiator and Bug 14
+claim-verification analogs were **not** required for the observed class and were deliberately not added
+(they remain sky-only). Documented in `LIGHTING_SYSTEM_OVERVIEW.md` §2.1 / §3.7.
+
+**Validation suite:** K17a red→green on the fix, promoted to **B88**; prove-red confirmed (neutering the veto
+re-plants the 24-voxel ghost, and only B88 goes red); B86 (over-correction tripwire), B50, and the Bug 07/09
+family stayed green. 80 baselines total.
 
 ---
 

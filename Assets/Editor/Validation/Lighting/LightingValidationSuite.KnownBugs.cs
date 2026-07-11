@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using Editor.Validation.Lighting.Framework;
 using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.Lighting
@@ -55,44 +54,19 @@ namespace Editor.Validation.Lighting
         // masking re-enqueued removal nodes to the channels actually zeroed; the BFS work cap became
         // a permanent fail-safe. Repro K16a promoted to baseline B87; B86 guards the simple form.
         //
-        // NOTE on Bug 17 (found 2026-07-11 as Bug 16's post-fix residue): the same interrupted-
-        // cycling recipe leaves a small SOURCELESS over-bright red island straddling a seam — planted
-        // while stale-flight merges and interrupted waves fight, then permanently orphaned because
-        // RGB has no over-bright corrector (edge checks only ADD; the removal respread branch treats
-        // equal-value neighbors as independent support; the Bug 12 initiator / Bug 13 veto / Bug 14
-        // claim verification were built for sky only — LIGHTING_SYSTEM_OVERVIEW.md §3.7). K17a is
-        // the full-field assert over the same recipe, red until the RGB mirror machinery exists.
+        // NOTE on Bug 17 (found 2026-07-11 as Bug 16's post-fix residue; FIXED July 2026, oracle-only
+        // confirmed, archived in _FIXED_BUGS.md): the same interrupted-cycling recipe left a small
+        // SOURCELESS over-bright red island straddling the z31|32 seam — a stale in-flight job re-instated
+        // pre-break red (merge + cross-chunk uplift) that ordinary re-spread then fanned out, and nothing
+        // removed it because RGB blocklight had no removal veto. Attribution (instrumented) pinned the
+        // planter to the stale in-flight job, NOT the darkness pull-back. Fixed by mirroring the sky
+        // Bug 11/13 independent-support veto to RGB in CrossChunkLightModApplier.ComputeBlocklight
+        // (per-channel): it breaks the stale-snapshot cross-seam removal oscillation so removals complete
+        // and the field converges to the oracle. Repro K17a promoted to baseline B88.
 
         static partial void AddKnownBugScenarios(List<Scenario> scenarios)
         {
             // Bug 09 still needs a faithful repro (see note above).
-
-            scenarios.Add(new Scenario(
-                "K17a: The settled field after interrupted seam-lamp cycling fully matches the borderless oracle — no sourceless RGB ghost island (Bug 17)",
-                KnownBug_RgbGhostIslandAfterInterruptedCycling, "Bug 17"));
-        }
-
-        /// <summary>
-        /// K17a (Bug 17): the full-field assertion over the same interrupted-cycling recipe as K16a.
-        /// EXPECTED RED until Bug 17 is fixed: the recipe's second cycle plants a small sourceless
-        /// over-bright red island straddling the z31|32 seam (~24 voxels, R 1–3), which nothing ever
-        /// corrects — RGB blocklight has no over-bright corrector (see the Bug 17 note above and
-        /// LIGHTING_SYSTEM_OVERVIEW.md §3.7). Flips green when the sky-only removal machinery
-        /// (Bug 12 initiator / Bug 13 veto / Bug 14 claim verification) gets its RGB mirror, or an
-        /// equivalent corrector lands.
-        /// </summary>
-        private static bool KnownBug_RgbGhostIslandAfterInterruptedCycling()
-        {
-            using LightingTestWorld world = BuildBug16RgbSeamBlendWorld(withWater: true);
-            bool passed = SetUpBug16InitialBlend(world, "K17a");
-
-            RunBug16InterruptedCyclingRecipe(world, cycles: 3);
-
-            passed &= LightingAssert.Converged(world.RunWaveToConvergence(),
-                "K17a: post-cycling reconciliation reaches a stable field");
-            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
-                "K17a: the settled field FULLY matches the borderless oracle (no sourceless ghost island)");
-            return passed;
         }
     }
 }

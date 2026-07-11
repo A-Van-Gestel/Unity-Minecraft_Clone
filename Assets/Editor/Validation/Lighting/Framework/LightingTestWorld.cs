@@ -63,6 +63,9 @@ namespace Editor.Validation.Lighting.Framework
         // is a block id fully opaque (cannot propagate sunlight)?
         private readonly Func<ushort, bool> _isBlockFullyOpaque;
 
+        // Cached emission lookup for the RGB removal veto (Bug 17), mirror of WorldJobManager._blockEmission.
+        private readonly Func<ushort, (byte r, byte g, byte b)> _blockEmission;
+
         // Chunks with a lighting job currently in flight (mirror of production's LightingJobs keys,
         // minus the already-processed _completedLightJobs entries).
         private readonly HashSet<Vector2Int> _inFlightCoords = new HashSet<Vector2Int>();
@@ -168,6 +171,11 @@ namespace Editor.Validation.Lighting.Framework
             // band derivation reads the resulting counts. Mirrors World.Awake's production binding.
             EmissiveBlockLookup.Initialize(_blockTypes);
             _isBlockFullyOpaque = id => _blockTypes[id].IsOpaque;
+            _blockEmission = id =>
+            {
+                BlockTypeJobData bt = _blockTypes[id];
+                return (bt.EmissionR, bt.EmissionG, bt.EmissionB);
+            };
             _getLoadedChunkByOrigin = originXZ =>
                 _chunks.TryGetValue(new Vector2Int(originXZ.x / VoxelData.ChunkWidth, originXZ.y / VoxelData.ChunkWidth),
                     out TestChunk chunk) && chunk.IsLoaded
@@ -1294,7 +1302,27 @@ namespace Editor.Validation.Lighting.Framework
                 independentSunSupport = Math.Max(inChunk, crossChunk);
             }
 
-            CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod, independentSunSupport);
+            // Blocklight REMOVAL mods consult per-channel independent support (the Bug 17 RGB veto) —
+            // mirror of WorldJobManager.ApplyCrossChunkLightMod.
+            byte independentBlockR = 0, independentBlockG = 0, independentBlockB = 0;
+            if (mod.Channel == LightChannel.Block && mod.IsRemoval)
+            {
+                ushort targetId = BurstVoxelDataBitMapping.GetId(
+                    target.Data.GetVoxel(localPos.x, localPos.y, localPos.z));
+                byte targetOpacity = _blockTypes[targetId].Opacity;
+                CrossChunkLightModApplier.InChunkBlocklightSupport(target.Data, localPos, targetOpacity,
+                    _isBlockFullyOpaque, _blockEmission, out byte inR, out byte inG, out byte inB);
+                CrossChunkLightModApplier.CrossChunkBlocklightSupport(
+                    target.VoxelOrigin, localPos, targetOpacity, emitterOriginXZ,
+                    _getLoadedChunkByOrigin, _isBlockFullyOpaque, _blockEmission,
+                    out byte crR, out byte crG, out byte crB);
+                independentBlockR = Math.Max(inR, crR);
+                independentBlockG = Math.Max(inG, crG);
+                independentBlockB = Math.Max(inB, crB);
+            }
+
+            CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod,
+                independentSunSupport, independentBlockR, independentBlockG, independentBlockB);
             if (!decision.ShouldApply) return false;
 
             target.Data.SetLightData(localPos.x, localPos.y, localPos.z, decision.NewLight);

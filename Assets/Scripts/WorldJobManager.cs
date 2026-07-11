@@ -33,6 +33,10 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     // null when absent. Allocated once so ApplyCrossChunkLightMod doesn't churn a closure per mod.
     private readonly Func<Vector2Int, ChunkData> _getLoadedChunkByOrigin;
 
+    // Cached lookup for the RGB removal veto (CrossChunkLightModApplier.*BlocklightSupport, the Bug 17
+    // fix): a block id's own emission RGB (an opaque block propagates only its emission). Allocated once.
+    private readonly Func<ushort, (byte r, byte g, byte b)> _blockEmission;
+
     #region Job Tracking Dictionaries
 
     public Dictionary<ChunkCoord, GenerationJobData> GenerationJobs { get; } = new Dictionary<ChunkCoord, GenerationJobData>();
@@ -189,6 +193,11 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     {
         _world = world;
         _isBlockFullyOpaque = id => _world.BlockTypes[id].IsOpaque;
+        _blockEmission = id =>
+        {
+            BlockTypeJobData bt = _world.JobDataManager.BlockTypesJobData[id];
+            return (bt.EmissionR, bt.EmissionG, bt.EmissionB);
+        };
         _getLoadedChunkByOrigin = originXZ =>
         {
             if (!World.IsChunkInWorld(ChunkCoord.FromVoxelOrigin(originXZ))) return null;
@@ -1502,7 +1511,28 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
             independentSunSupport = Math.Max(inChunk, crossChunk);
         }
 
-        CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod, independentSunSupport);
+        // Blocklight REMOVAL mods consult per-channel independent support (the Bug 17 RGB veto): a channel
+        // an independent in-chunk (Bug 11 analog) or live third-party cross-chunk (Bug 13 analog) source
+        // still backs must not be cleared by a stale-snapshot removal. Placements/uplifts ignore it.
+        byte independentBlockR = 0, independentBlockG = 0, independentBlockB = 0;
+        if (mod.Channel == LightChannel.Block && mod.IsRemoval)
+        {
+            ushort targetId = BurstVoxelDataBitMapping.GetId(
+                targetChunk.GetVoxel(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z));
+            byte targetOpacity = _world.BlockTypes[targetId].opacity;
+            CrossChunkLightModApplier.InChunkBlocklightSupport(targetChunk, localVoxelPos, targetOpacity,
+                _isBlockFullyOpaque, _blockEmission, out byte inR, out byte inG, out byte inB);
+            CrossChunkLightModApplier.CrossChunkBlocklightSupport(
+                _world.worldData.GetChunkCoordFor(mod.GlobalPosition), localVoxelPos, targetOpacity,
+                emitterOriginXZ, _getLoadedChunkByOrigin, _isBlockFullyOpaque, _blockEmission,
+                out byte crR, out byte crG, out byte crB);
+            independentBlockR = Math.Max(inR, crR);
+            independentBlockG = Math.Max(inG, crG);
+            independentBlockB = Math.Max(inB, crB);
+        }
+
+        CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod,
+            independentSunSupport, independentBlockR, independentBlockG, independentBlockB);
 
         if (!decision.ShouldApply)
         {
