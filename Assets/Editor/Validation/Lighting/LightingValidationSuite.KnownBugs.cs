@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using Editor.Validation.Lighting.Framework;
+using UnityEngine;
 using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.Lighting
@@ -47,11 +49,72 @@ namespace Editor.Validation.Lighting
         // F3/F7 stored-light views; distilled repros K15b/K15c promoted to baselines B62/B63
         // (Baselines/LightingValidationSuite.Baseline.Bug15Stamp.cs). Entry archived in _FIXED_BUGS.md.
 
+        // NOTE on Bug 16 (found 2026-07-11): the runaway RGB blocklight removal loop OOM. Simple
+        // shapes do NOT reproduce — a single clean break of an overlapping two-color cross-seam
+        // blend converges in every execution model (sequential, wave-parallel, held stale flight,
+        // rapid cycling, dry or underwater; those attempts are consolidated into baseline B86 as the
+        // simple-form guard + fix tripwire). The runaway needs the NON-MONOTONE mixed-channel
+        // plateau state built by INTERRUPTED reconciliation (under-budgeted waves + pre-edit held
+        // snapshots + water attenuation), after which a single job's blocklight removal phase enters
+        // a true infinite cycle (proven by the near-cap node dumps: identical (pos, oldRGB) triplets
+        // repeating at a two-seam corner — per-channel re-zeroing sustained by the darkness-phase
+        // CheckEdgeVoxelRGB pull-back re-lighting from never-zeroed lit halo cells). K16a below is
+        // that recipe, deterministic (3/3 reproductions during bisection).
+
         static partial void AddKnownBugScenarios(List<Scenario> scenarios)
         {
             // Bug 09 still needs a faithful repro (see note above).
 
-            // No open lighting bugs currently have a registered known-bug repro.
+            scenarios.Add(new Scenario(
+                "K16a: Interrupted underwater break/re-place cycling of a seam lamp must still converge to the oracle — no runaway RGB removal loop (Bug 16)",
+                KnownBug_RgbSeamBlendWaterCyclingRunaway, "Bug 16"));
+        }
+
+        /// <summary>
+        /// K16a (Bug 16): the deterministic runaway-removal recipe. The B86 world plus a water volume
+        /// (opacity-2 attenuation builds mixed-channel plateaus), cycled three times through: hold the
+        /// green chunk's job on a pre-edit snapshot → break the red lamp → run the red chunk's removal
+        /// pass → water re-flows into the hole → complete the stale green flight → one under-budgeted
+        /// wave → re-place the lamp → one more under-budgeted wave. The interrupted reconciliation
+        /// leaves non-monotone mixed R/G plateau values at the seam corners; the final break then
+        /// drives a blocklight removal phase into an infinite per-channel re-zero ↔ seam pull-back
+        /// cycle inside a single job (Bug 16's OOM).
+        /// <para>
+        /// EXPECTED RED until Bug 16 is fixed — and only survivable because of the temporary
+        /// <c>NeighborhoodLightingJob.MAX_BFS_NODES_PER_PASS</c> diagnostic cap, which aborts the
+        /// runaway pass (console: "[LightingJob DIAG] Bug-16 BFS work cap exceeded") and leaves a
+        /// corrupted field this scenario's oracle compare reports. WITHOUT that cap this scenario
+        /// OOM-crashes the editor (observed twice, 2026-07-11) — do not remove the cap before the fix.
+        /// </para>
+        /// </summary>
+        private static bool KnownBug_RgbSeamBlendWaterCyclingRunaway()
+        {
+            const int cycles = 3;
+            Vector3Int redPos = new Vector3Int(BUG16_RED_LAMP_X, BUG16_LAMP_Y, BUG16_LAMP_Z);
+
+            using LightingTestWorld world = BuildBug16RgbSeamBlendWorld(withWater: true);
+            bool passed = SetUpBug16InitialBlend(world, "K16a");
+
+            for (int i = 0; i < cycles; i++)
+            {
+                LightingTestWorld.LightingJobFlight greenFlight = world.BeginLightingJob(new Vector2Int(1, 1));
+                world.BreakBlock(redPos);
+                world.RunLightingJob(new Vector2Int(0, 1)); // removal pass against the held green snapshot
+                world.PlaceBlock(redPos, TestBlockPalette.Water); // fluid re-flow into the hole mid-reconciliation
+                world.CompleteLightingJob(greenFlight); // stale pre-break merge + deferred-mod drain
+                world.RunWaveToConvergence(1); // deliberately under-budgeted: next edit lands mid-reconciliation
+                world.PlaceBlock(redPos, TestBlockPalette.LampRed);
+                world.RunWaveToConvergence(1);
+            }
+
+            world.BreakBlock(redPos);
+            world.PlaceBlock(redPos, TestBlockPalette.Water);
+
+            passed &= LightingAssert.Converged(world.RunWaveToConvergence(),
+                "K16a: post-cycling reconciliation reaches a stable field without runaway removal work");
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                "K16a: the settled field matches the borderless oracle (red gone, green intact)");
+            return passed;
         }
     }
 }

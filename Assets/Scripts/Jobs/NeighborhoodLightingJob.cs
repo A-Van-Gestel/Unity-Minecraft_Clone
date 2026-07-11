@@ -227,6 +227,79 @@ namespace Jobs
         }
 
         /// <summary>
+        /// Bug 16 DIAGNOSTIC (2026-07-11, temporary): hard cap on the total nodes the four BFS phase
+        /// loops may process in one pass. A legitimate worst-case pass (full padded-volume re-flood)
+        /// stays around 0.3M node visits; the Bug 16 runaway grows its queues/mods unbounded inside a
+        /// single Execute() until the editor OOMs. The cap converts that into a loud, bounded abort:
+        /// the pass exits early (IsStable stays false — the queues are non-empty), and the console
+        /// error pins which phase exploded. Remove once Bug 16's root cause is fixed, or promote to a
+        /// permanent fail-safe with a proper diagnostics output.
+        /// NOTE: even a capped pass leaves its churned queue blocks in the frame's Temp linear
+        /// allocator (never reset mid-frame), so the cap must keep the per-pass churn in the tens of
+        /// MB — a 4M cap still OOM'd the editor when many capped jobs ran in one editor frame.
+        /// </summary>
+        private const long MAX_BFS_NODES_PER_PASS = 200_000;
+
+        /// <summary>
+        /// Bug 16 diagnostic: how many of the last nodes before the cap abort are dumped to the
+        /// console, to expose the cycling position/channel pattern of the runaway.
+        /// </summary>
+        private const long NEAR_CAP_NODE_DUMP = 12;
+
+        /// <summary>
+        /// Bug 16 diagnostic: reports a BFS phase loop aborted by <see cref="MAX_BFS_NODES_PER_PASS"/>
+        /// (Burst-safe FixedString logging only).
+        /// </summary>
+        /// <param name="phase">Which phase loop hit the cap.</param>
+        private void LogWorkCapAbort(in FixedString32Bytes phase)
+        {
+            FixedString512Bytes msg = "[LightingJob DIAG] Bug-16 BFS work cap exceeded - aborting phase ";
+            msg.Append(phase);
+            msg.Append((FixedString32Bytes)" chunk=(");
+            msg.Append(ChunkPosition.x);
+            msg.Append((FixedString32Bytes)",");
+            msg.Append(ChunkPosition.y);
+            msg.Append((FixedString32Bytes)") crossChunkMods=");
+            msg.Append(CrossChunkLightMods.Length);
+            msg.Append((FixedString32Bytes)" band=[");
+            msg.Append(BandMinY);
+            msg.Append((FixedString32Bytes)",");
+            msg.Append(BandHeight);
+            msg.Append((FixedString32Bytes)")");
+            Debug.LogError(msg);
+        }
+
+        /// <summary>
+        /// Bug 16 diagnostic: dumps one BFS node processed just before a cap abort (see
+        /// <see cref="NEAR_CAP_NODE_DUMP"/>) — position, the node's old RGB (removal) or the cell's
+        /// current RGB (placement) — so the runaway's cycling pattern is readable from the console.
+        /// </summary>
+        /// <param name="phase">Which phase loop the node belongs to.</param>
+        /// <param name="pos">The node's BFS-local position.</param>
+        /// <param name="r">Red channel (node-old for removal, current for placement).</param>
+        /// <param name="g">Green channel.</param>
+        /// <param name="b">Blue channel.</param>
+        private static void LogNodeNearCap(in FixedString32Bytes phase, Vector3Int pos, byte r, byte g, byte b)
+        {
+            FixedString128Bytes msg = "[LightingJob DIAG] near-cap ";
+            msg.Append(phase);
+            msg.Append((FixedString32Bytes)" node=(");
+            msg.Append(pos.x);
+            msg.Append((FixedString32Bytes)",");
+            msg.Append(pos.y);
+            msg.Append((FixedString32Bytes)",");
+            msg.Append(pos.z);
+            msg.Append((FixedString32Bytes)") rgb=(");
+            msg.Append(r);
+            msg.Append((FixedString32Bytes)",");
+            msg.Append(g);
+            msg.Append((FixedString32Bytes)",");
+            msg.Append(b);
+            msg.Append((FixedString32Bytes)")");
+            Debug.LogWarning(msg);
+        }
+
+        /// <summary>
         /// Executes the flood-fill lighting propagation algorithm within the central chunk, crossing boundaries to its 8 neighbors if necessary.
         /// </summary>
         public void Execute()
@@ -284,6 +357,9 @@ namespace Jobs
 
             // --- PASS 0: SEEDING ---
             // Seed the queues with initial changes from the main thread.
+            // Bug 16 DIAGNOSTIC: the seed loops share the phase loops' work budget — an
+            // over-accumulated input queue aborts loudly too (see MAX_BFS_NODES_PER_PASS).
+            long bfsWork = 0;
             while (SunlightColumnRecalcQueue.TryDequeue(out Vector2Int column))
             {
                 RecalculateSunlightForColumn(column.x, column.y, sunlightPlacementQueue, sunlightRemovalQueue);
@@ -291,6 +367,12 @@ namespace Jobs
 
             while (SunlightBfsQueue.TryDequeue(out LightQueueNode node))
             {
+                if (++bfsWork > MAX_BFS_NODES_PER_PASS)
+                {
+                    LogWorkCapAbort("sunSeed");
+                    break;
+                }
+
                 uint currentPacked = GetPackedData(node.Position);
                 if (currentPacked == uint.MaxValue) continue;
                 ushort currentLightData = GetLightData(node.Position);
@@ -310,6 +392,12 @@ namespace Jobs
 
             while (BlocklightBfsQueue.TryDequeue(out LightQueueNode node))
             {
+                if (++bfsWork > MAX_BFS_NODES_PER_PASS)
+                {
+                    LogWorkCapAbort("blockSeed");
+                    break;
+                }
+
                 uint currentPacked = GetPackedData(node.Position);
                 if (currentPacked == uint.MaxValue) continue;
 
@@ -358,15 +446,60 @@ namespace Jobs
 
             // --- LIGHTING PASSES ---
             // The propagation logic now seamlessly crosses chunk borders within the 3x3 grid.
+            // Bug 16 DIAGNOSTIC: one shared work budget across the four phase loops (see
+            // MAX_BFS_NODES_PER_PASS) — a runaway pass aborts loudly instead of growing until OOM.
             while (sunlightRemovalQueue.TryDequeue(out LightRemovalNode node))
+            {
+                if (++bfsWork > MAX_BFS_NODES_PER_PASS)
+                {
+                    LogWorkCapAbort("sunRemoval");
+                    break;
+                }
+
                 PropagateDarkness(node, LightChannel.Sun, sunlightPlacementQueue, sunlightRemovalQueue, ref emittedSunRemovals);
+            }
+
             while (sunlightPlacementQueue.TryDequeue(out Vector3Int pos))
+            {
+                if (++bfsWork > MAX_BFS_NODES_PER_PASS)
+                {
+                    LogWorkCapAbort("sunPlacement");
+                    break;
+                }
+
                 PropagateLight(pos, LightChannel.Sun, sunlightPlacementQueue);
+            }
 
             while (blocklightRemovalQueue.TryDequeue(out LightRemovalNode node))
+            {
+                if (++bfsWork > MAX_BFS_NODES_PER_PASS)
+                {
+                    LogWorkCapAbort("blockRemoval");
+                    break;
+                }
+
+                if (bfsWork > MAX_BFS_NODES_PER_PASS - NEAR_CAP_NODE_DUMP)
+                    LogNodeNearCap("blockRemoval", node.Pos, node.LightR, node.LightG, node.LightB);
                 PropagateDarkness(node, LightChannel.Block, blocklightPlacementQueue, blocklightRemovalQueue, ref emittedSunRemovals);
+            }
+
             while (blocklightPlacementQueue.TryDequeue(out Vector3Int pos))
+            {
+                if (++bfsWork > MAX_BFS_NODES_PER_PASS)
+                {
+                    LogWorkCapAbort("blockPlacement");
+                    break;
+                }
+
+                if (bfsWork > MAX_BFS_NODES_PER_PASS - NEAR_CAP_NODE_DUMP)
+                {
+                    ushort dumpLight = GetLightData(pos);
+                    LogNodeNearCap("blockPlacement", pos, LightBitMapping.GetBlocklightR(dumpLight),
+                        LightBitMapping.GetBlocklightG(dumpLight), LightBitMapping.GetBlocklightB(dumpLight));
+                }
+
                 PropagateLight(pos, LightChannel.Block, blocklightPlacementQueue);
+            }
 
             // --- FINAL STEP ---
             // The lighting is stable if no more work was generated during this pass, AND no work was passed to neighbors.

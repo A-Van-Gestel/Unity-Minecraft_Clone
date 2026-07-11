@@ -132,6 +132,11 @@ namespace Editor.Validation.Lighting
             // prove-red (a headroom-stripped band must be caught). Lives in
             // Baselines/LightingValidationSuite.Baseline.BandDifferential.cs and self-registers here. ---
             AddBandDifferentialBaselineScenarios(scenarios);
+
+            // --- Bug-16 runaway RGB removal family (B86): the simple-form convergence guard +
+            // fix over-correction tripwire. Lives in Baselines/LightingValidationSuite.Baseline.Bug16Runaway.cs
+            // (shared geometry with known-bug repro K16a) and self-registers here. ---
+            AddBug16RunawayBaselineScenarios(scenarios);
         }
 
         /// <summary>Hook for the Bug-12 family baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug12.cs).</summary>
@@ -169,6 +174,10 @@ namespace Editor.Validation.Lighting
         /// <summary>Hook for the Bug-15 stamp baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug15Stamp.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddBug15StampBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the Bug-16 runaway RGB removal baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug16Runaway.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBug16RunawayBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>
         /// B1: A torch placed mid-air in an empty world. Exercises in-chunk RGB placement BFS and
