@@ -8,8 +8,9 @@
 
 ## 1. Why this document exists
 
-The lighting validation suite (62 baselines + frame simulator, menu item
-**`Minecraft Clone/Dev/Validate Lighting Engine`**) is strong where it runs **real production code**:
+The lighting validation suite (70 baselines + frame simulator, menu item
+**`Minecraft Clone/Dev/Validate Lighting Engine`**; B71–B74 guard the LI-2 band derivation and B75–B78 the
+banded-vs-full differential + prove-red) is strong where it runs **real production code**:
 it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real `ChunkData` (section /
 uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision
 helpers `CrossChunkLightModApplier`, `LightingScheduleDecision`, and `LightingJobProcessor`.

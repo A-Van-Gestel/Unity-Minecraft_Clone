@@ -179,7 +179,7 @@ gates.
 | ID   | Finding                                                                                                                                          | Effort | Risk | Benefit | Seed | Save |
 |------|--------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
 | LI-1 | ✅ Branchy 9-map dispatch + hashmap cache → halo-padded volume; layout validated, **shipped net-positive via P-2 Phase 1** (worker-thread gather) |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
-| LI-2 | Halo gather/extract copies the full 128-voxel column height regardless of content (Y-band / section-ranged volume)                               |   🟡   |  🔴  |   🟢    |  ⚠️  |  ✅   |
+| LI-2 | ✅ Halo gather/extract/scans copied the full 128-voxel column regardless of content → **derived Y-band, shipped default-on** (`EnableLightingBandGather`); bit-identical (B75–B78), editor-screened −31…−75 % on gather/scan-dominated jobs |   🟡   |  🔴  |   🟢    |  ⚠️  |  ✅   |
 | LI-3 | Ready-set scan eagerly evaluates BOTH neighbor gates for every ready chunk each visit (plan-owned by `LIGHTING_PIPELINE_STATE_REFACTOR.md` LP-6) |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 
 ### World Generation
@@ -778,6 +778,19 @@ satisfy both if the persistent layout itself is halo-padded.
 ---
 
 ### LI-2. Halo gather/extract copies the full column height regardless of content
+
+> **✅ IMPLEMENTED 2026-07-11** (`feat/async-lighting-validation-suite`) — shipped default-on behind
+> `World.EnableLightingBandGather` (rollback flag; TempJob startup sweep stays full-height by design). The lighting job
+> now gathers/scans/extracts only the derived bottom-anchored Y-band `[0, bandHeight)`; reads above answer virtually
+> from a per-chunk uniform-region summary. **Bit-identical** by the `LightingBandDecision` rules (coverage + one
+> headroom section, column-recalc, cross-seam consistency), proven by the **B75–B78** banded-vs-full differential
+> (incl. the C3 cross-chunk darkening quadrant, a 12-seed fuzz, and a headroom-strip prove-red) + **B71–B74**
+> derivation baselines — `Validate Lighting Engine` 70/70. Editor screening: **−31…−75 %** on the gather/scan-dominated
+> job shapes (no-op relight, edge check), wave-carrying jobs bounded by the irreducible BFS; never slower on the clean
+> floor. Shippable IL2CPP/in-game frame A/B: see
+> [`Performance/LIGHTING_LI2_2026-07-11_BENCHMARK.md`](../Performance/LIGHTING_LI2_2026-07-11_BENCHMARK.md). Core:
+> `Assets/Scripts/Helpers/LightingBandDecision.cs` + `ChunkData.GetLightingBandTop` + `WorldJobManager.ScheduleLightingUpdate`.
+> The recommendation below is the as-designed record.
 
 *(Surfaced by the 2026-07-02 third-pass audit. This is the concrete, tracked form of
 `WORLD_SCALING_ANALYSIS.md` §2.2's "jobs must become section-ranged" Tier A prerequisite.)*
