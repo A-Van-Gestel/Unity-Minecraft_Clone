@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Data;
 using Editor.Validation.Lighting.Framework;
 using Helpers;
 using Jobs.BurstData;
@@ -35,6 +36,18 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario(
                 "B74: Band derivation over REAL converged chunk metadata — superflat bands tight, a high lamp forces full height (LI-2)",
                 Baseline_BandDerivationOnRealChunks));
+            scenarios.Add(new Scenario(
+                "B79: ChunkData.GetLightingBandBottom tracks the inert-dark bottom region through compaction, a buried lamp, and its removal (LI-2 bottom band)",
+                Baseline_BandBottomMetadataTracksSectionStates));
+            scenarios.Add(new Scenario(
+                "B80: Bottom-band coverage rule — inert-dark floors, the lowest queued BFS node, and the center heightmap minimum each bound the band with headroom (LI-2 bottom band)",
+                Baseline_BandBottomCoverageRule));
+            scenarios.Add(new Scenario(
+                "B81: Bottom-band full-bottom fallbacks — any column recalc, a missing center, and a low heightmap column force bandMinY to 0 (LI-2 bottom band)",
+                Baseline_BandBottomFallbacks));
+            scenarios.Add(new Scenario(
+                "B82: Bottom-band derivation over REAL converged chunk metadata — deep superflat floor bands, a buried lamp lowers the floor (LI-2 bottom band)",
+                Baseline_BandBottomDerivationOnRealChunks));
         }
 
         /// <summary>The packed light value of a fully-sunlit uniform region (sky 15, no blocklight).</summary>
@@ -230,6 +243,218 @@ namespace Editor.Validation.Lighting
                 $"expected {ChunkMath.CHUNK_HEIGHT}, got {full}");
 
             return ok;
+        }
+
+        /// <summary>A bottom summary with the inert-dark region <c>[0, upTo)</c>.</summary>
+        /// <param name="upTo">The exclusive top of the inert-dark region.</param>
+        /// <returns>The summary.</returns>
+        private static LightingBandChunkBottom BandDark(int upTo) =>
+            new LightingBandChunkBottom { InertUpToY = upTo };
+
+        /// <summary>Derives the bottom edge for a neighborhood that is the same summary in all 9 slots.</summary>
+        /// <param name="all">The summary used for the center and every neighbor.</param>
+        /// <param name="minQueuedNodeY">Lowest queued BFS node Y, or <c>int.MaxValue</c>.</param>
+        /// <param name="hasColumnRecalcs">Whether sunlight column recalcs are queued.</param>
+        /// <param name="minCenterHeightmapY">The center chunk's lowest heightmap entry.</param>
+        /// <returns>The derived band bottom.</returns>
+        private static int DeriveUniformBottomNeighborhood(in LightingBandChunkBottom all,
+            int minQueuedNodeY = int.MaxValue, bool hasColumnRecalcs = false,
+            int minCenterHeightmapY = ChunkMath.CHUNK_HEIGHT)
+        {
+            return LightingBandDecision.DeriveBandMinY(in all,
+                in all, in all, in all, in all, in all, in all, in all, in all,
+                minQueuedNodeY, hasColumnRecalcs, minCenterHeightmapY);
+        }
+
+        /// <summary>
+        /// B79: the inert-dark bottom summary must mirror the section states the banded job would skip.
+        /// A deep stone floor is not inert before lighting (sections uncompacted), compacts to two dark
+        /// sections after it, loses a section to a buried lamp (first via the SetVoxel promote, then —
+        /// the load-bearing case — via the emissive gate alone when the section reads compact-dark), and
+        /// recovers once the lamp is broken and the merge recompacts.
+        /// </summary>
+        /// <returns>True when every state summarizes correctly.</returns>
+        private static bool Baseline_BandBottomMetadataTracksSectionStates()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(47, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            Vector2Int center = new Vector2Int(1, 1);
+            LightingBandChunkBottom bottom = world.GetChunkData(center).GetLightingBandBottom();
+            bool ok = LightingAssert.IsTrue(bottom.InertUpToY == 0 && !bottom.IsMissing,
+                "B79: an unlit (uncompacted) floor proves nothing inert",
+                $"expected InertUpToY=0, got {bottom.InertUpToY}");
+
+            world.RunInitialLighting();
+            bottom = world.GetChunkData(center).GetLightingBandBottom();
+            ok &= LightingAssert.IsTrue(bottom.InertUpToY == 2 * ChunkMath.SECTION_SIZE,
+                "B79: after initial lighting the two fully-buried stone sections compact to inert-dark",
+                $"expected InertUpToY={2 * ChunkMath.SECTION_SIZE}, got {bottom.InertUpToY}");
+
+            // Bury a lamp in section 1: the SetVoxel promote decompacts the section, ending the run.
+            world.PlaceBlock(new Vector3Int(24, 20, 24), TestBlockPalette.LampWhite);
+            ChunkData centerData = world.GetChunkData(center);
+            ok &= LightingAssert.IsTrue(centerData.sections[1].emissiveCount == 1,
+                "B79: the buried lamp is counted by the section's emissive metadata",
+                $"expected emissiveCount=1, got {centerData.sections[1].emissiveCount}");
+            ok &= LightingAssert.IsTrue(centerData.GetLightingBandBottom().InertUpToY == ChunkMath.SECTION_SIZE,
+                "B79: the promoted (no-longer-compact) lamp section ends the inert run",
+                $"expected InertUpToY={ChunkMath.SECTION_SIZE}, got {centerData.GetLightingBandBottom().InertUpToY}");
+
+            world.RunToConvergence();
+
+            // The load-bearing emissive-gate case: force the lamp's section to READ compact-dark (the
+            // state a band-skipped, never-rescanned emitter would occupy) — the emissive count alone
+            // must still end the run there, or the banded job would never stamp the lamp.
+            byte savedSky = centerData.SectionUniformSkyLevel[1];
+            centerData.SectionUniformSkyLevel[1] = 0;
+            int gated = centerData.GetLightingBandBottom().InertUpToY;
+            centerData.SectionUniformSkyLevel[1] = savedSky;
+            ok &= LightingAssert.IsTrue(gated == ChunkMath.SECTION_SIZE,
+                "B79: the emissive gate ends the run even when the lamp section reads compact-dark",
+                $"expected InertUpToY={ChunkMath.SECTION_SIZE}, got {gated}");
+
+            // Breaking the lamp and re-converging recompacts the section to inert-dark.
+            world.BreakBlock(new Vector3Int(24, 20, 24));
+            world.RunToConvergence();
+            bottom = world.GetChunkData(center).GetLightingBandBottom();
+            ok &= LightingAssert.IsTrue(bottom.InertUpToY == 2 * ChunkMath.SECTION_SIZE
+                                        && world.GetChunkData(center).sections[1].emissiveCount == 0,
+                "B79: breaking the lamp restores the two-section inert-dark run",
+                $"expected InertUpToY={2 * ChunkMath.SECTION_SIZE} emissiveCount=0, got InertUpToY={bottom.InertUpToY}");
+
+            return ok;
+        }
+
+        /// <summary>
+        /// B80: the bottom coverage rule floors the band at the shallowest inert-dark ceiling in the
+        /// neighborhood, keeps headroom under the lowest queued BFS node and under the center's lowest
+        /// heightmap entry, treats a missing neighbor as neutral, and clamps at 0.
+        /// </summary>
+        /// <returns>True when every coverage case derives the expected bottom.</returns>
+        private static bool Baseline_BandBottomCoverageRule()
+        {
+            LightingBandChunkBottom dark48 = BandDark(48);
+
+            int quiescent = DeriveUniformBottomNeighborhood(in dark48, minCenterHeightmapY: 100);
+            bool ok = LightingAssert.IsTrue(quiescent == 48,
+                "B80: quiescent dark floors band at the inert-dark ceiling",
+                $"expected 48, got {quiescent}");
+
+            int withNode = DeriveUniformBottomNeighborhood(in dark48, minQueuedNodeY: 40, minCenterHeightmapY: 100);
+            ok &= LightingAssert.IsTrue(withNode == 40 - LightingBandDecision.BandHeadroomVoxels,
+                "B80: a low queued BFS node lowers the band to keep headroom under it",
+                $"expected {40 - LightingBandDecision.BandHeadroomVoxels}, got {withNode}");
+
+            int withHeightmap = DeriveUniformBottomNeighborhood(in dark48, minCenterHeightmapY: 40);
+            ok &= LightingAssert.IsTrue(withHeightmap == 40 - LightingBandDecision.BandHeadroomVoxels,
+                "B80: the center's lowest heightmap entry bounds the band (descending-sunlight rule)",
+                $"expected {40 - LightingBandDecision.BandHeadroomVoxels}, got {withHeightmap}");
+
+            // One shallow neighbor (inert only up to y=16) must lower the whole neighborhood's band.
+            LightingBandChunkBottom shallowEast = BandDark(ChunkMath.SECTION_SIZE);
+            int shallow = LightingBandDecision.DeriveBandMinY(in dark48,
+                in dark48, in shallowEast, in dark48, in dark48, in dark48, in dark48, in dark48, in dark48,
+                minQueuedNodeY: int.MaxValue, hasColumnRecalcs: false, minCenterHeightmapY: 100);
+            ok &= LightingAssert.IsTrue(shallow == ChunkMath.SECTION_SIZE,
+                "B80: the shallowest neighbor's inert-dark ceiling governs the band",
+                $"expected {ChunkMath.SECTION_SIZE}, got {shallow}");
+
+            // A missing neighbor is band-neutral (its rows read as the sentinel either way).
+            LightingBandChunkBottom missing = LightingBandChunkBottom.Missing;
+            int withMissing = LightingBandDecision.DeriveBandMinY(in dark48,
+                in dark48, in missing, in dark48, in dark48, in dark48, in dark48, in dark48, in dark48,
+                minQueuedNodeY: int.MaxValue, hasColumnRecalcs: false, minCenterHeightmapY: 100);
+            ok &= LightingAssert.IsTrue(withMissing == 48,
+                "B80: a missing neighbor neither lowers nor raises the band",
+                $"expected 48, got {withMissing}");
+
+            return ok;
+        }
+
+        /// <summary>
+        /// B81: every condition that cannot prove the skipped bottom rows inert must fall back to 0 —
+        /// any queued column recalc (PASS 2 walks to Y=0 unconditionally), a missing center (defensive),
+        /// and a heightmap column low enough that headroom clamps through the floor.
+        /// </summary>
+        /// <returns>True when each fallback fires.</returns>
+        private static bool Baseline_BandBottomFallbacks()
+        {
+            LightingBandChunkBottom dark48 = BandDark(48);
+
+            int recalc = DeriveUniformBottomNeighborhood(in dark48, hasColumnRecalcs: true, minCenterHeightmapY: 100);
+            bool ok = LightingAssert.IsTrue(recalc == 0,
+                "B81: any queued column recalc forces the bottom to 0 (no full-sky escape exists downward)",
+                $"expected 0, got {recalc}");
+
+            LightingBandChunkBottom missingCenter = LightingBandChunkBottom.Missing;
+            int missing = DeriveUniformBottomNeighborhood(in missingCenter, minCenterHeightmapY: 100);
+            ok &= LightingAssert.IsTrue(missing == 0,
+                "B81: a missing center derives 0 (defensive — never scheduled in practice)",
+                $"expected 0, got {missing}");
+
+            int lowColumn = DeriveUniformBottomNeighborhood(in dark48, minCenterHeightmapY: 5);
+            ok &= LightingAssert.IsTrue(lowColumn == 0,
+                "B81: a sky-open column near bedrock clamps the band bottom to 0",
+                $"expected 0, got {lowColumn}");
+
+            return ok;
+        }
+
+        /// <summary>
+        /// B82: the bottom derivation over REAL converged chunk metadata — the new APIs composed the way
+        /// the schedulers will use them. A deep lit superflat floor bands at the heightmap term (one
+        /// headroom under the surface, tighter than the two dark sections); burying a lamp lowers the
+        /// floor to its section boundary.
+        /// </summary>
+        /// <returns>True when both derivations match.</returns>
+        private static bool Baseline_BandBottomDerivationOnRealChunks()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(47, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+            world.RunInitialLighting();
+
+            int minHeightmap = world.GetChunkData(new Vector2Int(1, 1)).GetHeightmapMinY();
+            bool ok = LightingAssert.IsTrue(minHeightmap == 47,
+                "B82: the superflat floor's heightmap minimum matches its surface",
+                $"expected 47, got {minHeightmap}");
+
+            int banded = DeriveBottomFromRealChunks(world);
+            const int expectBanded = 47 - LightingBandDecision.BandHeadroomVoxels; // 31 — under the 32-row dark run
+            ok &= LightingAssert.IsTrue(banded == expectBanded,
+                "B82: lit deep superflat derives the heightmap-bounded bottom from real metadata",
+                $"expected {expectBanded}, got {banded}");
+
+            world.PlaceBlock(new Vector3Int(24, 20, 24), TestBlockPalette.LampWhite);
+            world.RunToConvergence();
+
+            int withLamp = DeriveBottomFromRealChunks(world);
+            ok &= LightingAssert.IsTrue(withLamp == ChunkMath.SECTION_SIZE,
+                "B82: a buried lamp on the center chunk lowers the real-metadata bottom to its section floor",
+                $"expected {ChunkMath.SECTION_SIZE}, got {withLamp}");
+
+            return ok;
+        }
+
+        /// <summary>Runs the bottom derivation for the 3×3 world's center chunk (1,1) from live chunk
+        /// metadata, with no queued work (the quiescent post-convergence state).</summary>
+        /// <param name="world">The 3×3 test world.</param>
+        /// <returns>The derived band bottom.</returns>
+        private static int DeriveBottomFromRealChunks(LightingTestWorld world)
+        {
+            LightingBandChunkBottom Bottom(int cx, int cz) =>
+                world.GetChunkData(new Vector2Int(cx, cz)).GetLightingBandBottom();
+
+            LightingBandChunkBottom center = Bottom(1, 1);
+            LightingBandChunkBottom w = Bottom(0, 1), e = Bottom(2, 1), s = Bottom(1, 0), n = Bottom(1, 2);
+            LightingBandChunkBottom sw = Bottom(0, 0), nw = Bottom(0, 2), se = Bottom(2, 0), ne = Bottom(2, 2);
+
+            return LightingBandDecision.DeriveBandMinY(in center,
+                in w, in e, in s, in n, in sw, in nw, in se, in ne,
+                minQueuedNodeY: int.MaxValue, hasColumnRecalcs: false,
+                minCenterHeightmapY: world.GetChunkData(new Vector2Int(1, 1)).GetHeightmapMinY());
         }
 
         /// <summary>Runs the derivation for the 3×3 world's center chunk (1,1) from live chunk metadata,

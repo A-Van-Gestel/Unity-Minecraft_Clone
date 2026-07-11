@@ -188,6 +188,127 @@ namespace Helpers
         }
 
         /// <summary>
+        /// Derives the band's bottom edge for one lighting job over a center chunk and its 8 neighbors
+        /// (LI-2 bottom band; parameter order matches <see cref="DeriveBandHeight"/>). The job then
+        /// gathers/scans/extracts only <c>[bandMinY, bandHeight)</c>. Returns 0 (no bottom banding)
+        /// whenever a rule cannot prove the skipped rows inert:
+        /// <list type="bullet">
+        /// <item><b>Column-recalc rule:</b> a queued sunlight column recalculation walks from the
+        /// heightmap down to Y=0, reading and writing every row — unlike the top side there is no
+        /// escape condition, so any recalc forces the bottom to 0.</item>
+        /// <item><b>Inert-dark coverage:</b> rows below the returned Y must be inert-dark in all nine
+        /// chunks (<see cref="LightingBandChunkBottom"/>: light uniformly zero AND no emitters). The
+        /// emissive gate is load-bearing twice over: the center's emission-sync scan must visit any
+        /// unstamped emitter, and the RGB edge check substitutes an opaque CARDINAL-halo block's
+        /// emission for its dark stored light — both end the summary's run, so neither can hide below
+        /// the band. It also keeps the banded steady state self-consistent: an emitter always ends the
+        /// run, so it is always in-band and always stamped, and a "dark compacted section with an
+        /// unstamped lamp the band never rescans" state is unreachable.</item>
+        /// <item><b>Wave coverage:</b> the band keeps <see cref="BandHeadroomVoxels"/> rows below the
+        /// lowest queued BFS node (attenuating waves lose ≥1 level per step, so a wave from
+        /// <c>y</c> can neither write nor read below <c>y − headroom</c>).</item>
+        /// <item><b>Descending-sunlight rule:</b> the vertical no-attenuation sunlight rule travels
+        /// DOWN — toward the bottom band — and headroom does not bound it. A sky-15 descent only runs
+        /// down CENTER columns (halo cells are never re-enqueued) and stops at that column's heightmap
+        /// block (the highest block with any opacity), continuing at most one attenuating headroom below
+        /// a partial-opacity top — so the band floor stays
+        /// <see cref="BandHeadroomVoxels"/> under the center's lowest heightmap entry.</item>
+        /// </list>
+        /// Cross-seam consistency needs no bottom rule: both sides of every seam are uniformly zero in
+        /// the skipped rows, and a zero source can never out-write anything.
+        /// </summary>
+        /// <param name="center">The center chunk's inert-dark summary (never missing in practice).</param>
+        /// <param name="west">West (−X) neighbor summary, or <see cref="LightingBandChunkBottom.Missing"/>.</param>
+        /// <param name="east">East (+X) neighbor summary.</param>
+        /// <param name="south">South (−Z) neighbor summary.</param>
+        /// <param name="north">North (+Z) neighbor summary.</param>
+        /// <param name="southWest">South-west diagonal neighbor summary.</param>
+        /// <param name="northWest">North-west diagonal neighbor summary.</param>
+        /// <param name="southEast">South-east diagonal neighbor summary.</param>
+        /// <param name="northEast">North-east diagonal neighbor summary.</param>
+        /// <param name="minQueuedNodeY">Lowest Y of any queued sun/block BFS node for this job, or
+        /// <c>int.MaxValue</c> when the queues are empty.</param>
+        /// <param name="hasColumnRecalcs">Whether any sunlight column recalculations are queued.</param>
+        /// <param name="minCenterHeightmapY">The center chunk's lowest heightmap entry
+        /// (<c>ChunkData.GetHeightmapMinY()</c>).</param>
+        /// <returns>The band's first gathered row, in <c>[0, ChunkMath.CHUNK_HEIGHT)</c>; 0 disables
+        /// bottom banding for this job.</returns>
+        public static int DeriveBandMinY(
+            in LightingBandChunkBottom center,
+            in LightingBandChunkBottom west, in LightingBandChunkBottom east,
+            in LightingBandChunkBottom south, in LightingBandChunkBottom north,
+            in LightingBandChunkBottom southWest, in LightingBandChunkBottom northWest,
+            in LightingBandChunkBottom southEast, in LightingBandChunkBottom northEast,
+            int minQueuedNodeY,
+            bool hasColumnRecalcs,
+            int minCenterHeightmapY)
+        {
+            // Defensive: a job over a missing center never happens; if it did, band nothing away.
+            if (center.IsMissing)
+                return 0;
+
+            // Column-recalc rule — PASS 2 unconditionally walks to Y=0.
+            if (hasColumnRecalcs)
+                return 0;
+
+            // Inert-dark coverage: the skipped rows must be dark and emitter-free in every chunk
+            // (a missing chunk is neutral — its InertUpToY is full height by construction).
+            int floor = center.InertUpToY;
+            floor = math.min(floor, west.InertUpToY);
+            floor = math.min(floor, east.InertUpToY);
+            floor = math.min(floor, south.InertUpToY);
+            floor = math.min(floor, north.InertUpToY);
+            floor = math.min(floor, southWest.InertUpToY);
+            floor = math.min(floor, northWest.InertUpToY);
+            floor = math.min(floor, southEast.InertUpToY);
+            floor = math.min(floor, northEast.InertUpToY);
+
+            // Wave coverage + descending-sunlight rules.
+            floor = math.min(floor, minQueuedNodeY - BandHeadroomVoxels);
+            floor = math.min(floor, minCenterHeightmapY - BandHeadroomVoxels);
+
+            return math.max(0, floor);
+        }
+
+        /// <summary>
+        /// Builds the job's 3×3 below-band table (the bottom mirror of <see cref="BuildTopLightTable"/>):
+        /// a present chunk's below-band rows are inert-DARK by derivation, so its entry is packed light 0;
+        /// <c>uint.MaxValue</c> marks a missing chunk (virtual reads return the out-of-world sentinels for
+        /// its region, matching its gathered — sentinel-filled — rows).
+        /// </summary>
+        /// <param name="center">The center chunk's inert-dark summary.</param>
+        /// <param name="west">West neighbor summary.</param>
+        /// <param name="east">East neighbor summary.</param>
+        /// <param name="south">South neighbor summary.</param>
+        /// <param name="north">North neighbor summary.</param>
+        /// <param name="southWest">South-west neighbor summary.</param>
+        /// <param name="northWest">North-west neighbor summary.</param>
+        /// <param name="southEast">South-east neighbor summary.</param>
+        /// <param name="northEast">North-east neighbor summary.</param>
+        /// <returns>The [cx][cz]-indexed below-band table.</returns>
+        public static uint3x3 BuildBottomLightTable(
+            in LightingBandChunkBottom center,
+            in LightingBandChunkBottom west, in LightingBandChunkBottom east,
+            in LightingBandChunkBottom south, in LightingBandChunkBottom north,
+            in LightingBandChunkBottom southWest, in LightingBandChunkBottom northWest,
+            in LightingBandChunkBottom southEast, in LightingBandChunkBottom northEast)
+        {
+            return new uint3x3(
+                new uint3(BottomEntry(in southWest), BottomEntry(in west), BottomEntry(in northWest)),
+                new uint3(BottomEntry(in south), BottomEntry(in center), BottomEntry(in north)),
+                new uint3(BottomEntry(in southEast), BottomEntry(in east), BottomEntry(in northEast)));
+        }
+
+        /// <summary>One chunk's <see cref="BuildBottomLightTable"/> entry: packed dark (0) for a present
+        /// chunk's inert region, or <c>uint.MaxValue</c> for a missing chunk.</summary>
+        /// <param name="bottom">The chunk's inert-dark summary.</param>
+        /// <returns>The table entry value.</returns>
+        private static uint BottomEntry(in LightingBandChunkBottom bottom)
+        {
+            return bottom.IsMissing ? uint.MaxValue : 0u;
+        }
+
+        /// <summary>
         /// Builds the job's 3×3 above-band uniform-light table (<c>NeighborhoodLightingJob.BandTopLight</c>)
         /// from the nine uniform-top summaries. Layout matches the job's <c>BandColumn</c> mapping: column
         /// index = the West/center/East third of the padded X axis, component index = the South/center/North

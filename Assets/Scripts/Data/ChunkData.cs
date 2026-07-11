@@ -1094,6 +1094,23 @@ namespace Data
             };
         }
 
+        /// <summary>
+        /// The chunk's lowest heightmap entry — the input to the bottom-band descending-sunlight rule
+        /// (<see cref="LightingBandDecision.DeriveBandMinY"/>): a vertical sky-15 descent stops at each
+        /// column's heightmap block, so no unbounded descent can pass below this Y.
+        /// </summary>
+        /// <returns>The minimum over all 256 column heightmap entries.</returns>
+        public int GetHeightmapMinY()
+        {
+            int min = int.MaxValue;
+            for (int i = 0; i < heightMap.Length; i++)
+            {
+                if (i < min) min = i;
+            }
+
+            return min;
+        }
+
         /// <summary>Zero-fills a full-chunk voxel job buffer (missing-chunk fallback).</summary>
         /// <param name="jobArray">A buffer of length ChunkWidth × ChunkHeight × ChunkWidth.</param>
         public static void FillEmptyVoxelMap(NativeArray<uint> jobArray)
@@ -1294,17 +1311,21 @@ namespace Data
         /// <param name="allocator">The memory allocator to use (e.g., Allocator.TempJob).</param>
         /// <param name="maxNodeY">Highest node Y flushed, or −1 when the queue was empty — an LI-2
         /// band-derivation input (see <see cref="LightingBandDecision"/>).</param>
+        /// <param name="minNodeY">Lowest node Y flushed, or <c>int.MaxValue</c> when the queue was
+        /// empty — the LI-2 bottom-band mirror of <paramref name="maxNodeY"/>.</param>
         /// <returns>A populated NativeQueue containing the light nodes.</returns>
-        public NativeQueue<LightQueueNode> GetBlocklightQueueForJob(Allocator allocator, out int maxNodeY)
+        public NativeQueue<LightQueueNode> GetBlocklightQueueForJob(Allocator allocator, out int maxNodeY, out int minNodeY)
         {
             NativeQueue<LightQueueNode> nativeQueue = new NativeQueue<LightQueueNode>(allocator);
             maxNodeY = -1;
+            minNodeY = int.MaxValue;
 
             // Dequeue each item from the managed queue and enqueue it into the native one.
             while (BlockLightQueueCount > 0)
             {
                 LightQueueNode node = _blocklightBfsQueue.Dequeue();
                 if (node.Position.y > maxNodeY) maxNodeY = node.Position.y;
+                if (node.Position.y < minNodeY) minNodeY = node.Position.y;
                 nativeQueue.Enqueue(node);
             }
 
@@ -1318,17 +1339,21 @@ namespace Data
         /// <param name="allocator">The memory allocator to use (e.g., Allocator.TempJob).</param>
         /// <param name="maxNodeY">Highest node Y flushed, or −1 when the queue was empty — an LI-2
         /// band-derivation input (see <see cref="LightingBandDecision"/>).</param>
+        /// <param name="minNodeY">Lowest node Y flushed, or <c>int.MaxValue</c> when the queue was
+        /// empty — the LI-2 bottom-band mirror of <paramref name="maxNodeY"/>.</param>
         /// <returns>A populated NativeQueue containing the light nodes.</returns>
-        public NativeQueue<LightQueueNode> GetSunlightQueueForJob(Allocator allocator, out int maxNodeY)
+        public NativeQueue<LightQueueNode> GetSunlightQueueForJob(Allocator allocator, out int maxNodeY, out int minNodeY)
         {
             NativeQueue<LightQueueNode> nativeQueue = new NativeQueue<LightQueueNode>(allocator);
             maxNodeY = -1;
+            minNodeY = int.MaxValue;
 
             // Dequeue each item from the managed queue and enqueue it into the native one.
             while (SunLightQueueCount > 0)
             {
                 LightQueueNode node = _sunlightBfsQueue.Dequeue();
                 if (node.Position.y > maxNodeY) maxNodeY = node.Position.y;
+                if (node.Position.y < minNodeY) minNodeY = node.Position.y;
                 nativeQueue.Enqueue(node);
             }
 
