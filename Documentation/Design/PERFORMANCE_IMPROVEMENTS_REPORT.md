@@ -179,7 +179,7 @@ gates.
 | ID   | Finding                                                                                                                                                                                                                                    | Effort | Risk | Benefit | Seed | Save |
 |------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
 | LI-1 | ✅ Branchy 9-map dispatch + hashmap cache → halo-padded volume; layout validated, **shipped net-positive via P-2 Phase 1** (worker-thread gather)                                                                                           |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
-| LI-2 | ✅ Halo gather/extract/scans copied the full 128-voxel column regardless of content → **derived Y-band, shipped default-on** (`EnableLightingBandGather`); bit-identical (B75–B78), editor-screened −31…−75 % on gather/scan-dominated jobs |   🟡   |  🔴  |   🟢    |  ⚠️  |  ✅   |
+| LI-2 | ✅ Halo gather/extract/scans copied the full 128-voxel column regardless of content → **derived Y-band, shipped default-on** (`EnableLightingBandGather`); bit-identical (B75–B78), IL2CPP in-game **−26 % settled-streaming frame / −27 % Light** (flood sustained Light −9 %) |   🟡   |  🔴  |   🟢    |  ⚠️  |  ✅   |
 | LI-3 | Ready-set scan eagerly evaluates BOTH neighbor gates for every ready chunk each visit (plan-owned by `LIGHTING_PIPELINE_STATE_REFACTOR.md` LP-6)                                                                                           |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 
 ### World Generation
@@ -787,8 +787,11 @@ satisfy both if the persistent layout itself is halo-padded.
 > (incl. the C3 cross-chunk darkening quadrant, a 12-seed fuzz, and a headroom-strip prove-red) + **B71–B74**
 > derivation baselines — `Validate Lighting Engine` 70/70. Editor screening: **−31…−75 %** on the gather/scan-dominated
 > job shapes (no-op relight, edge check), wave-carrying jobs bounded by the irreducible BFS; never slower on the clean
-> floor. Shippable IL2CPP/in-game frame A/B: see
-> [`Performance/LIGHTING_LI2_2026-07-11_BENCHMARK.md`](../Performance/LIGHTING_LI2_2026-07-11_BENCHMARK.md). Core:
+> floor. **Shippable IL2CPP/in-game frame A/B (confirmed):** settled-streaming frame **−26 %** / Light **−27 %**, flood
+> sustained Light **−9 %** with lighting no longer the worst-frame bottleneck (share 61 %→29 %) — a sustained frame win,
+> not merely "not slower" — see
+> [`Performance/LIGHTING_LI2_INGAME_IL2CPP_2026-07-11_BENCHMARK.md`](../Performance/LIGHTING_LI2_INGAME_IL2CPP_2026-07-11_BENCHMARK.md)
+> (editor screening: [`LIGHTING_LI2_2026-07-11_BENCHMARK.md`](../Performance/LIGHTING_LI2_2026-07-11_BENCHMARK.md)). Core:
 > `Assets/Scripts/Helpers/LightingBandDecision.cs` + `ChunkData.GetLightingBandTop` + `WorldJobManager.ScheduleLightingUpdate`.
 > The recommendation below is the as-designed record.
 
