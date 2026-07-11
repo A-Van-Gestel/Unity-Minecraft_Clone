@@ -593,8 +593,8 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
             jobData.Mods = new NativeList<LightModification>(allocator);
             jobData.PullBackClaims = new NativeList<PullBackClaim>(allocator);
             jobData.IsStable = new NativeArray<bool>(1, allocator);
-            jobData.SunLightQueue = chunkData.GetSunlightQueueForJob(allocator, out int maxSunNodeY, out _);
-            jobData.BlockLightQueue = chunkData.GetBlocklightQueueForJob(allocator, out int maxBlockNodeY, out _);
+            jobData.SunLightQueue = chunkData.GetSunlightQueueForJob(allocator, out int maxSunNodeY, out int minSunNodeY);
+            jobData.BlockLightQueue = chunkData.GetBlocklightQueueForJob(allocator, out int maxBlockNodeY, out int minBlockNodeY);
             jobData.SunLightRecalcQueue = new NativeQueue<Vector2Int>(allocator);
 
             if (_world.worldData.SunlightRecalculationQueue.TryGetValue(chunkData.Position, out HashSet<Vector2Int> columns))
@@ -613,9 +613,8 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
             // (the derivation's column-recalc rule would force full height anyway), and only the pooled
             // fills' missing-neighbor semantics (zero-FILLED maps) match NeighborBandTop's summary.
             uint3x3 bandTopLight = default;
+            uint3x3 bandBottomLight = default;
             jobData.BandHeight = ChunkMath.CHUNK_HEIGHT;
-            // LI-2 bottom band: production keeps the bottom at 0 until its wiring step lands; the job's
-            // band-local remap is the identity at 0, so behavior is unchanged.
             jobData.BandMinY = 0;
             if (_world.EnableLightingBandGather && usePooledBuffers)
             {
@@ -637,6 +636,31 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
 
                 bandTopLight = LightingBandDecision.BuildTopLightTable(in centerTop,
                     in w, in e, in s, in n, in sw, in nw, in se, in ne);
+
+                // LI-2 bottom band: derive the band's first gathered row from the inert-dark summaries
+                // (the bottom mirror of the block above; same shared decision as the harness).
+                LightingBandChunkBottom centerBottom = chunkData.GetLightingBandBottom();
+                LightingBandChunkBottom wB = NeighborBandBottom(chunkCoord, -1, 0);
+                LightingBandChunkBottom eB = NeighborBandBottom(chunkCoord, 1, 0);
+                LightingBandChunkBottom sB = NeighborBandBottom(chunkCoord, 0, -1);
+                LightingBandChunkBottom nB = NeighborBandBottom(chunkCoord, 0, 1);
+                LightingBandChunkBottom swB = NeighborBandBottom(chunkCoord, -1, -1);
+                LightingBandChunkBottom nwB = NeighborBandBottom(chunkCoord, -1, 1);
+                LightingBandChunkBottom seB = NeighborBandBottom(chunkCoord, 1, -1);
+                LightingBandChunkBottom neB = NeighborBandBottom(chunkCoord, 1, 1);
+
+                jobData.BandMinY = LightingBandDecision.DeriveBandMinY(in centerBottom,
+                    in wB, in eB, in sB, in nB, in swB, in nwB, in seB, in neB,
+                    math.min(minSunNodeY, minBlockNodeY),
+                    jobData.SunLightRecalcQueue.Count > 0,
+                    chunkData.GetHeightmapMinY());
+
+                // Defensive: the two derivations bound independently; keep at least one gathered row
+                // (mirror of the harness clamp in LightingTestWorld.BeginLightingJob).
+                jobData.BandMinY = math.min(jobData.BandMinY, jobData.BandHeight - 1);
+
+                bandBottomLight = LightingBandDecision.BuildBottomLightTable(in centerBottom,
+                    in wB, in eB, in sB, in nB, in swB, in nwB, in seB, in neB);
             }
 
             NeighborhoodLightingJob job = new NeighborhoodLightingJob
@@ -646,6 +670,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
                 BandHeight = jobData.BandHeight,
                 BandMinY = jobData.BandMinY,
                 BandTopLight = bandTopLight,
+                BandBottomLight = bandBottomLight,
                 ChunkPosition = chunkData.Position,
                 SunlightBfsQueue = jobData.SunLightQueue,
                 BlocklightBfsQueue = jobData.BlockLightQueue,
@@ -691,6 +716,23 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     {
         ChunkData neighbor = _world.worldData.RequestChunk(center.Neighbor(dx, dz).ToVoxelOrigin(), false);
         return neighbor?.GetLightingBandTop() ?? default;
+    }
+
+    /// <summary>
+    /// A neighbor's inert-dark bottom summary for the LI-2 bottom-band derivation. Presence mirrors
+    /// <see cref="NeighborBandTop"/>: a live chunk is summarized from its <see cref="ChunkData"/>; a
+    /// missing one (vestigial — the neighbors-ready gate precedes scheduling) summarizes as
+    /// <c>default</c> (no inert region), driving the derivation to its conservative bottom-0 arm just
+    /// as the top side's default drives full height.
+    /// </summary>
+    /// <param name="center">The center chunk's coordinate.</param>
+    /// <param name="dx">Neighbor X offset (−1..1).</param>
+    /// <param name="dz">Neighbor Z offset (−1..1).</param>
+    /// <returns>The neighbor's summary.</returns>
+    private LightingBandChunkBottom NeighborBandBottom(ChunkCoord center, int dx, int dz)
+    {
+        ChunkData neighbor = _world.worldData.RequestChunk(center.Neighbor(dx, dz).ToVoxelOrigin(), false);
+        return neighbor?.GetLightingBandBottom() ?? default;
     }
 
     /// <summary>
