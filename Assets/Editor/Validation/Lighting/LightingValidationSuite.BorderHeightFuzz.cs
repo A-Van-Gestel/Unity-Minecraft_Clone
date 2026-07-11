@@ -312,7 +312,10 @@ namespace Editor.Validation.Lighting
             // the warning branch stays so the fuzz can be re-armed as an expected-red repro if it ever
             // surfaces a new open bug.
             if (BORDER_FUZZ_EXPECTED_RED)
+#pragma warning disable CS0162 // Unreachable code detected
                 Debug.LogWarning($"{report}\nExpected while the newly-surfaced bug is open (see LIGHTING_BUGS.md).");
+#pragma warning restore CS0162 // Unreachable code detected
+            // ReSharper disable once RedundantIfElseBlock
             else
                 Debug.LogError($"<color=red>{report}</color>");
         }
@@ -463,7 +466,10 @@ namespace Editor.Validation.Lighting
         private static bool BorderFuzzFail(string testName, string detail)
         {
             if (BORDER_FUZZ_EXPECTED_RED)
+#pragma warning disable CS0162 // Unreachable code detected
                 Debug.LogWarning($"[EXPECTED-RED] {testName}\n{detail}");
+#pragma warning restore CS0162 // Unreachable code detected
+            // ReSharper disable once RedundantIfElseBlock
             else
                 Debug.LogError($"[FAIL] {testName}\n{detail}");
 
