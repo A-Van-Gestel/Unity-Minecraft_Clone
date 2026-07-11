@@ -350,6 +350,10 @@ public class World : MonoBehaviour
             if (_blockDatabase == null)
                 _blockDatabase = ResourceLoader.LoadBlockDatabase();
 
+            // LI-2 bottom band: bind the palette-independent emissive lookup before any chunk data
+            // exists — ChunkSection.emissiveCount maintenance consults it on every voxel write.
+            EmissiveBlockLookup.Initialize(BlockTypes);
+
             // --- Prepare Job-Safe Data (Block Types & Custom Meshes only — biomes are owned by the generator) ---
             PrepareGlobalJobData();
 

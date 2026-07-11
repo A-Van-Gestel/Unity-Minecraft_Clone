@@ -867,6 +867,15 @@ namespace Data
             if (!wasOldOpaque && isNewOpaque) sections[sectionY].opaqueCount++;
             else if (wasOldOpaque && !isNewOpaque) sections[sectionY].opaqueCount--;
 
+            // Handle EmissiveCount for the LI-2 bottom-band derivation. Unlike the opacity bookkeeping
+            // above, this must stay correct through the simplified overload (null properties), so the
+            // test goes through the palette-independent EmissiveBlockLookup rather than the parameters.
+            bool wasOldEmissive = EmissiveBlockLookup.IsEmissive(BurstVoxelDataBitMapping.GetId(oldValue));
+            bool isNewEmissive = EmissiveBlockLookup.IsEmissive(BurstVoxelDataBitMapping.GetId(value));
+
+            if (!wasOldEmissive && isNewEmissive) sections[sectionY].emissiveCount++;
+            else if (wasOldEmissive && !isNewEmissive) sections[sectionY].emissiveCount--;
+
             // Set voxel
             sections[sectionY].voxels[index] = value;
 
@@ -1042,6 +1051,45 @@ namespace Data
             {
                 UniformFromY = fromSection * ChunkMath.SECTION_SIZE,
                 UniformLight = regionLight,
+                IsMissing = false,
+            };
+        }
+
+        /// <summary>
+        /// Summarizes this chunk's <b>inert-dark bottom region</b> for the LI-2 bottom-band derivation
+        /// (the bottom mirror of <see cref="GetLightingBandTop"/>): scanning sections from the bottom
+        /// up, the run of sections whose light is uniformly ZERO — the pitch-black compaction byte
+        /// (<see cref="SectionUniformSkyLevel"/> == 0, voxels kept or not) or a fully unallocated slot
+        /// (null section, no compaction byte — <see cref="GetLightData"/> reads 0) — and that contain
+        /// no light-emitting voxels (<see cref="ChunkSection.emissiveCount"/>, which the lighting job's
+        /// emission-sync scan would otherwise need to visit). Rows below the returned Y read as light 0
+        /// and can never receive or supply light, so the banded job may skip gathering them.
+        /// </summary>
+        /// <returns>The inert-dark bottom summary (never <see cref="LightingBandChunkBottom.Missing"/>).</returns>
+        public LightingBandChunkBottom GetLightingBandBottom()
+        {
+            int inertUpToY = 0;
+
+            for (int s = 0; s < sections.Length; s++)
+            {
+                byte uniformSky = SectionUniformSkyLevel[s];
+                ChunkSection section = sections[s];
+
+                // Light must be uniformly zero: compacted pitch-black, or fully unallocated.
+                if (uniformSky != 0 && !(section == null && uniformSky == UNIFORM_SKY_NONE))
+                    break;
+
+                // A dark section holding an (unstamped) emitter ends the region — the emission-sync
+                // scan must still visit it.
+                if (section != null && section.emissiveCount > 0)
+                    break;
+
+                inertUpToY = (s + 1) * ChunkMath.SECTION_SIZE;
+            }
+
+            return new LightingBandChunkBottom
+            {
+                InertUpToY = inertUpToY,
                 IsMissing = false,
             };
         }

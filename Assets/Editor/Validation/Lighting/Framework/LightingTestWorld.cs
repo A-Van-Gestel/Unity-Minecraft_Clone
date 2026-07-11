@@ -147,6 +147,11 @@ namespace Editor.Validation.Lighting.Framework
             GridSize = gridSize;
             _blockTypes = blockTypes ?? TestBlockPalette.CreateJobDataArray();
             _blockTypesNative = new NativeArray<BlockTypeJobData>(_blockTypes, Allocator.Persistent);
+
+            // LI-2 bottom band: bind the emissive lookup to THIS palette before any fixture authoring —
+            // ChunkSection.emissiveCount maintenance (SetVoxel / RecalculateCounts) consults it, and the
+            // band derivation reads the resulting counts. Mirrors World.Awake's production binding.
+            EmissiveBlockLookup.Initialize(_blockTypes);
             _isBlockFullyOpaque = id => _blockTypes[id].IsOpaque;
             _getLoadedChunkByOrigin = originXZ =>
                 _chunks.TryGetValue(new Vector2Int(originXZ.x / VoxelData.ChunkWidth, originXZ.y / VoxelData.ChunkWidth),

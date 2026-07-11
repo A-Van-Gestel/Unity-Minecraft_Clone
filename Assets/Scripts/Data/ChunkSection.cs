@@ -25,6 +25,16 @@ namespace Data
         public int opaqueCount;
 
         /// <summary>
+        /// Number of light-emitting voxels in this section (per <see cref="Helpers.EmissiveBlockLookup"/>).
+        /// Backs the LI-2 bottom-band inert-dark derivation (<c>ChunkData.GetLightingBandBottom</c>):
+        /// a dark section containing an unstamped emitter must end the skippable region, because the
+        /// lighting job's emission-sync scan would stamp and propagate it. Runtime-only — never
+        /// serialized; recomputed by <see cref="RecalculateCounts"/>/<see cref="RecalculateNonAirCount"/>
+        /// on load and maintained incrementally by <c>ChunkData.SetVoxel</c>.
+        /// </summary>
+        public int emissiveCount;
+
+        /// <summary>
         /// Initializes a new, empty <see cref="ChunkSection"/> with arrays allocated.
         /// </summary>
         public ChunkSection()
@@ -35,6 +45,7 @@ namespace Data
             LightData = new ushort[ChunkMath.SECTION_VOLUME];
             nonAirCount = 0;
             opaqueCount = 0;
+            emissiveCount = 0;
         }
 
         /// <summary>
@@ -45,6 +56,7 @@ namespace Data
         {
             nonAirCount = 0;
             opaqueCount = 0;
+            emissiveCount = 0;
             Array.Clear(voxels, 0, voxels.Length);
             Array.Clear(LightData, 0, LightData.Length);
         }
@@ -64,10 +76,15 @@ namespace Data
         /// Recalculates the NonAirCount using optimized pointer arithmetic and loop unrolling.
         /// Uses a mask-based check (<c>data &amp; ID_MASK</c>) to correctly ignore air voxels
         /// that only carry light data (sunlight/blocklight bits set, block ID = 0).
+        /// Also recalculates <see cref="emissiveCount"/> — the emissive test goes through the
+        /// palette-independent <see cref="EmissiveBlockLookup"/>, so this path (the
+        /// <c>RecalculateCounts(null)</c> fallback) keeps it correct where <see cref="opaqueCount"/>
+        /// cannot be.
         /// </summary>
         public unsafe void RecalculateNonAirCount()
         {
             nonAirCount = 0;
+            emissiveCount = 0;
 
             // Use fixed pointer to avoid array bounds checks
             fixed (uint* pVoxels = voxels)
@@ -75,33 +92,29 @@ namespace Data
                 uint* ptr = pVoxels;
                 uint* end = pVoxels + ChunkMath.SECTION_VOLUME;
                 int count = 0;
+                int emissive = 0;
 
-                // Unroll loop 4x for instruction pipelining efficiency
-                // This reduces the overhead of the loop comparison/increment logic
-                while (ptr <= end - 4)
-                {
-                    if ((*ptr & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
-                    if ((*(ptr + 1) & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
-                    if ((*(ptr + 2) & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
-                    if ((*(ptr + 3) & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
-                    ptr += 4;
-                }
-
-                // Handle remaining items
                 while (ptr < end)
                 {
-                    if ((*ptr & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
-                    ptr++;
+                    uint data = *ptr++;
+                    if ((data & BurstVoxelDataBitMapping.ID_MASK) == 0) continue;
+
+                    count++;
+                    if (EmissiveBlockLookup.IsEmissive(BurstVoxelDataBitMapping.GetId(data))) emissive++;
                 }
 
                 nonAirCount = count;
+                emissiveCount = emissive;
             }
         }
 
         /// <summary>
-        /// Recalculates NonAir and Opaque counts.
+        /// Recalculates NonAir, Opaque, and Emissive counts.
         /// Uses a mask-based check (<c>data &amp; ID_MASK</c>) to correctly ignore air voxels
         /// that only carry light data (sunlight/blocklight bits set, block ID = 0).
+        /// The emissive test goes through <see cref="EmissiveBlockLookup"/> (not
+        /// <paramref name="blockTypes"/>) so it agrees with the incremental
+        /// <c>ChunkData.SetVoxel</c> maintenance on every path.
         /// </summary>
         /// <param name="blockTypes">The blockTypes array to look up opacity.</param>
         public unsafe void RecalculateCounts([CanBeNull] BlockType[] blockTypes)
@@ -109,8 +122,10 @@ namespace Data
             // Reset counts
             nonAirCount = 0;
             opaqueCount = 0;
+            emissiveCount = 0;
 
-            // Fallback: If no blockTypes proved, we can only calculate NonAir.
+            // Fallback: If no blockTypes proved, we can only calculate NonAir (and Emissive,
+            // whose lookup is palette-instance-independent).
             if (blockTypes == null)
             {
                 RecalculateNonAirCount();
@@ -119,6 +134,7 @@ namespace Data
 
             int localNonAir = 0;
             int localOpaque = 0;
+            int localEmissive = 0;
 
             fixed (uint* pVoxels = voxels)
             {
@@ -137,6 +153,8 @@ namespace Data
 
                     ushort id = BurstVoxelDataBitMapping.GetId(data);
 
+                    if (EmissiveBlockLookup.IsEmissive(id)) localEmissive++;
+
                     // Safety check for ID bounds to prevent crashes in unsafe context
                     if (id < blockTypes.Length)
                     {
@@ -153,6 +171,7 @@ namespace Data
 
             nonAirCount = localNonAir;
             opaqueCount = localOpaque;
+            emissiveCount = localEmissive;
         }
     }
 }

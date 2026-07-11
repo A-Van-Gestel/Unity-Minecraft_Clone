@@ -43,6 +43,42 @@ namespace Helpers
     }
 
     /// <summary>
+    /// One chunk's contribution to the lighting bottom-band derivation (LI-2 bottom band): the extent
+    /// of its <b>inert-dark bottom region</b> — the run of sections, scanned from the bottom of the
+    /// chunk upward, whose light is uniformly ZERO and that contain no light-emitting voxels. Below
+    /// <see cref="InertUpToY"/> every voxel of the chunk reads as light 0, can neither receive nor
+    /// supply light, and needs no emission-sync visit, so the banded lighting job can skip gathering
+    /// those rows entirely. Produced by <c>ChunkData.GetLightingBandBottom()</c>; consumed by
+    /// <see cref="LightingBandDecision"/>. Unlike the top region there is no uniform light VALUE to
+    /// carry — inert-dark is zero by definition.
+    /// </summary>
+    public struct LightingBandChunkBottom
+    {
+        /// <summary>
+        /// First (lowest) Y ABOVE the inert-dark bottom region — the region is <c>[0, InertUpToY)</c>.
+        /// 0 when the chunk's bottom section is lit, light-varied, or holds an emitter (no skippable
+        /// region). Always a multiple of the section size.
+        /// </summary>
+        public int InertUpToY;
+
+        /// <summary>
+        /// True when the chunk is absent (unloaded/uncreated). Mirrors
+        /// <see cref="LightingBandChunkTop.IsMissing"/>: the harness gather sentinel-fills a missing
+        /// neighbor's rows, so its virtual below-band reads must keep returning the out-of-world
+        /// sentinel rather than dark-zero. (The production pooled path never passes Missing — its
+        /// missing-neighbor maps are zero-FILLED, i.e. genuinely dark.)
+        /// </summary>
+        public bool IsMissing;
+
+        /// <summary>A missing-chunk marker. Full-height and band-neutral: skipping a missing chunk's
+        /// rows is always inert because every read there is answered by the sentinel either way.</summary>
+        public static LightingBandChunkBottom Missing => new LightingBandChunkBottom
+        {
+            InertUpToY = ChunkMath.CHUNK_HEIGHT, IsMissing = true,
+        };
+    }
+
+    /// <summary>
     /// Pure derivation of the lighting job's Y-band height (LI-2, see
     /// Documentation/Design/PERFORMANCE_IMPROVEMENTS_REPORT.md §LI-2): the number of bottom-anchored rows
     /// <c>[0, bandHeight)</c> of the halo-padded volume the <c>NeighborhoodLightingJob</c> must actually
