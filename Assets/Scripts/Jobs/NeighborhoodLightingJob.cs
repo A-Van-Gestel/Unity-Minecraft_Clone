@@ -227,27 +227,27 @@ namespace Jobs
         }
 
         /// <summary>
-        /// Bug 16 DIAGNOSTIC (2026-07-11, temporary): hard cap on the total nodes the four BFS phase
-        /// loops may process in one pass. A legitimate worst-case pass (full padded-volume re-flood)
-        /// stays around 0.3M node visits; the Bug 16 runaway grows its queues/mods unbounded inside a
-        /// single Execute() until the editor OOMs. The cap converts that into a loud, bounded abort:
-        /// the pass exits early (IsStable stays false — the queues are non-empty), and the console
-        /// error pins which phase exploded. Remove once Bug 16's root cause is fixed, or promote to a
-        /// permanent fail-safe with a proper diagnostics output.
-        /// NOTE: even a capped pass leaves its churned queue blocks in the frame's Temp linear
-        /// allocator (never reset mid-frame), so the cap must keep the per-pass churn in the tens of
-        /// MB — a 4M cap still OOM'd the editor when many capped jobs ran in one editor frame.
+        /// Fail-safe cap on the total nodes the seed + phase BFS loops may process in one pass. The
+        /// heaviest legitimate passes (full-column recalcs across the validation suite) stay well
+        /// below it; a runaway pass (Bug 16's infinite removal cycle, fixed July 2026) grows its Temp
+        /// queues unbounded inside a single Execute() until the process OOMs. Tripping the cap aborts the
+        /// pass loudly instead (console error + the last <see cref="NEAR_CAP_NODE_DUMP"/> nodes;
+        /// IsStable stays false, so the chunk retries) — a future termination regression degrades to
+        /// bounded, visible churn rather than a crash. The value must keep a capped pass's churn in
+        /// the tens of MB: even an aborted pass leaves its queue blocks in the frame's Temp linear
+        /// allocator (reset only at end-of-frame), so many capped jobs in one editor frame OOM'd at a
+        /// 4M cap during the Bug 16 bisection.
         /// </summary>
         private const long MAX_BFS_NODES_PER_PASS = 200_000;
 
         /// <summary>
-        /// Bug 16 diagnostic: how many of the last nodes before the cap abort are dumped to the
-        /// console, to expose the cycling position/channel pattern of the runaway.
+        /// How many of the last nodes before a work-cap abort are dumped to the console, exposing
+        /// the runaway's cycling position/channel pattern (this is how Bug 16's cycle was proven).
         /// </summary>
         private const long NEAR_CAP_NODE_DUMP = 12;
 
         /// <summary>
-        /// Bug 16 diagnostic: reports a BFS phase loop aborted by <see cref="MAX_BFS_NODES_PER_PASS"/>
+        /// Reports a BFS loop aborted by the <see cref="MAX_BFS_NODES_PER_PASS"/> fail-safe
         /// (Burst-safe FixedString logging only).
         /// </summary>
         /// <param name="phase">Which phase loop hit the cap.</param>
@@ -270,9 +270,9 @@ namespace Jobs
         }
 
         /// <summary>
-        /// Bug 16 diagnostic: dumps one BFS node processed just before a cap abort (see
+        /// Dumps one BFS node processed just before a work-cap abort (see
         /// <see cref="NEAR_CAP_NODE_DUMP"/>) — position, the node's old RGB (removal) or the cell's
-        /// current RGB (placement) — so the runaway's cycling pattern is readable from the console.
+        /// current RGB (placement) — so a runaway's cycling pattern is readable from the console.
         /// </summary>
         /// <param name="phase">Which phase loop the node belongs to.</param>
         /// <param name="pos">The node's BFS-local position.</param>
@@ -356,9 +356,9 @@ namespace Jobs
             }
 
             // --- PASS 0: SEEDING ---
-            // Seed the queues with initial changes from the main thread.
-            // Bug 16 DIAGNOSTIC: the seed loops share the phase loops' work budget — an
-            // over-accumulated input queue aborts loudly too (see MAX_BFS_NODES_PER_PASS).
+            // Seed the queues with initial changes from the main thread. The seed loops share the
+            // phase loops' fail-safe work budget (MAX_BFS_NODES_PER_PASS) — an over-accumulated
+            // input queue aborts loudly instead of feeding a runaway.
             long bfsWork = 0;
             while (SunlightColumnRecalcQueue.TryDequeue(out Vector2Int column))
             {
@@ -446,8 +446,8 @@ namespace Jobs
 
             // --- LIGHTING PASSES ---
             // The propagation logic now seamlessly crosses chunk borders within the 3x3 grid.
-            // Bug 16 DIAGNOSTIC: one shared work budget across the four phase loops (see
-            // MAX_BFS_NODES_PER_PASS) — a runaway pass aborts loudly instead of growing until OOM.
+            // One shared fail-safe work budget across the four phase loops (MAX_BFS_NODES_PER_PASS):
+            // a runaway pass aborts loudly instead of growing its queues until OOM.
             while (sunlightRemovalQueue.TryDequeue(out LightRemovalNode node))
             {
                 if (++bfsWork > MAX_BFS_NODES_PER_PASS)
@@ -806,7 +806,11 @@ namespace Jobs
 
         /// <summary>
         /// Per-channel RGB darkness removal for blocklight.
-        /// Each channel is compared independently against the removal node's old values.
+        /// Each channel is compared independently against the removal node's old values. A
+        /// re-enqueued removal node carries the neighbor's pre-zero value ONLY for the channels this
+        /// visit actually removed — a kept channel belongs to a different source's gradient, and
+        /// letting its value ride along turns the wave into a cross-gradient remover and breaks the
+        /// BFS's per-channel strict-decrease termination guarantee (Bug 16's runaway removal cycle).
         /// </summary>
         private void PropagateDarknessRGB(LightRemovalNode node, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue)
         {
@@ -839,7 +843,17 @@ namespace Jobs
                 {
                     SetBlocklightRGB(neighborPos, newR, newG, newB, isRemovalContext: true);
                     if (IsInCenterChunk(neighborPos))
-                        rQueue.Enqueue(new LightRemovalNode { Pos = neighborPos, LightR = nR, LightG = nG, LightB = nB });
+                    {
+                        // Mask the node to the channels actually zeroed here (kept channels carry 0):
+                        // see the method docstring — an unmasked node arms Bug 16's infinite cycle.
+                        rQueue.Enqueue(new LightRemovalNode
+                        {
+                            Pos = neighborPos,
+                            LightR = newR == nR ? (byte)0 : nR,
+                            LightG = newG == nG ? (byte)0 : nG,
+                            LightB = newB == nB ? (byte)0 : nB,
+                        });
+                    }
                 }
 
                 if (anyRespread)

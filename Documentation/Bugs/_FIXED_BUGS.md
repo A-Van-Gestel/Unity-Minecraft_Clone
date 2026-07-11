@@ -596,6 +596,73 @@ neutering the re-grant re-reds seed 14 and only seed 14. All 56 baselines green.
 
 ---
 
+### ~~21. Runaway lighting job loop → OOM after breaking a blocklight source near a chunk border~~
+
+**Severity:** High (editor/game/OS crash via out-of-memory)
+**Fixed:** July 2026 (was Bug 16 in `LIGHTING_BUGS.md`; found, root-caused, fixed and confirmed 2026-07-11)
+**Status:** Resolved — confirmed in-game (20+ RGB blocklight place/break cycles in the same world and
+location where the OOM originally struck, no freeze/memory growth/`[LightingJob DIAG]` errors) and via the
+validation suite. Promoted from known-bug repro **K16a** to baseline **B87**, alongside the simple-form
+guard/over-correction tripwire **B86**
+(`Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug16Runaway.cs`).
+
+**Files:** `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` — `PropagateDarknessRGB` (removal-node enqueue,
+the fix site) + the `MAX_BFS_NODES_PER_PASS` fail-safe added during diagnosis (now permanent).
+
+**Description:**
+Breaking a blocklight source near a chunk border — most reliably while testing RGB blending (multiple
+different-colored lamps with overlapping cross-seam gradients, in enclosed spaces such as caves or
+underwater) — could freeze the lighting pipeline for the affected chunk(s) while memory grew monotonically
+until the editor/game/OS crashed from OOM. Observed ~5 times over ~2 months (since the RGB lighting
+overhaul), always in Mono editor play mode; the mechanism is backend-independent (plain `.Run()` reproduces),
+so IL2CPP was equally exposed.
+
+**Root Cause (confirmed via harness repro + in-job near-cap node dumps):**
+An **infinite per-channel removal cycle inside a single job's blocklight darkness phase**, from two
+interacting behaviors:
+
+1. **Removal-node channel contamination** (`PropagateDarknessRGB`): when the darkness wave zeroed *any*
+   channel of a neighbor, the re-enqueued removal node carried the neighbor's **full pre-zero RGB** —
+   including channels that were *not* removed because they belong to a different, still-live lamp's gradient.
+   Those contaminated values acted as removal thresholds downstream, turning one lamp's removal wave into a
+   cross-gradient remover.
+2. **Restore-to-constant mid-phase re-lights**: the darkness-phase seam pull-back (`CheckEdgeVoxelRGB`, the
+   Bug 07 defect-2 fix) restores just-darkened border cells from cross-seam halo cells that are never
+   themselves zeroed (they keep hitting the respread branch).
+
+Per-channel alternation (zero V on R, re-light V, zero V on G, …) plus restore-to-constant defeated the BFS's
+per-channel strict-decrease termination guarantee. The near-cap dump captured the loop verbatim: the removal
+queue cycling the *same* stacked border cells with the *same* pre-zero values forever — `(15,65,15)
+rgb=(3,2,0) → (15,66,15) rgb=(0,1,0) → (15,64,15) rgb=(2,3,0) → repeat` — at a four-chunk corner, in jobs
+emitting only 1–6 cross-chunk mods (pure in-chunk churn). The runaway grew the job-internal `Allocator.Temp`
+BFS queues without bound inside one `Execute()` (Editor.log: Burst-job NREs at the native allocator,
+`ALLOC_DEFAULT` 22.6 GB, repeated failed 1.7 GB `BlockDoublingLinearAllocator` doublings, fatal OOM — twice
+during bisection). A clean break cannot arm the cycle (monotone gradients — guarded green as B86); it needs
+the non-monotone mixed-channel plateau state built by *interrupted reconciliation* (edits landing while
+stale-snapshot jobs are in flight), matching the in-game rapid place/break trigger.
+
+**Fix (July 2026):** two parts, both in `NeighborhoodLightingJob.cs`:
+
+1. **Removal-node channel masking** (root cause): `PropagateDarknessRGB` masks each re-enqueued removal node
+   to the channels this visit actually zeroed — a kept channel belongs to a different source's gradient. With
+   the mask, any pull-back-refueled removal chain stays in one channel with strictly decreasing values, so
+   the cycle is structurally impossible.
+2. **Permanent fail-safe**: the bisection work cap (`MAX_BFS_NODES_PER_PASS`, 200k, shared across the seed +
+   phase loops) stays: a runaway pass aborts loudly (console error + near-cap node dump; `IsStable` stays
+   false so the chunk retries) — a future termination regression degrades to bounded, visible churn instead
+   of an OOM crash. Documented in `LIGHTING_SYSTEM_OVERVIEW.md` §3.3.
+
+**Spawned follow-up:** the same repro exposed an independent second defect — a small sourceless over-bright
+RGB island that survives because RGB blocklight has none of the sky channel's removal machinery (Bug 12
+initiator / Bug 11+13 veto / Bug 14 claim verification) — filed as **Bug 17** (`LIGHTING_BUGS.md`, repro
+K17a). B87's oracle assertion carries a dated exemption for exactly that residue class; restore its plain
+oracle compare when Bug 17 is fixed.
+
+**Validation suite:** K16a red→green on the fix (no fail-safe aborts + convergence + oracle up to the Bug 17
+exemption), promoted to **B87**; B86 and all other baselines stayed green throughout (79 baselines total).
+
+---
+
 ## Fluid
 
 ### ~~01. Cross-chunk fluid simulation stops at chunk borders~~
