@@ -197,12 +197,14 @@ namespace Editor.WorldTools.Libraries
             // LI-2: the editor preview pipeline always runs full height (its worlds are one-shot renders,
             // not the streaming hot path the band optimizes).
             jobData.BandHeight = ChunkMath.CHUNK_HEIGHT;
+            jobData.BandMinY = 0;
 
             NeighborhoodLightingJob job = new NeighborhoodLightingJob
             {
                 PaddedVoxels = jobData.PaddedVoxels,
                 PaddedLight = jobData.PaddedLight,
                 BandHeight = jobData.BandHeight,
+                BandMinY = jobData.BandMinY,
                 ChunkPosition = voxelOrigin,
                 SunlightBfsQueue = jobData.SunLightQueue,
                 BlocklightBfsQueue = jobData.BlockLightQueue,

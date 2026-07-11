@@ -140,14 +140,24 @@ namespace Jobs
         // before running the BFS. This detects and corrects stale light values at chunk boundaries.
         public bool PerformEdgeCheck;
 
-        // LI-2: number of bottom-anchored rows [0, BandHeight) actually gathered into the padded
-        // volumes (and later extracted). Rows at/above BandHeight are un-gathered scratch: every read
-        // there is answered virtually from BandTopLight (the band derivation guarantees those rows are
-        // uniform air whose light the job can never change — see LightingBandDecision), and every write
-        // there is a provable no-op that is skipped while its cross-chunk mod is still emitted.
-        // ChunkMath.CHUNK_HEIGHT disables banding (the virtual paths become unreachable: an in-range Y
-        // is always below the band, and an out-of-range Y short-circuits to the sentinel first).
+        // LI-2: the Y-band [BandMinY, BandHeight) actually gathered into the padded volumes (and later
+        // extracted), stored as a band-local prefix (padded row 0 == global Y BandMinY). Rows at/above
+        // BandHeight are un-gathered scratch: every read there is answered virtually from BandTopLight
+        // (the band derivation guarantees those rows are uniform air whose light the job can never
+        // change — see LightingBandDecision), and every write there is a provable no-op that is skipped
+        // while its cross-chunk mod is still emitted. ChunkMath.CHUNK_HEIGHT disables top banding (the
+        // virtual paths become unreachable: an in-range Y is always below the band, and an out-of-range
+        // Y short-circuits to the sentinel first).
         public int BandHeight;
+
+        // LI-2 bottom band: global Y of the band's first gathered row. Rows below BandMinY are
+        // inert-dark in every chunk by the derivation (light uniformly 0, no emitters, no wave — incl.
+        // the unbounded downward vertical-sunlight rule — can reach them; see
+        // LightingBandDecision.DeriveBandMinY), so reads there are answered virtually from
+        // BandBottomLight and writes are value-preserving skips. The derivation's headroom additionally
+        // proves those reads/writes UNREACHABLE — the virtual paths are defense-in-depth, guarded by the
+        // band differential fuzz. 0 disables bottom banding (band-local Y == global Y).
+        public int BandMinY;
 
         // LI-2: per-chunk uniform light at/above the band, indexed [cx][cz] with cx ∈ {0,1,2} = the
         // West/center/East third of the padded X axis and cz likewise for South/center/North (see
@@ -156,6 +166,13 @@ namespace Jobs
         // missing chunk, whose virtual reads keep returning the out-of-world sentinels exactly like its
         // gathered (sentinel-filled) rows would. Never consulted when BandHeight == CHUNK_HEIGHT.
         public uint3x3 BandTopLight;
+
+        // LI-2 bottom band: per-chunk below-band entry, same [cx][cz] layout as BandTopLight. A present
+        // chunk's below-band region is inert-DARK by derivation, so its entry is packed light 0 (the
+        // virtual voxel read is the packed-air constant — see GetPackedData's bottom arm);
+        // uint.MaxValue marks a missing chunk (virtual reads return the out-of-world sentinels). Never
+        // consulted when BandMinY == 0.
+        public uint3x3 BandBottomLight;
 
         #endregion
 
@@ -220,11 +237,12 @@ namespace Jobs
             // ~305 µs gather floor on the worker thread instead, so the main thread pays only the snapshot
             // fill and the worker keeps the 2.4–3× branch-free BFS win. Bit-identical: the inputs are the
             // same unchanged snapshots and the gather logic is unchanged — only the call site moved.
-            // LI-2: both volumes gather only the band's rows; reads above answer virtually (see BandHeight).
+            // LI-2: both volumes gather only the band's rows (a band-local prefix, row 0 == BandMinY);
+            // reads outside answer virtually (see BandHeight / BandMinY).
             ChunkMath.GatherPaddedVoxels(PaddedVoxels, CenterVoxels,
-                VoxelW, VoxelE, VoxelS, VoxelN, VoxelSW, VoxelNW, VoxelSE, VoxelNE, BandHeight);
+                VoxelW, VoxelE, VoxelS, VoxelN, VoxelSW, VoxelNW, VoxelSE, VoxelNE, BandMinY, BandHeight);
             ChunkMath.GatherPaddedLight(PaddedLight, CenterLight,
-                LightW, LightE, LightS, LightN, LightSW, LightNW, LightSE, LightNE, BandHeight);
+                LightW, LightE, LightS, LightN, LightSW, LightNW, LightSE, LightNE, BandMinY, BandHeight);
 
             // Internal queues for the actual flood-fill algorithm. These are temporary for this job's execution.
             NativeQueue<LightRemovalNode> sunlightRemovalQueue = new NativeQueue<LightRemovalNode>(Allocator.Temp);
@@ -389,20 +407,22 @@ namespace Jobs
         /// <param name="blocklightPlacementQueue">The job-local blocklight placement BFS queue to seed.</param>
         private void SyncEmissionToLightArray(NativeQueue<Vector3Int> blocklightPlacementQueue)
         {
-            // Scan the CENTER chunk only — its [0,16)×[0,BandHeight)×[0,16) region within the padded
-            // volume. (The old section-contiguous Map/LightMap scan covered exactly these voxels; iterating
-            // local coordinates here lets us index the padded volume directly and enqueue the stamped
-            // position without the inverse-flatten step the old linear scan needed.) Rows at/above the band
-            // are uniform AIR by the band derivation, so the full-height scan's `id == 0 → continue` would
-            // skip every one of them anyway — clamping the loop is identical.
-            for (int y = 0; y < BandHeight; y++)
+            // Scan the CENTER chunk only — its [0,16)×[BandMinY,BandHeight)×[0,16) region within the
+            // padded volume. (The old section-contiguous Map/LightMap scan covered exactly these voxels;
+            // iterating local coordinates here lets us index the padded volume directly and enqueue the
+            // stamped position without the inverse-flatten step the old linear scan needed.) Rows at/above
+            // the band are uniform AIR by the band derivation, so the full-height scan's `id == 0 →
+            // continue` would skip every one of them anyway — clamping the loop is identical. Rows below
+            // BandMinY are emitter-free by the derivation's emissive gate (an emitter always ends the
+            // inert-dark run), so the scan would stamp nothing there either.
+            for (int y = BandMinY; y < BandHeight; y++)
             {
                 for (int z = 0; z < VoxelData.ChunkWidth; z++)
                 {
                     for (int x = 0; x < VoxelData.ChunkWidth; x++)
                     {
                         int idx = ChunkMath.GetPaddedLightingIndex(
-                            x + ChunkMath.LIGHTING_HALO, y, z + ChunkMath.LIGHTING_HALO);
+                            x + ChunkMath.LIGHTING_HALO, y - BandMinY, z + ChunkMath.LIGHTING_HALO);
 
                         uint packed = PaddedVoxels[idx];
                         ushort id = BurstVoxelDataBitMapping.GetId(packed);
@@ -944,6 +964,9 @@ namespace Jobs
 
             // --- PASS 2: At and below the highest block (with correct attenuation) ---
             // Propagate light downwards, now correctly reducing light based on each block's opacity.
+            // LI-2 bottom band: this walk reaches Y=0 unconditionally, which is exactly why the
+            // derivation forces BandMinY = 0 whenever any column recalc is queued — every read/write
+            // below lands in gathered rows.
             byte lightFromSky = 15;
             for (int y = highestBlockY; y >= 0; y--)
             {
@@ -989,8 +1012,11 @@ namespace Jobs
             {
                 // LI-2: rows at/above the band are excluded — the band derivation's cross-seam consistency
                 // rule proves an edge check there would write nothing (mismatched uniform regions force a
-                // full-height band instead), so clamping the scan is identical to running it.
-                for (int y = 0; y < BandHeight; y++)
+                // full-height band instead), so clamping the scan is identical to running it. Rows below
+                // BandMinY are excluded likewise: both sides of every seam are uniformly DARK there (a
+                // zero source never out-writes anything), and the opaque-emission substitution in
+                // CheckEdgeVoxelRGB is ruled out by the derivation's emissive gate.
+                for (int y = BandMinY; y < BandHeight; y++)
                 {
                     for (int along = 0; along < VoxelData.ChunkWidth; along++)
                     {
@@ -1186,7 +1212,18 @@ namespace Jobs
                     : PACKED_AIR;
             }
 
-            return PaddedVoxels[ChunkMath.GetPaddedLightingIndex(px, pos.y, pz)];
+            // LI-2 bottom band: below-band rows are inert-dark by derivation AND provably unreachable
+            // (headroom + heightmap rules) — this arm is defense-in-depth. Packed air (the "loud" wrong
+            // answer for buried terrain) is deliberate: a derivation bug diverges visibly under the band
+            // differential fuzz instead of quietly imitating a world edge.
+            if (pos.y < BandMinY)
+            {
+                return BandBottomLight[BandColumn(px)][BandColumn(pz)] == uint.MaxValue
+                    ? uint.MaxValue
+                    : PACKED_AIR;
+            }
+
+            return PaddedVoxels[ChunkMath.GetPaddedLightingIndex(px, pos.y - BandMinY, pz)];
         }
 
         /// <summary>
@@ -1212,7 +1249,15 @@ namespace Jobs
                 return uniform == uint.MaxValue ? ushort.MaxValue : (ushort)uniform;
             }
 
-            return PaddedLight[ChunkMath.GetPaddedLightingIndex(px, pos.y, pz)];
+            // LI-2 bottom band: a present chunk's below-band rows read uniformly dark (0); a missing
+            // chunk keeps the sentinel. Unreachable by derivation — see GetPackedData's bottom arm.
+            if (pos.y < BandMinY)
+            {
+                uint dark = BandBottomLight[BandColumn(px)][BandColumn(pz)];
+                return dark == uint.MaxValue ? ushort.MaxValue : (ushort)dark;
+            }
+
+            return PaddedLight[ChunkMath.GetPaddedLightingIndex(px, pos.y - BandMinY, pz)];
         }
 
         /// <summary>The packed-voxel value of default air — what the job maps hold for a null (all-air)
@@ -1320,13 +1365,13 @@ namespace Jobs
             int pz = localPos.z + ChunkMath.LIGHTING_HALO;
             if ((uint)px >= ChunkMath.PADDED_CHUNK_WIDTH || (uint)pz >= ChunkMath.PADDED_CHUNK_WIDTH) return;
 
-            // LI-2: a write at/above the band targets an un-gathered row. The band derivation proves it
-            // is value-preserving (the region is uniform and no wave can change it), so the store is
-            // skipped — but the cross-chunk mod below is still emitted, keeping the mod stream identical
-            // to the full-height run's.
-            if (localPos.y < BandHeight)
+            // LI-2: a write outside the band targets an un-gathered row. The band derivation proves it
+            // is value-preserving (the region is uniform/inert and no wave can change it), so the store
+            // is skipped — but the cross-chunk mod below is still emitted, keeping the mod stream
+            // identical to the full-height run's.
+            if (localPos.y >= BandMinY && localPos.y < BandHeight)
             {
-                int idx = ChunkMath.GetPaddedLightingIndex(px, localPos.y, pz);
+                int idx = ChunkMath.GetPaddedLightingIndex(px, localPos.y - BandMinY, pz);
                 PaddedLight[idx] = LightBitMapping.SetSkyLight(PaddedLight[idx], lightLevel);
             }
 
@@ -1359,11 +1404,11 @@ namespace Jobs
             int pz = localPos.z + ChunkMath.LIGHTING_HALO;
             if ((uint)px >= ChunkMath.PADDED_CHUNK_WIDTH || (uint)pz >= ChunkMath.PADDED_CHUNK_WIDTH) return;
 
-            // LI-2: skip the store at/above the band (value-preserving by the band derivation), but keep
+            // LI-2: skip the store outside the band (value-preserving by the band derivation), but keep
             // emitting the cross-chunk mod below — see SetSunlight.
-            if (localPos.y < BandHeight)
+            if (localPos.y >= BandMinY && localPos.y < BandHeight)
             {
-                int idx = ChunkMath.GetPaddedLightingIndex(px, localPos.y, pz);
+                int idx = ChunkMath.GetPaddedLightingIndex(px, localPos.y - BandMinY, pz);
                 PaddedLight[idx] = LightBitMapping.SetBlocklightRGB(PaddedLight[idx], r, g, b);
             }
 

@@ -614,6 +614,9 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
             // fills' missing-neighbor semantics (zero-FILLED maps) match NeighborBandTop's summary.
             uint3x3 bandTopLight = default;
             jobData.BandHeight = ChunkMath.CHUNK_HEIGHT;
+            // LI-2 bottom band: production keeps the bottom at 0 until its wiring step lands; the job's
+            // band-local remap is the identity at 0, so behavior is unchanged.
+            jobData.BandMinY = 0;
             if (_world.EnableLightingBandGather && usePooledBuffers)
             {
                 LightingBandChunkTop centerTop = chunkData.GetLightingBandTop();
@@ -641,6 +644,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
                 PaddedVoxels = jobData.PaddedVoxels,
                 PaddedLight = jobData.PaddedLight,
                 BandHeight = jobData.BandHeight,
+                BandMinY = jobData.BandMinY,
                 BandTopLight = bandTopLight,
                 ChunkPosition = chunkData.Position,
                 SunlightBfsQueue = jobData.SunLightQueue,
@@ -1602,7 +1606,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
         // Voxels are never modified in-job, so jobData.Map (the unchanged center voxel snapshot) is still
         // the correct merge reference. LI-2: only the job's gathered band rows are extracted; above them
         // LightMap keeps its schedule-time snapshot, which the job provably did not change.
-        ChunkMath.ExtractCenterLight(jobData.PaddedLight, jobData.LightMap, jobData.BandHeight);
+        ChunkMath.ExtractCenterLight(jobData.PaddedLight, jobData.LightMap, jobData.BandMinY, jobData.BandHeight);
         chunkData.ApplyJobLightMap(jobData.Map, jobData.LightMap, _world.BlockTypes);
     }
 

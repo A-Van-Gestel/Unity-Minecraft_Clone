@@ -65,6 +65,14 @@ namespace Jobs.Data
         /// </summary>
         public int BandHeight;
 
+        /// <summary>
+        /// LI-2 bottom band: global Y of the band's first gathered row
+        /// (<c>NeighborhoodLightingJob.BandMinY</c>). The completion-side extract MUST pass the same
+        /// value — rows below it are un-gathered scratch in <see cref="PaddedLight"/> and must be left
+        /// to <see cref="LightMap"/>'s schedule-time snapshot. 0 = bottom banding disabled.
+        /// </summary>
+        public int BandMinY;
+
         // --- Output data ---
         public NativeArray<uint> Map; // The center chunk voxel snapshot (gather source + ApplyJobLightMap reference)
         public NativeArray<ushort> LightMap; // The center chunk light buffer (gather source + readback target)

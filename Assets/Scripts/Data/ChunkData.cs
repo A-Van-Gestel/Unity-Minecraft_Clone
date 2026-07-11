@@ -1103,9 +1103,9 @@ namespace Data
         public int GetHeightmapMinY()
         {
             int min = int.MaxValue;
-            for (int i = 0; i < heightMap.Length; i++)
+            foreach (ushort height in heightMap)
             {
-                if (i < min) min = i;
+                if (height < min) min = height;
             }
 
             return min;

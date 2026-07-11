@@ -84,6 +84,21 @@ namespace Editor.Validation.Lighting.Framework
         internal Func<int, int> BandHeightSabotageHook;
 
         /// <summary>
+        /// TEST-ONLY sabotage hook for the bottom band's prove-red: maps the honestly-derived band
+        /// bottom to a deliberately wrong (too high) one — applied only in Derived mode, clamped so the
+        /// band stays non-empty. The bottom mirror of <see cref="BandHeightSabotageHook"/>.
+        /// </summary>
+        internal Func<int, int> BandMinYSabotageHook;
+
+        /// <summary>
+        /// Highest <c>BandMinY</c> any job in this world actually ran with — the bottom band's
+        /// ENGAGEMENT signal. Differential scenarios assert this is &gt; 0 on their banded leg so a
+        /// derivation that never engages (bandMinY always 0) cannot vacuously pass the bit-identity
+        /// comparison.
+        /// </summary>
+        public int MaxDerivedBandMinY { get; private set; }
+
+        /// <summary>
         /// A deferred cross-chunk mod paired with its emitting chunk's voxel origin — the Bug 13
         /// live-support veto must still exclude the emitter when the mod is drained on a later pass
         /// (mirror of <c>WorldJobManager.DeferredLightMod</c>).
@@ -299,6 +314,10 @@ namespace Editor.Validation.Lighting.Framework
             // LI-2: the Y-band height the job's volumes were gathered with — CompleteLightingJob must
             // extract with the same value (mirror of LightingJobData.BandHeight).
             internal int BandHeight;
+
+            // LI-2 bottom band: the job's first gathered row; the completion side must extract with the
+            // same value (mirror of LightingJobData.BandMinY). 0 = bottom banding off for this job.
+            internal int BandMinY;
 
             internal readonly List<IDisposable> OwnedContainers = new List<IDisposable>();
             internal bool Completed;
@@ -600,13 +619,15 @@ namespace Editor.Validation.Lighting.Framework
 
             // Seed queues: drain the chunk's managed queues into native ones (production flushes
             // ChunkData's queues into the job the same way; the chunk-side flag clears on schedule).
-            // LI-2: the drains also capture the highest queued node Y — a band-derivation input.
+            // LI-2: the drains also capture the highest AND lowest queued node Y — band-derivation inputs.
             int maxQueuedNodeY = -1;
+            int minQueuedNodeY = int.MaxValue;
             NativeQueue<LightQueueNode> sunQueue = NewOwned(flight, new NativeQueue<LightQueueNode>(Allocator.Persistent));
             while (chunk.SunQueue.Count > 0)
             {
                 LightQueueNode node = chunk.SunQueue.Dequeue();
                 if (node.Position.y > maxQueuedNodeY) maxQueuedNodeY = node.Position.y;
+                if (node.Position.y < minQueuedNodeY) minQueuedNodeY = node.Position.y;
                 sunQueue.Enqueue(node);
             }
 
@@ -615,6 +636,7 @@ namespace Editor.Validation.Lighting.Framework
             {
                 LightQueueNode node = chunk.BlockQueue.Dequeue();
                 if (node.Position.y > maxQueuedNodeY) maxQueuedNodeY = node.Position.y;
+                if (node.Position.y < minQueuedNodeY) minQueuedNodeY = node.Position.y;
                 blockQueue.Enqueue(node);
             }
 
@@ -642,7 +664,9 @@ namespace Editor.Validation.Lighting.Framework
             // presence condition mirrors SnapshotNeighborVoxels exactly: in-grid → summarized,
             // out-of-grid → Missing (the gather sentinel-fills its region).
             uint3x3 bandTopLight = default;
+            uint3x3 bandBottomLight = default;
             flight.BandHeight = ChunkMath.CHUNK_HEIGHT;
+            flight.BandMinY = 0;
             if (BandGatherMode == LightingBandGatherMode.Derived)
             {
                 LightingBandChunkTop centerTop = chunk.Data.GetLightingBandTop();
@@ -664,6 +688,33 @@ namespace Editor.Validation.Lighting.Framework
 
                 bandTopLight = LightingBandDecision.BuildTopLightTable(in centerTop,
                     in w, in e, in s, in n, in sw, in nw, in se, in ne);
+
+                // LI-2 bottom band: derive the band's first gathered row from the inert-dark summaries
+                // (the bottom mirror of the block above).
+                LightingBandChunkBottom centerBottom = chunk.Data.GetLightingBandBottom();
+                LightingBandChunkBottom wB = NeighborBandBottom(chunkCoord, -1, 0);
+                LightingBandChunkBottom eB = NeighborBandBottom(chunkCoord, 1, 0);
+                LightingBandChunkBottom sB = NeighborBandBottom(chunkCoord, 0, -1);
+                LightingBandChunkBottom nB = NeighborBandBottom(chunkCoord, 0, 1);
+                LightingBandChunkBottom swB = NeighborBandBottom(chunkCoord, -1, -1);
+                LightingBandChunkBottom nwB = NeighborBandBottom(chunkCoord, -1, 1);
+                LightingBandChunkBottom seB = NeighborBandBottom(chunkCoord, 1, -1);
+                LightingBandChunkBottom neB = NeighborBandBottom(chunkCoord, 1, 1);
+
+                flight.BandMinY = LightingBandDecision.DeriveBandMinY(in centerBottom,
+                    in wB, in eB, in sB, in nB, in swB, in nwB, in seB, in neB,
+                    minQueuedNodeY, sunColumnQueue.Count > 0, chunk.Data.GetHeightmapMinY());
+
+                if (BandMinYSabotageHook != null)
+                    flight.BandMinY = Mathf.Max(0, BandMinYSabotageHook(flight.BandMinY));
+
+                // Defensive: the two derivations bound independently; keep at least one gathered row.
+                flight.BandMinY = Mathf.Min(flight.BandMinY, flight.BandHeight - 1);
+
+                MaxDerivedBandMinY = Mathf.Max(MaxDerivedBandMinY, flight.BandMinY);
+
+                bandBottomLight = LightingBandDecision.BuildBottomLightTable(in centerBottom,
+                    in wB, in eB, in sB, in nB, in swB, in nwB, in seB, in neB);
             }
 
             NeighborhoodLightingJob job = new NeighborhoodLightingJob
@@ -671,7 +722,9 @@ namespace Editor.Validation.Lighting.Framework
                 PaddedVoxels = paddedVoxels,
                 PaddedLight = paddedLight,
                 BandHeight = flight.BandHeight,
+                BandMinY = flight.BandMinY,
                 BandTopLight = bandTopLight,
+                BandBottomLight = bandBottomLight,
                 ChunkPosition = chunk.VoxelOrigin,
                 SunlightBfsQueue = sunQueue,
                 BlocklightBfsQueue = blockQueue,
@@ -733,13 +786,15 @@ namespace Editor.Validation.Lighting.Framework
                 // Merge through the SAME production per-section + uniform-sky compaction code the live
                 // pipeline runs (ChunkData.ApplyJobLightMap), so section/compaction defects are visible to
                 // the suite instead of being bypassed by a flat-array copy. Block types are null: the
-                // harness does not mesh, and section counts are meshing-only (light-irrelevant).
+                // harness does not mesh, and of the section counts only emissiveCount is light-relevant
+                // (the bottom band's emissive gate) — it recomputes palette-independently through
+                // EmissiveBlockLookup on the null path.
                 // Mods applied to live data during the flight would be overwritten here — which is why mods
                 // targeting in-flight chunks are DEFERRED and drained right after this merge (Bug 08 path-2).
                 // LI-1: extract the job's center light from the padded volume into the center light buffer
                 // first (mirror of WorldJobManager.ApplyLightingJobResult), then merge; voxels are unchanged.
-                // LI-2: band rows only — above them CenterLight keeps its schedule-time snapshot.
-                ChunkMath.ExtractCenterLight(flight.PaddedLight, flight.CenterLight, flight.BandHeight);
+                // LI-2: band rows only — outside them CenterLight keeps its schedule-time snapshot.
+                ChunkMath.ExtractCenterLight(flight.PaddedLight, flight.CenterLight, flight.BandMinY, flight.BandHeight);
                 chunk.Data.ApplyJobLightMap(flight.CenterVoxels, flight.CenterLight, null);
 
                 // Drain mods deferred for this chunk while its job was in flight
@@ -1439,6 +1494,23 @@ namespace Editor.Validation.Lighting.Framework
             return _chunks.TryGetValue(chunkCoord + new Vector2Int(dx, dz), out TestChunk neighbor)
                 ? neighbor.Data.GetLightingBandTop()
                 : LightingBandChunkTop.Missing;
+        }
+
+        /// <summary>
+        /// A neighbor's inert-dark bottom summary for the bottom-band derivation. Presence mirrors
+        /// <see cref="SnapshotNeighborVoxels"/> exactly: an in-grid chunk is summarized from its live
+        /// <see cref="ChunkData"/>; an out-of-grid chunk is <see cref="LightingBandChunkBottom.Missing"/>
+        /// (its gathered rows would be sentinel-filled, so skipping them is band-neutral).
+        /// </summary>
+        /// <param name="chunkCoord">The center chunk's grid coordinate.</param>
+        /// <param name="dx">Neighbor X offset (−1..1).</param>
+        /// <param name="dz">Neighbor Z offset (−1..1).</param>
+        /// <returns>The neighbor's summary.</returns>
+        private LightingBandChunkBottom NeighborBandBottom(Vector2Int chunkCoord, int dx, int dz)
+        {
+            return _chunks.TryGetValue(chunkCoord + new Vector2Int(dx, dz), out TestChunk neighbor)
+                ? neighbor.Data.GetLightingBandBottom()
+                : LightingBandChunkBottom.Missing;
         }
 
         private static Vector2Int WorldToChunkCoord(Vector2Int worldXZ)
