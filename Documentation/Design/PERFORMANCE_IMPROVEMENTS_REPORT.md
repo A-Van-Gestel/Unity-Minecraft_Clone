@@ -176,11 +176,11 @@ gates.
 
 ### Lighting
 
-| ID   | Finding                                                                                                                                                                                                                                    | Effort | Risk | Benefit | Seed | Save |
-|------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| LI-1 | ✅ Branchy 9-map dispatch + hashmap cache → halo-padded volume; layout validated, **shipped net-positive via P-2 Phase 1** (worker-thread gather)                                                                                           |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
-| LI-2 | ✅ Halo gather/extract/scans copied the full 128-voxel column regardless of content → **derived Y-band, shipped default-on** (`EnableLightingBandGather`); bit-identical (B75–B78), IL2CPP in-game **−26 % settled-streaming frame / −27 % Light** (flood sustained Light −9 %) |   🟡   |  🔴  |   🟢    |  ⚠️  |  ✅   |
-| LI-3 | Ready-set scan eagerly evaluates BOTH neighbor gates for every ready chunk each visit (plan-owned by `LIGHTING_PIPELINE_STATE_REFACTOR.md` LP-6)                                                                                           |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| ID   | Finding                                                                                                                                                                                                                                                                                                                                                                                                              | Effort | Risk | Benefit | Seed | Save |
+|------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| LI-1 | ✅ Branchy 9-map dispatch + hashmap cache → halo-padded volume; layout validated, **shipped net-positive via P-2 Phase 1** (worker-thread gather)                                                                                                                                                                                                                                                                     |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
+| LI-2 | ✅ Halo gather/extract/scans copied the full 128-voxel column regardless of content → **derived Y-band, shipped default-on** (`EnableLightingBandGather`); bit-identical (B75–B78), IL2CPP in-game **−26 % settled-streaming frame / −27 % Light** (flood sustained Light −9 %); **LI-2b bottom band also shipped 2026-07-11** (per-section emissive metadata; another −49…−59 % marginal on engaged shapes, B79–B85) |   🟡   |  🔴  |   🟢    |  ⚠️  |  ✅   |
+| LI-3 | Ready-set scan eagerly evaluates BOTH neighbor gates for every ready chunk each visit (plan-owned by `LIGHTING_PIPELINE_STATE_REFACTOR.md` LP-6)                                                                                                                                                                                                                                                                     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 
 ### World Generation
 
@@ -793,6 +793,24 @@ satisfy both if the persistent layout itself is halo-padded.
 > [`Performance/LIGHTING_LI2_INGAME_IL2CPP_2026-07-11_BENCHMARK.md`](../Performance/LIGHTING_LI2_INGAME_IL2CPP_2026-07-11_BENCHMARK.md)
 > (editor screening: [`LIGHTING_LI2_2026-07-11_BENCHMARK.md`](../Performance/LIGHTING_LI2_2026-07-11_BENCHMARK.md)). Core:
 > `Assets/Scripts/Helpers/LightingBandDecision.cs` + `ChunkData.GetLightingBandTop` + `WorldJobManager.ScheduleLightingUpdate`.
+>
+> **✅ LI-2b BOTTOM BAND IMPLEMENTED 2026-07-11** (same branch; v1 shipped top-only by scope decision — this closes the
+> deferred half). The band is now the full range `[bandMinY, bandHeight)`: rows below an **inert-dark region** (light
+> uniformly 0, no emitters) are also skipped, stored as a band-local prefix of the padded volume. Enabler: per-section
+> **emissive-presence metadata** (`ChunkSection.emissiveCount`, maintained via the palette-independent
+> `Helpers/EmissiveBlockLookup` — runtime-only like `opaqueCount`, **no save-format change**). Bottom rules in
+> `LightingBandDecision.DeriveBandMinY`: inert-dark coverage over all 9 chunks (`ChunkData.GetLightingBandBottom`),
+> headroom under the lowest queued node, `min(center heightmap) − headroom` (the unbounded downward vertical-sunlight
+> rule has no attenuation to lean on), and **any column recalc → 0** (PASS 2 walks to Y=0; no downward full-sky escape
+> exists) — so floods/initial lighting stay effectively top-only and the wins accrue on settled-streaming re-lights.
+> Cross-seam needs no bottom rule (0-vs-0 is inert); the emissive gate also covers the RGB edge check's opaque-emission
+> substitution on cardinal halos. Same single flag (`EnableLightingBandGather`; rollback = full height). **Bit-identical**
+> proven by **B83–B85** (bottom differential with an *engagement assertion* — a never-engaging bottom cannot vacuously
+> pass — 8-seed deep-floor fuzz, raised-floor prove-red) + **B79–B82** derivation baselines — suite 77/77, in-game
+> underground lamp verification. Editor screening
+> ([`LIGHTING_LI2B_BOTTOM_BAND_2026-07-11_BENCHMARK.md`](../Performance/LIGHTING_LI2B_BOTTOM_BAND_2026-07-11_BENCHMARK.md)):
+> another **−49…−59 % on top of the shipped top band** where the bottom engages (deep/mid floors, no-op relight + edge
+> check — combined −70…−73 % vs pre-LI-2 full height), parity where it cannot; IL2CPP in-game frame A/B deferred.
 > The recommendation below is the as-designed record.
 
 *(Surfaced by the 2026-07-02 third-pass audit. This is the concrete, tracked form of

@@ -1,7 +1,7 @@
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
-using Editor.Validation.Lighting;
 using Editor.Validation.Lighting.Framework;
 using Helpers;
 using Jobs;
@@ -26,9 +26,13 @@ namespace Editor.Benchmarking
     /// <item><b>edge check</b> — the border consistency pass over a consistent world: gather + the
     /// 4-border scan (full-height 8,192 columns vs band-clamped).</item>
     /// </list>
-    /// Two floor heights vary the derived band (tight vs mid). <b>Editor Mono numbers are
-    /// SCREENING-ONLY</b> (per the perf-benchmark protocol) — the shippable capture is the in-game
-    /// IL2CPP flag A/B (<c>World.EnableLightingBandGather</c>). Editor-only; never compiled into a build.
+    /// Floor heights vary the derived band; the deep-floor section adds the LI-2b <b>bottom-band</b>
+    /// shapes (a buried lamp relight inside solid stone). Each leg runs THREE ways — full height,
+    /// top-only (Derived with the bottom sabotaged to 0, i.e. exactly the shipped LI-2 behavior), and
+    /// top+bottom (Derived) — so the bottom band's marginal win is isolated from LI-2's. <b>Editor Mono
+    /// numbers are SCREENING-ONLY</b> (per the perf-benchmark protocol) — the shippable capture is the
+    /// in-game IL2CPP flag A/B (<c>World.EnableLightingBandGather</c>). Editor-only; never compiled
+    /// into a build.
     /// </summary>
     internal static class LightingBandGatherBenchmark
     {
@@ -44,6 +48,7 @@ namespace Editor.Benchmarking
             public double MedianUs;
             public double StdDevUs;
             public int BandHeight;
+            public int BandMinY;
         }
 
         [MenuItem("Minecraft Clone/Benchmarks/Lighting Band Gather (LI-2)")]
@@ -51,8 +56,9 @@ namespace Editor.Benchmarking
         {
             string outPath = Path.Combine(Application.temporaryCachePath, "lighting_band_gather_bench.txt");
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine("=== LI-2 Lighting Band Gather A/B (EDITOR SCREENING — not a shippable capture) ===");
+            sb.AppendLine("=== LI-2/LI-2b Lighting Band Gather A/B (EDITOR SCREENING — not a shippable capture) ===");
             sb.AppendLine($"grid {GRID}x{GRID}, {SAMPLE_RUNS} samples after {WARMUP_RUNS} warmups, timing NeighborhoodLightingJob.Run() only");
+            sb.AppendLine("legs: full = h128/b0 | top = derived top, bottom sabotaged to 0 (shipped LI-2) | t+b = derived both (LI-2b)");
             sb.AppendLine();
 
             foreach (int floorY in new[] { 10, 60 })
@@ -64,13 +70,22 @@ namespace Editor.Benchmarking
                 sb.AppendLine();
             }
 
+            // LI-2b bottom-band shapes: a deep 3-section floor with the relight work UNDERGROUND — the
+            // buried lamp is the underground steady-state edit the bottom band exists for.
+            const int deepFloor = 47;
+            sb.AppendLine($"--- deep floor y={deepFloor} (LI-2b bottom-band shapes) ---");
+            AppendLegComparison(sb, "no-op relight", deepFloor, lampY: -1, edgeCheck: false);
+            AppendLegComparison(sb, "buried lamp  ", deepFloor, lampY: 20, edgeCheck: false);
+            AppendLegComparison(sb, "edge check   ", deepFloor, lampY: -1, edgeCheck: true);
+            sb.AppendLine();
+
             string report = sb.ToString();
             Debug.Log(report);
             File.WriteAllText(outPath, report);
             Debug.Log($"[LightingBandGatherBenchmark] report written to {outPath}");
         }
 
-        /// <summary>Measures one leg in both band modes and appends the comparison row.</summary>
+        /// <summary>Measures one leg in all three band configurations and appends the comparison rows.</summary>
         /// <param name="sb">The report builder.</param>
         /// <param name="label">The leg label.</param>
         /// <param name="floorY">Superflat floor height.</param>
@@ -79,11 +94,16 @@ namespace Editor.Benchmarking
         private static void AppendLegComparison(StringBuilder sb, string label, int floorY, int lampY, bool edgeCheck)
         {
             Cell full = MeasureLeg(LightingBandGatherMode.FullHeight, floorY, lampY, edgeCheck);
-            Cell band = MeasureLeg(LightingBandGatherMode.Derived, floorY, lampY, edgeCheck);
-            double deltaPct = full.MeanUs > 0 ? (band.MeanUs - full.MeanUs) / full.MeanUs * 100.0 : 0;
+            Cell top = MeasureLeg(LightingBandGatherMode.Derived, floorY, lampY, edgeCheck, bottomSabotage: _ => 0);
+            Cell both = MeasureLeg(LightingBandGatherMode.Derived, floorY, lampY, edgeCheck);
 
-            sb.AppendLine($"{label}  full(h=128): mean {full.MeanUs,8:F1} us  min {full.MinUs,8:F1}  med {full.MedianUs,8:F1}  sd {full.StdDevUs,7:F1}");
-            sb.AppendLine($"{label}  band(h={band.BandHeight,3}): mean {band.MeanUs,8:F1} us  min {band.MinUs,8:F1}  med {band.MedianUs,8:F1}  sd {band.StdDevUs,7:F1}  delta {deltaPct,6:F1}%");
+            double topDelta = full.MeanUs > 0 ? (top.MeanUs - full.MeanUs) / full.MeanUs * 100.0 : 0;
+            double bothDelta = full.MeanUs > 0 ? (both.MeanUs - full.MeanUs) / full.MeanUs * 100.0 : 0;
+            double marginal = top.MeanUs > 0 ? (both.MeanUs - top.MeanUs) / top.MeanUs * 100.0 : 0;
+
+            sb.AppendLine($"{label}  full(h=128,b=  0): mean {full.MeanUs,8:F1} us  min {full.MinUs,8:F1}  med {full.MedianUs,8:F1}  sd {full.StdDevUs,7:F1}");
+            sb.AppendLine($"{label}  top (h={top.BandHeight,3},b=  0): mean {top.MeanUs,8:F1} us  min {top.MinUs,8:F1}  med {top.MedianUs,8:F1}  sd {top.StdDevUs,7:F1}  vs full {topDelta,6:F1}%");
+            sb.AppendLine($"{label}  t+b (h={both.BandHeight,3},b={both.BandMinY,3}): mean {both.MeanUs,8:F1} us  min {both.MinUs,8:F1}  med {both.MedianUs,8:F1}  sd {both.StdDevUs,7:F1}  vs full {bothDelta,6:F1}%  vs top {marginal,6:F1}%");
         }
 
         /// <summary>
@@ -96,11 +116,15 @@ namespace Editor.Benchmarking
         /// <param name="floorY">Superflat floor height.</param>
         /// <param name="lampY">Lamp height, or −1 for no lamp.</param>
         /// <param name="edgeCheck">Whether the job runs the border consistency pass.</param>
+        /// <param name="bottomSabotage">Optional band-bottom override (Derived mode only) — <c>_ =&gt; 0</c>
+        /// reproduces the shipped LI-2 top-only configuration as a reference leg.</param>
         /// <returns>The cell's timing distribution.</returns>
-        private static Cell MeasureLeg(LightingBandGatherMode mode, int floorY, int lampY, bool edgeCheck)
+        private static Cell MeasureLeg(LightingBandGatherMode mode, int floorY, int lampY, bool edgeCheck,
+            Func<int, int> bottomSabotage = null)
         {
             using LightingTestWorld world = new LightingTestWorld(GRID);
             world.BandGatherMode = mode;
+            world.BandMinYSabotageHook = bottomSabotage;
             world.FillSuperflatFloor(floorY, TestBlockPalette.Stone);
             world.RecalculateHeightmaps();
             world.RunInitialLighting();
@@ -110,6 +134,7 @@ namespace Editor.Benchmarking
 
             double[] samples = new double[SAMPLE_RUNS];
             int bandHeight = ChunkMath.CHUNK_HEIGHT;
+            int bandMinY = 0;
             Stopwatch sw = new Stopwatch();
 
             for (int i = -WARMUP_RUNS; i < SAMPLE_RUNS; i++)
@@ -118,6 +143,7 @@ namespace Editor.Benchmarking
 
                 LightingTestWorld.LightingJobFlight flight = world.BeginLightingJob(center, edgeCheck);
                 bandHeight = flight.BandHeight;
+                bandMinY = flight.BandMinY;
 
                 // Time the job in isolation. flight.Job shares the flight's native containers, so this
                 // run drains the BFS queues and writes the padded volume — the band mode under test is
@@ -146,17 +172,18 @@ namespace Editor.Benchmarking
                 }
             }
 
-            return BuildCell(samples, bandHeight);
+            return BuildCell(samples, bandHeight, bandMinY);
         }
 
         /// <summary>Computes the distribution stats for one cell.</summary>
         /// <param name="samples">The per-run timings in microseconds.</param>
         /// <param name="bandHeight">The band height the leg's jobs ran with.</param>
+        /// <param name="bandMinY">The band bottom the leg's jobs ran with.</param>
         /// <returns>The populated cell.</returns>
-        private static Cell BuildCell(double[] samples, int bandHeight)
+        private static Cell BuildCell(double[] samples, int bandHeight, int bandMinY)
         {
             double[] sorted = (double[])samples.Clone();
-            System.Array.Sort(sorted);
+            Array.Sort(sorted);
 
             double sum = 0;
             foreach (double s in samples) sum += s;
@@ -171,8 +198,9 @@ namespace Editor.Benchmarking
                 MeanUs = mean,
                 MinUs = sorted[0],
                 MedianUs = sorted[sorted.Length / 2],
-                StdDevUs = System.Math.Sqrt(variance),
+                StdDevUs = Math.Sqrt(variance),
                 BandHeight = bandHeight,
+                BandMinY = bandMinY,
             };
         }
     }
