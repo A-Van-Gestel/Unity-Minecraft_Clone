@@ -810,7 +810,13 @@ satisfy both if the persistent layout itself is halo-padded.
 > underground lamp verification. Editor screening
 > ([`LIGHTING_LI2B_BOTTOM_BAND_2026-07-11_BENCHMARK.md`](../Performance/LIGHTING_LI2B_BOTTOM_BAND_2026-07-11_BENCHMARK.md)):
 > another **−49…−59 % on top of the shipped top band** where the bottom engages (deep/mid floors, no-op relight + edge
-> check — combined −70…−73 % vs pre-LI-2 full height), parity where it cannot; IL2CPP in-game frame A/B deferred.
+> check — combined −70…−73 % vs pre-LI-2 full height), parity where it cannot. **IL2CPP in-game flag A/B (captured
+> 2026-07-11): frame-neutral — GO on the not-slower + Tier-A basis** (flood/settled deltas within the session's noise
+> floor; flood is recalc-driven so the bottom is 0 there by rule — the engaged wins live in settled-streaming
+> re-lights, per the plan), see
+> [`Performance/LIGHTING_LI2B_INGAME_IL2CPP_2026-07-11_BENCHMARK.md`](../Performance/LIGHTING_LI2B_INGAME_IL2CPP_2026-07-11_BENCHMARK.md)
+> (which also documents that `LightingJobBenchmark` pins full height in both builds — its per-job deltas there and in
+> the LI-2 in-game report are the build/session noise floor, not band effects).
 > The recommendation below is the as-designed record.
 
 *(Surfaced by the 2026-07-02 third-pass audit. This is the concrete, tracked form of
