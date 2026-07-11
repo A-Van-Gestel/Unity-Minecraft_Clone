@@ -71,3 +71,9 @@ IDs** (skips re-authoring), stating the **red-for-the-documented-reason** check 
 different reason is a different bug), and pinning the **stop point** at in-game confirmation (the
 protocol's step the session must not skip). Record **rejected approaches** here when they exist —
 the Bug-13 emitter-side guard rejection saved the Bug-14 session from re-walking a dead end.
+Refined 2026-07-11 by the Bug-17 handoff with two optional elements: a **closing-bookkeeping**
+line for debts owned by the bug being fixed (a sibling baseline carried a dated assertion
+exemption for this bug's residue — restoring it belongs in the promotion commit, and only the
+prompt makes a cold session see that link), and an explicit **confirmation-scope note** when the
+bug was never observed in-game (point at the oracle-only-confirmation archive precedent so the
+session doesn't stall hunting an unobservable repro).
