@@ -4,6 +4,7 @@ using Data;
 using Editor.Validation.Lighting.Framework;
 using Helpers;
 using UnityEngine;
+using Random = System.Random;
 using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.Lighting
@@ -110,7 +111,7 @@ namespace Editor.Validation.Lighting
             string first = "";
             if (firstIndex >= 0)
             {
-                int perChunk = LightingTestWorld.ChunkBufferLength;
+                const int perChunk = LightingTestWorld.ChunkBufferLength;
                 int chunkIndex = firstIndex / perChunk;
                 int local = firstIndex % perChunk;
                 int y = local / (VoxelData.ChunkWidth * VoxelData.ChunkWidth);
@@ -243,7 +244,7 @@ namespace Editor.Validation.Lighting
                 int capturedSeed = seed;
                 bool matched = BandDifferentialMatches(world =>
                 {
-                    System.Random rnd = new System.Random(capturedSeed * 7919 + 17);
+                    Random rnd = new Random(capturedSeed * 7919 + 17);
                     int floorY = 8 + rnd.Next(24);
                     world.FillSuperflatFloor(floorY, TestBlockPalette.Stone);
                     world.RecalculateHeightmaps();

@@ -1232,7 +1232,9 @@ namespace Jobs
         {
             return paddedAxis < ChunkMath.LIGHTING_HALO
                 ? 0
-                : paddedAxis < ChunkMath.LIGHTING_HALO + ChunkMath.CHUNK_WIDTH ? 1 : 2;
+                : paddedAxis < ChunkMath.LIGHTING_HALO + ChunkMath.CHUNK_WIDTH
+                    ? 1
+                    : 2;
         }
 
         /// <summary>

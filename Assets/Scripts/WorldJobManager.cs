@@ -686,7 +686,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     private LightingBandChunkTop NeighborBandTop(ChunkCoord center, int dx, int dz)
     {
         ChunkData neighbor = _world.worldData.RequestChunk(center.Neighbor(dx, dz).ToVoxelOrigin(), false);
-        return neighbor != null ? neighbor.GetLightingBandTop() : default;
+        return neighbor?.GetLightingBandTop() ?? default;
     }
 
     /// <summary>

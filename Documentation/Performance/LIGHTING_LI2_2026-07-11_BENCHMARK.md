@@ -1,11 +1,11 @@
 # LI-2 Banded Lighting Gather — full-height vs derived Y-band A/B (editor screening)
 
-| Field           | Value                                                                                                                                                                                                                                                       |
-|-----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Captured**    | 2026-07-11 (local)                                                                                                                                                                                                                                          |
-| **Branch**      | `feat/async-lighting-validation-suite`                                                                                                                                                                                                                     |
-| **Commit**      | `68e749a` (POST: LI-2 Steps 1–4 — band derivation + plumbing + differential gate + production flip)                                                                                                                                                        |
-| **Captured by** | `Assets/Editor/Benchmarking/LightingBandGatherBenchmark.cs` — **editor Mono (SCREENING-ONLY)**, 24 samples/leg, 4 warm-ups; the shippable IL2CPP + in-game flag A/B is **not yet captured** (pending user player build — see Verdict)                       |
+| Field           | Value                                                                                                                                                                                                                                                                                                                              |
+|-----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Captured**    | 2026-07-11 (local)                                                                                                                                                                                                                                                                                                                 |
+| **Branch**      | `feat/async-lighting-validation-suite`                                                                                                                                                                                                                                                                                             |
+| **Commit**      | `68e749a` (POST: LI-2 Steps 1–4 — band derivation + plumbing + differential gate + production flip)                                                                                                                                                                                                                                |
+| **Captured by** | `Assets/Editor/Benchmarking/LightingBandGatherBenchmark.cs` — **editor Mono (SCREENING-ONLY)**, 24 samples/leg, 4 warm-ups; the shippable IL2CPP + in-game flag A/B is **not yet captured** (pending user player build — see Verdict)                                                                                              |
 | **Verdict**     | **GO (bit-identical + not slower) — pending user IL2CPP/in-game confirmation.** Bit-identical is proven by the B75–B78 differential (suite green); editor screening shows the band **never slower on the clean floor** and **−31…−75 %** on gather/scan-dominated job shapes. Frame-level number deferred to the in-game flag A/B. |
 
 > **This is the LI-2 "does the Y-band actually cut lighting job cost" screening capture**, per
@@ -51,20 +51,20 @@ gathered/scanned/extracted; h=128 would be banding-off).
 
 ## Result — editor Mono, µs over 24 samples
 
-| Floor | Job shape     | Leg          |     mean |      min |   median |  stddev | Δ mean vs full |
-|-------|---------------|--------------|---------:|---------:|---------:|--------:|---------------:|
-| y=10  | no-op relight | full (h=128) |    170.7 |    156.6 |    165.9 |    16.8 |                |
-| y=10  | no-op relight | **band h=32**  | **48.8** | **47.2** | **48.8** | **1.3** |     **−71.4 %** |
-| y=10  | lamp BFS      | full (h=128) |    405.0 |    391.6 |    398.7 |    23.4 |                |
-| y=10  | lamp BFS      | **band h=48**  |  **342.2** | **300.7** | **307.9** |    85.0 |     **−15.5 %** |
-| y=10  | edge check    | full (h=128) |    449.4 |    410.1 |    421.3 |    39.4 |                |
-| y=10  | edge check    | **band h=32**  | **112.8** | **109.8** | **112.6** | **2.3** |     **−74.9 %** |
-| y=60  | no-op relight | full (h=128) |    193.0 |    184.2 |    188.4 |    11.1 |                |
-| y=60  | no-op relight | **band h=80**  | **132.8** | **130.7** | **131.8** | **2.0** |     **−31.2 %** |
-| y=60  | lamp BFS      | full (h=128) |    429.9 |    423.0 |    426.0 |    10.3 |                |
-| y=60  | lamp BFS      | **band h=112** |    439.1 | **404.0** | **411.6** |    47.1 |       +2.1 % ⚠ |
-| y=60  | edge check    | full (h=128) |    456.5 |    431.4 |    438.7 |    77.0 |                |
-| y=60  | edge check    | **band h=80**  | **287.8** | **282.6** | **286.3** | **5.9** |     **−37.0 %** |
+| Floor | Job shape     | Leg            |      mean |       min |    median |  stddev | Δ mean vs full |
+|-------|---------------|----------------|----------:|----------:|----------:|--------:|---------------:|
+| y=10  | no-op relight | full (h=128)   |     170.7 |     156.6 |     165.9 |    16.8 |                |
+| y=10  | no-op relight | **band h=32**  |  **48.8** |  **47.2** |  **48.8** | **1.3** |    **−71.4 %** |
+| y=10  | lamp BFS      | full (h=128)   |     405.0 |     391.6 |     398.7 |    23.4 |                |
+| y=10  | lamp BFS      | **band h=48**  | **342.2** | **300.7** | **307.9** |    85.0 |    **−15.5 %** |
+| y=10  | edge check    | full (h=128)   |     449.4 |     410.1 |     421.3 |    39.4 |                |
+| y=10  | edge check    | **band h=32**  | **112.8** | **109.8** | **112.6** | **2.3** |    **−74.9 %** |
+| y=60  | no-op relight | full (h=128)   |     193.0 |     184.2 |     188.4 |    11.1 |                |
+| y=60  | no-op relight | **band h=80**  | **132.8** | **130.7** | **131.8** | **2.0** |    **−31.2 %** |
+| y=60  | lamp BFS      | full (h=128)   |     429.9 |     423.0 |     426.0 |    10.3 |                |
+| y=60  | lamp BFS      | **band h=112** |     439.1 | **404.0** | **411.6** |    47.1 |       +2.1 % ⚠ |
+| y=60  | edge check    | full (h=128)   |     456.5 |     431.4 |     438.7 |    77.0 |                |
+| y=60  | edge check    | **band h=80**  | **287.8** | **282.6** | **286.3** | **5.9** |    **−37.0 %** |
 
 `⚠` The one non-negative mean (lamp BFS, y=60, +2.1 %) is editor-Mono scheduler noise, **not a regression**: the band's
 `min` (clean floor) is **404.0 vs 423.0 µs = −4.5 %**, i.e. the band is faster on the best sample; the positive *mean*
