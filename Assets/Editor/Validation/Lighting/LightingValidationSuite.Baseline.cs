@@ -137,7 +137,17 @@ namespace Editor.Validation.Lighting
             // fix over-correction tripwire. Lives in Baselines/LightingValidationSuite.Baseline.Bug16Runaway.cs
             // (shared geometry with known-bug repro K16a) and self-registers here. ---
             AddBug16RunawayBaselineScenarios(scenarios);
+
+            // --- C12 RGB stale-pull-back self-heal guard (B89): a held-flight stale darkness-phase
+            // CheckEdgeVoxelRGB pull-back converges (no claim verification needed — scopes the RGB
+            // removal-machinery gap to the missing initiator, Bug 18). Lives in
+            // Baselines/LightingValidationSuite.Baseline.C12RgbPullback.cs and self-registers here. ---
+            AddC12RgbPullbackBaselineScenarios(scenarios);
         }
+
+        /// <summary>Hook for the C12 RGB stale-pull-back baseline (implemented in Baselines/LightingValidationSuite.Baseline.C12RgbPullback.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddC12RgbPullbackBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the Bug-12 family baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug12.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
