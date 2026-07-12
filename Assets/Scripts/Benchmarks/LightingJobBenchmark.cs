@@ -459,6 +459,7 @@ namespace Benchmarks
                 SunLightRecalcQueue = new NativeQueue<Vector2Int>(allocator),
 
                 Mods = new NativeList<LightModification>(allocator),
+                PullBackClaims = new NativeList<PullBackClaim>(allocator),
                 IsStable = new NativeArray<bool>(1, allocator),
             };
 
@@ -485,6 +486,8 @@ namespace Benchmarks
             {
                 PaddedVoxels = data.PaddedVoxels,
                 PaddedLight = data.PaddedLight,
+                BandHeight = ChunkMath.CHUNK_HEIGHT, // LI-2: benchmark measures the full-height path
+                BandMinY = 0,
                 ChunkPosition = new Vector2Int(0, 0),
                 SunlightBfsQueue = data.SunLightQueue,
                 BlocklightBfsQueue = data.BlockLightQueue,
@@ -494,6 +497,7 @@ namespace Benchmarks
 
                 BlockTypes = _world.JobDataManager.BlockTypesJobData,
                 CrossChunkLightMods = data.Mods,
+                PullBackClaims = data.PullBackClaims,
                 IsStable = data.IsStable,
                 PerformEdgeCheck = performEdgeCheck,
             };
@@ -521,7 +525,7 @@ namespace Benchmarks
 
                 // LI-1: the job wrote light into the padded volume's center region — extract it back into
                 // the center light map (mirror of WorldJobManager.ApplyLightingJobResult) before copying.
-                ChunkMath.ExtractCenterLight(preLight.PaddedLight, preLight.LightMap);
+                ChunkMath.ExtractCenterLight(preLight.PaddedLight, preLight.LightMap, 0, ChunkMath.CHUNK_HEIGHT);
 
                 // Copy the now-lit center map and light map back into the source data.
                 NativeArray<uint>.Copy(preLight.Map, sourceData.Center);

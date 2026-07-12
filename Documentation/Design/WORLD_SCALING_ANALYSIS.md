@@ -370,4 +370,7 @@ LI-1 padded lighting volume ────────────────┘ 
 - Tier B's floor-div/shift-mask cleanup (§3.2) is also a micro-optimization win on its own
   (removes float roundtrips from every chunk lookup) — it can ship early and independently, and it
   is the only part of this document with **zero** save/seed risk when done correctly. Now tracked
-  as **`WS-1`** in `PERFORMANCE_IMPROVEMENTS_REPORT.md`.
+  as **`WS-1`** in `PERFORMANCE_IMPROVEMENTS_REPORT.md`. **Execution packet:** phase **CP-2** of
+  [CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) (2026-07-06)
+  — includes the NS-5 equivalence suite (negative-domain + big-coordinate contract pins) this
+  section's audit checklist implies; the §2.4 constants unification is its phase **CP-7**.

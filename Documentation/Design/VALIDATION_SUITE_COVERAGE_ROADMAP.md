@@ -9,13 +9,14 @@
 >
 > Status: **Proposal / planning. No suite below exists yet.**
 
-**Existing coverage (for contrast):** Lighting (55 baselines), Meshing (B21), Behavior/fluid tick
+**Existing coverage (for contrast):** Lighting (62 baselines), Meshing (B21), Behavior/fluid tick
 (8 + determinism gates), Placement (13), MeshBuildQueue (9), LightWorkScheduler (9), plus the
 standalone `VoxelMetadataUtility` / `FastNoiseLite` / `ChunkRelativePosition` tests.
 
 **Build protocol for every suite below:** the `validation-driven-bugfix` skill (deterministic
 repro first, prove-red before trusting green, promote repros to baselines). New suites should land
-on the shared runner proposed in `VS-1` — schedule `VS-1` before or alongside the first of these.
+on the shared `ValidationSuiteRunner` (`VS-1`, ✅ shipped 2026-07-08): register `Scenario`s and
+return its `ValidationRunResult` from a headless `Execute()`, with a thin `[MenuItem]` wrapper.
 All suites stay on the custom validation framework: migrating to the Unity Test Framework was
 evaluated 2026-07-02 and rejected (see the status header in
 [`UNITY_TEST_FRAMEWORK_MIGRATION.md`](UNITY_TEST_FRAMEWORK_MIGRATION.md)); the
@@ -53,7 +54,10 @@ CI/coverage/XML gaps close via the VS-2 extensions instead.
        changes the locking.
 - **Building blocks already available:** `ValidationReflection` (ChunkPool stubbing),
   `GoldenMaster`, temp-directory region files (the storage manager already supports a volatile
-  path).
+  path). Phase **CP-3** of
+  [CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) seeds the
+  robustness slice (truncated/garbage/wrong-version payloads → `Deserialize` returns null, no
+  throw, no pooled-shell leak).
 - **Effort:** 🟡 core (1–5) → 🔴 with migration fixtures (6); build 1–5 first.
 
 ---
@@ -103,7 +107,13 @@ CI/coverage/XML gaps close via the VS-2 extensions instead.
   fixtures of the three historical deadlocks from `_FIXED_BUGS.md`.
 - **Building blocks:** `LightingFrameSimulator` (already simulates frame-by-frame lighting
   progression) is the embryo of this harness; `BehaviorTestWorld`'s multi-chunk world shows the
-  world-stubbing pattern scales.
+  world-stubbing pattern scales. The LP-* plan
+  ([LIGHTING_PIPELINE_STATE_REFACTOR.md](LIGHTING_PIPELINE_STATE_REFACTOR.md)) is deliberate
+  groundwork: LP-1's invariant probes and LP-4's `ChunkData` flag-transition API are the first
+  two concrete members of this suite's flag-pairing assertion family. The MP-* plan
+  ([MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md](MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md)) is
+  the meshing-side counterpart: MP-1's request/drop probes and MP-2's scheduling baselines are
+  the first members of the *convergence* ("every chunk eventually reaches lit + meshed") family.
 - **Effort:** 🔴 — the hardest harness on this list (World-level orchestration must be stubbed).
   Build scenario-by-scenario; even the first two scenarios (out-of-order completion, recycle
   replay) would have caught past incidents.
@@ -144,7 +154,10 @@ CI/coverage/XML gaps close via the VS-2 extensions instead.
   `RegionAddressCodec.V2Codec` behavior **pinned as-is, bug included** (existing saves depend on
   it) alongside V3 correctness assertions.
 - **Building blocks:** `ChunkRelativePositionTests` is the template for pure-math suites.
-- **Effort:** 🟢 — build it together with WS-1/VQ-1.
+- **Effort:** 🟢 — build it together with WS-1/VQ-1. **Scheduled:** phase **CP-2** of
+  [CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) executes
+  WS-1 and builds this suite alongside it (positive-domain equivalence + negative/big-coordinate
+  contract pins + region round-trips).
 
 ---
 

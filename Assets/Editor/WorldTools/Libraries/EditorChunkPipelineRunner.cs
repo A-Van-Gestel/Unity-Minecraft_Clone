@@ -179,6 +179,7 @@ namespace Editor.WorldTools.Libraries
                 Map = new NativeArray<uint>(maps[voxelOrigin], Allocator.Persistent),
                 LightMap = GetOrCreateLightMap(lightMaps, voxelOrigin),
                 Mods = new NativeList<LightModification>(Allocator.Persistent),
+                PullBackClaims = new NativeList<PullBackClaim>(Allocator.Persistent),
                 IsStable = new NativeArray<bool>(1, Allocator.Persistent),
                 SunLightQueue = new NativeQueue<LightQueueNode>(Allocator.Persistent),
                 BlockLightQueue = new NativeQueue<LightQueueNode>(Allocator.Persistent),
@@ -193,10 +194,17 @@ namespace Editor.WorldTools.Libraries
             jobData.PaddedVoxels = new NativeArray<uint>(ChunkMath.PADDED_LIGHTING_VOLUME, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             jobData.PaddedLight = new NativeArray<ushort>(ChunkMath.PADDED_LIGHTING_VOLUME, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 
+            // LI-2: the editor preview pipeline always runs full height (its worlds are one-shot renders,
+            // not the streaming hot path the band optimizes).
+            jobData.BandHeight = ChunkMath.CHUNK_HEIGHT;
+            jobData.BandMinY = 0;
+
             NeighborhoodLightingJob job = new NeighborhoodLightingJob
             {
                 PaddedVoxels = jobData.PaddedVoxels,
                 PaddedLight = jobData.PaddedLight,
+                BandHeight = jobData.BandHeight,
+                BandMinY = jobData.BandMinY,
                 ChunkPosition = voxelOrigin,
                 SunlightBfsQueue = jobData.SunLightQueue,
                 BlocklightBfsQueue = jobData.BlockLightQueue,
@@ -204,6 +212,7 @@ namespace Editor.WorldTools.Libraries
                 Heightmap = jobData.Input.Heightmap,
                 BlockTypes = _jobDataManager.BlockTypesJobData,
                 CrossChunkLightMods = jobData.Mods,
+                PullBackClaims = jobData.PullBackClaims,
                 IsStable = jobData.IsStable,
                 PerformEdgeCheck = false,
             };

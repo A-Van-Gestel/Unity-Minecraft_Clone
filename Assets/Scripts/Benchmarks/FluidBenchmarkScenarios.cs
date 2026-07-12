@@ -173,10 +173,11 @@ namespace Benchmarks
         /// <summary>
         /// Block used for the catch-floor: <see cref="BlockIDs.Facade"/> — <b>solid</b> (isSolid, so it dams the
         /// water) but <b>opacity 0</b> (fully transparent to light), so it casts NO skylight shadow on the columns
-        /// below. That distinction is load-bearing: a high <i>opaque</i> floor (e.g. Stone) shadows the whole region,
-        /// and the resulting cross-chunk skylight gradient oscillates without ever settling — the pipeline never goes
-        /// idle and the harness's settle wait hangs. A light-transparent solid sidesteps that entirely while still
-        /// containing the flood. (Facade is the only solid + opacity-0 block in <see cref="BlockIDs"/>.)
+        /// below. An opaque floor (e.g. Stone) also settles correctly since the July 2026 lighting fixes
+        /// (see <c>_FIXED_BUGS.md</c> Lighting #17/#18 — pre-fix it live-locked the settle wait), but Facade is
+        /// kept so the region's lighting workload stays minimal and every recorded FluidStress report remains
+        /// comparable; switching the floor block is a benchmark-scenario change that requires a re-baseline.
+        /// (Facade is the only solid + opacity-0 block in <see cref="BlockIDs"/>.)
         /// </summary>
         private const ushort FLOOR_BLOCK = BlockIDs.Facade;
 

@@ -51,12 +51,18 @@ namespace Helpers
         /// Drains the thread-safe staging queue into the ready set, promoting any parked entries.
         /// Main-thread only; call once at the start of the lighting scan.
         /// </summary>
-        public void DrainStaging()
+        /// <returns>The number of positions dequeued from staging (pre-dedup — repeated flags of the same
+        /// chunk each count once). Diagnostic; callers may ignore it.</returns>
+        public int DrainStaging()
         {
+            int drained = 0;
             while (_staging.TryDequeue(out Vector2Int pos))
             {
                 AddReady(pos);
+                drained++;
             }
+
+            return drained;
         }
 
         /// <summary>

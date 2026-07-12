@@ -12,6 +12,27 @@ using UnityEngine;
 
 namespace Jobs
 {
+    /// <summary>
+    /// One provisional cross-seam sunlight re-light performed by <see cref="NeighborhoodLightingJob"/>'s
+    /// darkness-wave pull-back: the job trusted its schedule-time SNAPSHOT of a neighbor voxel to re-light
+    /// a just-darkened center border voxel. The snapshot may be stale (the neighbor darkened after it was
+    /// taken), which plants sourceless "ghost" light nothing ever revisits (Bug 14) — so every claim is
+    /// re-verified on the main thread at merge time against the neighbor's LIVE data, and a claim the live
+    /// source no longer supports is routed through the standard cross-chunk sunlight-removal veto.
+    /// </summary>
+    public struct PullBackClaim
+    {
+        /// <summary>The re-lit voxel, in center-chunk local space — always inside [0,16)²×[0,128)
+        /// (halo pull-backs are not claimed; they surface as cross-chunk uplift mods instead).</summary>
+        public Vector3Int CenterPos;
+
+        /// <summary>The trusted neighbor voxel, in the 3x3 grid's local space (outside [0,16) on X or Z).</summary>
+        public Vector3Int NeighborPos;
+
+        /// <summary>The sky level the pull-back wrote (derived from the snapshot's neighbor value).</summary>
+        public byte WrittenSky;
+    }
+
     [BurstCompile]
     public struct NeighborhoodLightingJob : IJob
     {
@@ -119,6 +140,40 @@ namespace Jobs
         // before running the BFS. This detects and corrects stale light values at chunk boundaries.
         public bool PerformEdgeCheck;
 
+        // LI-2: the Y-band [BandMinY, BandHeight) actually gathered into the padded volumes (and later
+        // extracted), stored as a band-local prefix (padded row 0 == global Y BandMinY). Rows at/above
+        // BandHeight are un-gathered scratch: every read there is answered virtually from BandTopLight
+        // (the band derivation guarantees those rows are uniform air whose light the job can never
+        // change — see LightingBandDecision), and every write there is a provable no-op that is skipped
+        // while its cross-chunk mod is still emitted. ChunkMath.CHUNK_HEIGHT disables top banding (the
+        // virtual paths become unreachable: an in-range Y is always below the band, and an out-of-range
+        // Y short-circuits to the sentinel first).
+        public int BandHeight;
+
+        // LI-2 bottom band: global Y of the band's first gathered row. Rows below BandMinY are
+        // inert-dark in every chunk by the derivation (light uniformly 0, no emitters, no wave — incl.
+        // the unbounded downward vertical-sunlight rule — can reach them; see
+        // LightingBandDecision.DeriveBandMinY), so reads there are answered virtually from
+        // BandBottomLight and writes are value-preserving skips. The derivation's headroom additionally
+        // proves those reads/writes UNREACHABLE — the virtual paths are defense-in-depth, guarded by the
+        // band differential fuzz. 0 disables bottom banding (band-local Y == global Y).
+        public int BandMinY;
+
+        // LI-2: per-chunk uniform light at/above the band, indexed [cx][cz] with cx ∈ {0,1,2} = the
+        // West/center/East third of the padded X axis and cz likewise for South/center/North (see
+        // BandColumn). A present chunk's entry is its uniform packed ushort light (its region is
+        // uniform AIR, so the virtual voxel read is the packed-air constant 0); uint.MaxValue marks a
+        // missing chunk, whose virtual reads keep returning the out-of-world sentinels exactly like its
+        // gathered (sentinel-filled) rows would. Never consulted when BandHeight == CHUNK_HEIGHT.
+        public uint3x3 BandTopLight;
+
+        // LI-2 bottom band: per-chunk below-band entry, same [cx][cz] layout as BandTopLight. A present
+        // chunk's below-band region is inert-DARK by derivation, so its entry is packed light 0 (the
+        // virtual voxel read is the packed-air constant — see GetPackedData's bottom arm);
+        // uint.MaxValue marks a missing chunk (virtual reads return the out-of-world sentinels). Never
+        // consulted when BandMinY == 0.
+        public uint3x3 BandBottomLight;
+
         #endregion
 
         // --- OUTPUT Data  ---
@@ -127,6 +182,10 @@ namespace Jobs
 
         // A list of modifications for neighbor chunks. The job calculates these but can't apply them directly.
         public NativeList<LightModification> CrossChunkLightMods;
+
+        // The darkness-wave pull-back re-lights performed against neighbor SNAPSHOTS, recorded for
+        // main-thread re-verification against live data at merge time (the Bug 14 stale-ghost guard).
+        public NativeList<PullBackClaim> PullBackClaims;
 
         // A flag to indicate if the lighting in the central chunk has stabilized.
         public NativeArray<bool> IsStable;
@@ -168,6 +227,79 @@ namespace Jobs
         }
 
         /// <summary>
+        /// Fail-safe cap on the total nodes the seed + phase BFS loops may process in one pass. The
+        /// heaviest legitimate passes (full-column recalcs across the validation suite) stay well
+        /// below it; a runaway pass (Bug 16's infinite removal cycle, fixed July 2026) grows its Temp
+        /// queues unbounded inside a single Execute() until the process OOMs. Tripping the cap aborts the
+        /// pass loudly instead (console error + the last <see cref="NEAR_CAP_NODE_DUMP"/> nodes;
+        /// IsStable stays false, so the chunk retries) — a future termination regression degrades to
+        /// bounded, visible churn rather than a crash. The value must keep a capped pass's churn in
+        /// the tens of MB: even an aborted pass leaves its queue blocks in the frame's Temp linear
+        /// allocator (reset only at end-of-frame), so many capped jobs in one editor frame OOM'd at a
+        /// 4M cap during the Bug 16 bisection.
+        /// </summary>
+        private const long MAX_BFS_NODES_PER_PASS = 200_000;
+
+        /// <summary>
+        /// How many of the last nodes before a work-cap abort are dumped to the console, exposing
+        /// the runaway's cycling position/channel pattern (this is how Bug 16's cycle was proven).
+        /// </summary>
+        private const long NEAR_CAP_NODE_DUMP = 12;
+
+        /// <summary>
+        /// Reports a BFS loop aborted by the <see cref="MAX_BFS_NODES_PER_PASS"/> fail-safe
+        /// (Burst-safe FixedString logging only).
+        /// </summary>
+        /// <param name="phase">Which phase loop hit the cap.</param>
+        private void LogWorkCapAbort(in FixedString32Bytes phase)
+        {
+            FixedString512Bytes msg = "[LightingJob DIAG] Bug-16 BFS work cap exceeded - aborting phase ";
+            msg.Append(phase);
+            msg.Append((FixedString32Bytes)" chunk=(");
+            msg.Append(ChunkPosition.x);
+            msg.Append((FixedString32Bytes)",");
+            msg.Append(ChunkPosition.y);
+            msg.Append((FixedString32Bytes)") crossChunkMods=");
+            msg.Append(CrossChunkLightMods.Length);
+            msg.Append((FixedString32Bytes)" band=[");
+            msg.Append(BandMinY);
+            msg.Append((FixedString32Bytes)",");
+            msg.Append(BandHeight);
+            msg.Append((FixedString32Bytes)")");
+            Debug.LogError(msg);
+        }
+
+        /// <summary>
+        /// Dumps one BFS node processed just before a work-cap abort (see
+        /// <see cref="NEAR_CAP_NODE_DUMP"/>) — position, the node's old RGB (removal) or the cell's
+        /// current RGB (placement) — so a runaway's cycling pattern is readable from the console.
+        /// </summary>
+        /// <param name="phase">Which phase loop the node belongs to.</param>
+        /// <param name="pos">The node's BFS-local position.</param>
+        /// <param name="r">Red channel (node-old for removal, current for placement).</param>
+        /// <param name="g">Green channel.</param>
+        /// <param name="b">Blue channel.</param>
+        private static void LogNodeNearCap(in FixedString32Bytes phase, Vector3Int pos, byte r, byte g, byte b)
+        {
+            FixedString128Bytes msg = "[LightingJob DIAG] near-cap ";
+            msg.Append(phase);
+            msg.Append((FixedString32Bytes)" node=(");
+            msg.Append(pos.x);
+            msg.Append((FixedString32Bytes)",");
+            msg.Append(pos.y);
+            msg.Append((FixedString32Bytes)",");
+            msg.Append(pos.z);
+            msg.Append((FixedString32Bytes)") rgb=(");
+            msg.Append(r);
+            msg.Append((FixedString32Bytes)",");
+            msg.Append(g);
+            msg.Append((FixedString32Bytes)",");
+            msg.Append(b);
+            msg.Append((FixedString32Bytes)")");
+            Debug.LogWarning(msg);
+        }
+
+        /// <summary>
         /// Executes the flood-fill lighting propagation algorithm within the central chunk, crossing boundaries to its 8 neighbors if necessary.
         /// </summary>
         public void Execute()
@@ -178,10 +310,12 @@ namespace Jobs
             // ~305 µs gather floor on the worker thread instead, so the main thread pays only the snapshot
             // fill and the worker keeps the 2.4–3× branch-free BFS win. Bit-identical: the inputs are the
             // same unchanged snapshots and the gather logic is unchanged — only the call site moved.
+            // LI-2: both volumes gather only the band's rows (a band-local prefix, row 0 == BandMinY);
+            // reads outside answer virtually (see BandHeight / BandMinY).
             ChunkMath.GatherPaddedVoxels(PaddedVoxels, CenterVoxels,
-                VoxelW, VoxelE, VoxelS, VoxelN, VoxelSW, VoxelNW, VoxelSE, VoxelNE);
+                VoxelW, VoxelE, VoxelS, VoxelN, VoxelSW, VoxelNW, VoxelSE, VoxelNE, BandMinY, BandHeight);
             ChunkMath.GatherPaddedLight(PaddedLight, CenterLight,
-                LightW, LightE, LightS, LightN, LightSW, LightNW, LightSE, LightNE);
+                LightW, LightE, LightS, LightN, LightSW, LightNW, LightSE, LightNE, BandMinY, BandHeight);
 
             // Internal queues for the actual flood-fill algorithm. These are temporary for this job's execution.
             NativeQueue<LightRemovalNode> sunlightRemovalQueue = new NativeQueue<LightRemovalNode>(Allocator.Temp);
@@ -205,6 +339,12 @@ namespace Jobs
             // redundant apply-side in-chunk-support scans). Keyed by EncodeNeighborKey.
             NativeHashMap<long, byte> emittedSunRemovals = new NativeHashMap<long, byte>(16, Allocator.Temp);
 
+            // Bug 18: the same dedup set for the RGB cross-seam removal initiator (the blocklight mirror of
+            // the Bug 12 sunlight initiator). Kept distinct from emittedSunRemovals — both key on
+            // EncodeNeighborKey, so a shared set would let a sunlight removal to a neighbor suppress a
+            // legitimate blocklight removal to the same neighbor.
+            NativeHashMap<long, byte> emittedBlockRemovals = new NativeHashMap<long, byte>(16, Allocator.Temp);
+
             // --- PASS -2: SYNC EMISSION TO LIGHT ARRAY ---
             // The uint packed data has emission baked in by generation/placement, but the ushort
             // light array may be uninitialized. Scan center chunk blocks, write emission RGB so the
@@ -222,7 +362,10 @@ namespace Jobs
             }
 
             // --- PASS 0: SEEDING ---
-            // Seed the queues with initial changes from the main thread.
+            // Seed the queues with initial changes from the main thread. The seed loops share the
+            // phase loops' fail-safe work budget (MAX_BFS_NODES_PER_PASS) — an over-accumulated
+            // input queue aborts loudly instead of feeding a runaway.
+            long bfsWork = 0;
             while (SunlightColumnRecalcQueue.TryDequeue(out Vector2Int column))
             {
                 RecalculateSunlightForColumn(column.x, column.y, sunlightPlacementQueue, sunlightRemovalQueue);
@@ -230,6 +373,12 @@ namespace Jobs
 
             while (SunlightBfsQueue.TryDequeue(out LightQueueNode node))
             {
+                if (++bfsWork > MAX_BFS_NODES_PER_PASS)
+                {
+                    LogWorkCapAbort("sunSeed");
+                    break;
+                }
+
                 uint currentPacked = GetPackedData(node.Position);
                 if (currentPacked == uint.MaxValue) continue;
                 ushort currentLightData = GetLightData(node.Position);
@@ -238,10 +387,23 @@ namespace Jobs
                     sunlightRemovalQueue.Enqueue(new LightRemovalNode { Pos = node.Position, LightLevel = node.OldLightLevel });
                 else if (currentLight > node.OldLightLevel)
                     sunlightPlacementQueue.Enqueue(node.Position);
+                else if (currentLight > 0)
+                    // Unchanged-but-lit: an opacity-only change can keep the voxel's own value while
+                    // altering what its neighbors should receive (e.g. breaking a stone-top block
+                    // leaves the new air at its old stamped 15, but the faces it just exposed were
+                    // never stamped — Bug 15's in-chunk case). Re-spread; a no-deficiency wave is a
+                    // bounded no-op since PropagateLight only writes increases.
+                    sunlightPlacementQueue.Enqueue(node.Position);
             }
 
             while (BlocklightBfsQueue.TryDequeue(out LightQueueNode node))
             {
+                if (++bfsWork > MAX_BFS_NODES_PER_PASS)
+                {
+                    LogWorkCapAbort("blockSeed");
+                    break;
+                }
+
                 uint currentPacked = GetPackedData(node.Position);
                 if (currentPacked == uint.MaxValue) continue;
 
@@ -290,15 +452,60 @@ namespace Jobs
 
             // --- LIGHTING PASSES ---
             // The propagation logic now seamlessly crosses chunk borders within the 3x3 grid.
+            // One shared fail-safe work budget across the four phase loops (MAX_BFS_NODES_PER_PASS):
+            // a runaway pass aborts loudly instead of growing its queues until OOM.
             while (sunlightRemovalQueue.TryDequeue(out LightRemovalNode node))
-                PropagateDarkness(node, LightChannel.Sun, sunlightPlacementQueue, sunlightRemovalQueue, ref emittedSunRemovals);
+            {
+                if (++bfsWork > MAX_BFS_NODES_PER_PASS)
+                {
+                    LogWorkCapAbort("sunRemoval");
+                    break;
+                }
+
+                PropagateDarkness(node, LightChannel.Sun, sunlightPlacementQueue, sunlightRemovalQueue, ref emittedSunRemovals, ref emittedBlockRemovals);
+            }
+
             while (sunlightPlacementQueue.TryDequeue(out Vector3Int pos))
+            {
+                if (++bfsWork > MAX_BFS_NODES_PER_PASS)
+                {
+                    LogWorkCapAbort("sunPlacement");
+                    break;
+                }
+
                 PropagateLight(pos, LightChannel.Sun, sunlightPlacementQueue);
+            }
 
             while (blocklightRemovalQueue.TryDequeue(out LightRemovalNode node))
-                PropagateDarkness(node, LightChannel.Block, blocklightPlacementQueue, blocklightRemovalQueue, ref emittedSunRemovals);
+            {
+                if (++bfsWork > MAX_BFS_NODES_PER_PASS)
+                {
+                    LogWorkCapAbort("blockRemoval");
+                    break;
+                }
+
+                if (bfsWork > MAX_BFS_NODES_PER_PASS - NEAR_CAP_NODE_DUMP)
+                    LogNodeNearCap("blockRemoval", node.Pos, node.LightR, node.LightG, node.LightB);
+                PropagateDarkness(node, LightChannel.Block, blocklightPlacementQueue, blocklightRemovalQueue, ref emittedSunRemovals, ref emittedBlockRemovals);
+            }
+
             while (blocklightPlacementQueue.TryDequeue(out Vector3Int pos))
+            {
+                if (++bfsWork > MAX_BFS_NODES_PER_PASS)
+                {
+                    LogWorkCapAbort("blockPlacement");
+                    break;
+                }
+
+                if (bfsWork > MAX_BFS_NODES_PER_PASS - NEAR_CAP_NODE_DUMP)
+                {
+                    ushort dumpLight = GetLightData(pos);
+                    LogNodeNearCap("blockPlacement", pos, LightBitMapping.GetBlocklightR(dumpLight),
+                        LightBitMapping.GetBlocklightG(dumpLight), LightBitMapping.GetBlocklightB(dumpLight));
+                }
+
                 PropagateLight(pos, LightChannel.Block, blocklightPlacementQueue);
+            }
 
             // --- FINAL STEP ---
             // The lighting is stable if no more work was generated during this pass, AND no work was passed to neighbors.
@@ -312,6 +519,7 @@ namespace Jobs
             blocklightRemovalQueue.Dispose();
             blocklightPlacementQueue.Dispose();
             emittedSunRemovals.Dispose();
+            emittedBlockRemovals.Dispose();
         }
 
         /// <summary>
@@ -339,18 +547,22 @@ namespace Jobs
         /// <param name="blocklightPlacementQueue">The job-local blocklight placement BFS queue to seed.</param>
         private void SyncEmissionToLightArray(NativeQueue<Vector3Int> blocklightPlacementQueue)
         {
-            // Scan the CENTER chunk only — its [0,16)×[0,128)×[0,16) region within the padded volume.
-            // (The old section-contiguous Map/LightMap scan covered exactly these voxels; iterating local
-            // coordinates here lets us index the padded volume directly and enqueue the stamped position
-            // without the inverse-flatten step the old linear scan needed.)
-            for (int y = 0; y < VoxelData.ChunkHeight; y++)
+            // Scan the CENTER chunk only — its [0,16)×[BandMinY,BandHeight)×[0,16) region within the
+            // padded volume. (The old section-contiguous Map/LightMap scan covered exactly these voxels;
+            // iterating local coordinates here lets us index the padded volume directly and enqueue the
+            // stamped position without the inverse-flatten step the old linear scan needed.) Rows at/above
+            // the band are uniform AIR by the band derivation, so the full-height scan's `id == 0 →
+            // continue` would skip every one of them anyway — clamping the loop is identical. Rows below
+            // BandMinY are emitter-free by the derivation's emissive gate (an emitter always ends the
+            // inert-dark run), so the scan would stamp nothing there either.
+            for (int y = BandMinY; y < BandHeight; y++)
             {
                 for (int z = 0; z < VoxelData.ChunkWidth; z++)
                 {
                     for (int x = 0; x < VoxelData.ChunkWidth; x++)
                     {
                         int idx = ChunkMath.GetPaddedLightingIndex(
-                            x + ChunkMath.LIGHTING_HALO, y, z + ChunkMath.LIGHTING_HALO);
+                            x + ChunkMath.LIGHTING_HALO, y - BandMinY, z + ChunkMath.LIGHTING_HALO);
 
                         uint packed = PaddedVoxels[idx];
                         ushort id = BurstVoxelDataBitMapping.GetId(packed);
@@ -397,11 +609,11 @@ namespace Jobs
                    pos.z >= 0 && pos.z < VoxelData.ChunkWidth;
         }
 
-        private void PropagateDarkness(LightRemovalNode node, LightChannel channel, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue, ref NativeHashMap<long, byte> emittedSunRemovals)
+        private void PropagateDarkness(LightRemovalNode node, LightChannel channel, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue, ref NativeHashMap<long, byte> emittedSunRemovals, ref NativeHashMap<long, byte> emittedBlockRemovals)
         {
             if (channel == LightChannel.Block)
             {
-                PropagateDarknessRGB(node, pQueue, rQueue);
+                PropagateDarknessRGB(node, pQueue, rQueue, ref emittedBlockRemovals);
                 return;
             }
 
@@ -414,13 +626,25 @@ namespace Jobs
                 ushort neighborLightData = GetLightData(neighborPos);
                 byte neighborLight = LightBitMapping.GetSkyLight(neighborLightData);
 
-                if (neighborLight > 0)
+                if (neighborLight == 0 && !IsInCenterChunk(neighborPos))
+                {
+                    // A dark cross-seam neighbor may have been zeroed by THIS job's own wave earlier
+                    // (halo cells are job-local scratch); the pristine schedule-time snapshot still
+                    // holds its value. Re-derive a fully-opaque center's surface stamp from it —
+                    // claim-verified at merge, so a genuinely dark live neighbor clears it again
+                    // (Bug 15 residual: consecutive same-job waves over a seam stamp).
+                    PullBackDimmerCrossSeamStamp(node.Pos, neighborPos, neighborPacked,
+                        SampleSnapshotSkyLight(neighborPos));
+                }
+                else if (neighborLight > 0)
                 {
                     if (neighborLight < node.LightLevel)
                     {
                         SetSunlight(neighborPos, 0);
                         if (IsInCenterChunk(neighborPos))
                             rQueue.Enqueue(new LightRemovalNode { Pos = neighborPos, LightLevel = neighborLight });
+                        else
+                            PullBackDimmerCrossSeamStamp(node.Pos, neighborPos, neighborPacked, neighborLight);
                     }
                     else if (IsInCenterChunk(neighborPos))
                     {
@@ -428,16 +652,8 @@ namespace Jobs
                     }
                     else
                     {
-                        // The independent sky light lives across the border. The BFS must not
-                        // continue into the neighbor chunk, so pull the neighbor's attenuated
-                        // contribution back into the just-darkened center voxel instead of
-                        // silently dropping the re-spread seed (Bug 07 defect 2).
-                        uint centerPacked = GetPackedData(node.Pos);
-                        if (centerPacked != uint.MaxValue)
-                        {
-                            CheckEdgeVoxel(node.Pos, centerPacked, GetLightData(node.Pos),
-                                neighborPacked, neighborLightData, pQueue);
-                        }
+                        PullBackCrossSeamContribution(node.Pos, neighborPos, neighborPacked,
+                            neighborLightData, pQueue);
 
                         // Bug 12: a cross-seam neighbor sitting at EXACTLY the removed level, whose own
                         // column is NOT independently sky-lit, is the signature of a mutually-supporting
@@ -457,6 +673,12 @@ namespace Jobs
                         // light-propagation loop, and clearing its cross-seam surface value here would
                         // perturb a sky-exposed wall/floor. Without these guards this would spuriously clear
                         // ordinary sky-lit border voxels whenever a shadow's darkness wave reaches a seam.
+                        // A neighbor that this heuristic wrongly suspects (it IS independently fed, e.g. by
+                        // a sky-lit chunk on its far side) is protected on the apply side instead: the Bug 11
+                        // veto also credits LIVE cross-chunk support from chunks other than this emitter
+                        // (CrossChunkLightModApplier.CrossChunkSunlightSupport, the Bug 13 fix) — emitting
+                        // here from the stale snapshot and adjudicating there against live data keeps the
+                        // initiator aggressive without livelocking perimeter-fed seams.
                         if (neighborLight == node.LightLevel
                             && !BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsOpaque
                             && !IsVerticallySkyLit(neighborPos, neighborPacked))
@@ -467,10 +689,137 @@ namespace Jobs
         }
 
         /// <summary>
-        /// Per-channel RGB darkness removal for blocklight.
-        /// Each channel is compared independently against the removal node's old values.
+        /// Pulls a cross-seam neighbor's attenuated sunlight contribution back into a just-darkened
+        /// center voxel — the BFS must not continue into the neighbor chunk, so this re-derives the
+        /// center from the neighbor's snapshot instead of silently dropping the re-spread seed
+        /// (Bug 07 defect 2). The neighbor value is a schedule-time SNAPSHOT that may be stale (the
+        /// neighbor changed after it was taken), so the write is recorded as a
+        /// <see cref="PullBackClaim"/> and re-verified against the neighbor's LIVE data at merge time —
+        /// a claim the live source no longer supports is cleared through the standard removal veto
+        /// (Bug 14). Called for a cross-seam neighbor that can sustain the removed level (the ≥ arm);
+        /// a dimmer-but-lit neighbor is handled by <see cref="PullBackDimmerCrossSeamStamp"/> instead,
+        /// which re-derives fully-opaque surface stamps only.
         /// </summary>
-        private void PropagateDarknessRGB(LightRemovalNode node, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue)
+        /// <param name="centerPos">The just-darkened voxel being re-derived.</param>
+        /// <param name="neighborPos">The lit cross-seam (halo) neighbor supplying the contribution.</param>
+        /// <param name="neighborPacked">The neighbor's packed voxel data (already bounds-checked).</param>
+        /// <param name="neighborLightData">The neighbor's snapshot light value, captured before any halo write.</param>
+        /// <param name="pQueue">The sunlight placement queue for the re-spread seed.</param>
+        private void PullBackCrossSeamContribution(Vector3Int centerPos, Vector3Int neighborPos,
+            uint neighborPacked, ushort neighborLightData, NativeQueue<Vector3Int> pQueue)
+        {
+            uint centerPacked = GetPackedData(centerPos);
+            if (centerPacked == uint.MaxValue)
+                return;
+
+            byte pulledBack = CheckEdgeVoxel(centerPos, centerPacked, GetLightData(centerPos),
+                neighborPacked, neighborLightData, pQueue);
+
+            // Claims are only recorded for CENTER voxels — the merge-time verifier
+            // indexes this chunk's live data with CenterPos. A removal node CAN sit in
+            // the halo (the column-recalc shadow-caster check seeds cross-border
+            // neighbors), and a pull-back into a halo voxel becomes a cross-chunk
+            // uplift mod instead (SetSunlight's halo path), whose staleness is
+            // self-healing via the inbound-removal ordering.
+            if (pulledBack > 0 && IsInCenterChunk(centerPos))
+            {
+                PullBackClaims.Add(new PullBackClaim
+                {
+                    CenterPos = centerPos, NeighborPos = neighborPos, WrittenSky = pulledBack,
+                });
+            }
+        }
+
+        /// <summary>
+        /// Re-derives a just-darkened FULLY-OPAQUE center voxel's surface stamp from a dimmer-but-lit
+        /// cross-seam neighbor (Bug 15's order-dependent residual). The darkness wave zeroes the
+        /// neighbor's halo copy and emits a cross-chunk removal its chunk adjudicates; when that removal
+        /// is vetoed there (the neighbor survives), nothing ever revisits this seam — so the surface
+        /// stamp (<c>neighbor − 1</c>, the PropagateLight opaque-surface rule) is written here from the
+        /// pre-zero snapshot value and recorded as a <see cref="PullBackClaim"/>: merge-time verification
+        /// keeps it when the live neighbor still supports it and clears it through the removal veto when
+        /// the neighbor genuinely died. Opaque centers only — a stamp is written but never enqueued, so a
+        /// stale write cannot spread; re-lighting transparent centers from dimmer stale neighbors plants
+        /// spreading ghost light (attempted and rejected, see _FIXED_BUGS.md Lighting #19).
+        /// </summary>
+        /// <param name="centerPos">The just-darkened voxel whose stamp is re-derived.</param>
+        /// <param name="neighborPos">The dimmer lit cross-seam (halo) neighbor.</param>
+        /// <param name="neighborPacked">The neighbor's packed voxel data (already bounds-checked).</param>
+        /// <param name="neighborLight">The neighbor's sky value captured BEFORE its halo copy was zeroed
+        /// (or its pristine snapshot value when the halo copy already reads 0).</param>
+        private void PullBackDimmerCrossSeamStamp(Vector3Int centerPos, Vector3Int neighborPos,
+            uint neighborPacked, byte neighborLight)
+        {
+            // An opaque neighbor's stored value is a surface stamp, not a valid propagation source.
+            if (BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsOpaque)
+                return;
+
+            uint centerPacked = GetPackedData(centerPos);
+            if (centerPacked == uint.MaxValue)
+                return;
+            if (!BlockTypes[BurstVoxelDataBitMapping.GetId(centerPacked)].IsOpaque)
+                return;
+
+            byte stamp = (byte)math.max(0, neighborLight - 1);
+            if (stamp <= LightBitMapping.GetSkyLight(GetLightData(centerPos)))
+                return;
+
+            SetSunlight(centerPos, stamp);
+
+            // Claims are center-only (see PullBackCrossSeamContribution): a halo darkness node's own
+            // position is out-of-center, and its write surfaces as a cross-chunk mod instead.
+            if (IsInCenterChunk(centerPos))
+            {
+                PullBackClaims.Add(new PullBackClaim
+                {
+                    CenterPos = centerPos, NeighborPos = neighborPos, WrittenSky = stamp,
+                });
+            }
+        }
+
+        /// <summary>
+        /// Reads a position's sky light from the PRISTINE schedule-time snapshot maps (the
+        /// <c>[ReadOnly]</c> gather sources), bypassing the padded volume's job-local halo mutations.
+        /// Used by the Bug 15 residual pull-back: a halo cell this job's own darkness wave already
+        /// zeroed still has its schedule-time value here. Missing neighbors and out-of-height
+        /// positions read as 0 (never a stamp source).
+        /// </summary>
+        /// <param name="pos">The BFS-local position (center chunk space; halo positions lie outside [0,16)).</param>
+        /// <returns>The snapshot sky light, or 0 when the source is missing or out of bounds.</returns>
+        private byte SampleSnapshotSkyLight(Vector3Int pos)
+        {
+            if ((uint)pos.y >= VoxelData.ChunkHeight)
+                return 0;
+
+            int cx = pos.x < 0 ? -1 : (pos.x >= VoxelData.ChunkWidth ? 1 : 0);
+            int cz = pos.z < 0 ? -1 : (pos.z >= VoxelData.ChunkWidth ? 1 : 0);
+
+            NativeArray<ushort> source;
+            if (cx < 0)
+                source = cz < 0 ? LightSW : (cz > 0 ? LightNW : LightW);
+            else if (cx > 0)
+                source = cz < 0 ? LightSE : (cz > 0 ? LightNE : LightE);
+            else
+                source = cz < 0 ? LightS : (cz > 0 ? LightN : CenterLight);
+
+            // A missing neighbor is handed to the gather as a zero-length array (sentinel-filled there).
+            if (source.Length == 0)
+                return 0;
+
+            int localX = pos.x - cx * VoxelData.ChunkWidth;
+            int localZ = pos.z - cz * VoxelData.ChunkWidth;
+            return LightBitMapping.GetSkyLight(source[ChunkMath.GetFlattenedIndexInChunk(localX, pos.y, localZ)]);
+        }
+
+        /// <summary>
+        /// Per-channel RGB darkness removal for blocklight.
+        /// Each channel is compared independently against the removal node's old values. A
+        /// re-enqueued removal node carries the neighbor's pre-zero value ONLY for the channels this
+        /// visit actually removed — a kept channel belongs to a different source's gradient, and
+        /// letting its value ride along turns the wave into a cross-gradient remover and breaks the
+        /// BFS's per-channel strict-decrease termination guarantee (Bug 16's runaway removal cycle).
+        /// </summary>
+        private void PropagateDarknessRGB(LightRemovalNode node, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue, ref NativeHashMap<long, byte> emittedBlockRemovals)
         {
             for (int i = 0; i < 6; i++)
             {
@@ -501,7 +850,17 @@ namespace Jobs
                 {
                     SetBlocklightRGB(neighborPos, newR, newG, newB, isRemovalContext: true);
                     if (IsInCenterChunk(neighborPos))
-                        rQueue.Enqueue(new LightRemovalNode { Pos = neighborPos, LightR = nR, LightG = nG, LightB = nB });
+                    {
+                        // Mask the node to the channels actually zeroed here (kept channels carry 0):
+                        // see the method docstring — an unmasked node arms Bug 16's infinite cycle.
+                        rQueue.Enqueue(new LightRemovalNode
+                        {
+                            Pos = neighborPos,
+                            LightR = newR == nR ? (byte)0 : nR,
+                            LightG = newG == nG ? (byte)0 : nG,
+                            LightB = newB == nB ? (byte)0 : nB,
+                        });
+                    }
                 }
 
                 if (anyRespread)
@@ -519,6 +878,29 @@ namespace Jobs
                         uint centerPacked = GetPackedData(node.Pos);
                         if (centerPacked != uint.MaxValue)
                             CheckEdgeVoxelRGB(node.Pos, centerPacked, neighborPos, pQueue);
+
+                        // Bug 18: RGB mirror of the Bug 12 cross-seam removal initiator. A cross-seam
+                        // neighbor channel sitting at EXACTLY the removed level is the 2-cycle signature of a
+                        // mutually-supporting RGB loop straddling the boundary (voxel A here and voxel B the
+                        // neighbor, each lit "by" the other). Once the genuine source is gone the pull-back
+                        // above re-lights this side from the neighbor's still-high (possibly stale) value and
+                        // the neighbor's own job does the same, so — unlike an asymmetric gradient, which
+                        // always has a strictly-lower side the removal branch above handles — the pair locks
+                        // one level below the source forever (a stable-but-wrong over-bright field). Emit a
+                        // cross-chunk blocklight removal so the neighbor's chunk re-evaluates through the
+                        // Bug 17 independent-support veto (CrossChunkLightModApplier.ComputeBlocklight): a
+                        // channel a live independent source still backs is KEPT, the stale loop CLEARS. The
+                        // per-channel veto on the apply side decides which channels actually clear, so the mod
+                        // zeroes all channels and lets the veto keep the supported ones (mirror of the sky
+                        // initiator emitting from the stale snapshot and adjudicating against live data). An
+                        // opaque neighbor is skipped: it only stores surface blocklight and never propagates
+                        // it, so it is never a loop participant (mirror of the sky opaque guard).
+                        bool sigR = nR == node.LightR && node.LightR > 0;
+                        bool sigG = nG == node.LightG && node.LightG > 0;
+                        bool sigB = nB == node.LightB && node.LightB > 0;
+                        if ((sigR || sigG || sigB)
+                            && !BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsOpaque)
+                            EmitCrossChunkBlocklightRemoval(neighborPos, ref emittedBlockRemovals);
                     }
                 }
             }
@@ -709,7 +1091,10 @@ namespace Jobs
 
             // --- PASS 1: Above the highest block ---
             // Everything above this point is transparent to the sky and should be fully sunlit.
-            for (int y = VoxelData.ChunkHeight - 1; y > highestBlockY; y--)
+            // LI-2: start at the band top — the derivation's column-recalc rule guarantees the center's
+            // rows at/above the band are already uniform full-sky whenever a recalc is queued (any other
+            // top value forces a full-height band), so the skipped iterations would write nothing.
+            for (int y = BandHeight - 1; y > highestBlockY; y--)
             {
                 Vector3Int currentPos = new Vector3Int(x, y, z);
                 byte oldSunlight = LightBitMapping.GetSkyLight(GetLightData(currentPos));
@@ -756,6 +1141,9 @@ namespace Jobs
 
             // --- PASS 2: At and below the highest block (with correct attenuation) ---
             // Propagate light downwards, now correctly reducing light based on each block's opacity.
+            // LI-2 bottom band: this walk reaches Y=0 unconditionally, which is exactly why the
+            // derivation forces BandMinY = 0 whenever any column recalc is queued — every read/write
+            // below lands in gathered rows.
             byte lightFromSky = 15;
             for (int y = highestBlockY; y >= 0; y--)
             {
@@ -799,7 +1187,13 @@ namespace Jobs
             // West border (x=0, neighbor at x=-1), East border (x=15, neighbor at x=+1)
             for (int border = 0; border < 4; border++)
             {
-                for (int y = 0; y < VoxelData.ChunkHeight; y++)
+                // LI-2: rows at/above the band are excluded — the band derivation's cross-seam consistency
+                // rule proves an edge check there would write nothing (mismatched uniform regions force a
+                // full-height band instead), so clamping the scan is identical to running it. Rows below
+                // BandMinY are excluded likewise: both sides of every seam are uniformly DARK there (a
+                // zero source never out-writes anything), and the opaque-emission substitution in
+                // CheckEdgeVoxelRGB is ruled out by the derivation's emissive gate.
+                for (int y = BandMinY; y < BandHeight; y++)
                 {
                     for (int along = 0; along < VoxelData.ChunkWidth; along++)
                     {
@@ -847,10 +1241,18 @@ namespace Jobs
         /// <summary>
         /// Checks a single border voxel's sunlight against its cross-chunk neighbor.
         /// Detects missing light (black spots) where the neighbor has light that should propagate here.
+        /// An opaque center voxel still RECEIVES the surface stamp (source − 1, mirroring
+        /// <see cref="PropagateLight"/>'s opaque-neighbor arm) — it is written but never enqueued,
+        /// since opaque voxels do not propagate. Refusing the stamp here made every cross-seam
+        /// re-derivation path unable to restore a wiped seam-face stamp (Bug 15).
         /// </summary>
         /// <param name="neighborPacked">The cross-chunk neighbor's packed voxel data, used to reject an
         /// opaque neighbor as a light source (its sky value is non-transmissible surface light).</param>
-        private void CheckEdgeVoxel(
+        /// <returns>The sky level written to <paramref name="centerPos"/>, or 0 when nothing was written
+        /// (a write is always ≥ 1). The darkness-wave pull-back records non-zero returns as
+        /// <see cref="PullBackClaim"/>s for main-thread re-verification; the edge-check pass ignores the
+        /// return (its staleness is reconciled by the iterative edge-check rounds).</returns>
+        private byte CheckEdgeVoxel(
             Vector3Int centerPos, uint centerPacked, ushort centerLightData,
             uint neighborPacked, ushort neighborLightData,
             NativeQueue<Vector3Int> placementQueue)
@@ -858,15 +1260,25 @@ namespace Jobs
             byte centerLight = LightBitMapping.GetSkyLight(centerLightData);
             byte neighborLight = LightBitMapping.GetSkyLight(neighborLightData);
 
-            BlockTypeJobData centerProps = BlockTypes[BurstVoxelDataBitMapping.GetId(centerPacked)];
-            if (centerProps.IsOpaque) return;
-
             // An opaque neighbor cannot transmit sunlight across the border: its sky value is
             // non-propagable surface light (opaque blocks have no sky emission), so seeding from it would
             // leak light out of a wall into the adjacent chunk (Bug 10). Mirror of the IsOpaque source
             // guard in PropagateLight; the add-only edge check could never reconcile the surplus away.
             BlockTypeJobData neighborProps = BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)];
-            if (neighborProps.IsOpaque) return;
+            if (neighborProps.IsOpaque) return 0;
+
+            BlockTypeJobData centerProps = BlockTypes[BurstVoxelDataBitMapping.GetId(centerPacked)];
+            if (centerProps.IsOpaque)
+            {
+                byte stamp = (byte)math.max(0, neighborLight - 1);
+                if (stamp > centerLight)
+                {
+                    SetSunlight(centerPos, stamp);
+                    return stamp;
+                }
+
+                return 0;
+            }
 
             byte expectedFromNeighbor = AttenuateLight(neighborLight, centerProps.Opacity);
 
@@ -874,19 +1286,25 @@ namespace Jobs
             {
                 SetSunlight(centerPos, expectedFromNeighbor);
                 placementQueue.Enqueue(centerPos);
+                return expectedFromNeighbor;
             }
+
+            return 0;
         }
 
         /// <summary>
         /// Checks a single border voxel's blocklight RGB against its cross-chunk neighbor.
-        /// Per-channel comparison detects missing light on any channel.
+        /// Per-channel comparison detects missing light on any channel. An opaque center voxel still
+        /// RECEIVES per-channel surface stamps (source − 1, mirroring <see cref="PropagateLightRGB"/>'s
+        /// opaque-neighbor arm) — written but never enqueued, since opaque voxels do not propagate.
+        /// Refusing the stamp here made every cross-seam re-derivation path unable to restore a wiped
+        /// seam-face stamp (Bug 15).
         /// </summary>
         private void CheckEdgeVoxelRGB(
             Vector3Int centerPos, uint centerPacked, Vector3Int neighborPos,
             NativeQueue<Vector3Int> placementQueue)
         {
             BlockTypeJobData centerProps = BlockTypes[BurstVoxelDataBitMapping.GetId(centerPacked)];
-            if (centerProps.IsOpaque) return;
 
             // No light-sentinel check: every caller has already bounds-checked both positions via
             // GetPackedData (0xFFFF is a legitimate fully-lit value).
@@ -915,9 +1333,19 @@ namespace Jobs
                 nB = neighborProps.EmissionB;
             }
 
-            byte expR = AttenuateLight(nR, centerProps.Opacity);
-            byte expG = AttenuateLight(nG, centerProps.Opacity);
-            byte expB = AttenuateLight(nB, centerProps.Opacity);
+            byte expR, expG, expB;
+            if (centerProps.IsOpaque)
+            {
+                expR = (byte)math.max(0, nR - 1);
+                expG = (byte)math.max(0, nG - 1);
+                expB = (byte)math.max(0, nB - 1);
+            }
+            else
+            {
+                expR = AttenuateLight(nR, centerProps.Opacity);
+                expG = AttenuateLight(nG, centerProps.Opacity);
+                expB = AttenuateLight(nB, centerProps.Opacity);
+            }
 
             byte finalR = (byte)math.max(cR, (int)expR);
             byte finalG = (byte)math.max(cG, (int)expG);
@@ -926,7 +1354,8 @@ namespace Jobs
             if (finalR != cR || finalG != cG || finalB != cB)
             {
                 SetBlocklightRGB(centerPos, finalR, finalG, finalB, isRemovalContext: false);
-                placementQueue.Enqueue(centerPos);
+                if (!centerProps.IsOpaque)
+                    placementQueue.Enqueue(centerPos);
             }
         }
 
@@ -940,34 +1369,94 @@ namespace Jobs
         /// - A position like (17, y, 17) is the +1 diagonal rim of the North-East neighbor (padded 19,19).
         /// Sentinel semantics are preserved exactly: out-of-Y → uint.MaxValue; horizontally beyond the
         /// 2-voxel halo (grid x/z outside [-2,17]) → uint.MaxValue; a missing neighbor → uint.MaxValue
-        /// (the gather fill stamps MaxValue into that region). The center voxel volume is read-only.
+        /// (the gather fill stamps MaxValue into that region). LI-2: an in-range Y at/above the band is
+        /// answered virtually — packed air for a present chunk's uniform region, the sentinel for a
+        /// missing chunk's. The center voxel volume is read-only.
         private uint GetPackedData(Vector3Int pos)
         {
-            if (pos.y is < 0 or >= VoxelData.ChunkHeight) return uint.MaxValue;
+            if (pos.y < 0) return uint.MaxValue;
 
             int px = pos.x + ChunkMath.LIGHTING_HALO;
             int pz = pos.z + ChunkMath.LIGHTING_HALO;
             if ((uint)px >= ChunkMath.PADDED_CHUNK_WIDTH || (uint)pz >= ChunkMath.PADDED_CHUNK_WIDTH)
                 return uint.MaxValue;
 
-            return PaddedVoxels[ChunkMath.GetPaddedLightingIndex(px, pos.y, pz)];
+            if (pos.y >= BandHeight)
+            {
+                if (pos.y >= VoxelData.ChunkHeight) return uint.MaxValue;
+                return BandTopLight[BandColumn(px)][BandColumn(pz)] == uint.MaxValue
+                    ? uint.MaxValue
+                    : PACKED_AIR;
+            }
+
+            // LI-2 bottom band: below-band rows are inert-dark by derivation AND provably unreachable
+            // (headroom + heightmap rules) — this arm is defense-in-depth. Packed air (the "loud" wrong
+            // answer for buried terrain) is deliberate: a derivation bug diverges visibly under the band
+            // differential fuzz instead of quietly imitating a world edge.
+            if (pos.y < BandMinY)
+            {
+                return BandBottomLight[BandColumn(px)][BandColumn(pz)] == uint.MaxValue
+                    ? uint.MaxValue
+                    : PACKED_AIR;
+            }
+
+            return PaddedVoxels[ChunkMath.GetPaddedLightingIndex(px, pos.y - BandMinY, pz)];
         }
 
         /// <summary>
         /// Gets the ushort light data for a position in the 3x3 grid, read from the halo-padded light
         /// volume. Returns ushort.MaxValue for out-of-bounds positions (out-of-Y, beyond the 2-voxel
         /// halo, or a missing neighbor — the latter stamped MaxValue into the volume by the gather fill).
+        /// LI-2: an in-range Y at/above the band is answered virtually — the chunk's uniform light for a
+        /// present chunk's region, the sentinel for a missing chunk's.
         /// </summary>
         private ushort GetLightData(Vector3Int pos)
         {
-            if (pos.y is < 0 or >= VoxelData.ChunkHeight) return ushort.MaxValue;
+            if (pos.y < 0) return ushort.MaxValue;
 
             int px = pos.x + ChunkMath.LIGHTING_HALO;
             int pz = pos.z + ChunkMath.LIGHTING_HALO;
             if ((uint)px >= ChunkMath.PADDED_CHUNK_WIDTH || (uint)pz >= ChunkMath.PADDED_CHUNK_WIDTH)
                 return ushort.MaxValue;
 
-            return PaddedLight[ChunkMath.GetPaddedLightingIndex(px, pos.y, pz)];
+            if (pos.y >= BandHeight)
+            {
+                if (pos.y >= VoxelData.ChunkHeight) return ushort.MaxValue;
+                uint uniform = BandTopLight[BandColumn(px)][BandColumn(pz)];
+                return uniform == uint.MaxValue ? ushort.MaxValue : (ushort)uniform;
+            }
+
+            // LI-2 bottom band: a present chunk's below-band rows read uniformly dark (0); a missing
+            // chunk keeps the sentinel. Unreachable by derivation — see GetPackedData's bottom arm.
+            if (pos.y < BandMinY)
+            {
+                uint dark = BandBottomLight[BandColumn(px)][BandColumn(pz)];
+                return dark == uint.MaxValue ? ushort.MaxValue : (ushort)dark;
+            }
+
+            return PaddedLight[ChunkMath.GetPaddedLightingIndex(px, pos.y - BandMinY, pz)];
+        }
+
+        /// <summary>The packed-voxel value of default air — what the job maps hold for a null (all-air)
+        /// section (see <c>ChunkData.FillJobVoxelMap</c>), and therefore the virtual voxel value of every
+        /// present chunk's uniform top region.</summary>
+        private const uint PACKED_AIR = 0;
+
+        /// <summary>
+        /// Maps a padded X or Z coordinate onto its <see cref="BandTopLight"/> table index: 0 for the
+        /// halo third belonging to the West/South neighbor, 1 for the center span, 2 for the East/North
+        /// third. Only meaningful for in-range padded coordinates (callers bounds-check first).
+        /// </summary>
+        /// <param name="paddedAxis">A padded-volume X or Z coordinate in [0, PADDED_CHUNK_WIDTH).</param>
+        /// <returns>The 3×3 table index along that axis.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int BandColumn(int paddedAxis)
+        {
+            return paddedAxis < ChunkMath.LIGHTING_HALO
+                ? 0
+                : paddedAxis < ChunkMath.LIGHTING_HALO + ChunkMath.CHUNK_WIDTH
+                    ? 1
+                    : 2;
         }
 
         /// <summary>
@@ -1038,6 +1527,29 @@ namespace Jobs
         }
 
         /// <summary>
+        /// Bug 18: emits a cross-chunk blocklight removal mod for a seam neighbor caught at the 2-cycle
+        /// signature — the RGB mirror of <see cref="EmitCrossChunkSunlightRemoval"/>. The mod zeroes all
+        /// channels with <c>IsRemoval</c>; the receiving chunk's apply path adjudicates it per channel
+        /// through the Bug 17 independent-support veto
+        /// (<c>CrossChunkLightModApplier.ComputeBlocklight</c>), keeping any channel a live independent
+        /// source still backs and clearing the stale mutual-support loop. One mod per neighbor suffices
+        /// (the apply is idempotent); dedup on the neighbor key like the sunlight initiator.
+        /// </summary>
+        /// <param name="neighborPos">The cross-seam neighbor to re-evaluate for removal.</param>
+        /// <param name="emittedBlockRemovals">Per-job dedup set of already-emitted blocklight-removal neighbor keys.</param>
+        private void EmitCrossChunkBlocklightRemoval(Vector3Int neighborPos, ref NativeHashMap<long, byte> emittedBlockRemovals)
+        {
+            if (!emittedBlockRemovals.TryAdd(EncodeNeighborKey(neighborPos.x, neighborPos.y, neighborPos.z), 0))
+                return;
+
+            CrossChunkLightMods.Add(new LightModification
+            {
+                GlobalPosition = LocalToGlobal(neighborPos), LightLevel = 0, Channel = LightChannel.Block,
+                BlockR = 0, BlockG = 0, BlockB = 0, IsRemoval = true,
+            });
+        }
+
+        /// <summary>
         /// Sets sunlight level in the padded light volume (the single writable store for both center and
         /// halo cells). For blocklight, use <see cref="SetBlocklightRGB"/> instead.
         /// <para>The in-place RMW reads the live padded value exactly as the old write-through cache did,
@@ -1053,8 +1565,15 @@ namespace Jobs
             int pz = localPos.z + ChunkMath.LIGHTING_HALO;
             if ((uint)px >= ChunkMath.PADDED_CHUNK_WIDTH || (uint)pz >= ChunkMath.PADDED_CHUNK_WIDTH) return;
 
-            int idx = ChunkMath.GetPaddedLightingIndex(px, localPos.y, pz);
-            PaddedLight[idx] = LightBitMapping.SetSkyLight(PaddedLight[idx], lightLevel);
+            // LI-2: a write outside the band targets an un-gathered row. The band derivation proves it
+            // is value-preserving (the region is uniform/inert and no wave can change it), so the store
+            // is skipped — but the cross-chunk mod below is still emitted, keeping the mod stream
+            // identical to the full-height run's.
+            if (localPos.y >= BandMinY && localPos.y < BandHeight)
+            {
+                int idx = ChunkMath.GetPaddedLightingIndex(px, localPos.y - BandMinY, pz);
+                PaddedLight[idx] = LightBitMapping.SetSkyLight(PaddedLight[idx], lightLevel);
+            }
 
             if (localPos.x < 0 || localPos.x >= VoxelData.ChunkWidth ||
                 localPos.z < 0 || localPos.z >= VoxelData.ChunkWidth)
@@ -1085,8 +1604,13 @@ namespace Jobs
             int pz = localPos.z + ChunkMath.LIGHTING_HALO;
             if ((uint)px >= ChunkMath.PADDED_CHUNK_WIDTH || (uint)pz >= ChunkMath.PADDED_CHUNK_WIDTH) return;
 
-            int idx = ChunkMath.GetPaddedLightingIndex(px, localPos.y, pz);
-            PaddedLight[idx] = LightBitMapping.SetBlocklightRGB(PaddedLight[idx], r, g, b);
+            // LI-2: skip the store outside the band (value-preserving by the band derivation), but keep
+            // emitting the cross-chunk mod below — see SetSunlight.
+            if (localPos.y >= BandMinY && localPos.y < BandHeight)
+            {
+                int idx = ChunkMath.GetPaddedLightingIndex(px, localPos.y - BandMinY, pz);
+                PaddedLight[idx] = LightBitMapping.SetBlocklightRGB(PaddedLight[idx], r, g, b);
+            }
 
             if (localPos.x < 0 || localPos.x >= VoxelData.ChunkWidth ||
                 localPos.z < 0 || localPos.z >= VoxelData.ChunkWidth)

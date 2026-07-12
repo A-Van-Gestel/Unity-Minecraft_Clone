@@ -5,6 +5,7 @@ using Editor.Validation.Behavior.Framework;
 using Editor.Validation.Framework;
 using Jobs.BurstData;
 using UnityEngine;
+using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.Behavior
 {

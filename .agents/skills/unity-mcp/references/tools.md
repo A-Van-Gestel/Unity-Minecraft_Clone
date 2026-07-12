@@ -49,7 +49,7 @@ internal class CommandScript : IRunCommand
     {
         var world = Object.FindFirstObjectByType<World>();
         if (world == null) { result.LogError("World not found"); return; }
-        result.Log("Loaded chunks: {0}", world.LoadedChunks.Count);
+        result.Log("Chunks in memory: {0}", world.worldData.Chunks.Count);
     }
 }
 ```

@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Helpers;
 using JetBrains.Annotations;
 using Jobs.BurstData;
 using Unity.Collections;
 using UnityEngine;
+using Debug = UnityEngine.Debug;
 
 namespace Data
 {
@@ -173,6 +175,12 @@ namespace Data
         /// </summary>
         [NonSerialized]
         public int RemainingEdgeCheckRounds = 2;
+
+        // Edge-check budget re-granted to a chunk when an opacity-changing edit lands in one of its
+        // border columns (Bug 05). Post-generation the counter is already 0, so a border edit's
+        // cross-seam under-report would have no edge-check round to reconcile it; one round (self +
+        // cardinal neighbors, add-only) is enough to heal it — see ModifyVoxel.
+        private const int BORDER_EDIT_EDGE_CHECK_ROUNDS = 1;
 
         [NonSerialized]
         private readonly Queue<LightQueueNode> _sunlightBfsQueue = new Queue<LightQueueNode>();
@@ -533,6 +541,17 @@ namespace Data
             if (lightingEnabled && newProps.opacity != oldProps.opacity)
             {
                 World.Instance.worldData.QueueSunlightRecalculation(new Vector2Int(localPos.x + Position.x, localPos.z + Position.y));
+
+                // Bug 05: an opacity edit in a border column can under-report cross-seam sky light, and
+                // after generation both edge-check rounds are already spent — leaving no round to
+                // reconcile it, since edge checks are the only corrector for under-bright border light
+                // (LIGHTING_SYSTEM_OVERVIEW §3.6/§3.7). Re-grant a bounded budget so the post-edit
+                // stabilization re-runs the border check on this chunk and its cardinal neighbors. This
+                // is add-only and bounded, so it cannot livelock.
+                bool isBorderColumn = localPos.x == 0 || localPos.x == VoxelData.ChunkWidth - 1
+                                                      || localPos.z == 0 || localPos.z == VoxelData.ChunkWidth - 1;
+                if (isBorderColumn)
+                    RemainingEdgeCheckRounds = Math.Max(RemainingEdgeCheckRounds, BORDER_EDIT_EDGE_CHECK_ROUNDS);
             }
 
             // --- Notify World and Handle Active Voxels ---
@@ -779,6 +798,29 @@ namespace Data
         #region Chunk Section Methods
 
         /// <summary>
+        /// Editor/development-build bounds guard for the local-coordinate accessors: throws when
+        /// x/z is outside [0, ChunkWidth) or y is outside [0, ChunkHeight). Without it, an
+        /// out-of-bounds local is a position lottery — silent uniform-sky read, silent wrong-voxel
+        /// alias, or a throw depending on the coordinates — which hides contract violations
+        /// (lighting fidelity finding A5). Compiles to nothing in non-development builds; the
+        /// accessors are the engine's hottest reads.
+        /// </summary>
+        /// <param name="x">Local X to validate.</param>
+        /// <param name="y">Local Y to validate.</param>
+        /// <param name="z">Local Z to validate.</param>
+        [Conditional("UNITY_EDITOR"), Conditional("DEVELOPMENT_BUILD")]
+        private void AssertLocalPositionInChunk(int x, int y, int z)
+        {
+            if ((uint)x >= VoxelData.ChunkWidth ||
+                (uint)z >= VoxelData.ChunkWidth ||
+                (uint)y >= VoxelData.ChunkHeight)
+                throw new ArgumentOutOfRangeException(nameof(x),
+                    $"ChunkData local position out of range: ({x.ToString()}, {y.ToString()}, {z.ToString()}) " +
+                    $"in chunk {Position.ToString()} — x/z must be in [0, {VoxelData.ChunkWidth.ToString()}), " +
+                    $"y in [0, {VoxelData.ChunkHeight.ToString()}).");
+        }
+
+        /// <summary>
         /// Sets the packed voxel data at the specified local coordinates.
         /// Automatically handles the creation of ChunkSections if they don't exist.
         /// </summary>
@@ -790,6 +832,8 @@ namespace Data
         /// <param name="oldBlockProperties">The properties of the block being replaced (can be null).</param>
         public void SetVoxel(int x, int y, int z, uint value, [CanBeNull] BlockType newBlockProperties, [CanBeNull] BlockType oldBlockProperties)
         {
+            AssertLocalPositionInChunk(x, y, z);
+
             int sectionY = y / ChunkMath.SECTION_SIZE;
             int localY = y % ChunkMath.SECTION_SIZE;
 
@@ -823,6 +867,15 @@ namespace Data
             if (!wasOldOpaque && isNewOpaque) sections[sectionY].opaqueCount++;
             else if (wasOldOpaque && !isNewOpaque) sections[sectionY].opaqueCount--;
 
+            // Handle EmissiveCount for the LI-2 bottom-band derivation. Unlike the opacity bookkeeping
+            // above, this must stay correct through the simplified overload (null properties), so the
+            // test goes through the palette-independent EmissiveBlockLookup rather than the parameters.
+            bool wasOldEmissive = EmissiveBlockLookup.IsEmissive(BurstVoxelDataBitMapping.GetId(oldValue));
+            bool isNewEmissive = EmissiveBlockLookup.IsEmissive(BurstVoxelDataBitMapping.GetId(value));
+
+            if (!wasOldEmissive && isNewEmissive) sections[sectionY].emissiveCount++;
+            else if (wasOldEmissive && !isNewEmissive) sections[sectionY].emissiveCount--;
+
             // Set voxel
             sections[sectionY].voxels[index] = value;
 
@@ -852,6 +905,8 @@ namespace Data
         /// <returns>The packed uint data.</returns>
         public uint GetVoxel(int x, int y, int z)
         {
+            AssertLocalPositionInChunk(x, y, z);
+
             int sectionY = y / ChunkMath.SECTION_SIZE;
 
             // If section is null, it's implicitly Air
@@ -869,6 +924,8 @@ namespace Data
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ushort GetLightData(int x, int y, int z)
         {
+            AssertLocalPositionInChunk(x, y, z);
+
             int sectionY = y / ChunkMath.SECTION_SIZE;
             byte uniformSky = SectionUniformSkyLevel[sectionY];
             if (uniformSky != UNIFORM_SKY_NONE)
@@ -886,6 +943,8 @@ namespace Data
         /// </summary>
         public void SetLightData(int x, int y, int z, ushort value)
         {
+            AssertLocalPositionInChunk(x, y, z);
+
             int sectionY = y / ChunkMath.SECTION_SIZE;
             PromoteCompactSection(sectionY);
             if (sections[sectionY] == null)
@@ -952,6 +1011,104 @@ namespace Data
                 else
                     NativeArray<ushort>.Copy(s_emptySectionLight, 0, jobArray, i * sectionSize, sectionSize);
             }
+        }
+
+        /// <summary>
+        /// Summarizes this chunk's <b>uniform top region</b> for the LI-2 lighting Y-band derivation
+        /// (<see cref="LightingBandDecision"/>): scanning sections from the top down, the run of
+        /// sections that are voxel-empty (null — all air, job maps zero-filled) and share one uniform
+        /// light value (the compact <see cref="SectionUniformSkyLevel"/> byte, or all-zero when fully
+        /// unallocated). The banded lighting job answers reads at/above the returned Y from this
+        /// summary instead of gathered rows, so the semantics here must match what
+        /// <see cref="FillJobVoxelMap"/>/<see cref="FillJobLightMap"/> would have produced.
+        /// </summary>
+        /// <returns>The uniform-top summary (never <see cref="LightingBandChunkTop.Missing"/>).</returns>
+        public LightingBandChunkTop GetLightingBandTop()
+        {
+            int fromSection = sections.Length;
+            ushort regionLight = 0;
+
+            for (int s = sections.Length - 1; s >= 0; s--)
+            {
+                // A non-null section has voxels — the job map would carry real data, not uniform air.
+                if (sections[s] != null)
+                    break;
+
+                byte uniformSky = SectionUniformSkyLevel[s];
+                ushort light = uniformSky != UNIFORM_SKY_NONE
+                    ? LightBitMapping.PackLightData(uniformSky, 0, 0, 0)
+                    : (ushort)0;
+
+                if (fromSection == sections.Length)
+                    regionLight = light; // topmost section fixes the region's value
+                else if (light != regionLight)
+                    break; // uniform per-section but a different value — region ends above this one
+
+                fromSection = s;
+            }
+
+            return new LightingBandChunkTop
+            {
+                UniformFromY = fromSection * ChunkMath.SECTION_SIZE,
+                UniformLight = regionLight,
+                IsMissing = false,
+            };
+        }
+
+        /// <summary>
+        /// Summarizes this chunk's <b>inert-dark bottom region</b> for the LI-2 bottom-band derivation
+        /// (the bottom mirror of <see cref="GetLightingBandTop"/>): scanning sections from the bottom
+        /// up, the run of sections whose light is uniformly ZERO — the pitch-black compaction byte
+        /// (<see cref="SectionUniformSkyLevel"/> == 0, voxels kept or not) or a fully unallocated slot
+        /// (null section, no compaction byte — <see cref="GetLightData"/> reads 0) — and that contain
+        /// no light-emitting voxels (<see cref="ChunkSection.emissiveCount"/>, which the lighting job's
+        /// emission-sync scan would otherwise need to visit). Rows below the returned Y read as light 0
+        /// and can never receive or supply light, so the banded job may skip gathering them.
+        /// </summary>
+        /// <returns>The inert-dark bottom summary (never <see cref="LightingBandChunkBottom.Missing"/>).</returns>
+        public LightingBandChunkBottom GetLightingBandBottom()
+        {
+            int inertUpToY = 0;
+
+            for (int s = 0; s < sections.Length; s++)
+            {
+                byte uniformSky = SectionUniformSkyLevel[s];
+                ChunkSection section = sections[s];
+
+                // Light must be uniformly zero: compacted pitch-black, or fully unallocated.
+                if (uniformSky != 0 && !(section == null && uniformSky == UNIFORM_SKY_NONE))
+                    break;
+
+                // A dark section holding an (unstamped) emitter ends the region — the emission-sync
+                // scan must still visit it.
+                if (section != null && section.emissiveCount > 0)
+                    break;
+
+                inertUpToY = (s + 1) * ChunkMath.SECTION_SIZE;
+            }
+
+            return new LightingBandChunkBottom
+            {
+                InertUpToY = inertUpToY,
+                IsMissing = false,
+            };
+        }
+
+        /// <summary>
+        /// The chunk's lowest heightmap entry — the input to the bottom-band descending-sunlight rule
+        /// (<see cref="LightingBandDecision.DeriveBandMinY"/>): a vertical sky-15 descent stops at each
+        /// column's heightmap block, so no unbounded descent can pass below this Y.
+        /// </summary>
+        /// <returns>The minimum over all 256 column heightmap entries.</returns>
+        public int GetHeightmapMinY()
+        {
+            int min = int.MaxValue;
+            foreach (ushort height in heightMap)
+            {
+                if (height < min) min = height;
+            }
+
+            return min;
         }
 
         /// <summary>Zero-fills a full-chunk voxel job buffer (missing-chunk fallback).</summary>
@@ -1152,15 +1309,24 @@ namespace Data
         /// Flushes the managed blocklight queue into a NativeQueue for Burst Job processing.
         /// </summary>
         /// <param name="allocator">The memory allocator to use (e.g., Allocator.TempJob).</param>
+        /// <param name="maxNodeY">Highest node Y flushed, or −1 when the queue was empty — an LI-2
+        /// band-derivation input (see <see cref="LightingBandDecision"/>).</param>
+        /// <param name="minNodeY">Lowest node Y flushed, or <c>int.MaxValue</c> when the queue was
+        /// empty — the LI-2 bottom-band mirror of <paramref name="maxNodeY"/>.</param>
         /// <returns>A populated NativeQueue containing the light nodes.</returns>
-        public NativeQueue<LightQueueNode> GetBlocklightQueueForJob(Allocator allocator)
+        public NativeQueue<LightQueueNode> GetBlocklightQueueForJob(Allocator allocator, out int maxNodeY, out int minNodeY)
         {
             NativeQueue<LightQueueNode> nativeQueue = new NativeQueue<LightQueueNode>(allocator);
+            maxNodeY = -1;
+            minNodeY = int.MaxValue;
 
             // Dequeue each item from the managed queue and enqueue it into the native one.
             while (BlockLightQueueCount > 0)
             {
-                nativeQueue.Enqueue(_blocklightBfsQueue.Dequeue());
+                LightQueueNode node = _blocklightBfsQueue.Dequeue();
+                if (node.Position.y > maxNodeY) maxNodeY = node.Position.y;
+                if (node.Position.y < minNodeY) minNodeY = node.Position.y;
+                nativeQueue.Enqueue(node);
             }
 
             // The managed queue is now empty and ready for new requests.
@@ -1171,15 +1337,24 @@ namespace Data
         /// Flushes the managed sunlight queue into a NativeQueue for Burst Job processing.
         /// </summary>
         /// <param name="allocator">The memory allocator to use (e.g., Allocator.TempJob).</param>
+        /// <param name="maxNodeY">Highest node Y flushed, or −1 when the queue was empty — an LI-2
+        /// band-derivation input (see <see cref="LightingBandDecision"/>).</param>
+        /// <param name="minNodeY">Lowest node Y flushed, or <c>int.MaxValue</c> when the queue was
+        /// empty — the LI-2 bottom-band mirror of <paramref name="maxNodeY"/>.</param>
         /// <returns>A populated NativeQueue containing the light nodes.</returns>
-        public NativeQueue<LightQueueNode> GetSunlightQueueForJob(Allocator allocator)
+        public NativeQueue<LightQueueNode> GetSunlightQueueForJob(Allocator allocator, out int maxNodeY, out int minNodeY)
         {
             NativeQueue<LightQueueNode> nativeQueue = new NativeQueue<LightQueueNode>(allocator);
+            maxNodeY = -1;
+            minNodeY = int.MaxValue;
 
             // Dequeue each item from the managed queue and enqueue it into the native one.
             while (SunLightQueueCount > 0)
             {
-                nativeQueue.Enqueue(_sunlightBfsQueue.Dequeue());
+                LightQueueNode node = _sunlightBfsQueue.Dequeue();
+                if (node.Position.y > maxNodeY) maxNodeY = node.Position.y;
+                if (node.Position.y < minNodeY) minNodeY = node.Position.y;
+                nativeQueue.Enqueue(node);
             }
 
             // The managed queue is now empty and ready for new requests.

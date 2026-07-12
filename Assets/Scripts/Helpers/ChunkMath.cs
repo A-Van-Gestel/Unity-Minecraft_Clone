@@ -216,7 +216,8 @@ namespace Helpers
         /// <summary>
         /// Scatters the center chunk + its 8 horizontal neighbors into the <b>full-height</b> halo-padded volume —
         /// the <c>bandMinY = 0, bandCount = CHUNK_HEIGHT</c> case of <see cref="GatherPaddedRange{T}"/> (which holds
-        /// the drift-critical body). Used by the lighting gathers and the full-height fluid gather.
+        /// the drift-critical body). Used by the full-height fluid gather (the lighting gathers pass their
+        /// LI-2 band height straight to <see cref="GatherPaddedRange{T}"/>).
         /// </summary>
         private static void GatherPaddedFull<T>(NativeArray<T> padded,
             NativeArray<T> center, NativeArray<T> w, NativeArray<T> e, NativeArray<T> s, NativeArray<T> n,
@@ -227,15 +228,22 @@ namespace Helpers
         }
 
         /// <summary>
-        /// Lighting voxel gather: fills the padded voxel volume from the center + 8 neighbor voxel buffers, missing
-        /// sources stamped <c>uint.MaxValue</c>. Thin typed wrapper over <see cref="GatherPaddedFull{T}"/> bound to
-        /// the <see cref="LIGHTING_HALO"/>/<see cref="PADDED_CHUNK_WIDTH"/> geometry.
+        /// Lighting voxel gather: fills the Y-band <c>[<paramref name="bandMinY"/>, <paramref name="bandHeight"/>)</c>
+        /// of the padded voxel volume from the center + 8 neighbor voxel buffers, missing sources stamped
+        /// <c>uint.MaxValue</c>. The band is a prefix of a full-height allocation (LI-2): destination rows are
+        /// band-local (<c>by = gy − bandMinY</c>), rows outside the band are never written, and
+        /// <c>NeighborhoodLightingJob</c> answers reads there virtually from the band's region summaries.
+        /// Pass <c>0, CHUNK_HEIGHT</c> for the full-height gather. Thin typed wrapper over
+        /// <see cref="GatherPaddedRange{T}"/> bound to the <see cref="LIGHTING_HALO"/>/<see cref="PADDED_CHUNK_WIDTH"/>
+        /// geometry.
         /// </summary>
+        /// <param name="bandMinY">Global Y of the band's first gathered row (band-local row 0).</param>
+        /// <param name="bandHeight">Exclusive top of the band in global Y, in <c>(bandMinY, CHUNK_HEIGHT]</c>.</param>
         public static void GatherPaddedVoxels(NativeArray<uint> padded,
             NativeArray<uint> center, NativeArray<uint> w, NativeArray<uint> e, NativeArray<uint> s, NativeArray<uint> n,
-            NativeArray<uint> sw, NativeArray<uint> nw, NativeArray<uint> se, NativeArray<uint> ne)
+            NativeArray<uint> sw, NativeArray<uint> nw, NativeArray<uint> se, NativeArray<uint> ne, int bandMinY, int bandHeight)
         {
-            GatherPaddedFull(padded, center, w, e, s, n, sw, nw, se, ne, LIGHTING_HALO, PADDED_CHUNK_WIDTH, uint.MaxValue);
+            GatherPaddedRange(padded, center, w, e, s, n, sw, nw, se, ne, bandMinY, bandHeight - bandMinY, LIGHTING_HALO, PADDED_CHUNK_WIDTH, uint.MaxValue);
         }
 
         /// <summary>
@@ -272,34 +280,47 @@ namespace Helpers
         }
 
         /// <summary>
-        /// Light gather: fills the padded light volume from the center + 8 neighbor light buffers, missing
-        /// sources stamped <c>ushort.MaxValue</c>. Thin typed wrapper over <see cref="GatherPaddedFull{T}"/> bound to
-        /// the lighting geometry; the voxel/light pair always agrees because both route through the same generic body.
+        /// Light gather: fills the Y-band <c>[<paramref name="bandMinY"/>, <paramref name="bandHeight"/>)</c> of the
+        /// padded light volume from the center + 8 neighbor light buffers, missing sources stamped
+        /// <c>ushort.MaxValue</c> (LI-2 — see <see cref="GatherPaddedVoxels"/> for the band semantics; pass
+        /// <c>0, CHUNK_HEIGHT</c> for full height). Thin typed wrapper over <see cref="GatherPaddedRange{T}"/> bound
+        /// to the lighting geometry; the voxel/light pair always agrees because both route through the same generic body.
         /// </summary>
+        /// <param name="bandMinY">Global Y of the band's first gathered row (band-local row 0).</param>
+        /// <param name="bandHeight">Exclusive top of the band in global Y, in <c>(bandMinY, CHUNK_HEIGHT]</c>.</param>
         public static void GatherPaddedLight(NativeArray<ushort> padded,
             NativeArray<ushort> center, NativeArray<ushort> w, NativeArray<ushort> e, NativeArray<ushort> s, NativeArray<ushort> n,
-            NativeArray<ushort> sw, NativeArray<ushort> nw, NativeArray<ushort> se, NativeArray<ushort> ne)
+            NativeArray<ushort> sw, NativeArray<ushort> nw, NativeArray<ushort> se, NativeArray<ushort> ne, int bandMinY, int bandHeight)
         {
-            GatherPaddedFull(padded, center, w, e, s, n, sw, nw, se, ne, LIGHTING_HALO, PADDED_CHUNK_WIDTH, ushort.MaxValue);
+            GatherPaddedRange(padded, center, w, e, s, n, sw, nw, se, ne, bandMinY, bandHeight - bandMinY, LIGHTING_HALO, PADDED_CHUNK_WIDTH, ushort.MaxValue);
         }
 
         /// <summary>
-        /// Copies the center chunk's region [2,18)×[0,128)×[2,18) out of the halo-padded light volume into
-        /// a section-contiguous full-chunk light buffer (the <see cref="GetFlattenedIndexInChunk"/> layout
-        /// that <see cref="ChunkData.ApplyJobLightMap"/> reads back). The job only writes light into the
-        /// center region; voxels are never modified, so only light is extracted.
+        /// Copies the center chunk's band region [2,18)×[<paramref name="bandMinY"/>,<paramref name="bandHeight"/>)×[2,18)
+        /// out of the halo-padded light volume into a section-contiguous full-chunk light buffer (the
+        /// <see cref="GetFlattenedIndexInChunk"/> layout that <see cref="ChunkData.ApplyJobLightMap"/> reads
+        /// back). Source rows are band-local (<c>cy − bandMinY</c>); destination rows are absolute. The job
+        /// only writes light into the center region; voxels are never modified, so only light is extracted.
+        /// LI-2: both bounds MUST equal the values the job's volumes were gathered with — rows outside the
+        /// band are un-gathered scratch in the padded volume and are left untouched in
+        /// <paramref name="centerOut"/>, which therefore keeps its schedule-time snapshot values there (the
+        /// job cannot have changed them, so the subsequent full merge is unchanged-identity for those rows).
+        /// Pass <c>0, CHUNK_HEIGHT</c> for a full-height extract.
         /// </summary>
-        public static void ExtractCenterLight(NativeArray<ushort> padded, NativeArray<ushort> centerOut)
+        /// <param name="bandMinY">Global Y of the band's first gathered row (band-local row 0).</param>
+        /// <param name="bandHeight">Exclusive top of the band in global Y, in <c>(bandMinY, CHUNK_HEIGHT]</c>.</param>
+        public static void ExtractCenterLight(NativeArray<ushort> padded, NativeArray<ushort> centerOut, int bandMinY, int bandHeight)
         {
-            for (int cy = 0; cy < CHUNK_HEIGHT; cy++)
+            for (int cy = bandMinY; cy < bandHeight; cy++)
             {
                 for (int cz = 0; cz < CHUNK_WIDTH; cz++)
                 {
                     // Each center X-row is contiguous in both layouts (X is the fastest axis), so copy the
-                    // 16-wide span in bulk: source = padded center span px[2,18) at (cy, cz+2); dest = the
-                    // section-contiguous center row at (cx=0, cy, cz). Bit-identical to the per-cell loop.
+                    // 16-wide span in bulk: source = padded center span px[2,18) at band-local (cy−bandMinY,
+                    // cz+2); dest = the section-contiguous center row at (cx=0, cy, cz). Bit-identical to the
+                    // per-cell loop.
                     NativeArray<ushort>.Copy(
-                        padded, GetPaddedLightingIndex(LIGHTING_HALO, cy, cz + LIGHTING_HALO),
+                        padded, GetPaddedLightingIndex(LIGHTING_HALO, cy - bandMinY, cz + LIGHTING_HALO),
                         centerOut, GetFlattenedIndexInChunk(0, cy, cz),
                         CHUNK_WIDTH);
                 }

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Helpers;
 using UnityEngine;
+using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.LightScheduler
 {

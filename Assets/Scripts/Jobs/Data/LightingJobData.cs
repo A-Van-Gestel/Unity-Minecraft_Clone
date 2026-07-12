@@ -56,6 +56,23 @@ namespace Jobs.Data
         public NativeArray<uint> PaddedVoxels;
         public NativeArray<ushort> PaddedLight;
 
+        /// <summary>
+        /// LI-2: the Y-band height this job's padded volumes were gathered with
+        /// (<c>NeighborhoodLightingJob.BandHeight</c>). The completion-side extract MUST pass the same
+        /// value to <c>ChunkMath.ExtractCenterLight</c> — rows at/above it are un-gathered scratch in
+        /// <see cref="PaddedLight"/> and must be left to <see cref="LightMap"/>'s schedule-time snapshot.
+        /// <c>ChunkMath.CHUNK_HEIGHT</c> = full height (banding disabled for this job).
+        /// </summary>
+        public int BandHeight;
+
+        /// <summary>
+        /// LI-2 bottom band: global Y of the band's first gathered row
+        /// (<c>NeighborhoodLightingJob.BandMinY</c>). The completion-side extract MUST pass the same
+        /// value — rows below it are un-gathered scratch in <see cref="PaddedLight"/> and must be left
+        /// to <see cref="LightMap"/>'s schedule-time snapshot. 0 = bottom banding disabled.
+        /// </summary>
+        public int BandMinY;
+
         // --- Output data ---
         public NativeArray<uint> Map; // The center chunk voxel snapshot (gather source + ApplyJobLightMap reference)
         public NativeArray<ushort> LightMap; // The center chunk light buffer (gather source + readback target)
@@ -63,6 +80,11 @@ namespace Jobs.Data
         public NativeQueue<LightQueueNode> BlockLightQueue;
         public NativeQueue<Vector2Int> SunLightRecalcQueue;
         public NativeList<LightModification> Mods;
+
+        // The job's snapshot-trusting cross-seam re-lights, re-verified against live neighbor data at
+        // merge time (WorldJobManager.VerifyPullBackClaims — the Bug 14 stale-ghost guard).
+        public NativeList<PullBackClaim> PullBackClaims;
+
         public NativeArray<bool> IsStable;
 
         /// A helper to dispose all the containers at once
@@ -82,6 +104,7 @@ namespace Jobs.Data
             if (BlockLightQueue.IsCreated) BlockLightQueue.Dispose();
             if (SunLightRecalcQueue.IsCreated) SunLightRecalcQueue.Dispose();
             if (Mods.IsCreated) Mods.Dispose();
+            if (PullBackClaims.IsCreated) PullBackClaims.Dispose();
             if (IsStable.IsCreated) IsStable.Dispose();
         }
     }

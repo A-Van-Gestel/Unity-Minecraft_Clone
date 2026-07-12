@@ -161,7 +161,19 @@ namespace Editor.Validation.Lighting.Framework
             //    (production routes this through WorldData.QueueSunlightRecalculation, which lands
             //    in the owning chunk's column recalc queue).
             if (newProps.Opacity != oldProps.Opacity)
+            {
                 chunk.SunColumnRecalcQueue.Enqueue(new Vector2Int(localPos.x, localPos.z));
+
+                // Bug 05: mirror ChunkData.ModifyVoxel's border-column edge-check re-grant. An opacity
+                // edit in a border column can under-report cross-seam sky light with no edge-check round
+                // left (both spent during generation), so re-grant a bounded budget consumed by
+                // LightingFrameSimulator.RunToConvergence at grid quiescence (RunReGrantedEdgeCheckRound).
+                bool isBorderColumn = localPos.x == 0 || localPos.x == VoxelData.ChunkWidth - 1
+                                                      || localPos.z == 0 || localPos.z == VoxelData.ChunkWidth - 1;
+                if (isBorderColumn)
+                    chunk.Data.RemainingEdgeCheckRounds =
+                        Mathf.Max(chunk.Data.RemainingEdgeCheckRounds, 1);
+            }
 
             chunk.HasLightWork = true;
         }
@@ -310,6 +322,11 @@ namespace Editor.Validation.Lighting.Framework
             for (int cx = 0; cx < GridSize; cx++)
                 yield return new Vector2Int(cx, cz);
         }
+
+        /// <summary>True if a chunk exists at the given grid coordinate (mirror of production's
+        /// <c>worldData.Chunks.TryGetValue</c> guard in the scheduler scan — the fixed grid is the world).</summary>
+        /// <param name="chunkCoord">The grid coordinate to test.</param>
+        public bool HasChunk(Vector2Int chunkCoord) => _chunks.ContainsKey(chunkCoord);
 
         /// <summary>True if the world position lies inside the grid volume.</summary>
         /// <param name="worldPos">The world-space voxel position.</param>

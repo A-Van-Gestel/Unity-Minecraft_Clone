@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Data;
 using Editor.Validation.Behavior.Framework;
 using UnityEngine;
+using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.Behavior
 {

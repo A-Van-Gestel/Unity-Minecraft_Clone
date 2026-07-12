@@ -336,6 +336,438 @@ via `SetSunlight`'s cross-chunk path). These are pinned as completeness baseline
 
 ---
 
+### ~~17. Large suspended opaque slab never settles (oscillating cross-chunk skylight)~~
+
+**Severity:** Medium
+**Fixed:** July 2026 (was Bug 13 in `LIGHTING_BUGS.md`)
+**Status:** Resolved — confirmed in-game (fluid-stress run with an opaque `BlockIDs.Stone` floor at
+`REGION_CHUNKS ≥ 3`: the previously-endless flashing between the placed floor and fluid slabs is gone, the
+substrate settle completes, and higher region counts no longer hang) and via the validation suite (repro flipped
+red→green with all baselines green). Promoted to baselines **B56–B59** from known-bug repros K13a–K13d, grouped in
+`Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug13Slab.cs` (B58 dynamic-stamp is
+the primary fix tripwire — the deterministic pre-fix live-lock).
+**Found by:** player report from the fluid-stress benchmark; first faithful repro built as roadmap item **AS-1**
+([LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md)) — the sync-repro
+analysis that revised the earlier "needs the async wave" assumption.
+**Files:** `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs` (`CrossChunkSunlightSupport`, the extended Bug-11
+veto), `Assets/Scripts/WorldJobManager.cs` (`ApplyCrossChunkLightMod` + emitter-carrying `DeferredLightMod`),
+mirrored in `Assets/Editor/Validation/Lighting/Framework/LightingTestWorld.cs`.
+
+**Description:**
+A large, flat **opaque** block layer (opacity 15) suspended in otherwise sky-lit air and **spanning a contiguous
+multi-chunk region** never reached a stable lighting state. The columns directly under the slab are shadowed while
+the surrounding air stays full-bright, so light spills in from the slab's perimeter and forms a cross-chunk skylight
+gradient beneath it. That gradient **oscillated / never converged**: the lighting jobs kept re-scheduling so
+`WorldJobManager.HasActiveJobs` never returned to `false`, and in the scene view the slab's lit surfaces visibly
+**flickered** (light values churning frame-to-frame) rather than settling. Distinct from Bug 05 (wrong-but-static
+shadow patches): here the system reached **no fixed point at all** — a live-lock, not a static artifact.
+
+**Root Cause (confirmed 2026-07-04, via the repro + oscillation probe + emit-neuter attribution):**
+Not the edge-check rounds as originally suspected — a **mutual-removal machine between the Bug 12 cross-seam
+removal initiator and the Bug 11 veto's in-chunk-only support model**, at the slab region's interior seams. The
+under-slab gradient is *perimeter-fed*: a border voxel V in slab chunk A holds sky 14 supplied across a
+*different* seam by the sky-lit ring chunk — support the Bug 11 veto (`InChunkSunlightSupport`) cannot see,
+because it deliberately credits only in-chunk neighbors (V's in-chunk best is 13 < 14 → no veto). Meanwhile the
+adjacent slab chunk B's darkness wave sees V at exactly the removed level, not sky-lit — the Bug 12
+mutual-2-cycle signature — and emits a removal at it. The removal applies (no veto), V's chunk re-lights V via
+the seam pull-back from the ring's live 15, the re-spread crosses back into B as uplift mods, B's next pass
+emits the same removal again: a **period-2 live-lock** (the probe showed the light field hash-repeating with a
+cycle length of 1–2 while work stayed pending, across all 8 ring chunks of the slab, y 11–99). Neutering the
+Bug 12 emit converged the repro in 2 frames — the attribution test.
+
+**Fix (July 2026):** the Bug 11 veto's support model was extended to match reality: independent support is now
+the max of (a) in-chunk neighbors (unchanged) and (b) **live cross-chunk neighbors in chunks other than the
+emitter** (`CrossChunkLightModApplier.CrossChunkSunlightSupport`). Live main-thread data is trustworthy —
+staleness was only ever a property of the *emitting job's snapshot* — and excluding the emitting chunk preserves
+Bug 12's collapse of genuine sourceless seam loops (the emitter is exactly the possibly-stale mutual-loop side,
+and that loop pair has no third-party feed, so B53 stays guarded). Deferred cross-chunk mods now carry their
+emitter's origin (`WorldJobManager.DeferredLightMod`, mirrored in the harness) so the exclusion survives the
+defer/drain path. The perimeter-fed seam voxel is now vetoed instead of cleared, the counter-wave never launches,
+and the machine winds down. An emitter-side snapshot guard on the Bug 12 emit was tried first and rejected: it
+also suppressed load-bearing initiators whose "supporter" was itself ghost light, worsening the stale-ghost
+residue (see the open **Bug 14**, the terminating over-bright sibling this repro also surfaced).
+
+**Validation suite:** first faithful repro was synchronous (AS-1, 2026-07-04): the B58 geometry (grid 5, slab =
+center 3×3 chunks inside a sky-lit 16-chunk ring — the harness grid edge is the world edge, so an inset slab is
+required to model the perimeter feed) live-locked under unlimited-budget and single-slot scheduling with a proven
+period-2 field cycle; the seeded-shuffle sweep (B59) live-locked on other seeds. Generation-wave variants
+(B56/B57) were green pre-fix — the live-lock required the dynamic player-edit stamp against an established bright
+field, not the initial wave. Post-fix: all four green with every prior baseline green (including B48/B50–B55, the
+Bug 11/12 family the extended veto touches).
+
+---
+
+### ~~18. Stale-snapshot cross-chunk sunlight ghost light survives dynamic multi-chunk darkening~~
+
+**Severity:** Medium
+**Fixed:** July 2026 (was Bug 14 in `LIGHTING_BUGS.md`)
+**Status:** Resolved — confirmed in-game (fluid-stress run with an opaque Stone floor: the under-slab shadows
+begin patchy while the slab chunks are being stamped but now converge to correct shadow **before** the water cap
+is placed — previously they stayed patchy until that later edit rescued them) and via the validation suite
+(repro flipped red→green, all baselines green). Promoted to baselines **B60/B61** in
+`Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug14Ghost.cs` (B61 = the promoted
+K14a seed-1 repro; B60 = the halo-node claim-contract guard from the hotfix), and the B59 sweep was upgraded to
+assert the borderless oracle across its full 75-seed space (previously termination-only because of this bug).
+**Found by:** the Bug 13 (AS-1) seeded sweep — the same slab repro's terminating over-bright exit — and observed
+in-game during Bug 13's fix confirmation (patchy under-slab shadows that only settled after a later mass edit).
+**Files:** `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` (`PullBackClaim` + the recording pull-back in
+`PropagateDarkness`), `Assets/Scripts/WorldJobManager.cs` (`VerifyPullBackClaims`, `LastStalePullBacksCleared`),
+`Assets/Scripts/Helpers/CrossChunkLightModApplier.cs` (`PullBackClaimStillSupported`), mirrored in
+`Assets/Editor/Validation/Lighting/Framework/LightingTestWorld.cs`.
+
+**Description:**
+When a large multi-chunk region darkened dynamically (e.g. an opaque slab stamped across several chunks of
+sky-lit air) while lighting jobs interleaved under budgeted, out-of-order scheduling, chunks could settle into a
+**stable but massively over-bright field**: stale "ghost" skylight survived under the slab (up to +14 vs the
+borderless oracle) across tens of thousands of voxels. The pipeline terminated normally — no pending light work,
+no flicker — so nothing ever re-examined the region; the ghost persisted until a full relight (world reload) or
+an unrelated nearby edit. The **terminating sibling of Bug 13** (Lighting #17): the same AS-1 slab repro exposed
+both, Bug 13 as the non-terminating exit, this defect as the over-bright terminating exit.
+
+**Root Cause (confirmed by neuter attribution):**
+A job that ran concurrently with its neighbors' darkening re-lit its side of a seam from its **schedule-time
+snapshot** of the neighbor — the `PropagateDarkness` seam pull-back (`CheckEdgeVoxel`), whose value the placement
+BFS then re-spread through the chunk interior and across further seams as uplift mods. If the neighbor darkened
+after the snapshot, the re-lit gradient was sourceless, and no mechanism ever initiated a removal at a voxel
+nobody touched again: `CheckEdgeVoxel` is add-only (the Bug 05 note), the Bug 12 initiator only fires during an
+active darkness wave, and the ghost chunk's own job ended stable. Attribution (seed-1 case): neutering
+cross-chunk sun **uplift mods** only reduced the residue 57.6k → 46.9k voxels, but neutering the **pull-back**
+eliminated it entirely — the pull-back was the sole root; stale uplifts merely re-spread its ghost. The pull-back
+itself is load-bearing and could not be removed: with it neutered, B46 (pending-replay re-brighten), B50 (no
+black spot at a roofed seam), and B58 (the perimeter-fed under-slab gradient, 171k voxels under-bright) all go red.
+
+**Fix (July 2026):** trust-but-verify. The pull-back stays exactly as is inside the Burst job, but every
+pull-back write is recorded as a `PullBackClaim` (center voxel, trusted neighbor voxel, written sky level) in a
+new job output list. At merge time — after `ApplyJobLightMap` and the deferred-mod drain — the main thread
+re-verifies each claim against the neighbor's **live** data (`WorldJobManager.VerifyPullBackClaims`, mirrored in
+the harness): a superseded claim (the voxel no longer holds the written value) is skipped; a claim the live
+neighbor still supports (`CrossChunkLightModApplier.PullBackClaimStillSupported`, the exact `CheckEdgeVoxel`
+write condition against live values) is kept, so fresh snapshots verify for free; an unverifiable claim (neighbor
+absent/unloaded) is kept conservatively; a **stale** claim is routed through the standard cross-chunk
+sunlight-removal veto with the claimed neighbor's chunk as the excluded emitter — a voxel with other genuine
+support survives, a sourceless one clears and wakes the chunk for the corrective darkness wave. Diagnostics:
+`WorldJobManager.LastStalePullBacksCleared`. A stale-**uplift** veto was considered and deliberately NOT added:
+attribution showed uplift ghosts are strictly downstream of pull-back ghosts, and the inbound-removal ordering
+through the defer/drain path self-heals genuine uplift staleness.
+
+**Hotfix (same day, first in-game test):** the initial fix crashed real worlds with per-frame
+`ObjectDisposedException` spam from `ProcessLightingJobs`. The column-recalc **shadow-caster** check
+(`RecalculateSunlightForColumn`) seeds darkness nodes at the highest block's horizontal neighbors *without* an
+in-center guard, so a border column legitimately starts a wave at local x/z = −1/16 — and a pull-back during such
+a **halo node**'s wave recorded a claim whose "center" position lies outside the chunk. The verifier then indexed
+the chunk with that position; the resulting exception aborted the whole `ProcessLightingJobs` pass after some
+jobs were already released but before the end-of-pass `LightingJobs.Remove`, so every later frame re-touched
+disposed containers (note: this abort-cascades-into-spam shape is a pre-existing fragility of the pass, not
+specific to claims). Fixed twofold: claims are only recorded for center voxels (`IsInCenterChunk` guard in the
+job — a halo pull-back surfaces as a cross-chunk uplift mod instead), and both verifiers defensively skip any
+out-of-bounds claim so a malformed claim can never cascade again. Guarded by baseline **B60** (border
+shadow-caster halo-node geometry; asserts the cross-border wave fires + converges on the oracle). The flat suite
+worlds never produced a border shadow caster, which is how this slipped past 52 green scenarios — real terrain
+hits that branch constantly.
+
+**Validation suite:** deterministic repro K14a (grid-3 full-grid slab stamped under the pinned seed-1 schedule:
+budget 2, cadence 1, shuffled completion — settled ~57.6k voxels over-bright pre-fix, worst +14 sky) flipped
+red→green and was promoted to **B61**; a 75-seed oracle-asserting sweep over both slab geometries came back
+fully clean and is now permanent as the upgraded **B59**; **B60** pins the hotfix's claim contract.
+
+---
+
+### ~~19. Cross-chunk sunlight surface stamp permanently lost after a border-column edit~~
+
+**Severity:** Medium
+**Fixed:** July 2026 (was Bug 15 in `LIGHTING_BUGS.md`)
+**Status:** Resolved — confirmed in-game (hand-built 2-thick seam wall whose face voxels' only air exposure is
+across the boundary: in the pre-fix build the cap placement dropped the stored face values to 0 — visible in the
+F3 readout and as black columns in the F7 `VoxelDebugVisualization` sky view — while the fixed build holds 14,
+with 13 on faces fed by a dimmed 14-column, exactly the spec) and via the validation suite (K15b/K15c red→green,
+fuzz stamp seeds 0/9/12/19 green, all baselines green). Promoted to baselines **B62/B63** in
+`Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug15Stamp.cs`.
+**Found by:** the HF-3 border-heightmap fuzz (K15a), on its very first seed. The fuzz's one remaining red
+(seed 14) is **Bug 05's edge-round exhaustion**, a different mechanism — see the Bug 05 entry in
+`LIGHTING_BUGS.md` for the first faithful synchronous repro this fuzz also produced.
+**Files:** `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` (`CheckEdgeVoxel`, `CheckEdgeVoxelRGB`, BFS seeding,
+`PullBackDimmerCrossSeamStamp`, `SampleSnapshotSkyLight`), `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs`
+(`PullBackClaimStillSupported`).
+
+**Description:**
+At a chunk-border height step (a cliff face on the seam), the opaque face voxels carry the sunlight **surface
+stamp** (`source − 1`, the receive-but-don't-propagate rule pinned by baseline B39) fed by the *neighbor chunk's*
+lit border air. An opacity-changing edit higher in the same border column triggered that column's sunlight
+recalculation, which wiped those stamps — and nothing ever re-applied them: the field converged (no pending work)
+with the seam faces at sky 0 where the oracle and the engine's own generation wave put 14. Permanent until a full
+relight or an unrelated nearby edit flooded the seam again — the healing profile that made it the prime candidate
+mechanism for Bug 05's dense-biome border shadows (decoration VoxelMods use the same border-column edit path).
+In-chunk-fed stamps always recovered (the recalc's re-spread revisits in-chunk air); only exclusively
+cross-seam-fed stamps died, because every cross-seam re-derivation path (`CheckEdgeVoxel`/`CheckEdgeVoxelRGB`)
+hard-refused opaque centers. **Visual severity turned out low**: the mesher shades faces from the adjacent air
+voxels, not the opaque voxel's own stored stamp, so the corruption was invisible in normal rendering (it showed
+in the F7 stored-light view) — but it corrupted the light field that oracle comparisons, future features, and
+smooth-lighting samples read.
+
+**Fix (2026-07-05, five parts):**
+
+1. `CheckEdgeVoxel` no longer refuses an opaque center: it receives the surface stamp (`source − 1`), written
+   but never enqueued — the in-chunk opaque-surface rule extended across the seam.
+2. `CheckEdgeVoxelRGB` — the same change per RGB channel.
+3. `CrossChunkLightModApplier.PullBackClaimStillSupported` mirrors the new write condition (a fully-opaque
+   center's claim is supported by `liveNeighborSky − 1`), keeping Bug-14 claim verification from clearing
+   legitimate stamps.
+4. The sun BFS seeding re-spreads an unchanged-but-lit edit node (an opacity-only change — e.g. breaking a
+   stone-top block whose air keeps its old 15 — exposes faces that were never stamped; the in-chunk case).
+5. **Residual fix** (`PullBackDimmerCrossSeamStamp` + `SampleSnapshotSkyLight`): an order-dependent residual
+   (4 of 25 fuzz seeds) survived parts 1–4 — trace attribution showed a job with a *fresh* snapshot wiping the
+   stamp internally: its wake-node darkness wave (old level 14) treated the dimmer live feed (10) as a child,
+   zeroed the feed's halo copy (the removal mod was vetoed remotely — the feed had real support), and every
+   re-derivation path then read the zeroed halo; a second same-job wave re-zeroed the stamp after the first
+   re-derivation. Now a darkness wave meeting a dimmer or already-zeroed cross-seam neighbor re-derives a
+   fully-opaque center's stamp from the pre-zero (or pristine-`[ReadOnly]`-snapshot) value — write-no-enqueue,
+   recorded as a `PullBackClaim` and adjudicated against live data at merge (surviving feed → kept; dead feed →
+   stale → cleared through the removal veto). Opaque-only because stamps cannot propagate: a stale write is one
+   voxel, never a spreading ghost.
+
+**Attempted and REJECTED:** the first dimmer-arm form routed through `CheckEdgeVoxel`'s attenuation —
+inverted from what was needed: `Attenuate` yields 0 for a fully-opaque center (never fired for the stamps)
+while it re-lit AND enqueued *transparent* centers from dimmer stale neighbors, regressing B59/B61 with
+spreading over-bright ghosts (2497 voxels +12 sky). Part 5 is the corrected form: opaque-only, stamp rule,
+write-no-enqueue, claim-verified.
+
+**Validation suite:** distilled repros K15b (seam cliff + cap edit, sun) and K15c (seam wall + torch break, RGB)
+flipped red→green and were promoted to **B62/B63**; the border-heightmap fuzz that found the bug remains
+now baseline **B64** (its seed 14 also drove the Bug 05 fix — see Lighting #20 below).
+
+---
+
+### ~~20. Persistent chunk-border shadow patches in dense biomes (post-edit edge-round exhaustion)~~
+
+**Severity:** Medium
+**Fixed:** July 2026 (was Bug 05 in `LIGHTING_BUGS.md` — the oldest open lighting bug)
+**Status:** Resolved — confirmed in-game (a freshly generated dense-forest world no longer shows the
+persistent dark patches under overlapping canopies near freshly-generated chunk borders that previously
+needed a world reload to clear) and via the validation suite (K15a seed 14 red→green, all baselines green).
+Promoted from known-bug repro **K15a** to baseline **B64**
+(`Assets/Editor/Validation/Lighting/LightingValidationSuite.BorderHeightFuzz.cs`).
+**Found by:** long-standing player-reported symptom (dense forest biomes); the first faithful synchronous
+repro was the HF-3 border-heightmap fuzz's seed 14 (2026-07-05), after the geometry-axis fuzzes (B8 diagonal
+well, B42 dense-canopy) both converged and the "not synchronously reproducible" verdict had stood since June
+
+2026.
+
+**Files:** `Assets/Scripts/Data/ChunkData.cs` (`ModifyVoxel` border-column edge-check re-grant,
+`BORDER_EDIT_EDGE_CHECK_ROUNDS`); mirrored in the harness (`LightingTestWorld.Builder.cs`,
+`LightingTestWorld.RunReGrantedEdgeCheckRound`, `LightingFrameSimulator.RunToConvergence`).
+
+**Description:**
+Persistent dark/shadow patches near the borders of freshly generated chunks in visually dense areas
+(overlapping forest canopies), which only resolved on a full world reload or when an unrelated nearby edit
+forced a light update. The geometry axis was exhausted without a repro (B8 diagonal-well slab and the B42
+dense-canopy fuzz both converge within the production 2 edge-check rounds); the faithful repro lived on the
+**post-edit** axis instead.
+
+**Root Cause:**
+Each chunk starts with `RemainingEdgeCheckRounds = 2`, both consumed during the initial generation wave. A
+later **border-column opacity edit** (dense-biome decoration VoxelMods use this exact path) whose column
+recalc re-spreads against stale cross-seam snapshots can leave a transparent border voxel 1–2 sky levels
+under the borderless oracle — a converged, **stable-but-dark** field with no pending work. Edge checks are
+the only corrector for under-bright border light (add-only, §3.6/§3.7), and after generation there was no
+round left to run one. Classifier-proven: exactly one edge-check round over the settled field heals it (seed
+14 diff: engine sky 12/11/11/12 vs oracle 13 at `(21,21..24,15)`, the column of companion edit
+`place@(21,37,15)` under a z=16-seam overhang).
+
+**Fix (July 2026):** the **re-arm** direction. `ChunkData.ModifyVoxel`, on an opacity-changing edit whose
+column is a chunk-border column (local x/z in {0,15}), tops `RemainingEdgeCheckRounds` back up to
+`BORDER_EDIT_EDGE_CHECK_ROUNDS` (= 1). The existing stabilization machinery
+(`WorldJobManager.ProcessLightingJobs` re-arm + `TriggerNeighborEdgeChecks` + the `AreNeighborsReadyAndLit`
+edge-check gate) then re-runs the reconciling border check on the settled field — no other engine change.
+Add-only and bounded by the counter, so it cannot livelock (B58/B59 stayed green); `RemainingEdgeCheckRounds`
+is `[NonSerialized]` and already reset in `ChunkData.Reset()`, so no pool-reset or save-format work. The
+transparent-center pull-back direction (Bug 15's machinery) was **not** taken — re-lighting transparent
+centers from dimmer stale neighbors spreads over-bright ghosts (rejected, see #19).
+
+**Rejected mid-fix (harness):** a per-completion re-arm in the frame simulator ran the edge check mid-churn,
+and the field settled back to its under-report after the round was spent. The reconciling round must read the
+**settled** field: production gets that from its neighbor-stability edge-gate plus the only-increase mod guard
+that protects a healed border, while the harness models it by consuming the re-granted round at grid
+quiescence (`RunReGrantedEdgeCheckRound`, consistent with how `RunInitialLighting*` already drive generation
+edge rounds as a post-convergence loop). Exact per-frame edge-check scheduling in the harness remains AS-2.
+
+**Validation suite:** K15a seed 14 red→green, promoted to baseline **B64** (25 seeds/suite run, 200 nightly) —
+one varied-heightmap-at-seam geometry axis now guards both Bug 15 (all seeds) and Bug 05 (seed 14). Prove-red:
+neutering the re-grant re-reds seed 14 and only seed 14. All 56 baselines green.
+
+---
+
+### ~~21. Runaway lighting job loop → OOM after breaking a blocklight source near a chunk border~~
+
+**Severity:** High (editor/game/OS crash via out-of-memory)
+**Fixed:** July 2026 (was Bug 16 in `LIGHTING_BUGS.md`; found, root-caused, fixed and confirmed 2026-07-11)
+**Status:** Resolved — confirmed in-game (20+ RGB blocklight place/break cycles in the same world and
+location where the OOM originally struck, no freeze/memory growth/`[LightingJob DIAG]` errors) and via the
+validation suite. Promoted from known-bug repro **K16a** to baseline **B87**, alongside the simple-form
+guard/over-correction tripwire **B86**
+(`Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug16Runaway.cs`).
+
+**Files:** `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` — `PropagateDarknessRGB` (removal-node enqueue,
+the fix site) + the `MAX_BFS_NODES_PER_PASS` fail-safe added during diagnosis (now permanent).
+
+**Description:**
+Breaking a blocklight source near a chunk border — most reliably while testing RGB blending (multiple
+different-colored lamps with overlapping cross-seam gradients, in enclosed spaces such as caves or
+underwater) — could freeze the lighting pipeline for the affected chunk(s) while memory grew monotonically
+until the editor/game/OS crashed from OOM. Observed ~5 times over ~2 months (since the RGB lighting
+overhaul), always in Mono editor play mode; the mechanism is backend-independent (plain `.Run()` reproduces),
+so IL2CPP was equally exposed.
+
+**Root Cause (confirmed via harness repro + in-job near-cap node dumps):**
+An **infinite per-channel removal cycle inside a single job's blocklight darkness phase**, from two
+interacting behaviors:
+
+1. **Removal-node channel contamination** (`PropagateDarknessRGB`): when the darkness wave zeroed *any*
+   channel of a neighbor, the re-enqueued removal node carried the neighbor's **full pre-zero RGB** —
+   including channels that were *not* removed because they belong to a different, still-live lamp's gradient.
+   Those contaminated values acted as removal thresholds downstream, turning one lamp's removal wave into a
+   cross-gradient remover.
+2. **Restore-to-constant mid-phase re-lights**: the darkness-phase seam pull-back (`CheckEdgeVoxelRGB`, the
+   Bug 07 defect-2 fix) restores just-darkened border cells from cross-seam halo cells that are never
+   themselves zeroed (they keep hitting the respread branch).
+
+Per-channel alternation (zero V on R, re-light V, zero V on G, …) plus restore-to-constant defeated the BFS's
+per-channel strict-decrease termination guarantee. The near-cap dump captured the loop verbatim: the removal
+queue cycling the *same* stacked border cells with the *same* pre-zero values forever — `(15,65,15)
+rgb=(3,2,0) → (15,66,15) rgb=(0,1,0) → (15,64,15) rgb=(2,3,0) → repeat` — at a four-chunk corner, in jobs
+emitting only 1–6 cross-chunk mods (pure in-chunk churn). The runaway grew the job-internal `Allocator.Temp`
+BFS queues without bound inside one `Execute()` (Editor.log: Burst-job NREs at the native allocator,
+`ALLOC_DEFAULT` 22.6 GB, repeated failed 1.7 GB `BlockDoublingLinearAllocator` doublings, fatal OOM — twice
+during bisection). A clean break cannot arm the cycle (monotone gradients — guarded green as B86); it needs
+the non-monotone mixed-channel plateau state built by *interrupted reconciliation* (edits landing while
+stale-snapshot jobs are in flight), matching the in-game rapid place/break trigger.
+
+**Fix (July 2026):** two parts, both in `NeighborhoodLightingJob.cs`:
+
+1. **Removal-node channel masking** (root cause): `PropagateDarknessRGB` masks each re-enqueued removal node
+   to the channels this visit actually zeroed — a kept channel belongs to a different source's gradient. With
+   the mask, any pull-back-refueled removal chain stays in one channel with strictly decreasing values, so
+   the cycle is structurally impossible.
+2. **Permanent fail-safe**: the bisection work cap (`MAX_BFS_NODES_PER_PASS`, 200k, shared across the seed +
+   phase loops) stays: a runaway pass aborts loudly (console error + near-cap node dump; `IsStable` stays
+   false so the chunk retries) — a future termination regression degrades to bounded, visible churn instead
+   of an OOM crash. Documented in `LIGHTING_SYSTEM_OVERVIEW.md` §3.3.
+
+**Spawned follow-up:** the same repro exposed an independent second defect — a small sourceless over-bright
+RGB island that survives because RGB blocklight lacked the sky channel's removal machinery — filed as
+**Bug 17** and fixed July 2026 (entry #22 below); B87's oracle assertion (which carried a dated exemption for
+exactly that residue class) has been restored to a plain oracle compare, and K17a promoted to **B88**.
+
+**Validation suite:** K16a red→green on the fix (no fail-safe aborts + convergence + oracle up to the Bug 17
+exemption at the time), promoted to **B87**; B86 and all other baselines stayed green throughout.
+
+---
+
+### ~~22. Sourceless RGB ghost-light island survives interrupted cross-seam removal (no RGB removal veto)~~
+
+**Severity:** Low-Medium (visual artifact: a faint sourceless color tint — observed R ≤ 3/15 — near chunk
+seams after rapid lamp place/break; stable, but self-heals on any full relight, e.g. save/reload)
+**Fixed:** July 2026 (was Bug 17 in `LIGHTING_BUGS.md`; found 2026-07-11 as Bug 16's post-fix residue, fixed
+and oracle-confirmed 2026-07-12)
+**Status:** Resolved — confirmed via the validation suite (repro K17a flipped red→green, all baselines green);
+oracle-only confirmation (never knowingly observed in-game — in-game footprint would be a faint colored tint
+near a seam that disappears on reload, per the Bug 12 archive precedent, #16). Promoted from known-bug repro
+**K17a** to baseline **B88** (`Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug16Runaway.cs`,
+which shares the Bug 16 geometry + cycling recipe); B87's plain oracle compare restored in the same change.
+
+**Files:** `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs` — `ComputeBlocklight` per-channel removal
+veto + `InChunkBlocklightSupport` / `CrossChunkBlocklightSupport`; `Assets/Scripts/WorldJobManager.cs` +
+`Assets/Editor/Validation/Lighting/Framework/LightingTestWorld.cs` — the block-removal support wiring in the
+cross-chunk apply path (`ApplyCrossChunkLightMod` / `ApplyModToChunk`) + cached `_blockEmission` lookup.
+
+**Description:**
+The Bug 16 interrupted-cycling recipe (rapid lamp place/break under load, with stale-snapshot jobs in flight)
+left a small **orphaned over-bright RGB island** near a chunk seam: light whose source was gone, disconnected
+from any live gradient by zero-valued cells (K17a: ~24 voxels, R 1–3, straddling the z31|32 seam), which
+nothing ever corrected. RGB blocklight had **none** of the sky channel's cross-chunk removal machinery.
+
+**Root Cause (confirmed via instrumented attribution):** the planter is a **stale in-flight lighting job**
+re-instating pre-break red — both through its full-`LightData` center merge and through the cross-chunk RGB
+**uplift/placement mods** it emitted from a pre-break snapshot — which ordinary `PropagateLightRGB` re-spread
+then fanned outward. It survived because the RGB cross-chunk **removal** path had no independent-support veto:
+without it, a darkness-wave removal mod computed against a stale snapshot **over-cleared** channels that a live
+independent source still backed, and the receiver re-lit them — the same stale-snapshot cross-seam
+removal/re-light **oscillation** the sky channel's Bug 11/13 veto exists to break. The darkness-phase
+`CheckEdgeVoxelRGB` pull-back (the other candidate planter) was ruled out: cycle 0 of the recipe self-heals
+despite it, and neutering the RGB claim path changed nothing.
+
+**Fix (July 2026):** mirror the sky **Bug 11/13 independent-support veto** to RGB per channel. A cross-chunk
+RGB *removal* mod now consults the strongest attenuated blocklight an independent in-chunk neighbor
+(`InChunkBlocklightSupport`) or a live third-party cross-chunk neighbor in a chunk other than the emitter
+(`CrossChunkBlocklightSupport`) still supplies; `ComputeBlocklight` keeps a channel a live source still backs
+instead of clearing it to 0. This breaks the oscillation, so the removal completes and the field converges to
+the borderless oracle with no orphan. (An opaque neighbor contributes only its own emission, mirroring
+`PropagateLightRGB`'s opaque-source arm.) Only the veto was needed; the Bug 12 initiator and Bug 14
+claim-verification analogs were **not** required for the observed class and were deliberately not added
+(they remain sky-only). Documented in `LIGHTING_SYSTEM_OVERVIEW.md` §2.1 / §3.7.
+
+**Validation suite:** K17a red→green on the fix, promoted to **B88**; prove-red confirmed (neutering the veto
+re-plants the 24-voxel ghost, and only B88 goes red); B86 (over-correction tripwire), B50, and the Bug 07/09
+family stayed green. 80 baselines total.
+
+---
+
+### ~~23. Sourceless RGB blocklight loop survives when equal-color seam sources are removed in the same wave~~
+
+**Severity:** Medium (visual artifact: a stable, sourceless over-bright colored residue straddling a chunk
+seam after equal-color lamps are removed together; self-heals on any full relight — the RGB mirror of Bug 12's
+sky loop)
+**Fixed:** July 2026 (was Bug 18 in `LIGHTING_BUGS.md`; predicted by the post-Bug-17 sky↔RGB parity audit
+[fidelity finding C10], then reproduced deterministically, fixed, and oracle-confirmed 2026-07-12)
+**Status:** Resolved — confirmed via the validation suite (repro K18a flipped red→green, all baselines green,
+prove-red confirms only the guard reds when the initiator is neutered). Oracle-only confirmation (the borderless
+`LightingOracle` is trusted as ground truth; never knowingly observed in-game, per the Bug 12/17 colored-residue
+precedent). Promoted from known-bug repro **K18a** to baseline **B90**
+(`Assets/Editor/Validation/Lighting/LightingValidationSuite.C10RgbLoop.cs`).
+
+**Files:** `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` — new `EmitCrossChunkBlocklightRemoval` +
+its call from `PropagateDarknessRGB` (the 2-cycle-signature emit) + the `emittedBlockRemovals` dedup set
+threaded through `PropagateDarkness`.
+
+**Description:**
+When two **equal-color** blocklight sources on opposite sides of a chunk seam mutually lit the two shared border
+columns and both were removed in the same lighting wave (each chunk's schedule-time snapshot still showing the
+*other* side lit), the seam did **not** darken. It dropped by exactly one level and then **locked** as a
+stable-but-wrong over-bright residue, sustained purely by the two seam voxels mutually supporting each other
+across the boundary. The RGB (blocklight) twin of **Bug 12** (the sky sourceless cross-seam loop) and the same
+over-bright class as **Bug 17**, but with a distinct root cause — a missing removal *initiator*, not a missing
+*veto*.
+
+**Root Cause (confirmed via harness repro + per-voxel attribution):**
+The sky↔RGB removal-machinery parity gap after Bug 17. Sky light has a cross-seam removal **initiator**
+(`EmitCrossChunkSunlightRemoval`, the Bug 12 fix): when a darkness wave meets a cross-chunk neighbor at
+*exactly* the removed level (the 2-cycle signature) and the neighbor is not independently supported, it emits a
+removal mod that starts collapse from the other side. RGB blocklight had **no counterpart** —
+`EmitCrossChunkSunlightRemoval` hard-codes `Channel = Sun`, and `PropagateDarknessRGB` never emitted a cross-seam
+removal initiator. So the symmetric mutually-equal seam had no node to begin removal from (each side re-lit from
+the other's stale snapshot), and the Bug 17 independent-support **veto**
+(`CrossChunkLightModApplier.ComputeBlocklight`), added to *protect* legitimately-supported channels, actively
+**protected the stale mutual support** — the over-protection tension Bug 13 resolved on the sky side. Fidelity
+finding **C12** (the RGB darkness-phase pull-back's lack of claim verification) was proven a non-cause: an
+asymmetric held-flight probe self-heals (baseline B89), matching the Bug 17 note that "neutering the RGB claim
+path changed nothing".
+
+**Fix (July 2026):** mirror the Bug 12 cross-seam removal **initiator** to RGB per channel. When a blocklight
+darkness wave meets a cross-seam neighbor with a channel at exactly the removed level (`nX == node.LightX`) on a
+non-opaque neighbor, `PropagateDarknessRGB` emits a cross-chunk blocklight removal mod
+(`EmitCrossChunkBlocklightRemoval`, zeroed channels + `IsRemoval`, deduped per neighbor). The receiving chunk
+adjudicates it per channel through the **existing** Bug 17 veto: a channel a live independent source still backs
+is kept, the stale loop clears. No apply-side change was needed (that infra shipped with Bug 17). The Bug 14
+claim-verification analog remained unnecessary and was not added (C12 self-heal, B89) — mirroring Bug 17 scoping
+itself to the veto only. Documented in `LIGHTING_SYSTEM_OVERVIEW.md` §3.7. Bug 16's removal-node channel masking
+and the permanent `MAX_BFS_NODES_PER_PASS` fail-safe are preserved.
+
+**Validation suite:** K18a red→green on the fix, promoted to **B90**; prove-red confirmed (neutering the emit
+reds only B90 — the ~38-voxel over-bright red residue returns, worst R13 at the seam); B86–B88 (Bug 16/17
+over-correction tripwires), the Bug 12 sky family B50–B53, and B89 (C12 self-heal) all stayed green. 82 baselines
+total.
+
+---
+
 ## Fluid
 
 ### ~~01. Cross-chunk fluid simulation stops at chunk borders~~

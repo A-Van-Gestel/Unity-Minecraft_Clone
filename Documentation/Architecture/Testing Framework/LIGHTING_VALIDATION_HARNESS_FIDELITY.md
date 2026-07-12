@@ -8,8 +8,13 @@
 
 ## 1. Why this document exists
 
-The lighting validation suite (39 baselines + frame simulator, menu item
-**`Minecraft Clone/Dev/Validate Lighting Engine`**) is strong where it runs **real production code**:
+The lighting validation suite (84 baselines + frame simulator, menu item
+**`Minecraft Clone/Dev/Validate Lighting Engine`**; B71–B74 guard the LI-2 band derivation, B75–B78 the
+banded-vs-full differential + prove-red, B79–B82 the LI-2b bottom-band derivation + emissive metadata,
+B83–B85 the bottom differential with its engagement assertion + raised-floor prove-red, B86–B88 the
+Bug-16/17 RGB removal family — simple-form tripwire, runaway-cycle guard, ghost-island guard — B89 the
+C12 RGB stale-pull-back self-heal guard, and B90 the Bug-18 RGB cross-seam removal initiator guard) is strong
+where it runs **real production code**:
 it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real `ChunkData` (section /
 uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision
 helpers `CrossChunkLightModApplier`, `LightingScheduleDecision`, and `LightingJobProcessor`.
@@ -123,6 +128,35 @@ there is invisible.
   general differential check. Pre-existing independent probes (`R == 9`, `crossBorder >= 13`) and
   oracle-free invariants (`NoBlocklightInVolume`, `FieldsEqual` baseline-return) remain in force.
 
+### A5 — Shared `ChunkData` accessors are fail-soft: out-of-bounds behavior is a position lottery ·  **CLOSED (2026-07-05, HF-1)**
+
+- `ChunkData.GetVoxel` / `GetLightData` / `SetLightData` (`ChunkData.cs:853–900`) validate nothing. For an
+  out-of-bounds **local** coordinate the outcome depends entirely on the position: a **compacted section**
+  returns the uniform sky value for ANY x/z (fully silent, no array touched); most other positions alias a
+  *different in-range voxel* (`index = x + 16·localY + 256·z` usually stays inside `[0, 4096)` — silent
+  wrong-read); only the extremes (e.g. `x = −1` with `localY = 0, z = 0`, or `y` outside `[0, 128)`)
+  actually throw.
+- **Why this is a false-pass surface even though the code is shared:** the same contract violation is
+  invisible, silently corrupting, or crashing depending on geometry — so any pinned scenario samples one
+  lottery ticket. Proven during the Bug 14 hotfix: B60's deliberate both-guards-off sabotage run stayed
+  **green** (its halo position wrong-read benignly, and the claim verifier's superseded check then skipped
+  it) while the *identical* code crashed in-game on real terrain (`ProcessLightingJobs`
+  `ObjectDisposedException` cascade — see B7). Any future consumer of local coordinates can land in
+  "not reproducible in harness" status the same way.
+- **Closed by roadmap item HF-1** (see
+  [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) §10):
+  `ChunkData.AssertLocalPositionInChunk` — a `[Conditional("UNITY_EDITOR")]`/`("DEVELOPMENT_BUILD")` guard
+  called first in all four accessors (before `GetLightData`'s uniform-sky early-return, so compacted
+  sections no longer read silently), throwing with the offending coordinates and chunk position; compiled
+  out of IL2CPP master (the reads are the hottest in the engine). The prerequisite caller audit (all 69
+  accessor call sites) found **no caller relying on the leniency**: every site is loop-bounded,
+  derived-from-lookup, explicitly guarded, or job-volume-bounded (the Burst job's `GetPackedData` sentinel
+  bounds every emitted mod/claim). Verified by re-running B60's both-guards-off sabotage: it now goes
+  **RED** (`ArgumentOutOfRangeException` at the halo claim `(-1, 49, 8)`) where it previously stayed green —
+  retroactively giving B60 its prove-red — with all 53 baselines green under the live assertions once the
+  guards were restored. Pairs with **HF-3** (border heightmap fuzz, the C9 lesson — shipped 2026-07-05,
+  see C9's follow-through note), which widens how many positions scenarios sample.
+
 ---
 
 ## 3. Missing harness features (whole bug classes unreachable)
@@ -227,7 +261,7 @@ there is invisible.
   on `HasLightChangesToProcess` / `NeedsInitialLighting` (the recurring deadlock family) is unreachable.
   Reasonable boundary for a lighting-correctness suite — noted so we don't assume otherwise.
 
-### B6 — MT-2 `LightWorkScheduler` park/promote layer is unmodeled ·  **OPEN · MEDIUM-HIGH (new 2026-07-03)**
+### B6 — MT-2 `LightWorkScheduler` park/promote layer is unmodeled ·  **CLOSED (2026-07-06, AS-2)**
 
 - **What changed:** MT-2 (`Helpers/LightWorkScheduler`, shipped 2026-07-02 — *after* this document's
   June audit and the entire Bug-09 sync-repro campaign) split the lighting dirty set into a per-frame
@@ -250,6 +284,74 @@ there is invisible.
   an opt-in frame-simulator mode driving a real `LightWorkScheduler` with mirrored park/promote sites
   and the fail-safe OFF by default, so "converges without the backstop" becomes a mechanical gate.
   Legacy mode stays the default so existing baselines are untouched.
+- **CLOSED (2026-07-06, AS-2 Phases 1–3):** `LightingFrameSimulator(schedulerMode:true)` now drives a
+  real `LightWorkScheduler` — the ready/waiting split scanned via the shared `LightingScanDecision`, the
+  flag sink wired (`SetLightWorkFlagSink`), and the promotion hooks mirrored (completion
+  `PromoteNeighborhood` in the completion-pass driver, neighbor-ready/load via the `MarkNeighborsReady`/
+  `MarkChunkLoaded` wrappers), with the `PromoteAll` fail-safe **off** by default. Phase-3 baselines:
+  **B66** (cross-chunk both-modes parity), **B67** (neighbor-ready promotion un-parks), **B68**
+  (50-seed Bug-09 geometry fuzz in scheduler mode, fail-safe off), **B69** (prove-red:
+  `SuppressCompletionPromotion` stalls a chunk re-flagged mid-flight, only the fail-safe recovers it),
+  **B70** (border-heightmap fuzz — the Bug-05 re-granted edge round — settles in scheduler mode). The
+  `RunReGrantedEdgeCheckRound` quiescence hook is retained as a legacy-mode backstop (B70 confirms
+  scheduler mode settles the border edit through the real edge gate). Suite at **62 baselines**.
+
+### B7 — `ProcessLightingJobs` per-pass bookkeeping is production-only ·  **CLOSED — FULL (2026-07-06, HF-4 #2); near-term closure was 2026-07-05, HF-2**
+
+- The harness replays per-**job** logic (`CompleteLightingJob` mirrors merge → deferred drain →
+  pull-back-claim verification → mod routing) and the frame simulator replays scheduling decisions — but
+  nobody replays the production **pass skeleton**: iterate the `LightingJobs` dictionary, release each
+  completed job's containers *inside* the loop, remove entries from the dictionary only *after* the loop
+  (via `_completedLightJobs`).
+- **The failure class this hides:** any exception mid-pass strands already-released jobs in the dictionary
+  → per-frame `ObjectDisposedException` spam re-touching disposed containers (observed in-game during the
+  Bug 14 hotfix — the original thrower was hidden behind hundreds of cascade repeats). In the suite the
+  same exception presents as **one red scenario** (the runner's per-scenario try/catch), never as a
+  cascade — the class is structurally invisible, like B3/B5/B6 it lives in code the harness does not run.
+- **Closed (near-term) by roadmap item HF-2** (see
+  [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) §10):
+  per-job fault isolation in production *eliminates* the cascade class instead of modeling it. All three
+  passes (`ProcessLightingJobs`, `ProcessGenerationJobs`, `ProcessMeshJobs` — the audit confirmed the
+  gen/mesh passes share the release-inside-loop/remove-after-loop surface) now isolate each job: a failed
+  `Handle.Complete()` leaves the job enrolled un-released for retry; a fault after `Complete()` logs one
+  error, still releases + removes that job, and the pass continues. The lighting pass clears
+  `IsAwaitingMainThreadProcess` in a per-job `finally` (flag-pairing invariant), re-flags the chunk
+  (`HasLightChangesToProcess`), and counts faults in `LastFaultedLightJobs`; the generation pass's
+  budget-retry paths keep their deliberate un-released `continue` semantics. Behavior documented in
+  `CHUNK_LIFECYCLE_PIPELINE.md` §4. The full-fidelity alternative — extracting the pass skeleton into a
+  shared orchestrator the harness can drive — remains **HF-4**, deliberately folded into AS-2 / NS-3
+  rather than done standalone.
+- **Closed FULL by HF-4 #2 (2026-07-06):** the pass skeleton is now `Helpers/LightingCompletionPass.cs`
+  (`RunMergeLoop` + `RunRemoveAndPromote`, driven via `ILightingCompletionDriver<TKey>`).
+  `ProcessLightingJobs` implements the driver on `this` (byte-identical — all 57 baselines green); the
+  frame simulator implements it too, so the harness replays the exact release-inside / remove-after
+  ordering and two-stage fault isolation. Baseline **B65** injects a merge fault into one job of a
+  four-job pass (`LightingFrameSimulator.SetMergeFaultInjector` → `LightingTestWorld.AbortLightingJob`)
+  and asserts the fault is isolated + counted, the other jobs still complete, the faulted job is removed
+  rather than stranded, and the field recovers once the lost work is resubmitted — the multi-job cascade
+  class the runner's per-scenario try/catch could never present. Behavior in `CHUNK_LIFECYCLE_PIPELINE.md`
+  §4 (shared skeleton pointer).
+
+### B8 — The BFS work-cap fail-safe was asserted by only two scenarios ·  **CLOSED (2026-07-12)**
+
+- Bug 16 (the runaway RGB removal cycle → OOM, `_FIXED_BUGS.md` Lighting #21) left a permanent fail-safe
+  in `NeighborhoodLightingJob`: `MAX_BFS_NODES_PER_PASS` aborts a runaway pass with a
+  `[LightingJob DIAG]` console **error** + near-cap node dump. Before this fix only **B87/B88** listened
+  for it (`WorkCapAbortListener`). A future termination regression arming on a *different* scenario's
+  geometry would log the error yet leave that scenario's PASS/FAIL untouched — the interactive menu summary
+  stayed green.
+- **Closed** by promoting the listener to a **runner-level invariant** in
+  `Editor/Validation/Framework/ValidationSuiteRunner.Execute` (`FailSafeErrorScope` + the pure
+  `IsFailSafeError` predicate): a scenario during whose body a `LogType.Error` carrying a registered
+  fail-safe marker (`FAIL_SAFE_ERROR_MARKERS`, currently `[LightingJob DIAG]`) is logged is **force-failed**,
+  for all 8 suites at once. Generic — a future engine fail-safe joins by adding its marker; scoped to the
+  scenario body (subscribe/run/unsubscribe); restricted to tagged Errors so the fault-isolation baselines
+  (which deliberately log errors) still pass. The per-baseline `WorkCapAbortListener` stays in B87/B88 as
+  belt-and-braces. **Self-test:** two Validation Framework scenarios (16→18) pin the predicate and the
+  scope's trip via a `Feed` seam (a real marker log would bubble through the global
+  `Application.logMessageReceived` into the self-test's own scope); the force-fail was also proven
+  end-to-end (a tagged-error scenario returning `true` is marked failed). `Validate All` green at 181
+  baselines.
 
 ---
 
@@ -381,23 +483,120 @@ there is invisible.
   pass asserted a 2-layer vertical stack and read `9`, not `5` — engine correct, probe wrong; fixed to a
   3-block cap. This is exactly the A4 value: an oracle-independent constant forces the rule into the open.)
 
-### C6 — No per-channel removal-independence scenario ·  **OPEN · LOW–MEDIUM**
+### C6 — No per-channel removal-independence scenario ·  **CLOSED (2026-07-11, by the Bug-16/17 arc) — the gap's predicted bug class was real, twice**
 
-- **B10/B11** *blend* two channels; **B12** removes a *white* source. Nothing asserts that removing one
-  *colored* source leaves the *other* channel intact (the per-channel `PropagateDarknessRGB` path) — e.g.
-  overlap a red and a green source, break the red, assert green survives unchanged and red clears fully.
-- **Needs no new capability** — the palette already has pure R/G/B lamps.
+- **Was:** B10/B11 *blend* two channels; B12 removes a *white* source. Nothing asserted that removing one
+  *colored* source leaves the *other* channel intact (the per-channel `PropagateDarknessRGB` path).
+- **Closed** by exactly the predicted scenario shape — and authoring it found **two shipped bugs** in the
+  per-channel removal path (`_FIXED_BUGS.md` Lighting #21 Bug 16 runaway removal cycle → OOM, #22 Bug 17
+  sourceless ghost island): **B86** (overlap red + green across the seam, break the red, green survives and
+  red clears — the literal C6 ask), **B87** (the interrupted-cycling runaway guard, promoted from K16a),
+  **B88** (the ghost-island guard, promoted from K17a). All in
+  `Baselines/LightingValidationSuite.Baseline.Bug16Runaway.cs` (+ B88's registration site).
+- **Standing lesson (mirrors C9's):** this finding sat OPEN·LOW–MEDIUM for a month while both bugs were
+  live. A "small-effort, no-new-capability" coverage gap on a *removal* path is cheap insurance —
+  removal is the engine's documented problem area (`LIGHTING_SYSTEM_OVERVIEW.md` §3.7) and deserves
+  priority inflation over placement-path gaps of equal apparent size.
 
-### C7 — Diagonal/corner delivery and dynamic in-chunk opaque-placement re-shadow lack deterministic baselines ·  **OPEN · LOW**
+### C7 — Diagonal/corner delivery and dynamic in-chunk opaque-placement re-shadow lack deterministic baselines ·  **OPEN · LOW (corner half upgraded — Bug 16 evidence)**
 
 - Corner (diagonal-neighbor) cross-chunk delivery exists only *inside* B40's fuzz (probabilistic per seed);
   there is no fixed, deterministic corner-spill baseline (source at a chunk corner → diagonal neighbor lit →
-  oracle).
+  oracle). **Priority evidence (2026-07-11):** Bug 16's infinite removal cycle armed at a **four-chunk
+  corner** (the x15|16 / z31|32 junction) — multi-seam corners are where per-channel colored-light cycles
+  live, not just a delivery edge case. The corner-spill baseline should use *colored* lamps, not white.
 - Dynamic in-chunk column re-shadow on opaque *placement* (place a block mid-air in a lit column → everything
   below darkens to side-bleed → break → re-light) is untested as a dedicated baseline; B3 only opens a shaft.
   Likely caught incidentally by other oracle compares — hence LOW.
 
-### C8 — Initial lighting only ever runs as a single simultaneous wave ·  **OPEN · MEDIUM (Bug 05's untried axis, new 2026-07-03)**
+### C10 — No RGB analog of the Bug 12 sourceless-loop initiator ·  **CLOSED (2026-07-12) — the predicted latent bug was real (Bug 18), fixed + guarded by baseline B90**
+
+- The sky↔RGB removal-machinery parity matrix after Bug 17: sky had the **initiator** (Bug 12,
+  `EmitCrossChunkSunlightRemoval`), the **veto** (Bugs 11/13, `In/CrossChunkSunlightSupport`) and **claim
+  verification** (Bug 14, `PullBackClaim`). RGB had the **veto only** (Bug 17,
+  `In/CrossChunkBlocklightSupport`), and `EmitCrossChunkSunlightRemoval` had no blocklight counterpart.
+- **The predicted bug was confirmed real.** The B53-twin scenario — a sealed blocklight corridor straddling
+  the x15|16 seam, two equal-color lamps as the only sources, both broken in the same wave — reproduced RED:
+  the seam settled stable-but-wrong at a ~38-voxel over-bright red residue (worst R13 at the seam) with no
+  collapse path, the Bug 17 veto actively protecting the stale mutual support. Filed **Bug 18** (`_FIXED_BUGS.md`
+  Lighting #23).
+- **Fixed** by mirroring the Bug 12 initiator to RGB per channel (`NeighborhoodLightingJob.EmitCrossChunkBlocklightRemoval`,
+  emitted from `PropagateDarknessRGB` at the 2-cycle signature `nX == node.LightX`), adjudicated by the
+  **existing** Bug 17 veto (no apply-side change). The Bug 14 claim-verification analog was **not** needed —
+  C12's pull-back self-heals (baseline B89) — so the fix is initiator-only, mirroring Bug 17 adding only the
+  veto.
+- **Guarded by baseline B90** (`LightingValidationSuite.C10RgbLoop.cs`, promoted from repro K18a). Prove-red
+  confirmed: neutering the emit reds only B90 (the residue returns); B86–B88, B50–B53, and B89 stay green.
+
+### C11 — The interrupted-reconciliation axis has exactly ONE recipe instance ·  **CLOSED (2026-07-12) — seeded fuzz B91 + band differential B92; the fuzz surfaced a Bug-09-shaped under-delivery lead**
+
+- **Closed** by a seeded interrupted-reconciliation fuzz (`LightingValidationSuite.InterruptedReconFuzz.cs`):
+  **B91** runs 24 seeds per suite invocation (nightly menu item `… (Interrupted Reconciliation Fuzz)` runs
+  500), each building a randomized colored-lamp cross-seam world (± water) and running a randomized number of
+  interrupted break/re-place cycles via the Bug-16 held-flight primitives (held neighbor flight + under-budgeted
+  waves), then asserting **convergence + zero work-cap aborts + oracle**. **B92** is the cheap companion — the
+  B87 recipe as a banded-vs-full differential (B75–B78 pattern), since interrupted flights change the LI-2
+  queued-node extents the sequential-edit differentials never exercise.
+- **Scope note (deliberate):** the fuzz covers **face-adjacent seams** — the cross-seam mutual-support topology
+  the removal-machinery churn (Bug 16/17/18) lives on. Diagonal 4-chunk-corner pairs are excluded: they are not
+  face-adjacent, and the interrupted schedule strands their cross-chunk *placement* delivery, surfacing an
+  **under-bright** (not over-bright) divergence — the **Bug 09** shape, orthogonal to this fuzz's removal axis.
+  That lead (a *synchronous* cross-chunk under-delivery — the first) is recorded under Bug 09 in
+  `LIGHTING_BUGS.md`, not conflated into this baseline.
+- **Diagonal-corner lead RESOLVED (2026-07-12) — harness-fidelity artifact, not a Bug-09 defect.** The
+  excluded corner geometry's under-bright divergence exists only because the fuzz recipe settles with plain
+  `RunWaveToConvergence`, which omits production's post-stabilization edge-check *re-add* rounds. Replaying
+  the identical interrupted schedule and then driving one re-granted edge-check round
+  (`RunReGrantedEdgeCheckRound`, i.e. `LightingFrameSimulator.RunToConvergence`'s quiescence hook — the
+  Bug-05 border-column re-grant path production takes after the final water placement) heals it completely
+  (41 → 0 divergent voxels). Confirms the §3.7 invariant: cross-chunk *placement* under-bright is always
+  edge-check-recoverable. B91 stays seam-scoped and unchanged; a future diagonal-corner axis must settle
+  through an edge-check-inclusive driver to avoid re-surfacing this artifact. Full classifier under Bug 09
+  in `LIGHTING_BUGS.md`.
+
+- Every scenario except B87/B88 edits a **converged** field and lets reconciliation **complete**. Bug 16
+  required ≥2 *interrupted* cycles (edits landing mid-reconciliation: held pre-edit flights +
+  under-budgeted waves + water attenuation) to build the non-monotone mixed-channel plateau state that
+  armed the cycle — a state no hand-authored converged-field scenario can reach. B87/B88 pin one geometry ×
+  one schedule; the axis itself is otherwise unexplored.
+- **Missing scenario family:** a seeded **interrupted-reconciliation fuzz** (the HF-3/C1 pattern applied to
+  the churn axis): randomized colored-lamp placements near seams/corners (± water volumes), randomized
+  interleavings of {break, re-place, held flight, 1-wave budget}, then settle and assert convergence +
+  zero work-cap aborts + oracle. Reuses `RunBug16InterruptedCyclingRecipe`'s primitives; suite-tier seed
+  count + nightly menu item per the HF-3 precedent.
+- Cheap companion: run the B87 recipe as a **banded-vs-full differential** (the B75–B78 pattern) — the
+  LI-2/2b band derivations consume queued-node extents, and interrupted flights change those extents
+  mid-stream; the existing differentials only script *sequential* edits.
+- Modeling limit (note, don't chase): the real Burst fluid tick driving opacity churn during lighting
+  reconciliation stays out of scope — B87 hand-models re-flow via `PlaceBlock(Water)`; cross-system
+  interplay is B3-adjacent structural territory.
+
+### C12 — RGB darkness-phase pull-backs are unverified (Bug 14's RGB mirror) ·  **CLOSED (2026-07-12) — verdict GREEN: the claim-free pull-back self-heals; scopes the fix to the initiator only**
+
+- `CheckEdgeVoxelRGB`, when called from inside the darkness phase (the Bug 07 defect-2 seam pull-back),
+  re-lights just-darkened border cells from stale snapshot halo values with **no claim verification** —
+  `PullBackClaim` carries `WrittenSky` only, and `PullBackClaimStillSupported` is sky-only. This is the
+  exact mechanism that planted sourceless sky ghost light in Bug 14, and it was one of the two candidate
+  planting writes in Bug 17 (the fix took the veto route; the plant path itself was unverified).
+- **Closed by baseline B89** (`Baselines/LightingValidationSuite.Baseline.C12RgbPullback.cs`): the B60/B61
+  RGB mirror — a held-flight interleave that forces the west chunk's darkness wave to run its
+  `CheckEdgeVoxelRGB` pull-back against a snapshot in which the east neighbor is still lit (it has since
+  gone dark). **Verdict: the stale, claim-free pull-back self-heals** — the field converges to the
+  borderless oracle because the ordinary *asymmetric* cross-seam removal branch clears the stale re-light
+  on the following wave (the B51 lesson, on the RGB channel). This confirms the Bug 17 investigation's
+  finding that "neutering the RGB claim path changed nothing," so **no RGB claim-verification mirror is
+  needed** — the RGB parallel of Bug 17 adding only the veto.
+- **Prove-red (demonstrated, not automated):** making the two lamps *symmetric* flips B89 red — that is
+  exactly repro **K18a / Bug 18** (the mutually-equal seam with no removal initiator; a 56-voxel surviving
+  ghost). So the held-flight harness demonstrably detects a surviving cross-seam RGB ghost; B89's
+  *asymmetric* arrangement staying green is what isolates C12 (pull-back, self-heals) from Bug 18
+  (initiator, the real gap).
+- **Consequence for the fix:** the RGB removal-machinery gap is the missing **initiator** (Bug 12's RGB
+  mirror — [C10](#c10--no-rgb-analog-of-the-bug-12-sourceless-loop-initiator-and-no-scenario-that-would-expose-it) →
+  Bug 18) **only**, not the claim verification. The "one RGB removal-machinery parity work item" is
+  therefore initiator-scoped.
+
+### C8 — Initial lighting only ever runs as a single simultaneous wave ·  **OPEN · LOW (was Bug 05's untried axis; Bug 05 fixed via the post-edit axis 2026-07-05, so this drops to belt-and-braces re-verification)**
 
 - Every generation-shaped scenario (B8, the B42 canopy fuzz, the B40 geometry fuzz) lights **all chunks
   in one concurrent wave** with `neighborsDataReady: true` throughout (the C1 remainder). Production
@@ -412,12 +611,54 @@ there is invisible.
   (includes the modeling limit: voxel data pre-exists — the stagger models "populated but not yet lit",
   which is the production initial-lighting environment, not "terrain absent" = B1 territory).
 
-> **None of C3–C8 require a new harness capability** — each reuses existing primitives
+### C9 — Flat scenario worlds never exercise border shadow-casters ·  **CLOSED (2026-07-04, found by the Bug 14 hotfix)**
+
+- Every scenario terrain is a superflat floor plus hand-placed features, so the column-recalc
+  **shadow-caster** branch (`RecalculateSunlightForColumn` waking the highest block's horizontal
+  neighbors, **including cross-border ones** — the one production path that seeds darkness nodes in the
+  halo) essentially never fired at a seam. Real terrain hits it constantly. Consequence: the Bug 14 fix's
+  pull-back claims could carry out-of-center positions in-game, crash `ProcessLightingJobs`, and leave
+  every suite scenario green — the crash class was structurally invisible to the corpus.
+- **Closed** by baseline **B60** (seam overhang → partially-lit neighbor → border-column edit; asserts
+  the cross-border wave fires via `ModsEmitted > 0` + oracle convergence), plus the center-only claim
+  contract in the job and defensive bounds-skips in both verifiers.
+- **Residual — resolved by HF-1 (2026-07-05):** originally the crash itself was not scenario-provable —
+  at B60's position the harness `ChunkData` tolerated the out-of-bounds read as a benign wrong-voxel read
+  that the verifier's superseded check skipped (a deliberate both-guards-off sabotage run stayed green),
+  so B60 only pinned path liveness/convergence. With HF-1's fail-fast accessor assertions (see A5) the
+  same sabotage now reds B60 loudly, so the scenario guards the crash class too. Standing lesson for
+  scenario authoring: prefer at least one **varied-heightmap-at-seam** geometry per new cross-chunk
+  feature — flat worlds under-sample the shadow-caster and halo-node paths.
+- **HF-3 follow-through (2026-07-05) — the lesson validated:** the border-heightmap fuzz shipped
+  (`LightingValidationSuite.BorderHeightFuzz.cs`: per-column random heights at every seam, seam
+  overhangs, seeded border edits; K15a 25-seed suite tier + 200-seed nightly menu item) and its first
+  run found two bugs on the very geometry axis this finding predicted flat worlds were hiding:
+  seed 0 → **Bug 15** (cross-seam surface stamps wiped by border-column edits; fixed + confirmed +
+  archived `_FIXED_BUGS.md` Lighting #19, distilled repros promoted to baselines **B62/B63**), and
+  seed 14 → the **first faithful synchronous Bug 05 repro** (post-edit edge-round exhaustion). **Bug 05
+  was then fixed** (2026-07-05, `ChunkData.ModifyVoxel` re-grants a bounded edge-check round on a
+  border-column opacity edit), confirmed in-game, and archived (`_FIXED_BUGS.md` Lighting #20); the fuzz
+  was promoted from K15a to baseline **B64**. One geometry axis, two bugs — the lesson paid off twice.
+- **New modeling note from the Bug 05 fix (frame-sim edge-check timing):** driving seed 14 green exposed
+  that the frame simulator lacks production's neighbor-stability **edge-check gate** (`AreNeighborsReadyAndLit`,
+  which naturally defers a re-armed edge check until the neighborhood settles). A per-completion re-arm in
+  the simulator ran the edge check *mid-churn* and the field settled back to its under-report. The fix
+  models the settled-field edge check by consuming the border-edit re-grant at grid **quiescence**
+  (`LightingTestWorld.RunReGrantedEdgeCheckRound`, driven from `LightingFrameSimulator.RunToConvergence`) —
+  outcome-faithful and consistent with how `RunInitialLighting*` already drive generation edge rounds as a
+  post-convergence loop. The exact per-frame edge-gate was **delivered by AS-2** (2026-07-06): scheduler
+  mode's ready scan has the real `AreNeighborsReadyAndLit` edge arm, and baseline **B70** confirms the
+  border-edit re-grant settles through it in scheduler mode. The `RunReGrantedEdgeCheckRound` quiescence
+  hook is retained as the legacy-mode backstop (the legacy baselines depend on it).
+
+> **None of C3–C12 require a new harness capability** — each reuses existing primitives
 > (`MarkChunkUnloaded`/`MarkChunkLoaded`, `BeginLightingJob`/`CompleteLightingJob`, the pure-channel lamp
-> palette, `GetSkyLight`/`GetBlocklightRGB`). The genuinely open *harness-feature* gaps remain those already
-> catalogued: no failure shrinker (C1/C2), fixed grid sizes (3×3 / 5×5), `neighborsDataReady` is a hand-set
-> toggle not derived from generation state (B2), no second differential oracle (A4), the on-disk
-> `Save()`/`Load()` round-trip is out of scope (B1), and the lighting→meshing gate is out of scope (B5).
+> palette, `GetSkyLight`/`GetBlocklightRGB`, `RunBug16InterruptedCyclingRecipe`; C11's fuzz needs only a
+> scenario-level seeded driver, the HF-3 shape). The genuinely open *harness/framework* gaps remain those
+> already catalogued: the runner-level work-cap invariant (B8), no failure shrinker (C1/C2), fixed grid
+> sizes (3×3 / 5×5), `neighborsDataReady` is a hand-set toggle not derived from generation state (B2), no
+> second differential oracle (A4), the on-disk `Save()`/`Load()` round-trip is out of scope (B1), and the
+> lighting→meshing gate is out of scope (B5).
 
 ---
 
@@ -470,26 +711,33 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 
 ## 6. Priority backlog (snapshot)
 
-| #  | Finding                                                                                    | Status            | Priority         | Effort         |
-|----|--------------------------------------------------------------------------------------------|-------------------|------------------|----------------|
-| C4 | Sunlight persist→replay (B46) + `AddPendingBlocklight` guard (B47)                         | **CLOSED**        | —                | done           |
-| C5 | Cumulative multi-layer attenuation probe (B45)                                             | **CLOSED**        | —                | done           |
-| C3 | Cross-chunk sunlight darkening race quadrant (B54/B55) — prereq for LI-1 → P-2 / TG-4 Ph.4 | **CLOSED**        | —                | done           |
-| B6 | MT-2 `LightWorkScheduler` park/promote layer unmodeled (→ roadmap AS-2)                    | OPEN              | **Medium-High**  | medium         |
-| C8 | Single-wave-only initial lighting — staggered-frontier axis unfuzzed (→ roadmap AS-3)      | OPEN              | Medium           | medium         |
-| C6 | Per-channel removal independence                                                           | OPEN              | Low–Medium       | small          |
-| C7 | Deterministic corner spill / in-chunk re-shadow                                            | OPEN              | Low              | small          |
-| §5 | Bug-09 fleet (B15–B25) consolidation                                                       | **CLOSED**        | —                | done           |
-| A3 | `ModifyVoxel` heightmap (shared) / enqueue path                                            | **PARTIAL**       | Low              | heightmap done |
-| A4 | Oracle shared-assumption probes                                                            | **MOSTLY CLOSED** | Low (2nd oracle) | probes done    |
-| B5 | Meshing-gate coverage                                                                      | OPEN              | Low (by design)  | —              |
-| C2 | Bug-05 dense-canopy geometry (found Bug 10)                                                | **CLOSED**        | —                | done           |
-| B2 | `neighborsDataReady` toggle                                                                | **CLOSED**        | —                | done           |
-| C1 | Bug-09 geometry fuzz (randomize geometry)                                                  | **CLOSED**        | —                | done           |
-| B1 | Chunk-unload / persist-replay path                                                         | **CLOSED**        | —                | done           |
-| B4 | Pool-recycle / flag-pairing                                                                | **CLOSED**        | —                | done           |
-| A1 | Section / uniform-sky merge bypass                                                         | **CLOSED**        | —                | done           |
-| A2 | Shared mod-routing decision                                                                | **CLOSED**        | —                | done           |
+| #   | Finding                                                                                                                                                                                                                                       | Status            | Priority         | Effort         |
+|-----|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------|------------------|----------------|
+| C10 | RGB sourceless-loop initiator absent (Bug 12's RGB mirror) — B53-twin **confirmed red → Bug 18**; FIXED (RGB initiator) + baseline B90, prove-red confirmed                                                                                   | **CLOSED**        | —                | done           |
+| C11 | Interrupted-reconciliation axis has ONE recipe instance — **seeded fuzz B91 + band differential B92**; fuzz surfaced a Bug-09-shaped sync under-delivery lead → **RESOLVED harness artifact** (edge-check re-add heals it; Bug 09 stays open) | **CLOSED**        | —                | done           |
+| C12 | RGB darkness-phase pull-backs unverified (Bug 14's RGB mirror) — B60/B61-twin; **verdict GREEN, self-heals → baseline B89**, scopes fix to initiator-only                                                                                     | **CLOSED**        | —                | done           |
+| B8  | Work-cap fail-safe asserted by only B87/B88 — **promoted to a runner-level `FailSafeErrorScope` invariant** (all 8 suites) + 2 framework self-tests                                                                                           | **CLOSED**        | —                | done           |
+| C4  | Sunlight persist→replay (B46) + `AddPendingBlocklight` guard (B47)                                                                                                                                                                            | **CLOSED**        | —                | done           |
+| C5  | Cumulative multi-layer attenuation probe (B45)                                                                                                                                                                                                | **CLOSED**        | —                | done           |
+| C3  | Cross-chunk sunlight darkening race quadrant (B54/B55) — prereq for LI-1 → P-2 / TG-4 Ph.4                                                                                                                                                    | **CLOSED**        | —                | done           |
+| A5  | Fail-soft `ChunkData` accessors — out-of-bounds is a position lottery (closed by HF-1)                                                                                                                                                        | **CLOSED**        | —                | done           |
+| B6  | MT-2 `LightWorkScheduler` park/promote layer unmodeled (closed by AS-2 scheduler mode + B66–B70)                                                                                                                                              | **CLOSED**        | —                | done           |
+| B7  | `ProcessLightingJobs` pass bookkeeping production-only (HF-2 near-term; full replay via `LightingCompletionPass` + B65, HF-4 #2)                                                                                                              | **CLOSED (full)** | —                | done           |
+| C8  | Single-wave-only initial lighting — staggered-frontier axis unfuzzed (→ roadmap AS-3; Bug 05 fixed via the post-edit axis, so now belt-and-braces)                                                                                            | OPEN              | Low              | medium         |
+| C9  | Flat scenario worlds never exercise border shadow-casters (B60; HF-3 fuzz shipped 2026-07-05 — found Bug 15 → B62/B63 + the first sync Bug-05 repro)                                                                                          | **CLOSED**        | —                | done           |
+| C6  | Per-channel removal independence (B86–B88 — authoring it found Bugs 16+17, `_FIXED_BUGS.md` #21/#22)                                                                                                                                          | **CLOSED**        | —                | done           |
+| C7  | Deterministic corner spill / in-chunk re-shadow (corner half upgraded by Bug-16 evidence — use colored lamps)                                                                                                                                 | OPEN              | Low              | small          |
+| §5  | Bug-09 fleet (B15–B25) consolidation                                                                                                                                                                                                          | **CLOSED**        | —                | done           |
+| A3  | `ModifyVoxel` heightmap (shared) / enqueue path                                                                                                                                                                                               | **PARTIAL**       | Low              | heightmap done |
+| A4  | Oracle shared-assumption probes                                                                                                                                                                                                               | **MOSTLY CLOSED** | Low (2nd oracle) | probes done    |
+| B5  | Meshing-gate coverage                                                                                                                                                                                                                         | OPEN              | Low (by design)  | —              |
+| C2  | Bug-05 dense-canopy geometry (found Bug 10)                                                                                                                                                                                                   | **CLOSED**        | —                | done           |
+| B2  | `neighborsDataReady` toggle                                                                                                                                                                                                                   | **CLOSED**        | —                | done           |
+| C1  | Bug-09 geometry fuzz (randomize geometry)                                                                                                                                                                                                     | **CLOSED**        | —                | done           |
+| B1  | Chunk-unload / persist-replay path                                                                                                                                                                                                            | **CLOSED**        | —                | done           |
+| B4  | Pool-recycle / flag-pairing                                                                                                                                                                                                                   | **CLOSED**        | —                | done           |
+| A1  | Section / uniform-sky merge bypass                                                                                                                                                                                                            | **CLOSED**        | —                | done           |
+| A2  | Shared mod-routing decision                                                                                                                                                                                                                   | **CLOSED**        | —                | done           |
 
 ---
 
@@ -497,8 +745,9 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 
 - Harness file map & API: `.agents/skills/validation-driven-bugfix/references/lighting-suite.md`
 - Frame simulator architecture: [LIGHTING_FRAME_SIMULATOR_DESIGN.md](LIGHTING_FRAME_SIMULATOR_DESIGN.md)
-- Async-bug testability roadmap (AS-1…AS-5 — B3 amendment, B6, C8, Bug 05/09/13 plans):
+- Async-bug testability roadmap (AS-1…AS-5 — B3 amendment, B6, C8, Bug 05/09 plans) + harness-hardening
+  follow-ups (HF-1…HF-4 — A5, B7, C9 remediations):
   [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md)
-- Open lighting bugs (Bug 05, Bug 09, Bug 13): [LIGHTING_BUGS.md](../../Bugs/LIGHTING_BUGS.md)
+- Open lighting bugs (Bug 09): [LIGHTING_BUGS.md](../../Bugs/LIGHTING_BUGS.md)
 - Lighting system overview: [LIGHTING_SYSTEM_OVERVIEW.md](../LIGHTING_SYSTEM_OVERVIEW.md)
 - Pipeline invariants: `.agents/rules/chunk-pipeline.md`, `.agents/rules/pool-reset-safety.md`

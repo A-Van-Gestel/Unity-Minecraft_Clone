@@ -1,8 +1,10 @@
+using System;
 using System.Collections.Generic;
 using System.Text;
 using Data;
 using Editor.DataGeneration;
 using UnityEngine;
+using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.Placement
 {
@@ -76,7 +78,7 @@ namespace Editor.Validation.Placement
             if (mask == BlockTags.NONE) return "NONE";
 
             StringBuilder sb = new StringBuilder();
-            foreach (BlockTags flag in System.Enum.GetValues(typeof(BlockTags)))
+            foreach (BlockTags flag in Enum.GetValues(typeof(BlockTags)))
             {
                 if (flag == BlockTags.NONE) continue;
                 if ((mask & flag) == flag)

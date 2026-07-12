@@ -1,6 +1,9 @@
 # Own stuff
 /Assets/settings.json*
 
+# Validation-suite headless results (NUnit XML build artifact — ValidationSuiteCI.RunHeadless)
+/TestResults/
+
 # NugetForUnity
 /Assets/Packages/
 
@@ -108,3 +111,8 @@ __pycache__/
 
 # MCP
 .mcp.json
+
+# Embedded com.unity.ai.assistant (external package source, ~48 MB).
+# Recreate after clone with Tools/Apply-AiAssistantMcpPatch.ps1
+# (see Documentation/Guides/UNITY_MCP_RUNCOMMAND_PATCH_GUIDE.md)
+/Packages/com.unity.ai.assistant/

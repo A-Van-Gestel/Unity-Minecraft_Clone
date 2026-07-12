@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Editor.Validation.Lighting.Framework;
 using UnityEngine;
+using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.Lighting
 {
@@ -87,7 +88,95 @@ namespace Editor.Validation.Lighting
             // --- C3 cross-chunk sunlight darkening family (B54 in-flight race, B55 steady-state) lives in
             // Baselines/LightingValidationSuite.Baseline.C3Darkening.cs and self-registers here. ---
             AddCrossChunkDarkeningBaselineScenarios(scenarios);
+
+            // --- Bug 13 suspended-slab family (B56/B57 generation-wave, B58/B59 dynamic-stamp fix
+            // tripwires; promoted from K13a-K13d) lives in
+            // Baselines/LightingValidationSuite.Baseline.Bug13Slab.cs and self-registers here. ---
+            AddBug13SlabBaselineScenarios(scenarios);
+
+            // --- Bug 14 fix baselines (B60 halo-node claim contract, B61 promoted ghost repro) live in
+            // Baselines/LightingValidationSuite.Baseline.Bug14Ghost.cs and self-register here. ---
+            AddBug14GhostBaselineScenarios(scenarios);
+
+            // --- Bug 15 fix baselines (B62 sun stamp, B63 RGB stamp; promoted from K15b/K15c) live in
+            // Baselines/LightingValidationSuite.Baseline.Bug15Stamp.cs and self-register here. ---
+            AddBug15StampBaselineScenarios(scenarios);
+
+            // --- Bug 05 fix baseline (B64, promoted from K15a after the July 2026 border-edit
+            // edge-check re-grant + in-game confirmation): the HF-3 border-heightmap fuzz. One
+            // varied-heightmap-at-seam geometry axis guarding two fixes — Bug 15 stamps (all seeds) and
+            // Bug 05 edge-round exhaustion (seed 14). Body + private helpers live in
+            // LightingValidationSuite.BorderHeightFuzz.cs. ---
+            scenarios.Add(new Scenario(
+                "B64: Border-heightmap fuzz — varied heights at every seam, seam overhangs, and border edits settle on the oracle across randomized seeds (Bug 15 + Bug 05 guard)",
+                Baseline_BorderHeightFuzz));
+
+            // --- Completion-pass fault isolation (B65, HF-4 #2 / finding B7): the sim drives the shared
+            // LightingCompletionPass skeleton and injects a merge fault to prove per-job isolation. Lives in
+            // Baselines/LightingValidationSuite.Baseline.FaultIsolation.cs and self-registers here. ---
+            AddFaultIsolationBaselineScenarios(scenarios);
+
+            // --- AS-2 Phase 3 scheduler-mode baselines (B66+, finding B6): the MT-2 park/promote layer
+            // exercised with the fail-safe off. Lives in LightingValidationSuite.SchedulerMode.cs and
+            // self-registers here. ---
+            AddSchedulerModeBaselineScenarios(scenarios);
+
+            // --- LI-2 lighting Y-band derivation baselines (B71-B74): the pure LightingBandDecision
+            // rules + ChunkData.GetLightingBandTop metadata summary, guarded before the band is plumbed
+            // into the job. Lives in Baselines/LightingValidationSuite.Baseline.BandDecision.cs and
+            // self-registers here. ---
+            AddBandDecisionBaselineScenarios(scenarios);
+
+            // --- LI-2 band differential gate (B75-B78): identical world scripts run banded vs full
+            // height must produce bit-identical fields with equal round counts; B78 is the gate's
+            // prove-red (a headroom-stripped band must be caught). Lives in
+            // Baselines/LightingValidationSuite.Baseline.BandDifferential.cs and self-registers here. ---
+            AddBandDifferentialBaselineScenarios(scenarios);
+
+            // --- Bug-16 runaway RGB removal family (B86): the simple-form convergence guard +
+            // fix over-correction tripwire. Lives in Baselines/LightingValidationSuite.Baseline.Bug16Runaway.cs
+            // (shared geometry with known-bug repro K16a) and self-registers here. ---
+            AddBug16RunawayBaselineScenarios(scenarios);
+
+            // --- C12 RGB stale-pull-back self-heal guard (B89): a held-flight stale darkness-phase
+            // CheckEdgeVoxelRGB pull-back converges (no claim verification needed — scopes the RGB
+            // removal-machinery gap to the missing initiator, Bug 18). Lives in
+            // Baselines/LightingValidationSuite.Baseline.C12RgbPullback.cs and self-registers here. ---
+            AddC12RgbPullbackBaselineScenarios(scenarios);
+
+            // --- Bug 18 RGB cross-seam removal initiator (B90; fidelity finding C10, promoted from repro
+            // K18a): two equal-color lamps mutually lighting a seam, broken in the same wave, must darken to
+            // the oracle (no sourceless RGB loop). Guards the EmitCrossChunkBlocklightRemoval initiator. Lives
+            // in LightingValidationSuite.C10RgbLoop.cs and self-registers here. ---
+            AddBug18RgbLoopBaselineScenarios(scenarios);
+
+            // --- C11 interrupted-reconciliation fuzz (B91 seeded seam/corner cycling sweep + B92 the B87
+            // recipe as a banded-vs-full differential): the Bug-16 churn axis generalized. Lives in
+            // LightingValidationSuite.InterruptedReconFuzz.cs and self-registers here. ---
+            AddInterruptedReconFuzzBaselineScenarios(scenarios);
+
+            // --- C13 mixed-channel cross-seam removal (B94): the Bug-18 red loop straddling a seam PLUS a
+            // green gradient fed across it from one chunk — proves the all-channel EmitCrossChunkBlocklightRemoval
+            // mod does not persistently over-clear an independently-sourced OTHER channel. Lives in
+            // LightingValidationSuite.C13RgbMixedChannel.cs and self-registers here. ---
+            AddC13RgbMixedChannelScenarios(scenarios);
         }
+
+        /// <summary>Hook for the C13 mixed-channel cross-seam removal baseline B94 (implemented in LightingValidationSuite.C13RgbMixedChannel.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddC13RgbMixedChannelScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the C11 interrupted-reconciliation fuzz baselines (implemented in LightingValidationSuite.InterruptedReconFuzz.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddInterruptedReconFuzzBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the C12 RGB stale-pull-back baseline (implemented in Baselines/LightingValidationSuite.Baseline.C12RgbPullback.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddC12RgbPullbackBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the Bug-18 RGB sourceless-loop baseline B90 (implemented in LightingValidationSuite.C10RgbLoop.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBug18RgbLoopBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the Bug-12 family baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug12.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
@@ -96,6 +185,38 @@ namespace Editor.Validation.Lighting
         /// <summary>Hook for the C3 cross-chunk sunlight darkening baselines (implemented in Baselines/LightingValidationSuite.Baseline.C3Darkening.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddCrossChunkDarkeningBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the completion-pass fault-isolation baseline (implemented in Baselines/LightingValidationSuite.Baseline.FaultIsolation.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddFaultIsolationBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the AS-2 scheduler-mode baselines (implemented in LightingValidationSuite.SchedulerMode.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddSchedulerModeBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the LI-2 band-derivation baselines (implemented in Baselines/LightingValidationSuite.Baseline.BandDecision.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBandDecisionBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the LI-2 band differential gate baselines (implemented in Baselines/LightingValidationSuite.Baseline.BandDifferential.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBandDifferentialBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the Bug-13 suspended-slab baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug13Slab.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBug13SlabBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the Bug-14 fix baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug14Ghost.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBug14GhostBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the Bug-15 stamp baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug15Stamp.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBug15StampBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the Bug-16 runaway RGB removal baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug16Runaway.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBug16RunawayBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>
         /// B1: A torch placed mid-air in an empty world. Exercises in-chunk RGB placement BFS and
@@ -1445,7 +1566,7 @@ namespace Editor.Validation.Lighting
         // light loop (the seam voxels mutually support each other across the boundary), so no removal mod
         // ever reaches the target — that orphaned-loop limitation is a separate concern that would mask
         // exactly what finding 3 changed (the attenuation formula). ---
-        private const byte B49_neighbor_SKY = 12; // the single lit in-chunk neighbor of the probe
+        private const byte B49_NEIGHBOR_SKY = 12; // the single lit in-chunk neighbor of the probe
         private const byte B49_DIMGLASS_OPACITY = 5; // TestBlockPalette.DimGlass
 
         /// <summary>
@@ -1455,7 +1576,7 @@ namespace Editor.Validation.Lighting
         /// <c>NeighborhoodLightingJob.AttenuateLight</c> and the <c>CheckEdgeVoxel</c> cross-chunk guard),
         /// not by a flat air step.
         /// <para>
-        /// One in-chunk neighbor of the probe is set to sky <see cref="B49_neighbor_SKY"/> (all other
+        /// One in-chunk neighbor of the probe is set to sky <see cref="B49_NEIGHBOR_SKY"/> (all other
         /// neighbors stay dark). The guard's support for a DimGlass (opacity 5) target must therefore be
         /// <c>sky − max(1,5) = sky − 5</c>, not the pre-fix flat <c>sky − 1</c>. We then drive the real
         /// decision logic (<c>ComputeSunlight</c>) for a removal of a voxel held over-bright at a value
@@ -1476,21 +1597,21 @@ namespace Editor.Validation.Lighting
             // support is a deterministic function of one known neighbor sky.
             Vector3Int probe = new Vector3Int(8, 64, 8);
             Vector3Int neighbor = new Vector3Int(7, 64, 8);
-            world.SetSkyLightAt(neighbor, B49_neighbor_SKY);
+            world.SetSkyLightAt(neighbor, B49_NEIGHBOR_SKY);
 
             // Finding 3: in-chunk support charges the TARGET voxel's opacity on entry (max(1, opacity)),
             // so DimGlass (opacity 5) support is neighborSky-5 — strictly below the pre-fix flat air step.
             byte supportDim = world.InChunkSunlightSupportAt(probe, B49_DIMGLASS_OPACITY);
             byte supportFlat = world.InChunkSunlightSupportAt(probe, 1);
             bool passed = LightingAssert.IsTrue(
-                supportDim == B49_neighbor_SKY - B49_DIMGLASS_OPACITY && supportFlat == B49_neighbor_SKY - 1 && supportDim < supportFlat,
+                supportDim == B49_NEIGHBOR_SKY - B49_DIMGLASS_OPACITY && supportFlat == B49_NEIGHBOR_SKY - 1 && supportDim < supportFlat,
                 "B49: in-chunk support charges the target's opacity (neighborSky-5), not the flat air step (neighborSky-1)",
-                $"neighborSky={B49_neighbor_SKY}: DimGlass support={supportDim} (expected {B49_neighbor_SKY - B49_DIMGLASS_OPACITY}), flat support={supportFlat} (expected {B49_neighbor_SKY - 1})");
+                $"neighborSky={B49_NEIGHBOR_SKY}: DimGlass support={supportDim} (expected {B49_NEIGHBOR_SKY - B49_DIMGLASS_OPACITY}), flat support={supportFlat} (expected {B49_NEIGHBOR_SKY - 1})");
 
             // A DimGlass voxel held over-bright at a value above its true (opacity-attenuated) support but
             // at/below the flat estimate. The opacity-aware guard applies the legitimate removal; the
             // pre-fix flat estimate would have spuriously vetoed it.
-            const byte overBright = B49_neighbor_SKY - 3; // supportDim (sky-5) < overBright (sky-3) <= supportFlat (sky-1)
+            const byte overBright = B49_NEIGHBOR_SKY - 3; // supportDim (sky-5) < overBright (sky-3) <= supportFlat (sky-1)
             passed &= LightingAssert.IsTrue(!LightingTestWorld.CrossChunkSunlightRemovalVetoed(overBright, supportDim),
                 "B49: opacity-aware support does NOT veto the legitimate cross-chunk removal (it applies)",
                 $"removal of sky {overBright} with opacity-aware support {supportDim} was unexpectedly vetoed");

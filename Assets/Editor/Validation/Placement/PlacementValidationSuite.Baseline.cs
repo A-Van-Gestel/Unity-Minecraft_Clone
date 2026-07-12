@@ -3,6 +3,7 @@ using Data;
 using Editor.Validation.Placement.Framework;
 using UnityEngine;
 using Id = Editor.Validation.Placement.Framework.TestPlacementBlockPalette.Id;
+using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.Placement
 {

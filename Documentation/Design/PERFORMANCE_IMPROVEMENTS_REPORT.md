@@ -10,6 +10,10 @@
 **Last audited:** 2026-06-12, at commit `39c92ef` (branch `feat/Modular-World-Generation-&-World-Types`).
 **Implementation status synced:** 2026-06-20, at commit `ea2aec0` — all Meshing & Rendering items
 except MR-8 (greedy meshing) are now closed and in-game confirmed (MR-1 through MR-7, MR-9).
+**Implementation status synced:** 2026-07-08 — `VS-1` (shared validation-suite runner) shipped:
+`Framework/ValidationSuiteRunner` + `ValidationRunResult`, six suites + `ChunkRelativePositionTests`
+migrated with unchanged verdicts; `VoxelMetadataUtilityTests`/`FastNoiseLiteTests` left as a tracked
+follow-up. VS-2/VS-3 now build on the runner's result object.
 **Third-pass audit:** 2026-07-02, at commit `99c3e6e` — added `WG-1..3`, `LI-2`, `GS-6`, `WS-1`;
 re-scoped `P-1` (see the pipeline table note).
 **Fourth-pass audit:** 2026-07-02, at commit `99c3e6e` — added `SL-1..4` (serialization save/load),
@@ -22,6 +26,9 @@ debug-tooling exemption.
 on `Assets/Editor/WorldTools/` + quick pass on the remaining editor tools).
 **Seventh-pass audit:** 2026-07-02 — added `VS-1..3` (editor validation suites), completing the
 audit coverage: every system in the repository has now had at least one audit pass.
+**Review sync:** 2026-07-10 — branch code review of `feat/async-lighting-validation-suite` added
+`LI-3` (eager double neighbor-gate evaluation in the lighting ready-set scan; plan-owned by
+`LIGHTING_PIPELINE_STATE_REFACTOR.md` F7 → LP-6).
 Findings are from static code review unless stated otherwise — capture a baseline per
 `Documentation/Performance/README.md` before implementing the larger items.
 
@@ -169,10 +176,11 @@ gates.
 
 ### Lighting
 
-| ID   | Finding                                                                                                                                          | Effort | Risk | Benefit | Seed | Save |
-|------|--------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| LI-1 | ✅ Branchy 9-map dispatch + hashmap cache → halo-padded volume; layout validated, **shipped net-positive via P-2 Phase 1** (worker-thread gather) |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
-| LI-2 | Halo gather/extract copies the full 128-voxel column height regardless of content (Y-band / section-ranged volume)                               |   🟡   |  🔴  |   🟢    |  ⚠️  |  ✅   |
+| ID   | Finding                                                                                                                                                                                                                                                                                                                                                                                                              | Effort | Risk | Benefit | Seed | Save |
+|------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| LI-1 | ✅ Branchy 9-map dispatch + hashmap cache → halo-padded volume; layout validated, **shipped net-positive via P-2 Phase 1** (worker-thread gather)                                                                                                                                                                                                                                                                     |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
+| LI-2 | ✅ Halo gather/extract/scans copied the full 128-voxel column regardless of content → **derived Y-band, shipped default-on** (`EnableLightingBandGather`); bit-identical (B75–B78), IL2CPP in-game **−26 % settled-streaming frame / −27 % Light** (flood sustained Light −9 %); **LI-2b bottom band also shipped 2026-07-11** (per-section emissive metadata; another −49…−59 % marginal on engaged shapes, B79–B85) |   🟡   |  🔴  |   🟢    |  ⚠️  |  ✅   |
+| LI-3 | Ready-set scan eagerly evaluates BOTH neighbor gates for every ready chunk each visit (plan-owned by `LIGHTING_PIPELINE_STATE_REFACTOR.md` LP-6)                                                                                                                                                                                                                                                                     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 
 ### World Generation
 
@@ -294,11 +302,11 @@ gates.
 
 ### Validation Suites
 
-| ID   | Finding                                                                                    | Effort | Risk | Benefit | Seed | Save |
-|------|--------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| VS-1 | Suite-runner scaffolding copy-pasted across all six suites (~90 near-identical lines each) |   🟡   |  🟢  |    ⚪    |  ✅   |  ✅   |
-| VS-2 | Suites are human-in-the-loop only: no aggregate run-all, no CI/headless entry point        |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| VS-3 | No stale-assembly guard — a suite can silently validate stale code after an edit           |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
+| ID   | Finding                                                                                                                                                                                                                                                                                                                                                                                                              | Effort | Risk | Benefit | Seed | Save |
+|------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| VS-1 | ✅ **SHIPPED 2026-07-08** — shared `Framework/ValidationSuiteRunner` + `ValidationRunResult` (per-scenario + total timing; `KnownBugChannel` ends the archive-vs-promote drift); six suites + `ChunkRelativePositionTests` migrated, verdicts unchanged; `VoxelMetadataUtilityTests`/`FastNoiseLiteTests` remain a tracked follow-up (assertion-model mismatch)                                                       |   ✅    |  ✅   |    ⚪    |  ✅   |  ✅   |
+| VS-2 | ✅ **SHIPPED 2026-07-09** — `Validate All` aggregate + `ValidationSuiteCI` headless entry (`RunHeadless` exit-code + NUnit3 XML; `RunSelected`/`-validationSuites` subset) over an explicit registry; per-suite `World.Instance` isolation guard (snapshot→force-restore→mark-failed) proven leak-tight; `Validation Framework` self-test suite added (8 suites, 151 baselines, fwd==rev==individual)                 |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| VS-3 | ✅ **SHIPPED 2026-07-10** — `Framework/StaleAssemblyGuard` diagnostic preamble in the shared runner (warn-only, never fails a baseline, suppressed to warn once per aggregate); 3 signals (isCompiling/isUpdating, source-vs-DLL, domain-vs-disk `[InitializeOnLoadMethod]` capture) over the two project assemblies; 6 self-tests (Validation Framework → 16, aggregate → 159); live-proven stale warning fires once |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
 
 ### World Scaling Enablers
 
@@ -771,6 +779,46 @@ satisfy both if the persistent layout itself is halo-padded.
 
 ### LI-2. Halo gather/extract copies the full column height regardless of content
 
+> **✅ IMPLEMENTED 2026-07-11** (`feat/async-lighting-validation-suite`) — shipped default-on behind
+> `World.EnableLightingBandGather` (rollback flag; TempJob startup sweep stays full-height by design). The lighting job
+> now gathers/scans/extracts only the derived bottom-anchored Y-band `[0, bandHeight)`; reads above answer virtually
+> from a per-chunk uniform-region summary. **Bit-identical** by the `LightingBandDecision` rules (coverage + one
+> headroom section, column-recalc, cross-seam consistency), proven by the **B75–B78** banded-vs-full differential
+> (incl. the C3 cross-chunk darkening quadrant, a 12-seed fuzz, and a headroom-strip prove-red) + **B71–B74**
+> derivation baselines — `Validate Lighting Engine` 70/70. Editor screening: **−31…−75 %** on the gather/scan-dominated
+> job shapes (no-op relight, edge check), wave-carrying jobs bounded by the irreducible BFS; never slower on the clean
+> floor. **Shippable IL2CPP/in-game frame A/B (confirmed):** settled-streaming frame **−26 %** / Light **−27 %**, flood
+> sustained Light **−9 %** with lighting no longer the worst-frame bottleneck (share 61 %→29 %) — a sustained frame win,
+> not merely "not slower" — see
+> [`Performance/LIGHTING_LI2_INGAME_IL2CPP_2026-07-11_BENCHMARK.md`](../Performance/LIGHTING_LI2_INGAME_IL2CPP_2026-07-11_BENCHMARK.md)
+> (editor screening: [`LIGHTING_LI2_2026-07-11_BENCHMARK.md`](../Performance/LIGHTING_LI2_2026-07-11_BENCHMARK.md)). Core:
+> `Assets/Scripts/Helpers/LightingBandDecision.cs` + `ChunkData.GetLightingBandTop` + `WorldJobManager.ScheduleLightingUpdate`.
+>
+> **✅ LI-2b BOTTOM BAND IMPLEMENTED 2026-07-11** (same branch; v1 shipped top-only by scope decision — this closes the
+> deferred half). The band is now the full range `[bandMinY, bandHeight)`: rows below an **inert-dark region** (light
+> uniformly 0, no emitters) are also skipped, stored as a band-local prefix of the padded volume. Enabler: per-section
+> **emissive-presence metadata** (`ChunkSection.emissiveCount`, maintained via the palette-independent
+> `Helpers/EmissiveBlockLookup` — runtime-only like `opaqueCount`, **no save-format change**). Bottom rules in
+> `LightingBandDecision.DeriveBandMinY`: inert-dark coverage over all 9 chunks (`ChunkData.GetLightingBandBottom`),
+> headroom under the lowest queued node, `min(center heightmap) − headroom` (the unbounded downward vertical-sunlight
+> rule has no attenuation to lean on), and **any column recalc → 0** (PASS 2 walks to Y=0; no downward full-sky escape
+> exists) — so floods/initial lighting stay effectively top-only and the wins accrue on settled-streaming re-lights.
+> Cross-seam needs no bottom rule (0-vs-0 is inert); the emissive gate also covers the RGB edge check's opaque-emission
+> substitution on cardinal halos. Same single flag (`EnableLightingBandGather`; rollback = full height). **Bit-identical**
+> proven by **B83–B85** (bottom differential with an *engagement assertion* — a never-engaging bottom cannot vacuously
+> pass — 8-seed deep-floor fuzz, raised-floor prove-red) + **B79–B82** derivation baselines — suite 77/77, in-game
+> underground lamp verification. Editor screening
+> ([`LIGHTING_LI2B_BOTTOM_BAND_2026-07-11_BENCHMARK.md`](../Performance/LIGHTING_LI2B_BOTTOM_BAND_2026-07-11_BENCHMARK.md)):
+> another **−49…−59 % on top of the shipped top band** where the bottom engages (deep/mid floors, no-op relight + edge
+> check — combined −70…−73 % vs pre-LI-2 full height), parity where it cannot. **IL2CPP in-game flag A/B (captured
+> 2026-07-11): frame-neutral — GO on the not-slower + Tier-A basis** (flood/settled deltas within the session's noise
+> floor; flood is recalc-driven so the bottom is 0 there by rule — the engaged wins live in settled-streaming
+> re-lights, per the plan), see
+> [`Performance/LIGHTING_LI2B_INGAME_IL2CPP_2026-07-11_BENCHMARK.md`](../Performance/LIGHTING_LI2B_INGAME_IL2CPP_2026-07-11_BENCHMARK.md)
+> (which also documents that `LightingJobBenchmark` pins full height in both builds — its per-job deltas there and in
+> the LI-2 in-game report are the build/session noise floor, not band effects).
+> The recommendation below is the as-designed record.
+
 *(Surfaced by the 2026-07-02 third-pass audit. This is the concrete, tracked form of
 `WORLD_SCALING_ANALYSIS.md` §2.2's "jobs must become section-ranged" Tier A prerequisite.)*
 
@@ -804,6 +852,38 @@ design problem; the copy mechanics are done.
     > full-height copies prohibitive — `WORLD_SCALING_ANALYSIS.md` §2.2).
 > - **Seed/Save:** ⚠️ same contract as LI-1 (terrain-safe, but light output must remain identical —
     > any divergence re-dirties the edge-check cascade on old saves) / ✅.
+
+---
+
+### LI-3. Ready-set scan eagerly evaluates BOTH neighbor gates for every ready chunk
+
+*(Surfaced by the 2026-07-10 branch code review of `feat/async-lighting-validation-suite` — a cost
+introduced by the AS-2/HF-4 #1 `LightingScanDecision` extraction. Independently found by the LP
+census as `LIGHTING_PIPELINE_STATE_REFACTOR.md` **F7**, which owns the fix via **LP-6**; this entry
+exists so the master perf backlog lists it — details and the consolidation plan live there.)*
+
+**Observed:** the `World.Update` lighting ready-set scan (`World.cs:1630–1631`) computes both
+`AreNeighborsDataReady` *and* `AreNeighborsReadyAndLit` for **every** ready chunk on every visit to
+feed the pure `LightingScanDecision.EvaluateReadyChunk` call, where the pre-AS-2 code
+short-circuited: `AreNeighborsReadyAndLit` (the expensive gate — 8 neighbors × chunk-store lookup +
+in-flight probe + flag reads) ran only on the rare `NeedsEdgeCheck` arm, and neither gate ran when a
+job was already in flight (immediate park). During initial world load / heavy edit churn the ready
+set is large, so this is added cost in exactly the loop MT-2 was built to slim down.
+
+**Recommendation:** compute the gate booleans lazily at the call site — `neighborsReadyAndLit` only
+when `!jobInFlight && !needsInitialLighting && needsEdgeCheck`, `neighborsDataReady` only when an
+arm that reads it is reachable. `EvaluateReadyChunk` stays pure and its semantics are unchanged
+because each gate is only consulted on those paths (mirror the same lazy pattern in the frame
+simulator's `RunSchedulerPhase2` so the two call sites stay identical). LP-6 subsumes this if the
+gates are consolidated there first.
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — call-site-only change in two mirrored callers; the shared decision is untouched.
+> - **Risk:** 🟢 Low — no semantic change (gates are pure reads); guarded by the scheduler-mode
+    > baselines B66–B70 + the legacy fleet.
+> - **Benefit:** 🟡 Medium — O(ready-set) per frame; matters during world load and edit bursts,
+    > negligible at steady state.
+> - **Seed/Save:** ✅ / ✅ — scheduling-only; no lighting output or disk change.
 
 ---
 
@@ -2267,6 +2347,30 @@ the combined handle; assign constant section bounds in `ConvertMeshOutput`.
 
 ### VS-1. Suite-runner scaffolding copy-pasted across all six suites
 
+> **✅ Implemented 2026-07-08 (branch `feat/async-lighting-validation-suite`).** Extracted
+> `Assets/Editor/Validation/Framework/`: `ValidationSuiteRunner.Execute(...)` (categorized loop +
+> per-scenario/total wall-clock timing), the `ValidationRunResult`/`ScenarioResult` result object,
+> the shared `Scenario` struct, and a `KnownBugChannel` enum (`Bug`/`Unimplemented`) that replaces the
+> drifting per-suite "archive vs promote" message strings. Each suite now exposes a headless
+> `Execute()` returning the result; `[MenuItem] RunAll()` is a thin `void` wrapper. The six suites and
+> `ChunkRelativePositionTests` were migrated (shared `Scenario` pulled in per-file via
+> `using Scenario = …Framework.Scenario;`) and re-verified to report identical baseline/known-bug
+> counts before/after (62/21/15/13/9/9 baselines; ChunkMath now 14, previously a bare pass/fail bool).
+> **Remaining (tracked follow-up):** `VoxelMetadataUtilityTests` and `FastNoiseLiteTests` — their
+> granular `AssertEqual`/golden-value harnesses don't map cleanly to one-bool-per-scenario. The result
+> object was designed to also feed VS-2 (CI exit code + NUnit-XML) and VS-3 (stale-assembly preamble).
+>
+> **Possible future refinements (tracked, not blocking):**
+> - Re-add per-suite header annotations (`(MT-1)`/`(MT-2)`, dropped in the migration) as a structured
+    > `Scenario`/suite tag rather than baking them into the display name (noted in `ValidationSuiteRunner.cs`).
+> - Optionally hoist the still-duplicated `Check(label, condition)` / `Expect(condition, message)` logging
+    > primitives (MeshQueue + LightScheduler + Placement, ~76 call sites) into a shared `ValidationLog` — a
+    > separate, bisectable commit, not required for VS-1.
+> - Add a per-scenario category tag to `ScenarioResult` so VS-2 can preserve distinctions the current binary
+    > baseline/known-bug split flattens (e.g. Placement's data-audit scenarios).
+> - Zero-alloc timing: swap the per-scenario `Stopwatch` for `Stopwatch.GetTimestamp()` deltas (noted in
+    > `ValidationSuiteRunner.cs`).
+
 **Observed:** Every suite entry file re-declares the same private `Scenario` struct and the same
 `RunAll` body — scenario loop, try/catch, baseline vs known-bug counting, colorized summary — as
 near-byte-identical copies (~90 lines × 6: `LightingValidationSuite.cs`,
@@ -2303,6 +2407,50 @@ decision note above), so it must be designed in here rather than retrofitted.
 
 ### VS-2. Suites are human-in-the-loop only — no aggregate run, no CI entry point
 
+> **✅ Implemented 2026-07-09 (branch `feat/async-lighting-validation-suite`, 5 commits).** On top of VS-1's
+> shared runner:
+> - **`Framework/ValidationSuiteRegistry`** — an *explicit* hand-maintained list of the standard suites (not
+    > attribute/reflection discovery: the failure mode is a compile error, list order is run order, and
+    > `ExpectedSuiteCount` is a floor the runner warns against). Adding a suite is one line.
+> - **`Framework/ValidationSuiteAggregateRunner`** — the `Minecraft Clone/Dev/Validate All` menu item + a
+    > `Run(logToConsole, suites)` core returning an **`AggregateRunResult`** (roll-ups computed from the per-suite
+    > results; `Success`, `AnySuiteRanNothing`, `RanNothing`). Each suite's `Execute` was threaded with
+    > `logToConsole`/`showProgress` so the aggregate drives one progress bar instead of each inner bar clobbering it.
+> - **Isolation guard (the load-bearing part).** The suites share the process-global `World.Instance` singleton
+    > (stubbed via reflection by `BehaviorTestWorld`). Sequential aggregation would make a suite order-dependent if
+    > one failed to restore it. So the runner snapshots `World.Instance` around every suite and, on a mismatch,
+    > **force-restores it (protecting the next suite) and marks the offender failed+untrusted** — a leak becomes a
+    > loud, attributed error, never a silent heisenbug. Acceptance gate: `individual == forward == reversed`
+    > per-scenario over all suites (**151 baselines** across **8 suites**, byte-identical in every ordering).
+> - **`Framework/NUnitXmlWriter`** (behind `IValidationResultWriter`, so JUnit can drop in later) — NUnit3
+    > `test-run` XML: baseline pass / known-bug now-passing → `Passed`; baseline fail / thrown / isolation-failed →
+    > `Failed` + `<failure>`; known-bug still reproducing → `Inconclusive` + `<reason>`.
+> - **`Framework/ValidationFrameworkSelfTest`** — registered as the 8th suite ("Validation Framework"), so
+    > `Validate All` re-checks the reporting/guard layer every run. It round-trips the XML writer in-memory and
+    > **hard-proves the isolation guard trips on a leak** via a mock guard (no real `World` fabricated).
+> - **`Framework/ValidationSuiteCI`** — `RunHeadless()` is the `-executeMethod` batch target (runs the selected
+    > suites, writes the XML, `EditorApplication.Exit(0)` only when every baseline passed and no suite ran nothing,
+    > else `Exit(1)`; any crash logs and exits 1). `RunSelected(csv)` is the no-exit in-editor path. `-validationSuites
+>   "Lighting Engine,Meshing"` selects a subset (case-insensitive, registry-ordered; a single unknown name rejects
+    > the whole request so a typo can't launder a partial run).
+>
+> **Scope / limitations (by design):**
+> - **Entry point ≠ live CI.** No CI pipeline or batch scheduler exists yet (none is planned near-term); the
+    > immediate consumer is an AI agent calling `RunSelected` via `Unity_RunCommand`. The batch `Exit`/XML path is
+    > built for whenever CI lands. Batchmode also needs Unity license activation on any runner.
+> - **Aggregate covers the 8 runner-based suites, not all ~15 menu items.** The deep-run/nightly variants
+    > (lighting fuzz sweeps, fluid parallel-determinism) and the not-yet-migrated standalone tests
+    > (`VoxelMetadataUtility`, `FastNoiseLite`) stay separate — they auto-join the aggregate the moment they return a
+    > `ValidationRunResult` and get a registry line (the VS-1 follow-up).
+> - **NUnit3 XML is round-trip-checked in-memory, not yet against a live CI parser** (deferred with CI itself).
+> - The default results path is `TestResults/validation-results.xml` (a build artifact — add to `.gitignore` when a
+    > CI job starts writing it).
+>
+> **Coverage recording (report item (e)):** left as the documented batchmode CLI recipe
+> (`-enableCodeCoverage -coverageOptions "…"`) rather than in-code, since the Code Coverage editor assembly is not
+> auto-referenced into `Assembly-CSharp-Editor`; the Burst caveat (coverage instruments IL; Burst jobs only register
+> with Burst disabled; numbers reflect editor-Mono) stands.
+
 **Observed:** Running the full regression surface means manually clicking **14 menu items** (six
 suites, three standalone test files, two nightly fuzz deep-runs, three fluid-determinism
 variants), reading colorized console output per run. There is no "run everything" aggregate, and no
@@ -2335,6 +2483,27 @@ and the numbers reflect editor-Mono execution either way.
 ---
 
 ### VS-3. No stale-assembly guard — a suite can silently validate stale code
+
+> **✅ Implemented 2026-07-10 (branch `feat/async-lighting-validation-suite`).** Added
+> **`Framework/StaleAssemblyGuard`** — a diagnostic preamble wired as the first line of
+> `ValidationSuiteRunner.Execute` (the one shared funnel, so every entry point — individual menu items,
+> headless single-suite `Execute`, `Validate All`, CI — is covered). The aggregate runner checks once and
+> opens a ref-counted `SuppressScope` around its suite loop, so an 8-suite run warns **at most once**, not
+> eight times. It never throws and never fails a baseline (verified in-editor: a stale run still returned
+> `Success=True` with the warning attached); an IO/resolution failure degrades to an *inconclusive* warning
+> rather than a silent false all-clear. Three signals against the two project assemblies
+> (`Assembly-CSharp` = production under validation, `Assembly-CSharp-Editor` = the suite code):
+> `isCompiling`/`isUpdating`; **source-vs-DLL** (newest `.cs` in an assembly's `CompilationPipeline`
+> `sourceFiles` newer than its compiled DLL — the load-bearing signal, since even `isCompiling == false` has
+> produced stale runs); and **domain-vs-disk** (on-disk DLL newer than what this domain loaded, captured at
+> `[InitializeOnLoadMethod]` — catches recompile-without-reload). A 2 s tolerance absorbs save→compile jitter.
+> The pure `Decide(...)` is guarded by **6 self-test scenarios** in the Validation Framework suite
+> (fresh / compiling / source-newer / within-tolerance / disk-newer-than-loaded / unresolved-inconclusive),
+> bringing that suite to 16 and the aggregate to **159 baselines**. Live-proven: touching a source file's
+> mtime into the future (no recompile) fired exactly one stale warning through a real aggregate run.
+> **Scope:** warn-only everywhere (the report's diagnostic intent) — the headless/CI exit code stays driven by
+> baseline results, not by the staleness heuristic. Two-assembly scope: a future `.asmdef` split would need
+> its new assembly added to the guard's list.
 
 **Observed:** A documented operational foot-gun (workflow memory + the `dotnet build` notes in
 CLAUDE.md): after editing code, the menu-item suites can execute against the *previous* compiled
@@ -2453,10 +2622,14 @@ evaluator (part a, 🔴, seed-gated) should be scheduled like any generator chan
 differential mandatory) and ideally alongside the next planned worldgen feature work, with ET-1's
 Burst port landing on top of it.
 
-VS-1..3 (validation suites) form one small dependency chain: VS-1's shared runner first (each suite
-re-verified against its own pre-refactor verdicts), then VS-2's aggregate + CI entry points and
-VS-3's stale-assembly preamble land in that runner in one place. Worth scheduling before the next
-multi-suite regression campaign (LI-2 and GS-5 will both lean on several suites at once).
+VS-1..3 (validation suites) form one small dependency chain: **VS-1's shared runner is ✅ done
+(2026-07-08** — `ValidationSuiteRunner` + result object; six suites + ChunkRelativePosition migrated,
+verdicts unchanged) and **VS-2 is ✅ done (2026-07-09** — `Validate All` aggregate + `ValidationSuiteCI`
+headless/agent entry + NUnit3 XML, over an explicit registry with a leak-tight `World.Instance` isolation
+guard) and **VS-3 is ✅ done (2026-07-10** — `StaleAssemblyGuard` diagnostic preamble in the shared runner:
+warn-only, suppressed to fire once per aggregate, three signals over the two project assemblies, 6 self-tests,
+live-proven). The whole VS-1..3 chain is now complete; the multi-suite regression campaigns ahead (LI-2, GS-5)
+inherit a one-click `Validate All` that also flags stale-code runs automatically.
 
 ---
 

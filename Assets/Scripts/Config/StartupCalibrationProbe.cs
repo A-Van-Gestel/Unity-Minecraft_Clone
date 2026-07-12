@@ -13,6 +13,9 @@ using Unity.Jobs;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
+// ReSharper disable HeuristicUnreachableCode
+#pragma warning disable CS0162 // Unreachable code detected
+
 namespace Config
 {
     /// <summary>
@@ -243,6 +246,7 @@ namespace Config
                     NativeQueue<LightQueueNode> blockQueue = new NativeQueue<LightQueueNode>(Allocator.Persistent);
                     NativeQueue<Vector2Int> recalcQueue = new NativeQueue<Vector2Int>(Allocator.Persistent);
                     NativeList<LightModification> mods = new NativeList<LightModification>(Allocator.Persistent);
+                    NativeList<PullBackClaim> pullBackClaims = new NativeList<PullBackClaim>(Allocator.Persistent);
                     NativeArray<bool> isStable = new NativeArray<bool>(1, Allocator.Persistent);
 
                     for (int x = 0; x < VoxelData.ChunkWidth; x++)
@@ -253,6 +257,8 @@ namespace Config
                     {
                         PaddedVoxels = paddedVoxels,
                         PaddedLight = paddedLight,
+                        BandHeight = ChunkMath.CHUNK_HEIGHT, // LI-2: the probe calibrates the full-height path
+                        BandMinY = 0,
                         ChunkPosition = new Vector2Int(0, 0),
                         SunlightBfsQueue = sunQueue,
                         BlocklightBfsQueue = blockQueue,
@@ -260,6 +266,7 @@ namespace Config
                         Heightmap = heightmap,
                         BlockTypes = jobData.BlockTypesJobData,
                         CrossChunkLightMods = mods,
+                        PullBackClaims = pullBackClaims,
                         IsStable = isStable,
                         PerformEdgeCheck = false,
                     };
@@ -278,6 +285,7 @@ namespace Config
                     blockQueue.Dispose();
                     recalcQueue.Dispose();
                     mods.Dispose();
+                    pullBackClaims.Dispose();
                     isStable.Dispose();
                 }
 
