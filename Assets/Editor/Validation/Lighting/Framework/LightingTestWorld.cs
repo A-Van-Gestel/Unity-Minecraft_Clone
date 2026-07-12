@@ -1007,6 +1007,19 @@ namespace Editor.Validation.Lighting.Framework
         /// cross-chunk mods are applied to chunks whose own job already snapshotted — the in-flight
         /// loss window that <see cref="RunToConvergence"/> (strictly sequential) can never produce.
         /// </summary>
+        /// <remarks>
+        /// This is the RAW regular-update driver: it does <b>not</b> drive the post-stabilization
+        /// edge-check <i>re-add</i> rounds (production's under-bright corrector — §3.6/§3.7 of
+        /// LIGHTING_SYSTEM_OVERVIEW.md). A cross-chunk <i>placement</i> stranded by the in-flight loss
+        /// window therefore stays under-bright here even though production self-heals it on the next
+        /// edge round (e.g. a border-column opacity edit's Bug-05 re-grant). For a production-faithful
+        /// settle that includes the edge-check re-add, drive convergence through
+        /// <see cref="LightingFrameSimulator.RunToConvergence"/> (which consumes the re-granted
+        /// <see cref="ChunkData.RemainingEdgeCheckRounds"/> at quiescence) or <see cref="RunInitialLighting"/>
+        /// / <see cref="RunInitialLightingParallel"/> for the generation-time rounds. Keeping this driver
+        /// raw is deliberate — the removal-machinery churn repros (Bug 16/17/18) rely on observing the
+        /// unreconciled wave state.
+        /// </remarks>
         /// <param name="maxRounds">The round budget before giving up.</param>
         /// <returns>The number of waves taken, or -1 when work was still pending after <paramref name="maxRounds"/>.</returns>
         public int RunWaveToConvergence(int maxRounds = DefaultMaxRounds)
