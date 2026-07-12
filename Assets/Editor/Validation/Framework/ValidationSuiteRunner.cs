@@ -314,14 +314,14 @@ namespace Editor.Validation.Framework
         /// console error joins by adding its marker here. NOT every error: the fault-isolation baselines
         /// deliberately log errors and must still pass, so the match is restricted to these explicit tags.
         /// </summary>
-        private static readonly string[] FAIL_SAFE_ERROR_MARKERS =
+        private static readonly string[] s_failSafeErrorMarkers =
         {
             "[LightingJob DIAG]", // NeighborhoodLightingJob.MAX_BFS_NODES_PER_PASS runaway abort (Bug 16 permanent fail-safe)
         };
 
         /// <summary>
         /// True when a console message is an engine fail-safe report — a <see cref="LogType.Error"/> carrying a
-        /// <see cref="FAIL_SAFE_ERROR_MARKERS"/> tag. Pure, so the self-test can pin it directly without
+        /// <see cref="s_failSafeErrorMarkers"/> tag. Pure, so the self-test can pin it directly without
         /// logging (a real log would bubble through the global <see cref="Application.logMessageReceived"/> into
         /// the enclosing self-test scenario's own scope and cross-fail it).
         /// </summary>
@@ -332,7 +332,7 @@ namespace Editor.Validation.Framework
         {
             if (type != LogType.Error || condition == null)
                 return false;
-            foreach (string marker in FAIL_SAFE_ERROR_MARKERS)
+            foreach (string marker in s_failSafeErrorMarkers)
                 if (condition.Contains(marker))
                     return true;
             return false;
