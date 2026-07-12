@@ -2334,8 +2334,8 @@ public class World : MonoBehaviour
     [CanBeNull]
     public Chunk GetChunkFromVector3(Vector3 pos)
     {
-        int x = Mathf.FloorToInt(pos.x / VoxelData.ChunkWidth);
-        int z = Mathf.FloorToInt(pos.z / VoxelData.ChunkWidth);
+        int x = ChunkMath.WorldToChunk(pos.x);
+        int z = ChunkMath.WorldToChunk(pos.z);
 
         // "Is in World" bounds check before accessing the array.
         if (!IsChunkInWorld(x, z))

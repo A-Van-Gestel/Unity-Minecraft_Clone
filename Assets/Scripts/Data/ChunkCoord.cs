@@ -1,4 +1,5 @@
 using System;
+using Helpers;
 using UnityEngine;
 
 namespace Data
@@ -100,7 +101,7 @@ namespace Data
         /// <example><c>WorldPos (800, 800)</c> -> <c>ChunkCoord (50, 50)</c></example>
         public static ChunkCoord FromVoxelOrigin(Vector2Int chunkVoxelPos)
         {
-            return new ChunkCoord(Mathf.FloorToInt((float)chunkVoxelPos.x / VoxelData.ChunkWidth), Mathf.FloorToInt((float)chunkVoxelPos.y / VoxelData.ChunkWidth));
+            return new ChunkCoord(ChunkMath.VoxelToChunk(chunkVoxelPos.x), ChunkMath.VoxelToChunk(chunkVoxelPos.y));
         }
 
         /// <summary>
@@ -111,7 +112,7 @@ namespace Data
         /// <example><c>WorldPos (800, 75, 800)</c> -> <c>ChunkCoord (50, 50)</c></example>
         public static ChunkCoord FromVoxelOrigin(Vector3Int voxelPos)
         {
-            return new ChunkCoord(Mathf.FloorToInt((float)voxelPos.x / VoxelData.ChunkWidth), Mathf.FloorToInt((float)voxelPos.z / VoxelData.ChunkWidth));
+            return new ChunkCoord(ChunkMath.VoxelToChunk(voxelPos.x), ChunkMath.VoxelToChunk(voxelPos.z));
         }
 
         /// <summary>
@@ -122,8 +123,7 @@ namespace Data
         /// <example><c>WorldPos (800.5f, 75f, 800.5f)</c> -> <c>ChunkCoord (50, 50)</c></example>
         public static ChunkCoord FromWorldPosition(Vector3 worldPos)
         {
-            return new ChunkCoord(Mathf.FloorToInt(worldPos.x / VoxelData.ChunkWidth),
-                Mathf.FloorToInt(worldPos.z / VoxelData.ChunkWidth));
+            return new ChunkCoord(ChunkMath.WorldToChunk(worldPos.x), ChunkMath.WorldToChunk(worldPos.z));
         }
 
         /// <summary>
@@ -134,8 +134,7 @@ namespace Data
         /// <example><c>WorldPos (800.5f, 800.5f)</c> -> <c>ChunkCoord (50, 50)</c></example>
         public static ChunkCoord FromWorldPosition(Vector2 worldPos)
         {
-            return new ChunkCoord(Mathf.FloorToInt(worldPos.x / VoxelData.ChunkWidth),
-                Mathf.FloorToInt(worldPos.y / VoxelData.ChunkWidth));
+            return new ChunkCoord(ChunkMath.WorldToChunk(worldPos.x), ChunkMath.WorldToChunk(worldPos.y));
         }
 
         #endregion

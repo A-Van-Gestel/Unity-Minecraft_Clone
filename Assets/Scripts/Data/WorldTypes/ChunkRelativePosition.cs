@@ -95,7 +95,7 @@ namespace Data.WorldTypes
             // Normalize X
             if (localPosition.x is >= ChunkMath.CHUNK_WIDTH or < 0f)
             {
-                int chunkOffset = Mathf.FloorToInt(localPosition.x / ChunkMath.CHUNK_WIDTH);
+                int chunkOffset = ChunkMath.WorldToChunk(localPosition.x);
                 Chunk = new ChunkCoord(Chunk.X + chunkOffset, Chunk.Z);
                 localPosition.x -= chunkOffset * ChunkMath.CHUNK_WIDTH;
             }
@@ -103,7 +103,7 @@ namespace Data.WorldTypes
             // Normalize Z
             if (localPosition.z is >= ChunkMath.CHUNK_WIDTH or < 0f)
             {
-                int chunkOffset = Mathf.FloorToInt(localPosition.z / ChunkMath.CHUNK_WIDTH);
+                int chunkOffset = ChunkMath.WorldToChunk(localPosition.z);
                 Chunk = new ChunkCoord(Chunk.X, Chunk.Z + chunkOffset);
                 localPosition.z -= chunkOffset * ChunkMath.CHUNK_WIDTH;
             }

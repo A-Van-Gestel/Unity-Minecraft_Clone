@@ -144,8 +144,8 @@ namespace Data
         /// <returns>The chunk's voxel-space origin.</returns>
         public Vector2Int GetChunkCoordFor(Vector3 worldPos)
         {
-            int x = Mathf.FloorToInt(worldPos.x / VoxelData.ChunkWidth) * VoxelData.ChunkWidth;
-            int z = Mathf.FloorToInt(worldPos.z / VoxelData.ChunkWidth) * VoxelData.ChunkWidth;
+            int x = ChunkMath.WorldToChunk(worldPos.x) * VoxelData.ChunkWidth;
+            int z = ChunkMath.WorldToChunk(worldPos.z) * VoxelData.ChunkWidth;
             return new Vector2Int(x, z);
         }
 
