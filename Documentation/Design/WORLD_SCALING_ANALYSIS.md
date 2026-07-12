@@ -13,7 +13,10 @@
 > recommended approach. Save-format impact is flagged per item — almost everything here is a
 > ⚠️ format change requiring the AOT migration protocol (`serialization-migration` skill).
 >
-> Status: **Analysis / planning. Nothing here is implemented.**
+> Status: **Analysis / planning.** §3.2 (floor-div audit) shipped as `WS-1`+`VQ-1` (2026-07-12);
+> the Tier B execution roadmap now lives in
+> [`WORLD_SCALING_IMPLEMENTATION.md`](WORLD_SCALING_IMPLEMENTATION.md) (global-unbounded, sign-split
+> phasing WS-2/WS-3/WS-4). This doc remains the "what breaks per tier" reference.
 
 **Analyzed:** 2026-06-12, at commit `39c92ef` (branch `feat/Modular-World-Generation-&-World-Types`).
 
