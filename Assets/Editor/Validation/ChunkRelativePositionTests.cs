@@ -95,6 +95,12 @@ namespace Editor.Validation
             scenarios.Add(new Scenario("WorldToChunk == Floor Div (float sweep)", RunWorldToChunkSweep));
             scenarios.Add(new Scenario("Negative-Coordinate Teeth (truncation would fail)", RunNegativeTeeth));
 
+            // --- VQ-1 GetVoxelState float→int decomposition parity ---
+            // The new integer TryGetVoxel fast path (and its GetVoxelState(Vector3) wrapper) must resolve the SAME
+            // chunk, local voxel, and in-world verdict the old float path did — the floor semantics at fractional
+            // and world-bound edges preserved exactly.
+            scenarios.Add(new Scenario("VQ-1 Float↔Int Decomposition Parity (sweep)", RunVoxelQueryDecompositionParity));
+
             return ValidationSuiteRunner.Execute("Chunk Math", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
 
@@ -356,6 +362,91 @@ namespace Editor.Validation
             }
 
             Debug.Log("[PASS] WorldToChunk == Floor Div (float sweep)");
+            return true;
+        }
+
+        /// <summary>
+        /// Proves the VQ-1 integer decomposition (<c>Mathf.FloorToInt</c> + <see cref="ChunkMath.VoxelToChunk"/>/
+        /// <see cref="ChunkMath.VoxelToLocal"/>, as <c>WorldData.TryGetVoxel</c> and its <c>GetVoxelState(Vector3)</c>
+        /// wrapper use it) yields the SAME in-world verdict, chunk voxel-origin, and local voxel position as the old
+        /// float path (<see cref="WorldData.IsVoxelInWorld"/> + <see cref="WorldData.GetChunkCoordFor"/> +
+        /// <see cref="WorldData.GetLocalVoxelPositionInChunk"/>). Sweeps quarter-voxel steps straddling the origin
+        /// (negative fractions that must resolve out-of-world) and across several chunk boundaries, plus explicit
+        /// world/height-bound edge tuples where a float compare and an int compare on the floored value could disagree.
+        /// The WorldData math methods are pure (no <c>World.Instance</c>), so a bare instance drives them.
+        /// </summary>
+        private static bool RunVoxelQueryDecompositionParity()
+        {
+            WorldData wd = new WorldData("parity-test", 0);
+
+            // Diagonal sweep: X and Z share identical logic, so one coordinate applied to both axes covers both.
+            // -32 → +512 spans negative fractions (out-of-world), the origin, and many chunk boundaries; Y held at a
+            // valid interior value so an in-world verdict actually exercises the chunk/local comparison.
+            for (int q = -32 * 4; q <= 512 * 4; q++)
+            {
+                float w = q * 0.25f;
+                if (!CheckDecompositionParity(wd, w, 64.5f, w))
+                    return false;
+            }
+
+            // Edge tuples: world horizontal bound, chunk height bound, and negative fractions on each axis — the
+            // cases where `IsVoxelInWorld`'s float `< size` and the int `< size` on the floored value must still agree.
+            const float worldSize = VoxelData.WorldSizeInVoxels;
+            (float x, float y, float z)[] edges =
+            {
+                (0f, 0f, 0f), (-0.5f, 64f, 0f), (0f, 64f, -0.5f), (0f, -0.5f, 0f),
+                (worldSize - 0.5f, 64f, 0f), (worldSize, 64f, 0f), (worldSize + 0.5f, 64f, 0f),
+                (0f, VoxelData.ChunkHeight - 0.5f, 0f), (0f, VoxelData.ChunkHeight, 0f),
+                (15.75f, 127.5f, 15.75f), (16f, 0f, 16f),
+            };
+            foreach ((float x, float y, float z) in edges)
+            {
+                if (!CheckDecompositionParity(wd, x, y, z))
+                    return false;
+            }
+
+            Debug.Log("[PASS] VQ-1 Float↔Int Decomposition Parity (sweep)");
+            return true;
+        }
+
+        /// <summary>
+        /// Single-position parity check for <see cref="RunVoxelQueryDecompositionParity"/>: compares the old float
+        /// decomposition against the integer one for one world position. Returns false (and logs) on any mismatch.
+        /// </summary>
+        private static bool CheckDecompositionParity(WorldData wd, float wx, float wy, float wz)
+        {
+            Vector3 wp = new Vector3(wx, wy, wz);
+
+            bool oldInWorld = wd.IsVoxelInWorld(wp);
+            int fx = Mathf.FloorToInt(wx), fy = Mathf.FloorToInt(wy), fz = Mathf.FloorToInt(wz);
+            bool newInWorld = (uint)fx < VoxelData.WorldSizeInVoxels &&
+                              (uint)fy < VoxelData.ChunkHeight &&
+                              (uint)fz < VoxelData.WorldSizeInVoxels;
+
+            if (oldInWorld != newInWorld)
+            {
+                Debug.LogError($"[FAIL] VQ-1 Float↔Int Decomposition Parity — in-world verdict differs at {wp}: " +
+                               $"float={oldInWorld}, int={newInWorld}.");
+                return false;
+            }
+
+            // Chunk/local only defined when in-world (both agree it is, per the check above).
+            if (!oldInWorld) return true;
+
+            Vector2Int oldChunk = wd.GetChunkCoordFor(wp);
+            Vector3Int oldLocal = wd.GetLocalVoxelPositionInChunk(wp);
+            Vector2Int newChunk = new Vector2Int(
+                ChunkMath.VoxelToChunk(fx) * VoxelData.ChunkWidth,
+                ChunkMath.VoxelToChunk(fz) * VoxelData.ChunkWidth);
+            Vector3Int newLocal = new Vector3Int(ChunkMath.VoxelToLocal(fx), fy, ChunkMath.VoxelToLocal(fz));
+
+            if (oldChunk != newChunk || oldLocal != newLocal)
+            {
+                Debug.LogError($"[FAIL] VQ-1 Float↔Int Decomposition Parity — decomposition differs at {wp}: " +
+                               $"chunk float={oldChunk}/int={newChunk}, local float={oldLocal}/int={newLocal}.");
+                return false;
+            }
+
             return true;
         }
 

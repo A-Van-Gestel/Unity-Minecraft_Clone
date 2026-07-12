@@ -158,6 +158,10 @@ CI/coverage/XML gaps close via the VS-2 extensions instead.
   [CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) executes
   WS-1 and builds this suite alongside it (positive-domain equivalence + negative/big-coordinate
   contract pins + region round-trips).
+- **Partial status (2026-07-12):** the WS-1 shift/mask sweeps and the VQ-1 float↔int
+  decomposition-parity sweep both shipped as scenarios in `ChunkRelativePositionTests` (the "Chunk
+  Math" suite) — the WS-1 and VQ-1 gates above are satisfied. The V2/V3 region-codec pins remain
+  outstanding as the standalone NS-5 suite.
 
 ---
 

@@ -30,6 +30,25 @@ namespace Data
         [NonSerialized]
         public Dictionary<Vector2Int, HashSet<Vector2Int>> SunlightRecalculationQueue = new Dictionary<Vector2Int, HashSet<Vector2Int>>();
 
+        // --- One-entry voxel-query cache (VQ-1) ---
+        // Query bursts (an AABB collision scan, a ray march) overwhelmingly hit the same chunk, so caching the
+        // last-resolved chunk turns the dictionary lookup into a Vector2Int compare. Main-thread only (every
+        // GetVoxelState/TryGetVoxel caller is managed; jobs read gathered NativeArrays, not this path).
+        // The cached ChunkData reference must not outlive its dictionary entry — a pool-recycled chunk at the
+        // same key would serve stale data — so a topology version stamped on every Chunk's add/remove/clear
+        // (see InvalidateVoxelQueryCache) fails the cache closed instead.
+        [NonSerialized]
+        private Vector2Int _cachedChunkKey;
+
+        [NonSerialized]
+        private ChunkData _cachedChunkData;
+
+        [NonSerialized]
+        private long _chunkTopologyVersion;
+
+        [NonSerialized]
+        private long _cachedTopologyVersion;
+
         #region Constructors
 
         /// <summary>
@@ -111,7 +130,15 @@ namespace Data
             // We create a "placeholder" ChunkData object.
             // The asynchronous job system is responsible for populating it.
             Chunks.Add(chunkVoxelPos, World.Instance.ChunkPool.GetChunkData(chunkVoxelPos)); // Create placeholder using POOL
+            InvalidateVoxelQueryCache();
         }
+
+        /// <summary>
+        /// Invalidates the one-entry voxel-query cache used by <see cref="TryGetVoxel"/>. MUST be called after any
+        /// structural change to <see cref="Chunks"/> (add, remove, or clear), so a cached <see cref="ChunkData"/>
+        /// reference can never outlive its dictionary entry and serve data from a pool-recycled chunk at the same key.
+        /// </summary>
+        public void InvalidateVoxelQueryCache() => _chunkTopologyVersion++;
 
 
         /// <summary>
@@ -130,6 +157,7 @@ namespace Data
             {
                 // Create the placeholder
                 Chunks.Add(chunkVoxelPos, World.Instance.ChunkPool.GetChunkData(chunkVoxelPos)); // Create placeholder using POOL
+                InvalidateVoxelQueryCache();
                 return false;
             }
 
@@ -181,7 +209,57 @@ namespace Data
         }
 
         /// <summary>
-        /// Gets the voxel state at the given world position.
+        /// Integer voxel-query fast path (VQ-1): resolves the voxel at an integer world coordinate with one
+        /// chunk-coord computation (WS-1 shift/mask helpers), no float round-trip, and no nullable wrap. Backed by
+        /// the one-entry last-chunk cache so a burst of queries into the same chunk skips the dictionary lookup.
+        /// Prefer this over <see cref="GetVoxelState(Vector3)"/> for callers that already hold integer coordinates.
+        /// </summary>
+        /// <param name="x">World voxel X.</param>
+        /// <param name="y">World voxel Y.</param>
+        /// <param name="z">World voxel Z.</param>
+        /// <param name="state">The resolved voxel state; <c>default</c> when the method returns false.</param>
+        /// <returns>True when the coordinate is in-world and its chunk is loaded; false otherwise (matches the old <c>null</c>).</returns>
+        public bool TryGetVoxel(int x, int y, int z, out VoxelState state)
+        {
+            // Integer world-bounds check: the unsigned compare folds "< 0" and ">= size" into one test per axis,
+            // mirroring IsVoxelInWorld's float `is >= 0 and < size` on the floored coordinate.
+            if ((uint)x >= VoxelData.WorldSizeInVoxels ||
+                (uint)y >= VoxelData.ChunkHeight ||
+                (uint)z >= VoxelData.WorldSizeInVoxels)
+            {
+                state = default;
+                return false;
+            }
+
+            // One chunk-coord computation, keyed by the chunk's voxel-space origin exactly like `Chunks`.
+            Vector2Int chunkKey = new Vector2Int(
+                ChunkMath.VoxelToChunk(x) * VoxelData.ChunkWidth,
+                ChunkMath.VoxelToChunk(z) * VoxelData.ChunkWidth);
+
+            ChunkData chunkData;
+            if (_cachedChunkData != null && _cachedTopologyVersion == _chunkTopologyVersion && _cachedChunkKey == chunkKey)
+            {
+                chunkData = _cachedChunkData;
+            }
+            else if (Chunks.TryGetValue(chunkKey, out chunkData))
+            {
+                _cachedChunkKey = chunkKey;
+                _cachedChunkData = chunkData;
+                _cachedTopologyVersion = _chunkTopologyVersion;
+            }
+            else
+            {
+                state = default;
+                return false;
+            }
+
+            state = new VoxelState(chunkData.GetVoxel(ChunkMath.VoxelToLocal(x), y, ChunkMath.VoxelToLocal(z)));
+            return true;
+        }
+
+        /// <summary>
+        /// Gets the voxel state at the given world position. Floor-then-delegate wrapper over the integer
+        /// <see cref="TryGetVoxel"/> fast path.
         /// </summary>
         /// <param name="worldPos">The world position</param>
         /// <returns>The `voxel state` at the given position or `null` if the voxel is `outside the world` or the `chunk doesn't exist`.</returns>
@@ -192,20 +270,11 @@ namespace Data
             if (!IsVoxelInWorld(worldPos))
                 return null;
 
-            // Find out the global ChunkCoord value of our voxel's chunk.
-            Vector2Int chunkCoord = GetChunkCoordFor(worldPos);
+            if (TryGetVoxel(Mathf.FloorToInt(worldPos.x), Mathf.FloorToInt(worldPos.y), Mathf.FloorToInt(worldPos.z),
+                    out VoxelState state))
+                return state;
 
-            // Check if the chunk exists.
-            ChunkData chunkData = RequestChunk(chunkCoord, false);
-
-            if (chunkData == null)
-                return null;
-
-            // Then create a Vector3Int with the position of our voxel *within* the chunk.
-            Vector3Int voxelPos = GetLocalVoxelPositionInChunk(worldPos);
-
-            // Then get the voxel in our chunk.
-            return chunkData.GetState(voxelPos);
+            return null;
         }
 
         /// <summary>

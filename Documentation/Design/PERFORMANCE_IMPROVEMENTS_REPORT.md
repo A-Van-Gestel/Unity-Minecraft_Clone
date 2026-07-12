@@ -18,6 +18,10 @@ follow-up. VS-2/VS-3 now build on the runner's result object.
 on `feat/world-scaling`: Burst-safe `ChunkMath` voxel↔chunk↔region helpers + all ~11 chunk-math call
 sites migrated, guarded by the "Chunk Math" suite; byte-identical over the reachable range (no save
 bump). Audit correction folded in: the V2 codec truncation was latent-but-unreachable, not a live bug.
+`VQ-1` (integer `TryGetVoxel` fast path — WS-1's runtime-API half) shipped 2026-07-12 on the same
+branch: one-chunk-coord integer query + one-entry last-chunk cache, `GetVoxelState(Vector3)` kept as a
+floor-then-delegate wrapper, physics/placement/mod-apply consumers migrated; guarded by a float↔int
+decomposition-parity sweep in the "Chunk Math" suite; Placement suite + Validate All green (no save bump).
 **Third-pass audit:** 2026-07-02, at commit `99c3e6e` — added `WG-1..3`, `LI-2`, `GS-6`, `WS-1`;
 re-scoped `P-1` (see the pipeline table note).
 **Fourth-pass audit:** 2026-07-02, at commit `99c3e6e` — added `SL-1..4` (serialization save/load),
@@ -260,11 +264,11 @@ gates.
 
 ### Voxel Queries, Interaction & Physics
 
-| ID   | Finding                                                                                       | Effort | Risk | Benefit | Seed | Save |
-|------|-----------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| VQ-1 | `GetVoxelState` float path: chunk coord computed twice, ~7 `FloorToInt` + nullable per query  |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
-| VQ-2 | Placement ray uses fixed-increment sampling (~reach/step queries per frame) instead of DDA    |   🟡   |  🟡  |    ⚪    |  ✅   |  ✅   |
-| PH-1 | Collision solver re-queries the same voxel neighborhood across up to 7 sweeps × substeps/tick |   🟡   |  🟡  |   ⚪⁵    |  ✅   |  ✅   |
+| ID   | Finding                                                                                                                                                                                                          | Effort | Risk | Benefit | Seed | Save |
+|------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| VQ-1 | ✅ **SHIPPED 2026-07-12** — integer `TryGetVoxel` fast path (one chunk-coord, no float/nullable) + one-entry last-chunk cache; `GetVoxelState(Vector3)` kept as wrapper; physics/placement/mod consumers migrated |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+| VQ-2 | Placement ray uses fixed-increment sampling (~reach/step queries per frame) instead of DDA                                                                                                                       |   🟡   |  🟡  |    ⚪    |  ✅   |  ✅   |
+| PH-1 | Collision solver re-queries the same voxel neighborhood across up to 7 sweeps × substeps/tick                                                                                                                    |   🟡   |  🟡  |   ⚪⁵    |  ✅   |  ✅   |
 
 > ⁵ VQ-2/PH-1 benefits are ⚪ with a single player entity — but `VoxelRigidbody` is the collision
 > solver any future entity (mobs, items) will reuse, and both scale linearly with entity count.
@@ -1923,27 +1927,42 @@ backlog. Implement the hybrid (§3 of that doc) or `RandomAccess` (§4) variant;
 
 ### VQ-1. `GetVoxelState` float path — duplicated chunk math, nullable + managed deref per query
 
-**Observed:** `WorldData.GetVoxelState(Vector3)` (`WorldData.cs` ~line 189) costs, per query:
-float world-bounds compares (`IsVoxelInWorld`), `GetChunkCoordFor` (2 float divides + 2
-`FloorToInt`), a dictionary `TryGetValue`, then `GetLocalVoxelPositionInChunk` — which **calls
-`GetChunkCoordFor` again** (the chunk coord is computed twice per query) — plus 3 more
-`FloorToInt`, a `VoxelState?` nullable wrap, and at most callers a managed `BlockType` array deref.
-Integer-coordinate callers (`CheckPhysicsCollision` passes `Vector3Int` voxel positions) round-trip
-int → float → floored int. Per-frame call volume: the physics solver (12–18 cells × up to 7 sweeps
-× substeps per FixedUpdate — see PH-1), the placement march (~reach/checkIncrement calls per frame
-— see VQ-2), pending-mod apply, and the grass tick.
+✅ **SHIPPED 2026-07-12** (`feat/world-scaling`). The runtime-API half of WS-1: shipped once the
+shift/mask helpers it builds on landed.
 
-**Recommendation:** Add an integer fast path — `bool TryGetVoxel(int x, int y, int z, out
-VoxelState state)` — built on the WS-1 shift/mask helpers (this item is the *runtime API half of
-WS-1*; implement them together): one chunk-coord computation, no floats, no nullable. Add a
-one-entry "last chunk" cache (query bursts — an AABB scan, a ray march — overwhelmingly hit the
-same chunk, turning the dictionary lookup into a compare). Keep the `Vector3` overload as a
-floor-then-delegate wrapper. Migrate the hot consumers (physics, march, mods) first.
+**Observed:** `WorldData.GetVoxelState(Vector3)` (`WorldData.cs` ~line 189) costs, per query:
+float world-bounds compares (`IsVoxelInWorld`), `GetChunkCoordFor`, a dictionary `TryGetValue`, then
+`GetLocalVoxelPositionInChunk` — which **calls `GetChunkCoordFor` again** (the chunk coord is
+computed twice per query) — plus a `VoxelState?` nullable wrap and (at most callers) a managed
+`BlockType` array deref. *(WS-1 had already replaced `GetChunkCoordFor`'s float divides with the
+`ChunkMath.WorldToChunk` shift; the live targets at the time of VQ-1 were the **double** computation,
+the float floor, and the nullable.)* Integer-coordinate callers (`CheckPhysicsCollision` passes
+`Vector3Int` voxel positions) round-trip int → float → floored int. Per-frame call volume: the
+physics solver (12–18 cells × up to 7 sweeps × substeps per FixedUpdate — see PH-1), the placement
+march (~reach/checkIncrement calls per frame — see VQ-2), pending-mod apply, and the grass tick.
+
+**Shipped:** integer fast path `bool TryGetVoxel(int x, int y, int z, out VoxelState state)` on
+`WorldData` (forwarded from `World`), built on the WS-1 `ChunkMath.VoxelToChunk`/`VoxelToLocal`
+helpers: one chunk-coord computation, an unsigned-fold integer bounds check, no floats, no nullable,
+a value-struct `out`. A one-entry last-chunk cache (key + `ChunkData`, main-thread only) turns a
+same-chunk query burst's dictionary lookup into a `Vector2Int` compare; it is stamped with a
+**topology version** bumped on every `Chunks` add/remove/clear (`WorldData.InvalidateVoxelQueryCache`),
+so a pool-recycled chunk can never be served from a stale cached reference. `GetVoxelState(Vector3)`
+remains a floor-then-delegate wrapper (float `IsVoxelInWorld` preserved for exact bounds parity). The
+hot consumers were migrated: `CheckPhysicsCollision`, `PlacementController.Probe`/`CanPlaceAt`, and the
+pending-mod apply block (break/place-rule/support/neighbor-activation queries). *Out of scope (build on
+VQ-1): PH-1 gather-once sweeps, VQ-2 DDA march, and the mod-apply block's residual
+`GetLocalVoxelPositionInChunk` double-math.*
+
+**Verification:** a float↔int decomposition-parity sweep added to the "Chunk Math" suite proves the
+new integer path yields the same in-world verdict, chunk origin, and local voxel as the old float path
+across a fractional sweep straddling the origin and world bounds (teeth confirmed on the
+negative-fraction in-world verdict); the Placement suite (13 baselines) and Validate All stay green.
 
 > **Impact Analysis:**
 > - **Effort:** 🟡 Medium — new overload + WS-1 helpers + consumer migration.
 > - **Risk:** 🟡 Medium — the float→int floor semantics at negative-fraction boundaries must be
-    > preserved exactly (guard with an equivalence sweep, same harness as WS-1); the placement
+    > preserved exactly (guarded with the parity sweep, same harness as WS-1); the placement
     > suite (13 baselines) covers the interaction consumers.
 > - **Benefit:** 🟡 Medium — cuts the constant per-frame query tax for every consumer at once, and
     > removes the last float coordinate path standing in Tier B's way.

@@ -461,6 +461,7 @@ public class World : MonoBehaviour
             }
 
             worldData.Chunks.Clear();
+            worldData.InvalidateVoxelQueryCache();
             worldData.ModifiedChunks.Clear();
         }
 
@@ -2115,9 +2116,9 @@ public class World : MonoBehaviour
             // We should always allow this, unless the target is unbreakable.
             if (v.ID == BlockIDs.Air)
             {
-                VoxelState? stateToBreak = worldData.GetVoxelState(v.GlobalPosition);
-                if (stateToBreak.HasValue &&
-                    (BlockTypes[stateToBreak.Value.ID].tags & BlockTags.UNBREAKABLE) != 0)
+                Vector3Int breakPos = v.GlobalPosition;
+                if (worldData.TryGetVoxel(breakPos.x, breakPos.y, breakPos.z, out VoxelState stateToBreak) &&
+                    (BlockTypes[stateToBreak.ID].tags & BlockTags.UNBREAKABLE) != 0)
                 {
                     continue; // Cannot break an unbreakable block.
                 }
@@ -2125,21 +2126,21 @@ public class World : MonoBehaviour
             else // This is a "place" action, so run the full rule check.
             {
                 bool canPlace = true;
-                VoxelState? existingState = worldData.GetVoxelState(v.GlobalPosition);
+                Vector3Int placePos = v.GlobalPosition;
 
-                if (existingState.HasValue)
+                if (worldData.TryGetVoxel(placePos.x, placePos.y, placePos.z, out VoxelState existingState))
                 {
                     switch (v.Rule)
                     {
                         case ReplacementRule.ForcePlace:
                             // Force placement, but still respect Unbreakable blocks.
-                            if ((BlockTypes[existingState.Value.ID].tags & BlockTags.UNBREAKABLE) != 0)
+                            if ((BlockTypes[existingState.ID].tags & BlockTags.UNBREAKABLE) != 0)
                                 canPlace = false;
                             break;
 
                         case ReplacementRule.OnlyReplaceAir:
                             // Only allow placement if the existing block is Air (ID 0).
-                            if (existingState.Value.ID != BlockIDs.Air)
+                            if (existingState.ID != BlockIDs.Air)
                                 canPlace = false;
                             break;
 
@@ -2149,7 +2150,7 @@ public class World : MonoBehaviour
                             // World-gen and player edits consult different replacement masks: a structure may
                             // overwrite leaves while stacking, but the player holding that block must not.
                             BlockType incomingProps = BlockTypes[v.ID];
-                            BlockType existingProps = BlockTypes[existingState.Value.ID];
+                            BlockType existingProps = BlockTypes[existingState.ID];
 
                             bool canReplace = v.Source == VoxelModSource.WorldGen
                                 ? BlockTagUtility.CanReplaceForWorldGen(incomingProps, existingProps)
@@ -2174,8 +2175,9 @@ public class World : MonoBehaviour
             Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(v.GlobalPosition);
 
             // Capture old state BEFORE modification for support check
-            VoxelState? oldState = worldData.GetVoxelState(v.GlobalPosition);
-            bool oldProvidedSupport = oldState.HasValue && BlockTypes[oldState.Value.ID].ProvidesSupport;
+            bool oldProvidedSupport =
+                worldData.TryGetVoxel(v.GlobalPosition.x, v.GlobalPosition.y, v.GlobalPosition.z, out VoxelState oldState) &&
+                BlockTypes[oldState.ID].ProvidesSupport;
 
             chunkData.ModifyVoxel(localPos, v);
 
@@ -2187,9 +2189,8 @@ public class World : MonoBehaviour
                 if (!newModProps.ProvidesSupport)
                 {
                     Vector3Int abovePos = v.GlobalPosition + Vector3Int.up;
-                    VoxelState? aboveState = worldData.GetVoxelState(abovePos);
-                    if (aboveState.HasValue &&
-                        (BlockTypes[aboveState.Value.ID].tags & BlockTags.REQUIRES_SUPPORT) != 0)
+                    if (worldData.TryGetVoxel(abovePos.x, abovePos.y, abovePos.z, out VoxelState aboveState) &&
+                        (BlockTypes[aboveState.ID].tags & BlockTags.REQUIRES_SUPPORT) != 0)
                     {
                         _modifications.Enqueue(new VoxelMod(abovePos, blockId: BlockIDs.Air)
                         {
@@ -2205,10 +2206,10 @@ public class World : MonoBehaviour
             {
                 // Get the global position of the neighbor.
                 Vector3Int neighborPos = v.GlobalPosition + VoxelData.FaceChecks[i];
-                VoxelState? neighborState = worldData.GetVoxelState(neighborPos);
 
                 // If the neighbor exists and has behavior, ensure it's active.
-                if (neighborState.HasValue && neighborState.Value.Properties.isActive)
+                if (worldData.TryGetVoxel(neighborPos.x, neighborPos.y, neighborPos.z, out VoxelState neighborState) &&
+                    neighborState.Properties.isActive)
                 {
                     Chunk neighborChunk = GetChunkFromVector3(neighborPos);
                     if (neighborChunk != null)
@@ -2252,6 +2253,7 @@ public class World : MonoBehaviour
         _chunkMap[chunk.Coord] = chunk;
         _activeChunks.Add(chunk.Coord);
         worldData.Chunks[chunk.Coord.ToVoxelOrigin()] = chunk.ChunkData;
+        worldData.InvalidateVoxelQueryCache();
     }
 
     /// <summary>
@@ -2267,6 +2269,7 @@ public class World : MonoBehaviour
         _chunkMap.Clear();
         _activeChunks.Clear();
         worldData.Chunks.Clear();
+        worldData.InvalidateVoxelQueryCache();
         worldData.ModifiedChunks.Clear();
         _modifications.Clear();
 
@@ -2472,6 +2475,7 @@ public class World : MonoBehaviour
 
             // 3. Remove Data Reference from World
             worldData.Chunks.Remove(chunkVoxelPos);
+            worldData.InvalidateVoxelQueryCache();
 
             // 4. Recycle Data
             // POOLING: Return data to pool
@@ -2558,6 +2562,7 @@ public class World : MonoBehaviour
                     // Create placeholder
                     data = Instance.ChunkPool.GetChunkData(chunkVoxelPos);
                     worldData.Chunks.Add(chunkVoxelPos, data);
+                    worldData.InvalidateVoxelQueryCache();
                 }
 
                 // If it's empty, and not currently fetching from disk, and not currently generating... start the pipeline!
@@ -3353,13 +3358,13 @@ public class World : MonoBehaviour
             {
                 for (int z = minVoxel.z; z <= maxVoxel.z; z++)
                 {
-                    Vector3Int voxelPos = new Vector3Int(x, y, z);
-                    VoxelState? voxel = worldData.GetVoxelState(voxelPos);
-
-                    if (!voxel.HasValue || !voxel.Value.Properties.isSolid || voxel.Value.Properties.fluidType != FluidType.None)
+                    // VQ-1 integer fast path: no float round-trip, no nullable wrap for this per-frame AABB scan.
+                    if (!worldData.TryGetVoxel(x, y, z, out VoxelState voxel) ||
+                        !voxel.Properties.isSolid || voxel.Properties.fluidType != FluidType.None)
                         continue; // Empty, unloaded, or fluid
 
-                    BlockType blockType = voxel.Value.Properties;
+                    Vector3Int voxelPos = new Vector3Int(x, y, z);
+                    BlockType blockType = voxel.Properties;
                     Bounds blockBounds;
 
                     if (!blockType.collisionBounds.HasCustomBounds)
@@ -3371,7 +3376,7 @@ public class World : MonoBehaviour
                     {
                         // Slow path: Get rotated bounds
                         float3x3 rotMatrix = BurstCustomMeshRotationUtility.GetRotationMatrix(
-                            blockType.metadataSchema, voxel.Value.Meta, blockType.defaultMetadata);
+                            blockType.metadataSchema, voxel.Meta, blockType.defaultMetadata);
                         blockBounds = GetRotatedWorldBounds(voxelPos, blockType.collisionBounds, rotMatrix);
                     }
 
@@ -3488,6 +3493,20 @@ public class World : MonoBehaviour
     public VoxelState? GetVoxelState(Vector3 worldPos)
     {
         return worldData.GetVoxelState(worldPos);
+    }
+
+    /// <summary>
+    /// Integer voxel-query fast path (VQ-1): forwards to <see cref="WorldData.TryGetVoxel"/>. Prefer this over
+    /// <see cref="GetVoxelState(Vector3)"/> when the caller already holds integer voxel coordinates.
+    /// </summary>
+    /// <param name="x">World voxel X.</param>
+    /// <param name="y">World voxel Y.</param>
+    /// <param name="z">World voxel Z.</param>
+    /// <param name="state">The resolved voxel state; <c>default</c> when the method returns false.</param>
+    /// <returns>True when the coordinate is in-world and its chunk is loaded; false otherwise.</returns>
+    public bool TryGetVoxel(int x, int y, int z, out VoxelState state)
+    {
+        return worldData.TryGetVoxel(x, y, z, out state);
     }
 
     /// <summary>
@@ -3661,6 +3680,7 @@ public class World : MonoBehaviour
         }
 
         worldData.Chunks.Clear();
+        worldData.InvalidateVoxelQueryCache();
         worldData.ModifiedChunks.Clear();
 
         // 7. Clear lighting work sets and active chunk tracking

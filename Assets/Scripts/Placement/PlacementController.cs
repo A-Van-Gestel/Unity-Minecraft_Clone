@@ -56,8 +56,8 @@ namespace Placement
                 return PlacementProbe.Miss;
             }
 
-            VoxelState? hit = _world.GetVoxelState(hitCell);
-            bool replaces = hit.HasValue && PlacementResolver.ResolvesToReplace(heldBlock, hit.Value.Properties);
+            bool replaces = _world.TryGetVoxel(hitCell.x, hitCell.y, hitCell.z, out VoxelState hit)
+                            && PlacementResolver.ResolvesToReplace(heldBlock, hit.Properties);
             Vector3Int placeCell = replaces ? hitCell : adjacentCell;
 
             return new PlacementProbe(
@@ -123,8 +123,10 @@ namespace Placement
             // skip the extra voxel lookup.
             if (placedBlock != null && (placedBlock.tags & BlockTags.REQUIRES_SUPPORT) != 0)
             {
-                VoxelState? below = _world.worldData.GetVoxelState(placeCell + Vector3Int.down);
-                BlockType belowProps = below.HasValue ? _world.BlockTypes[below.Value.ID] : null;
+                Vector3Int belowCell = placeCell + Vector3Int.down;
+                BlockType belowProps = _world.TryGetVoxel(belowCell.x, belowCell.y, belowCell.z, out VoxelState below)
+                    ? _world.BlockTypes[below.ID]
+                    : null;
                 if (!PlacementResolver.HasRequiredSupport(placedBlock, belowProps))
                     return false;
             }
