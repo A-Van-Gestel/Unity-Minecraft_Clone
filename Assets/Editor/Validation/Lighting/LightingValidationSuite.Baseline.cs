@@ -154,7 +154,17 @@ namespace Editor.Validation.Lighting
             // recipe as a banded-vs-full differential): the Bug-16 churn axis generalized. Lives in
             // LightingValidationSuite.InterruptedReconFuzz.cs and self-registers here. ---
             AddInterruptedReconFuzzBaselineScenarios(scenarios);
+
+            // --- C13 mixed-channel cross-seam removal (B94): the Bug-18 red loop straddling a seam PLUS a
+            // green gradient fed across it from one chunk — proves the all-channel EmitCrossChunkBlocklightRemoval
+            // mod does not persistently over-clear an independently-sourced OTHER channel. Lives in
+            // LightingValidationSuite.C13RgbMixedChannel.cs and self-registers here. ---
+            AddC13RgbMixedChannelScenarios(scenarios);
         }
+
+        /// <summary>Hook for the C13 mixed-channel cross-seam removal baseline B94 (implemented in LightingValidationSuite.C13RgbMixedChannel.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddC13RgbMixedChannelScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the C11 interrupted-reconciliation fuzz baselines (implemented in LightingValidationSuite.InterruptedReconFuzz.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
