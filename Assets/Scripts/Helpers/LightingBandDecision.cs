@@ -271,6 +271,28 @@ namespace Helpers
         }
 
         /// <summary>
+        /// Reconciles the independently-derived band bottom (<see cref="DeriveBandMinY"/>) and top
+        /// (<see cref="DeriveBandHeight"/>) into a valid gathered range <c>[bandMinY, bandHeight)</c>.
+        /// In every real case the bottom sits well below the top; a hypothetical derivation defect that
+        /// inverted them (<c>bandMinY &gt;= bandHeight</c>) is failed CLOSED to full height — always
+        /// correct — rather than collapsing to a one-row band whose virtual above/below reads would
+        /// silently mis-serve the rows between the two bounds. Full height also makes the
+        /// BandTop/BottomLight tables inert (the job never consults them at
+        /// <c>bandMinY == 0 / bandHeight == CHUNK_HEIGHT</c>). Shared by the production scheduler and the
+        /// validation harness so neither can drift on the rule.
+        /// </summary>
+        /// <param name="bandMinY">The derived band bottom; reset to 0 on a contradiction.</param>
+        /// <param name="bandHeight">The derived band top; reset to <see cref="ChunkMath.CHUNK_HEIGHT"/> on a contradiction.</param>
+        public static void ReconcileBand(ref int bandMinY, ref int bandHeight)
+        {
+            if (bandMinY >= bandHeight)
+            {
+                bandMinY = 0;
+                bandHeight = ChunkMath.CHUNK_HEIGHT;
+            }
+        }
+
+        /// <summary>
         /// Builds the job's 3×3 below-band table (the bottom mirror of <see cref="BuildTopLightTable"/>):
         /// a present chunk's below-band rows are inert-DARK by derivation, so its entry is packed light 0;
         /// <c>uint.MaxValue</c> marks a missing chunk (virtual reads return the out-of-world sentinels for

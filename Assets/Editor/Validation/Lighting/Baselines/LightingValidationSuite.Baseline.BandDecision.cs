@@ -48,6 +48,9 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario(
                 "B82: Bottom-band derivation over REAL converged chunk metadata — deep superflat floor bands, a buried lamp lowers the floor (LI-2 bottom band)",
                 Baseline_BandBottomDerivationOnRealChunks));
+            scenarios.Add(new Scenario(
+                "B93: Band reconciliation fails CLOSED — a contradictory (bandMinY >= bandHeight) pair resets to full height, a valid band is untouched (LI-2)",
+                Baseline_BandReconcileFailsClosed));
         }
 
         /// <summary>The packed light value of a fully-sunlit uniform region (sky 15, no blocklight).</summary>
@@ -211,6 +214,51 @@ namespace Editor.Validation.Lighting
             ok &= LightingAssert.IsTrue(dimCenterEdge == ChunkMath.CHUNK_HEIGHT,
                 "B73: a brighter neighbor WITH an edge check forces full height (center-ward corrections)",
                 $"expected {ChunkMath.CHUNK_HEIGHT}, got {dimCenterEdge}");
+
+            return ok;
+        }
+
+        /// <summary>
+        /// B93: <see cref="LightingBandDecision.ReconcileBand"/> is the shared safety net that the
+        /// production scheduler and this harness both run after deriving the top and bottom bounds
+        /// independently. A valid band (bottom below top, including the tight one-row edge) must pass
+        /// through untouched; a contradictory pair (a hypothetical derivation defect inverting them,
+        /// <c>bandMinY &gt;= bandHeight</c>, including equality) must fail CLOSED to full height rather
+        /// than collapse to a mis-serving one-row band. Guards the Finding-2 defensive fix.
+        /// </summary>
+        /// <returns>True when every reconciliation case matches.</returns>
+        private static bool Baseline_BandReconcileFailsClosed()
+        {
+            // Valid band: bottom well below top — untouched.
+            int minY = 40, height = 80;
+            LightingBandDecision.ReconcileBand(ref minY, ref height);
+            bool ok = LightingAssert.IsTrue(minY == 40 && height == 80,
+                "B93: a valid band [40,80) passes through reconciliation untouched",
+                $"expected [40,80), got [{minY},{height})");
+
+            // Tight one-row band (bottom == top − 1) is still valid — untouched.
+            minY = 79;
+            height = 80;
+            LightingBandDecision.ReconcileBand(ref minY, ref height);
+            ok &= LightingAssert.IsTrue(minY == 79 && height == 80,
+                "B93: a valid one-row band [79,80) is not disturbed",
+                $"expected [79,80), got [{minY},{height})");
+
+            // Contradiction (bottom above top) — fail closed to full height.
+            minY = 90;
+            height = 64;
+            LightingBandDecision.ReconcileBand(ref minY, ref height);
+            ok &= LightingAssert.IsTrue(minY == 0 && height == ChunkMath.CHUNK_HEIGHT,
+                "B93: an inverted band [90,64) fails closed to full height",
+                $"expected [0,{ChunkMath.CHUNK_HEIGHT}), got [{minY},{height})");
+
+            // Boundary contradiction (bottom == top, an empty band) — fail closed too.
+            minY = 50;
+            height = 50;
+            LightingBandDecision.ReconcileBand(ref minY, ref height);
+            ok &= LightingAssert.IsTrue(minY == 0 && height == ChunkMath.CHUNK_HEIGHT,
+                "B93: an empty band [50,50) fails closed to full height",
+                $"expected [0,{ChunkMath.CHUNK_HEIGHT}), got [{minY},{height})");
 
             return ok;
         }

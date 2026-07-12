@@ -664,9 +664,11 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
                     jobData.SunLightRecalcQueue.Count > 0,
                     chunkData.GetHeightmapMinY());
 
-                // Defensive: the two derivations bound independently; keep at least one gathered row
-                // (mirror of the harness clamp in LightingTestWorld.BeginLightingJob).
-                jobData.BandMinY = math.min(jobData.BandMinY, jobData.BandHeight - 1);
+                // Reconcile the independently-derived top and bottom bounds: on a contradiction (a
+                // hypothetical derivation defect inverting them) fail CLOSED to full height rather than a
+                // one-row band that would silently mis-serve the rows between them. Shared with the harness
+                // honest path (LightingTestWorld.BeginLightingJob).
+                LightingBandDecision.ReconcileBand(ref jobData.BandMinY, ref jobData.BandHeight);
 
                 bandBottomLight = LightingBandDecision.BuildBottomLightTable(in centerBottom,
                     in wB, in eB, in sB, in nB, in swB, in nwB, in seB, in neB);

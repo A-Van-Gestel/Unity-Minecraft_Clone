@@ -716,8 +716,23 @@ namespace Editor.Validation.Lighting.Framework
                 if (BandMinYSabotageHook != null)
                     flight.BandMinY = Mathf.Max(0, BandMinYSabotageHook(flight.BandMinY));
 
-                // Defensive: the two derivations bound independently; keep at least one gathered row.
-                flight.BandMinY = Mathf.Min(flight.BandMinY, flight.BandHeight - 1);
+                if (BandMinYSabotageHook != null || BandHeightSabotageHook != null)
+                {
+                    // TEST-ONLY: a sabotage hook is deliberately injecting a too-tight band, so keep the
+                    // legacy non-empty clamp — the honest fail-closed reset below would reset an
+                    // over-raised floor to full height and neutralize the prove-red.
+                    flight.BandMinY = Mathf.Min(flight.BandMinY, flight.BandHeight - 1);
+                }
+                else
+                {
+                    // Honest path — mirror of WorldJobManager: fail closed to full height on a top/bottom
+                    // contradiction (see LightingBandDecision.ReconcileBand).
+                    int minY = flight.BandMinY;
+                    int height = flight.BandHeight;
+                    LightingBandDecision.ReconcileBand(ref minY, ref height);
+                    flight.BandMinY = minY;
+                    flight.BandHeight = height;
+                }
 
                 MaxDerivedBandMinY = Mathf.Max(MaxDerivedBandMinY, flight.BandMinY);
 
