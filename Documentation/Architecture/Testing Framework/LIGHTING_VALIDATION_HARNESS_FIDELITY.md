@@ -332,21 +332,26 @@ there is invisible.
   class the runner's per-scenario try/catch could never present. Behavior in `CHUNK_LIFECYCLE_PIPELINE.md`
   §4 (shared skeleton pointer).
 
-### B8 — The BFS work-cap fail-safe is asserted by only two scenarios ·  **OPEN · SMALL (post-Bug-16 audit, 2026-07-12)**
+### B8 — The BFS work-cap fail-safe was asserted by only two scenarios ·  **CLOSED (2026-07-12)**
 
 - Bug 16 (the runaway RGB removal cycle → OOM, `_FIXED_BUGS.md` Lighting #21) left a permanent fail-safe
   in `NeighborhoodLightingJob`: `MAX_BFS_NODES_PER_PASS` aborts a runaway pass with a
-  `[LightingJob DIAG]` console **error** + near-cap node dump. But only **B87/B88** listen for it
-  (`WorkCapAbortListener` in `Baselines/LightingValidationSuite.Baseline.Bug16Runaway.cs`). A future
-  termination regression that arms on a *different* scenario's geometry would log the error yet leave
-  that scenario's PASS/FAIL untouched — the interactive menu summary stays green (the headless CI's
-  errors-grep would catch it, but nobody greps the console after an interactive run that prints an
-  all-green summary).
-- **Fix shape:** promote the listener to a runner-level invariant in
-  `Editor/Validation/Framework/ValidationSuiteRunner.Execute` — any work-cap abort logged during a
-  scenario's body fails that scenario. Suite-wide termination assertion for free; also generalizes to any
-  future engine fail-safe that reports via a tagged console error. (Framework change → add a Validation
-  Framework self-test proving the trip, per the VS-2 pattern.)
+  `[LightingJob DIAG]` console **error** + near-cap node dump. Before this fix only **B87/B88** listened
+  for it (`WorkCapAbortListener`). A future termination regression arming on a *different* scenario's
+  geometry would log the error yet leave that scenario's PASS/FAIL untouched — the interactive menu summary
+  stayed green.
+- **Closed** by promoting the listener to a **runner-level invariant** in
+  `Editor/Validation/Framework/ValidationSuiteRunner.Execute` (`FailSafeErrorScope` + the pure
+  `IsFailSafeError` predicate): a scenario during whose body a `LogType.Error` carrying a registered
+  fail-safe marker (`FAIL_SAFE_ERROR_MARKERS`, currently `[LightingJob DIAG]`) is logged is **force-failed**,
+  for all 8 suites at once. Generic — a future engine fail-safe joins by adding its marker; scoped to the
+  scenario body (subscribe/run/unsubscribe); restricted to tagged Errors so the fault-isolation baselines
+  (which deliberately log errors) still pass. The per-baseline `WorkCapAbortListener` stays in B87/B88 as
+  belt-and-braces. **Self-test:** two Validation Framework scenarios (16→18) pin the predicate and the
+  scope's trip via a `Feed` seam (a real marker log would bubble through the global
+  `Application.logMessageReceived` into the self-test's own scope); the force-fail was also proven
+  end-to-end (a tagged-error scenario returning `true` is marked failed). `Validate All` green at 181
+  baselines.
 
 ---
 
@@ -687,7 +692,7 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 | C10 | RGB sourceless-loop initiator absent (Bug 12's RGB mirror) — B53-twin **confirmed red → Bug 18**; FIXED (RGB initiator) + baseline B90, prove-red confirmed                          | **CLOSED**        | —                | done           |
 | C11 | Interrupted-reconciliation axis has ONE recipe instance — seeded churn fuzz (HF-3 pattern) + B87 band differential                                        | OPEN               | Medium-High      | medium         |
 | C12 | RGB darkness-phase pull-backs unverified (Bug 14's RGB mirror) — B60/B61-twin; **verdict GREEN, self-heals → baseline B89**, scopes fix to initiator-only | **CLOSED**         | —                | done           |
-| B8  | Work-cap fail-safe asserted by only B87/B88 — promote `WorkCapAbortListener` to a runner-level invariant                                                  | OPEN               | Medium           | small          |
+| B8  | Work-cap fail-safe asserted by only B87/B88 — **promoted to a runner-level `FailSafeErrorScope` invariant** (all 8 suites) + 2 framework self-tests       | **CLOSED**         | —                | done           |
 | C4  | Sunlight persist→replay (B46) + `AddPendingBlocklight` guard (B47)                                                                                        | **CLOSED**         | —                | done           |
 | C5  | Cumulative multi-layer attenuation probe (B45)                                                                                                            | **CLOSED**         | —                | done           |
 | C3  | Cross-chunk sunlight darkening race quadrant (B54/B55) — prereq for LI-1 → P-2 / TG-4 Ph.4                                                                | **CLOSED**         | —                | done           |

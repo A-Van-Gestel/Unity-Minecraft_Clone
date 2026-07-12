@@ -43,6 +43,8 @@ namespace Editor.Validation.Framework
                 new Scenario("Stale guard: source within tolerance ⇒ not stale", StaleGuardWithinTolerance),
                 new Scenario("Stale guard: on-disk DLL newer than loaded ⇒ stale", StaleGuardDiskNewerThanLoaded),
                 new Scenario("Stale guard: unresolved assembly ⇒ inconclusive, not stale", StaleGuardUnresolvedInconclusive),
+                new Scenario("Fail-safe: tagged Error detected; untagged / Warning / null are not", FailSafeDetectsMarker),
+                new Scenario("Fail-safe scope: trips on a fed tagged Error, not on plain messages", FailSafeScopeTrips),
                 new Scenario("Registry: suite count matches ExpectedSuiteCount", RegistryMeetsExpectedCount),
             };
             return ValidationSuiteRunner.Execute("Validation Framework", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
@@ -288,6 +290,43 @@ namespace Editor.Validation.Framework
             StaleVerdict v = StaleAssemblyGuard.Decide(false, false, new[] { AssemblyFreshness.Unresolved("Missing-Asm") }, TOL);
             return Check(v.IsInconclusive, "unresolved assembly not reported inconclusive")
                    && Check(!v.IsStale, "unresolved assembly wrongly reported stale");
+        }
+
+        // --- Fail-safe invariant scenarios (B8) ---
+        //
+        // The runner force-fails a scenario during whose body an engine fail-safe (e.g. the lighting BFS
+        // work-cap) logged a tagged console ERROR. Proven via the pure predicate + the scope's Feed seam,
+        // NOT a real log: a real Debug.LogError of the marker would bubble through the global
+        // logMessageReceived into THIS self-test scenario's own runner scope and cross-fail it.
+
+        private static bool FailSafeDetectsMarker()
+        {
+            return Check(ValidationSuiteRunner.IsFailSafeError("[LightingJob DIAG] Bug-16 BFS work cap exceeded", LogType.Error),
+                       "a tagged Error was not detected as a fail-safe")
+                   && Check(!ValidationSuiteRunner.IsFailSafeError("ordinary scenario failure", LogType.Error),
+                       "an untagged Error was misdetected as a fail-safe (would break fault-isolation baselines)")
+                   && Check(!ValidationSuiteRunner.IsFailSafeError("[LightingJob DIAG] near-cap node dump", LogType.Warning),
+                       "a tagged WARNING (the near-cap dump) was misdetected — only Errors count")
+                   && Check(!ValidationSuiteRunner.IsFailSafeError(null, LogType.Error),
+                       "a null message matched or threw");
+        }
+
+        private static bool FailSafeScopeTrips()
+        {
+            using ValidationSuiteRunner.FailSafeErrorScope scope = new ValidationSuiteRunner.FailSafeErrorScope();
+
+            bool cleanBefore = !scope.Tripped;
+            scope.Feed("just a warning", LogType.Warning);
+            scope.Feed("an ordinary error", LogType.Error);
+            bool stillCleanAfterNonMarkers = !scope.Tripped;
+
+            scope.Feed("[LightingJob DIAG] Bug-16 BFS work cap exceeded - aborting phase blockRemoval", LogType.Error);
+
+            return Check(cleanBefore, "scope was tripped before any input")
+                   && Check(stillCleanAfterNonMarkers, "scope tripped on a non-fail-safe message")
+                   && Check(scope.Tripped, "scope did not trip on a fed tagged fail-safe Error")
+                   && Check(scope.FirstMessage != null && scope.FirstMessage.Contains("work cap"),
+                       "scope did not capture the fail-safe message text");
         }
 
         private static bool RegistryMeetsExpectedCount()

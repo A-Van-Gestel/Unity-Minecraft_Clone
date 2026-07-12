@@ -86,6 +86,8 @@ namespace Editor.Validation.Framework
                     // A Stopwatch object per scenario is fine on this editor-only path; if a zero-alloc run is ever
                     // wanted, Stopwatch.GetTimestamp() deltas measure the same interval without the allocation.
                     Stopwatch stopwatch = Stopwatch.StartNew();
+                    // B8: watch for an engine fail-safe (tagged console error) fired during THIS scenario's body.
+                    FailSafeErrorScope failSafe = new FailSafeErrorScope();
                     try
                     {
                         passed = scenario.Run();
@@ -98,6 +100,20 @@ namespace Editor.Validation.Framework
                     finally
                     {
                         stopwatch.Stop();
+                        failSafe.Dispose();
+                    }
+
+                    // B8: an engine fail-safe (e.g. the lighting BFS work-cap, Bug 16) reports via a tagged
+                    // console error but cannot flip a scenario's own return value — promote it to a hard failure
+                    // here, so a runaway that arms on ANY scenario's geometry reds the suite instead of hiding
+                    // under a green summary. Generalizes the per-baseline WorkCapAbortListener into a suite-wide
+                    // invariant shared by all suites. Only force-fails a scenario that otherwise passed (a
+                    // scenario that already failed keeps its own diagnosis).
+                    if (passed && failSafe.Tripped)
+                    {
+                        passed = false;
+                        if (logToConsole)
+                            Debug.LogError($"[FAIL-SAFE] {scenario.Name}: an engine fail-safe fired during this scenario — {failSafe.FirstMessage}");
                     }
 
                     double elapsedMs = stopwatch.Elapsed.TotalMilliseconds;
@@ -289,6 +305,80 @@ namespace Editor.Validation.Framework
             if (hours > 0 || minutes > 0) result = $"{minutes} min {result}";
             if (hours > 0) result = $"{hours} h {result}";
             return result;
+        }
+
+        /// <summary>
+        /// Console-error markers that signal an engine fail-safe fired (B8). A scenario during whose body a
+        /// <see cref="LogType.Error"/> carrying one of these is logged is force-failed by <see cref="Execute"/>
+        /// — a suite-wide termination/abort invariant. A future engine fail-safe that reports via a tagged
+        /// console error joins by adding its marker here. NOT every error: the fault-isolation baselines
+        /// deliberately log errors and must still pass, so the match is restricted to these explicit tags.
+        /// </summary>
+        private static readonly string[] FAIL_SAFE_ERROR_MARKERS =
+        {
+            "[LightingJob DIAG]", // NeighborhoodLightingJob.MAX_BFS_NODES_PER_PASS runaway abort (Bug 16 permanent fail-safe)
+        };
+
+        /// <summary>
+        /// True when a console message is an engine fail-safe report — a <see cref="LogType.Error"/> carrying a
+        /// <see cref="FAIL_SAFE_ERROR_MARKERS"/> tag. Pure, so the self-test can pin it directly without
+        /// logging (a real log would bubble through the global <see cref="Application.logMessageReceived"/> into
+        /// the enclosing self-test scenario's own scope and cross-fail it).
+        /// </summary>
+        /// <param name="condition">The log message text.</param>
+        /// <param name="type">The log severity.</param>
+        /// <returns>True when the message is a fail-safe report.</returns>
+        internal static bool IsFailSafeError(string condition, LogType type)
+        {
+            if (type != LogType.Error || condition == null)
+                return false;
+            foreach (string marker in FAIL_SAFE_ERROR_MARKERS)
+                if (condition.Contains(marker))
+                    return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Listens for engine fail-safe console errors (see <see cref="IsFailSafeError"/>) for the duration of a
+        /// single scenario body (B8). Subscribes on construction, unsubscribes on <see cref="Dispose"/>; the
+        /// runner force-fails the scenario when <see cref="Tripped"/>. Generalizes the per-baseline
+        /// <c>WorkCapAbortListener</c> (Bug 16) into a suite-wide invariant.
+        /// </summary>
+        internal sealed class FailSafeErrorScope : IDisposable
+        {
+            /// <summary>True once a fail-safe error was seen while this scope was open.</summary>
+            public bool Tripped { get; private set; }
+
+            /// <summary>The first fail-safe error message seen (for the runner's force-fail log).</summary>
+            public string FirstMessage { get; private set; }
+
+            public FailSafeErrorScope()
+            {
+                // UDR0004 false positive: this listener deregisters in Dispose and every use site is a scoped
+                // new/Dispose pair, not the OnDisable pattern the analyzer recognizes.
+#pragma warning disable UDR0004
+                Application.logMessageReceived += OnLog;
+#pragma warning restore UDR0004
+            }
+
+            public void Dispose() => Application.logMessageReceived -= OnLog;
+
+            /// <summary>
+            /// Test seam: feeds a message straight to the detection logic, bypassing the global
+            /// <see cref="Application.logMessageReceived"/> event (so a self-test can prove the trip without a
+            /// real log that would bubble into the enclosing scenario's scope).
+            /// </summary>
+            /// <param name="condition">The log message text.</param>
+            /// <param name="type">The log severity.</param>
+            internal void Feed(string condition, LogType type) => OnLog(condition, null, type);
+
+            private void OnLog(string condition, string stackTrace, LogType type)
+            {
+                if (Tripped || !IsFailSafeError(condition, type))
+                    return;
+                Tripped = true;
+                FirstMessage = condition;
+            }
         }
     }
 }
