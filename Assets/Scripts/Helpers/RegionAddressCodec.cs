@@ -65,7 +65,7 @@ namespace Helpers
         /// </summary>
         /// <param name="saveVersion">The version field read from <c>level.dat</c>.</param>
         /// <exception cref="NotSupportedException">
-        /// Thrown for unrecognised versions (below 1).
+        /// Thrown for unrecognized versions (below 1).
         /// </exception>
         /// <param name="allowLegacyEncoder">
         /// When <c>false</c> (default), calling <c>ChunkVoxelPosToRegionAddress</c> on a
@@ -161,10 +161,10 @@ namespace Helpers
 
         // ── V2+: Correct chunk-index addressing ──────────────────────────────
         //
-        // V2 ENCODER:
-        //   chunkX    = voxelX / ChunkWidth          (convert voxel pos to chunk index)
-        //   regionX   = floor(chunkX / 32)           (which region file)
-        //   localX    = chunkX % 32                  (slot within the file, full 0–31 range)
+        // V2 ENCODER (via ChunkMath shift/mask — floor division / positive modulo, negative-correct; WS-1):
+        //   chunkX    = VoxelToChunk(voxelX)         (voxel pos → chunk index)
+        //   regionX   = ChunkToRegion(chunkX)        (which region file)
+        //   localX    = ChunkToRegionLocal(chunkX)   (slot within the file, full 0–31 range)
         //
         // V2 DECODER (inverse):
         //   chunkX    = regionX * 32 + localX        (direct chunk index, no voxel conversion)
@@ -173,18 +173,16 @@ namespace Helpers
             public (Vector2Int regionCoord, int localX, int localZ) ChunkVoxelPosToRegionAddress(Vector2Int chunkVoxelPos)
             {
                 // Step 1: voxel-space world origin → chunk index
-                int chunkX = chunkVoxelPos.x / VoxelData.ChunkWidth;
-                int chunkZ = chunkVoxelPos.y / VoxelData.ChunkWidth;
+                int chunkX = ChunkMath.VoxelToChunk(chunkVoxelPos.x);
+                int chunkZ = ChunkMath.VoxelToChunk(chunkVoxelPos.y);
 
                 // Step 2: chunk index → region coord
-                int regionX = Mathf.FloorToInt(chunkX / 32f);
-                int regionZ = Mathf.FloorToInt(chunkZ / 32f);
+                int regionX = ChunkMath.ChunkToRegion(chunkX);
+                int regionZ = ChunkMath.ChunkToRegion(chunkZ);
 
-                // Step 3: chunk index → local slot (negative correction for future-proofing)
-                int lx = chunkX % 32;
-                int lz = chunkZ % 32;
-                if (lx < 0) lx += 32;
-                if (lz < 0) lz += 32;
+                // Step 3: chunk index → local slot (mask is positive-modulo for both signs)
+                int lx = ChunkMath.ChunkToRegionLocal(chunkX);
+                int lz = ChunkMath.ChunkToRegionLocal(chunkZ);
 
                 return (new Vector2Int(regionX, regionZ), lx, lz);
             }
