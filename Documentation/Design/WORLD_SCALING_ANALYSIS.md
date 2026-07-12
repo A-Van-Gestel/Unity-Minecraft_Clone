@@ -162,14 +162,20 @@ of this work) is validated before committing to depth.
 
 C# integer `/` and `%` **truncate toward zero**; chunk math needs **floor division** and
 **positive modulo**. Every site that mixes them up works perfectly in the all-positive world and
-breaks only at coordinates < 0 — the worst kind of bug. One instance is already live:
+breaks only at coordinates < 0 — the worst kind of bug.
 
-> **`RegionAddressCodec.V2Codec.ChunkVoxelPosToRegionAddress` step 1** uses
-> `chunkVoxelPos.x / VoxelData.ChunkWidth` (truncating). For `voxelX = −8` this yields chunk 0;
-> the correct chunk is −1. Today unreachable (no negative coords exist); the moment Tier B lands,
-> chunks near the −X/−Z axes silently overwrite their mirror chunks' region slots. The same file's
-> step 2 correctly uses `Mathf.FloorToInt(chunkX / 32f)` — the inconsistency within one function
-> shows how easy this is to miss.
+> ✅ **RESOLVED 2026-07-12 (WS-1).** The worked example below was the flagship case; the WS-1
+> implementation audit refined it. **`RegionAddressCodec.V2Codec.ChunkVoxelPosToRegionAddress` step 1**
+> used `chunkVoxelPos.x / VoxelData.ChunkWidth` (truncating). Truncation *would* be wrong for a
+> mid-chunk voxel like `voxelX = −8` (yields chunk 0; correct is −1), **but that input is
+> unreachable**: every encoder caller passes an exact chunk origin (a multiple of 16), and
+> truncating division equals floor division for exact multiples *regardless of sign*. Combined with
+> step 2's `Mathf.FloorToInt(chunkX / 32f)` and step 3's manual `if (lx<0) lx+=32` correction, the V2
+> encoder was already correct for every reachable input, including negative origins — so this was a
+> **latent-but-unreachable** inconsistency, not the "already live" corruption it was first billed as.
+> WS-1 still routed all three steps through the `ChunkMath` shift/mask helpers (consistency +
+> future-proofing against a raw-voxel caller), byte-identical for the reachable range, so **no V3
+> version bump was needed** (see the note after the fix pattern).
 
 **Recommended fix pattern — power-of-two shift/mask, which is simultaneously the fastest and the
 only always-correct option:**
@@ -186,13 +192,19 @@ This also removes the current float-roundtrip idiom (`Mathf.FloorToInt((float)x 
 **float conversion loses integer precision beyond ±2²⁴ (≈16.7M)**, so even "correct" float-floor
 breaks in a truly infinite world. Audit checklist (grep targets): `/ VoxelData.ChunkWidth`,
 `/ ChunkMath.CHUNK_WIDTH`, `% CHUNK`, `/ 32f`, `% 32`, `FloorToInt`, plus `Mathf.Abs` on
-coordinates. Centralize all of it into `ChunkMath` (shift/mask helpers) and forbid inline chunk
-math by convention. *(Tracked as **`WS-1`** in `PERFORMANCE_IMPROVEMENTS_REPORT.md` since
-2026-07-02.)*
+coordinates. WS-1 centralized all reachable chunk-math sites into the `ChunkMath` shift/mask helpers
+(`VoxelToChunk`/`VoxelToLocal`/`ChunkToRegion`/`ChunkToRegionLocal`/`WorldToChunk`); "forbid inline
+chunk math" remains a convention. *(✅ **shipped 2026-07-12** as **`WS-1`** — see
+`PERFORMANCE_IMPROVEMENTS_REPORT.md`. The `FloorToInt` count in the report's original framing
+included ~37 legitimate world→voxel floors that are **not** chunk math and were correctly left
+alone.)*
 
 Region filenames `r.{x}.{z}.bin` handle negative integers fine; the region *header/slot* math is
-covered by the shift/mask fix. Bump the region codec version (V3) anyway so the migration system
-can detect files written by a hypothetically-buggy build. ⚠️ Format-adjacent.
+covered by the shift/mask fix. WS-1 deliberately made **no** V3 version bump — the fix is
+byte-identical for every reachable input (all callers pass exact chunk origins), so there is no
+buggy on-disk build to detect. The defensive V3 bump is **deferred to Tier B**: introduce it when
+negative coordinates first become reachable (riding the border-removal change), so it protects real
+data instead of being a no-op version stamp today. ⚠️ Format-adjacent when it lands.
 
 ### 3.3 Floating origin (the precision problem)
 
@@ -330,8 +342,9 @@ third storage rewrite.
 
 ## 5. Cross-cutting gotcha checklist
 
-- [ ] **Floor div / positive mod audit** (§3.2) — shift/mask helpers in `ChunkMath`, fix
-  `RegionAddressCodec` V2 step 1 (as V3), grep for `FloorToInt`, `/ Chunk`, `% Chunk`, `% 32`.
+- [x] **Floor div / positive mod audit** (§3.2) — ✅ **WS-1, 2026-07-12**: shift/mask helpers in
+  `ChunkMath`; all reachable chunk-math sites migrated (incl. `RegionAddressCodec` V2 — fixed in
+  place, no V3 bump, see §3.2). V3 codec bump deferred to Tier B (no reachable buggy output today).
 - [ ] **Unify duplicate constants** (`VoxelData.ChunkHeight` vs `ChunkMath.CHUNK_HEIGHT`) before
   changing either.
 - [ ] **`EncodeNeighborKey` Y range** (today `[0,255]`) and any other bit-packed position encodings
@@ -368,9 +381,10 @@ LI-1 padded lighting volume ────────────────┘ 
 - **OM-1/OM-2** budgets must be parameterized by chunk height anyway — do the parameterization once.
 - **LI-1 / P-2** should be designed with 3D keys and halo padding so Tier C never forces a rewrite.
 - Tier B's floor-div/shift-mask cleanup (§3.2) is also a micro-optimization win on its own
-  (removes float roundtrips from every chunk lookup) — it can ship early and independently, and it
-  is the only part of this document with **zero** save/seed risk when done correctly. Now tracked
-  as **`WS-1`** in `PERFORMANCE_IMPROVEMENTS_REPORT.md`. **Execution packet:** phase **CP-2** of
-  [CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) (2026-07-06)
-  — includes the NS-5 equivalence suite (negative-domain + big-coordinate contract pins) this
-  section's audit checklist implies; the §2.4 constants unification is its phase **CP-7**.
+  (removes float roundtrips from every chunk lookup) — it was the only part of this document with
+  **zero** save/seed risk, so it shipped early and independently as **`WS-1`** (✅ **2026-07-12**,
+  `PERFORMANCE_IMPROVEMENTS_REPORT.md`). Rather than waiting for CP-2's NS-5 suite, WS-1 landed its
+  own equivalence guard in the existing "Chunk Math" validation suite (negative-domain sweeps +
+  boundary/teeth cases). The §2.4 constants unification (`VoxelData.ChunkHeight` vs
+  `ChunkMath.CHUNK_HEIGHT`) remains open — phase **CP-7** of
+  [CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) (2026-07-06).

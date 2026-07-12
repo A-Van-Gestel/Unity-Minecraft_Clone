@@ -14,6 +14,10 @@ except MR-8 (greedy meshing) are now closed and in-game confirmed (MR-1 through 
 `Framework/ValidationSuiteRunner` + `ValidationRunResult`, six suites + `ChunkRelativePositionTests`
 migrated with unchanged verdicts; `VoxelMetadataUtilityTests`/`FastNoiseLiteTests` left as a tracked
 follow-up. VS-2/VS-3 now build on the runner's result object.
+**Implementation status synced:** 2026-07-12 — `WS-1` (chunk-math shift/mask centralization) shipped
+on `feat/world-scaling`: Burst-safe `ChunkMath` voxel↔chunk↔region helpers + all ~11 chunk-math call
+sites migrated, guarded by the "Chunk Math" suite; byte-identical over the reachable range (no save
+bump). Audit correction folded in: the V2 codec truncation was latent-but-unreachable, not a live bug.
 **Third-pass audit:** 2026-07-02, at commit `99c3e6e` — added `WG-1..3`, `LI-2`, `GS-6`, `WS-1`;
 re-scoped `P-1` (see the pipeline table note).
 **Fourth-pass audit:** 2026-07-02, at commit `99c3e6e` — added `SL-1..4` (serialization save/load),
@@ -310,9 +314,9 @@ gates.
 
 ### World Scaling Enablers
 
-| ID   | Finding                                                                             | Effort | Risk | Benefit | Seed | Save |
-|------|-------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| WS-1 | Truncating / float-roundtrip chunk coordinate math → `ChunkMath` shift/mask helpers |   🟡   |  🟡  |    ⚪    |  ✅   |  ✅   |
+| ID   | Finding                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Effort | Risk | Benefit | Seed | Save |
+|------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| WS-1 | ✅ **SHIPPED 2026-07-12** — `ChunkMath` shift/mask helpers (`VoxelToChunk`/`VoxelToLocal`/`ChunkToRegion`/`ChunkToRegionLocal`/`WorldToChunk`, Burst-safe) + all ~11 chunk-math call sites migrated (incl. `RegionAddressCodec.V2` and the `StandardWormCarverJob` Burst site); byte-identical over the reachable range (no save bump), negative-correct for Tier B; guarded by the "Chunk Math" suite (21 scenarios incl. a negative-coordinate teeth case). Audit finding: the V2 step-1 truncation was **latent-but-unreachable**, not "already live" — all encoder callers pass exact chunk origins |   🟡   |  🟡  |    ⚪    |  ✅   |  ✅   |
 
 ### Chunk Pipeline (deep-dive in `CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md`)
 
@@ -2533,32 +2537,46 @@ visible warning on every run.
 
 ### WS-1. Truncating / float-roundtrip chunk coordinate math → `ChunkMath` shift/mask helpers
 
-*(Promoted from `WORLD_SCALING_ANALYSIS.md` §3.2/§6, which analyzed it but never tracked it in this
-backlog. It is the only part of the world-scaling work with zero save/seed risk that can ship early
-and independently — and it is a micro-optimization win on its own.)*
+✅ **SHIPPED 2026-07-12** (`feat/world-scaling`, 4 commits). *(Promoted from `WORLD_SCALING_ANALYSIS.md`
+§3.2/§6, which analyzed it but never tracked it in this backlog. It was the only part of the
+world-scaling work with zero save/seed risk that could ship early and independently.)*
 
-**Observed:** Chunk/region coordinate math currently mixes three idioms (48 `FloorToInt` sites
-across 13 files as of 2026-07-02, plus the truncating `/`/`%` sites): float-roundtrip floors
+**Observed:** Chunk/region coordinate math mixed three idioms: float-roundtrip floors
 (`Mathf.FloorToInt((float)x / 16)` — correct today but silently wrong beyond ±2²⁴), truncating
-integer division (wrong for negative coordinates — one latent instance is already live in
-`RegionAddressCodec.V2Codec` step 1), and ad-hoc correct forms. All-positive coordinates hide the
-differences today; Tier B (negative quadrants) turns every wrong site into a silent
-world-corruption bug.
+integer division (wrong for negative *mid-chunk* coordinates), and ad-hoc correct forms. ~11 of the
+repo's `FloorToInt` sites are actual chunk/region-coordinate math (the rest are legitimate
+world→voxel floors — player HUD, cloud tiling, texture-atlas, entity AABB — and were left alone).
+All-positive coordinates hide the differences today; Tier B (negative quadrants) would turn every
+wrong *reachable* site into a silent world-corruption bug.
 
-**Recommendation:** Centralize into `ChunkMath` shift/mask helpers (`voxel >> 4`, `voxel & 15`,
-`chunk >> 5`, `chunk & 31` — simultaneously the fastest and the only always-correct option),
-migrate every call site, forbid inline chunk math by convention, and fix the region codec as V3.
-Full audit checklist and grep targets: `WORLD_SCALING_ANALYSIS.md` §3.2/§5.
+**Delivered:** Centralized into `ChunkMath` shift/mask helpers (`voxel >> 4`, `voxel & 15`,
+`chunk >> 5`, `chunk & 31` — simultaneously the fastest and the only always-correct option, all
+Burst-safe), migrated every chunk-math call site (`ChunkCoord`, `WorldData`, `World`,
+`ChunkRelativePosition`, `RegionAddressCodec.V2`, and the `StandardWormCarverJob` Burst site — a
+*second* truncation site the original audit didn't list), and guarded them with the "Chunk Math"
+validation suite (21 scenarios: floor-div/local/region sweeps over ±2048 incl. boundaries, a
+power-of-two coupling guard, legacy-parity for positives, and a negative-coordinate teeth case).
+"Forbid inline chunk math" remains a convention (no analyzer).
+
+> **Audit correction (supersedes the original premise):** the `RegionAddressCodec.V2Codec` step-1
+> truncation was described as an *"already live"* bug. It is **latent but unreachable**: every encoder
+> caller (`ChunkStorageManager` ×3, the v1→v2 migration) passes an exact chunk origin (a multiple of
+> 16), and truncating division equals floor division for exact multiples *regardless of sign*.
+> Combined with the old step-2 float-floor and step-3 manual `if (lx<0) lx+=32` correction, the V2
+> encoder was already correct for every reachable input, including negative origins (verified by an
+> old-vs-new sweep: 0 mismatches). So the codec change is a **consistency / future-proofing refactor**
+> (removes the truncation that *would* be wrong if a raw mid-chunk voxel were ever passed), **not** a
+> live-bug fix. No save-format V3 bump was made — output is byte-identical for all reachable inputs;
+> the defensive V3 bump is deferred to Tier B (when negative coords become reachable and it rides the
+> border-removal change).
 
 > **Impact Analysis:**
-> - **Effort:** 🟡 Medium — the audit is the work; each individual fix is mechanical.
-> - **Risk:** 🟡 Medium — a single wrong mask silently corrupts chunk/region addressing; guard with
-    > an exhaustive old-vs-new equivalence sweep over representative coordinate ranges (trivially
-    > scriptable) before swapping call sites.
+> - **Effort:** 🟡 Medium — the audit was the work; each individual fix was mechanical.
+> - **Risk:** 🟡 Medium — a single wrong mask silently corrupts chunk/region addressing; guarded with
+    > an old-vs-new equivalence sweep (positive range byte-identical) before swapping call sites.
 > - **Benefit:** ⚪ Low today (removes float conversions from every chunk lookup) — but it is the
     > first Tier B prerequisite and the cheapest insurance against the negative-coordinate bug class.
-> - **Seed/Save:** ✅ / ✅ — outputs are identical for all-positive coordinates; the defensive
-    > region-codec V3 version bump is format-adjacent (see the scaling doc §3.2).
+> - **Seed/Save:** ✅ / ✅ — outputs identical for all-positive coordinates; no version bump shipped.
 
 ---
 
@@ -2603,10 +2621,10 @@ benchmark baseline (`Performance/README.md`) before each wave that touches meshi
    see the GS-6 entry) →
    MR-8 (greedy meshing — own design doc first).
 
-WS-1 (chunk-math shift/mask centralization) is wave-independent: zero save/seed risk, ships any
-time, and is the first Tier B enabler (`WORLD_SCALING_ANALYSIS.md` §6). **VQ-1** (integer voxel
-query fast path) is WS-1's runtime-API half — implement the two together, then PH-1
-(gather-once collision sweeps) and VQ-2 (DDA ray march) build on it. SL-4 (region-file read
+WS-1 (chunk-math shift/mask centralization) ✅ **shipped 2026-07-12** — the first Tier B enabler is
+banked (`WORLD_SCALING_ANALYSIS.md` §6). **VQ-1** (integer voxel query fast path) is WS-1's
+runtime-API half and was deliberately deferred — it now builds on the shipped `ChunkMath` helpers,
+then PH-1 (gather-once collision sweeps) and VQ-2 (DDA ray march) build on it. SL-4 (region-file read
 concurrency, design in `REGION_FILE_CONCURRENCY.md`) is benchmark-gated and corruption-risk 🔴 —
 schedule it only with its stress test in place, after SL-1/SL-2 land the cheap wins.
 
