@@ -25,7 +25,7 @@ namespace Editor.Validation.Placement
         /// excluded: every replaceable plant is also <see cref="BlockTags.REPLACEABLE"/>, while leaves are PLANT-but-solid.
         /// The separate <see cref="BlockType.worldGenCanReplaceTags"/> is unconstrained here.
         /// </summary>
-        private const BlockTags AllowedPlayerCanReplace =
+        private const BlockTags ALLOWED_PLAYER_CAN_REPLACE =
             BlockTags.REPLACEABLE | BlockTags.LIQUID;
 
         static partial void AddDataAuditScenarios(List<Scenario> scenarios)
@@ -37,7 +37,7 @@ namespace Editor.Validation.Placement
 
         /// <summary>
         /// Asserts that no shipping block (other than Air, which the player never holds) lists a tag outside
-        /// <see cref="AllowedPlayerCanReplace"/> in its <see cref="BlockType.placementCanReplaceTags"/>. Offenders are
+        /// <see cref="ALLOWED_PLAYER_CAN_REPLACE"/> in its <see cref="BlockType.placementCanReplaceTags"/>. Offenders are
         /// logged individually with the exact disallowed bits so the retune is a checklist.
         /// </summary>
         private static bool CanReplaceTagsArePlayerSafe()
@@ -58,14 +58,14 @@ namespace Editor.Validation.Placement
                 BlockType block = database.blockTypes[id];
                 if (block == null) continue;
 
-                BlockTags disallowed = block.placementCanReplaceTags & ~AllowedPlayerCanReplace;
+                BlockTags disallowed = block.placementCanReplaceTags & ~ALLOWED_PLAYER_CAN_REPLACE;
                 if (disallowed != BlockTags.NONE)
                 {
                     ok = false;
                     Debug.LogError(
                         $"  [ASSERT FAILED] '{block.blockName}' (id {id}) placementCanReplaceTags includes disallowed " +
                         $"structural tag(s) for player placement: {DescribeTags(disallowed)} " +
-                        $"(allowed: {DescribeTags(AllowedPlayerCanReplace)}).");
+                        $"(allowed: {DescribeTags(ALLOWED_PLAYER_CAN_REPLACE)}).");
                 }
             }
 
