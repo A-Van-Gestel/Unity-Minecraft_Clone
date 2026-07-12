@@ -157,13 +157,25 @@ namespace Editor.Validation.Lighting
         private static LightingTestWorld BuildBug16RgbSeamBlendWorld(bool withWater)
         {
             LightingTestWorld world = new LightingTestWorld(3);
+            PopulateBug16RgbSeamBlendWorld(world, withWater);
+            return world;
+        }
+
+        /// <summary>
+        /// Populates an existing (empty) grid-3 world with the Bug-16 geometry — used both by
+        /// <see cref="BuildBug16RgbSeamBlendWorld"/> (fresh world) and by the C11 banded-vs-full differential,
+        /// whose harness supplies the world so it can set the band gather mode first.
+        /// </summary>
+        /// <param name="world">The world to populate (must be grid-3).</param>
+        /// <param name="withWater">True to submerge the lamp region in the K16a water volume.</param>
+        private static void PopulateBug16RgbSeamBlendWorld(LightingTestWorld world, bool withWater)
+        {
             world.FillSuperflatFloor(BUG16_FLOOR_Y, TestBlockPalette.Stone);
             if (withWater)
                 world.FillBox(s_bug16WaterMin, s_bug16WaterMax, TestBlockPalette.Water);
             world.SetBlock(new Vector3Int(BUG16_RED_LAMP_X, BUG16_LAMP_Y, BUG16_LAMP_Z), TestBlockPalette.LampRed);
             world.SetBlock(new Vector3Int(BUG16_GREEN_LAMP_X, BUG16_LAMP_Y, BUG16_LAMP_Z), TestBlockPalette.LampGreen);
             world.RecalculateHeightmaps();
-            return world;
         }
 
         /// <summary>

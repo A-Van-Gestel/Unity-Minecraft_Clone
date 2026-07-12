@@ -149,7 +149,16 @@ namespace Editor.Validation.Lighting
             // the oracle (no sourceless RGB loop). Guards the EmitCrossChunkBlocklightRemoval initiator. Lives
             // in LightingValidationSuite.C10RgbLoop.cs and self-registers here. ---
             AddBug18RgbLoopBaselineScenarios(scenarios);
+
+            // --- C11 interrupted-reconciliation fuzz (B91 seeded seam/corner cycling sweep + B92 the B87
+            // recipe as a banded-vs-full differential): the Bug-16 churn axis generalized. Lives in
+            // LightingValidationSuite.InterruptedReconFuzz.cs and self-registers here. ---
+            AddInterruptedReconFuzzBaselineScenarios(scenarios);
         }
+
+        /// <summary>Hook for the C11 interrupted-reconciliation fuzz baselines (implemented in LightingValidationSuite.InterruptedReconFuzz.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddInterruptedReconFuzzBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the C12 RGB stale-pull-back baseline (implemented in Baselines/LightingValidationSuite.Baseline.C12RgbPullback.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>

@@ -8,7 +8,7 @@
 
 ## 1. Why this document exists
 
-The lighting validation suite (82 baselines + frame simulator, menu item
+The lighting validation suite (84 baselines + frame simulator, menu item
 **`Minecraft Clone/Dev/Validate Lighting Engine`**; B71–B74 guard the LI-2 band derivation, B75–B78 the
 banded-vs-full differential + prove-red, B79–B82 the LI-2b bottom-band derivation + emissive metadata,
 B83–B85 the bottom differential with its engagement assertion + raised-floor prove-red, B86–B88 the
@@ -528,7 +528,21 @@ there is invisible.
 - **Guarded by baseline B90** (`LightingValidationSuite.C10RgbLoop.cs`, promoted from repro K18a). Prove-red
   confirmed: neutering the emit reds only B90 (the residue returns); B86–B88, B50–B53, and B89 stay green.
 
-### C11 — The interrupted-reconciliation axis has exactly ONE recipe instance ·  **OPEN · MEDIUM-HIGH (the Bug-16 lesson generalized)**
+### C11 — The interrupted-reconciliation axis has exactly ONE recipe instance ·  **CLOSED (2026-07-12) — seeded fuzz B91 + band differential B92; the fuzz surfaced a Bug-09-shaped under-delivery lead**
+
+- **Closed** by a seeded interrupted-reconciliation fuzz (`LightingValidationSuite.InterruptedReconFuzz.cs`):
+  **B91** runs 24 seeds per suite invocation (nightly menu item `… (Interrupted Reconciliation Fuzz)` runs
+  500), each building a randomized colored-lamp cross-seam world (± water) and running a randomized number of
+  interrupted break/re-place cycles via the Bug-16 held-flight primitives (held neighbor flight + under-budgeted
+  waves), then asserting **convergence + zero work-cap aborts + oracle**. **B92** is the cheap companion — the
+  B87 recipe as a banded-vs-full differential (B75–B78 pattern), since interrupted flights change the LI-2
+  queued-node extents the sequential-edit differentials never exercise.
+- **Scope note (deliberate):** the fuzz covers **face-adjacent seams** — the cross-seam mutual-support topology
+  the removal-machinery churn (Bug 16/17/18) lives on. Diagonal 4-chunk-corner pairs are excluded: they are not
+  face-adjacent, and the interrupted schedule strands their cross-chunk *placement* delivery, surfacing an
+  **under-bright** (not over-bright) divergence — the **Bug 09** shape, orthogonal to this fuzz's removal axis.
+  That lead (a *synchronous* cross-chunk under-delivery — the first) is recorded under Bug 09 in
+  `LIGHTING_BUGS.md` for dedicated investigation, not conflated into this baseline.
 
 - Every scenario except B87/B88 edits a **converged** field and lets reconciliation **complete**. Bug 16
   required ≥2 *interrupted* cycles (edits landing mid-reconciliation: held pre-edit flights +
@@ -690,7 +704,7 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 | #   | Finding                                                                                                                                                   | Status             | Priority         | Effort         |
 |-----|-----------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------|------------------|----------------|
 | C10 | RGB sourceless-loop initiator absent (Bug 12's RGB mirror) — B53-twin **confirmed red → Bug 18**; FIXED (RGB initiator) + baseline B90, prove-red confirmed                          | **CLOSED**        | —                | done           |
-| C11 | Interrupted-reconciliation axis has ONE recipe instance — seeded churn fuzz (HF-3 pattern) + B87 band differential                                        | OPEN               | Medium-High      | medium         |
+| C11 | Interrupted-reconciliation axis has ONE recipe instance — **seeded fuzz B91 + band differential B92**; fuzz surfaced a Bug-09-shaped sync under-delivery lead (filed under Bug 09) | **CLOSED**         | —                | done           |
 | C12 | RGB darkness-phase pull-backs unverified (Bug 14's RGB mirror) — B60/B61-twin; **verdict GREEN, self-heals → baseline B89**, scopes fix to initiator-only | **CLOSED**         | —                | done           |
 | B8  | Work-cap fail-safe asserted by only B87/B88 — **promoted to a runner-level `FailSafeErrorScope` invariant** (all 8 suites) + 2 framework self-tests       | **CLOSED**         | —                | done           |
 | C4  | Sunlight persist→replay (B46) + `AddPendingBlocklight` guard (B47)                                                                                        | **CLOSED**         | —                | done           |
