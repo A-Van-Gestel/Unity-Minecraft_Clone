@@ -149,8 +149,8 @@ namespace Jobs
             // hashing or path caching for correct cross-chunk discovery.
             chunkSearchRadius = math.min(chunkSearchRadius, 16);
 
-            int currentChunkX = ChunkPosition.x / VoxelData.ChunkWidth;
-            int currentChunkZ = ChunkPosition.y / VoxelData.ChunkWidth;
+            int currentChunkX = ChunkMath.VoxelToChunk(ChunkPosition.x);
+            int currentChunkZ = ChunkMath.VoxelToChunk(ChunkPosition.y);
 
             // Define the bounding box of the CURRENT chunk in global space
             float3 chunkMin = new float3(ChunkPosition.x, 0, ChunkPosition.y);
@@ -477,6 +477,7 @@ namespace Jobs
                             cachedSurfaceHeightValue = GetTerrainHeight(pos.x, pos.z);
                         }
                     }
+
                     float cachedSurfaceHeight = cachedSurfaceHeightValue;
 
                     // Perturb angles
