@@ -67,6 +67,16 @@ namespace Editor.Validation.Lighting
         static partial void AddKnownBugScenarios(List<Scenario> scenarios)
         {
             // Bug 09 still needs a faithful repro (see note above).
+
+            // Fidelity finding C10 (predicted latent bug — Bug 12's RGB twin): the RGB sourceless cross-seam
+            // loop probe. Registered test-first as a known-bug scenario until its verdict is known — RED
+            // confirms the predicted bug (document + fix); GREEN means the Bug 17 veto already collapses the
+            // loop and it promotes to a baseline. Lives in LightingValidationSuite.C10RgbLoop.cs.
+            AddC10RgbLoopScenarios(scenarios);
         }
+
+        /// <summary>Hook for the C10 RGB sourceless-loop probe (implemented in LightingValidationSuite.C10RgbLoop.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddC10RgbLoopScenarios(List<Scenario> scenarios);
     }
 }
