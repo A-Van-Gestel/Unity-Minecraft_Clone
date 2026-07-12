@@ -711,6 +711,63 @@ family stayed green. 80 baselines total.
 
 ---
 
+### ~~23. Sourceless RGB blocklight loop survives when equal-color seam sources are removed in the same wave~~
+
+**Severity:** Medium (visual artifact: a stable, sourceless over-bright colored residue straddling a chunk
+seam after equal-color lamps are removed together; self-heals on any full relight — the RGB mirror of Bug 12's
+sky loop)
+**Fixed:** July 2026 (was Bug 18 in `LIGHTING_BUGS.md`; predicted by the post-Bug-17 sky↔RGB parity audit
+[fidelity finding C10], then reproduced deterministically, fixed, and oracle-confirmed 2026-07-12)
+**Status:** Resolved — confirmed via the validation suite (repro K18a flipped red→green, all baselines green,
+prove-red confirms only the guard reds when the initiator is neutered). Oracle-only confirmation (the borderless
+`LightingOracle` is trusted as ground truth; never knowingly observed in-game, per the Bug 12/17 colored-residue
+precedent). Promoted from known-bug repro **K18a** to baseline **B90**
+(`Assets/Editor/Validation/Lighting/LightingValidationSuite.C10RgbLoop.cs`).
+
+**Files:** `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` — new `EmitCrossChunkBlocklightRemoval` +
+its call from `PropagateDarknessRGB` (the 2-cycle-signature emit) + the `emittedBlockRemovals` dedup set
+threaded through `PropagateDarkness`.
+
+**Description:**
+When two **equal-color** blocklight sources on opposite sides of a chunk seam mutually lit the two shared border
+columns and both were removed in the same lighting wave (each chunk's schedule-time snapshot still showing the
+*other* side lit), the seam did **not** darken. It dropped by exactly one level and then **locked** as a
+stable-but-wrong over-bright residue, sustained purely by the two seam voxels mutually supporting each other
+across the boundary. The RGB (blocklight) twin of **Bug 12** (the sky sourceless cross-seam loop) and the same
+over-bright class as **Bug 17**, but with a distinct root cause — a missing removal *initiator*, not a missing
+*veto*.
+
+**Root Cause (confirmed via harness repro + per-voxel attribution):**
+The sky↔RGB removal-machinery parity gap after Bug 17. Sky light has a cross-seam removal **initiator**
+(`EmitCrossChunkSunlightRemoval`, the Bug 12 fix): when a darkness wave meets a cross-chunk neighbor at
+*exactly* the removed level (the 2-cycle signature) and the neighbor is not independently supported, it emits a
+removal mod that starts collapse from the other side. RGB blocklight had **no counterpart** —
+`EmitCrossChunkSunlightRemoval` hard-codes `Channel = Sun`, and `PropagateDarknessRGB` never emitted a cross-seam
+removal initiator. So the symmetric mutually-equal seam had no node to begin removal from (each side re-lit from
+the other's stale snapshot), and the Bug 17 independent-support **veto**
+(`CrossChunkLightModApplier.ComputeBlocklight`), added to *protect* legitimately-supported channels, actively
+**protected the stale mutual support** — the over-protection tension Bug 13 resolved on the sky side. Fidelity
+finding **C12** (the RGB darkness-phase pull-back's lack of claim verification) was proven a non-cause: an
+asymmetric held-flight probe self-heals (baseline B89), matching the Bug 17 note that "neutering the RGB claim
+path changed nothing".
+
+**Fix (July 2026):** mirror the Bug 12 cross-seam removal **initiator** to RGB per channel. When a blocklight
+darkness wave meets a cross-seam neighbor with a channel at exactly the removed level (`nX == node.LightX`) on a
+non-opaque neighbor, `PropagateDarknessRGB` emits a cross-chunk blocklight removal mod
+(`EmitCrossChunkBlocklightRemoval`, zeroed channels + `IsRemoval`, deduped per neighbor). The receiving chunk
+adjudicates it per channel through the **existing** Bug 17 veto: a channel a live independent source still backs
+is kept, the stale loop clears. No apply-side change was needed (that infra shipped with Bug 17). The Bug 14
+claim-verification analog remained unnecessary and was not added (C12 self-heal, B89) — mirroring Bug 17 scoping
+itself to the veto only. Documented in `LIGHTING_SYSTEM_OVERVIEW.md` §3.7. Bug 16's removal-node channel masking
+and the permanent `MAX_BFS_NODES_PER_PASS` fail-safe are preserved.
+
+**Validation suite:** K18a red→green on the fix, promoted to **B90**; prove-red confirmed (neutering the emit
+reds only B90 — the ~38-voxel over-bright red residue returns, worst R13 at the seam); B86–B88 (Bug 16/17
+over-correction tripwires), the Bug 12 sky family B50–B53, and B89 (C12 self-heal) all stayed green. 82 baselines
+total.
+
+---
+
 ## Fluid
 
 ### ~~01. Cross-chunk fluid simulation stops at chunk borders~~

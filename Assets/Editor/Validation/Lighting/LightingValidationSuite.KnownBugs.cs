@@ -68,15 +68,14 @@ namespace Editor.Validation.Lighting
         {
             // Bug 09 still needs a faithful repro (see note above).
 
-            // Fidelity finding C10 (predicted latent bug — Bug 12's RGB twin): the RGB sourceless cross-seam
-            // loop probe. Registered test-first as a known-bug scenario until its verdict is known — RED
-            // confirms the predicted bug (document + fix); GREEN means the Bug 17 veto already collapses the
-            // loop and it promotes to a baseline. Lives in LightingValidationSuite.C10RgbLoop.cs.
-            AddC10RgbLoopScenarios(scenarios);
+            // NOTE on Bug 18 (fidelity finding C10; found + FIXED 2026-07-12): the RGB twin of the Bug 12
+            // sourceless cross-seam loop. Two equal-color lamps mutually lighting a seam, both broken in the
+            // same wave, settled stable-but-wrong over-bright because RGB blocklight had the Bug 17 removal
+            // veto but no cross-seam removal INITIATOR (EmitCrossChunkSunlightRemoval was sky-only). Fixed by
+            // mirroring the initiator to RGB (EmitCrossChunkBlocklightRemoval in PropagateDarknessRGB),
+            // adjudicated by the existing Bug 17 veto. Repro K18a promoted to baseline B90
+            // (LightingValidationSuite.C10RgbLoop.cs); C12's RGB pull-back was proven self-healing (B89), so
+            // no claim-verification mirror was needed. Entry archived in _FIXED_BUGS.md.
         }
-
-        /// <summary>Hook for the C10 RGB sourceless-loop probe (implemented in LightingValidationSuite.C10RgbLoop.cs).</summary>
-        /// <param name="scenarios">The scenario list to append to.</param>
-        static partial void AddC10RgbLoopScenarios(List<Scenario> scenarios);
     }
 }

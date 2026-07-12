@@ -339,6 +339,12 @@ namespace Jobs
             // redundant apply-side in-chunk-support scans). Keyed by EncodeNeighborKey.
             NativeHashMap<long, byte> emittedSunRemovals = new NativeHashMap<long, byte>(16, Allocator.Temp);
 
+            // Bug 18: the same dedup set for the RGB cross-seam removal initiator (the blocklight mirror of
+            // the Bug 12 sunlight initiator). Kept distinct from emittedSunRemovals — both key on
+            // EncodeNeighborKey, so a shared set would let a sunlight removal to a neighbor suppress a
+            // legitimate blocklight removal to the same neighbor.
+            NativeHashMap<long, byte> emittedBlockRemovals = new NativeHashMap<long, byte>(16, Allocator.Temp);
+
             // --- PASS -2: SYNC EMISSION TO LIGHT ARRAY ---
             // The uint packed data has emission baked in by generation/placement, but the ushort
             // light array may be uninitialized. Scan center chunk blocks, write emission RGB so the
@@ -456,7 +462,7 @@ namespace Jobs
                     break;
                 }
 
-                PropagateDarkness(node, LightChannel.Sun, sunlightPlacementQueue, sunlightRemovalQueue, ref emittedSunRemovals);
+                PropagateDarkness(node, LightChannel.Sun, sunlightPlacementQueue, sunlightRemovalQueue, ref emittedSunRemovals, ref emittedBlockRemovals);
             }
 
             while (sunlightPlacementQueue.TryDequeue(out Vector3Int pos))
@@ -480,7 +486,7 @@ namespace Jobs
 
                 if (bfsWork > MAX_BFS_NODES_PER_PASS - NEAR_CAP_NODE_DUMP)
                     LogNodeNearCap("blockRemoval", node.Pos, node.LightR, node.LightG, node.LightB);
-                PropagateDarkness(node, LightChannel.Block, blocklightPlacementQueue, blocklightRemovalQueue, ref emittedSunRemovals);
+                PropagateDarkness(node, LightChannel.Block, blocklightPlacementQueue, blocklightRemovalQueue, ref emittedSunRemovals, ref emittedBlockRemovals);
             }
 
             while (blocklightPlacementQueue.TryDequeue(out Vector3Int pos))
@@ -513,6 +519,7 @@ namespace Jobs
             blocklightRemovalQueue.Dispose();
             blocklightPlacementQueue.Dispose();
             emittedSunRemovals.Dispose();
+            emittedBlockRemovals.Dispose();
         }
 
         /// <summary>
@@ -602,11 +609,11 @@ namespace Jobs
                    pos.z >= 0 && pos.z < VoxelData.ChunkWidth;
         }
 
-        private void PropagateDarkness(LightRemovalNode node, LightChannel channel, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue, ref NativeHashMap<long, byte> emittedSunRemovals)
+        private void PropagateDarkness(LightRemovalNode node, LightChannel channel, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue, ref NativeHashMap<long, byte> emittedSunRemovals, ref NativeHashMap<long, byte> emittedBlockRemovals)
         {
             if (channel == LightChannel.Block)
             {
-                PropagateDarknessRGB(node, pQueue, rQueue);
+                PropagateDarknessRGB(node, pQueue, rQueue, ref emittedBlockRemovals);
                 return;
             }
 
@@ -812,7 +819,7 @@ namespace Jobs
         /// letting its value ride along turns the wave into a cross-gradient remover and breaks the
         /// BFS's per-channel strict-decrease termination guarantee (Bug 16's runaway removal cycle).
         /// </summary>
-        private void PropagateDarknessRGB(LightRemovalNode node, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue)
+        private void PropagateDarknessRGB(LightRemovalNode node, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue, ref NativeHashMap<long, byte> emittedBlockRemovals)
         {
             for (int i = 0; i < 6; i++)
             {
@@ -871,6 +878,29 @@ namespace Jobs
                         uint centerPacked = GetPackedData(node.Pos);
                         if (centerPacked != uint.MaxValue)
                             CheckEdgeVoxelRGB(node.Pos, centerPacked, neighborPos, pQueue);
+
+                        // Bug 18: RGB mirror of the Bug 12 cross-seam removal initiator. A cross-seam
+                        // neighbor channel sitting at EXACTLY the removed level is the 2-cycle signature of a
+                        // mutually-supporting RGB loop straddling the boundary (voxel A here and voxel B the
+                        // neighbor, each lit "by" the other). Once the genuine source is gone the pull-back
+                        // above re-lights this side from the neighbor's still-high (possibly stale) value and
+                        // the neighbor's own job does the same, so — unlike an asymmetric gradient, which
+                        // always has a strictly-lower side the removal branch above handles — the pair locks
+                        // one level below the source forever (a stable-but-wrong over-bright field). Emit a
+                        // cross-chunk blocklight removal so the neighbor's chunk re-evaluates through the
+                        // Bug 17 independent-support veto (CrossChunkLightModApplier.ComputeBlocklight): a
+                        // channel a live independent source still backs is KEPT, the stale loop CLEARS. The
+                        // per-channel veto on the apply side decides which channels actually clear, so the mod
+                        // zeroes all channels and lets the veto keep the supported ones (mirror of the sky
+                        // initiator emitting from the stale snapshot and adjudicating against live data). An
+                        // opaque neighbor is skipped: it only stores surface blocklight and never propagates
+                        // it, so it is never a loop participant (mirror of the sky opaque guard).
+                        bool sigR = nR == node.LightR && node.LightR > 0;
+                        bool sigG = nG == node.LightG && node.LightG > 0;
+                        bool sigB = nB == node.LightB && node.LightB > 0;
+                        if ((sigR || sigG || sigB)
+                            && !BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsOpaque)
+                            EmitCrossChunkBlocklightRemoval(neighborPos, ref emittedBlockRemovals);
                     }
                 }
             }
@@ -1493,6 +1523,29 @@ namespace Jobs
             CrossChunkLightMods.Add(new LightModification
             {
                 GlobalPosition = LocalToGlobal(neighborPos), LightLevel = 0, Channel = LightChannel.Sun,
+            });
+        }
+
+        /// <summary>
+        /// Bug 18: emits a cross-chunk blocklight removal mod for a seam neighbor caught at the 2-cycle
+        /// signature — the RGB mirror of <see cref="EmitCrossChunkSunlightRemoval"/>. The mod zeroes all
+        /// channels with <c>IsRemoval</c>; the receiving chunk's apply path adjudicates it per channel
+        /// through the Bug 17 independent-support veto
+        /// (<c>CrossChunkLightModApplier.ComputeBlocklight</c>), keeping any channel a live independent
+        /// source still backs and clearing the stale mutual-support loop. One mod per neighbor suffices
+        /// (the apply is idempotent); dedup on the neighbor key like the sunlight initiator.
+        /// </summary>
+        /// <param name="neighborPos">The cross-seam neighbor to re-evaluate for removal.</param>
+        /// <param name="emittedBlockRemovals">Per-job dedup set of already-emitted blocklight-removal neighbor keys.</param>
+        private void EmitCrossChunkBlocklightRemoval(Vector3Int neighborPos, ref NativeHashMap<long, byte> emittedBlockRemovals)
+        {
+            if (!emittedBlockRemovals.TryAdd(EncodeNeighborKey(neighborPos.x, neighborPos.y, neighborPos.z), 0))
+                return;
+
+            CrossChunkLightMods.Add(new LightModification
+            {
+                GlobalPosition = LocalToGlobal(neighborPos), LightLevel = 0, Channel = LightChannel.Block,
+                BlockR = 0, BlockG = 0, BlockB = 0, IsRemoval = true,
             });
         }
 

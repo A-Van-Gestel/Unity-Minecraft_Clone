@@ -8,12 +8,12 @@
 
 ## 1. Why this document exists
 
-The lighting validation suite (81 baselines + frame simulator, menu item
+The lighting validation suite (82 baselines + frame simulator, menu item
 **`Minecraft Clone/Dev/Validate Lighting Engine`**; B71–B74 guard the LI-2 band derivation, B75–B78 the
 banded-vs-full differential + prove-red, B79–B82 the LI-2b bottom-band derivation + emissive metadata,
 B83–B85 the bottom differential with its engagement assertion + raised-floor prove-red, B86–B88 the
-Bug-16/17 RGB removal family — simple-form tripwire, runaway-cycle guard, ghost-island guard — and B89 the
-C12 RGB stale-pull-back self-heal guard) is strong
+Bug-16/17 RGB removal family — simple-form tripwire, runaway-cycle guard, ghost-island guard — B89 the
+C12 RGB stale-pull-back self-heal guard, and B90 the Bug-18 RGB cross-seam removal initiator guard) is strong
 where it runs **real production code**:
 it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real `ChunkData` (section /
 uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision
@@ -504,23 +504,24 @@ there is invisible.
   below darkens to side-bleed → break → re-light) is untested as a dedicated baseline; B3 only opens a shaft.
   Likely caught incidentally by other oracle compares — hence LOW.
 
-### C10 — No RGB analog of the Bug 12 sourceless-loop initiator, and no scenario that would expose it ·  **OPEN · HIGH (predicted latent bug, post-Bug-17 parity audit 2026-07-12)**
+### C10 — No RGB analog of the Bug 12 sourceless-loop initiator ·  **CLOSED (2026-07-12) — the predicted latent bug was real (Bug 18), fixed + guarded by baseline B90**
 
-- The sky↔RGB removal-machinery parity matrix after Bug 17: sky has the **initiator** (Bug 12,
+- The sky↔RGB removal-machinery parity matrix after Bug 17: sky had the **initiator** (Bug 12,
   `EmitCrossChunkSunlightRemoval`), the **veto** (Bugs 11/13, `In/CrossChunkSunlightSupport`) and **claim
-  verification** (Bug 14, `PullBackClaim`). RGB now has the **veto only** (Bug 17,
-  `In/CrossChunkBlocklightSupport` — "consulted only by removals"). `EmitCrossChunkSunlightRemoval` has no
-  blocklight counterpart anywhere in `NeighborhoodLightingJob`.
-- **The predicted bug:** a genuinely sourceless mutually-supporting RGB seam loop — two equal-color lamps
-  feeding each other's shared seam columns, both broken in the same wave so each chunk's schedule-time
-  snapshot still shows the other side lit — has **no collapse path** on the RGB channel, and the new Bug 17
-  veto now actively *protects* it (the exact over-protection tension Bug 13 resolved on the sky side).
-  Expected outcome: stable-but-wrong ghost light, B53's RGB twin.
-- **Missing scenario:** B53's geometry translated to blocklight (sealed corridor straddling the seam,
-  equal-color lamps as the only sources, simultaneous same-wave break via held flights, full oracle
-  compare). Test-first either way: red ⇒ the next documented bug arrives with its repro already written;
-  green ⇒ pins that the veto's emitter-exclusion arm suffices and scopes the missing initiator. Needs no
-  new capability (palette lamps + `BeginLightingJob`/`CompleteLightingJob`).
+  verification** (Bug 14, `PullBackClaim`). RGB had the **veto only** (Bug 17,
+  `In/CrossChunkBlocklightSupport`), and `EmitCrossChunkSunlightRemoval` had no blocklight counterpart.
+- **The predicted bug was confirmed real.** The B53-twin scenario — a sealed blocklight corridor straddling
+  the x15|16 seam, two equal-color lamps as the only sources, both broken in the same wave — reproduced RED:
+  the seam settled stable-but-wrong at a ~38-voxel over-bright red residue (worst R13 at the seam) with no
+  collapse path, the Bug 17 veto actively protecting the stale mutual support. Filed **Bug 18** (`_FIXED_BUGS.md`
+  Lighting #23).
+- **Fixed** by mirroring the Bug 12 initiator to RGB per channel (`NeighborhoodLightingJob.EmitCrossChunkBlocklightRemoval`,
+  emitted from `PropagateDarknessRGB` at the 2-cycle signature `nX == node.LightX`), adjudicated by the
+  **existing** Bug 17 veto (no apply-side change). The Bug 14 claim-verification analog was **not** needed —
+  C12's pull-back self-heals (baseline B89) — so the fix is initiator-only, mirroring Bug 17 adding only the
+  veto.
+- **Guarded by baseline B90** (`LightingValidationSuite.C10RgbLoop.cs`, promoted from repro K18a). Prove-red
+  confirmed: neutering the emit reds only B90 (the residue returns); B86–B88, B50–B53, and B89 stay green.
 
 ### C11 — The interrupted-reconciliation axis has exactly ONE recipe instance ·  **OPEN · MEDIUM-HIGH (the Bug-16 lesson generalized)**
 
@@ -683,7 +684,7 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 
 | #   | Finding                                                                                                                                                   | Status             | Priority         | Effort         |
 |-----|-----------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------|------------------|----------------|
-| C10 | RGB sourceless-loop initiator absent (Bug 12's RGB mirror) — B53-twin scenario; **CONFIRMED red → filed Bug 18**, repro K18a; fix (RGB initiator) pending | REPRO'D (fix open) | **High**         | small          |
+| C10 | RGB sourceless-loop initiator absent (Bug 12's RGB mirror) — B53-twin **confirmed red → Bug 18**; FIXED (RGB initiator) + baseline B90, prove-red confirmed                          | **CLOSED**        | —                | done           |
 | C11 | Interrupted-reconciliation axis has ONE recipe instance — seeded churn fuzz (HF-3 pattern) + B87 band differential                                        | OPEN               | Medium-High      | medium         |
 | C12 | RGB darkness-phase pull-backs unverified (Bug 14's RGB mirror) — B60/B61-twin; **verdict GREEN, self-heals → baseline B89**, scopes fix to initiator-only | **CLOSED**         | —                | done           |
 | B8  | Work-cap fail-safe asserted by only B87/B88 — promote `WorkCapAbortListener` to a runner-level invariant                                                  | OPEN               | Medium           | small          |

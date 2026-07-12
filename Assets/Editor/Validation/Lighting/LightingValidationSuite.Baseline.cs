@@ -143,11 +143,21 @@ namespace Editor.Validation.Lighting
             // removal-machinery gap to the missing initiator, Bug 18). Lives in
             // Baselines/LightingValidationSuite.Baseline.C12RgbPullback.cs and self-registers here. ---
             AddC12RgbPullbackBaselineScenarios(scenarios);
+
+            // --- Bug 18 RGB cross-seam removal initiator (B90; fidelity finding C10, promoted from repro
+            // K18a): two equal-color lamps mutually lighting a seam, broken in the same wave, must darken to
+            // the oracle (no sourceless RGB loop). Guards the EmitCrossChunkBlocklightRemoval initiator. Lives
+            // in LightingValidationSuite.C10RgbLoop.cs and self-registers here. ---
+            AddBug18RgbLoopBaselineScenarios(scenarios);
         }
 
         /// <summary>Hook for the C12 RGB stale-pull-back baseline (implemented in Baselines/LightingValidationSuite.Baseline.C12RgbPullback.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddC12RgbPullbackBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the Bug-18 RGB sourceless-loop baseline B90 (implemented in LightingValidationSuite.C10RgbLoop.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBug18RgbLoopBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the Bug-12 family baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug12.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
