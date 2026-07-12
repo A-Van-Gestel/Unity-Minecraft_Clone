@@ -343,6 +343,17 @@ namespace Editor.Validation.Framework
         /// single scenario body (B8). Subscribes on construction, unsubscribes on <see cref="Dispose"/>; the
         /// runner force-fails the scenario when <see cref="Tripped"/>. Generalizes the per-baseline
         /// <c>WorkCapAbortListener</c> (Bug 16) into a suite-wide invariant.
+        /// <para>
+        /// <b>Precondition — synchronous main-thread delivery.</b> Detection assumes the engine fail-safe's
+        /// <c>Debug.LogError</c> is raised on the main thread <i>inside</i> the scenario body, where
+        /// <see cref="Application.logMessageReceived"/> fires inline (before <see cref="Dispose"/>). This holds
+        /// for every current suite: they run their jobs via <c>job.Run()</c> on the main thread, so a work-cap
+        /// abort logs synchronously within the scope. A future suite that SCHEDULES a job off the main thread
+        /// would have its abort marshaled to a later main-thread pump (<c>logMessageReceived</c> queues
+        /// non-main-thread logs) and delivered AFTER this scope disposes — escaping the trip. Such a suite must
+        /// also subscribe to <c>Application.logMessageReceivedThreaded</c> and guard
+        /// <see cref="Tripped"/>/<see cref="FirstMessage"/> for concurrent writes.
+        /// </para>
         /// </summary>
         internal sealed class FailSafeErrorScope : IDisposable
         {
