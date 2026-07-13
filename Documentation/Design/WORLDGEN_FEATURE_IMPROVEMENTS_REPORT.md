@@ -16,6 +16,10 @@
 effects, per-world generation options, worldgen versioning, world border) plus RF-7 (weather) in
 the sibling report, and folded minor notes into TF-3 (sub-biome variants) and TF-9 (bedrock,
 pre-generation tool).
+**Amended:** 2026-07-13 — TF-14 decision taken (Tier B unbounded XZ is now scheduled as WS-2, see
+`WORLD_SCALING_IMPLEMENTATION.md`): skip the interim hard-wall treatment; TF-14 becomes the
+**per-world configurable border** (gameplay fence, terrain generates past it). Save flips ✅ → ⚠️
+(level.dat field, rides the TF-12/TF-13 v12 wave).
 Findings are from static code review of the Standard generation pipeline
 (`StandardChunkGenerator` → `StandardWormCarverJob` → `StandardChunkGenerationJob` →
 `CaveIsolationFilterJob`) plus the shipped authoring/editor tooling. The Legacy pipeline
@@ -82,7 +86,7 @@ Findings are from static code review of the Standard generation pipeline
 | TF-11 | Climate-driven surface effects: snow line, ice, biome/foliage tint (gated on TF-3)       |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
 | TF-12 | Generation feature flags read from global Settings, not the world — persist in level.dat |   🟢   |  🟢  |   🟢    |  ✅   |  ⚠️  |
 | TF-13 | No worldgen version stamp — post-freeze terrain changes produce silent seams             |   🟢   |  🟢  |    ⚪    |  ✅   |  ⚠️  |
-| TF-14 | World border is a bare void edge — no visual or gameplay treatment                       |   🟡   |  🟢  |   🟡    |  ✅   |  ✅   |
+| TF-14 | World border → per-world configurable gameplay fence (decided 2026-07-13; post-WS-2)     |   🟡   |  🟢  |   🟡    |  ✅   |  ⚠️  |
 
 ---
 
@@ -985,7 +989,25 @@ the raw edge is every player's first impression of the world limit.
 only because of the border shader; the clamp is an hour.
 
 **Risks.** 🟢 — additive rendering + a controller clamp; nothing touches generation, lighting, or
-storage. Seed ✅ / Save ✅.
+storage. Seed ✅ / Save ✅ *(original bounded-world treatment; superseded below)*.
+
+**DECIDED 2026-07-13 — per-world configurable border (post-WS-2).** With Tier B scheduled
+(`WORLD_SCALING_IMPLEMENTATION.md`, WS-2 plan approved), the interim hard-wall treatment is
+skipped and this item resolves to its own item-3 variant: a **per-world border setting persisted
+in level.dat** (radius/center, off by default is one option — see open question below). Semantics:
+
+- **Gameplay fence only.** Terrain still generates past the border (generation, lighting, meshing,
+  and storage are border-blind); the *player* is clamped (soft pushback in the player controller,
+  per the original design) and the translucent wall shader renders at the configured radius. Must
+  **not** be implemented in `IsVoxelInWorld`/`IsChunkInWorld` — that would re-block the pipeline.
+- **Save:** ⚠️ level.dat field + migration — rides the TF-12/TF-13 **v12 wave** (it is a per-world
+  generation-adjacent option; TF-12 is its natural plumbing prerequisite).
+- **Minimap:** `WorldInfoUtility` redraws its border rect from the per-world setting when present
+  (WS-2 leaves the surviving west/south walls; pure redraw, no schema coupling).
+- **Open question (answer at build time):** default for *existing* worlds on upgrade — no border
+  (WS-2's global-unbounded default) vs. a border pre-set at their legacy 100-chunk extent
+  (preserves today's player experience; softens the roadmap §2.1 "silently gain room" trade-off
+  into an opt-in).
 
 ---
 

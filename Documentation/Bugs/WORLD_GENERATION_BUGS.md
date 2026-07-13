@@ -40,6 +40,8 @@ collapse to a constant → biome boundary dithering is effectively **disabled** 
 
 **Proposed fix:** Never feed the raw seed into float coordinates. Either hash the seed into a small bounded offset (`seed & 0xFFFF`), or migrate these `snoise` call sites to seeded `FastNoiseLite.CreateSimple(seed, freq)` instances (see `LIBRARY_BUGS.md` → "Remaining noise.snoise Migration", which lists these exact call sites).
 
+**2026-07-13 (world-scaling OQ-7 audit):** Mechanism re-verified in code. One additional seed-as-coordinate site: `Legacy/LegacyNoise.cs` (`position.x += offset + VoxelData.Seed + 0.1f` and siblings) — left as-is deliberately, the Legacy generator is frozen for save compatibility. Decision: **no fix now**; the proper fix is world-version-gated and rides WS-3's seed-hygiene item (see `Design/WORLD_SCALING_IMPLEMENTATION.md` §5 / OQ-7 — fixing this per Bug 01's warning is seed-breaking by definition).
+
 ---
 
 ## 05. Generation pipeline truncates block IDs to `byte` (latent 255-block ceiling)

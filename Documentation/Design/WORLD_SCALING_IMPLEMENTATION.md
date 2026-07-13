@@ -1,8 +1,8 @@
 # World Scaling — Implementation Roadmap (Tier B: unbounded XZ)
 
-**Version:** 1.0
-**Date:** 2026-07-12
-**Status:** **Draft — WS-2 is plan-ready; WS-3+ direction-captured (see Open Questions before building).**
+**Version:** 1.4
+**Date:** 2026-07-13
+**Status:** **Proposed design — not implemented. OQ-1..7 all resolved in code (2026-07-13); WS-2 plan-ready, WS-3 direction-captured.**
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The decided execution path for scaling the world horizontally. Analysis (`WORLD_SCALING_ANALYSIS.md`)
@@ -20,6 +20,10 @@ comments — zero runtime coupling), the `WorldCentre` fallback-spawn path (`Wor
 persisted `WorldSpawnPoint`/`ChunkRelativePosition`), and the `v10→v11` spawn-persistence migration.
 WS-1 shift/mask centralization (shipped) and VQ-1 `TryGetVoxel` (shipped) are the foundation this
 builds on.
+
+**Second audit (open questions):** 2026-07-13, same branch. All seven §7 questions resolved by
+reading the owning code paths — answers inline in §7; the §4/§5 premises they corrected are edited
+in place below.
 
 **Relationship to other documents:**
 
@@ -64,9 +68,14 @@ The XZ border is removed for **all** worlds, not behind a per-world capability f
 - ✅ No flag threading through `IsVoxelInWorld`/`IsChunkInWorld`/spawn/codec; one behavior.
 - ✅ Matches the long-term intent — existing worlds *should* be able to grow past their old edge.
 - ❌ Existing worlds silently gain the ability to generate past their former border. Accepted: under
-  global-unbounded this is the desired behavior, not a surprise to design around.
-- Existing-world spawn on upgrade resolves to the **player's last stored location** (the
-  `ChunkRelativePosition`-style field), not the old `WorldCentre` — folded into Phase 2's spawn work.
+  global-unbounded this is the desired behavior, not a surprise to design around. *(Softened
+  2026-07-13: the per-world configurable border — `WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md` TF-14,
+  decided as a post-WS-2 follow-up — adds a gameplay fence on top; terrain stays border-blind, only
+  player movement is clamped. Whether upgraded worlds default to a fence at their legacy extent is
+  TF-14's open question, not WS-2's.)*
+- Existing-world spawn on upgrade resolves to the **player's last stored location** — already
+  persisted as `WorldSaveData.player.position` (absolute `Vector3` in level.dat, restored on every
+  load; verified, see OQ-5) — not the old `WorldCentre`. No new field or migration needed.
 
 *Rejected — per-world gate:* keeps old saves bounded but costs a flag on every border/spawn/codec
 decision and a two-behavior test matrix, for a "safety" the global choice doesn't want.
@@ -81,11 +90,11 @@ coordinates go negative. Positive-only expansion sidesteps every one of them.
 
 ## 3. Phased plan
 
-| Phase                      | Scope                                                                                                    | Effort | Save impact                   | Depends on                    |
-|----------------------------|----------------------------------------------------------------------------------------------------------|:------:|-------------------------------|-------------------------------|
-| **WS-2** — unbounded +XZ   | Relax XZ *upper* bound only (keep `>= 0`); neighbor-guard flip; reconceive `WorldCentre` as spawn const  |   🟡   | None (V2 byte-identical)      | WS-1 ✅, VQ-1 ✅                |
-| **WS-3** — negative XZ     | Drop `>= 0` floor; V3 codec bump + migration; **structure-RNG mirroring rewrite**; seed hygiene; spawn   |   🔴   | ⚠️ V3 codec + level.dat spawn | WS-2                          |
-| **WS-4** — floating origin | Periodic origin shift; `ChunkRelativePosition` for player/camera; `_WorldOriginOffset` shader continuity |   🔴   | None (presentation layer)     | Independent (far-travel gate) |
+| Phase                      | Scope                                                                                                                                                         | Effort | Save impact                         | Depends on                    |
+|----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|-------------------------------------|-------------------------------|
+| **WS-2** — unbounded +XZ   | Relax XZ *upper* bound only (keep `>= 0`); neighbor-guard flip; reconceive `WorldCentre` as spawn const                                                       |   🟡   | None (V2 byte-identical)            | WS-1 ✅, VQ-1 ✅                |
+| **WS-3** — negative XZ     | Drop `>= 0` floor; V3 codec bump + migration; structure-RNG negative verification; seed hygiene; spawn                                                        |   🟡   | ⚠️ V3 codec bump                    | WS-2                          |
+| **WS-4** — floating origin | Periodic origin shift; `ChunkRelativePosition` for player/camera; `_WorldOriginOffset` shader continuity; **noise-precision rider** (double base offsets, §6) |   🔴   | None (presentation) / rider ⚠️ seed | Independent (far-travel gate) |
 
 **Validation is built alongside each phase** (WS-1 precedent: its equivalence guard shipped in the
 "Chunk Math" suite, not after). WS-2 adds an unbounded-streaming / positive-past-border determinism
@@ -114,11 +123,23 @@ scenario; WS-3 adds a negative-quadrant generation-parity + mirroring scenario a
   structure/decorator hashing stays valid.
 - **No seed / noise-precision work.** All negative or far-out concerns.
 
-### 4.3 WS-2 blast radius (from the audit)
+### 4.3 WS-2 blast radius (from the audits)
 
-Small and already characterized: the two bounds tests, the ~6 neighbor-guard sites, and the
-`WorldCentre` constant. Streaming is already player-relative (verified), and the `ChunkCoord` "0–99"
-contract is doc-only. The remaining risk is concentrated in the open questions below.
+Small and fully characterized after the 2026-07-13 OQ audit:
+
+- **Bounds tests:** `World.IsChunkInWorld` ×2 (:3528/:3540), `WorldData.IsVoxelInWorld` (:204), and
+  VQ-1's `TryGetVoxel` (:226) — the latter folds "< 0" and ">= size" into one unsigned compare per
+  axis (`(uint)x >= WorldSizeInVoxels`), so the relaxation must split it back into an explicit
+  `x < 0` test on XZ (keep the folded form for Y).
+- **Neighbor guards:** the three gates (`AreNeighborsDataReady` / `AreNeighborsReadyAndLit` /
+  `AreNeighborsMeshReady`, `World.cs` :1909/:1952/:1989/:2028) plus `WorldJobManager` :203/:1305/:1755
+  — all resolve cleanly, see OQ-2.
+- **`WorldCentre`** (`VoxelData.cs:35`) — see OQ-3.
+- **Cosmetic finite-world UI:** `WorldInfoUtility`'s orange "valid world border" rectangle and
+  centre crosshair — see OQ-4 (no functional breakage anywhere).
+
+Streaming is already player-relative (verified), the `ChunkCoord` "0–99" contract is doc-only, and
+no fixed-size `[WorldSizeInChunks]` array exists anywhere (OQ-1).
 
 ---
 
@@ -127,17 +148,33 @@ contract is doc-only. The remaining risk is concentrated in the open questions b
 Drops the `>= 0` XZ floor, at which point negative coordinates become reachable and the following
 become hard prerequisites (each is a documented Tier B item in `WORLD_SCALING_ANALYSIS.md`):
 
-- **Structure-RNG mirroring rewrite (§3.4).** `hash(chunkX·K1 + chunkZ·K2)`-style multiplicative
-  hashing collides/mirrors across ±quadrants ("mirrored structures" bug). Replace with a
-  sign-safe mixer (e.g. SplitMix avalanche on `(x, z)` packed into a `long`). **This is the phase's
-  gating item** — it must land before negative generation is shippable, and it bites *near* origin,
-  not just far out. Requires a generation-job audit first (not yet located in code).
+- **Structure-RNG negative-quadrant verification (§3.4) — rewrite NOT needed (OQ-6, verified).**
+  The assumed multiplicative quadrant-mirroring hashing does not exist: every structure/decorator/
+  cave RNG site already uses sign-safe avalanche hashing (`Unity.Mathematics.math.hash` on
+  `int3`/`int4` — structure cell election `StandardChunkGenerationJob:577`, per-structure seed
+  `StandardChunkGenerator:857`, worm-carver trunk/local `StandardWormCarverJob:174/:239`, fluid tick
+  `FluidTickJob:579`). The phase's gating item downgrades to: (a) fix the structure grid-cell
+  derivation `(int)math.floor((float)globalX / spacing)` (`StandardChunkGenerationJob:574`) —
+  floor-correct for negatives but float-precision-capped at ±2²⁴ (spacing is not power-of-two, so
+  the fix is an integer floor-div helper, not shift/mask); (b) a negative-quadrant generation-parity
+    + structure-placement validation scenario.
 - **V3 codec defensive bump (§3.2).** Rides the border-floor removal so it protects real
   negative-addressed data instead of stamping a no-op version. ⚠️ AOT frozen-DTO migration.
-- **Seed hygiene (§3.4).** Root-cause `VoxelData.CalculateSeed`'s `Mathf.Abs(hash) / 10000` hack;
-  ⚠️ seed-breaking by definition → world-version-gated, old worlds keep the old seed output.
-- **Spawn policy.** Fresh worlds spawn at **(0, 0)** (surface-search for Y); existing worlds on
-  upgrade spawn at the **player's last stored `ChunkRelativePosition`**. ⚠️ level.dat spawn migration.
+- **Seed hygiene (§3.4) — root cause identified (OQ-7).** The `Abs(hash)/10000` hack is a
+  **magnitude cap**, not sign handling: the seed is added directly to *float noise coordinates* in
+  `StandardChunkGenerationJob:238-239` (surface dither, `snoise(... ± BaseSeed)`) and throughout
+  `LegacyNoise` (`position.x += offset + Seed`), so a large |seed| pushes noise inputs past float
+  precision and degenerates generation. The hack caps only the random/string-hash paths (≤ ~214k);
+  the integer-parse path returns any typed int untouched — a user typing `2000000000` hits the
+  breakage **today**, independent of WS-3. Fix = stop using the seed as a coordinate offset (derive
+  small offsets by hashing the seed); touches the Standard dither pattern → ⚠️ seed-breaking by
+  definition → world-version-gated; Legacy generator stays frozen. The FNL core path is already
+  clean (`FastNoiseLite.Create(baseSeed + seedOffset)` uses the seed as an int).
+- **Spawn policy (OQ-5, simplified — no migration needed).** Fresh worlds spawn at **(0, 0)**
+  (surface-search for Y) — a constant change only. Existing worlds already restore the player to
+  `WorldSaveData.player.position` (absolute `Vector3`, persisted in level.dat) on every load, and
+  their canonical `spawnPosition` (~voxel (800, 800)) stays valid because the positive quadrant
+  survives WS-3 unchanged. The former "level.dat spawn migration" item is dropped.
 
 ---
 
@@ -149,19 +186,32 @@ negative quadrants is fully usable without it. Full design in `WORLD_SCALING_ANA
 `_WorldOriginOffset` shader global for noise continuity, the "must-not-shift" list). Its natural
 trigger is the first time a player travels far enough for vertex jitter to be visible (~16k units).
 
+**Rider — generation noise precision (assigned 2026-07-13; was unowned).** WS-4 makes far travel
+*visually/physically* stable but deliberately doesn't touch generation — so the ~2²⁴ (≈16.7M-voxel)
+"Far Lands" band survives it: `FastNoiseLite` sampled at absolute float coordinates degenerates into
+striped terrain there (`WORLD_SCALING_ANALYSIS.md` §3.4), and the surface-dither `snoise` sites share
+the failure. Fix (rides WS-4, the far-travel phase): pass chunk-local coordinates plus a per-chunk
+**double** base offset into the generation jobs, sampling at `(double)(base + local) * freq` narrowed
+once per column (measure the Burst double-width cost; FNL's double switch is the fallback).
+⚠️ **Seed-breaking by definition** → world-version-gated exactly like WS-3's seed-hygiene fix — old
+worlds keep the old sampler. Without this rider the usable radius stays capped at ~16.7M voxels no
+matter what WS-4 ships; with it (plus WS-3's negatives) the stable range extends to the natural
+integer edge at ±2³¹ voxels, where `×16` chunk-origin wrap makes the world end with old-border wall
+semantics — accepted as the permanent world limit.
+
 ---
 
-## 7. Open questions (answer in future sessions before the owning phase builds)
+## 7. Open questions — **all resolved 2026-07-13** (read-before-claim: every answer verified in code)
 
-| ID   | Phase | Question                                                                                                                                                                                                                                                                                      |
-|------|:-----:|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| OQ-1 | WS-2  | Does anything index an **absolute chunk coordinate into a fixed-size `[WorldSizeInChunks]` array** (would overflow past 99)? Audit expected clean (streaming is player-relative), but this is the load-bearing "WS-2 is low-risk" assumption — **verify before building**.                    |
-| OQ-2 | WS-2  | **Neighbor-guard flip:** do the lighting/meshing `IsChunkInWorld(neighbor)` sites already cleanly separate "in-world" from "loaded", or does making them always-in-world on XZ open a deadlock/perf surface? Consult the `chunk-lifecycle` skill; this is WS-2's only pipeline-touching risk. |
-| OQ-3 | WS-2  | Exact **default-spawn constant** after `WorldCentre` is decoupled from world-size: keep the current ~chunk (50,50) value verbatim, or pick a fresh comfortable positive origin? (Naming: `WorldCentre` → `DefaultSpawn…`.)                                                                    |
-| OQ-4 | WS-2  | Does `WorldInfoUtility` (5 `WorldSize*` refs) or any UI/minimap assume a **finite world extent** (progress %, map bounds) that breaks when +XZ is unbounded?                                                                                                                                  |
-| OQ-5 | WS-3  | Is the player's last location **already persisted as `ChunkRelativePosition`** (reusable for the existing-world upgrade spawn), or does a new field + migration step need adding?                                                                                                             |
-| OQ-6 | WS-3  | **Locate the structure/decorator RNG** in the generation jobs and confirm whether it actually uses quadrant-mirroring multiplicative hashing (assumed, not yet found in code). Scope of the "rewrite" depends on the answer.                                                                  |
-| OQ-7 | WS-3  | Root-cause of the `CalculateSeed` `Abs/10000` hack — negative-seed handling vs. generator magnitude sensitivity? Determines whether the seed fix is isolated or drags a generator change.                                                                                                     |
+| ID   | Phase | Question (abridged)                                              | Resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+|------|:-----:|------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| OQ-1 | WS-2  | Fixed-size `[WorldSizeInChunks]` arrays?                         | ✅ **Clean — none exist.** Every `WorldSizeInChunks/InVoxels` reference is a bounds test, doc comment, frozen migration constant, benchmark-region clamp (`BenchmarkController:513`, a `Mathf.Min`, not an array), or `WorldInfoUtility` map math whose arrays are sized by *texture* dimensions derived from actual chunk min/max bounds. WS-2's low-risk rating stands.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| OQ-2 | WS-2  | Neighbor-guard flip: do gates separate "in-world" from "loaded"? | ✅ **Yes — cleanly.** All three gates skip out-of-world neighbors but return not-ready for in-world-unloaded ones, and "in-world but unloaded" is already the *normal frontier state* everywhere in the interior (streaming is player-relative). The flip just makes old-border chunks ordinary frontier chunks: they park (event promotions + ~1 s fail-safe scan already cover this), and `AreNeighborsMeshReady` already killed the wave-front ping-pong generically. Two behavior shifts to encode in the WS-2 validation scenario: old-border chunks stop meshing-with-void until outward neighbors populate, and their cross-chunk light mods reroute `DropOutOfWorld` → `PersistUndeliverable` (`LightingJobProcessor.RouteCrossChunkMod:61`) — the standard frontier path. The `IsEffectivelyStable` out-of-world override stops firing on east/north edges (stays live for negative XZ until WS-3). |
+| OQ-3 | WS-2  | Default-spawn constant after decoupling `WorldCentre`?           | ✅ **Keep 800 verbatim, rename to `DefaultSpawnPosition` (decided).** Consumers *(corrected in the 2026-07-13 re-review — the v1.1 "World.cs:629 only" claim missed two)*: `World.cs:629` (fresh-world spawn), `Clouds.cs:42` (initial plane anchor — benign, tiles re-anchor to the player in `UpdateClouds`, verified player-following), `FluidStressController.cs:98/:100` (benchmark start position). All three are mechanical renames. The v10→v11 migration carries its own frozen copy; `WorldInfoUtility` derives (50,50) independently; `WorldSelectMenu:620` labels that point "World Center" in the legend → relabel with the rename. Moving spawn to (0,0) is WS-3's job.                                                                                                                                                                                                                        |
+| OQ-4 | WS-2  | Does `WorldInfoUtility`/minimap assume finite extent?            | ✅ **No functional breakage.** Bounds come from actual saved chunks (min/max scan) with dynamic downsampling explicitly written "to prevent VRAM overflow on infinite worlds". Two cosmetic staleness items: the orange "valid world border" rectangle (draws the defunct 0–99 box → reduce to the surviving west/south walls) and the red centre crosshair at (50,50) (→ draw at the spawn constant). `SettingsManager:436` is a doc comment; the benchmark clamp is harmless.                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| OQ-5 | WS-3  | Player's last location already persisted?                        | ✅ **Yes — `WorldSaveData.player.position`** (absolute `Vector3` in level.dat, not `ChunkRelativePosition`), saved and restored on every load (`World.cs:721`). No new field, no migration. (WS-4 will want it converted to `ChunkRelativePosition` for origin shifts — deferred with WS-4.)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| OQ-6 | WS-3  | Locate the structure/decorator RNG; is it quadrant-mirroring?    | ✅ **Found — and it is already sign-safe.** All sites use `math.hash` avalanche on `int3`/`int4` (see §5); no multiplicative mirroring exists anywhere. The "rewrite" collapses to an integer floor-div fix for the float grid-cell derivation (`StandardChunkGenerationJob:574`) + a negative-quadrant parity scenario.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| OQ-7 | WS-3  | Root cause of the `CalculateSeed` `Abs/10000` hack?              | ✅ **Magnitude sensitivity — seed used as a float noise-coordinate offset** (Standard surface dither `StandardChunkGenerationJob:238-239`, `LegacyNoise`). Not a negative-seed issue; the hack caps only random/string seeds while typed integer seeds bypass it entirely (large typed seeds break generation today). Fix is a generator change (hash the seed into small offsets) → world-version-gated as planned (see §5).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 ---
 
@@ -178,10 +228,30 @@ trigger is the first time a player travels far enough for vertex jitter to be vi
 
 ## Document History
 
+* **v1.4** - Noise-precision item assigned an owner (was unowned in the phasing): double-precision
+  per-chunk noise base offsets ride WS-4 as an explicit ⚠️ seed-breaking, world-version-gated rider
+  (§6). Documents the resulting end-state: WS-3 + WS-4 + rider = stable range to the natural ±2³¹
+  integer edge (old-border wall semantics there, accepted as the permanent world limit).
+* **v1.3** - WS-2 plan re-review corrections: OQ-3 consumer list was wrong (`WorldCentre` has three
+  runtime consumers — `World.cs:629`, `Clouds.cs:42` [verified benign, clouds are player-following],
+  `FluidStressController.cs:98/:100` — plus the `WorldSelectMenu:620` "World Center" legend label).
+  Noted: `WorldSaveData.worldSizeInChunks`/`chunkWidth`/`chunkHeight` are write-only level.dat
+  metadata (never read at runtime) — left untouched by WS-2; `worldSizeInChunks = 100` is a
+  candidate "legacy extent" source for TF-14's default-fence question.
+* **v1.2** - TF-14 alignment: per-world configurable world border decided as a separate post-WS-2
+  follow-up (gameplay fence only — terrain/pipeline stay border-blind; level.dat field rides the
+  TF-12/TF-13 v12 wave). §2.1 trade-off note softened; WS-2 plan itself unchanged.
+* **v1.1** - OQ-1..7 all resolved from code (2026-07-13 audit): no fixed-size world arrays (OQ-1);
+  neighbor-guard flip = ordinary frontier semantics, no new deadlock surface (OQ-2); keep spawn 800
+  verbatim under a decoupled name (OQ-3); minimap already infinite-ready, two cosmetic items (OQ-4);
+  player position already persisted as `player.position` Vector3 → WS-3 spawn migration dropped
+  (OQ-5); structure RNG already sign-safe `math.hash` → mirroring rewrite descoped to floor-div fix
+    + parity scenario (OQ-6); seed hack root-caused as seed-as-float-coordinate magnitude issue (OQ-7).
+      Status flipped Draft → Proposed design.
 * **v1.0** - Initial draft — global-unbounded + sign-split phasing (WS-2/WS-3/WS-4) captured from the
   2026-07-12 design session; WS-2 plan-ready, WS-3+ direction-captured with open questions.
 
 ---
 
-**Last Updated:** 2026-07-12
-**Next Review:** when WS-2 planning starts (resolve OQ-1..4 first).
+**Last Updated:** 2026-07-13
+**Next Review:** at the WS-2 plan-approval gate (plan authored 2026-07-13, awaiting decision menu).
