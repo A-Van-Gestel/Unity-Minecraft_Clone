@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Editor.Validation.Behavior;
+using Editor.Validation.ChunkMath;
 using Editor.Validation.Lighting;
 using Editor.Validation.LightScheduler;
 using Editor.Validation.Meshing;
@@ -56,7 +57,7 @@ namespace Editor.Validation.Framework
             new RegisteredSuite("Placement", PlacementValidationSuite.Execute),
             new RegisteredSuite("Mesh Build Queue", MeshBuildQueueValidationSuite.Execute),
             new RegisteredSuite("Light Work Scheduler", LightWorkSchedulerValidationSuite.Execute),
-            new RegisteredSuite("Chunk Math", ChunkRelativePositionTests.Execute),
+            new RegisteredSuite("Chunk Math", ChunkMathValidationSuite.Execute),
             new RegisteredSuite("Validation Framework", ValidationFrameworkSelfTest.Execute),
         };
     }
