@@ -70,9 +70,9 @@ The XZ border is removed for **all** worlds, not behind a per-world capability f
 - ❌ Existing worlds silently gain the ability to generate past their former border. Accepted: under
   global-unbounded this is the desired behavior, not a surprise to design around. *(Softened
   2026-07-13: the per-world configurable border — `WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md` TF-14,
-  decided as a post-WS-2 follow-up — adds a gameplay fence on top; terrain stays border-blind, only
-  player movement is clamped. Whether upgraded worlds default to a fence at their legacy extent is
-  TF-14's open question, not WS-2's.)*
+  shipped as a post-WS-2 follow-up — adds a gameplay fence on top; terrain stays border-blind, only
+  player movement is clamped. Upgraded worlds default to **no** fence (the border is opt-in), so WS-2's
+  grow-past-the-edge behavior is unchanged.)*
 - Existing-world spawn on upgrade resolves to the **player's last stored location** — already
   persisted as `WorldSaveData.player.position` (absolute `Vector3` in level.dat, restored on every
   load; verified, see OQ-5) — not the old `WorldCentre`. No new field or migration needed.
@@ -335,4 +335,4 @@ semantics — accepted as the permanent world limit.
 ---
 
 **Last Updated:** 2026-07-13
-**Next Review:** at the WS-4 kickoff (floating origin + noise-precision rider) or when TF-14 / Bug 04 / the seed-hygiene fix is scheduled.
+**Next Review:** at the WS-4 kickoff (floating origin + noise-precision rider) or when Bug 04 / the seed-hygiene fix is scheduled. *(TF-14 world border shipped 2026-07-13.)*
