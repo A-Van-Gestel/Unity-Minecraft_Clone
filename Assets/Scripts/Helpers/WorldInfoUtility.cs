@@ -142,7 +142,11 @@ namespace Helpers
         /// <param name="info">The data parsed by FetchWorldInfoAsync.</param>
         /// <param name="playerChunkCoord">The players chunk coordinates</param>
         /// <param name="maxTextureSize">The maximum allowed width/height of the texture.</param>
-        public static MinimapData GenerateMinimapTexture(ParsedWorldInfo info, Vector2Int playerChunkCoord, int maxTextureSize = 256)
+        /// <param name="borderRadius">
+        /// Per-world gameplay border half-extent in voxels (<c>0</c> = disabled). When set, an origin-centered
+        /// square outline is drawn and the border extent is folded into the map bounds so the fence stays visible.
+        /// </param>
+        public static MinimapData GenerateMinimapTexture(ParsedWorldInfo info, Vector2Int playerChunkCoord, int maxTextureSize = 256, int borderRadius = 0)
         {
             if (info.ChunkCount == 0)
             {
@@ -168,6 +172,16 @@ namespace Helpers
             int maxX = Mathf.Max(info.MaxX, spawnChunkX, playerChunkCoord.x);
             int minZ = Mathf.Min(info.MinZ, spawnChunkZ, playerChunkCoord.y);
             int maxZ = Mathf.Max(info.MaxZ, spawnChunkZ, playerChunkCoord.y);
+
+            // Include the gameplay border extent so the whole fence stays on the map (TF-14).
+            int borderChunks = borderRadius > 0 ? Mathf.CeilToInt((float)borderRadius / VoxelData.ChunkWidth) : 0;
+            if (borderChunks > 0)
+            {
+                minX = Mathf.Min(minX, -borderChunks);
+                maxX = Mathf.Max(maxX, borderChunks);
+                minZ = Mathf.Min(minZ, -borderChunks);
+                maxZ = Mathf.Max(maxZ, borderChunks);
+            }
 
             int worldWidth = maxX - minX + 1;
             int worldHeight = maxZ - minZ + 1;
@@ -233,8 +247,18 @@ namespace Helpers
                 }
             }
 
-            // WS-3: no world border is drawn — XZ is fully unbounded (no floor, no cap), so the minimap shows
-            // only the spawn crosshair, the player, and generated-terrain density.
+            // TF-14: the world is unbounded by default (WS-3), so a border is drawn only when the per-world
+            // gameplay fence is configured — an origin-centered square at the border half-extent. Drawn before
+            // the spawn/player markers so those render on top.
+            if (borderRadius > 0)
+            {
+                float halfChunks = (float)borderRadius / VoxelData.ChunkWidth;
+                int left = Mathf.RoundToInt((-halfChunks - minX) / scale) + padding;
+                int right = Mathf.RoundToInt((halfChunks - minX) / scale) + padding;
+                int bottom = Mathf.RoundToInt((-halfChunks - minZ) / scale) + padding;
+                int top = Mathf.RoundToInt((halfChunks - minZ) / scale) + padding;
+                DrawRect(left, bottom, right, top, new Color32(255, 200, 40, 255));
+            }
 
             // 1. Draw Default Spawn (Red Crosshair) at the origin
             int wCx = (spawnChunkX - minX) / scale + padding;
@@ -252,6 +276,27 @@ namespace Helpers
             return new MinimapData { Texture = tex, ScaleFactor = scale };
 
             // --- DRAWING HELPERS ---
+
+            void SetPixelSafe(int x, int z, Color32 color)
+            {
+                if (x >= 0 && x < texWidth && z >= 0 && z < texHeight)
+                    pixels[z * texWidth + x] = color;
+            }
+
+            void DrawRect(int x0, int z0, int x1, int z1, Color32 color)
+            {
+                for (int x = x0; x <= x1; x++)
+                {
+                    SetPixelSafe(x, z0, color);
+                    SetPixelSafe(x, z1, color);
+                }
+
+                for (int z = z0; z <= z1; z++)
+                {
+                    SetPixelSafe(x0, z, color);
+                    SetPixelSafe(x1, z, color);
+                }
+            }
 
             void DrawDot(int cx, int cz, Color32 color, bool isCross)
             {

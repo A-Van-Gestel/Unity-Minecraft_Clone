@@ -89,6 +89,10 @@ namespace UI
         [SerializeField]
         private TMP_InputField _seedInput;
 
+        [Tooltip("Optional per-world gameplay border half-extent, in voxels. Blank or 0 = no border (unbounded).")]
+        [SerializeField]
+        private TMP_InputField _borderRadiusInput;
+
         [Tooltip("Dropdown for selecting the world generation type (Legacy, Standard, etc.).")]
         [SerializeField]
         private TMP_Dropdown _worldTypeDropdown;
@@ -459,10 +463,20 @@ namespace UI
             // Calculate Seed
             int seed = VoxelData.CalculateSeed(_seedInput.text);
 
+            // Parse optional gameplay border half-extent (blank / invalid / negative => no border).
+            int borderRadius = 0;
+            if (_borderRadiusInput != null
+                && int.TryParse(_borderRadiusInput.text, out int parsedRadius)
+                && parsedRadius > 0)
+            {
+                borderRadius = parsedRadius;
+            }
+
             // Setup Launch State
             WorldLaunchState.WorldName = worldName;
             WorldLaunchState.Seed = seed;
             WorldLaunchState.IsNewGame = true;
+            WorldLaunchState.BorderRadius = borderRadius;
 
             // Map dropdown selection to WorldTypeID using a safe lookup list
             if (_worldTypeDropdown != null && _worldTypeDropdown.value < _dropdownMapping.Count)
@@ -542,7 +556,7 @@ namespace UI
                 }
 
                 // ALWAYS call this now, so we get the dark fallback texture for empty worlds
-                MinimapData mapData = WorldInfoUtility.GenerateMinimapTexture(info, playerChunkIndex, maxTextureSize);
+                MinimapData mapData = WorldInfoUtility.GenerateMinimapTexture(info, playerChunkIndex, maxTextureSize, _selectedWorld.borderRadius);
 
                 // 4. Format string data
                 string scaleText = info.ChunkCount == 0

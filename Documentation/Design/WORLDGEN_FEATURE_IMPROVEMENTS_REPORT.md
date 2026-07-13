@@ -20,6 +20,9 @@ pre-generation tool).
 `WORLD_SCALING_IMPLEMENTATION.md`): skip the interim hard-wall treatment; TF-14 becomes the
 **per-world configurable border** (gameplay fence, terrain generates past it). Save flips ✅ → ⚠️
 (level.dat field, rides the TF-12/TF-13 v12 wave).
+**Amended:** 2026-07-13 (later) — TF-14 **Phase 1 shipped** (persistence + player clamp + minimap).
+Landed as a **standalone level.dat v11 → v12** `borderRadius` (int; 0 = disabled) — *not* the
+TF-12/13 wave — with existing worlds upgrading border-disabled. Phase 2 (visual border wall) pending.
 Findings are from static code review of the Standard generation pipeline
 (`StandardChunkGenerator` → `StandardWormCarverJob` → `StandardChunkGenerationJob` →
 `CaveIsolationFilterJob`) plus the shipped authoring/editor tooling. The Legacy pipeline
@@ -86,7 +89,7 @@ Findings are from static code review of the Standard generation pipeline
 | TF-11 | Climate-driven surface effects: snow line, ice, biome/foliage tint (gated on TF-3)       |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
 | TF-12 | Generation feature flags read from global Settings, not the world — persist in level.dat |   🟢   |  🟢  |   🟢    |  ✅   |  ⚠️  |
 | TF-13 | No worldgen version stamp — post-freeze terrain changes produce silent seams             |   🟢   |  🟢  |    ⚪    |  ✅   |  ⚠️  |
-| TF-14 | World border → per-world configurable gameplay fence (decided 2026-07-13; post-WS-2)     |   🟡   |  🟢  |   🟡    |  ✅   |  ⚠️  |
+| TF-14 | World border → per-world gameplay fence — Phase 1 shipped 2026-07-13 (persist+clamp+minimap); visual wall pending |   🟡   |  🟢  |   🟡    |  ✅   |  ⚠️  |
 
 ---
 
@@ -961,6 +964,16 @@ per-chunk byte if taken now).
 
 **Classification:** Nice-to-have (polish, but the current edge actively reads as broken).
 
+**✅ IMPLEMENTED — Phase 1 (2026-07-13).** The functional fence shipped: a per-world `borderRadius`
+(int voxels, `0` = disabled) persisted in level.dat via a standalone **v11 → v12** migration; a
+player-position clamp in `VoxelRigidbody` (the pipeline stays border-blind); a create-menu input; and
+an origin-centered square drawn on the `WorldInfoUtility` minimap. **Decisions taken at build time:**
+standalone v12 bump (NOT the TF-12/13 wave — migrations chain cleanly and the field needs no TF-12
+plumbing); existing worlds upgrade with the border **disabled**; **radius-only, origin-centered
+square** (per-world center reserved, not persisted). **Remaining (Phase 2):** the translucent animated
+border-wall shader + camera-following renderer (item 1 below). Until then the fence is invisible in
+first-person — the clamp and minimap convey it.
+
 **What exists today.** The bounded 100-chunk world (`WorldSizeInChunks = 100`, `VoxelData.cs:8`)
 just *stops*: `IsVoxelInWorld` fails, chunks end, and the player walks to a bare void edge — with
 a known edge-lighting caveat at the boundary
@@ -1000,14 +1013,17 @@ in level.dat** (radius/center, off by default is one option — see open questio
   and storage are border-blind); the *player* is clamped (soft pushback in the player controller,
   per the original design) and the translucent wall shader renders at the configured radius. Must
   **not** be implemented in `IsVoxelInWorld`/`IsChunkInWorld` — that would re-block the pipeline.
-- **Save:** ⚠️ level.dat field + migration — rides the TF-12/TF-13 **v12 wave** (it is a per-world
-  generation-adjacent option; TF-12 is its natural plumbing prerequisite).
-- **Minimap:** `WorldInfoUtility` redraws its border rect from the per-world setting when present
-  (WS-2 leaves the surviving west/south walls; pure redraw, no schema coupling).
-- **Open question (answer at build time):** default for *existing* worlds on upgrade — no border
-  (WS-2's global-unbounded default) vs. a border pre-set at their legacy 100-chunk extent
-  (preserves today's player experience; softens the roadmap §2.1 "silently gain room" trade-off
-  into an opt-in).
+- **Save:** ⚠️ level.dat field + migration. **Shipped as a standalone v11 → v12 bump** (the earlier
+  "ride the TF-12/13 wave" framing was a bundling preference, not a dependency — the `spawnPosition`
+  field already proved per-world level.dat fields need no TF-12 plumbing). TF-12/13 can later bump
+  v12 → v13 independently.
+- **Minimap:** `WorldInfoUtility` draws an origin-centered border square from the per-world setting
+  when present. *(WS-3 removed the old west/south floor walls entirely, so this is a fresh draw, not
+  a redraw of surviving walls; no schema coupling.)*
+- **Resolved (build time):** existing worlds upgrade with **no border** (disabled) — consistent with
+  WS-2/WS-3, which already dropped their walls, so the border is purely opt-in. The "pre-set at the
+  legacy 100-chunk extent" alternative was rejected: WS-2/WS-3 already changed that experience, so
+  re-introducing a fence would surprise more than it preserves.
 
 ---
 
