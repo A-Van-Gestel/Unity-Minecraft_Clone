@@ -53,7 +53,9 @@ namespace Helpers
                     MinX = int.MaxValue, MaxX = int.MinValue,
                     MinZ = int.MaxValue, MaxZ = int.MinValue,
                     TotalSizeBytes = 0,
-                    CenterChunkCoord = new Vector2Int(VoxelData.WorldSizeInChunks / 2, VoxelData.WorldSizeInChunks / 2),
+                    CenterChunkCoord = new Vector2Int(
+                        VoxelData.DefaultSpawnPosition / VoxelData.ChunkWidth,
+                        VoxelData.DefaultSpawnPosition / VoxelData.ChunkWidth),
                     CompressionStats = new Dictionary<CompressionAlgorithm, int>(),
                 };
 
@@ -157,15 +159,15 @@ namespace Helpers
             Debug.Log($"[WorldInfoUtility] Generating Minimap. Target Max Size: {maxTextureSize}px");
 
             // 1. Calculate Bounds & Scale
-            // Include the world center in bounds so it's always visible
-            const int centerChunkX = VoxelData.WorldSizeInChunks / 2;
-            const int centerChunkZ = VoxelData.WorldSizeInChunks / 2;
+            // Include the default-spawn chunk in bounds so it's always visible (WS-2: no finite world centre).
+            const int spawnChunkX = VoxelData.DefaultSpawnPosition / VoxelData.ChunkWidth;
+            const int spawnChunkZ = VoxelData.DefaultSpawnPosition / VoxelData.ChunkWidth;
 
             // Include player in bounds so they never walk off the map
-            int minX = Mathf.Min(info.MinX, centerChunkX, playerChunkCoord.x);
-            int maxX = Mathf.Max(info.MaxX, centerChunkX, playerChunkCoord.x);
-            int minZ = Mathf.Min(info.MinZ, centerChunkZ, playerChunkCoord.y);
-            int maxZ = Mathf.Max(info.MaxZ, centerChunkZ, playerChunkCoord.y);
+            int minX = Mathf.Min(info.MinX, spawnChunkX, playerChunkCoord.x);
+            int maxX = Mathf.Max(info.MaxX, spawnChunkX, playerChunkCoord.x);
+            int minZ = Mathf.Min(info.MinZ, spawnChunkZ, playerChunkCoord.y);
+            int maxZ = Mathf.Max(info.MaxZ, spawnChunkZ, playerChunkCoord.y);
 
             int worldWidth = maxX - minX + 1;
             int worldHeight = maxZ - minZ + 1;
@@ -231,18 +233,20 @@ namespace Helpers
                 }
             }
 
-            // 1. Draw Valid World Border (Orange/Yellow Box)
-            int borderStartX = (0 - minX) / scale + padding;
-            int borderStartZ = (0 - minZ) / scale + padding;
-            int borderEndX = (VoxelData.WorldSizeInChunks - 1 - minX) / scale + padding;
-            int borderEndZ = (VoxelData.WorldSizeInChunks - 1 - minZ) / scale + padding;
+            // 1. Draw the surviving world floor (WS-2: only the west + south walls remain; the east/north bound
+            //    is gone). Both walls anchor at the origin and run outward (clamped to the drawn extent).
+            int originPx = (0 - minX) / scale + padding; // chunk x = 0 → pixel column (west wall)
+            int originPz = (0 - minZ) / scale + padding; // chunk z = 0 → pixel row    (south wall)
+            int floorEndX = (maxX - minX) / scale + padding;
+            int floorEndZ = (maxZ - minZ) / scale + padding;
 
             Color32 borderColor = new Color32(255, 165, 0, 255); // Orange
-            DrawHollowRect(borderStartX, borderStartZ, borderEndX, borderEndZ, borderColor);
+            DrawVLine(originPx, originPz, floorEndZ, borderColor); // west wall (x=0), from z=0 outward
+            DrawHLine(originPz, originPx, floorEndX, borderColor); // south wall (z=0), from x=0 outward
 
-            // 2. Draw World Center (Red Crosshair)
-            int wCx = (centerChunkX - minX) / scale + padding;
-            int wCz = (centerChunkZ - minZ) / scale + padding;
+            // 2. Draw Default Spawn (Red Crosshair)
+            int wCx = (spawnChunkX - minX) / scale + padding;
+            int wCz = (spawnChunkZ - minZ) / scale + padding;
             DrawDot(wCx, wCz, new Color32(255, 50, 50, 255), true);
 
             // 3. Draw Player Position (Green Square)
@@ -275,21 +279,18 @@ namespace Helpers
                 }
             }
 
-            void DrawHollowRect(int startX, int startZ, int endX, int endZ, Color32 color)
+            void DrawVLine(int x, int startZ, int endZ, Color32 color)
             {
-                // Horizontal lines (Bottom and Top)
-                for (int x = startX; x <= endX; x++)
-                {
-                    if (x >= 0 && x < texWidth && startZ >= 0 && startZ < texHeight) pixels[startZ * texWidth + x] = color;
-                    if (x >= 0 && x < texWidth && endZ >= 0 && endZ < texHeight) pixels[endZ * texWidth + x] = color;
-                }
+                if (x < 0 || x >= texWidth) return;
+                for (int z = Mathf.Max(0, startZ); z <= endZ && z < texHeight; z++)
+                    pixels[z * texWidth + x] = color;
+            }
 
-                // Vertical lines (Left and Right)
-                for (int z = startZ; z <= endZ; z++)
-                {
-                    if (startX >= 0 && startX < texWidth && z >= 0 && z < texHeight) pixels[z * texWidth + startX] = color;
-                    if (endX >= 0 && endX < texWidth && z >= 0 && z < texHeight) pixels[z * texWidth + endX] = color;
-                }
+            void DrawHLine(int z, int startX, int endX, Color32 color)
+            {
+                if (z < 0 || z >= texHeight) return;
+                for (int x = Mathf.Max(0, startX); x <= endX && x < texWidth; x++)
+                    pixels[z * texWidth + x] = color;
             }
         }
     }

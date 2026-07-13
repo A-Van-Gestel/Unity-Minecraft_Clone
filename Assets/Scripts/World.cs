@@ -625,8 +625,8 @@ public class World : MonoBehaviour
             }
             else
             {
-                // Set initial spawnPosition to the center of the world for X & Z, and an unresolved Y value.
-                spawnPosition = new Vector3(VoxelData.WorldCentre, ChunkRelativePosition.UNRESOLVED_HEIGHT, VoxelData.WorldCentre);
+                // Set initial spawnPosition to the default fresh-world spawn for X & Z, and an unresolved Y value.
+                spawnPosition = new Vector3(VoxelData.DefaultSpawnPosition, ChunkRelativePosition.UNRESOLVED_HEIGHT, VoxelData.DefaultSpawnPosition);
                 _playerTransform.position = spawnPosition;
             }
         }

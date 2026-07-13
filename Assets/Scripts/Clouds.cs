@@ -39,7 +39,7 @@ public class Clouds : MonoBehaviour
         _cloudTexWidth = _cloudPattern.width;
         _cloudTileSize = VoxelData.ChunkWidth;
         _offset = new Vector3Int(-(_cloudTexWidth / 2), 0, -(_cloudTexWidth / 2));
-        transform.position = new Vector3(VoxelData.WorldCentre, cloudHeight, VoxelData.WorldCentre);
+        transform.position = new Vector3(VoxelData.DefaultSpawnPosition, cloudHeight, VoxelData.DefaultSpawnPosition);
     }
 
     // This is our new public initialization method.
