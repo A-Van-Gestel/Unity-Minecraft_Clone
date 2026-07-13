@@ -159,7 +159,7 @@ namespace Helpers
             Debug.Log($"[WorldInfoUtility] Generating Minimap. Target Max Size: {maxTextureSize}px");
 
             // 1. Calculate Bounds & Scale
-            // Include the default-spawn chunk in bounds so it's always visible (WS-2: no finite world centre).
+            // Include the default-spawn chunk in bounds so it's always visible (WS-2: no finite world center).
             const int spawnChunkX = VoxelData.DefaultSpawnPosition / VoxelData.ChunkWidth;
             const int spawnChunkZ = VoxelData.DefaultSpawnPosition / VoxelData.ChunkWidth;
 
@@ -233,23 +233,15 @@ namespace Helpers
                 }
             }
 
-            // 1. Draw the surviving world floor (WS-2: only the west + south walls remain; the east/north bound
-            //    is gone). Both walls anchor at the origin and run outward (clamped to the drawn extent).
-            int originPx = (0 - minX) / scale + padding; // chunk x = 0 → pixel column (west wall)
-            int originPz = (0 - minZ) / scale + padding; // chunk z = 0 → pixel row    (south wall)
-            int floorEndX = (maxX - minX) / scale + padding;
-            int floorEndZ = (maxZ - minZ) / scale + padding;
+            // WS-3: no world border is drawn — XZ is fully unbounded (no floor, no cap), so the minimap shows
+            // only the spawn crosshair, the player, and generated-terrain density.
 
-            Color32 borderColor = new Color32(255, 165, 0, 255); // Orange
-            DrawVLine(originPx, originPz, floorEndZ, borderColor); // west wall (x=0), from z=0 outward
-            DrawHLine(originPz, originPx, floorEndX, borderColor); // south wall (z=0), from x=0 outward
-
-            // 2. Draw Default Spawn (Red Crosshair)
+            // 1. Draw Default Spawn (Red Crosshair) at the origin
             int wCx = (spawnChunkX - minX) / scale + padding;
             int wCz = (spawnChunkZ - minZ) / scale + padding;
             DrawDot(wCx, wCz, new Color32(255, 50, 50, 255), true);
 
-            // 3. Draw Player Position (Green Square)
+            // 2. Draw Player Position (Green Square)
             int pCx = (playerChunkCoord.x - minX) / scale + padding;
             int pCz = (playerChunkCoord.y - minZ) / scale + padding;
             DrawDot(pCx, pCz, new Color32(50, 255, 50, 255), false);
@@ -277,20 +269,6 @@ namespace Helpers
                     if (cx > 0 && cz < texHeight - 1) pixels[(cz + 1) * texWidth + (cx - 1)] = color;
                     if (cx < texWidth - 1 && cz < texHeight - 1) pixels[(cz + 1) * texWidth + cx + 1] = color;
                 }
-            }
-
-            void DrawVLine(int x, int startZ, int endZ, Color32 color)
-            {
-                if (x < 0 || x >= texWidth) return;
-                for (int z = Mathf.Max(0, startZ); z <= endZ && z < texHeight; z++)
-                    pixels[z * texWidth + x] = color;
-            }
-
-            void DrawHLine(int z, int startX, int endX, Color32 color)
-            {
-                if (z < 0 || z >= texHeight) return;
-                for (int x = Mathf.Max(0, startX); x <= endX && x < texWidth; x++)
-                    pixels[z * texWidth + x] = color;
             }
         }
     }

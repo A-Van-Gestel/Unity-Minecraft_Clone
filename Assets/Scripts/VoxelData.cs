@@ -32,10 +32,10 @@ public static class VoxelData
 
     public const int WorldSizeInVoxels = WorldSizeInChunks * ChunkWidth;
 
-    // WS-2: decoupled from the (now-defunct) world size. This is the explicit default fresh-world spawn XZ —
-    // kept at its former value (the old WorldCentre = WorldSizeInVoxels / 2 = 800) so spawn behavior is unchanged.
-    // WS-3 moves fresh-world spawn to the origin; existing worlds already restore the player's saved position.
-    public const int DefaultSpawnPosition = 800;
+    // WS-3: fresh worlds spawn at the origin (0,0). With negative quadrants now in-world, the origin is a
+    // central point rather than a corner. Existing worlds restore the player's saved position, so this only
+    // affects brand-new worlds. (Decoupled from the defunct world size since WS-2.)
+    public const int DefaultSpawnPosition = 0;
 
     public const int TextureAtlasSizeInBlocks = 16;
 

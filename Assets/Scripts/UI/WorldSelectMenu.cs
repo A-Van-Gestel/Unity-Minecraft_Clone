@@ -618,7 +618,6 @@ namespace UI
                         "<b>Map Legend:</b>\n" +
                         "<color=#32FF32>■</color> Player Location\n" +
                         $"<color=#FF3232>■</color> Default Spawn ({info.CenterChunkCoord.x},{info.CenterChunkCoord.y})\n" +
-                        "<color=#FFA500>└</color> World Floor (West/South)\n" +
                         "<color=#50B4FF>■</color> Generated Terrain";
                 }
 
