@@ -1,8 +1,8 @@
 # World Scaling — Implementation Roadmap (Tier B: unbounded XZ)
 
-**Version:** 1.5
+**Version:** 1.6
 **Date:** 2026-07-13
-**Status:** **Proposed design — not implemented. OQ-1..7 all resolved in code (2026-07-13); WS-2 plan-ready, WS-3 direction-captured.**
+**Status:** **WS-2 SHIPPED (2026-07-13, in-game confirmed). WS-3 direction-captured, WS-4 deferred. OQ-1..7 all resolved in code.**
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The decided execution path for scaling the world horizontally. Analysis (`WORLD_SCALING_ANALYSIS.md`)
@@ -90,11 +90,11 @@ coordinates go negative. Positive-only expansion sidesteps every one of them.
 
 ## 3. Phased plan
 
-| Phase                      | Scope                                                                                                                                                         | Effort | Save impact                         | Depends on                    |
-|----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|-------------------------------------|-------------------------------|
-| **WS-2** — unbounded +XZ   | Relax XZ *upper* bound only (keep `>= 0`); neighbor-guard flip; reconceive `WorldCentre` as spawn const                                                       |   🟡   | None (V2 byte-identical)            | WS-1 ✅, VQ-1 ✅                |
-| **WS-3** — negative XZ     | Drop `>= 0` floor; V3 codec bump + migration; structure-RNG negative verification; seed hygiene; spawn                                                        |   🟡   | ⚠️ V3 codec bump                    | WS-2                          |
-| **WS-4** — floating origin | Periodic origin shift; `ChunkRelativePosition` for player/camera; `_WorldOriginOffset` shader continuity; **noise-precision rider** (double base offsets, §6) |   🔴   | None (presentation) / rider ⚠️ seed | Independent (far-travel gate) |
+| Phase                      | Scope                                                                                                                                                         |  Effort   | Save impact                         | Depends on                    |
+|----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------:|-------------------------------------|-------------------------------|
+| **WS-2** — unbounded +XZ ✅ | Relax XZ *upper* bound only (keep `>= 0`); neighbor-guard flip; reconceive `WorldCentre` as spawn const                                                       | ✅ SHIPPED | None (V2 byte-identical)            | WS-1 ✅, VQ-1 ✅                |
+| **WS-3** — negative XZ     | Drop `>= 0` floor; V3 codec bump + migration; structure-RNG negative verification; seed hygiene; spawn                                                        |    🟡     | ⚠️ V3 codec bump                    | WS-2                          |
+| **WS-4** — floating origin | Periodic origin shift; `ChunkRelativePosition` for player/camera; `_WorldOriginOffset` shader continuity; **noise-precision rider** (double base offsets, §6) |    🔴     | None (presentation) / rider ⚠️ seed | Independent (far-travel gate) |
 
 **Validation is built alongside each phase** (WS-1 precedent: its equivalence guard shipped in the
 "Chunk Math" suite, not after). WS-2 adds an unbounded-streaming / positive-past-border determinism
@@ -103,7 +103,23 @@ scenario; WS-3 adds a negative-quadrant generation-parity + mirroring scenario a
 
 ---
 
-## 4. WS-2 — unbounded positive XZ (Phase 1, plan-ready)
+## 4. WS-2 — unbounded positive XZ (Phase 1, ✅ SHIPPED 2026-07-13)
+
+> **Status (2026-07-13, shipped):** All four steps done. Steps 1–2 — bounds baselines + relaxation
+> (`IsVoxelInWorld`, `IsChunkInWorld` ×2, `TryGetVoxel` fold-split) with the same-commit parity mirror,
+> `ChunkCoord` doc comments, and §3 rationale-cell sync. Step 3 — `WorldCentre` →
+> `DefaultSpawnPosition = 800` across its three consumers + minimap west/south-floor walls +
+> spawn-derived crosshair + legend relabel. Step 4 (in-game) confirmed: fresh world generated to
+> 6000+ voxels (`r.9.1.bin`), existing world showed no terrain seam at the old border. Suites: Chunk
+> Math 24/24, Validate All 195/0.
+>
+> **Existing-world note — border-overflow structure mods (verified benign):** structures near the old
+> east/north edge (chunks 96–99) whose parts spilled past x=1600 emitted `VoxelMod`s that
+> `World.ApplyModifications` routed to `ModificationManager.AddPendingMod` (no world-bounds guard) and
+> persisted to `pending_mods.bin` with absolute coordinates — **orphaned, never discarded**, because
+> the target chunk could not generate under the old border. Under WS-2 those chunks now generate, so
+> `TryGetModsForChunk` replays the orphaned mods on top of the fresh terrain, *completing* the clipped
+> structures. No data loss or corruption; `CanReplaceForWorldGen` resolves any overlap.
 
 ### 4.1 What changes
 
@@ -262,6 +278,11 @@ semantics — accepted as the permanent world limit.
 
 ## Document History
 
+* **v1.6** - **WS-2 shipped** (2026-07-13, in-game confirmed). Bounds relaxation + prove-red bounds
+  baseline + V2 codec pin, `WorldCentre` → `DefaultSpawnPosition = 800`, minimap west/south-floor
+  cosmetics. §4 status + §3 row flipped to SHIPPED. Added the verified-benign existing-world note:
+  border-overflow structure mods were persisted (orphaned) to `pending_mods.bin`, not discarded, and
+  replay to complete clipped structures under WS-2. Chunk Math 24/24, Validate All 195/0.
 * **v1.5** - §4.4 added: the approved WS-2 execution plan (baselines-first prove-red with the
   codec-pin caveat and ≤2²⁰-chunk coordinate cap, same-commit parity-mirror rule, closed decision
   menu, two-commit sequence, in-game gate) — persisted for the cold execution session.
@@ -291,4 +312,4 @@ semantics — accepted as the permanent world limit.
 ---
 
 **Last Updated:** 2026-07-13
-**Next Review:** at the WS-2 plan-approval gate (plan authored 2026-07-13, awaiting decision menu).
+**Next Review:** at the WS-3 kickoff (negative quadrants — V3 codec bump + seed hygiene + floor-div fix).

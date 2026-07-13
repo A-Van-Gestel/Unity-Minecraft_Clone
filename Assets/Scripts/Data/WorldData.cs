@@ -203,9 +203,11 @@ namespace Data
         /// <returns>True if the voxel is within the world bounds, false otherwise.</returns>
         public bool IsVoxelInWorld(Vector3 worldPos)
         {
-            return worldPos.x is >= 0 and < VoxelData.WorldSizeInVoxels &&
+            // WS-2: XZ is unbounded on the positive side — only the west/south floor (>= 0) remains; the east/north
+            // upper bound is gone. Y stays bounded by ChunkHeight (Tier A owns height).
+            return worldPos.x >= 0 &&
                    worldPos.y is >= 0 and < VoxelData.ChunkHeight &&
-                   worldPos.z is >= 0 and < VoxelData.WorldSizeInVoxels;
+                   worldPos.z >= 0;
         }
 
         /// <summary>
@@ -221,11 +223,12 @@ namespace Data
         /// <returns>True when the coordinate is in-world and its chunk is loaded; false otherwise (matches the old <c>null</c>).</returns>
         public bool TryGetVoxel(int x, int y, int z, out VoxelState state)
         {
-            // Integer world-bounds check: the unsigned compare folds "< 0" and ">= size" into one test per axis,
-            // mirroring IsVoxelInWorld's float `is >= 0 and < size` on the floored coordinate.
-            if ((uint)x >= VoxelData.WorldSizeInVoxels ||
+            // Integer world-bounds check. WS-2: XZ is unbounded on the positive side, so the folded unsigned
+            // compare splits back into an explicit `< 0` floor test on X/Z (mirroring IsVoxelInWorld). Y keeps the
+            // folded form — `(uint)y >= ChunkHeight` still catches both y < 0 and y >= ChunkHeight in one test.
+            if (x < 0 ||
                 (uint)y >= VoxelData.ChunkHeight ||
-                (uint)z >= VoxelData.WorldSizeInVoxels)
+                z < 0)
             {
                 state = default;
                 return false;

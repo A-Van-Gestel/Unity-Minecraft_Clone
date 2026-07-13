@@ -3521,24 +3521,25 @@ public class World : MonoBehaviour
     /// <summary>
     /// Checks if the specified chunk coordinate is within the permitted world boundaries.
     /// </summary>
+    /// <remarks>WS-2: XZ is unbounded on the positive side — only the west/south floor (>= 0) gates chunks;
+    /// the east/north upper bound is gone. Out-of-world now means strictly negative XZ.</remarks>
     /// <param name="chunkCoord">The chunk coordinate.</param>
     /// <returns>True if the chunk is in the world; otherwise, false.</returns>
     internal static bool IsChunkInWorld(ChunkCoord chunkCoord)
     {
-        return chunkCoord.X is >= 0 and < VoxelData.WorldSizeInChunks &&
-               chunkCoord.Z is >= 0 and < VoxelData.WorldSizeInChunks;
+        return chunkCoord.X >= 0 && chunkCoord.Z >= 0;
     }
 
     /// <summary>
     /// Checks if the specified X/Z coordinates are within the permitted world boundaries.
     /// </summary>
+    /// <remarks>WS-2: XZ is unbounded on the positive side — only the west/south floor (>= 0) gates chunks.</remarks>
     /// <param name="x">The X coordinate.</param>
     /// <param name="z">The Z coordinate.</param>
     /// <returns>True if in world; otherwise, false.</returns>
     private static bool IsChunkInWorld(int x, int z)
     {
-        return x is >= 0 and < VoxelData.WorldSizeInChunks &&
-               z is >= 0 and < VoxelData.WorldSizeInChunks;
+        return x >= 0 && z >= 0;
     }
 
     #region Public Interface Methods

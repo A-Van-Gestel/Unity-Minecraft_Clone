@@ -71,12 +71,12 @@ Two critical gate functions control when work can proceed. Understanding the dif
 
 Checks all **8 horizontal neighbors** (cardinal + diagonal):
 
-| Check          | Condition                              | Rationale                             |
-|----------------|----------------------------------------|---------------------------------------|
-| World bounds   | `IsChunkInWorld()` → skip if false     | Edge-of-world chunks treated as ready |
-| Generation job | `generationJobs.ContainsKey()` → false | Neighbor terrain must be complete     |
-| Data exists    | `Chunks.TryGetValue()` → exists        | Neighbor must have a ChunkData        |
-| Populated      | `IsPopulated` → true                   | Voxel data must be filled             |
+| Check          | Condition                              | Rationale                                                                                                                                                                  |
+|----------------|----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| World bounds   | `IsChunkInWorld()` → skip if false     | Out-of-world (negative XZ) skipped as ready; WS-2 removed the +XZ upper bound, so old east/north-edge neighbors are now ordinary frontier chunks that park until populated |
+| Generation job | `generationJobs.ContainsKey()` → false | Neighbor terrain must be complete                                                                                                                                          |
+| Data exists    | `Chunks.TryGetValue()` → exists        | Neighbor must have a ChunkData                                                                                                                                             |
+| Populated      | `IsPopulated` → true                   | Voxel data must be filled                                                                                                                                                  |
 
 **Summary:** "Do all neighbors have terrain data I can read?"
 
@@ -102,12 +102,12 @@ Checks all **8 horizontal neighbors** (cardinal + diagonal) with stricter requir
 
 Checks all **8 horizontal neighbors** (cardinal + diagonal) with relaxed requirements:
 
-| Check                   | Condition                              | Rationale                                         |
-|-------------------------|----------------------------------------|---------------------------------------------------|
-| World bounds            | `IsChunkInWorld()` → skip if false     | Edge-of-world chunks treated as ready             |
-| Generation job          | `generationJobs.ContainsKey()` → false | Neighbor terrain must be complete                 |
-| Data exists + populated | `Chunks.TryGetValue()` + `IsPopulated` | Neighbor must have voxel data                     |
-| Initial lighting done   | `NeedsInitialLighting` → false         | Neighbor must have had at least one lighting pass |
+| Check                   | Condition                              | Rationale                                                                                                                                        |
+|-------------------------|----------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
+| World bounds            | `IsChunkInWorld()` → skip if false     | Out-of-world (negative XZ) skipped as ready; WS-2 removed the +XZ upper bound, so old east/north-edge neighbors are now ordinary frontier chunks |
+| Generation job          | `generationJobs.ContainsKey()` → false | Neighbor terrain must be complete                                                                                                                |
+| Data exists + populated | `Chunks.TryGetValue()` + `IsPopulated` | Neighbor must have voxel data                                                                                                                    |
+| Initial lighting done   | `NeedsInitialLighting` → false         | Neighbor must have had at least one lighting pass                                                                                                |
 
 **Does NOT check:** `lightingJobs`, `HasLightChangesToProcess`, `IsAwaitingMainThreadProcess`.
 
