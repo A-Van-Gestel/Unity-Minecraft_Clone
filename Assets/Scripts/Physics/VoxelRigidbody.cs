@@ -39,6 +39,10 @@ namespace Physics
         public float CollisionHalfWidthX => collisionWidthX * 0.5f;
         public float CollisionHalfDepthZ => collisionDepthZ * 0.5f;
 
+        // TF-14: extra gap (in voxels) kept between the player collider and the world border,
+        // so the body doesn't visually clip through the border wall. Added to the collision half-extent.
+        private const float BORDER_MARGIN = 0.5f;
+
         [Header("Movement Settings")]
         [Tooltip("Jump velocity applied when jumping.")]
         public float jumpForce = 5.7f;
@@ -133,6 +137,32 @@ namespace Physics
             }
 
             transform.Translate(Velocity, Space.World);
+
+            ClampToWorldBorder();
+        }
+
+        /// <summary>
+        /// Hard-clamps the player's horizontal position inside the per-world gameplay border —
+        /// a square AABB centered on the world origin. No-op when the border is disabled
+        /// (<see cref="World.BorderRadius"/> is 0). Player-only: the voxel pipeline (generation,
+        /// lighting, meshing, storage) is deliberately border-blind, so terrain still exists past
+        /// the fence; only the player is stopped.
+        /// </summary>
+        private void ClampToWorldBorder()
+        {
+            float radius = _world.BorderRadius;
+            if (radius <= 0f) return;
+
+            // Keep the collider fully inside the border; guard tiny radii from inverting the bounds.
+            float limitX = Mathf.Max(0f, radius - CollisionHalfWidthX - BORDER_MARGIN);
+            float limitZ = Mathf.Max(0f, radius - CollisionHalfDepthZ - BORDER_MARGIN);
+
+            Vector3 pos = transform.position;
+            float clampedX = Mathf.Clamp(pos.x, -limitX, limitX);
+            float clampedZ = Mathf.Clamp(pos.z, -limitZ, limitZ);
+
+            if (clampedX != pos.x || clampedZ != pos.z)
+                transform.position = new Vector3(clampedX, pos.y, clampedZ);
         }
 
         private void CalculateVelocity()
