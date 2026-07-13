@@ -1,6 +1,6 @@
 # World Scaling — Implementation Roadmap (Tier B: unbounded XZ)
 
-**Version:** 1.4
+**Version:** 1.5
 **Date:** 2026-07-13
 **Status:** **Proposed design — not implemented. OQ-1..7 all resolved in code (2026-07-13); WS-2 plan-ready, WS-3 direction-captured.**
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -141,6 +141,40 @@ Small and fully characterized after the 2026-07-13 OQ audit:
 Streaming is already player-relative (verified), the `ChunkCoord` "0–99" contract is doc-only, and
 no fixed-size `[WorldSizeInChunks]` array exists anywhere (OQ-1).
 
+### 4.4 Approved execution plan (2026-07-13; decision menu closed)
+
+**Step 1 — baselines first, prove-red.** In the "Chunk Math" suite (`ChunkRelativePositionTests.cs`):
+(a) unbounded-bounds baseline — `IsVoxelInWorld`/`TryGetVoxel` at tuples straddling the old border
+(`1599.75, 1600, 1600.25`, far-out `1_000_000`; negatives stay out-of-world) — **must be red on tip**
+(the existing parity sweep only covers −32…+512 and never touches the bound); (b) V2 codec identity
+baseline — encode/decode round-trip for chunk origins past 99 (100, 1000, 100_000) — **a pin, not a
+prove-red**: it already passes today and exists to hold the no-V3-bump claim. Keep all test
+coordinates ≤ ~2²⁰ chunks (`ToVoxelOrigin`'s `×16` wraps `int` above ~134M chunks — a baseline in
+the overflow zone fails for the wrong reason).
+
+**Step 2 — bounds relaxation** (§4.1/§4.3 sites) **+ same-commit companions:** the parity-test
+mirror (`ChunkRelativePositionTests` :422-424 inline bounds + :398 edge-tuple verdicts) re-implements
+production bounds and goes red otherwise; `ChunkCoord` doc comments;
+`CHUNK_LIFECYCLE_PIPELINE.md` §3 rationale cells; this doc's §4 status flip. The `TryGetVoxel`
+fold-split (§4.3) is the flagged fragility hotspot. Gate: Chunk Math suite green + **Validate All**
+green.
+
+**Step 3 — spawn constant + UI cosmetics.** `WorldCentre` → **`DefaultSpawnPosition = 800`**
+(literal; decided) across all three consumers + the `WorldSelectMenu:620` "World Center" legend
+label (OQ-3); minimap border → **west/south walls only**, crosshair from the spawn constant (OQ-4,
+decided); `SettingsManager:436` comment reword. **`WorldSizeInChunks` stays** until WS-3 (decided);
+`WorldSaveData.worldSizeInChunks`/`chunkWidth`/`chunkHeight` are write-only level.dat metadata —
+leave untouched.
+
+**Step 4 — in-game gate.** Teleport past x=1600: generate → light → mesh with no stuck frontier and
+no fail-safe promotion storms; no seam artifacts at chunk 99↔100; save + reload round-trips the
+past-border chunks (new `r.3.*.bin` region). Ends on user confirmation.
+
+Two bisectable commits: (1) baselines + relaxation + doc-sync; (2) spawn constant + minimap.
+Compile check = Unity compiler (`RequestScriptCompilation` → `IsCompiling == false` → console), not
+`dotnet build`. The seed-magnitude finding is filed-only (`WORLD_GENERATION_BUGS.md` Bug 04,
+2026-07-13 note) — no fix in WS-2 (decided).
+
 ---
 
 ## 5. WS-3 — negative quadrants (Phase 2, direction-captured)
@@ -228,6 +262,9 @@ semantics — accepted as the permanent world limit.
 
 ## Document History
 
+* **v1.5** - §4.4 added: the approved WS-2 execution plan (baselines-first prove-red with the
+  codec-pin caveat and ≤2²⁰-chunk coordinate cap, same-commit parity-mirror rule, closed decision
+  menu, two-commit sequence, in-game gate) — persisted for the cold execution session.
 * **v1.4** - Noise-precision item assigned an owner (was unowned in the phasing): double-precision
   per-chunk noise base offsets ride WS-4 as an explicit ⚠️ seed-breaking, world-version-gated rider
   (§6). Documents the resulting end-state: WS-3 + WS-4 + rider = stable range to the natural ±2³¹
