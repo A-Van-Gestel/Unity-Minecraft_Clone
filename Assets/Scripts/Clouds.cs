@@ -15,6 +15,10 @@ public class Clouds : MonoBehaviour
     [SerializeField]
     private World _world = null;
 
+    [Tooltip("Inflates the cloud hull outward along vertex normals by this many units, off the voxel grid, so no cloud face (top, bottom, or sides) Z-fights terrain — without opening seams between tiles. Increase if Z-fighting persists at distance.")]
+    [SerializeField]
+    private float _depthOffset = 0.0035f;
+
     private bool[,] _cloudData; // Array of bools representing where cloud is.
     private int _cloudTexWidth;
     private int _cloudTileSize;
@@ -181,11 +185,15 @@ public class Clouds : MonoBehaviour
 
                 if (_cloudData[xVal, zVal])
                 {
+                    // Push the single down-facing quad outward (below the plane) along its normal, off the
+                    // voxel grid, to avoid Z-fighting. Fast tiles have no side faces, so no seams to worry about.
+                    Vector3 o = Vector3.down * _depthOffset;
+
                     // Add 4 vertices for cloud face.
-                    vertices.Add(new Vector3(xIncrement, 0, zIncrement));
-                    vertices.Add(new Vector3(xIncrement, 0, zIncrement + 1));
-                    vertices.Add(new Vector3(xIncrement + 1, 0, zIncrement + 1));
-                    vertices.Add(new Vector3(xIncrement + 1, 0, zIncrement));
+                    vertices.Add(new Vector3(xIncrement, 0, zIncrement) + o);
+                    vertices.Add(new Vector3(xIncrement, 0, zIncrement + 1) + o);
+                    vertices.Add(new Vector3(xIncrement + 1, 0, zIncrement + 1) + o);
+                    vertices.Add(new Vector3(xIncrement + 1, 0, zIncrement) + o);
 
                     // We know what direction our faces are facing, so we just add them directly.
                     for (int i = 0; i < 4; i++)
@@ -221,6 +229,20 @@ public class Clouds : MonoBehaviour
         List<Vector3> normals = new List<Vector3>();
         int vertCount = 0;
 
+        // Integer cube corner of face p's i-th vertex, in local tile coordinates (VoxelVerts are 0/1).
+        Vector3Int CornerOf(int xi, int zi, int p, int i)
+        {
+            Vector3 vv = VoxelData.VoxelVerts[VoxelData.VoxelTris[p * 4 + i]];
+            return new Vector3Int(xi + Mathf.RoundToInt(vv.x), Mathf.RoundToInt(vv.y), zi + Mathf.RoundToInt(vv.z));
+        }
+
+        // Pass 1: collect the exposed hull faces and, per shared corner, accumulate the summed normal of
+        // every face meeting there. Displacing each corner along that summed normal inflates the whole hull
+        // outward as one watertight shell — every face (top, bottom, sides) lifts off the voxel grid to avoid
+        // Z-fighting, while faces sharing an edge move together so no seams open between cells or tiles.
+        List<(int xi, int zi, int p)> faces = new List<(int xi, int zi, int p)>();
+        Dictionary<Vector3Int, Vector3> cornerNormals = new Dictionary<Vector3Int, Vector3>();
+
         for (int xIncrement = 0; xIncrement < _cloudTileSize; xIncrement++)
         {
             for (int zIncrement = 0; zIncrement < _cloudTileSize; zIncrement++)
@@ -228,38 +250,51 @@ public class Clouds : MonoBehaviour
                 int xVal = x + xIncrement;
                 int zVal = z + zIncrement;
 
-                if (_cloudData[xVal, zVal])
+                if (!_cloudData[xVal, zVal])
+                    continue;
+
+                // Loop though neighbor points using faceCheck array.
+                for (int p = 0; p < 6; p++)
                 {
-                    // Loop though neighbor points using faceCheck array.
-                    for (int p = 0; p < 6; p++)
+                    // Only faces whose neighbor has no cloud are on the hull; internal faces are skipped
+                    // (and so carry no offset).
+                    if (CheckCloudData(new Vector3Int(xVal, 0, zVal) + VoxelData.FaceChecks[p]))
+                        continue;
+
+                    faces.Add((xIncrement, zIncrement, p));
+
+                    Vector3 faceNormal = VoxelData.FaceChecks[p];
+                    for (int i = 0; i < 4; i++)
                     {
-                        // If the current neighbor has no cloud, draw this face.
-                        if (!CheckCloudData(new Vector3Int(xVal, 0, zVal) + VoxelData.FaceChecks[p]))
-                        {
-                            // Add our 4 vertices for this face.
-                            for (int i = 0; i < 4; i++)
-                            {
-                                Vector3 vert = new Vector3Int(xIncrement, 0, zIncrement);
-                                int vertIndex = VoxelData.VoxelTris[p * 4 + i];
-                                vert += VoxelData.VoxelVerts[vertIndex];
-                                vertices.Add(vert);
-                            }
-
-                            for (int i = 0; i < 4; i++)
-                                normals.Add(VoxelData.FaceChecks[p]);
-
-                            triangles.Add(vertCount);
-                            triangles.Add(vertCount + 1);
-                            triangles.Add(vertCount + 2);
-                            triangles.Add(vertCount + 2);
-                            triangles.Add(vertCount + 1);
-                            triangles.Add(vertCount + 3);
-
-                            vertCount += 4;
-                        }
+                        Vector3Int corner = CornerOf(xIncrement, zIncrement, p, i);
+                        cornerNormals[corner] = (cornerNormals.TryGetValue(corner, out Vector3 acc) ? acc : Vector3.zero) + faceNormal;
                     }
                 }
             }
+        }
+
+        // Pass 2: emit each hull face with its corners displaced along the (normalized) accumulated normal.
+        foreach ((int xi, int zi, int p) in faces)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                Vector3Int corner = CornerOf(xi, zi, p, i);
+                Vector3 dir = cornerNormals[corner];
+                if (dir != Vector3.zero) dir.Normalize();
+                vertices.Add(corner + dir * _depthOffset);
+            }
+
+            for (int i = 0; i < 4; i++)
+                normals.Add(VoxelData.FaceChecks[p]);
+
+            triangles.Add(vertCount);
+            triangles.Add(vertCount + 1);
+            triangles.Add(vertCount + 2);
+            triangles.Add(vertCount + 2);
+            triangles.Add(vertCount + 1);
+            triangles.Add(vertCount + 3);
+
+            vertCount += 4;
         }
 
         Mesh mesh = new Mesh();

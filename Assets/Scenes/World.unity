@@ -3018,6 +3018,7 @@ MonoBehaviour:
   _cloudPattern: {fileID: 2800000, guid: 97e640f4781f6834a931ea9191f853b5, type: 3}
   _cloudMaterial: {fileID: 2100000, guid: 861bcc19e949283479bc12c433ad1e22, type: 2}
   _world: {fileID: 1731500968}
+  _depthOffset: 0.0035
 --- !u!4 &806419710
 Transform:
   m_ObjectHideFlags: 0
