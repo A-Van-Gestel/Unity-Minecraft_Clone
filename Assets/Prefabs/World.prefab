@@ -121,6 +121,7 @@ MonoBehaviour:
   spawnPositionOffset: {x: 0.5, y: 1.1, z: 0.5}
   debugScreen: {fileID: 0}
   clouds: {fileID: 0}
+  _borderWall: {fileID: 0}
   worldData:
     worldName: Prototype
     seed: 0

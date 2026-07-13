@@ -29,6 +29,7 @@ using Unity.Mathematics;
 using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Pool;
+using UnityEngine.Serialization;
 using Debug = UnityEngine.Debug;
 using Random = UnityEngine.Random;
 
@@ -139,6 +140,11 @@ public class World : MonoBehaviour
     // Clouds
     [Header("Clouds")]
     public Clouds clouds;
+
+    [Header("World Border")]
+    [Tooltip("Renders the per-world gameplay border wall. Inactive when the world has no border.")]
+    [SerializeField]
+    private BorderWallRenderer _borderWall;
 
     [Header("World Data")]
     public WorldData worldData;
@@ -758,6 +764,9 @@ public class World : MonoBehaviour
 
         Debug.Log("Initializing clouds...");
         clouds?.Initialize();
+
+        // Border wall follows the same post-load init as clouds; it self-hides when BorderRadius is 0.
+        _borderWall?.Initialize();
 
         Debug.Log("Starting world tick...");
         _tickTimer = 0f;

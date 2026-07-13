@@ -20,9 +20,10 @@ pre-generation tool).
 `WORLD_SCALING_IMPLEMENTATION.md`): skip the interim hard-wall treatment; TF-14 becomes the
 **per-world configurable border** (gameplay fence, terrain generates past it). Save flips ✅ → ⚠️
 (level.dat field, rides the TF-12/TF-13 v12 wave).
-**Amended:** 2026-07-13 (later) — TF-14 **Phase 1 shipped** (persistence + player clamp + minimap).
-Landed as a **standalone level.dat v11 → v12** `borderRadius` (int; 0 = disabled) — *not* the
-TF-12/13 wave — with existing worlds upgrading border-disabled. Phase 2 (visual border wall) pending.
+**Amended:** 2026-07-13 (later) — TF-14 **fully shipped** (Phase 1 persistence + player clamp + minimap;
+Phase 2 `Minecraft/BorderWall` shader + `BorderWallRenderer`). Landed as a **standalone level.dat
+v11 → v12** `borderRadius` (int; 0 = disabled) — *not* the TF-12/13 wave — with existing worlds
+upgrading border-disabled. Item is complete and ready to archive from the open backlog.
 Findings are from static code review of the Standard generation pipeline
 (`StandardChunkGenerator` → `StandardWormCarverJob` → `StandardChunkGenerationJob` →
 `CaveIsolationFilterJob`) plus the shipped authoring/editor tooling. The Legacy pipeline
@@ -89,7 +90,7 @@ Findings are from static code review of the Standard generation pipeline
 | TF-11 | Climate-driven surface effects: snow line, ice, biome/foliage tint (gated on TF-3)       |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
 | TF-12 | Generation feature flags read from global Settings, not the world — persist in level.dat |   🟢   |  🟢  |   🟢    |  ✅   |  ⚠️  |
 | TF-13 | No worldgen version stamp — post-freeze terrain changes produce silent seams             |   🟢   |  🟢  |    ⚪    |  ✅   |  ⚠️  |
-| TF-14 | World border → per-world gameplay fence — Phase 1 shipped 2026-07-13 (persist+clamp+minimap); visual wall pending |   🟡   |  🟢  |   🟡    |  ✅   |  ⚠️  |
+| TF-14 | ✅ SHIPPED 2026-07-13 — per-world gameplay fence: persist + clamp + minimap + animated border wall (ready to archive) |   🟡   |  🟢  |   🟡    |  ✅   |  ⚠️  |
 
 ---
 
@@ -964,15 +965,24 @@ per-chunk byte if taken now).
 
 **Classification:** Nice-to-have (polish, but the current edge actively reads as broken).
 
-**✅ IMPLEMENTED — Phase 1 (2026-07-13).** The functional fence shipped: a per-world `borderRadius`
-(int voxels, `0` = disabled) persisted in level.dat via a standalone **v11 → v12** migration; a
-player-position clamp in `VoxelRigidbody` (the pipeline stays border-blind); a create-menu input; and
-an origin-centered square drawn on the `WorldInfoUtility` minimap. **Decisions taken at build time:**
-standalone v12 bump (NOT the TF-12/13 wave — migrations chain cleanly and the field needs no TF-12
-plumbing); existing worlds upgrade with the border **disabled**; **radius-only, origin-centered
-square** (per-world center reserved, not persisted). **Remaining (Phase 2):** the translucent animated
-border-wall shader + camera-following renderer (item 1 below). Until then the fence is invisible in
-first-person — the clamp and minimap convey it.
+**✅ FULLY IMPLEMENTED (2026-07-13) — Phases 1 & 2 shipped, in-game confirmed.** Ready to archive from
+the open backlog. Both halves landed:
+
+- **Phase 1 — functional fence.** A per-world `borderRadius` (int voxels, `0` = disabled) persisted in
+  level.dat via a standalone **v11 → v12** migration; a player-position clamp in `VoxelRigidbody` (the
+  pipeline stays border-blind); a create-menu input; and an origin-centered square on the
+  `WorldInfoUtility` minimap.
+- **Phase 2 — visual wall.** `Minecraft/BorderWall` URP transparent shader (world-anchored scrolling
+  bands + camera-distance fade) driven by `BorderWallRenderer` — four camera-following quads that slide
+  along the border edges, clamp to the extent so corners meet, cull beyond the terrain draw distance,
+  and carry a small `_depthOffset` off the voxel boundary to avoid Z-fighting. Wired as `World.borderWall`,
+  initialized beside the clouds; no voxel-pipeline contact.
+
+**Decisions taken at build time:** standalone v12 bump (NOT the TF-12/13 wave — migrations chain cleanly
+and the field needs no TF-12 plumbing); existing worlds upgrade with the border **disabled**;
+**radius-only, origin-centered square** (per-world center reserved, not persisted); **camera-following
+sliding quads** with procedural bands (over a static box / textured wall). The optional RF-2 fog pairing
+remains a separate item.
 
 **What exists today.** The bounded 100-chunk world (`WorldSizeInChunks = 100`, `VoxelData.cs:8`)
 just *stops*: `IsVoxelInWorld` fails, chunks end, and the player walks to a bare void edge — with
@@ -1050,7 +1060,7 @@ items last. RF items are detailed in
 | 13   | **TF-4** Dimensions + save changes          | Parallel serialization track (no seed risk); coordinate v12 bump with RF-1's migration                |
 | 14   | **TF-6** Farlands world type                | Cheap novelty once TF-1's warp helper exists                                                          |
 | 15   | **TF-5** Amplified world type               | Gated on `WORLD_SCALING_ANALYSIS.md` Tier A1 — do not start before the height work                    |
-| 16   | **TF-14** World border                      | Independent polish; pairs with RF-2's fog; the raw void edge reads as broken                          |
+| 16   | ~~**TF-14** World border~~ ✅ SHIPPED        | Done 2026-07-13 (per-world fence + animated wall); pairs optionally with RF-2's fog                    |
 | 17   | **RF-7** Weather                            | Needs TF-3/TF-11's temperature axis for precipitation type; rendering rides RF-1/RF-2 machinery       |
 | 18   | **RF-4** Torch flicker                      | Polish; 🟢 shader-side, needs a Torch block authored first                                            |
 | 19   | **RF-3** Bloom / post-processing            | Polish; pair with the GS-4 render-tier audit; tint-channel coordination with TF-11                    |
