@@ -71,12 +71,12 @@ Two critical gate functions control when work can proceed. Understanding the dif
 
 Checks all **8 horizontal neighbors** (cardinal + diagonal):
 
-| Check          | Condition                              | Rationale                                                                                                                                                                  |
-|----------------|----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| World bounds   | `IsChunkInWorld()` → skip if false     | Out-of-world (negative XZ) skipped as ready; WS-2 removed the +XZ upper bound, so old east/north-edge neighbors are now ordinary frontier chunks that park until populated |
-| Generation job | `generationJobs.ContainsKey()` → false | Neighbor terrain must be complete                                                                                                                                          |
-| Data exists    | `Chunks.TryGetValue()` → exists        | Neighbor must have a ChunkData                                                                                                                                             |
-| Populated      | `IsPopulated` → true                   | Voxel data must be filled                                                                                                                                                  |
+| Check          | Condition                              | Rationale                                                                                                                                                                                                                    |
+|----------------|----------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| World bounds   | `IsChunkInWorld()` → skip if false     | WS-3: `IsChunkInWorld` is now always true (XZ fully unbounded, both signs), so this skip branch never fires — every neighbor is an ordinary frontier chunk that parks until populated. "Out-of-world" no longer exists in XZ |
+| Generation job | `generationJobs.ContainsKey()` → false | Neighbor terrain must be complete                                                                                                                                                                                            |
+| Data exists    | `Chunks.TryGetValue()` → exists        | Neighbor must have a ChunkData                                                                                                                                                                                               |
+| Populated      | `IsPopulated` → true                   | Voxel data must be filled                                                                                                                                                                                                    |
 
 **Summary:** "Do all neighbors have terrain data I can read?"
 
@@ -102,12 +102,12 @@ Checks all **8 horizontal neighbors** (cardinal + diagonal) with stricter requir
 
 Checks all **8 horizontal neighbors** (cardinal + diagonal) with relaxed requirements:
 
-| Check                   | Condition                              | Rationale                                                                                                                                        |
-|-------------------------|----------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
-| World bounds            | `IsChunkInWorld()` → skip if false     | Out-of-world (negative XZ) skipped as ready; WS-2 removed the +XZ upper bound, so old east/north-edge neighbors are now ordinary frontier chunks |
-| Generation job          | `generationJobs.ContainsKey()` → false | Neighbor terrain must be complete                                                                                                                |
-| Data exists + populated | `Chunks.TryGetValue()` + `IsPopulated` | Neighbor must have voxel data                                                                                                                    |
-| Initial lighting done   | `NeedsInitialLighting` → false         | Neighbor must have had at least one lighting pass                                                                                                |
+| Check                   | Condition                              | Rationale                                                                                                                                   |
+|-------------------------|----------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
+| World bounds            | `IsChunkInWorld()` → skip if false     | WS-3: `IsChunkInWorld` is now always true (XZ fully unbounded) — this skip branch never fires; every neighbor is an ordinary frontier chunk |
+| Generation job          | `generationJobs.ContainsKey()` → false | Neighbor terrain must be complete                                                                                                           |
+| Data exists + populated | `Chunks.TryGetValue()` + `IsPopulated` | Neighbor must have voxel data                                                                                                               |
+| Initial lighting done   | `NeedsInitialLighting` → false         | Neighbor must have had at least one lighting pass                                                                                           |
 
 **Does NOT check:** `lightingJobs`, `HasLightChangesToProcess`, `IsAwaitingMainThreadProcess`.
 
@@ -506,7 +506,8 @@ When `IsStable = false`:
 - The chunk re-enters the lighting scan next frame.
 
 > [!NOTE]
-> The stability test itself is computed only from the BFS queues + raw `CrossChunkLightMods.Length` inside the job. On the main thread, `LightingJobProcessor.IsEffectivelyStable` then overrides it to `true` when the only outstanding mods target out-of-world positions (which can never be consumed) — otherwise world-boundary chunks would reschedule lighting indefinitely.
+> The stability test itself is computed only from the BFS queues + raw `CrossChunkLightMods.Length` inside the job. On the main thread, `LightingJobProcessor.IsEffectivelyStable` then overrides it to `true` when the only outstanding mods target out-of-world positions (which can never be consumed) — otherwise world-boundary chunks would reschedule lighting indefinitely. *(WS-3 note: with XZ fully unbounded, cross-chunk light mods — always horizontal, same Y — can no longer be out-of-world, so this override is effectively dead for XZ; undeliverable
+frontier mods take the `PersistUndeliverable` route instead, which lets a frontier chunk settle exactly like any interior frontier.)*
 
 ---
 

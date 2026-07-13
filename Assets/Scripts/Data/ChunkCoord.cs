@@ -13,14 +13,14 @@ namespace Data
     //
     // ── SCALE 1: Chunk Index ────────────────────────────────────
     //   Type:  ChunkCoord  (preferred)  or  Vector2Int (legacy)
-    //   Range: 0 – unbounded (WS-2: XZ has no upper bound; only the west/south floor at 0 gates chunks)
+    //   Range: fully unbounded, both signs (WS-3: XZ has no floor and no upper bound; negatives are in-world)
     //   Usage: Loop indices, region math, dictionary KEYS for worldData.Chunks
     //   How:   ChunkCoord.X / ChunkCoord.Z
     //          ChunkCoord.ToChunkIndex()
     //
     // ── SCALE 2: Voxel World Origin ─────────────────────────────
     //   Type:  Vector2Int  (always)
-    //   Range: 0 – unbounded (WS-2: XZ upper bound removed; floor at 0)
+    //   Range: fully unbounded, both signs (WS-3: no floor, no upper bound)
     //   Usage: ChunkData.position, world-space queries, job inputs
     //   How:   ChunkCoord.ToVoxelOrigin()
     //          ChunkCoord.FromVoxelOrigin(Vector2Int)
@@ -42,10 +42,10 @@ namespace Data
 
     public readonly struct ChunkCoord : IEquatable<ChunkCoord>
     {
-        /// <summary>Chunk index on the X axis. Range: 0 – unbounded (WS-2: floor at 0, no upper bound).</summary>
+        /// <summary>Chunk index on the X axis. Range: fully unbounded, both signs (WS-3: no floor, no upper bound).</summary>
         public readonly int X;
 
-        /// <summary>Chunk index on the Z axis. Range: 0 – unbounded (WS-2: floor at 0, no upper bound).</summary>
+        /// <summary>Chunk index on the Z axis. Range: fully unbounded, both signs (WS-3: no floor, no upper bound).</summary>
         public readonly int Z;
 
         #region Constructors

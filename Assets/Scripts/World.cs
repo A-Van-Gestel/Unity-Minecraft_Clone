@@ -3521,25 +3521,26 @@ public class World : MonoBehaviour
     /// <summary>
     /// Checks if the specified chunk coordinate is within the permitted world boundaries.
     /// </summary>
-    /// <remarks>WS-2: XZ is unbounded on the positive side — only the west/south floor (>= 0) gates chunks;
-    /// the east/north upper bound is gone. Out-of-world now means strictly negative XZ.</remarks>
+    /// <remarks>WS-3: XZ is fully unbounded — the west/south floor is gone, so every XZ chunk coordinate is
+    /// in-world (chunks are full-height columns, so there is no chunk-granularity Y bound). Kept as the single
+    /// bounds chokepoint for the neighbor guards and streaming filters, and for WS-4/TF-14 to hook later.</remarks>
     /// <param name="chunkCoord">The chunk coordinate.</param>
-    /// <returns>True if the chunk is in the world; otherwise, false.</returns>
+    /// <returns>True — every chunk coordinate is in the (unbounded) world.</returns>
     internal static bool IsChunkInWorld(ChunkCoord chunkCoord)
     {
-        return chunkCoord.X >= 0 && chunkCoord.Z >= 0;
+        return true;
     }
 
     /// <summary>
     /// Checks if the specified X/Z coordinates are within the permitted world boundaries.
     /// </summary>
-    /// <remarks>WS-2: XZ is unbounded on the positive side — only the west/south floor (>= 0) gates chunks.</remarks>
+    /// <remarks>WS-3: XZ is fully unbounded — every chunk coordinate is in-world.</remarks>
     /// <param name="x">The X coordinate.</param>
     /// <param name="z">The Z coordinate.</param>
-    /// <returns>True if in world; otherwise, false.</returns>
+    /// <returns>True — every chunk coordinate is in the (unbounded) world.</returns>
     private static bool IsChunkInWorld(int x, int z)
     {
-        return x >= 0 && z >= 0;
+        return true;
     }
 
     #region Public Interface Methods

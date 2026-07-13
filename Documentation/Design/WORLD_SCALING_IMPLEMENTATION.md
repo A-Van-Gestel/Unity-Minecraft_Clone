@@ -1,8 +1,8 @@
 # World Scaling — Implementation Roadmap (Tier B: unbounded XZ)
 
-**Version:** 1.6
+**Version:** 1.7
 **Date:** 2026-07-13
-**Status:** **WS-2 SHIPPED (2026-07-13, in-game confirmed). WS-3 direction-captured, WS-4 deferred. OQ-1..7 all resolved in code.**
+**Status:** **WS-2 + WS-3 SHIPPED (2026-07-13, in-game confirmed) — XZ now fully unbounded, both signs, save v11 unchanged. WS-4 deferred. OQ-1..7 all resolved in code.**
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The decided execution path for scaling the world horizontally. Analysis (`WORLD_SCALING_ANALYSIS.md`)
@@ -93,7 +93,7 @@ coordinates go negative. Positive-only expansion sidesteps every one of them.
 | Phase                      | Scope                                                                                                                                                         |  Effort   | Save impact                         | Depends on                    |
 |----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------:|-------------------------------------|-------------------------------|
 | **WS-2** — unbounded +XZ ✅ | Relax XZ *upper* bound only (keep `>= 0`); neighbor-guard flip; reconceive `WorldCentre` as spawn const                                                       | ✅ SHIPPED | None (V2 byte-identical)            | WS-1 ✅, VQ-1 ✅                |
-| **WS-3** — negative XZ     | Drop `>= 0` floor; V3 codec bump + migration; structure-RNG negative verification; seed hygiene; spawn                                                        |    🟡     | ⚠️ V3 codec bump                    | WS-2                          |
+| **WS-3** — negative XZ ✅   | Drop `>= 0` floor (bounds only); fresh spawn → origin. V3 bump SKIPPED (V2 already neg-correct); seed hygiene + floor-div kept separate (§5)                   | ✅ SHIPPED | None (V2 byte-identical, save v11)  | WS-2 ✅                        |
 | **WS-4** — floating origin | Periodic origin shift; `ChunkRelativePosition` for player/camera; `_WorldOriginOffset` shader continuity; **noise-precision rider** (double base offsets, §6) |    🔴     | None (presentation) / rider ⚠️ seed | Independent (far-travel gate) |
 
 **Validation is built alongside each phase** (WS-1 precedent: its equivalence guard shipped in the
@@ -152,7 +152,7 @@ Small and fully characterized after the 2026-07-13 OQ audit:
   — all resolve cleanly, see OQ-2.
 - **`WorldCentre`** (`VoxelData.cs:35`) — see OQ-3.
 - **Cosmetic finite-world UI:** `WorldInfoUtility`'s orange "valid world border" rectangle and
-  centre crosshair — see OQ-4 (no functional breakage anywhere).
+  center crosshair — see OQ-4 (no functional breakage anywhere).
 
 Streaming is already player-relative (verified), the `ChunkCoord` "0–99" contract is doc-only, and
 no fixed-size `[WorldSizeInChunks]` array exists anywhere (OQ-1).
@@ -193,10 +193,28 @@ Compile check = Unity compiler (`RequestScriptCompilation` → `IsCompiling == f
 
 ---
 
-## 5. WS-3 — negative quadrants (Phase 2, direction-captured)
+## 5. WS-3 — negative quadrants (Phase 2, ✅ SHIPPED 2026-07-13)
 
-Drops the `>= 0` XZ floor, at which point negative coordinates become reachable and the following
-become hard prerequisites (each is a documented Tier B item in `WORLD_SCALING_ANALYSIS.md`):
+> **Status (2026-07-13, shipped, in-game confirmed):** re-verifying §5's premises against post-WS-2 code
+> collapsed the phase to a lean bounds relaxation (mirror of WS-2 to the negative side). Decisions:
+> **(a) No V3 codec bump / no migration** — `V2Codec` addresses via WS-1's negative-correct `ChunkMath`
+> and region filenames (`r.-1.0.bin`) round-trip negatives with zero format change; save version stays
+> 11. **(b) Seed-hygiene (Bug 04) + structure floor-div stay separate** — both are magnitude/far-out and
+> sign-independent, not negative-triggered; keeping them out leaves WS-3 non-seed-breaking (existing-world
+> generation byte-identical). **(c) Fresh-world spawn → origin (0,0).** Landed: `IsVoxelInWorld` → Y-only,
+> `TryGetVoxel` → Y-only, `IsChunkInWorld` ×2 → always-true (kept as the bounds chokepoint), the
+> negative-quadrant prove-red baseline + negative V2 codec pin, parity-mirror/`ChunkCoord`-doc/§3-rationale
+> sync; then spawn→origin + minimap floor-wall removal. **In-game confirmed:** fresh world spawned at (0,0),
+> negative chunks generated correctly, flew to ≈(−10 000, −10 000) with block/lava edits + fluid sim, and
+> negative-region files persist (`r.-20.-18.bin`). Suites: Chunk Math 26/26, Validate All 197/0.
+> **Limitation:** no automated negative-quadrant *generation-parity* scenario (no generation suite exists to
+> extend) — negative terrain determinism is verified in-game only.
+>
+> The original §5 prerequisite list below is retained for the deferred riders (their homes are noted inline).
+
+Drops the `>= 0` XZ floor, at which point negative coordinates become reachable. The items below were
+§5's assumed hard prerequisites; the execution re-scope (above) reclassified them — **only the floor
+drop + validation is WS-3**; the rest are separable riders with the homes noted:
 
 - **Structure-RNG negative-quadrant verification (§3.4) — rewrite NOT needed (OQ-6, verified).**
   The assumed multiplicative quadrant-mirroring hashing does not exist: every structure/decorator/
@@ -278,6 +296,11 @@ semantics — accepted as the permanent world limit.
 
 ## Document History
 
+* **v1.7** - **WS-3 shipped** (2026-07-13, in-game confirmed). Re-scoped lean at execution: XZ floor fully
+  dropped (`IsVoxelInWorld`/`TryGetVoxel` → Y-only, `IsChunkInWorld` → always-true), fresh spawn → origin,
+  minimap floor removed. **V3 codec bump SKIPPED** (V2 + region filenames already round-trip negatives —
+  verified; save version stays 11); seed hygiene (Bug 04) + structure floor-div kept separate/non-seed-breaking.
+  §5 + §3 row flipped SHIPPED. Chunk Math 26/26, Validate All 197/0; in-game to ≈(−10 000,−10 000), `r.-20.-18.bin`.
 * **v1.6** - **WS-2 shipped** (2026-07-13, in-game confirmed). Bounds relaxation + prove-red bounds
   baseline + V2 codec pin, `WorldCentre` → `DefaultSpawnPosition = 800`, minimap west/south-floor
   cosmetics. §4 status + §3 row flipped to SHIPPED. Added the verified-benign existing-world note:
@@ -312,4 +335,4 @@ semantics — accepted as the permanent world limit.
 ---
 
 **Last Updated:** 2026-07-13
-**Next Review:** at the WS-3 kickoff (negative quadrants — V3 codec bump + seed hygiene + floor-div fix).
+**Next Review:** at the WS-4 kickoff (floating origin + noise-precision rider) or when TF-14 / Bug 04 / the seed-hygiene fix is scheduled.
