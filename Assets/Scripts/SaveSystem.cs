@@ -36,7 +36,9 @@ public static class SaveSystem
     //            LightData). New flag 0x03 for light-only+full. See Migration_v9_to_v10_StripLightBitsAndNewFlags.cs.
     // v10 → v11: Added spawnPosition (ChunkRelativePosition: _chunkX/_chunkZ ints + Vector3 localPosition)
     //            to level.dat for persistent spawn point support. See Migration_v10_to_v11_SpawnPosition.cs.
-    public const int CURRENT_VERSION = 11;
+    // v11 → v12: Added borderRadius (float) to level.dat for the optional per-world gameplay border
+    //            (TF-14). Defaults to 0 (disabled) for existing worlds. See Migration_v11_to_v12_WorldBorder.cs.
+    public const int CURRENT_VERSION = 12;
 
     /// <summary>
     /// Resolves the absolute directory path where a world's save files are stored.
@@ -78,6 +80,7 @@ public static class SaveSystem
             creationDate = world.worldData.creationDate > 0 ? world.worldData.creationDate : DateTime.UtcNow.Ticks,
             lastPlayed = DateTime.UtcNow.Ticks,
             spawnPosition = world.WorldSpawnPoint,
+            borderRadius = world.BorderRadius,
 
             worldState = new WorldStateData
             {
@@ -158,6 +161,9 @@ public static class SaveSystem
 
         // 2. Restore Spawn Point
         world.SetSpawnPoint(data.spawnPosition);
+
+        // Restore per-world gameplay border (0 = disabled).
+        world.SetBorderRadius(data.borderRadius);
 
         // If the player doesn't exist, do nothing
         if (world.player == null) return;

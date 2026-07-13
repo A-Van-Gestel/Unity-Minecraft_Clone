@@ -309,6 +309,25 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
+    /// Half-extent (in voxels) of the optional per-world gameplay border — a square AABB
+    /// centered on the world origin. <c>0</c> means disabled (fully unbounded, the default).
+    /// A player-only fence: the pipeline (generation, lighting, meshing, storage) is border-blind,
+    /// and this value is deliberately NOT consulted by <see cref="IsChunkInWorld(ChunkCoord)"/> or
+    /// <see cref="WorldData.IsVoxelInWorld"/>. Persisted in level.dat and restored on load.
+    /// </summary>
+    public int BorderRadius { get; private set; }
+
+    /// <summary>
+    /// Sets the world's gameplay border half-extent. The change is persisted to level.dat
+    /// on the next save.
+    /// </summary>
+    /// <param name="radius">Border half-extent in voxels, or 0 to disable.</param>
+    public void SetBorderRadius(int radius)
+    {
+        BorderRadius = radius;
+    }
+
+    /// <summary>
     /// Runtime toggle for chunk border visualization. Toggled by the player input action;
     /// not persisted to settings because it is transient debug state.
     /// </summary>
@@ -574,6 +593,7 @@ public class World : MonoBehaviour
                 isEditorReplay = true;
                 loadedWorldType = existingMeta.worldType;
                 WorldSpawnPoint = existingMeta.spawnPosition;
+                BorderRadius = existingMeta.borderRadius;
                 Debug.Log($"[World] Editor re-play detected — restoring persisted spawn point: {WorldSpawnPoint}");
             }
         }
@@ -585,6 +605,11 @@ public class World : MonoBehaviour
         WorldTypeID typeToLoad = isNewGame && !isEditorReplay
             ? WorldLaunchState.SelectedWorldType
             : loadedWorldType;
+
+        // Fresh new worlds take their gameplay border from the create-menu selection; loaded and
+        // editor-replay worlds keep the value restored from level.dat above (TF-14).
+        if (isNewGame && !isEditorReplay)
+            SetBorderRadius(WorldLaunchState.BorderRadius);
 
         // Safe fallback for unimplemented types
         if (typeToLoad == WorldTypeID.Amplified)

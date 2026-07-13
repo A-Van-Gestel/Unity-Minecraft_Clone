@@ -32,6 +32,12 @@ namespace Data
         /// </summary>
         public static WorldTypeID SelectedWorldType = WorldTypeID.Standard;
 
+        /// <summary>
+        /// Gameplay border half-extent (in voxels) chosen for a new world, or <c>0</c> for no border (the default).
+        /// Persisted into level.dat on the world's first save (TF-14).
+        /// </summary>
+        public static int BorderRadius = 0;
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void DomainReset()
         {
@@ -40,6 +46,7 @@ namespace Data
             IsNewGame = true;
             CurrentMode = RuntimeMode.Default;
             SelectedWorldType = WorldTypeID.Standard;
+            BorderRadius = 0;
         }
     }
 }
