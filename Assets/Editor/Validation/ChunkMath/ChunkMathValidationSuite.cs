@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using Editor.Validation.Framework;
 using UnityEditor;
 
-namespace Editor.Validation.ChunkMath
+namespace Editor.Validation
 {
     /// <summary>
     /// Validation suite for the chunk coordinate / addressing math — the "Chunk Math" suite. Covers

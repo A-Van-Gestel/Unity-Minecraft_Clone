@@ -5,7 +5,7 @@ using Editor.Validation.Framework;
 using Serialization;
 using UnityEngine;
 
-namespace Editor.Validation.ChunkMath
+namespace Editor.Validation
 {
     /// <summary>
     /// <see cref="ChunkMathValidationSuite"/> — <see cref="ChunkRelativePosition"/> scenarios: serialization

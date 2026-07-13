@@ -4,7 +4,7 @@ using Editor.Validation.Framework;
 using Helpers;
 using UnityEngine;
 
-namespace Editor.Validation.ChunkMath
+namespace Editor.Validation
 {
     /// <summary>
     /// <see cref="ChunkMathValidationSuite"/> — VQ-1 integer voxel-query decomposition parity, the WS-2
@@ -103,9 +103,9 @@ namespace Editor.Validation.ChunkMath
             Vector2Int oldChunk = wd.GetChunkCoordFor(wp);
             Vector3Int oldLocal = wd.GetLocalVoxelPositionInChunk(wp);
             Vector2Int newChunk = new Vector2Int(
-                Helpers.ChunkMath.VoxelToChunk(fx) * VoxelData.ChunkWidth,
-                Helpers.ChunkMath.VoxelToChunk(fz) * VoxelData.ChunkWidth);
-            Vector3Int newLocal = new Vector3Int(Helpers.ChunkMath.VoxelToLocal(fx), fy, Helpers.ChunkMath.VoxelToLocal(fz));
+                ChunkMath.VoxelToChunk(fx) * VoxelData.ChunkWidth,
+                ChunkMath.VoxelToChunk(fz) * VoxelData.ChunkWidth);
+            Vector3Int newLocal = new Vector3Int(ChunkMath.VoxelToLocal(fx), fy, ChunkMath.VoxelToLocal(fz));
 
             if (oldChunk != newChunk || oldLocal != newLocal)
             {

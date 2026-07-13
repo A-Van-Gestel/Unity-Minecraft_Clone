@@ -4,7 +4,7 @@ using Editor.Validation.Framework;
 using Helpers;
 using UnityEngine;
 
-namespace Editor.Validation.ChunkMath
+namespace Editor.Validation
 {
     /// <summary>
     /// <see cref="ChunkMathValidationSuite"/> — WS-1 <see cref="ChunkMath"/> shift/mask equivalence sweep.
@@ -42,20 +42,20 @@ namespace Editor.Validation.ChunkMath
         /// </summary>
         private static bool RunChunkMathPow2Guard()
         {
-            bool widthOk = (Helpers.ChunkMath.CHUNK_WIDTH & (Helpers.ChunkMath.CHUNK_WIDTH - 1)) == 0 &&
-                           Helpers.ChunkMath.VoxelToChunk(Helpers.ChunkMath.CHUNK_WIDTH) == 1 &&
-                           Helpers.ChunkMath.VoxelToLocal(Helpers.ChunkMath.CHUNK_WIDTH - 1) == Helpers.ChunkMath.CHUNK_WIDTH - 1;
-            bool regionOk = (Helpers.ChunkMath.CHUNKS_PER_REGION_SIDE & (Helpers.ChunkMath.CHUNKS_PER_REGION_SIDE - 1)) == 0 &&
-                            Helpers.ChunkMath.ChunkToRegion(Helpers.ChunkMath.CHUNKS_PER_REGION_SIDE) == 1 &&
-                            Helpers.ChunkMath.ChunkToRegionLocal(Helpers.ChunkMath.CHUNKS_PER_REGION_SIDE - 1) == Helpers.ChunkMath.CHUNKS_PER_REGION_SIDE - 1;
+            bool widthOk = (ChunkMath.CHUNK_WIDTH & (ChunkMath.CHUNK_WIDTH - 1)) == 0 &&
+                           ChunkMath.VoxelToChunk(ChunkMath.CHUNK_WIDTH) == 1 &&
+                           ChunkMath.VoxelToLocal(ChunkMath.CHUNK_WIDTH - 1) == ChunkMath.CHUNK_WIDTH - 1;
+            bool regionOk = (ChunkMath.CHUNKS_PER_REGION_SIDE & (ChunkMath.CHUNKS_PER_REGION_SIDE - 1)) == 0 &&
+                            ChunkMath.ChunkToRegion(ChunkMath.CHUNKS_PER_REGION_SIDE) == 1 &&
+                            ChunkMath.ChunkToRegionLocal(ChunkMath.CHUNKS_PER_REGION_SIDE - 1) == ChunkMath.CHUNKS_PER_REGION_SIDE - 1;
             if (widthOk && regionOk)
             {
                 Debug.Log("[PASS] ChunkMath Power-Of-Two Guard");
                 return true;
             }
 
-            Debug.LogError($"[FAIL] ChunkMath Power-Of-Two Guard — CHUNK_WIDTH={Helpers.ChunkMath.CHUNK_WIDTH} " +
-                           $"CHUNKS_PER_REGION_SIDE={Helpers.ChunkMath.CHUNKS_PER_REGION_SIDE} (both must be powers of two).");
+            Debug.LogError($"[FAIL] ChunkMath Power-Of-Two Guard — CHUNK_WIDTH={ChunkMath.CHUNK_WIDTH} " +
+                           $"CHUNKS_PER_REGION_SIDE={ChunkMath.CHUNKS_PER_REGION_SIDE} (both must be powers of two).");
             return false;
         }
 
@@ -64,8 +64,8 @@ namespace Editor.Validation.ChunkMath
         {
             for (int v = VOXEL_SWEEP_MIN; v <= VOXEL_SWEEP_MAX; v++)
             {
-                int expected = RefFloorDiv(v, Helpers.ChunkMath.CHUNK_WIDTH);
-                int actual = Helpers.ChunkMath.VoxelToChunk(v);
+                int expected = RefFloorDiv(v, ChunkMath.CHUNK_WIDTH);
+                int actual = ChunkMath.VoxelToChunk(v);
                 if (actual != expected)
                 {
                     Debug.LogError($"[FAIL] VoxelToChunk == Floor Div (sweep) — v={v} expected {expected}, got {actual}.");
@@ -86,7 +86,7 @@ namespace Editor.Validation.ChunkMath
             for (int v = 0; v <= VOXEL_SWEEP_MAX; v++)
             {
                 int legacy = Mathf.FloorToInt((float)v / VoxelData.ChunkWidth);
-                int actual = Helpers.ChunkMath.VoxelToChunk(v);
+                int actual = ChunkMath.VoxelToChunk(v);
                 if (actual != legacy)
                 {
                     Debug.LogError($"[FAIL] VoxelToChunk == Legacy FloorToInt (positives) — v={v} legacy {legacy}, got {actual}.");
@@ -103,14 +103,14 @@ namespace Editor.Validation.ChunkMath
         {
             for (int v = VOXEL_SWEEP_MIN; v <= VOXEL_SWEEP_MAX; v++)
             {
-                int local = Helpers.ChunkMath.VoxelToLocal(v);
-                if (local < 0 || local >= Helpers.ChunkMath.CHUNK_WIDTH)
+                int local = ChunkMath.VoxelToLocal(v);
+                if (local < 0 || local >= ChunkMath.CHUNK_WIDTH)
                 {
-                    Debug.LogError($"[FAIL] VoxelToLocal Reconstructs Voxel (sweep) — v={v} local {local} out of [0,{Helpers.ChunkMath.CHUNK_WIDTH}).");
+                    Debug.LogError($"[FAIL] VoxelToLocal Reconstructs Voxel (sweep) — v={v} local {local} out of [0,{ChunkMath.CHUNK_WIDTH}).");
                     return false;
                 }
 
-                int reconstructed = Helpers.ChunkMath.VoxelToChunk(v) * Helpers.ChunkMath.CHUNK_WIDTH + local;
+                int reconstructed = ChunkMath.VoxelToChunk(v) * ChunkMath.CHUNK_WIDTH + local;
                 if (reconstructed != v)
                 {
                     Debug.LogError($"[FAIL] VoxelToLocal Reconstructs Voxel (sweep) — v={v} reconstructed {reconstructed}.");
@@ -130,11 +130,11 @@ namespace Editor.Validation.ChunkMath
         {
             for (int c = CHUNK_SWEEP_MIN; c <= CHUNK_SWEEP_MAX; c++)
             {
-                int region = Helpers.ChunkMath.ChunkToRegion(c);
-                int slot = Helpers.ChunkMath.ChunkToRegionLocal(c);
-                int expectedRegion = RefFloorDiv(c, Helpers.ChunkMath.CHUNKS_PER_REGION_SIDE);
-                if (region != expectedRegion || slot < 0 || slot >= Helpers.ChunkMath.CHUNKS_PER_REGION_SIDE ||
-                    region * Helpers.ChunkMath.CHUNKS_PER_REGION_SIDE + slot != c)
+                int region = ChunkMath.ChunkToRegion(c);
+                int slot = ChunkMath.ChunkToRegionLocal(c);
+                int expectedRegion = RefFloorDiv(c, ChunkMath.CHUNKS_PER_REGION_SIDE);
+                if (region != expectedRegion || slot < 0 || slot >= ChunkMath.CHUNKS_PER_REGION_SIDE ||
+                    region * ChunkMath.CHUNKS_PER_REGION_SIDE + slot != c)
                 {
                     Debug.LogError($"[FAIL] ChunkToRegion / RegionLocal Reconstructs Chunk (sweep) — c={c} " +
                                    $"region {region} (expected {expectedRegion}) slot {slot}.");
@@ -156,8 +156,8 @@ namespace Editor.Validation.ChunkMath
             for (int q = VOXEL_SWEEP_MIN * 4; q <= VOXEL_SWEEP_MAX * 4; q++)
             {
                 float world = q * 0.25f;
-                int expected = (int)Math.Floor(world / Helpers.ChunkMath.CHUNK_WIDTH);
-                int actual = Helpers.ChunkMath.WorldToChunk(world);
+                int expected = (int)Math.Floor(world / ChunkMath.CHUNK_WIDTH);
+                int actual = ChunkMath.WorldToChunk(world);
                 if (actual != expected)
                 {
                     Debug.LogError($"[FAIL] WorldToChunk == Floor Div (float sweep) — world={world} expected {expected}, got {actual}.");
@@ -188,10 +188,10 @@ namespace Editor.Validation.ChunkMath
         {
             (int input, Func<int, int> fn, int expected, int truncated, string name)[] cases =
             {
-                (-8, Helpers.ChunkMath.VoxelToChunk, -1, -8 / VoxelData.ChunkWidth, "VoxelToChunk(-8)"),
-                (-8, Helpers.ChunkMath.VoxelToLocal, 8, -8 % VoxelData.ChunkWidth, "VoxelToLocal(-8)"),
-                (-1, Helpers.ChunkMath.ChunkToRegion, -1, -1 / Helpers.ChunkMath.CHUNKS_PER_REGION_SIDE, "ChunkToRegion(-1)"),
-                (-1, Helpers.ChunkMath.ChunkToRegionLocal, 31, -1 % Helpers.ChunkMath.CHUNKS_PER_REGION_SIDE, "ChunkToRegionLocal(-1)"),
+                (-8, ChunkMath.VoxelToChunk, -1, -8 / VoxelData.ChunkWidth, "VoxelToChunk(-8)"),
+                (-8, ChunkMath.VoxelToLocal, 8, -8 % VoxelData.ChunkWidth, "VoxelToLocal(-8)"),
+                (-1, ChunkMath.ChunkToRegion, -1, -1 / ChunkMath.CHUNKS_PER_REGION_SIDE, "ChunkToRegion(-1)"),
+                (-1, ChunkMath.ChunkToRegionLocal, 31, -1 % ChunkMath.CHUNKS_PER_REGION_SIDE, "ChunkToRegionLocal(-1)"),
             };
 
             foreach ((int input, Func<int, int> fn, int expected, int truncated, string name) in cases)
