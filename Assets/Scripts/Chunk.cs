@@ -86,7 +86,10 @@ public class Chunk
     public void Reset(ChunkCoord chunkCoord)
     {
         Coord = chunkCoord;
-        ChunkPosition = Coord.ToWorldPosition();
+
+        // The single chokepoint placing a chunk's GameObject in Unity space (SectionRenderers are children, so they
+        // ride along). Re-derived from Coord rather than patched by a delta, so a re-anchor cannot accumulate drift.
+        ChunkPosition = WorldOrigin.VoxelToUnity(Coord.ToVoxelOrigin());
 
         // Update GameObject identity
 #if UNITY_EDITOR

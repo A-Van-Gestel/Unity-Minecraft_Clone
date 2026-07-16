@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+using Helpers;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 /// <summary>
 /// Renders the per-world gameplay border (TF-14 Phase 2) as a translucent, animated wall at the
@@ -63,7 +65,7 @@ public class BorderWallRenderer : MonoBehaviour
         meshFilter.mesh = _mesh;
 
         _meshRenderer.sharedMaterial = _borderMaterial;
-        _meshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        _meshRenderer.shadowCastingMode = ShadowCastingMode.Off;
         _meshRenderer.receiveShadows = false;
         _meshRenderer.enabled = false;
 
@@ -103,11 +105,15 @@ public class BorderWallRenderer : MonoBehaviour
         // wall doesn't Z-fight the terrain faces at ±radius, while corners still meet at (±ext, ±ext).
         float ext = r + _depthOffset;
 
+        // The border is a voxel-space AABB centered on the WORLD origin, but the mesh and the player position are
+        // Unity space — so each face converts its own plane and parallel clamp on its own axis.
+        Vector3Int ov = WorldOrigin.OriginVoxel;
+
         // +X / -X faces slide along Z; +Z / -Z faces slide along X.
-        AddFace(true, ext, p.x, p.z, ext, h, drawWidth);
-        AddFace(true, -ext, p.x, p.z, ext, h, drawWidth);
-        AddFace(false, ext, p.z, p.x, ext, h, drawWidth);
-        AddFace(false, -ext, p.z, p.x, ext, h, drawWidth);
+        AddFace(true, ext, p.x, p.z, ext, h, drawWidth, ov.x, ov.z);
+        AddFace(true, -ext, p.x, p.z, ext, h, drawWidth, ov.x, ov.z);
+        AddFace(false, ext, p.z, p.x, ext, h, drawWidth, ov.z, ov.x);
+        AddFace(false, -ext, p.z, p.x, ext, h, drawWidth, ov.z, ov.x);
 
         _mesh.Clear();
         _mesh.SetVertices(_vertices);
@@ -122,41 +128,50 @@ public class BorderWallRenderer : MonoBehaviour
     /// selects the perpendicular axis: true for the ±X faces (which slide along Z), false for the ±Z
     /// faces (which slide along X).
     /// </summary>
-    /// <param name="plane">World coordinate of the face on its perpendicular axis (±radius).</param>
-    /// <param name="playerPerp">Player position on the perpendicular axis.</param>
-    /// <param name="playerParallel">Player position on the parallel (slide) axis.</param>
-    /// <param name="parallelLimit">Half-extent along the slide axis (border extent incl. the depth offset); clamps corners.</param>
+    /// <param name="plane">Voxel-space coordinate of the face on its perpendicular axis (±radius).</param>
+    /// <param name="playerPerp">Player Unity-space position on the perpendicular axis.</param>
+    /// <param name="playerParallel">Player Unity-space position on the parallel (slide) axis.</param>
+    /// <param name="parallelLimit">Voxel-space half-extent along the slide axis (border extent incl. the depth offset); clamps corners.</param>
     /// <param name="h">Wall height.</param>
     /// <param name="drawWidth">Half-window drawn along the edge, and the per-face cull distance.</param>
-    private void AddFace(bool axisIsX, float plane, float playerPerp, float playerParallel, float parallelLimit, float h, float drawWidth)
+    /// <param name="originPerp">Floating-origin offset on the perpendicular axis.</param>
+    /// <param name="originParallel">Floating-origin offset on the parallel (slide) axis.</param>
+    private void AddFace(bool axisIsX, float plane, float playerPerp, float playerParallel, float parallelLimit,
+        float h, float drawWidth, float originPerp, float originParallel)
     {
-        if (Mathf.Abs(plane - playerPerp) > drawWidth) return; // face beyond draw distance
+        // Bring the voxel-space border geometry into Unity space, where the player values and the mesh already live.
+        float unityPlane = plane - originPerp;
 
-        float min = Mathf.Max(-parallelLimit, playerParallel - drawWidth);
-        float max = Mathf.Min(parallelLimit, playerParallel + drawWidth);
+        if (Mathf.Abs(unityPlane - playerPerp) > drawWidth) return; // face beyond draw distance
+
+        float min = Mathf.Max(-parallelLimit - originParallel, playerParallel - drawWidth);
+        float max = Mathf.Min(parallelLimit - originParallel, playerParallel + drawWidth);
         if (max - min < 0.01f) return; // degenerate window
 
         int i = _vertices.Count;
         if (axisIsX)
         {
-            _vertices.Add(new Vector3(plane, 0, min));
-            _vertices.Add(new Vector3(plane, 0, max));
-            _vertices.Add(new Vector3(plane, h, max));
-            _vertices.Add(new Vector3(plane, h, min));
+            _vertices.Add(new Vector3(unityPlane, 0, min));
+            _vertices.Add(new Vector3(unityPlane, 0, max));
+            _vertices.Add(new Vector3(unityPlane, h, max));
+            _vertices.Add(new Vector3(unityPlane, h, min));
         }
         else
         {
-            _vertices.Add(new Vector3(min, 0, plane));
-            _vertices.Add(new Vector3(max, 0, plane));
-            _vertices.Add(new Vector3(max, h, plane));
-            _vertices.Add(new Vector3(min, h, plane));
+            _vertices.Add(new Vector3(min, 0, unityPlane));
+            _vertices.Add(new Vector3(max, 0, unityPlane));
+            _vertices.Add(new Vector3(max, h, unityPlane));
+            _vertices.Add(new Vector3(min, h, unityPlane));
         }
 
-        // uv.x = world distance along the edge (world-anchored bands), uv.y = world height.
-        _uvs.Add(new Vector2(min, 0));
-        _uvs.Add(new Vector2(max, 0));
-        _uvs.Add(new Vector2(max, h));
-        _uvs.Add(new Vector2(min, h));
+        // uv.x = VOXEL-space distance along the edge (world-anchored bands), uv.y = world height. Kept in voxel
+        // space so the bands don't slide along the wall when the origin re-anchors.
+        float uMin = min + originParallel;
+        float uMax = max + originParallel;
+        _uvs.Add(new Vector2(uMin, 0));
+        _uvs.Add(new Vector2(uMax, 0));
+        _uvs.Add(new Vector2(uMax, h));
+        _uvs.Add(new Vector2(uMin, h));
 
         _triangles.Add(i);
         _triangles.Add(i + 1);

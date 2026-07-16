@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Data;
+using Helpers;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
@@ -40,7 +41,7 @@ namespace DebugVisualizations
             ChunkObject = new GameObject();
 #endif
             ChunkObject.transform.SetParent(parent);
-            ChunkObject.transform.position = chunkCoord.ToWorldPosition();
+            ChunkObject.transform.position = WorldOrigin.VoxelToUnity(chunkCoord.ToVoxelOrigin());
 
             MeshFilter meshFilter = ChunkObject.AddComponent<MeshFilter>();
             MeshRenderer mr = ChunkObject.AddComponent<MeshRenderer>();
@@ -64,7 +65,7 @@ namespace DebugVisualizations
         public void Reset(ChunkCoord chunkCoord, Material mat, Transform parent)
         {
             ChunkObject.transform.SetParent(parent);
-            ChunkObject.transform.position = chunkCoord.ToWorldPosition();
+            ChunkObject.transform.position = WorldOrigin.VoxelToUnity(chunkCoord.ToVoxelOrigin());
 #if UNITY_EDITOR
             ChunkObject.name = $"Visualizer_{chunkCoord.X.ToString()}_{chunkCoord.Z.ToString()}";
 #endif

@@ -208,10 +208,11 @@ public class ChunkPoolManager
     /// Retrieves a Border GameObject from the pool or instantiates a new one.
     /// </summary>
     /// <param name="prefab">The prefab to instantiate if the pool is empty.</param>
-    /// <param name="position">The world position to place the border at.</param>
+    /// <param name="position">The Unity-space position to place the border at.</param>
     /// <param name="parent">The transform parent to organize the border under.</param>
+    /// <param name="chunkCoord">The voxel-space chunk this border outlines, for the editor object name.</param>
     /// <returns>An active GameObject representing the chunk border.</returns>
-    public GameObject GetBorder(GameObject prefab, Vector3 position, Transform parent)
+    public GameObject GetBorder(GameObject prefab, Vector3 position, Transform parent, ChunkCoord chunkCoord)
     {
         // 1. Try to get from pool.
         // If pool is empty, DynamicPool calls createFunc which returns null.
@@ -228,8 +229,8 @@ public class ChunkPoolManager
         border.transform.SetParent(parent);
         border.transform.position = position;
 
-        // Update name
-        ChunkCoord chunkCoord = ChunkCoord.FromWorldPosition(position);
+        // Update name. The coord is passed in rather than re-derived from `position`: that is a Unity-space value,
+        // which resolves to the wrong chunk once the origin leaves (0, 0).
 #if UNITY_EDITOR
         border.name = $"Border {chunkCoord.X.ToString()}, {chunkCoord.Z.ToString()}";
 #endif

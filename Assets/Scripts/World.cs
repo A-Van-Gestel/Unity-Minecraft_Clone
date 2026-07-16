@@ -29,7 +29,6 @@ using Unity.Mathematics;
 using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Pool;
-using UnityEngine.Serialization;
 using Debug = UnityEngine.Debug;
 using Random = UnityEngine.Random;
 
@@ -190,6 +189,7 @@ public class World : MonoBehaviour
     private static readonly int s_shaderMinGlobalLightLevel = Shader.PropertyToID("minGlobalLightLevel");
     private static readonly int s_shaderMaxGlobalLightLevel = Shader.PropertyToID("maxGlobalLightLevel");
     private static readonly int s_shaderSkyLightColor = Shader.PropertyToID("SkyLightColor");
+    private static readonly int s_shaderWorldOriginOffset = Shader.PropertyToID("_WorldOriginOffset");
 
     // --- Fluid Vertex Data ---
     [NonSerialized]
@@ -641,6 +641,14 @@ public class World : MonoBehaviour
         _chunkBorderParent = borderParentGo.transform;
         _lastChunkBordersState = ShowChunkBorders;
 
+        // --- STEP 0: ANCHOR THE FLOATING ORIGIN (WS-4) ---
+        // Must precede every transform write and chunk creation below: they convert through the origin, so an
+        // anchor set afterwards would bake the stale offset into their positions. WS-4a pins the identity, which
+        // makes Unity space and voxel space coincide and the whole startup path bit-identical to pre-WS-4;
+        // WS-4b derives the anchor from the loaded player position here instead.
+        WorldOrigin.ResetToIdentity();
+        SetWorldOriginShaderGlobal();
+
         // --- STEP 1: DETERMINE INITIAL PLAYER POSITION ---
         // If we loaded a save, the player position is already set by LoadWorldGameState.
         // If not, we use the default spawn logic.
@@ -652,19 +660,21 @@ public class World : MonoBehaviour
             {
                 // Spawn point was already restored from the save in step 3.
                 spawnPosition = WorldSpawnPoint.ToAbsoluteWorldPosition();
-                _playerTransform.position = spawnPosition;
+                _playerTransform.position = WorldOrigin.VoxelToUnity(spawnPosition);
             }
             else
             {
                 // Set initial spawnPosition to the default fresh-world spawn for X & Z, and an unresolved Y value.
                 spawnPosition = new Vector3(VoxelData.DefaultSpawnPosition, ChunkRelativePosition.UNRESOLVED_HEIGHT, VoxelData.DefaultSpawnPosition);
-                _playerTransform.position = spawnPosition;
+                _playerTransform.position = WorldOrigin.VoxelToUnity(spawnPosition);
             }
         }
         else
         {
             // If we loaded a save, update our local 'spawnPosition' to match where the player actually is.
-            spawnPosition = _playerTransform.position;
+            // spawnPosition is voxel space (it feeds ResolveSpawnHeight and SetSpawnPoint), so the Unity-space
+            // transform converts. Display-only on this branch — nothing reads it before WS-4b reworks the load path.
+            spawnPosition = _playerTransform.position + WorldOrigin.OriginVoxel;
             savedPlayerPosition = _playerTransform.position;
         }
 
@@ -739,7 +749,7 @@ public class World : MonoBehaviour
         if (!wasSaveLoaded)
         {
             spawnPosition = ResolveSpawnHeight(spawnPosition);
-            _playerTransform.position = spawnPosition;
+            _playerTransform.position = WorldOrigin.VoxelToUnity(spawnPosition);
 
             if (!isEditorReplay)
             {
@@ -1410,6 +1420,15 @@ public class World : MonoBehaviour
 
         // Process their results.
         JobManager.ProcessMeshJobs();
+    }
+
+    /// <summary>
+    /// Pushes the floating-origin offset to the shaders that sample world-anchored fields (LiquidCore's noise).
+    /// Must run whenever the origin is re-anchored — otherwise the liquid pattern slides with the shift.
+    /// </summary>
+    private static void SetWorldOriginShaderGlobal()
+    {
+        Shader.SetGlobalVector(s_shaderWorldOriginOffset, (Vector3)WorldOrigin.OriginVoxel);
     }
 
     public void SetGlobalLightValue()
@@ -2337,13 +2356,15 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
-    /// Returns the chunk coordinates for a given world position.
+    /// Returns the voxel-space chunk coordinates containing a <b>Unity-space</b> position.
+    /// <para>Private, and every caller passes the player transform — so unlike the public float-taking query APIs
+    /// (which serve voxel-space callers too), this one can safely own the conversion for all of them.</para>
     /// </summary>
-    /// <param name="worldPos">The world position</param>
-    /// <returns>The chunk coordinates for the given world position</returns>
-    private static ChunkCoord GetChunkCoordFromVector3(Vector3 worldPos)
+    /// <param name="unityPos">The Unity-space position (the player transform).</param>
+    /// <returns>The voxel-space chunk coordinate containing that position.</returns>
+    private static ChunkCoord GetChunkCoordFromVector3(Vector3 unityPos)
     {
-        return ChunkCoord.FromWorldPosition(worldPos);
+        return WorldOrigin.UnityToChunk(unityPos);
     }
 
     /// <summary>
@@ -2722,8 +2743,8 @@ public class World : MonoBehaviour
         if (_chunkBorders.ContainsKey(chunkCoord)) return;
 
         // POOLING: Use ChunkPoolManager
-        Vector3 pos = chunkCoord.ToWorldPosition();
-        GameObject borderObject = ChunkPool.GetBorder(chunkBorderPrefab, pos, _chunkBorderParent);
+        Vector3 pos = WorldOrigin.VoxelToUnity(chunkCoord.ToVoxelOrigin());
+        GameObject borderObject = ChunkPool.GetBorder(chunkBorderPrefab, pos, _chunkBorderParent, chunkCoord);
 
         // Ensure state matches setting (Pool might return active object, but setting might be off)
         borderObject.SetActive(ShowChunkBorders);
@@ -2944,7 +2965,9 @@ public class World : MonoBehaviour
                 int globalY = startY + yOffset;
 
                 Vector3 localBlockOrigin = new Vector3(x, globalY, z);
-                Vector3 worldBlockOrigin = chunk.Coord.ToWorldPosition() + localBlockOrigin;
+
+                // Unity space: this is compared against the player transform below and fed to Debug.DrawLine.
+                Vector3 worldBlockOrigin = WorldOrigin.VoxelToUnity(chunk.Coord.ToVoxelOrigin()) + localBlockOrigin;
 
                 // --- RADIUS CULLING ---
                 const float COLLISION_BOUNDS_DRAW_RADIUS = 10f;

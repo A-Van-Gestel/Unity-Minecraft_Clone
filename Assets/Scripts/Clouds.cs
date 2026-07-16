@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Helpers;
 using UnityEngine;
 
 public class Clouds : MonoBehaviour
@@ -43,7 +44,11 @@ public class Clouds : MonoBehaviour
         _cloudTexWidth = _cloudPattern.width;
         _cloudTileSize = VoxelData.ChunkWidth;
         _offset = new Vector3Int(-(_cloudTexWidth / 2), 0, -(_cloudTexWidth / 2));
-        transform.position = new Vector3(VoxelData.DefaultSpawnPosition, cloudHeight, VoxelData.DefaultSpawnPosition);
+
+        // DefaultSpawnPosition is voxel space, so it converts. Root anchor only — UpdateClouds positions every tile
+        // in Unity space directly, so this never feeds the tile grid and is not origin-critical.
+        transform.position = WorldOrigin.VoxelToUnity(
+            new Vector3(VoxelData.DefaultSpawnPosition, cloudHeight, VoxelData.DefaultSpawnPosition));
     }
 
     // This is our new public initialization method.
@@ -136,7 +141,9 @@ public class Clouds : MonoBehaviour
                 // position += transform.position - new Vector3(cloudTexWidth / 2f, 0, cloudTexWidth / 2f);
                 // position.y = cloudHeight;
 
-                _clouds.Add(CloudTilePosFromVector3(position), CreateCloudTile(cloudMesh, position));
+                // x/y are already pattern-space (0.._cloudTexWidth), so they ARE the key — no wrap, and in
+                // particular no origin conversion: unlike UpdateClouds, this loop never holds a Unity-space value.
+                _clouds.Add(new Vector2Int(x, y), CreateCloudTile(cloudMesh, position));
             }
         }
     }
@@ -151,9 +158,13 @@ public class Clouds : MonoBehaviour
         {
             for (int y = 0; y < _cloudTexWidth; y += _cloudTileSize)
             {
+                // Unity space: the tile grid follows the player, so it re-anchors across a shift for free.
                 Vector3 position = _world.player.transform.position + new Vector3(x, 0, y) + _offset;
                 position = new Vector3(RoundToCloud(position.x), cloudHeight, RoundToCloud(position.z));
-                Vector2Int cloudPosition = CloudTilePosFromVector3(position);
+
+                // The pattern, unlike the tiles, is anchored to the WORLD — so the lookup converts to voxel space.
+                // Without this the whole cloudscape would jump to a different part of the pattern on a re-anchor.
+                Vector2Int cloudPosition = CloudTileKeyFromVoxel(WorldOrigin.UnityToVoxelCell(position));
 
                 // Check to prevent "KeyNotFoundException", though it shouldn't happen now.
                 if (_clouds.TryGetValue(cloudPosition, out GameObject cloud))
@@ -344,18 +355,27 @@ public class Clouds : MonoBehaviour
         return newCloudTile;
     }
 
-    private Vector2Int CloudTilePosFromVector3(Vector3 pos)
+    /// <summary>
+    /// Wraps an absolute voxel-space cell onto the repeating cloud pattern, yielding the tile's dictionary key.
+    /// </summary>
+    /// <param name="voxelCell">The absolute voxel-space cell the tile sits over.</param>
+    /// <returns>The pattern-space tile key, both components in <c>[0, _cloudTexWidth)</c>.</returns>
+    private Vector2Int CloudTileKeyFromVoxel(Vector3Int voxelCell)
     {
-        return new Vector2Int(CloudTileCoordFromFloat(pos.x), CloudTileCoordFromFloat(pos.z));
+        return new Vector2Int(WrapToPattern(voxelCell.x), WrapToPattern(voxelCell.z));
     }
 
-    private int CloudTileCoordFromFloat(float value)
+    /// <summary>
+    /// Positive-modulo wrap of a voxel coordinate onto the pattern width.
+    /// </summary>
+    /// <param name="value">An absolute voxel coordinate on one axis.</param>
+    /// <returns>The wrapped coordinate in <c>[0, _cloudTexWidth)</c>.</returns>
+    // Integer modulo, not the old float `frac` idiom: exact at any distance from the origin, where dividing a large
+    // world coordinate by the pattern width would quantize the result and stripe the pattern.
+    private int WrapToPattern(int value)
     {
-        float a = value / _cloudTexWidth; // Gets the position using cloudTexture width as units.
-        a -= Mathf.FloorToInt(a); // Subtract whole nums to get a 0-1 value representing position in cloud texture.
-        int b = Mathf.FloorToInt(_cloudTexWidth * a); // Multiply cloud texture width by 'a' to get position in texture globally.
-
-        return b;
+        int wrapped = value % _cloudTexWidth;
+        return wrapped < 0 ? wrapped + _cloudTexWidth : wrapped;
     }
 }
 
