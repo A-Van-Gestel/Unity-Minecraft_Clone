@@ -1,9 +1,10 @@
 # World Scaling — WS-4 Floating Origin Design
 
-**Version:** 1.6
+**Version:** 1.7
 **Date:** 2026-07-17
-**Status:** Partially implemented — **WS-4a + WS-4b shipped** (the origin plumbing and the shift; far travel is
-stable in-game), WS-4c (persistence + tooling) proposed.
+**Status:** **Implemented** — WS-4a (origin plumbing), WS-4b (the shift), and **WS-4c's persistence half**
+(`ChunkRelativePosition` player position, level.dat v13) are shipped and in-game confirmed. The only WS-4 work
+left is WS-4c's `/teleport` tool (`CMD-2`), deferred to a future session, and the v2 noise rider.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The far-travel precision phase of the world-scaling track. Unity render space and voxel world
@@ -253,12 +254,19 @@ Everything persisted is voxel world space. Two changes:
   `ChunkRelativePosition` retype is WS-4c's, and that one *is* a migration.)
   <br>**STEP 4 is not an anchor site:** it runs after chunk creation, so re-anchoring there would need the
   §4.3 translate loop. It stays a plain `VoxelToUnity` conversion.
-- **WS-4c:** `PlayerSaveData.position` migrates `Vector3` → `ChunkRelativePosition`
-  (**v12→v13**, AOT frozen-DTO protocol, `MigrateLevelDat` only — chunk/region formats
-  untouched), removing the ±2²⁴ precision cap on the saved value. Runtime construction uses
-  `new ChunkRelativePosition(OriginChunk, transform.position)` — the normalizing constructor
-  resolves the small local offset exactly, with no large-float round-trip. Rotation,
-  capabilities, and inventory are unchanged.
+- **WS-4c ✅ shipped (persistence half):** `PlayerSaveData.position` migrated `Vector3` →
+  `ChunkRelativePosition` (**v12→v13**, AOT frozen-DTO protocol, `MigrateLevelDat` only — chunk/region formats
+  untouched), removing the ±2²⁴ precision cap on the saved value. `Player.GetSaveData` writes
+  `WorldOrigin.UnityToRelative(transform.position)` — the normalizing constructor resolves the small local offset
+  exactly, with no large-float round-trip. Rotation, capabilities, and inventory are unchanged.
+  <br>**The format is only half the win — the load path has to carry it.** `ChunkRelativePosition` is threaded
+  through `SpawnResolution`/`SpawnPlacement` end-to-end, and the new **`WorldOrigin.VoxelToUnity(ChunkRelativePosition)`**
+  (the exact inverse of `UnityToRelative`: the chunk distance resolves in `int`, only the local offset is float) is
+  what converts at the transform write. STEP 1's anchor becomes simply `AnchorOrigin(spawnPosition.Chunk)` — the
+  saved chunk *is* the anchor, no coordinate math at all.
+  <br>⚠️ **`ToAbsoluteWorldPosition()` anywhere between the save file and the transform silently undoes all of it.**
+  Proven, not asserted: sabotaging the resume to route through it collapses a 2³⁰-voxel save's sub-voxel offset
+  from `(5.25, 9.75)` to `(0, 0)` — the Spawn suite's far-resume baseline fails on exactly that.
 
 `VoxelMod.GlobalPosition` (persisted in `pending_mods.bin`) is already voxel space; WS-4a makes
 the interaction call sites (`PlayerInteraction.cs:75/:93`) convert their Unity-space cells at
@@ -385,7 +393,8 @@ bounded-position assertion (§4.3 step 4) makes drift loud in dev builds.
 |-----------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|-----------------|
 | **WS-4a — origin plumbing, no shift** ✅ **SHIPPED 2026-07-16, in-game confirmed** | `WorldOrigin` type + helpers; thread every §5 boundary site; call-site audit sweep; suite baselines. Origin pinned `(0,0)` → **zero behavior change**, game bit-identical. Also landed the `_WorldOriginOffset` global + `LiquidCore` sampling (identity-safe at offset 0, so it moved out of WS-4b)    |   🟡   | WS-3 ✅          |
 | **WS-4b — the shift** ✅ **SHIPPED 2026-07-17, in-game confirmed**                 | §4.3 trigger + translate loop; `GetSaveData`/load voxel-space fix (§4.4 — **the one boundary WS-4a deliberately left**), a single `AnchorOrigin` at the SP-1 chokepoint rather than three spawn sites; bounded-position assertion. Also closed three WS-4a boundary misses the identity had hidden (§9) |   🔴   | WS-4a ✅, SP-1 ✅ |
-| **WS-4c — persistence + tooling**                                                 | `PlayerSaveData.position` → `ChunkRelativePosition`, v12→v13 AOT migration; `/teleport` command — `CMD-2` of [`COMMAND_CONSOLE_SYSTEM.md`](COMMAND_CONSOLE_SYSTEM.md) (console phases CMD-0/1 may land earlier, independently)                                                                          |   🟡   | WS-4b ✅, CMD-1  |
+| **WS-4c — persistence** ✅ **SHIPPED 2026-07-17, in-game confirmed**               | `PlayerSaveData.position` → `ChunkRelativePosition`, v12→v13 AOT migration, CRP threaded through the load path (+ the frozen-DTO fix the retype forced on four shipped steps — §9)                                                                                                                      |   🟡   | WS-4b ✅         |
+| **WS-4c — tooling** (deferred 2026-07-17)                                         | `/teleport` — `CMD-2` of [`COMMAND_CONSOLE_SYSTEM.md`](COMMAND_CONSOLE_SYSTEM.md) (console phases CMD-0/1 land first). Split from the persistence half, which did not need it                                                                                                                           |   🟡   | CMD-1           |
 
 WS-4a+b deliver the standalone value (stable far travel); WS-4c extends save precision past
 ±2²⁴ and ships the far-coordinate test harness. Bisectable: each phase compiles and keeps all
@@ -417,9 +426,14 @@ suites green on its own.
   <br>**Reach (stated, not implied):** these pin the origin *math*. No editor suite can construct a `Chunk` or drive
   a MonoBehaviour, so the *call sites* — `GetSaveData` actually adding `OriginVoxel`, the translate loop actually
   covering every object — are guarded by review and the in-game gate, not by a baseline. Same class as §4.7's ceiling.
-- **WS-4c:** v12→v13 migration fixture (frozen v12 level.dat → migrated CRP equals the old
-  absolute position exactly at near coords; far-coordinate fixture beyond 2²⁴ documents the
-  recovered precision), riding the `serialization-migration` skill.
+- **WS-4c baselines** ✅ **shipped (Spawn 9→10; Validate All 217→218, prove-red):** *far save resumes exactly* —
+  a 2³⁰-voxel save with a sub-voxel offset must arrive with its chunk and its local XZ **bit-identical**. Y is
+  compared approximately on purpose: it is a computed sum, and exact equality on a float addition tests the JIT's
+  intermediate precision, not the code. The prove-red is the "disk-only" design that was rejected in planning —
+  it fails this and nothing else, since the other nine baselines are near-origin and structurally blind to it.
+  <br>The migration itself was verified against **real saves rather than a synthetic fixture** — there were ~200 on
+  disk spanning v1–v12, which is better evidence than any fixture: the far v1 world `Test 100_000 world`
+  (x=809527) through the whole v1→v13 chain, decomposing exactly to chunk 50595 + local 7.5625.
 
 **In-game gate (WS-4b)** ✅ **PASSED 2026-07-17.** The gate was: fly past the 64-chunk threshold repeatedly — no
 visual pop at the shift frame; block targeting, placement/break, physics, and fluid edits land on the correct voxels
@@ -525,8 +539,25 @@ graduate to work items).
   float-precision artifacts until the v2 rider ships.
 - **Liquid noise input precision degrades cosmetically far out** under the raw
   `_WorldOriginOffset` — same class as today's absolute `worldPos`, liquid-only, accepted.
-- **Until WS-4c lands, the saved player position is precise only to ±2²⁴** (voxel-space
-  `Vector3`), coincidentally the same cap as the un-shipped noise rider.
+- ~~**Until WS-4c lands, the saved player position is precise only to ±2²⁴**~~ — **closed 2026-07-17**: it is
+  a `ChunkRelativePosition` on disk (v13) and stays chunk-relative all the way to the transform, so it is exact to
+  the ±2³¹ edge. The **spawn point** and the terrain height probe still resolve through an absolute `Vector3`
+  (`ResolveSpawnHeight` queries the world in absolute voxel space), so a *spawn point* placed past ±2²⁴ still
+  rounds — a smaller, separate concern than the player's position, and untouched here.
+- **The v13 retype exposed that four shipped level.dat migrations were only accidentally safe.** v3→v4, v6→v7,
+  v10→v11 and v11→v12 all round-tripped the whole document through the **live** `WorldSaveData`
+  (`FromJson` → mutate one field → `ToJson`). That works for an *additive* change — JsonUtility defaults an absent
+  field — and every level.dat change up to v12 was additive. A **re-type** is the case it cannot survive: a v1–v12
+  document's `"position":{"x":..,"y":..,"z":..}` has none of the members the new type looks for, so the field is
+  silently defaulted and written away. With ~200 saves on disk spanning v1–v12, this would have blanked the player
+  position in every one of them, with no error — the backup being the only recourse.
+  <br>This is exactly the coupling
+  [`AOT_WORLD_MIGRATION_SYSTEM.md`](../Architecture/AOT_WORLD_MIGRATION_SYSTEM.md) §1.2 forbids ("a complete
+  rewrite of those classes in the future cannot break old migrations"); those steps simply never adopted frozen
+  DTOs, and nothing forced the issue until now. Fixed first, as its own commit, by `LegacyLevelDat` — one frozen
+  v1–v12 shape all four now read. **The generalization is in the DTO's header:** a step migrating vN→vN+1 only ever
+  sees vN-shaped JSON, so a frozen DTO can never drop a field that did not exist yet — which is why it is safe to
+  freeze one shape for the whole era, and why the next re-type must write its own rather than extend it.
 - **The teleport command is a first-class console command** (`CMD-2` of
   [`COMMAND_CONSOLE_SYSTEM.md`](COMMAND_CONSOLE_SYSTEM.md)), not throwaway dev tooling — but v1
   ships no permissions gating, so it is effectively a cheats-on capability until that seat fills.
@@ -579,6 +610,18 @@ graduate to work items).
 
 ## Document History
 
+* **v1.7** - **WS-4c's persistence half SHIPPED** (2026-07-17), in-game confirmed across multiple migrated saves
+  and the fresh-world flow: `PlayerSaveData.position` is a `ChunkRelativePosition` (level.dat **v12→v13**,
+  `MigrateLevelDat` only, frozen DTOs on both sides), threaded through `SpawnResolution`/`SpawnPlacement` to the
+  transform via the new `WorldOrigin.VoxelToUnity(ChunkRelativePosition)` — so the saved position is exact to the
+  ±2³¹ edge instead of ±2²⁴, and STEP 1's anchor is just `spawnPosition.Chunk`. Spawn 9→10, Validate All 217→218,
+  prove-red (the rejected "disk-only" design collapses a 2³⁰ sub-voxel offset to `(0,0)`). **The phase's real
+  finding is in §9:** the retype exposed that four shipped level.dat migrations round-tripped the live
+  `WorldSaveData` and were only ever *accidentally* safe (every prior change was additive) — they would have
+  silently blanked the player position in the ~200 v1–v12 saves on disk. Fixed first, as its own commit, via the
+  frozen `LegacyLevelDat`. §7 splits WS-4c into a shipped persistence row and a deferred `/teleport` (CMD-2) row at
+  the user's request; the ±2²⁴ saved-position limitation is retired, with the spawn point's own absolute-`Vector3`
+  probe named as the smaller remaining case.
 * **v1.6** - **WS-4b SHIPPED** (2026-07-17), in-game confirmed: the shift trigger + translate loop
   (`World.ShiftOrigin`, `WorldOrigin.ShouldReanchor`, `Chunk`/`ChunkLoadAnimation`/`VoxelVisualizer`/`Clouds`
   `Reanchor`), §4.4's `GetSaveData`/anchor pairing at the SP-1 chokepoint (**no version bump — level.dat stays
@@ -635,5 +678,5 @@ graduate to work items).
 ---
 
 **Last Updated:** 2026-07-17
-**Next Review:** when WS-4c starts (`PlayerSaveData.position` → `ChunkRelativePosition`, v12→v13 — it needs CMD-1
-first for its `/teleport` half, but the migration half does not) or when the noise rider is scheduled.
+**Next Review:** when `/teleport` (CMD-2) is scheduled — it needs CMD-1 first — or when the v2 noise rider is,
+whose harness it was always meant to be. WS-4's own work is otherwise complete.

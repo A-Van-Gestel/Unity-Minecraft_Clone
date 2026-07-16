@@ -1,8 +1,9 @@
 # World Scaling — Implementation Roadmap (Tier B: unbounded XZ)
 
-**Version:** 1.9
+**Version:** 2.0
 **Date:** 2026-07-17
-**Status:** **WS-2 + WS-3 SHIPPED (2026-07-13) — XZ fully unbounded, both signs, save v11 unchanged. WS-4a + WS-4b SHIPPED (2026-07-17, in-game confirmed) — far travel is stable: flown to ~20k through multiple origin shifts with no jitter. WS-4c (level.dat v13 + teleport) remains; the noise rider stays deferred to WS-4 v2. OQ-1..7 all resolved in code.**
+**Status:** **Tier B COMPLETE. WS-2 + WS-3 SHIPPED (2026-07-13) — XZ fully unbounded, both signs. WS-4a + WS-4b + WS-4c's persistence half SHIPPED (2026-07-17, all in-game confirmed) — far travel is stable (flown to ~20k through multiple origin shifts, no jitter) and the saved player position is chunk-relative (level.dat v13), exact to the ±2³¹ edge. Remaining, both deferred by choice: `/teleport` (CMD-2, needs the console) and the v2 noise rider (⚠️ seed-breaking) — terrain still degrades at ~±2²⁴ even though travel no longer does. OQ-1..7 all resolved
+in code.**
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The decided execution path for scaling the world horizontally. Analysis (`WORLD_SCALING_ANALYSIS.md`)
@@ -93,11 +94,11 @@ coordinates go negative. Positive-only expansion sidesteps every one of them.
 
 ## 3. Phased plan
 
-| Phase                      | Scope                                                                                                                                                                                                                                                                                                  |  Effort   | Save impact                                  | Depends on     |
-|----------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------:|----------------------------------------------|----------------|
-| **WS-2** — unbounded +XZ ✅ | Relax XZ *upper* bound only (keep `>= 0`); neighbor-guard flip; reconceive `WorldCentre` as spawn const                                                                                                                                                                                                | ✅ SHIPPED | None (V2 byte-identical)                     | WS-1 ✅, VQ-1 ✅ |
-| **WS-3** — negative XZ ✅   | Drop `>= 0` floor (bounds only); fresh spawn → origin. V3 bump SKIPPED (V2 already neg-correct); seed hygiene + floor-div kept separate (§5)                                                                                                                                                           | ✅ SHIPPED | None (V2 byte-identical, save v11)           | WS-2 ✅         |
-| **WS-4** — floating origin | Periodic origin shift; `ChunkRelativePosition` for player/camera; `_WorldOriginOffset` shader continuity; rider deferred to v2. **WS-4a + WS-4b ✅ SHIPPED 2026-07-17** (in-game confirmed to ~20k, no jitter); **WS-4c open** → [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) |    🔴     | None (presentation) / WS-4c ⚠️ level.dat v13 | WS-3 ✅         |
+| Phase                        | Scope                                                                                                                                                                                                                                                                                                                                                                                  |  Effort   | Save impact                               | Depends on     |
+|------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------:|-------------------------------------------|----------------|
+| **WS-2** — unbounded +XZ ✅   | Relax XZ *upper* bound only (keep `>= 0`); neighbor-guard flip; reconceive `WorldCentre` as spawn const                                                                                                                                                                                                                                                                                | ✅ SHIPPED | None (V2 byte-identical)                  | WS-1 ✅, VQ-1 ✅ |
+| **WS-3** — negative XZ ✅     | Drop `>= 0` floor (bounds only); fresh spawn → origin. V3 bump SKIPPED (V2 already neg-correct); seed hygiene + floor-div kept separate (§5)                                                                                                                                                                                                                                           | ✅ SHIPPED | None (V2 byte-identical, save v11)        | WS-2 ✅         |
+| **WS-4** — floating origin ✅ | Periodic origin shift; `ChunkRelativePosition` for the player; `_WorldOriginOffset` shader continuity; rider deferred to v2. **WS-4a + WS-4b + WS-4c persistence ✅ SHIPPED 2026-07-17** (in-game confirmed to ~20k, no jitter; v13 migration confirmed over multiple saves). Only `/teleport` (CMD-2) is left → [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) | ✅ SHIPPED | level.dat **v13** (player position → CRP) | WS-3 ✅         |
 
 **Validation is built alongside each phase** (WS-1 precedent: its equivalence guard shipped in the
 "Chunk Math" suite, not after). WS-2 adds an unbounded-streaming / positive-past-border determinism
@@ -311,6 +312,14 @@ semantics — accepted as the permanent world limit.
 
 ## Document History
 
+* **v2.0** - **Tier B COMPLETE** (2026-07-17). WS-4c's persistence half shipped and in-game confirmed over multiple
+  migrated saves + the fresh-world flow: the player position is a `ChunkRelativePosition` on disk (**level.dat
+  v13**) and stays chunk-relative to the transform, so it is exact to the ±2³¹ edge. Together with WS-4a/WS-4b
+  earlier the same day, the horizontal scaling track is done: unbounded both signs, stable far travel, exact
+  persistence. Deferred by choice, not blocked: `/teleport` (CMD-2, wants the console first) and the v2 noise rider
+  (§6, ⚠️ seed-breaking) — **travel is stable but generation still degrades at ~±2²⁴**, which is the honest ceiling
+  today. Status line, §3 row, and Next Review updated; detail in the child doc (v1.7), including the four shipped
+  migrations the v13 retype forced onto frozen DTOs.
 * **v1.9** - **WS-4a + WS-4b SHIPPED** (2026-07-17, in-game confirmed): the floating origin is live — an existing
   ~10k save flown to ~20k through multiple re-anchors renders and behaves correctly with **no jitter**, closing the
   ~10k onset §6 describes. Far *travel* is now stable; far *generation* still degrades at ~±2²⁴ until the v2 noise
@@ -359,6 +368,5 @@ semantics — accepted as the permanent world limit.
 ---
 
 **Last Updated:** 2026-07-17
-**Next Review:** at the WS-4c kickoff (execution lives in
-[`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md)) or when Bug 04 / the
-seed-hygiene fix is scheduled. *(TF-14 world border shipped 2026-07-13; WS-4a+b shipped 2026-07-17.)*
+**Next Review:** when the v2 noise rider (§6) or `/teleport` (CMD-2) is scheduled, or when Bug 04 / the
+seed-hygiene fix is. *(TF-14 world border shipped 2026-07-13; WS-4a+b+c shipped 2026-07-17 — Tier B is complete.)*
