@@ -1,8 +1,8 @@
 # World Scaling — Implementation Roadmap (Tier B: unbounded XZ)
 
-**Version:** 1.8
-**Date:** 2026-07-16
-**Status:** **WS-2 + WS-3 SHIPPED (2026-07-13, in-game confirmed) — XZ now fully unbounded, both signs, save v11 unchanged. WS-4 design ready (see child doc). OQ-1..7 all resolved in code.**
+**Version:** 1.9
+**Date:** 2026-07-17
+**Status:** **WS-2 + WS-3 SHIPPED (2026-07-13) — XZ fully unbounded, both signs, save v11 unchanged. WS-4a + WS-4b SHIPPED (2026-07-17, in-game confirmed) — far travel is stable: flown to ~20k through multiple origin shifts with no jitter. WS-4c (level.dat v13 + teleport) remains; the noise rider stays deferred to WS-4 v2. OQ-1..7 all resolved in code.**
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The decided execution path for scaling the world horizontally. Analysis (`WORLD_SCALING_ANALYSIS.md`)
@@ -93,11 +93,11 @@ coordinates go negative. Positive-only expansion sidesteps every one of them.
 
 ## 3. Phased plan
 
-| Phase                      | Scope                                                                                                                                                         |  Effort   | Save impact                         | Depends on                    |
-|----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------:|-------------------------------------|-------------------------------|
-| **WS-2** — unbounded +XZ ✅ | Relax XZ *upper* bound only (keep `>= 0`); neighbor-guard flip; reconceive `WorldCentre` as spawn const                                                       | ✅ SHIPPED | None (V2 byte-identical)            | WS-1 ✅, VQ-1 ✅                |
-| **WS-3** — negative XZ ✅   | Drop `>= 0` floor (bounds only); fresh spawn → origin. V3 bump SKIPPED (V2 already neg-correct); seed hygiene + floor-div kept separate (§5)                   | ✅ SHIPPED | None (V2 byte-identical, save v11)  | WS-2 ✅                        |
-| **WS-4** — floating origin | Periodic origin shift; `ChunkRelativePosition` for player/camera; `_WorldOriginOffset` shader continuity; rider deferred to v2. **Design ready** → [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) |    🔴     | None (presentation) / WS-4c ⚠️ level.dat v13 | WS-3 ✅                        |
+| Phase                      | Scope                                                                                                                                                                                                                                                                                                  |  Effort   | Save impact                                  | Depends on     |
+|----------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------:|----------------------------------------------|----------------|
+| **WS-2** — unbounded +XZ ✅ | Relax XZ *upper* bound only (keep `>= 0`); neighbor-guard flip; reconceive `WorldCentre` as spawn const                                                                                                                                                                                                | ✅ SHIPPED | None (V2 byte-identical)                     | WS-1 ✅, VQ-1 ✅ |
+| **WS-3** — negative XZ ✅   | Drop `>= 0` floor (bounds only); fresh spawn → origin. V3 bump SKIPPED (V2 already neg-correct); seed hygiene + floor-div kept separate (§5)                                                                                                                                                           | ✅ SHIPPED | None (V2 byte-identical, save v11)           | WS-2 ✅         |
+| **WS-4** — floating origin | Periodic origin shift; `ChunkRelativePosition` for player/camera; `_WorldOriginOffset` shader continuity; rider deferred to v2. **WS-4a + WS-4b ✅ SHIPPED 2026-07-17** (in-game confirmed to ~20k, no jitter); **WS-4c open** → [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) |    🔴     | None (presentation) / WS-4c ⚠️ level.dat v13 | WS-3 ✅         |
 
 **Validation is built alongside each phase** (WS-1 precedent: its equivalence guard shipped in the
 "Chunk Math" suite, not after). WS-2 adds an unbounded-streaming / positive-past-border determinism
@@ -203,15 +203,15 @@ Compile check = Unity compiler (`RequestScriptCompilation` → `IsCompiling == f
 > **(a) No V3 codec bump / no migration** — `V2Codec` addresses via WS-1's negative-correct `ChunkMath`
 > and region filenames (`r.-1.0.bin`) round-trip negatives with zero format change; save version stays
 > 11. **(b) Seed-hygiene (Bug 04) + structure floor-div stay separate** — both are magnitude/far-out and
-> sign-independent, not negative-triggered; keeping them out leaves WS-3 non-seed-breaking (existing-world
-> generation byte-identical). **(c) Fresh-world spawn → origin (0,0).** Landed: `IsVoxelInWorld` → Y-only,
-> `TryGetVoxel` → Y-only, `IsChunkInWorld` ×2 → always-true (kept as the bounds chokepoint), the
-> negative-quadrant prove-red baseline + negative V2 codec pin, parity-mirror/`ChunkCoord`-doc/§3-rationale
-> sync; then spawn→origin + minimap floor-wall removal. **In-game confirmed:** fresh world spawned at (0,0),
-> negative chunks generated correctly, flew to ≈(−10 000, −10 000) with block/lava edits + fluid sim, and
-> negative-region files persist (`r.-20.-18.bin`). Suites: Chunk Math 26/26, Validate All 197/0.
-> **Limitation:** no automated negative-quadrant *generation-parity* scenario (no generation suite exists to
-> extend) — negative terrain determinism is verified in-game only.
+      > sign-independent, not negative-triggered; keeping them out leaves WS-3 non-seed-breaking (existing-world
+      > generation byte-identical). **(c) Fresh-world spawn → origin (0,0).** Landed: `IsVoxelInWorld` → Y-only,
+      > `TryGetVoxel` → Y-only, `IsChunkInWorld` ×2 → always-true (kept as the bounds chokepoint), the
+      > negative-quadrant prove-red baseline + negative V2 codec pin, parity-mirror/`ChunkCoord`-doc/§3-rationale
+      > sync; then spawn→origin + minimap floor-wall removal. **In-game confirmed:** fresh world spawned at (0,0),
+      > negative chunks generated correctly, flew to ≈(−10 000, −10 000) with block/lava edits + fluid sim, and
+      > negative-region files persist (`r.-20.-18.bin`). Suites: Chunk Math 26/26, Validate All 197/0.
+      > **Limitation:** no automated negative-quadrant *generation-parity* scenario (no generation suite exists to
+      > extend) — negative terrain determinism is verified in-game only.
 >
 > The original §5 prerequisite list below is retained for the deferred riders (their homes are noted inline).
 
@@ -249,13 +249,19 @@ drop + validation is WS-3**; the rest are separable riders with the homes noted:
 
 ---
 
-## 6. WS-4 — floating origin (Phase 3, design ready)
+## 6. WS-4 — floating origin (Phase 3, **WS-4a + WS-4b shipped**; WS-4c open)
 
 > **2026-07-16:** the full execution design now lives in
 > [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) (WS-4a plumbing /
 > WS-4b shift / WS-4c persistence+teleport; decision menu closed). The sketch below is retained
 > for the rider spec; where they differ, the child doc wins. Jitter was observed in-game at
 > ~10 000 voxels (2026-07-15), earlier than the ~16k estimate below.
+>
+> **2026-07-17:** the origin plumbing (WS-4a) and the shift itself (WS-4b) are **shipped and in-game
+> confirmed** — a ~20k flight through multiple re-anchors renders and behaves correctly with no jitter,
+> so the ~10k jitter onset this section describes is gone in practice. **WS-4c** (`PlayerSaveData.position`
+> → `ChunkRelativePosition`, level.dat v12→v13, + `/teleport`) is what remains, and the ±2²⁴ cap below
+> still applies to the *saved* position until it lands.
 
 The far-travel precision follow-up. Independent of WS-2/WS-3 — a bigger near-origin world with
 negative quadrants is fully usable without it. Full design in `WORLD_SCALING_ANALYSIS.md` §3.3
@@ -305,6 +311,11 @@ semantics — accepted as the permanent world limit.
 
 ## Document History
 
+* **v1.9** - **WS-4a + WS-4b SHIPPED** (2026-07-17, in-game confirmed): the floating origin is live — an existing
+  ~10k save flown to ~20k through multiple re-anchors renders and behaves correctly with **no jitter**, closing the
+  ~10k onset §6 describes. Far *travel* is now stable; far *generation* still degrades at ~±2²⁴ until the v2 noise
+  rider, and the *saved* position keeps its ±2²⁴ cap until WS-4c (level.dat v12→v13 + `/teleport`), which is all
+  that remains of WS-4. Status line, §3 row, §6 header, and Next Review updated; full detail in the child doc (v1.6).
 * **v1.8** - WS-4 design authored as child doc [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md)
   (2026-07-16): `WorldOrigin` explicit-helper conversions, 64-chunk re-anchor, player save →
   `ChunkRelativePosition` (v12→v13), dev teleport in scope; noise rider stays a WS-4 v2 extension.
@@ -347,7 +358,7 @@ semantics — accepted as the permanent world limit.
 
 ---
 
-**Last Updated:** 2026-07-16
-**Next Review:** at the WS-4a kickoff (execution lives in
+**Last Updated:** 2026-07-17
+**Next Review:** at the WS-4c kickoff (execution lives in
 [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md)) or when Bug 04 / the
-seed-hygiene fix is scheduled. *(TF-14 world border shipped 2026-07-13.)*
+seed-hygiene fix is scheduled. *(TF-14 world border shipped 2026-07-13; WS-4a+b shipped 2026-07-17.)*

@@ -17,7 +17,8 @@ namespace Serialization.Migration.Steps
 
         public override string MigrateLevelDat(string oldJson)
         {
-            WorldSaveData data = JsonUtility.FromJson<WorldSaveData>(oldJson);
+            // Frozen DTO, not the live WorldSaveData — see LegacyLevelDat's header.
+            LegacyLevelDat data = JsonUtility.FromJson<LegacyLevelDat>(oldJson);
 
             // Existing worlds were unbounded, so upgrade them with the border disabled.
             data.borderRadius = 0;
