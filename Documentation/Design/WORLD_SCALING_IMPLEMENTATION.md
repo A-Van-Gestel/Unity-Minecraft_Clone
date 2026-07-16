@@ -1,8 +1,8 @@
 # World Scaling — Implementation Roadmap (Tier B: unbounded XZ)
 
-**Version:** 1.7
-**Date:** 2026-07-13
-**Status:** **WS-2 + WS-3 SHIPPED (2026-07-13, in-game confirmed) — XZ now fully unbounded, both signs, save v11 unchanged. WS-4 deferred. OQ-1..7 all resolved in code.**
+**Version:** 1.8
+**Date:** 2026-07-16
+**Status:** **WS-2 + WS-3 SHIPPED (2026-07-13, in-game confirmed) — XZ now fully unbounded, both signs, save v11 unchanged. WS-4 design ready (see child doc). OQ-1..7 all resolved in code.**
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The decided execution path for scaling the world horizontally. Analysis (`WORLD_SCALING_ANALYSIS.md`)
@@ -37,6 +37,9 @@ in place below.
   — the region codec (`RegionAddressCodec.V2`) and the AOT migration protocol `WS-3` needs for its V3 bump.
 - [`CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md`](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) — `CP-7`
   owns the `ChunkHeight`/`CHUNK_HEIGHT` constant unification (a Tier A prerequisite, not on this track).
+- [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) — the WS-4 execution
+  design (2026-07-16): `WorldOrigin` re-anchor at 64 chunks, full boundary inventory, WS-4a/b/c
+  phasing. Supersedes §6's sketch; the noise-precision rider stays deferred to its v2 extension.
 
 ---
 
@@ -94,7 +97,7 @@ coordinates go negative. Positive-only expansion sidesteps every one of them.
 |----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------:|-------------------------------------|-------------------------------|
 | **WS-2** — unbounded +XZ ✅ | Relax XZ *upper* bound only (keep `>= 0`); neighbor-guard flip; reconceive `WorldCentre` as spawn const                                                       | ✅ SHIPPED | None (V2 byte-identical)            | WS-1 ✅, VQ-1 ✅                |
 | **WS-3** — negative XZ ✅   | Drop `>= 0` floor (bounds only); fresh spawn → origin. V3 bump SKIPPED (V2 already neg-correct); seed hygiene + floor-div kept separate (§5)                   | ✅ SHIPPED | None (V2 byte-identical, save v11)  | WS-2 ✅                        |
-| **WS-4** — floating origin | Periodic origin shift; `ChunkRelativePosition` for player/camera; `_WorldOriginOffset` shader continuity; **noise-precision rider** (double base offsets, §6) |    🔴     | None (presentation) / rider ⚠️ seed | Independent (far-travel gate) |
+| **WS-4** — floating origin | Periodic origin shift; `ChunkRelativePosition` for player/camera; `_WorldOriginOffset` shader continuity; rider deferred to v2. **Design ready** → [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) |    🔴     | None (presentation) / WS-4c ⚠️ level.dat v13 | WS-3 ✅                        |
 
 **Validation is built alongside each phase** (WS-1 precedent: its equivalence guard shipped in the
 "Chunk Math" suite, not after). WS-2 adds an unbounded-streaming / positive-past-border determinism
@@ -246,7 +249,13 @@ drop + validation is WS-3**; the rest are separable riders with the homes noted:
 
 ---
 
-## 6. WS-4 — floating origin (Phase 3, deferred)
+## 6. WS-4 — floating origin (Phase 3, design ready)
+
+> **2026-07-16:** the full execution design now lives in
+> [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) (WS-4a plumbing /
+> WS-4b shift / WS-4c persistence+teleport; decision menu closed). The sketch below is retained
+> for the rider spec; where they differ, the child doc wins. Jitter was observed in-game at
+> ~10 000 voxels (2026-07-15), earlier than the ~16k estimate below.
 
 The far-travel precision follow-up. Independent of WS-2/WS-3 — a bigger near-origin world with
 negative quadrants is fully usable without it. Full design in `WORLD_SCALING_ANALYSIS.md` §3.3
@@ -296,6 +305,10 @@ semantics — accepted as the permanent world limit.
 
 ## Document History
 
+* **v1.8** - WS-4 design authored as child doc [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md)
+  (2026-07-16): `WorldOrigin` explicit-helper conversions, 64-chunk re-anchor, player save →
+  `ChunkRelativePosition` (v12→v13), dev teleport in scope; noise rider stays a WS-4 v2 extension.
+  §6 annotated; observed jitter onset ~10k recorded. §3 row + status line updated.
 * **v1.7** - **WS-3 shipped** (2026-07-13, in-game confirmed). Re-scoped lean at execution: XZ floor fully
   dropped (`IsVoxelInWorld`/`TryGetVoxel` → Y-only, `IsChunkInWorld` → always-true), fresh spawn → origin,
   minimap floor removed. **V3 codec bump SKIPPED** (V2 + region filenames already round-trip negatives —
@@ -334,5 +347,7 @@ semantics — accepted as the permanent world limit.
 
 ---
 
-**Last Updated:** 2026-07-13
-**Next Review:** at the WS-4 kickoff (floating origin + noise-precision rider) or when Bug 04 / the seed-hygiene fix is scheduled. *(TF-14 world border shipped 2026-07-13.)*
+**Last Updated:** 2026-07-16
+**Next Review:** at the WS-4a kickoff (execution lives in
+[`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md)) or when Bug 04 / the
+seed-hygiene fix is scheduled. *(TF-14 world border shipped 2026-07-13.)*
