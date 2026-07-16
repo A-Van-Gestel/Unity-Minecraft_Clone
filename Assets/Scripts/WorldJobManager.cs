@@ -360,7 +360,9 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
                 Map = jobData.Map,
                 SectionData = sectionData,
                 BlockTypes = _world.JobDataManager.BlockTypesJobData,
-                ChunkPosition = chunk.ChunkPosition,
+                // Voxel space, from the coord — never the chunk's Unity-space transform position: jobs live in voxel
+                // space exclusively and must not see the floating origin.
+                ChunkPosition = chunkCoord.ToWorldPosition(),
                 NeighborBack = jobData.Neighbors.NeighborS,
                 NeighborFront = jobData.Neighbors.NeighborN,
                 NeighborLeft = jobData.Neighbors.NeighborW,

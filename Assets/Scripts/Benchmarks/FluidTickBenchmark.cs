@@ -406,13 +406,11 @@ namespace Benchmarks
                 scenario.Seed(data);
                 data.IsPopulated = true;
 
+                // Reset is bypassed on purpose (it would re-fetch ChunkData from worldData instead of using our seeded
+                // data). Nothing here needs the chunk's Unity-space position: this substrate never renders, and the
+                // global→local conversion ApplyModifications performs derives the local cell from the voxel
+                // coordinate alone.
                 Chunk chunk = new Chunk(coord);
-                // Chunk.Reset normally sets ChunkPosition, but we bypass Reset (it would re-fetch ChunkData from
-                // worldData instead of using our seeded data). Set it explicitly: ApplyModifications' six-neighbor
-                // re-activation converts global→local via Chunk.GetVoxelPositionInChunkFromGlobalVector3, which
-                // subtracts ChunkPosition — without it, chunks at a non-zero origin (the multi-chunk scenarios)
-                // read the wrong cell and mis-register neighbors.
-                chunk.ChunkPosition = coord.ToWorldPosition();
                 chunk.ChunkData = data;
                 data.Chunk = chunk;
 

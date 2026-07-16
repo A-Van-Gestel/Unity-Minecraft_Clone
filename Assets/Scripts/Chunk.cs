@@ -14,7 +14,14 @@ using Object = UnityEngine.Object;
 public class Chunk
 {
     public ChunkCoord Coord;
-    public Vector3 ChunkPosition;
+
+    /// <summary>
+    /// Where this chunk's GameObject sits in <b>Unity</b> space — <see cref="Coord"/> put through the floating origin.
+    /// Named for its space on purpose: it is a render-space value, so it must never be fed to a voxel-space consumer
+    /// (a query, a job, anything persisted). Those derive their own origin from <see cref="Coord"/>.
+    /// </summary>
+    public Vector3 UnityPosition;
+
     public ChunkData ChunkData;
     private readonly SectionRenderer[] _sectionRenderers;
 
@@ -89,7 +96,7 @@ public class Chunk
 
         // The single chokepoint placing a chunk's GameObject in Unity space (SectionRenderers are children, so they
         // ride along). Re-derived from Coord rather than patched by a delta, so a re-anchor cannot accumulate drift.
-        ChunkPosition = WorldOrigin.VoxelToUnity(Coord.ToVoxelOrigin());
+        UnityPosition = WorldOrigin.VoxelToUnity(Coord.ToVoxelOrigin());
 
         // Update GameObject identity
 #if UNITY_EDITOR
@@ -99,12 +106,12 @@ public class Chunk
         if (World.Instance.settings.enableChunkLoadAnimations && _loadAnimation != null)
         {
             _loadAnimation.enabled = true;
-            _loadAnimation.ResetToUnderground(ChunkPosition);
+            _loadAnimation.ResetToUnderground(UnityPosition);
         }
         else
         {
             if (_loadAnimation != null) _loadAnimation.enabled = false;
-            ChunkGameObject.transform.position = ChunkPosition;
+            ChunkGameObject.transform.position = UnityPosition;
         }
 
         // Reset State
@@ -511,21 +518,19 @@ public class Chunk
     }
 
     /// <summary>
-    /// Converts a global world position into a local voxel position strictly within the bounds of this chunk.
+    /// Converts an absolute <b>voxel-space</b> position into the local voxel position within its chunk.
     /// </summary>
-    /// <param name="pos">The global world-space position.</param>
+    /// <param name="pos">The absolute voxel-space position (NOT a Unity transform — callers convert first).</param>
     /// <returns>The local 3D position of the voxel (0-15 on X and Z).</returns>
-    /// <example><c>Global Pos (17.5f, 50f, -5f)</c> in Chunk at <c>(16, 0, -16)</c> -> <c>Local Pos (1, 50, 11)</c></example>
+    /// <example><c>Voxel Pos (17.5f, 50f, -5f)</c> in Chunk at <c>(16, 0, -16)</c> -> <c>Local Pos (1, 50, 11)</c></example>
     public Vector3Int GetVoxelPositionInChunkFromGlobalVector3(Vector3 pos)
     {
-        int xCheck = Mathf.FloorToInt(pos.x);
-        int yCheck = Mathf.FloorToInt(pos.y);
-        int zCheck = Mathf.FloorToInt(pos.z);
-
-        xCheck -= Mathf.FloorToInt(ChunkPosition.x);
-        zCheck -= Mathf.FloorToInt(ChunkPosition.z);
-
-        return new Vector3Int(xCheck, yCheck, zCheck);
+        // The chunk's own origin is deliberately not an input: masking the voxel coordinate yields the same local
+        // coordinate without it, so this cannot be fed the wrong space. Shares WorldData.TryGetVoxel's idiom.
+        return new Vector3Int(
+            ChunkMath.VoxelToLocal(Mathf.FloorToInt(pos.x)),
+            Mathf.FloorToInt(pos.y),
+            ChunkMath.VoxelToLocal(Mathf.FloorToInt(pos.z)));
     }
 
     #region Mesh Generation
@@ -640,7 +645,7 @@ public class Chunk
         {
             // If animations are heavily disabled or toggled off mid-game, ensure chunk is snapped to correct position
             if (_loadAnimation != null) _loadAnimation.enabled = false;
-            ChunkGameObject.transform.position = ChunkPosition;
+            ChunkGameObject.transform.position = UnityPosition;
         }
 
         _hasPlayedLoadAnimation = true;
