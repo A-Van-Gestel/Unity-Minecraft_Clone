@@ -213,7 +213,8 @@ data instead of being a no-op version stamp today. ⚠️ Format-adjacent when i
 
 Float32 has ~7 significant digits: at |pos| ≈ 100k, positions quantize to ~1 cm (visible vertex
 jitter, z-fighting, swimming shadows); at ~1M it's ~10 cm (broken). Camera-relative jitter starts
-being visible around **16k–65k** units. The engine's internal data model is already mostly immune
+being visible around **16k–65k** units — though in-game observation (2026-07-15, post-WS-3) puts the
+actual onset **earlier, at ~10 000 voxels**. The engine's internal data model is already mostly immune
 — this is a *presentation-layer* problem:
 
 **Already safe (keep it that way):**
@@ -225,6 +226,12 @@ being visible around **16k–65k** units. The engine's internal data model is al
   deltas; that's the primitive everything else needs).
 - Physics: `VoxelRigidbody` is custom (no PhysX world-space dependency) — make it operate on
   `ChunkRelativePosition` natively and it is origin-independent.
+  > **Superseded** by [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) §4.2
+  > (shipped in WS-4a): reading the solver shows no such rewrite is needed. Its float math is already
+  > origin-relative by nature (velocity, momentum, AABB sweeps are deltas or near-origin floats), so it
+  > stays a pure Unity-space solver and only its two voxel *lookup* sites offset. Likewise
+  > `ChunkRelativePosition` is the **persistence** format, not the runtime math substrate — at runtime
+  > the "small Unity transform + integer origin" pairing *is* the chunk-relative representation.
 
 **Needs work — recommended design: periodic origin shift.**
 
@@ -236,6 +243,11 @@ Maintain a `WorldOriginChunk` (a `ChunkCoord`); Unity world position of anything
    player, clouds, and particles by the (exact, integer-multiple-of-16) delta in one frame.
    Chunk positions are already assigned in exactly one place (`Chunk.Reset` /
    `ChunkLoadAnimation`) — route them through the origin mapping and the shift is one loop.
+   > **Correction** (WS-4a audit, 2026-07-16): "exactly one place" undercounts. `Chunk.Reset` is the
+   > chokepoint for chunk *GameObjects*, but the WS-4a sweep found voxel→Unity placement also in the
+   > chunk-border visualizer, `ChunkPoolManager.GetBorder`, `VisualizerChunkData`, the collision-bounds
+   > debug draw, `BorderWallRenderer`, `Clouds`, the spawn writes, and the benchmark waypoint drivers.
+   > See [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) §5.1 for the full list.
 2. **Shift by integer multiples of the chunk size only.** This keeps every voxel boundary, every
    `frac()` in shaders, and every texture-tiling computation bit-exact across shifts.
 3. **Shaders:** `LiquidCore.hlsl` uses `worldPos` for noise coordinates, `frac(worldPos)` shore
