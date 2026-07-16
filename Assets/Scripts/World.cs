@@ -21,6 +21,7 @@ using Libraries;
 using MyBox;
 using Physics;
 using Serialization;
+using Spawn;
 using UI;
 using Unity.Collections;
 using Unity.Jobs;
@@ -540,10 +541,10 @@ public class World : MonoBehaviour
         // Ahead of everything that reads it: the save load below writes the player transform, and every chunk and
         // visual placed afterwards converts through the origin. WS-4a pins the identity, which makes Unity space and
         // voxel space coincide and the whole startup path bit-identical to pre-WS-4.
-        // WS-4b does NOT simply re-anchor here: the anchor must come from the loaded player position, which only
-        // exists once the save is parsed — so its derivation belongs inside the load path (see LoadWorldGameState /
-        // Player.LoadSaveData), which must set the origin from the saved voxel position *before* writing the
-        // transform. This call stays as the fresh-world default.
+        // WS-4b does NOT simply re-anchor here: the anchor must come from the starting player position, which only
+        // exists once the save is parsed. Since SP-1 that position has one home — the SpawnResolution chokepoint in
+        // STEP 1 below — so the re-anchor belongs there, ahead of its transform write. This call stays as the
+        // pre-load default.
         AnchorOrigin(new ChunkCoord(0, 0));
 
         // --- Initialize World settings (from save data / create new world) ---
@@ -580,6 +581,15 @@ public class World : MonoBehaviour
         // Only load if it's NOT a new game AND Persistence is actually enabled.
         WorldTypeID loadedWorldType = WorldTypeID.Legacy; // Default for old saves / new legacy games
         bool isEditorReplay = false;
+        bool hasExistingMetadata = false;
+
+        // The persisted player position travels to STEP 1 rather than being applied here: SpawnResolution owns the
+        // player's placement, and it must settle before chunk loading (the position selects which chunks load).
+        // Seeded from the player's current (prefab) position, not zero, so the metadata-null hole documented on
+        // SpawnResolution.Classify still resumes where it always did — a save that classifies as LoadedSave but has
+        // no readable level.dat to override this.
+        Vector3 savedPlayerVoxelPosition = _playerTransform.position + WorldOrigin.OriginVoxel;
+
         if (!isNewGame && settings.EnablePersistence)
         {
             // Load Pending Mods
@@ -591,6 +601,8 @@ public class World : MonoBehaviour
 
             if (metadata != null)
             {
+                hasExistingMetadata = true;
+                savedPlayerVoxelPosition = metadata.player.position;
                 SaveSystem.LoadWorldGameState(this, metadata);
                 VoxelData.Seed = metadata.seed; // Re-affirm seed from save just in case
                 worldData.seed = metadata.seed;
@@ -606,9 +618,10 @@ public class World : MonoBehaviour
             WorldSaveData existingMeta = SaveSystem.LoadWorldMetadata(worldName, IsVolatileMode);
             if (existingMeta != null)
             {
+                hasExistingMetadata = true;
                 isEditorReplay = true;
                 loadedWorldType = existingMeta.worldType;
-                WorldSpawnPoint = existingMeta.spawnPosition;
+                SetSpawnPoint(existingMeta.spawnPosition);
                 BorderRadius = existingMeta.borderRadius;
                 Debug.Log($"[World] Editor re-play detected — restoring persisted spawn point: {WorldSpawnPoint}");
             }
@@ -652,29 +665,14 @@ public class World : MonoBehaviour
         _lastChunkBordersState = ShowChunkBorders;
 
         // --- STEP 1: DETERMINE INITIAL PLAYER POSITION ---
-        // If we loaded a save, the player position is already set by LoadWorldGameState.
-        // If not, we use the default spawn logic.
-        bool wasSaveLoaded = !isNewGame && settings.EnablePersistence;
-        Vector3 savedPlayerPosition = new Vector3();
-        if (!wasSaveLoaded)
-        {
-            if (isEditorReplay)
-            {
-                // Spawn point was already restored from the save in step 3.
-                spawnPosition = WorldSpawnPoint.ToAbsoluteWorldPosition();
-                _playerTransform.position = WorldOrigin.VoxelToUnity(spawnPosition);
-            }
-            else
-            {
-                // Set initial spawnPosition to the default fresh-world spawn for X & Z, and an unresolved Y value.
-                spawnPosition = new Vector3(VoxelData.DefaultSpawnPosition, ChunkRelativePosition.UNRESOLVED_HEIGHT, VoxelData.DefaultSpawnPosition);
-                _playerTransform.position = WorldOrigin.VoxelToUnity(spawnPosition);
-            }
-        }
-        else
-        {
-            savedPlayerPosition = _playerTransform.position;
-        }
+        // The single place a starting player position is decided (SP-1). Whichever source this world came from, the
+        // position must be settled before STEP 2: it is what PlayerChunkCoord — and hence the set of chunks that
+        // load — is derived from. Its Y may still be the unresolved sentinel; STEP 4 probes the surface once the
+        // chunk data it selects exists.
+        SpawnSource spawnSource = SpawnResolution.Classify(isNewGame, settings.EnablePersistence, hasExistingMetadata);
+        spawnPosition = SpawnResolution.ResolveInitial(
+            spawnSource, savedPlayerVoxelPosition, WorldSpawnPoint, VoxelData.DefaultSpawnPosition);
+        _playerTransform.position = WorldOrigin.VoxelToUnity(spawnPosition);
 
         PlayerChunkCoord = WorldOrigin.UnityToChunk(_playerTransform.position);
 
@@ -744,31 +742,18 @@ public class World : MonoBehaviour
         // 4. NOW it's safe to get the spawn height, as the data AND mesh colliders exist.
         Debug.Log("--- Finalizing startup ---");
         Debug.Log("Getting spawn position...");
-        if (!wasSaveLoaded)
-        {
-            spawnPosition = ResolveSpawnHeight(spawnPosition);
-            _playerTransform.position = WorldOrigin.VoxelToUnity(spawnPosition);
 
-            if (!isEditorReplay)
-            {
-                // Set the canonical spawn point for new games to the resolved surface position.
-                SetSpawnPoint(new ChunkRelativePosition(spawnPosition));
-            }
-        }
-        else
-        {
-            Debug.Log($"Re-using last player location from loaded save. {savedPlayerPosition}");
-            _playerTransform.position = savedPlayerPosition;
+        // The chunk data the height probe needs now exists, so the same decision unit finishes the placement: it
+        // aims ResolveSpawnHeight at whichever position this source actually needs resolved (for a resumed save that
+        // is the spawn point, not the player), and decides whether the canonical spawn point is rewritten.
+        SpawnPlacement placement = SpawnResolution.ResolveFinal(
+            spawnSource, spawnPosition, WorldSpawnPoint, ResolveSpawnHeight);
 
-            // Ensure the canonical spawn point is fully resolved (e.g. from a v10->v11 migration).
-            Vector3 unresolvedSpawn = WorldSpawnPoint.ToAbsoluteWorldPosition();
-            Vector3 resolvedSpawn = ResolveSpawnHeight(unresolvedSpawn);
-            if (resolvedSpawn != unresolvedSpawn)
-            {
-                SetSpawnPoint(new ChunkRelativePosition(resolvedSpawn));
-                Debug.Log($"[World] Lazily resolved canonical spawn point to {WorldSpawnPoint}");
-            }
-        }
+        spawnPosition = placement.PlayerVoxelPosition;
+        _playerTransform.position = WorldOrigin.VoxelToUnity(spawnPosition);
+
+        if (placement.ShouldCanonicalizeSpawn)
+            SetSpawnPoint(placement.CanonicalSpawn);
 
         Debug.Log("Initializing clouds...");
         clouds?.Initialize();

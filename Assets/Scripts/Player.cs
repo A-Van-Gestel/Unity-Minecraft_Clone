@@ -250,10 +250,12 @@ public class Player : MonoBehaviour
 
     public void LoadSaveData(PlayerSaveData data)
     {
-        // 1. Position + small Y offset to prevent clipping trough world
-        transform.position = data.position + new Vector3(0, 0.1f, 0);
+        // NOTE: data.position is deliberately NOT applied here. World.StartWorld owns the player's placement through
+        // Spawn.SpawnResolution, which must settle the position before chunk loading begins; a write here would be a
+        // second, competing one from outside that chokepoint. The anti-clip Y offset moved there too
+        // (SpawnResolution.SavedPositionClipOffsetY).
 
-        // 2. Rotation
+        // 1. Rotation
         Vector3 savedRot = data.rotation;
 
         // Apply Yaw to Body (Y axis)
@@ -268,7 +270,7 @@ public class Player : MonoBehaviour
             _playerCamera.localEulerAngles = new Vector3(savedRot.x, 0, 0);
         }
 
-        // 3. Capabilities
+        // 2. Capabilities
         IsFlying = data.capabilities.isFlying;
         IsNoclipping = data.capabilities.isNoclipping;
     }
