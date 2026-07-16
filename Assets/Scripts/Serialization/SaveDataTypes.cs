@@ -75,7 +75,12 @@ namespace Serialization
     [Serializable]
     public class PlayerSaveData
     {
-        public Vector3 position;
+        /// <summary>
+        /// The player's position in voxel world space, stored chunk-relative so it stays exact at any distance
+        /// (v13; an absolute <see cref="Vector3"/> before that, which lost sub-voxel precision past ±2²⁴).
+        /// </summary>
+        public ChunkRelativePosition position;
+
         public Vector3 rotation;
         public PlayerCapabilityData capabilities = new PlayerCapabilityData();
         public List<InventoryItemData> inventory = new List<InventoryItemData>();

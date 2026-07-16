@@ -54,21 +54,30 @@ namespace Spawn
         /// must be settled first — its Y may still be the unresolved sentinel.
         /// </summary>
         /// <param name="source">The spawn source, from <see cref="Classify"/>.</param>
-        /// <param name="savedVoxelPosition">The persisted player position; read only for <see cref="SpawnSource.LoadedSave"/>.</param>
+        /// <param name="savedPlayerPosition">The persisted player position; read only for <see cref="SpawnSource.LoadedSave"/>.</param>
         /// <param name="worldSpawnPoint">The world's canonical spawn point; read only for <see cref="SpawnSource.EditorReplay"/>.</param>
         /// <param name="defaultSpawnPosition">The fresh-world default spawn coordinate, applied to both X and Z.</param>
         /// <returns>The voxel-space position to place the player at before chunk loading.</returns>
-        public static Vector3 ResolveInitial(SpawnSource source, Vector3 savedVoxelPosition,
-            ChunkRelativePosition worldSpawnPoint, float defaultSpawnPosition)
+        /// <remarks>
+        /// Chunk-relative in and out, never absolute: an absolute <see cref="Vector3"/> anywhere on this path would
+        /// round a far-out saved position back to whole voxels (or worse), which is exactly the loss the v13 format
+        /// exists to prevent. The caller converts once, at the transform write, via
+        /// <c>WorldOrigin.VoxelToUnity(ChunkRelativePosition)</c>.
+        /// </remarks>
+        public static ChunkRelativePosition ResolveInitial(SpawnSource source,
+            ChunkRelativePosition savedPlayerPosition, ChunkRelativePosition worldSpawnPoint,
+            float defaultSpawnPosition)
         {
             return source switch
             {
                 // A fresh world has no terrain yet, so Y stays the sentinel and ResolveFinal probes the surface
                 // once the chunks it selects have loaded.
-                SpawnSource.Fresh => new Vector3(
-                    defaultSpawnPosition, ChunkRelativePosition.UNRESOLVED_HEIGHT, defaultSpawnPosition),
-                SpawnSource.EditorReplay => worldSpawnPoint.ToAbsoluteWorldPosition(),
-                SpawnSource.LoadedSave => savedVoxelPosition + new Vector3(0f, SavedPositionClipOffsetY, 0f),
+                SpawnSource.Fresh => new ChunkRelativePosition(new Vector3(
+                    defaultSpawnPosition, ChunkRelativePosition.UNRESOLVED_HEIGHT, defaultSpawnPosition)),
+                SpawnSource.EditorReplay => worldSpawnPoint,
+
+                // The operator re-normalizes, so the offset can never push the local position out of its chunk.
+                SpawnSource.LoadedSave => savedPlayerPosition + new Vector3(0f, SavedPositionClipOffsetY, 0f),
                 _ => throw new ArgumentOutOfRangeException(nameof(source), source, null),
             };
         }
@@ -87,7 +96,7 @@ namespace Spawn
         /// </param>
         /// <returns>The final placement and canonical-spawn decision.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="resolveHeight"/> is null.</exception>
-        public static SpawnPlacement ResolveFinal(SpawnSource source, Vector3 initialVoxelPosition,
+        public static SpawnPlacement ResolveFinal(SpawnSource source, ChunkRelativePosition initialVoxelPosition,
             ChunkRelativePosition worldSpawnPoint, Func<Vector3, Vector3> resolveHeight)
         {
             if (resolveHeight == null) throw new ArgumentNullException(nameof(resolveHeight));
@@ -97,22 +106,25 @@ namespace Spawn
                 case SpawnSource.Fresh:
                 {
                     // A fresh world defines its own spawn: the surface the player lands on IS the canonical point.
-                    Vector3 resolved = resolveHeight(initialVoxelPosition);
-                    return new SpawnPlacement(resolved, true, new ChunkRelativePosition(resolved));
+                    Vector3 resolved = resolveHeight(initialVoxelPosition.ToAbsoluteWorldPosition());
+                    return new SpawnPlacement(
+                        new ChunkRelativePosition(resolved), true, new ChunkRelativePosition(resolved));
                 }
 
                 case SpawnSource.EditorReplay:
                 {
                     // A replay honors the persisted spawn point but never rewrites it — the session did not create
                     // the save and must not modify what it resolves for its own placement.
-                    Vector3 resolved = resolveHeight(initialVoxelPosition);
-                    return new SpawnPlacement(resolved, false, default);
+                    Vector3 resolved = resolveHeight(initialVoxelPosition.ToAbsoluteWorldPosition());
+                    return new SpawnPlacement(new ChunkRelativePosition(resolved), false, default);
                 }
 
                 case SpawnSource.LoadedSave:
                 {
-                    // The player resumes exactly where they logged out, so the probe serves only the spawn point,
-                    // which may still be unresolved from a v10->v11 migration and is canonicalized lazily here.
+                    // The player resumes exactly where they logged out — their position is passed through untouched
+                    // and never through an absolute Vector3, which is what keeps a far-out resume exact. The probe
+                    // serves only the spawn point, which may still be unresolved from a v10->v11 migration and is
+                    // canonicalized lazily here.
                     Vector3 unresolvedSpawn = worldSpawnPoint.ToAbsoluteWorldPosition();
                     Vector3 resolvedSpawn = resolveHeight(unresolvedSpawn);
 

@@ -147,6 +147,26 @@ namespace Helpers
                 voxelPos.z - OriginVoxel.z);
         }
 
+        /// <summary>
+        /// Converts a persisted chunk-relative position to Unity space — the exact inverse of
+        /// <see cref="UnityToRelative"/>, and the <b>only</b> lossless way to restore a saved position.
+        /// <para>
+        /// Unlike the <see cref="Vector3"/> overload, no large absolute coordinate is ever formed: the chunk distance
+        /// resolves in <c>int</c> and only the small local offset is float math, so this is exact to the ±2³¹ edge.
+        /// Routing a saved position through <c>ToAbsoluteWorldPosition()</c> instead would round it away past ±2²⁴ —
+        /// the precision this format exists to keep.
+        /// </para>
+        /// </summary>
+        /// <param name="voxelPos">The chunk-relative voxel-space position (as persisted).</param>
+        /// <returns>The corresponding Unity-space position.</returns>
+        public static Vector3 VoxelToUnity(ChunkRelativePosition voxelPos)
+        {
+            return new Vector3(
+                (voxelPos.Chunk.X - OriginChunk.X) * ChunkMath.CHUNK_WIDTH + voxelPos.localPosition.x,
+                voxelPos.localPosition.y,
+                (voxelPos.Chunk.Z - OriginChunk.Z) * ChunkMath.CHUNK_WIDTH + voxelPos.localPosition.z);
+        }
+
         #endregion
 
         #region Unity -> Voxel (queries from transforms)

@@ -538,9 +538,9 @@ namespace UI
                 // 1. Fetch data on background thread
                 ParsedWorldInfo info = await WorldInfoUtility.FetchWorldInfoAsync(savePath, saveVersion);
 
-                // 2. Extract Player Chunk Coordinate
-                Vector3 playerPos = _selectedWorld.player.position;
-                Vector2Int playerChunkIndex = ChunkCoord.FromWorldPosition(playerPos).ToChunkIndex();
+                // 2. Extract Player Chunk Coordinate — the saved position is chunk-relative (v13), so its chunk is
+                // already the answer: no coordinate math, and exact no matter how far out the world was left.
+                Vector2Int playerChunkIndex = _selectedWorld.player.position.Chunk.ToChunkIndex();
 
                 // 3. Generate texture on main thread
                 int maxTextureSize = 256; // Default fallback

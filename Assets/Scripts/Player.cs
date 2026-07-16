@@ -233,10 +233,11 @@ public class Player : MonoBehaviour
 
         PlayerSaveData data = new PlayerSaveData
         {
-            // Voxel space: the transform is Unity space, which is only the same thing while the origin is the
-            // identity. Everything on disk is voxel space (World.StartWorld's spawn chokepoint converts back on
-            // load), so a save written after a re-anchor still names the position the player was actually standing at.
-            position = transform.position + WorldOrigin.OriginVoxel,
+            // Voxel space, chunk-relative (v13): the transform is Unity space, which is only the same thing while
+            // the origin is the identity. Everything on disk is voxel space (World.StartWorld's spawn chokepoint
+            // converts back on load), so a save written after a re-anchor still names the position the player was
+            // actually standing at — and the chunk-relative form keeps it exact however far out that is.
+            position = WorldOrigin.UnityToRelative(transform.position),
             rotation = combinedRotation,
             capabilities = new PlayerCapabilityData
             {

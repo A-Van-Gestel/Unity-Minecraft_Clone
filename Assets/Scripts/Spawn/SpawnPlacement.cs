@@ -1,5 +1,4 @@
 using Data.WorldTypes;
-using UnityEngine;
 
 namespace Spawn
 {
@@ -9,8 +8,11 @@ namespace Spawn
     /// </summary>
     public readonly struct SpawnPlacement
     {
-        /// <summary>The voxel-space position the player transform is placed at. The caller converts to Unity space.</summary>
-        public readonly Vector3 PlayerVoxelPosition;
+        /// <summary>
+        /// The voxel-space position the player transform is placed at, chunk-relative so it survives any distance
+        /// from the origin. The caller converts to Unity space via <c>WorldOrigin.VoxelToUnity</c>.
+        /// </summary>
+        public readonly ChunkRelativePosition PlayerVoxelPosition;
 
         /// <summary>
         /// Whether the world's canonical spawn point should be (re)written to <see cref="CanonicalSpawn"/>. When
@@ -25,7 +27,7 @@ namespace Spawn
         /// <param name="playerVoxelPosition">The voxel-space position to place the player at.</param>
         /// <param name="shouldCanonicalizeSpawn">Whether the canonical spawn point is rewritten.</param>
         /// <param name="canonicalSpawn">The spawn point to persist; ignored unless <paramref name="shouldCanonicalizeSpawn"/>.</param>
-        public SpawnPlacement(Vector3 playerVoxelPosition, bool shouldCanonicalizeSpawn,
+        public SpawnPlacement(ChunkRelativePosition playerVoxelPosition, bool shouldCanonicalizeSpawn,
             ChunkRelativePosition canonicalSpawn)
         {
             PlayerVoxelPosition = playerVoxelPosition;

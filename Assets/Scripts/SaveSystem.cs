@@ -38,7 +38,12 @@ public static class SaveSystem
     //            to level.dat for persistent spawn point support. See Migration_v10_to_v11_SpawnPosition.cs.
     // v11 → v12: Added borderRadius (float) to level.dat for the optional per-world gameplay border
     //            (TF-14). Defaults to 0 (disabled) for existing worlds. See Migration_v11_to_v12_WorldBorder.cs.
-    public const int CURRENT_VERSION = 12;
+    // v12 → v13: Re-typed PlayerSaveData.position from an absolute Vector3 to ChunkRelativePosition (WS-4c), so a
+    //            saved position stays exact past ±2^24 instead of rounding to whole voxels and beyond. The FIRST
+    //            level.dat change that is not purely additive — hence the frozen LegacyLevelDat DTO the pre-v13
+    //            steps now read, without which they would silently blank this field.
+    //            See Migration_v12_to_v13_PlayerChunkRelativePosition.cs.
+    public const int CURRENT_VERSION = 13;
 
     /// <summary>
     /// Resolves the absolute directory path where a world's save files are stored.

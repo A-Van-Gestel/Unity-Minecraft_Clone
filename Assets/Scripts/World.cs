@@ -66,8 +66,13 @@ public class World : MonoBehaviour
     private Transform _playerTransform;
     private Camera _playerCamera;
 
+    /// <summary>
+    /// Where the player started this session, in voxel space. Chunk-relative (WS-4c) so it stays exact however far
+    /// from the origin the world is resumed at; <see cref="WorldOrigin.VoxelToUnity(ChunkRelativePosition)"/>
+    /// converts it at the transform write.
+    /// </summary>
     [InitializationField]
-    public Vector3 spawnPosition;
+    public ChunkRelativePosition spawnPosition;
 
     [InitializationField]
     public Vector3 spawnPositionOffset = new Vector3(0.5f, 1.1f, 0.5f);
@@ -598,7 +603,7 @@ public class World : MonoBehaviour
         // Seeded from the player's current (prefab) position, not zero, so the metadata-null hole documented on
         // SpawnResolution.Classify still resumes where it always did — a save that classifies as LoadedSave but has
         // no readable level.dat to override this.
-        Vector3 savedPlayerVoxelPosition = _playerTransform.position + WorldOrigin.OriginVoxel;
+        ChunkRelativePosition savedPlayerVoxelPosition = WorldOrigin.UnityToRelative(_playerTransform.position);
 
         if (!isNewGame && settings.EnablePersistence)
         {
@@ -687,8 +692,9 @@ public class World : MonoBehaviour
         // before STEP 2 creates any chunk — both convert through the origin and would otherwise bake in the stale
         // one. This is the only re-anchor outside the Update shift, and the reason it lives here: the anchor must
         // come from the starting player position, and SP-1 made this the one place that position exists.
-        // Y is ignored (the origin is XZ-only), so the unresolved-height sentinel is harmless.
-        AnchorOrigin(ChunkCoord.FromVoxelPosition(spawnPosition));
+        // WS-4c: the position is chunk-relative, so its chunk IS the anchor — no coordinate math, and exact however
+        // far out the save is. Y is ignored (the origin is XZ-only), so the unresolved-height sentinel is harmless.
+        AnchorOrigin(spawnPosition.Chunk);
 
         _playerTransform.position = WorldOrigin.VoxelToUnity(spawnPosition);
 
