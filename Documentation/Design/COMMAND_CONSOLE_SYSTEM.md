@@ -1,6 +1,6 @@
 # Command Console System Design
 
-**Version:** 1.0
+**Version:** 1.1
 **Date:** 2026-07-16
 **Status:** Proposed design — not implemented.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -259,17 +259,39 @@ each phase:
   execute vs confirm-then-cancel. The arrival hold is verified in-game (WS-4b's far-travel
   gate doubles as its test).
 
-### 8. Extension roadmap (post-CMD-2, in intended order)
+## 8. Extension roadmap (post-CMD-2, in intended order)
 
 | Version | Extension                                                                                                                        |
 |---------|-------------------------------------------------------------------------------------------------------------------------------------|
-| **v2**  | Tab autocomplete (registry-driven); selectable/copyable output; relative `~` coordinates; more commands (`/time`, `/give`, `/setblock`) as needed. |
+| **v2**  | The **CMD-3 command pack** (§8.1); tab autocomplete (registry-driven); selectable/copyable output; relative `~` coordinates.          |
 | **v3+** | Entity selectors (`@entity-<id>`, filters) with the entity system; chat on the unprefixed namespace; permissions on `CommandContext` — each gets a design pass when concrete. |
+
+### 8.1 CMD-3 — candidate command pack (brainstormed 2026-07-16, not yet scheduled)
+
+Ordered by value ÷ cost; every 🟢 entry is a thin getter/setter over a system that already
+exists, so the pack is mostly registry plumbing. Effort assumes CMD-0..2 have landed.
+
+| Command                              | Backing system (exists today)                                  | Effort | Note                                                                                                                                              |
+|--------------------------------------|-----------------------------------------------------------------|:------:|----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `/where`                             | transform + `WorldOrigin` + region codec                        |   🟢   | Prints voxel pos, chunk, region file, origin chunk. The best WS-4 debugging aid after `/teleport`; pairs with the far-coordinates soak (WS-4 doc §8.2.4) |
+| `/origin` (dev)                      | `WorldOrigin`                                                   |   🟢   | Show the origin / force a shift — makes the WS-4b in-game gate scriptable instead of "fly 1024 units"                                                |
+| `/set-world-border <radius>` / `off` | TF-14 `BorderRadius` + `World.SetBorderRadius` + level.dat v12  |   🟢   | Everything exists; the command is a setter + save. Warn+confirm when shrinking would strand the player outside (the fence re-clamps them inward)     |
+| `/spawn`, `/setspawn`                | `WorldSpawnPoint` (CRP) + `SetSpawnPoint`                       |   🟢   | `/spawn` = teleport-to-CRP (reuses CMD-2's arrival hold); `/setspawn` writes the existing field                                                      |
+| `/time set\|add <t>`                 | `WorldStateData.timeOfDay` + `GlobalLightLevel`                 |   🟢   | Also enables deterministic lighting screenshots/repros                                                                                               |
+| `/seed`                              | `VoxelData.Seed`                                                |   🟢   | Trivial; handy once the seed-hygiene work (Bug 04) starts                                                                                            |
+| `/fly`, `/noclip`, `/speed <n>`      | `VoxelRigidbody` flags                                          |   🟢   | Already keybound (F1/F6); command form adds discoverability + an exact speed value                                                                   |
+| `/give <block> [n]`                  | `BlockIDs` + toolbar/inventory                                  |   🟡   | Needs name→ID lookup (BlockDatabase names); MUST resolve via `BlockIDs`, never raw IDs                                                               |
+| `/setblock X Y Z <block>`            | `VoxelMod` + `World.AddModification`                            |   🟡   | Thin wrapper over the existing mod path; useful for validation repros                                                                                |
+| `/chunk info`                        | `ChunkData` state flags                                         |   🟡   | Dumps the current chunk's pipeline state (lighting flags, mesh state, active voxels) — queryable anywhere; pairs with `chunk-lifecycle` debugging     |
+| `/fill`                              | mass `VoxelMod`                                                 |   🔴   | **Deliberately deferred** — unbounded mod volumes stress the apply path's per-frame budgets; needs its own design pass, don't sneak it in            |
 
 ---
 
 ## Document History
 
+* **v1.1** - Added §8.1: the CMD-3 candidate command pack (11 commands ranked by value ÷ cost,
+  each mapped to its existing backing system; `/fill` explicitly deferred pending an apply-path
+  design pass). §8 heading level fixed (was nested under §7).
 * **v1.0** - Initial design — three-layer engine/UI/command split; decision menu closed
   2026-07-16 (mandatory `/`, inventory-parity input blocking, hold-until-ready arrival +
   2-arg surface form, v1 = history recall + `/help`); `CMD-0..2` phasing with CMD-2 as the

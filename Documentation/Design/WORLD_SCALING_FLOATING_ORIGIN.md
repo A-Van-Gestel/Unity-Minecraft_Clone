@@ -1,6 +1,6 @@
 # World Scaling — WS-4 Floating Origin Design
 
-**Version:** 1.1
+**Version:** 1.2
 **Date:** 2026-07-16
 **Status:** Proposed design — not implemented.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -268,7 +268,7 @@ execution checklist; each row becomes a visible `WorldOrigin.*` call.
 | Collision-bounds debug draw (`World.cs:2947`)                   | `VoxelToUnity(Coord.ToVoxelOrigin()) + local` before `Debug.DrawLine`                                  |
 | `BorderWallRenderer.RebuildMesh`                                | Wall planes at `±ext − OriginVoxel`; keep `uv.x` bands voxel-space for continuity across shifts        |
 | Spawn/teleport transform writes (`World.cs:655/:661/:742/:753`) | Voxel-space spawn values (`WorldSpawnPoint`, `ResolveSpawnHeight`, `GetHighestVoxel`) convert before assignment; `SetSpawnPoint(new ChunkRelativePosition(...))` builds from voxel space |
-| `Clouds` (`Awake` anchor `:46`, `CloudTileCoordFromFloat:352`)  | Pattern lookup adds `OriginVoxel` so the cloud pattern doesn't teleport on shift; tile re-anchoring is player-relative and needs nothing else |
+| `Clouds` (`Awake` anchor `:46`, `CloudTileCoordFromFloat:352`)  | Pattern lookup adds `OriginVoxel` so the cloud pattern doesn't teleport on shift; tile re-anchoring is player-relative and needs nothing else. Do the pattern wrap in **integer** space (pattern repeats every `_cloudTexWidth`) — the float-`frac` idiom re-introduces large-float precision loss far out; integer modulo is exact for free |
 | Shader global                                                   | `_WorldOriginOffset` (§4.6)                                                                            |
 
 ### 5.2 Unity → Voxel (queries from transforms)
@@ -355,7 +355,9 @@ visible today; liquid noise pattern is continuous across a shift.
 
 ---
 
-## 8. Verification checklist (MUST re-verify during WS-4a)
+## 8. Verification checklist & research points
+
+### 8.1 Gating — MUST re-verify during WS-4a
 
 1. **`BorderWallShader.shader` `worldPos` usage** — not yet read; classify its world-space
    dependence and offset if the visual bands must stay world-anchored across shifts.
@@ -367,6 +369,38 @@ visible today; liquid noise pattern is continuous across a shift.
    the new non-zero-origin cases reset it on dispose (suite isolation).
 4. **`Chunk.GetVoxelPositionInChunkFromGlobalVector3` callers** — classify each as Unity- or
    voxel-space before deciding whether the method converts or its callers do.
+
+### 8.2 Non-gating — far-out scalability research points (added 2026-07-16)
+
+Open questions surfaced by this design's audit that do **not** block WS-4a/b/c. Each names its
+resolution path; findings land back here (or in `PERFORMANCE_IMPROVEMENTS_REPORT.md` if they
+graduate to work items).
+
+1. **`ChunkCoord`/`Vector2Int` dictionary hash quality at large/negative coordinates.**
+   `WorldData.Chunks` and `World._chunkMap` are hot lookup dictionaries keyed by chunk
+   identity. Hash functions that distribute fine over a 0–99 world can cluster at coordinates
+   like ±500 000 or across mixed-sign quadrants, silently degrading every chunk lookup.
+   *Resolve:* micro-benchmark dictionary fill/lookup with realistic far-out and mixed-quadrant
+   key sets vs the near-origin baseline (`perf-benchmark` protocol). If degraded, a
+   SplitMix-style mixer in `ChunkCoord.GetHashCode` is a small, save-safe fix — **measure
+   first**, per the optimization guide.
+2. **Minimap / `WorldInfoUtility` span math at extreme chunk spread.** Dynamic downsampling is
+   verified (WS-2 OQ-4), but a save with visited chunks at −10M *and* +10M drives the span
+   computation into billions of voxels. *Resolve:* one synthetic far-spread save (two distant
+   region files) through the world-select minimap; check for overflow/degenerate texture dims.
+3. **Region-file fan-out.** Long-range travel creates one region file per 512×512 voxels — a
+   cross-map flight leaves thousands of files in one directory. *Resolve:* confirm
+   `ChunkStorageManager.GetRegion` and the save/load paths never enumerate the region
+   directory (open-by-computed-name only), and note the OS directory-size practicalities in
+   `INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md` if relevant.
+4. **Far-coordinates soak scenario (standing, post-WS-4c).** Once `/teleport` (CMD-2) exists:
+   teleport to ±100k / ±10M / ±1×10⁹ and run the checklist — streaming, block edits, fluid
+   sim, lighting, save/reload, minimap. Candidate for a semi-automated benchmark-mode pass on
+   the existing `BenchmarkController` flight infrastructure. Doubles as the harness for the v2
+   noise rider (§7 extension roadmap).
+5. **Negative-quadrant generation parity remains in-game-only** (WS-3's recorded limitation —
+   no generation suite exists to extend). If a generation validation suite is ever built, that
+   parity scenario plus the §8.2.4 soak coordinates should be its first citizens.
 
 ---
 
@@ -391,6 +425,10 @@ visible today; liquid noise pattern is continuous across a shift.
 
 ## Document History
 
+* **v1.2** - §8 split into gating checklist (8.1) + non-gating far-out scalability research
+  points (8.2: chunk-key hash quality benchmark, minimap far-spread span test, region-file
+  fan-out check, standing far-coordinates soak scenario, generation-suite parity note); clouds
+  row in §5.1 now specifies integer-space pattern wrap (exact at any distance).
 * **v1.1** - Teleport tooling re-homed: the WS-4c command is now `CMD-2` of the new
   [`COMMAND_CONSOLE_SYSTEM.md`](COMMAND_CONSOLE_SYSTEM.md) (three-layer console design,
   2026-07-16) instead of an ad-hoc dev command; WS-4c row, relationships, and §9 updated.
