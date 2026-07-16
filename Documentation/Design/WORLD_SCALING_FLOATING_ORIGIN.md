@@ -1,6 +1,6 @@
 # World Scaling — WS-4 Floating Origin Design
 
-**Version:** 1.3
+**Version:** 1.4
 **Date:** 2026-07-16
 **Status:** Partially implemented — **WS-4a shipped** (origin plumbing, pinned at the identity);
 WS-4b (the shift) and WS-4c (persistence + tooling) proposed.
@@ -222,6 +222,13 @@ Everything persisted is voxel world space. Two changes:
   `transform.position + OriginVoxel` (voxel-space absolute `Vector3`); `LoadSaveData` and the
   `World` startup path set the origin from the saved position first, then place the transform
   near the Unity origin. Without this, the first post-shift save corrupts the player position.
+  <br>**Where this goes (corrected by the WS-4a audit):** *not* at `World.StartWorld`'s anchor call —
+  that runs before `SaveSystem.LoadWorldGameState`, and the anchor must be derived from the loaded
+  player position, which only exists once the save is parsed. The derivation therefore belongs
+  **inside the load path**: parse the save → `AnchorOrigin(chunkOf(savedVoxelPos))` → write
+  `transform = VoxelToUnity(savedVoxelPos)`, in that order. `World.AnchorOrigin` is the single
+  permitted entry point (it pairs `WorldOrigin.SetOrigin` with the `_WorldOriginOffset` shader push so a
+  re-anchor cannot land without the shader following); WS-4a leaves it pinned to the fresh-world identity.
 - **WS-4c:** `PlayerSaveData.position` migrates `Vector3` → `ChunkRelativePosition`
   (**v12→v13**, AOT frozen-DTO protocol, `MigrateLevelDat` only — chunk/region formats
   untouched), removing the ±2²⁴ precision cap on the saved value. Runtime construction uses
@@ -250,6 +257,31 @@ shifts). The offset is passed raw — far from origin the noise *input* precisio
 as today's absolute `worldPos` does (cosmetic, liquid-only; a periodicity `fmod` does not
 cleanly exist for simplex across the shader's several scales — accepted limitation, §9).
 `BorderWallShader`'s `worldPos` usage is a WS-4a audit item (§8).
+
+### 4.7 Rule: the origin is read fresh, never stored
+
+`WorldOrigin.OriginVoxel` is **frame state** — it changes whenever the world re-anchors. Two rules follow,
+both learned from a WS-4a code-review finding (a captured origin that would have gone stale on the first
+shift, guarded only by a docstring):
+
+- **Never cache the origin in construction-time state.** Anything holding it across frames must be refreshed
+  by someone, and "someone must remember" is precisely the silent-bug class this design exists to remove.
+  Read it fresh at the point of use (presentation layer only), or take it as a parameter.
+- **Reusable decision units take it as a per-call parameter**, not from the global and not as a field — the
+  pattern `PlacementController` follows. This buys two properties at once:
+    1. **Snapshot atomicity.** A ray march makes one voxel query per step (hundreds per call); all of them must
+       resolve against the same origin, or a march torn across a re-anchor silently targets a mix of two
+       coordinate frames. A parameter pins the frame for the call's duration *by construction*.
+    2. **Suite isolation.** The unit stays free of the global, so validation can drive it at any origin with no
+       global state to set or restore — which is what makes the origin plumbing falsifiable at all (§6).
+
+  Where a result and a later action must agree (e.g. a probe's cells feeding a `VoxelMod` on click), carry the
+  origin **alongside** the result rather than re-reading the global, so both use one frame's anchor.
+
+**Ceiling of this rule (WS-4b checklist item):** no suite can prove a *caller* reads the global fresh — a
+MonoBehaviour that caches `WorldOrigin.OriginVoxel` in `Start()` resurrects the bug one layer up, invisibly at
+origin (0,0). That is inherent to keeping the static presentation-only; the backstop is the §7 in-game gate
+(targeting/placement land on the correct voxels after multiple shifts), which must not be traded away.
 
 ---
 
@@ -386,8 +418,9 @@ All four closed by the WS-4a audit sweep; kept here as the record of what was ch
    remaining unconverted boundary is `Player.GetSaveData`/`LoadSaveData` (`Player.cs:235/:254`),
    deliberately deferred to WS-4b (§4.4) because both sides must change together or saves corrupt.
 3. **Validation-suite world stubs** — ✅ confirmed. Suites never touch the `WorldOrigin` global: the
-   Chunk Math origin scenarios restore the identity in a `finally`, and `PlacementController` takes an
-   **injected** origin, so `PlacementTestWorld` drives far origins with no global to leak.
+   Chunk Math origin scenarios restore the identity in a `finally`, and `PlacementController` takes the
+   origin as a **per-probe parameter** (see §4.7), so `PlacementTestWorld` drives far origins with no
+   global to leak.
 4. **`Chunk.GetVoxelPositionInChunkFromGlobalVector3` callers** — ✅ classified **voxel-space; method
    does NOT convert.** Both callers pass voxel-space values (`World.cs:2271` a `VoxelMod`-derived
    neighbor; `DebugScreen.cs:590` a converted target cell), so its callers own the conversion.
@@ -452,6 +485,15 @@ graduate to work items).
   a play session proves only "nothing regressed". Its positive signal is entirely the non-zero-origin
   suites, and their reach is one call path (placement) plus the helper math. A boundary site that is
   both un-swept and unexercised by those suites stays latent until the first shift.
+- **Two coordinate sites still ROUND where the engine otherwise floors** — left untouched by WS-4a
+  deliberately, so the phase stayed bit-identical. MyBox's `Vector3.ToVector3Int()` extension is
+  `RoundToInt`, not `FloorToInt`; only floor names the cell *containing* a position, and every WS-4
+  conversion (`WorldOrigin.UnityToVoxelCell`, `MarchRay`, `CheckPhysicsCollision`) floors. The survivors are
+  `DebugScreen.cs:271` (`_groundVoxelPos`, a readout) and `World.ResolveSpawnHeight` (`World.cs:3268`, which
+  rounds the spawn XZ before the height probe). Both are pre-existing and only diverge for fractional inputs.
+  WS-4b touches the spawn/load path (§4.4) and will pass over the second one: **do not silently "fix" it**
+  inside the shift work — changing it is a behavior change that deserves its own decision, not a rider on a
+  phase whose contract is "no behavior change except the shift".
 - **The saved player position is still Unity-space-shaped.** `Player.GetSaveData` writes
   `transform.position` verbatim (`Player.cs:235`), which is correct only while the origin is the
   identity. This is WS-4b's **first** obligation (§4.4): the first post-shift save corrupts the player
@@ -465,6 +507,15 @@ graduate to work items).
 
 ## Document History
 
+* **v1.4** - WS-4a code review (2026-07-16). New **§4.7 "the origin is read fresh, never stored"** — the
+  origin is frame state, so reusable decision units take it as a per-call parameter (snapshot atomicity across
+  a multi-step march + suite isolation), never as constructor state; states the rule's ceiling (no suite can
+  prove a *caller* reads the global fresh → the §7 in-game gate is the backstop). §4.4 corrected: the WS-4b
+  origin derivation belongs **inside the load path**, not at the startup anchor, which runs before the save is
+  parsed; `World.AnchorOrigin` named as the single entry point pairing `SetOrigin` with the shader push. §8.1
+  item 3 updated (per-probe parameter, not injected ctor state). §9 additionally records the two surviving
+  `ToVector3Int` (round-not-floor) coordinate sites as a deliberate WS-4a non-change, flagged so the WS-4b
+  spawn/load work does not "fix" them as a rider on a no-behavior-change phase.
 * **v1.3** - **WS-4a SHIPPED** (2026-07-16). §7 phase table + validation section record the shipped
   baselines (Chunk Math 26→32, Placement 13→15, Validate All 197→205, both prove-red); §8.1 flipped
   from "MUST re-verify" to resolved, with `BorderWallShader` closed as **no change needed** (its
