@@ -65,9 +65,9 @@ namespace Editor.Validation
                         return FailOrigin("WorldOrigin Identity Is Pre-WS-4 Behavior",
                             $"VoxelToUnity({cell}) = {unity}, expected the identity.");
 
-                    // The legacy floor idiom the Unity->voxel call sites used before WS-4 (MarchRay's hitCell,
-                    // CheckPhysicsCollision's AABB scan bounds). NOT MyBox's ToVector3Int, which rounds — see
-                    // the PlayerInteraction note in the WS-4a boundary work.
+                    // The floor idiom the Unity->voxel call sites use (MarchRay's hitCell, CheckPhysicsCollision's
+                    // AABB scan bounds). Deliberately NOT MyBox's ToVector3Int extension, which ROUNDS — the two
+                    // differ for any fractional coordinate, and only floor names the cell containing a position.
                     Vector3 pos = new Vector3(v + 0.375f, 64.5f, -v - 0.125f);
                     Vector3Int legacyCell = new Vector3Int(
                         Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
