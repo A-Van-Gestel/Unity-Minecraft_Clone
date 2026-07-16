@@ -1,0 +1,299 @@
+using System.Collections.Generic;
+using Data;
+using Data.WorldTypes;
+using Editor.Validation.Framework;
+using Helpers;
+using UnityEngine;
+
+namespace Editor.Validation
+{
+    /// <summary>
+    /// <see cref="ChunkMathValidationSuite"/> — WS-4a <see cref="WorldOrigin"/> Unity↔voxel conversion baselines.
+    /// <para>
+    /// WS-4a pins the origin at (0, 0), where every conversion is a +0 and a <b>missed</b> boundary site is
+    /// indistinguishable from a threaded one. These scenarios are the only place the origin is ever non-zero before
+    /// WS-4b ships, so they are what stops the plumbing from being silently wrong: they drive the helpers at far
+    /// origins where a dropped offset or a large-float round-trip cannot hide.
+    /// </para>
+    /// </summary>
+    /// <remarks>Every scenario mutates the <see cref="WorldOrigin"/> global and restores it in a <c>finally</c>: an
+    /// escaping origin would silently re-space every later suite in a <c>Validate All</c> run.</remarks>
+    public static partial class ChunkMathValidationSuite
+    {
+        // Origins the conversions are exercised at. 2^26 chunks = 2^30 voxels — the far edge that still leaves
+        // ToVoxelOrigin's (chunk * 16) inside int range, so the helpers are proven to the permanent world edge.
+        private static readonly ChunkCoord[] s_originCases =
+        {
+            new ChunkCoord(0, 0),
+            new ChunkCoord(1, -1),
+            new ChunkCoord(625, 625),       // ~10k voxels — where jitter is observed in-game today
+            new ChunkCoord(-625, 625),
+            new ChunkCoord(1 << 26, -(1 << 26)),
+        };
+
+        /// <summary>Offsets from the origin a shifted world can legitimately hold objects at (view distance + slack).</summary>
+        private const int NEAR_ORIGIN_REACH = 2048;
+
+        static partial void AddWorldOriginScenarios(List<Scenario> scenarios)
+        {
+            scenarios.Add(new Scenario("WorldOrigin Identity Is Pre-WS-4 Behavior", RunOriginIdentity));
+            scenarios.Add(new Scenario("WorldOrigin OriginVoxel Is Chunk-Aligned", RunOriginVoxelAlignment));
+            scenarios.Add(new Scenario("WorldOrigin Cell Round-Trip (near origin, all origins)", RunCellRoundTrip));
+            scenarios.Add(new Scenario("WorldOrigin Y Never Shifts", RunYNeverShifts));
+            scenarios.Add(new Scenario("WorldOrigin UnityToChunk Matches Voxel-Space Chunk", RunUnityToChunkParity));
+            scenarios.Add(new Scenario("WorldOrigin UnityToRelative Round-Trip", RunRelativeRoundTrip));
+        }
+
+        /// <summary>
+        /// At the identity origin the two spaces coincide, so every helper must be a pass-through equivalent to the
+        /// pre-WS-4 idiom. This is the WS-4a regression baseline: the shipped game runs exclusively on this path.
+        /// </summary>
+        private static bool RunOriginIdentity()
+        {
+            try
+            {
+                WorldOrigin.ResetToIdentity();
+
+                if (!WorldOrigin.IsIdentity)
+                    return FailOrigin("WorldOrigin Identity Is Pre-WS-4 Behavior", "IsIdentity was false at (0, 0).");
+
+                for (int v = -2048; v <= 2048; v += 7)
+                {
+                    Vector3Int cell = new Vector3Int(v, 64, -v);
+                    Vector3 unity = WorldOrigin.VoxelToUnity(cell);
+                    if (unity != new Vector3(cell.x, cell.y, cell.z))
+                        return FailOrigin("WorldOrigin Identity Is Pre-WS-4 Behavior",
+                            $"VoxelToUnity({cell}) = {unity}, expected the identity.");
+
+                    // The legacy floor idiom the Unity->voxel call sites used before WS-4 (MarchRay's hitCell,
+                    // CheckPhysicsCollision's AABB scan bounds). NOT MyBox's ToVector3Int, which rounds — see
+                    // the PlayerInteraction note in the WS-4a boundary work.
+                    Vector3 pos = new Vector3(v + 0.375f, 64.5f, -v - 0.125f);
+                    Vector3Int legacyCell = new Vector3Int(
+                        Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
+                    if (WorldOrigin.UnityToVoxelCell(pos) != legacyCell)
+                        return FailOrigin("WorldOrigin Identity Is Pre-WS-4 Behavior",
+                            $"UnityToVoxelCell({pos}) = {WorldOrigin.UnityToVoxelCell(pos)}, legacy floor idiom gives {legacyCell}.");
+
+                    if (!WorldOrigin.UnityToChunk(pos).Equals(ChunkCoord.FromWorldPosition(pos)))
+                        return FailOrigin("WorldOrigin Identity Is Pre-WS-4 Behavior",
+                            $"UnityToChunk({pos}) diverged from the legacy ChunkCoord.FromWorldPosition idiom.");
+                }
+
+                Debug.Log("[PASS] WorldOrigin Identity Is Pre-WS-4 Behavior");
+                return true;
+            }
+            finally
+            {
+                WorldOrigin.ResetToIdentity();
+            }
+        }
+
+        /// <summary>
+        /// The offset must always be an exact multiple of <see cref="ChunkMath.CHUNK_WIDTH"/> — that is what makes it
+        /// representable in float without error and keeps chunk-local and <c>frac(worldPos)</c> math invariant across
+        /// a shift.
+        /// </summary>
+        private static bool RunOriginVoxelAlignment()
+        {
+            try
+            {
+                foreach (ChunkCoord origin in s_originCases)
+                {
+                    WorldOrigin.SetOrigin(origin);
+                    Vector3Int ov = WorldOrigin.OriginVoxel;
+
+                    if (ov.x % ChunkMath.CHUNK_WIDTH != 0 || ov.z % ChunkMath.CHUNK_WIDTH != 0)
+                        return FailOrigin("WorldOrigin OriginVoxel Is Chunk-Aligned",
+                            $"origin {origin.X},{origin.Z} -> OriginVoxel {ov} is not a multiple of {ChunkMath.CHUNK_WIDTH}.");
+
+                    if (ov.y != 0)
+                        return FailOrigin("WorldOrigin OriginVoxel Is Chunk-Aligned",
+                            $"OriginVoxel.y = {ov.y}, must always be 0 (Y never shifts).");
+
+                    if (ov.x != origin.X * ChunkMath.CHUNK_WIDTH || ov.z != origin.Z * ChunkMath.CHUNK_WIDTH)
+                        return FailOrigin("WorldOrigin OriginVoxel Is Chunk-Aligned",
+                            $"OriginVoxel {ov} does not match origin chunk {origin.X},{origin.Z}.");
+                }
+
+                Debug.Log("[PASS] WorldOrigin OriginVoxel Is Chunk-Aligned");
+                return true;
+            }
+            finally
+            {
+                WorldOrigin.ResetToIdentity();
+            }
+        }
+
+        /// <summary>
+        /// The core WS-4 guarantee: for any origin — including the far edge — a cell near that origin survives the
+        /// voxel -> Unity -> voxel trip exactly, and lands within a float range where rendering does not jitter.
+        /// A conversion that dropped the offset, or round-tripped through a large float, fails here.
+        /// </summary>
+        private static bool RunCellRoundTrip()
+        {
+            try
+            {
+                foreach (ChunkCoord origin in s_originCases)
+                {
+                    WorldOrigin.SetOrigin(origin);
+                    Vector3Int ov = WorldOrigin.OriginVoxel;
+
+                    for (int d = -NEAR_ORIGIN_REACH; d <= NEAR_ORIGIN_REACH; d += 13)
+                    {
+                        Vector3Int cell = new Vector3Int(ov.x + d, 70, ov.z - d);
+                        Vector3 unity = WorldOrigin.VoxelToUnity(cell);
+
+                        // The point of the whole design: rendered coordinates stay small no matter how far out we are.
+                        if (Mathf.Abs(unity.x) > NEAR_ORIGIN_REACH || Mathf.Abs(unity.z) > NEAR_ORIGIN_REACH)
+                            return FailOrigin("WorldOrigin Cell Round-Trip (near origin, all origins)",
+                                $"origin {origin.X},{origin.Z}: cell {cell} mapped to far Unity pos {unity}.");
+
+                        if (WorldOrigin.UnityToVoxelCell(unity) != cell)
+                            return FailOrigin("WorldOrigin Cell Round-Trip (near origin, all origins)",
+                                $"origin {origin.X},{origin.Z}: cell {cell} -> {unity} -> {WorldOrigin.UnityToVoxelCell(unity)}.");
+
+                        // Sub-cell positions must floor into the same cell (the raycast / physics AABB pattern).
+                        Vector3 inside = unity + new Vector3(0.5f, 0.25f, 0.75f);
+                        if (WorldOrigin.UnityToVoxelCell(inside) != cell)
+                            return FailOrigin("WorldOrigin Cell Round-Trip (near origin, all origins)",
+                                $"origin {origin.X},{origin.Z}: sub-cell {inside} did not floor into {cell}.");
+                    }
+                }
+
+                Debug.Log("[PASS] WorldOrigin Cell Round-Trip (near origin, all origins)");
+                return true;
+            }
+            finally
+            {
+                WorldOrigin.ResetToIdentity();
+            }
+        }
+
+        /// <summary>
+        /// The origin is XZ-only. Y must pass through every conversion untouched at every origin — a Y offset would
+        /// silently move the whole world vertically once the origin left (0, 0).
+        /// </summary>
+        private static bool RunYNeverShifts()
+        {
+            try
+            {
+                foreach (ChunkCoord origin in s_originCases)
+                {
+                    WorldOrigin.SetOrigin(origin);
+
+                    for (int y = -8; y <= ChunkMath.CHUNK_HEIGHT + 8; y++)
+                    {
+                        Vector3Int cell = new Vector3Int(WorldOrigin.OriginVoxel.x, y, WorldOrigin.OriginVoxel.z);
+                        if (!Mathf.Approximately(WorldOrigin.VoxelToUnity(cell).y, y))
+                            return FailOrigin("WorldOrigin Y Never Shifts",
+                                $"origin {origin.X},{origin.Z}: VoxelToUnity kept y={WorldOrigin.VoxelToUnity(cell).y}, expected {y}.");
+
+                        if (WorldOrigin.UnityToVoxelCell(new Vector3(0f, y + 0.5f, 0f)).y != y)
+                            return FailOrigin("WorldOrigin Y Never Shifts",
+                                $"origin {origin.X},{origin.Z}: UnityToVoxelCell did not preserve y={y}.");
+                    }
+                }
+
+                Debug.Log("[PASS] WorldOrigin Y Never Shifts");
+                return true;
+            }
+            finally
+            {
+                WorldOrigin.ResetToIdentity();
+            }
+        }
+
+        /// <summary>
+        /// <c>UnityToChunk</c> is what feeds <c>PlayerChunkCoord</c>, and everything downstream of it (streaming,
+        /// readiness gates) is origin-independent — so it must agree exactly with resolving the converted voxel cell
+        /// through the production voxel-space path.
+        /// </summary>
+        private static bool RunUnityToChunkParity()
+        {
+            try
+            {
+                foreach (ChunkCoord origin in s_originCases)
+                {
+                    WorldOrigin.SetOrigin(origin);
+
+                    for (int d = -NEAR_ORIGIN_REACH; d <= NEAR_ORIGIN_REACH; d += 11)
+                    {
+                        Vector3 unity = new Vector3(d + 0.5f, 64f, -d - 0.5f);
+                        Vector3Int cell = WorldOrigin.UnityToVoxelCell(unity);
+                        ChunkCoord expected = ChunkCoord.FromVoxelOrigin(cell);
+
+                        if (!WorldOrigin.UnityToChunk(unity).Equals(expected))
+                            return FailOrigin("WorldOrigin UnityToChunk Matches Voxel-Space Chunk",
+                                $"origin {origin.X},{origin.Z}: UnityToChunk({unity}) = " +
+                                $"{WorldOrigin.UnityToChunk(unity).X},{WorldOrigin.UnityToChunk(unity).Z}, expected {expected.X},{expected.Z}.");
+                    }
+                }
+
+                Debug.Log("[PASS] WorldOrigin UnityToChunk Matches Voxel-Space Chunk");
+                return true;
+            }
+            finally
+            {
+                WorldOrigin.ResetToIdentity();
+            }
+        }
+
+        /// <summary>
+        /// The persistence bridge (WS-4b/c): a Unity-space transform converted to the chunk-relative save format must
+        /// name the same voxel cell the direct integer conversion does, with the local offset resolved exactly and no
+        /// large-float round-trip — the precision WS-4c is being built to recover.
+        /// </summary>
+        private static bool RunRelativeRoundTrip()
+        {
+            try
+            {
+                foreach (ChunkCoord origin in s_originCases)
+                {
+                    WorldOrigin.SetOrigin(origin);
+
+                    for (int d = -NEAR_ORIGIN_REACH; d <= NEAR_ORIGIN_REACH; d += 17)
+                    {
+                        Vector3 unity = new Vector3(d + 0.25f, 71.5f, -d + 0.75f);
+                        ChunkRelativePosition crp = WorldOrigin.UnityToRelative(unity);
+
+                        // The local offset must stay inside one chunk — that is what keeps it float-exact far out.
+                        if (crp.localPosition.x < 0f || crp.localPosition.x >= ChunkMath.CHUNK_WIDTH ||
+                            crp.localPosition.z < 0f || crp.localPosition.z >= ChunkMath.CHUNK_WIDTH)
+                            return FailOrigin("WorldOrigin UnityToRelative Round-Trip",
+                                $"origin {origin.X},{origin.Z}: local offset {crp.localPosition} escaped its chunk.");
+
+                        if (!crp.Chunk.Equals(WorldOrigin.UnityToChunk(unity)))
+                            return FailOrigin("WorldOrigin UnityToRelative Round-Trip",
+                                $"origin {origin.X},{origin.Z}: CRP chunk {crp.Chunk.X},{crp.Chunk.Z} disagrees with UnityToChunk.");
+
+                        // Reconstructing the cell from the CRP must name the same voxel the integer path does.
+                        Vector3Int direct = WorldOrigin.UnityToVoxelCell(unity);
+                        Vector3Int viaCrp = new Vector3Int(
+                            crp.Chunk.X * ChunkMath.CHUNK_WIDTH + Mathf.FloorToInt(crp.localPosition.x),
+                            Mathf.FloorToInt(crp.localPosition.y),
+                            crp.Chunk.Z * ChunkMath.CHUNK_WIDTH + Mathf.FloorToInt(crp.localPosition.z));
+
+                        if (viaCrp != direct)
+                            return FailOrigin("WorldOrigin UnityToRelative Round-Trip",
+                                $"origin {origin.X},{origin.Z}: CRP resolved {viaCrp}, integer path resolved {direct}.");
+                    }
+                }
+
+                Debug.Log("[PASS] WorldOrigin UnityToRelative Round-Trip");
+                return true;
+            }
+            finally
+            {
+                WorldOrigin.ResetToIdentity();
+            }
+        }
+
+        /// <summary>Logs a scenario failure and returns false, keeping the failure sites to one line each.</summary>
+        private static bool FailOrigin(string scenario, string detail)
+        {
+            Debug.LogError($"[FAIL] {scenario} — {detail}");
+            return false;
+        }
+    }
+}

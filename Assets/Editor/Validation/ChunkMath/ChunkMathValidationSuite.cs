@@ -8,9 +8,10 @@ namespace Editor.Validation
     /// Validation suite for the chunk coordinate / addressing math — the "Chunk Math" suite. Covers
     /// <see cref="Data.WorldTypes.ChunkRelativePosition"/> (serialization, normalization, operators), the WS-1
     /// <see cref="Helpers.ChunkMath"/> shift/mask equivalence sweep, the VQ-1 integer voxel-query decomposition
-    /// parity, the WS-2 unbounded-+XZ bounds, and the V2 region-codec identity pin. Every scenario is a baseline
+    /// parity, the WS-2 unbounded-+XZ bounds, the V2 region-codec identity pin, and the WS-4a
+    /// <see cref="Helpers.WorldOrigin"/> Unity↔voxel conversions. Every scenario is a baseline
     /// (must stay green). Scenario implementations live in the partial files (<c>.ChunkRelativePosition.cs</c>,
-    /// <c>.ShiftMask.cs</c>, <c>.VoxelQuery.cs</c>).
+    /// <c>.ShiftMask.cs</c>, <c>.VoxelQuery.cs</c>, <c>.WorldOrigin.cs</c>).
     /// </summary>
     /// <remarks>Deliberately kept in <c>namespace Editor.Validation</c> (not <c>Editor.Validation.ChunkMath</c>)
     /// despite living in the <c>ChunkMath/</c> folder: a <c>.ChunkMath</c> namespace would shadow the
@@ -33,6 +34,7 @@ namespace Editor.Validation
             AddChunkRelativePositionScenarios(scenarios);
             AddShiftMaskScenarios(scenarios);
             AddVoxelQueryScenarios(scenarios);
+            AddWorldOriginScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Chunk Math", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
 
@@ -44,5 +46,8 @@ namespace Editor.Validation
 
         /// <summary>Registers the VQ-1 decomposition parity + WS-2 unbounded-bounds + V2 codec baselines (partial file .VoxelQuery.cs).</summary>
         static partial void AddVoxelQueryScenarios(List<Scenario> scenarios);
+
+        /// <summary>Registers the WS-4a WorldOrigin Unity↔voxel conversion baselines (partial file .WorldOrigin.cs).</summary>
+        static partial void AddWorldOriginScenarios(List<Scenario> scenarios);
     }
 }
