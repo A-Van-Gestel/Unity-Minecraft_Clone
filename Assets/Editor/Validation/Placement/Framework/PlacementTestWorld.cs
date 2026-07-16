@@ -80,6 +80,7 @@ namespace Editor.Validation.Placement.Framework
         private readonly World _world;
         private readonly World _previousInstance;
         private readonly PlacementController _controller;
+        private readonly Vector3Int _originVoxel;
         private bool _disposed;
 
         /// <summary>Reach for the harness probe — generous enough to march the full 0-127 column from any start Y.</summary>
@@ -128,10 +129,12 @@ namespace Editor.Validation.Placement.Framework
                 ChunkData = new ChunkData(chunkVoxelPos);
                 _world.worldData.Chunks[chunkVoxelPos] = ChunkData;
 
+                // The origin this harness drives every probe with. Supplied per call (like production), so the suite
+                // never touches the WorldOrigin global — there is no leak to restore.
+                _originVoxel = new Vector3Int(chunkVoxelPos.x, 0, chunkVoxelPos.y);
+
                 // The REAL production decision object the scenarios drive (no reimplementation in the harness).
-                // The origin is injected, so the suite never touches the WorldOrigin global — no leak to restore.
-                _controller = new PlacementController(_world, new Vector3Int(
-                    chunkVoxelPos.x, 0, chunkVoxelPos.y));
+                _controller = new PlacementController(_world);
             }
             catch
             {
@@ -177,7 +180,8 @@ namespace Editor.Validation.Placement.Framework
 
             // "Player looking straight down the column" — feed the real production probe a downward ray.
             Vector3 origin = new Vector3(x + 0.5f, startY + 0.5f, z + 0.5f);
-            PlacementProbe probe = _controller.Probe(origin, Vector3.down, held, includeFluids: false, PROBE_REACH, PROBE_INCREMENT);
+            PlacementProbe probe = _controller.Probe(origin, Vector3.down, held, includeFluids: false, PROBE_REACH,
+                PROBE_INCREMENT, _originVoxel);
 
             return new PlacementOutcome(probe.DidHit, probe.HitCell, probe.Replaces, probe.PlaceCell, probe.WorldPlaceable);
         }
@@ -195,7 +199,7 @@ namespace Editor.Validation.Placement.Framework
         public bool EvaluatePlacementAt(ushort? heldId, Vector3Int placeCell)
         {
             BlockType held = heldId.HasValue ? _palette[heldId.Value] : null;
-            return _controller.CanPlaceAt(placeCell, held);
+            return _controller.CanPlaceAt(placeCell, held, _originVoxel);
         }
 
         /// <summary>Restores the previous <c>World.Instance</c> and destroys every object the harness created.</summary>

@@ -30,6 +30,13 @@ public class PlayerInteraction : MonoBehaviour
     private PlacementController _placement;
     private PlacementProbe _lastProbe;
 
+    /// <summary>
+    /// The floating origin <see cref="_lastProbe"/> was resolved under. Kept beside the probe so a block
+    /// modification is addressed in the same coordinate frame its cells were found in, rather than re-reading a
+    /// global that may have re-anchored since.
+    /// </summary>
+    private Vector3Int _lastProbeOrigin;
+
     [Tooltip("Distance between each ray-cast check, lower value means better accuracy")]
     public float checkIncrement = 0.05f;
 
@@ -50,7 +57,7 @@ public class PlayerInteraction : MonoBehaviour
         _world = World.Instance;
         _input = InputManager.Instance;
         _highlightBlocksParent = GameObject.Find("HighlightBlocks").GetComponent<Transform>();
-        _placement = new PlacementController(_world, WorldOrigin.OriginVoxel);
+        _placement = new PlacementController(_world);
     }
 
     private void Update()
@@ -111,7 +118,9 @@ public class PlayerInteraction : MonoBehaviour
     /// </summary>
     /// <param name="unityCell">The Unity-space cell resolved by the probe.</param>
     /// <returns>The absolute voxel cell to modify.</returns>
-    private static Vector3Int ToVoxelMod(Vector3Int unityCell) => unityCell + WorldOrigin.OriginVoxel;
+    // Uses the probe's own origin, not a fresh global read: the cell and the offset must come from the same frame,
+    // or a re-anchor between the probe and the click would address the edit to the wrong voxel.
+    private Vector3Int ToVoxelMod(Vector3Int unityCell) => unityCell + _lastProbeOrigin;
 
     /// <summary>
     /// Computes the metadata byte for a freshly-placed block based on its
@@ -190,7 +199,9 @@ public class PlayerInteraction : MonoBehaviour
         // Use the override if provided, otherwise fall back to the player's current setting.
         bool checkFluids = overrideInteractWithFluids ?? interactWithFluids;
 
-        if (_placement.MarchRay(_playerCamera.position, _playerCamera.forward, checkFluids, skipTags, reach, checkIncrement,
+        // Read the origin fresh — never cached — so a re-anchor takes effect on the very next raycast.
+        if (_placement.MarchRay(_playerCamera.position, _playerCamera.forward, checkFluids, skipTags, reach,
+                checkIncrement, WorldOrigin.OriginVoxel,
                 out Vector3Int hitCell, out int3 hitNormal, out Vector3Int adjacentCell))
         {
             return new VoxelRaycastResult
@@ -216,7 +227,10 @@ public class PlayerInteraction : MonoBehaviour
             ? _world.BlockTypes[heldSlot.ItemSlot.Stack.ID]
             : null;
 
-        PlacementProbe probe = _placement.Probe(_playerCamera.position, _playerCamera.forward, heldBlock, interactWithFluids, reach, checkIncrement);
+        // Read the origin fresh each frame — never cached at construction — so a re-anchor takes effect immediately.
+        _lastProbeOrigin = WorldOrigin.OriginVoxel;
+        PlacementProbe probe = _placement.Probe(_playerCamera.position, _playerCamera.forward, heldBlock,
+            interactWithFluids, reach, checkIncrement, _lastProbeOrigin);
         _lastProbe = probe;
 
         if (!probe.DidHit)
