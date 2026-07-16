@@ -170,6 +170,18 @@ public class World : MonoBehaviour
     private readonly HashSet<ChunkCoord> _chunksToUpdateVisualization = new HashSet<ChunkCoord>();
     private Vector3 _lastVisualizerPlayerPos;
 
+    // --- Floating origin (WS-4b) ---
+    // Slack past the shift threshold before the bounded-position assertion trips: the player crosses the threshold
+    // mid-chunk and keeps moving until the next Update re-anchors, and a chunk-aligned margin keeps the bound a whole
+    // number of chunks like everything else in WS-4. Wide enough never to false-positive, tight enough that a missed
+    // shift (which grows without bound) trips it almost immediately.
+    private const int PLAYER_BOUND_MARGIN_CHUNKS = 4;
+
+    private const int MAX_PLAYER_UNITY_DISTANCE =
+        (WorldOrigin.ShiftThresholdChunks + PLAYER_BOUND_MARGIN_CHUNKS) * ChunkMath.CHUNK_WIDTH;
+
+    private bool _hasReportedUnboundedPlayer;
+
     // --- Storage & Serialization ---
     [NonSerialized]
     public ChunkStorageManager StorageManager;
@@ -1467,6 +1479,33 @@ public class World : MonoBehaviour
         _lastVisualizerPlayerPos -= unityDelta;
     }
 
+    /// <summary>
+    /// Fails loudly if the player has drifted further from the Unity origin than a working floating origin ever
+    /// allows (§4.3 step 4). This is WS-4's false-green guard: the failures it catches — a re-anchor that silently
+    /// stopped firing, or a site holding a stale origin that pins the player out at the old anchor — otherwise show
+    /// up only as gradually worsening render jitter, which is easy to miss and hard to attribute. Editor/development
+    /// builds only, and latched, so a genuine breach reports once instead of every frame.
+    /// </summary>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private void AssertPlayerNearOrigin()
+    {
+        if (_hasReportedUnboundedPlayer) return;
+
+        Vector3 playerUnityPos = _playerTransform.position;
+        if (Mathf.Abs(playerUnityPos.x) <= MAX_PLAYER_UNITY_DISTANCE &&
+            Mathf.Abs(playerUnityPos.z) <= MAX_PLAYER_UNITY_DISTANCE)
+            return;
+
+        _hasReportedUnboundedPlayer = true;
+        Debug.LogError(
+            $"[WS-4] Player is at Unity {playerUnityPos}, further than {MAX_PLAYER_UNITY_DISTANCE} units from the " +
+            "render origin — which a working floating origin never allows. The re-anchor has either stopped firing " +
+            "or something is holding a stale origin. Voxel position: " +
+            $"{playerUnityPos + WorldOrigin.OriginVoxel}, origin chunk: " +
+            $"{WorldOrigin.OriginChunk.X},{WorldOrigin.OriginChunk.Z}. (Reported once per session.)");
+    }
+
     public void SetGlobalLightValue()
     {
         Shader.SetGlobalFloat(s_shaderGlobalLightLevel, globalLightLevel);
@@ -1625,6 +1664,8 @@ public class World : MonoBehaviour
         // the shift cannot change it — every distance loop below is unaffected by construction.
         if (WorldOrigin.ShouldReanchor(PlayerChunkCoord))
             ShiftOrigin(PlayerChunkCoord);
+
+        AssertPlayerNearOrigin();
 
         // Only update the chunks if the player has moved from the chunk they were previously on.
         if (!PlayerChunkCoord.Equals(_playerLastChunkCoord))
