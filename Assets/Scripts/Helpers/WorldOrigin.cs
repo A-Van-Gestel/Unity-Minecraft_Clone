@@ -42,7 +42,6 @@ namespace Helpers
     {
         /// <summary>
         /// Chebyshev chunk distance from the current anchor at which the world re-anchors on the player.
-        /// Consumed by the WS-4b shift trigger; WS-4a pins the origin, so nothing reads it yet.
         /// </summary>
         public const int ShiftThresholdChunks = 64;
 
@@ -90,6 +89,20 @@ namespace Helpers
         /// and by validation fixtures that must not leak an origin into the next suite.
         /// </summary>
         public static void ResetToIdentity() => SetOrigin(new ChunkCoord(0, 0));
+
+        /// <summary>
+        /// Whether the world should re-anchor onto <paramref name="playerChunk"/> — true once it is further than
+        /// <see cref="ShiftThresholdChunks"/> chunks (Chebyshev) from the current anchor. The policy behind
+        /// <c>World.Update</c>'s shift trigger; kept here so the threshold and the test that reads it stay together.
+        /// </summary>
+        /// <param name="playerChunk">The chunk the player currently occupies (voxel-chunk space).</param>
+        /// <returns>True if the world is due a re-anchor this frame.</returns>
+        public static bool ShouldReanchor(ChunkCoord playerChunk)
+        {
+            int dx = Mathf.Abs(playerChunk.X - OriginChunk.X);
+            int dz = Mathf.Abs(playerChunk.Z - OriginChunk.Z);
+            return Mathf.Max(dx, dz) > ShiftThresholdChunks;
+        }
 
         #region Voxel -> Unity (placing visuals)
 

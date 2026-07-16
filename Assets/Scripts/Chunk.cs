@@ -518,6 +518,24 @@ public class Chunk
     }
 
     /// <summary>
+    /// Re-places this chunk's GameObject for a new floating-origin anchor (WS-4b). Re-derived from
+    /// <see cref="Coord"/>, never patched by the shift delta, so repeated re-anchors cannot accumulate float drift.
+    /// </summary>
+    public void Reanchor()
+    {
+        UnityPosition = WorldOrigin.VoxelToUnity(Coord.ToVoxelOrigin());
+
+        // Mirrors Reset's branch exactly, which is what makes the animation's target authoritative here. Note this
+        // deliberately does NOT test _loadAnimation.enabled: a chunk that has been Reset but not yet started its
+        // animation is disabled while parked underground, and snapping it would undo the pre-position that exists to
+        // prevent a 1-frame flash. Handing the animation its new target preserves whatever phase it is in.
+        if (World.Instance.settings.enableChunkLoadAnimations && _loadAnimation != null)
+            _loadAnimation.Reanchor(UnityPosition);
+        else
+            ChunkGameObject.transform.position = UnityPosition;
+    }
+
+    /// <summary>
     /// Converts an absolute <b>voxel-space</b> position into the local voxel position within its chunk.
     /// </summary>
     /// <param name="pos">The absolute voxel-space position (NOT a Unity transform — callers convert first).</param>

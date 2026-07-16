@@ -24,6 +24,20 @@ public class ChunkLoadAnimation : MonoBehaviour
     }
 
     /// <summary>
+    /// Re-bases the animation onto a new floating-origin anchor (WS-4b): the resting target moves, and the current
+    /// position moves with it, so the chunk carries on exactly as it was with no jump at the shift frame.
+    /// </summary>
+    /// <param name="newTargetPosition">The chunk's final resting position under the new origin.</param>
+    public void Reanchor(Vector3 newTargetPosition)
+    {
+        // Shift the transform by the target's own delta rather than snapping to the target: that offset is the
+        // animation's state — mid-rise it is the remaining distance, and before StartAnimation it is the underground
+        // anti-flash parking spot. A settled chunk has no offset, so it lands exactly on the new target.
+        transform.position += newTargetPosition - _targetPos;
+        _targetPos = newTargetPosition;
+    }
+
+    /// <summary>
     /// Resets the internal timer and enables the component, triggering the chunk to rise smoothly
     /// from its underground offset towards its final resting position.
     /// </summary>

@@ -51,11 +51,7 @@ public class Clouds : MonoBehaviour
     {
         if (_isInitialized) return;
 
-        // Root anchor. Deliberately here rather than in Awake: DefaultSpawnPosition is voxel space, so it converts
-        // through the origin, and Awake runs before World has anchored it. (The tiles themselves don't depend on
-        // this — UpdateClouds positions each one in Unity space directly.)
-        transform.position = WorldOrigin.VoxelToUnity(
-            new Vector3(VoxelData.DefaultSpawnPosition, cloudHeight, VoxelData.DefaultSpawnPosition));
+        AnchorRoot();
 
         LoadCloudData();
         CreateClouds();
@@ -64,6 +60,29 @@ public class Clouds : MonoBehaviour
         _isInitialized = true;
 
         // Update clouds to set initial positions.
+        UpdateClouds();
+    }
+
+    /// <summary>
+    /// Places the cloudscape's root. Deliberately not in Awake: DefaultSpawnPosition is voxel space, so it converts
+    /// through the origin, and Awake runs before World has anchored it. (The tiles themselves don't depend on this —
+    /// UpdateClouds positions each one in Unity space directly.)
+    /// </summary>
+    private void AnchorRoot()
+    {
+        transform.position = WorldOrigin.VoxelToUnity(
+            new Vector3(VoxelData.DefaultSpawnPosition, cloudHeight, VoxelData.DefaultSpawnPosition));
+    }
+
+    /// <summary>
+    /// Re-anchors the cloudscape after a floating-origin shift (WS-4b). The root is world-anchored, so it re-derives;
+    /// the tiles are re-placed immediately rather than waiting for the next chunk crossing to drive UpdateClouds.
+    /// </summary>
+    public void Reanchor()
+    {
+        if (!_isInitialized) return;
+
+        AnchorRoot();
         UpdateClouds();
     }
 

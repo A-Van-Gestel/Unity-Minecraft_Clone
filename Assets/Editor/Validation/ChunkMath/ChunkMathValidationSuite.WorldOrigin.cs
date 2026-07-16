@@ -43,6 +43,141 @@ namespace Editor.Validation
             scenarios.Add(new Scenario("WorldOrigin UnityToChunk Matches Voxel-Space Chunk", RunUnityToChunkParity));
             scenarios.Add(new Scenario("WorldOrigin UnityToRelative Round-Trip", RunRelativeRoundTrip));
             scenarios.Add(new Scenario("WorldOrigin Save Round-Trip Anchors Near Origin", RunSaveRoundTripAnchor));
+            scenarios.Add(new Scenario("WorldOrigin Re-Anchor Preserves Voxel Cells", RunReanchorEquivalence));
+            scenarios.Add(new Scenario("WorldOrigin ShouldReanchor Trips Past The Threshold", RunShouldReanchorPolicy));
+        }
+
+        /// <summary>
+        /// Anchor movements a real shift can perform. The trigger fires the moment the player is one chunk past the
+        /// threshold, so a shift always lands within a chunk or so of that distance — never an arbitrary jump. That
+        /// bound is what keeps the delta arithmetic float-exact even at the world edge.
+        /// </summary>
+        private static readonly ChunkCoord[] s_shiftDeltas =
+        {
+            new ChunkCoord(WorldOrigin.ShiftThresholdChunks + 1, 0),
+            new ChunkCoord(0, -(WorldOrigin.ShiftThresholdChunks + 1)),
+            new ChunkCoord(WorldOrigin.ShiftThresholdChunks + 1, WorldOrigin.ShiftThresholdChunks + 1),
+            new ChunkCoord(-(WorldOrigin.ShiftThresholdChunks + 1), -(WorldOrigin.ShiftThresholdChunks + 1)),
+            new ChunkCoord(1, -1),
+        };
+
+        /// <summary>
+        /// §7's WS-4b baseline. The shift loop moves objects two different ways — chunks are <b>re-derived</b> from
+        /// their coord, while the player and in-flight animations are <b>patched</b> by the shift delta — and this
+        /// pins the equivalence that makes mixing them safe: both land on the same Unity position, the point keeps
+        /// naming the same voxel cell, and a patched fractional position keeps its sub-voxel offset exactly (the
+        /// player must not be quantized by traveling). Sabotaging either side's arithmetic fails here.
+        /// </summary>
+        private static bool RunReanchorEquivalence()
+        {
+            const string scenario = "WorldOrigin Re-Anchor Preserves Voxel Cells";
+            try
+            {
+                foreach (ChunkCoord from in s_originCases)
+                {
+                    foreach (ChunkCoord shift in s_shiftDeltas)
+                    {
+                        WorldOrigin.SetOrigin(from);
+
+                        // A physical point near the old anchor — where the world's objects actually are when a shift
+                        // fires — and the player's fractional position within its cell.
+                        Vector3Int cell = new Vector3Int(WorldOrigin.OriginVoxel.x + 5, 70, WorldOrigin.OriginVoxel.z - 9);
+                        Vector3 subCellOffset = new Vector3(0.25f, 0.5f, 0.75f);
+                        Vector3 unityBefore = WorldOrigin.VoxelToUnity(cell);
+                        Vector3 fractionalBefore = unityBefore + subCellOffset;
+
+                        // World.ShiftOrigin's own arithmetic.
+                        ChunkCoord to = from + shift;
+                        Vector3 unityDelta = new Vector3(
+                            shift.X * ChunkMath.CHUNK_WIDTH, 0f, shift.Z * ChunkMath.CHUNK_WIDTH);
+
+                        WorldOrigin.SetOrigin(to);
+
+                        // 1. Re-derivation and delta-patching must agree EXACTLY, or the two halves of the shift loop
+                        //    drift apart a little further on every re-anchor.
+                        Vector3 rederived = WorldOrigin.VoxelToUnity(cell);
+                        Vector3 patched = unityBefore - unityDelta;
+                        if (rederived != patched)
+                            return FailOrigin(scenario,
+                                $"origin {from.X},{from.Z} + shift {shift.X},{shift.Z}: re-derived {rederived} != patched {patched}.");
+
+                        // 2. The invariant: the same physical point still names the same voxel cell.
+                        if (WorldOrigin.UnityToVoxelCell(patched) != cell)
+                            return FailOrigin(scenario,
+                                $"origin {from.X},{from.Z} + shift {shift.X},{shift.Z}: cell {cell} became {WorldOrigin.UnityToVoxelCell(patched)}.");
+
+                        // 3. The player's sub-voxel position survives the patch untouched.
+                        Vector3 fractionalAfter = fractionalBefore - unityDelta;
+                        if (fractionalAfter - rederived != subCellOffset)
+                            return FailOrigin(scenario,
+                                $"origin {from.X},{from.Z} + shift {shift.X},{shift.Z}: sub-cell offset became {fractionalAfter - rederived}, expected {subCellOffset}.");
+
+                        // 4. The shift did its job: the point is now rendered near the origin, not out where floats jitter.
+                        if (Mathf.Abs(rederived.x) > NEAR_ORIGIN_REACH || Mathf.Abs(rederived.z) > NEAR_ORIGIN_REACH)
+                            return FailOrigin(scenario,
+                                $"origin {from.X},{from.Z} + shift {shift.X},{shift.Z}: point left at far Unity pos {rederived}.");
+                    }
+                }
+
+                Debug.Log($"[PASS] {scenario}");
+                return true;
+            }
+            finally
+            {
+                WorldOrigin.ResetToIdentity();
+            }
+        }
+
+        /// <summary>
+        /// The shift trigger's policy: re-anchor only once the player is <b>past</b> the threshold (Chebyshev, so a
+        /// diagonal does not trip it early), and never while inside it — a predicate that fired every frame would
+        /// re-anchor the world continuously.
+        /// </summary>
+        private static bool RunShouldReanchorPolicy()
+        {
+            const string scenario = "WorldOrigin ShouldReanchor Trips Past The Threshold";
+            const int threshold = WorldOrigin.ShiftThresholdChunks;
+            try
+            {
+                foreach (ChunkCoord origin in s_originCases)
+                {
+                    WorldOrigin.SetOrigin(origin);
+
+                    // Inside the threshold, on both axes and the diagonal: no shift.
+                    (int dx, int dz, bool expected)[] cases =
+                    {
+                        (0, 0, false),
+                        (threshold, 0, false),
+                        (0, -threshold, false),
+                        (threshold, threshold, false), // Chebyshev: the diagonal is still exactly at the edge
+                        (-threshold, threshold, false),
+                        (threshold + 1, 0, true),
+                        (0, -(threshold + 1), true),
+                        (-(threshold + 1), threshold, true),
+                    };
+
+                    foreach ((int dx, int dz, bool expected) c in cases)
+                    {
+                        ChunkCoord playerChunk = new ChunkCoord(origin.X + c.dx, origin.Z + c.dz);
+                        if (WorldOrigin.ShouldReanchor(playerChunk) != c.expected)
+                            return FailOrigin(scenario,
+                                $"origin {origin.X},{origin.Z} + ({c.dx},{c.dz}): ShouldReanchor was {!c.expected}, expected {c.expected}.");
+                    }
+
+                    // And after re-anchoring on the player, the trigger must be satisfied — or it would fire forever.
+                    ChunkCoord farPlayer = new ChunkCoord(origin.X + threshold + 1, origin.Z - threshold - 1);
+                    WorldOrigin.SetOrigin(farPlayer);
+                    if (WorldOrigin.ShouldReanchor(farPlayer))
+                        return FailOrigin(scenario, "re-anchoring on the player left the trigger still armed.");
+                }
+
+                Debug.Log($"[PASS] {scenario}");
+                return true;
+            }
+            finally
+            {
+                WorldOrigin.ResetToIdentity();
+            }
         }
 
         /// <summary>

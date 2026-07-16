@@ -1423,6 +1423,50 @@ public class World : MonoBehaviour
         Shader.SetGlobalVector(s_shaderWorldOriginOffset, (Vector3)WorldOrigin.OriginVoxel);
     }
 
+    /// <summary>
+    /// Re-anchors the floating origin onto the player's chunk and translates every Unity-space object to match, so
+    /// that however far the player travels, what is rendered and simulated stays near the Unity origin where float
+    /// precision is good (WS-4b, §4.3). One frame, main thread, no allocation.
+    /// <para>
+    /// Nothing in voxel space moves: chunk coords, voxel data, jobs, and everything persisted are origin-independent,
+    /// so this is invisible to the pipeline. Physics needs nothing either — the solver runs in FixedUpdate (no
+    /// mid-solve teleport is possible) and its velocity/momentum are deltas.
+    /// </para>
+    /// </summary>
+    /// <param name="newOriginChunk">The chunk to re-anchor on — the player's, so they land next to the Unity origin.</param>
+    private void ShiftOrigin(ChunkCoord newOriginChunk)
+    {
+        // The exact Unity-space distance every object moves. A whole number of chunks, so it is float-exact and
+        // leaves chunk-local and frac(worldPos) shader math untouched.
+        ChunkCoord delta = newOriginChunk - WorldOrigin.OriginChunk;
+        Vector3 unityDelta = new Vector3(delta.X * ChunkMath.CHUNK_WIDTH, 0f, delta.Z * ChunkMath.CHUNK_WIDTH);
+
+        // FIRST: everything below reads the new origin. (This also republishes the shader global, so the liquid
+        // pattern re-anchors in the same frame rather than sliding.)
+        AnchorOrigin(newOriginChunk);
+
+        // --- Re-derived from voxel space (never patched by the delta, so repeated shifts cannot drift) ---
+        foreach (Chunk chunk in _chunkMap.Values)
+            chunk.Reanchor();
+
+        foreach (KeyValuePair<ChunkCoord, GameObject> border in _chunkBorders)
+        {
+            if (border.Value != null)
+                border.Value.transform.position = WorldOrigin.VoxelToUnity(border.Key.ToVoxelOrigin());
+        }
+
+        if (voxelVisualizer != null) voxelVisualizer.Reanchor();
+        if (clouds != null) clouds.Reanchor();
+
+        // --- Patched by the delta: transient Unity-space state with no voxel-space source to re-derive from ---
+        // The player must keep its sub-voxel position exactly (re-deriving would quantize it to a cell); the camera
+        // is a child, so it follows.
+        _playerTransform.position -= unityDelta;
+
+        // Or the next visualizer check reads a 1000-unit jump as player movement and needlessly regenerates.
+        _lastVisualizerPlayerPos -= unityDelta;
+    }
+
     public void SetGlobalLightValue()
     {
         Shader.SetGlobalFloat(s_shaderGlobalLightLevel, globalLightLevel);
@@ -1576,6 +1620,11 @@ public class World : MonoBehaviour
         WorldFrameProfiler.BeginFrame();
 
         PlayerChunkCoord = WorldOrigin.UnityToChunk(_playerTransform.position);
+
+        // WS-4b: re-anchor before anything consumes this frame's positions. PlayerChunkCoord is voxel-chunk space, so
+        // the shift cannot change it — every distance loop below is unaffected by construction.
+        if (WorldOrigin.ShouldReanchor(PlayerChunkCoord))
+            ShiftOrigin(PlayerChunkCoord);
 
         // Only update the chunks if the player has moved from the chunk they were previously on.
         if (!PlayerChunkCoord.Equals(_playerLastChunkCoord))

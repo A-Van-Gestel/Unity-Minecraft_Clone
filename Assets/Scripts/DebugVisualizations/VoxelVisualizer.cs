@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Data;
 using DebugVisualizations.Jobs;
+using Helpers;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
@@ -71,6 +72,19 @@ namespace DebugVisualizations
             _faceChecks = new NativeArray<Vector3Int>(VoxelData.FaceChecks, Allocator.Persistent);
             _voxelTris = new NativeArray<int>(VoxelData.VoxelTris, Allocator.Persistent);
             _voxelVerts = new NativeArray<Vector3>(VoxelData.VoxelVerts, Allocator.Persistent);
+        }
+
+        /// <summary>
+        /// Re-places every visualizer chunk for a new floating-origin anchor (WS-4b), re-derived from each chunk's
+        /// coord so a re-anchor cannot accumulate drift. No-op when nothing is being visualized.
+        /// </summary>
+        public void Reanchor()
+        {
+            foreach (KeyValuePair<ChunkCoord, VisualizerChunkData> visualizerChunk in _visualizerChunks)
+            {
+                visualizerChunk.Value.ChunkObject.transform.position =
+                    WorldOrigin.VoxelToUnity(visualizerChunk.Key.ToVoxelOrigin());
+            }
         }
 
         private void OnDestroy()
