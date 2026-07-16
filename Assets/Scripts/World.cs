@@ -678,7 +678,7 @@ public class World : MonoBehaviour
             savedPlayerPosition = _playerTransform.position;
         }
 
-        PlayerChunkCoord = GetChunkCoordFromVector3(_playerTransform.position);
+        PlayerChunkCoord = WorldOrigin.UnityToChunk(_playerTransform.position);
 
         // --- STEP 2: LOAD INITIAL CHUNKS (Async -> Sync Wait) ---
         Debug.Log("--- Loading/Generating initial chunks ---");
@@ -1583,7 +1583,7 @@ public class World : MonoBehaviour
         // them at the bottom of Update for the stress-pass collector to read.
         WorldFrameProfiler.BeginFrame();
 
-        PlayerChunkCoord = GetChunkCoordFromVector3(_playerTransform.position);
+        PlayerChunkCoord = WorldOrigin.UnityToChunk(_playerTransform.position);
 
         // Only update the chunks if the player has moved from the chunk they were previously on.
         if (!PlayerChunkCoord.Equals(_playerLastChunkCoord))
@@ -2356,15 +2356,17 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
-    /// Returns the voxel-space chunk coordinates containing a <b>Unity-space</b> position.
-    /// <para>Private, and every caller passes the player transform — so unlike the public float-taking query APIs
-    /// (which serve voxel-space callers too), this one can safely own the conversion for all of them.</para>
+    /// Returns the chunk coordinates for a given <b>voxel-space</b> position.
     /// </summary>
-    /// <param name="unityPos">The Unity-space position (the player transform).</param>
-    /// <returns>The voxel-space chunk coordinate containing that position.</returns>
-    private static ChunkCoord GetChunkCoordFromVector3(Vector3 unityPos)
+    /// <param name="worldPos">The voxel-space position.</param>
+    /// <returns>The chunk coordinates for the given voxel-space position.</returns>
+    /// <remarks>Deliberately NOT origin-converting: it serves voxel-space callers (e.g. <c>VoxelMod.GlobalPosition</c>
+    /// routing in <c>ApplyModifications</c>). Unity-space callers convert at their own call site via
+    /// <see cref="WorldOrigin.UnityToChunk"/> — mixing both spaces into one helper is the silent-bug class WS-4 exists
+    /// to prevent.</remarks>
+    private static ChunkCoord GetChunkCoordFromVector3(Vector3 worldPos)
     {
-        return WorldOrigin.UnityToChunk(unityPos);
+        return ChunkCoord.FromWorldPosition(worldPos);
     }
 
     /// <summary>
@@ -2584,7 +2586,7 @@ public class World : MonoBehaviour
     {
         clouds.UpdateClouds();
 
-        ChunkCoord playerCurrentChunkCoord = GetChunkCoordFromVector3(_playerTransform.position);
+        ChunkCoord playerCurrentChunkCoord = WorldOrigin.UnityToChunk(_playerTransform.position);
 
         // Return early if the player hasn't moved outside the last chunk.
         if (playerCurrentChunkCoord.Equals(_playerLastChunkCoord)) return;
