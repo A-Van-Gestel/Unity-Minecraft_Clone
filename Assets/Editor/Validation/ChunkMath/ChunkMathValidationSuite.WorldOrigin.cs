@@ -26,7 +26,7 @@ namespace Editor.Validation
         {
             new ChunkCoord(0, 0),
             new ChunkCoord(1, -1),
-            new ChunkCoord(625, 625),       // ~10k voxels — where jitter is observed in-game today
+            new ChunkCoord(625, 625), // ~10k voxels — where jitter is observed in-game today
             new ChunkCoord(-625, 625),
             new ChunkCoord(1 << 26, -(1 << 26)),
         };
@@ -42,6 +42,75 @@ namespace Editor.Validation
             scenarios.Add(new Scenario("WorldOrigin Y Never Shifts", RunYNeverShifts));
             scenarios.Add(new Scenario("WorldOrigin UnityToChunk Matches Voxel-Space Chunk", RunUnityToChunkParity));
             scenarios.Add(new Scenario("WorldOrigin UnityToRelative Round-Trip", RunRelativeRoundTrip));
+            scenarios.Add(new Scenario("WorldOrigin Save Round-Trip Anchors Near Origin", RunSaveRoundTripAnchor));
+        }
+
+        /// <summary>
+        /// Saved player positions the load path must be able to resume at. Fractional cases stay under ±2²³ because a
+        /// voxel-space <c>Vector3</c> cannot hold a fraction past ±2²⁴ (§9's documented limitation, which WS-4c's
+        /// ChunkRelativePosition migration removes); the far-edge cases are therefore whole multiples of the chunk width.
+        /// </summary>
+        private static readonly Vector3[] s_savedPositionCases =
+        {
+            new Vector3(0.5f, 64f, 0.5f), // identity-adjacent — the pre-WS-4b case
+            new Vector3(800.5f, 71.25f, 800.5f), // the default spawn
+            new Vector3(12345.5f, 71.25f, -9876.25f), // past the observed jitter onset, mixed sign
+            new Vector3(-100000.5f, 64f, 100000.5f), // negative quadrant (WS-3)
+            new Vector3(1 << 30, 64f, -(1 << 30)), // the permanent ±2³¹ voxel edge
+        };
+
+        /// <summary>
+        /// WS-4b's persistence contract, which <c>Player.GetSaveData</c> and <c>World.StartWorld</c>'s spawn
+        /// chokepoint implement between them: the origin is anchored <b>from</b> the saved voxel position, and only
+        /// then is the transform placed. This pins both halves — that resuming a far save puts the transform next to
+        /// the render origin (not out at the jitter distance), and that saving it straight back reproduces the
+        /// original voxel position exactly. Anchoring at the identity instead, or dropping either side's origin term,
+        /// fails here.
+        /// </summary>
+        private static bool RunSaveRoundTripAnchor()
+        {
+            const string scenario = "WorldOrigin Save Round-Trip Anchors Near Origin";
+            try
+            {
+                foreach (Vector3 saved in s_savedPositionCases)
+                {
+                    // The load path, in its required order: derive the anchor from the saved position...
+                    WorldOrigin.SetOrigin(ChunkCoord.FromVoxelPosition(saved));
+
+                    // ...then place the transform.
+                    Vector3 unity = WorldOrigin.VoxelToUnity(saved);
+
+                    // 1. The whole point: however far out the save is, the transform lands inside the anchor chunk.
+                    if (unity.x < 0f || unity.x >= ChunkMath.CHUNK_WIDTH ||
+                        unity.z < 0f || unity.z >= ChunkMath.CHUNK_WIDTH)
+                        return FailOrigin(scenario,
+                            $"saved {saved} resumed at Unity {unity}, outside the anchor chunk [0,{ChunkMath.CHUNK_WIDTH}).");
+
+                    // 2. Y is never shifted by the anchor.
+                    if (unity.y != saved.y)
+                        return FailOrigin(scenario, $"saved {saved} resumed at Y {unity.y}, expected {saved.y}.");
+
+                    // 3. Round-trip: Player.GetSaveData's `transform + OriginVoxel` must reproduce the saved position
+                    //    exactly, or every save after a re-anchor walks the player.
+                    Vector3 resaved = unity + WorldOrigin.OriginVoxel;
+                    if (resaved != saved)
+                        return FailOrigin(scenario, $"saved {saved} -> resumed {unity} -> re-saved {resaved}.");
+
+                    // 4. The resumed transform floors into the voxel cell the save named.
+                    Vector3Int expectedCell = new Vector3Int(
+                        Mathf.FloorToInt(saved.x), Mathf.FloorToInt(saved.y), Mathf.FloorToInt(saved.z));
+                    if (WorldOrigin.UnityToVoxelCell(unity) != expectedCell)
+                        return FailOrigin(scenario,
+                            $"saved {saved} resumed into cell {WorldOrigin.UnityToVoxelCell(unity)}, expected {expectedCell}.");
+                }
+
+                Debug.Log($"[PASS] {scenario}");
+                return true;
+            }
+            finally
+            {
+                WorldOrigin.ResetToIdentity();
+            }
         }
 
         /// <summary>

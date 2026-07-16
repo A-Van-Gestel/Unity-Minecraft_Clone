@@ -538,13 +538,11 @@ public class World : MonoBehaviour
         settings = SettingsManager.LoadSettings();
 
         // --- ANCHOR THE FLOATING ORIGIN (WS-4) ---
-        // Ahead of everything that reads it: the save load below writes the player transform, and every chunk and
-        // visual placed afterwards converts through the origin. WS-4a pins the identity, which makes Unity space and
-        // voxel space coincide and the whole startup path bit-identical to pre-WS-4.
-        // WS-4b does NOT simply re-anchor here: the anchor must come from the starting player position, which only
-        // exists once the save is parsed. Since SP-1 that position has one home — the SpawnResolution chokepoint in
-        // STEP 1 below — so the re-anchor belongs there, ahead of its transform write. This call stays as the
-        // pre-load default.
+        // The pre-load default only. The real anchor cannot be chosen yet: it comes from the starting player
+        // position, which does not exist until the save is parsed — so it happens at the SpawnResolution chokepoint
+        // in STEP 1, before anything converts through the origin. Pinning the identity here keeps the code between
+        // this line and STEP 1 (which reads no origin) in the pre-WS-4 space, and re-anchors a re-entered world
+        // rather than inheriting the previous session's origin.
         AnchorOrigin(new ChunkCoord(0, 0));
 
         // --- Initialize World settings (from save data / create new world) ---
@@ -672,6 +670,14 @@ public class World : MonoBehaviour
         SpawnSource spawnSource = SpawnResolution.Classify(isNewGame, settings.EnablePersistence, hasExistingMetadata);
         spawnPosition = SpawnResolution.ResolveInitial(
             spawnSource, savedPlayerVoxelPosition, WorldSpawnPoint, VoxelData.DefaultSpawnPosition);
+
+        // WS-4b: anchor the floating origin on wherever we are about to start, BEFORE the transform write below and
+        // before STEP 2 creates any chunk — both convert through the origin and would otherwise bake in the stale
+        // one. This is the only re-anchor outside the Update shift, and the reason it lives here: the anchor must
+        // come from the starting player position, and SP-1 made this the one place that position exists.
+        // Y is ignored (the origin is XZ-only), so the unresolved-height sentinel is harmless.
+        AnchorOrigin(ChunkCoord.FromVoxelPosition(spawnPosition));
+
         _playerTransform.position = WorldOrigin.VoxelToUnity(spawnPosition);
 
         PlayerChunkCoord = WorldOrigin.UnityToChunk(_playerTransform.position);

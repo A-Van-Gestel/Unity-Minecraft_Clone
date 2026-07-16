@@ -116,9 +116,25 @@ namespace Data
         }
 
         /// <summary>
-        /// Creates a ChunkCoord from a Unity world-space position (e.g. <c>Transform.position</c>).
+        /// Creates a ChunkCoord from a fractional <b>voxel-space</b> position.
+        /// <para>⚠ NOT for a Unity transform — since WS-4 the two spaces differ by the floating origin. Convert a
+        /// transform with <c>WorldOrigin.UnityToChunk</c> instead; this is its voxel-space twin.</para>
         /// </summary>
-        /// <param name="worldPos">The floating-point world position in Unity space.</param>
+        /// <param name="voxelPos">The floating-point position in voxel world space.</param>
+        /// <returns>The calculated <see cref="ChunkCoord"/>.</returns>
+        /// <example><c>VoxelPos (800.5f, 75f, 800.5f)</c> -> <c>ChunkCoord (50, 50)</c></example>
+        public static ChunkCoord FromVoxelPosition(Vector3 voxelPos)
+        {
+            return new ChunkCoord(ChunkMath.WorldToChunk(voxelPos.x), ChunkMath.WorldToChunk(voxelPos.z));
+        }
+
+        /// <summary>
+        /// Creates a ChunkCoord from a fractional voxel-space position.
+        /// <para>⚠ Despite the name this is <b>voxel</b> space, not Unity space — every caller passes saved or
+        /// query-space data. Prefer <see cref="FromVoxelPosition"/>, which says so; convert a Unity transform with
+        /// <c>WorldOrigin.UnityToChunk</c>.</para>
+        /// </summary>
+        /// <param name="worldPos">The floating-point position in voxel world space.</param>
         /// <returns>The calculated <see cref="ChunkCoord"/>.</returns>
         /// <example><c>WorldPos (800.5f, 75f, 800.5f)</c> -> <c>ChunkCoord (50, 50)</c></example>
         public static ChunkCoord FromWorldPosition(Vector3 worldPos)

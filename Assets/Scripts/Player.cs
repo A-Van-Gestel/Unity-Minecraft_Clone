@@ -2,6 +2,7 @@ using Benchmarks;
 using Data;
 using Data.Enums;
 using DebugVisualizations;
+using Helpers;
 using Physics;
 using Serialization;
 using UnityEngine;
@@ -232,7 +233,10 @@ public class Player : MonoBehaviour
 
         PlayerSaveData data = new PlayerSaveData
         {
-            position = transform.position,
+            // Voxel space: the transform is Unity space, which is only the same thing while the origin is the
+            // identity. Everything on disk is voxel space (World.StartWorld's spawn chokepoint converts back on
+            // load), so a save written after a re-anchor still names the position the player was actually standing at.
+            position = transform.position + WorldOrigin.OriginVoxel,
             rotation = combinedRotation,
             capabilities = new PlayerCapabilityData
             {
