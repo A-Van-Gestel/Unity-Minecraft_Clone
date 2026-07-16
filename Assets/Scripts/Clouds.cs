@@ -44,17 +44,18 @@ public class Clouds : MonoBehaviour
         _cloudTexWidth = _cloudPattern.width;
         _cloudTileSize = VoxelData.ChunkWidth;
         _offset = new Vector3Int(-(_cloudTexWidth / 2), 0, -(_cloudTexWidth / 2));
-
-        // DefaultSpawnPosition is voxel space, so it converts. Root anchor only — UpdateClouds positions every tile
-        // in Unity space directly, so this never feeds the tile grid and is not origin-critical.
-        transform.position = WorldOrigin.VoxelToUnity(
-            new Vector3(VoxelData.DefaultSpawnPosition, cloudHeight, VoxelData.DefaultSpawnPosition));
     }
 
     // This is our new public initialization method.
     public void Initialize()
     {
         if (_isInitialized) return;
+
+        // Root anchor. Deliberately here rather than in Awake: DefaultSpawnPosition is voxel space, so it converts
+        // through the origin, and Awake runs before World has anchored it. (The tiles themselves don't depend on
+        // this — UpdateClouds positions each one in Unity space directly.)
+        transform.position = WorldOrigin.VoxelToUnity(
+            new Vector3(VoxelData.DefaultSpawnPosition, cloudHeight, VoxelData.DefaultSpawnPosition));
 
         LoadCloudData();
         CreateClouds();

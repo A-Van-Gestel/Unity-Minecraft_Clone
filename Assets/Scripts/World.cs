@@ -536,6 +536,16 @@ public class World : MonoBehaviour
         // --- Load Settings via Manager ---
         settings = SettingsManager.LoadSettings();
 
+        // --- ANCHOR THE FLOATING ORIGIN (WS-4) ---
+        // Ahead of everything that reads it: the save load below writes the player transform, and every chunk and
+        // visual placed afterwards converts through the origin. WS-4a pins the identity, which makes Unity space and
+        // voxel space coincide and the whole startup path bit-identical to pre-WS-4.
+        // WS-4b does NOT simply re-anchor here: the anchor must come from the loaded player position, which only
+        // exists once the save is parsed — so its derivation belongs inside the load path (see LoadWorldGameState /
+        // Player.LoadSaveData), which must set the origin from the saved voxel position *before* writing the
+        // transform. This call stays as the fresh-world default.
+        AnchorOrigin(new ChunkCoord(0, 0));
+
         // --- Initialize World settings (from save data / create new world) ---
         // 1. Determine Mode
         IsVolatileMode = Application.isEditor && settings.enableVolatileSaveData;
@@ -641,14 +651,6 @@ public class World : MonoBehaviour
         _chunkBorderParent = borderParentGo.transform;
         _lastChunkBordersState = ShowChunkBorders;
 
-        // --- STEP 0: ANCHOR THE FLOATING ORIGIN (WS-4) ---
-        // Must precede every transform write and chunk creation below: they convert through the origin, so an
-        // anchor set afterwards would bake the stale offset into their positions. WS-4a pins the identity, which
-        // makes Unity space and voxel space coincide and the whole startup path bit-identical to pre-WS-4;
-        // WS-4b derives the anchor from the loaded player position here instead.
-        WorldOrigin.ResetToIdentity();
-        SetWorldOriginShaderGlobal();
-
         // --- STEP 1: DETERMINE INITIAL PLAYER POSITION ---
         // If we loaded a save, the player position is already set by LoadWorldGameState.
         // If not, we use the default spawn logic.
@@ -671,10 +673,6 @@ public class World : MonoBehaviour
         }
         else
         {
-            // If we loaded a save, update our local 'spawnPosition' to match where the player actually is.
-            // spawnPosition is voxel space (it feeds ResolveSpawnHeight and SetSpawnPoint), so the Unity-space
-            // transform converts. Display-only on this branch — nothing reads it before WS-4b reworks the load path.
-            spawnPosition = _playerTransform.position + WorldOrigin.OriginVoxel;
             savedPlayerPosition = _playerTransform.position;
         }
 
@@ -1423,11 +1421,14 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
-    /// Pushes the floating-origin offset to the shaders that sample world-anchored fields (LiquidCore's noise).
-    /// Must run whenever the origin is re-anchored — otherwise the liquid pattern slides with the shift.
+    /// Re-anchors the floating origin and republishes it to the shaders that sample world-anchored fields
+    /// (LiquidCore's noise). The <b>only</b> place the origin may be set: the two operations are paired here so a
+    /// re-anchor cannot land without the shader global following it, which would slide the liquid pattern.
     /// </summary>
-    private static void SetWorldOriginShaderGlobal()
+    /// <param name="originChunk">The chunk whose corner becomes the new Unity-space origin.</param>
+    private static void AnchorOrigin(ChunkCoord originChunk)
     {
+        WorldOrigin.SetOrigin(originChunk);
         Shader.SetGlobalVector(s_shaderWorldOriginOffset, (Vector3)WorldOrigin.OriginVoxel);
     }
 
@@ -3404,7 +3405,7 @@ public class World : MonoBehaviour
     /// This is a coarse grid-level check used for placement previews.
     /// Does NOT evaluate <see cref="BlockTags.REPLACEABLE"/> or specific placement rules.
     /// </summary>
-    /// <param name="pos">The world-space position to check.</param>
+    /// <param name="pos">The <b>voxel-space</b> position to check.</param>
     /// <returns>True if the cell contains a solid block, false otherwise.</returns>
     public bool IsCellOccupiedForPlacement(Vector3 pos)
     {
