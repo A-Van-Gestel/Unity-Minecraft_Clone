@@ -261,9 +261,12 @@ public class DebugScreen : MonoBehaviour
     /// </summary>
     private void UpdateInfrequentData()
     {
+        // Unity space (a transform); the voxel-space values below are what the world queries and the readout use.
         Vector3 playerPos = _player.transform.position;
+        Vector3 playerVoxelPos = playerPos + WorldOrigin.OriginVoxel;
+
         // Update Ground Voxel State
-        Vector3 groundVoxelPosVector3 = playerPos + Vector3.down;
+        Vector3 groundVoxelPosVector3 = playerVoxelPos + Vector3.down;
         _groundVoxelState = _world.GetVoxelState(groundVoxelPosVector3);
         _groundVoxelPos = groundVoxelPosVector3.ToVector3Int();
 
@@ -271,7 +274,9 @@ public class DebugScreen : MonoBehaviour
         UpdateTargetVoxel();
 
         // Update Current Chunk
-        _currentChunk = _world.worldData.IsVoxelInWorld(playerPos) ? _world.GetChunkFromVector3(playerPos) : null;
+        _currentChunk = _world.worldData.IsVoxelInWorld(playerVoxelPos)
+            ? _world.GetChunkFromVector3(playerVoxelPos)
+            : null;
     }
 
     /// <summary>
@@ -283,8 +288,10 @@ public class DebugScreen : MonoBehaviour
 
         if (result.DidHit)
         {
-            _targetVoxelPos = result.HitPosition;
-            _targetVoxelState = _world.GetVoxelState(result.HitPosition);
+            // The raycast reports Unity-space cells; the readout and the state query are both voxel space.
+            Vector3Int targetVoxel = result.HitPosition + WorldOrigin.OriginVoxel;
+            _targetVoxelPos = targetVoxel;
+            _targetVoxelState = _world.GetVoxelState(targetVoxel);
         }
         else
         {

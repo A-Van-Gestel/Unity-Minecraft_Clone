@@ -3333,9 +3333,9 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
-    /// Determines if a voxel at the given world position should stop a ray or count as a hit.
+    /// Determines if a voxel at the given <b>voxel-space</b> position should stop a ray or count as a hit.
     /// </summary>
-    /// <param name="worldPos">The world-space position.</param>
+    /// <param name="worldPos">The voxel-space position.</param>
     /// <param name="includeFluids">If true, fluids will also count as a hit.</param>
     /// <param name="includeNonSolid">If true, non-solid interactable blocks (excluding Air and
     /// blocks with <see cref="BlockTags.IGNORE_RAYCAST"/>) will also count as a hit.</param>
@@ -3344,12 +3344,39 @@ public class World : MonoBehaviour
         BlockTags skipTags = BlockTags.NONE)
     {
         VoxelState? voxel = worldData.GetVoxelState(worldPos);
-        if (!voxel.HasValue) return false;
+        return voxel.HasValue && IsRayHit(voxel.Value, includeFluids, includeNonSolid, skipTags);
+    }
 
-        BlockType props = BlockTypes[voxel.Value.ID];
+    /// <summary>
+    /// Integer-cell overload of <see cref="CheckForVoxel(Vector3,bool,bool,BlockTags)"/> — same voxel space, no
+    /// float round-trip. Preferred by callers that already hold a cell, notably the per-step ray march.
+    /// </summary>
+    /// <param name="x">Absolute voxel X.</param>
+    /// <param name="y">Absolute voxel Y.</param>
+    /// <param name="z">Absolute voxel Z.</param>
+    /// <param name="includeFluids">If true, fluids will also count as a hit.</param>
+    /// <param name="includeNonSolid">If true, non-solid interactable blocks (excluding Air and
+    /// blocks with <see cref="BlockTags.IGNORE_RAYCAST"/>) will also count as a hit.</param>
+    /// <param name="skipTags">Block tags the ray passes through.</param>
+    /// <returns>True if the voxel should be treated as a hit; otherwise, false.</returns>
+    public bool CheckForVoxel(int x, int y, int z, bool includeFluids = false, bool includeNonSolid = false,
+        BlockTags skipTags = BlockTags.NONE)
+    {
+        // VQ-1 integer fast path: no float decomposition, no nullable wrap.
+        return worldData.TryGetVoxel(x, y, z, out VoxelState voxel) &&
+               IsRayHit(voxel, includeFluids, includeNonSolid, skipTags);
+    }
+
+    /// <summary>
+    /// The shared hit classification behind both <c>CheckForVoxel</c> overloads: decides whether a resolved voxel
+    /// stops a ray, given the caller's fluid / non-solid / skip-tag policy.
+    /// </summary>
+    private bool IsRayHit(VoxelState voxel, bool includeFluids, bool includeNonSolid, BlockTags skipTags)
+    {
+        BlockType props = BlockTypes[voxel.ID];
 
         // Skip Air (ID 0) — never a hit
-        if (voxel.Value.ID == BlockIDs.Air) return false;
+        if (voxel.ID == BlockIDs.Air) return false;
 
         // Skip blocks whose tags overlap with the held block's canReplaceTags,
         // so the ray passes through them (e.g. fluids when holding a block that can replace fluids).
@@ -3388,11 +3415,13 @@ public class World : MonoBehaviour
     /// specific movement axis and direction. Aggregates across all overlapping blocks
     /// and returns the correction that fully resolves ALL overlaps on this axis.
     /// </summary>
-    /// <param name="entityBounds">The entity's predicted world-space AABB.</param>
+    /// <param name="entityBounds">The entity's predicted <b>Unity-space</b> AABB.</param>
     /// <param name="axis">The movement axis to resolve (0=X, 1=Y, 2=Z).</param>
     /// <param name="directionSign">+1 for positive movement, -1 for negative.</param>
     /// <param name="contact">If overlap detected, contains axis-specific resolution.</param>
     /// <returns>True if there is any overlap on the specified axis.</returns>
+    /// <remarks>WS-4: the scan stays entirely in Unity space — only the voxel <i>lookup</i> offsets — so the block
+    /// bounds and the returned contact/correction remain directly comparable to the entity's AABB.</remarks>
     public bool CheckPhysicsCollision(Bounds entityBounds, int axis, int directionSign, out CollisionContact contact)
     {
         contact = new CollisionContact { Hit = false };
@@ -3409,6 +3438,10 @@ public class World : MonoBehaviour
             Mathf.FloorToInt(entityBounds.max.y),
             Mathf.FloorToInt(entityBounds.max.z));
 
+        // The scan indices are Unity-space cells; only the lookup below crosses into voxel space.
+        int originX = WorldOrigin.OriginVoxel.x;
+        int originZ = WorldOrigin.OriginVoxel.z;
+
         for (int x = minVoxel.x; x <= maxVoxel.x; x++)
         {
             for (int y = minVoxel.y; y <= maxVoxel.y; y++)
@@ -3416,7 +3449,7 @@ public class World : MonoBehaviour
                 for (int z = minVoxel.z; z <= maxVoxel.z; z++)
                 {
                     // VQ-1 integer fast path: no float round-trip, no nullable wrap for this per-frame AABB scan.
-                    if (!worldData.TryGetVoxel(x, y, z, out VoxelState voxel) ||
+                    if (!worldData.TryGetVoxel(x + originX, y, z + originZ, out VoxelState voxel) ||
                         !voxel.Properties.isSolid || voxel.Properties.fluidType != FluidType.None)
                         continue; // Empty, unloaded, or fluid
 

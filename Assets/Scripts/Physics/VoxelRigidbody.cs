@@ -1,3 +1,4 @@
+using Helpers;
 using UnityEngine;
 
 namespace Physics
@@ -157,9 +158,13 @@ namespace Physics
             float limitX = Mathf.Max(0f, radius - CollisionHalfWidthX - BORDER_MARGIN);
             float limitZ = Mathf.Max(0f, radius - CollisionHalfDepthZ - BORDER_MARGIN);
 
+            // The border is a voxel-space AABB centered on the WORLD origin while the transform is Unity space, so
+            // the limits shift by the origin instead of staying symmetric about the render origin.
+            Vector3Int ov = WorldOrigin.OriginVoxel;
+
             Vector3 pos = transform.position;
-            float clampedX = Mathf.Clamp(pos.x, -limitX, limitX);
-            float clampedZ = Mathf.Clamp(pos.z, -limitZ, limitZ);
+            float clampedX = Mathf.Clamp(pos.x, -limitX - ov.x, limitX - ov.x);
+            float clampedZ = Mathf.Clamp(pos.z, -limitZ - ov.z, limitZ - ov.z);
 
             if (clampedX != pos.x || clampedZ != pos.z)
                 transform.position = new Vector3(clampedX, pos.y, clampedZ);
@@ -211,7 +216,7 @@ namespace Physics
             if (!isNoclipping)
             {
                 const float MIN_COLLISION_THICKNESS = 0.25f; // Quarter-slab
-                float maxStep = MIN_COLLISION_THICKNESS * 0.5f; // 0.125m
+                const float maxStep = MIN_COLLISION_THICKNESS * 0.5f; // 0.125m
 
                 // Velocity here is actually the intended displacement for this frame
                 float displacementMag = Velocity.magnitude;

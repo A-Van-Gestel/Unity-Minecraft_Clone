@@ -1,6 +1,6 @@
 using Data;
+using Helpers;
 using Jobs.BurstData;
-using MyBox;
 using Physics;
 using Placement;
 using Unity.Mathematics;
@@ -50,7 +50,7 @@ public class PlayerInteraction : MonoBehaviour
         _world = World.Instance;
         _input = InputManager.Instance;
         _highlightBlocksParent = GameObject.Find("HighlightBlocks").GetComponent<Transform>();
-        _placement = new PlacementController(_world);
+        _placement = new PlacementController(_world, WorldOrigin.OriginVoxel);
     }
 
     private void Update()
@@ -72,7 +72,10 @@ public class PlayerInteraction : MonoBehaviour
             // Destroy block.
             if (_input.AttackPressed)
             {
-                _world.AddModification(new VoxelMod(highlightBlock.position.ToVector3Int(), blockId: BlockIDs.Air)
+                // VoxelMod.GlobalPosition is voxel space (it is persisted), so the probe's Unity-space cell converts.
+                // Read from the probe rather than the highlight transform: the cell is already exact there, with no
+                // float round-trip to re-derive it from.
+                _world.AddModification(new VoxelMod(ToVoxelMod(_lastProbe.HitCell), blockId: BlockIDs.Air)
                 {
                     ImmediateUpdate = true,
                 });
@@ -90,7 +93,7 @@ public class PlayerInteraction : MonoBehaviour
 
                 byte meta = ComputePlacementMeta(placedBlockType, _lastProbe.HitNormal);
 
-                _world.AddModification(new VoxelMod(placeBlock.position.ToVector3Int(), placedBlockId)
+                _world.AddModification(new VoxelMod(ToVoxelMod(_lastProbe.PlaceCell), placedBlockId)
                 {
                     Meta = meta,
                     ImmediateUpdate = true,
@@ -100,6 +103,15 @@ public class PlayerInteraction : MonoBehaviour
         }
     }
 
+
+    /// <summary>
+    /// Converts a Unity-space cell from the placement probe into the absolute voxel cell a
+    /// <see cref="VoxelMod"/> is addressed in — <c>VoxelMod.GlobalPosition</c> is persisted, so it must never
+    /// carry a Unity-space value.
+    /// </summary>
+    /// <param name="unityCell">The Unity-space cell resolved by the probe.</param>
+    /// <returns>The absolute voxel cell to modify.</returns>
+    private static Vector3Int ToVoxelMod(Vector3Int unityCell) => unityCell + WorldOrigin.OriginVoxel;
 
     /// <summary>
     /// Computes the metadata byte for a freshly-placed block based on its

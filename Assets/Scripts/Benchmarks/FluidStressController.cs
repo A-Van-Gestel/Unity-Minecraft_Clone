@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using Data;
 using Data.Enums;
+using Helpers;
 using UnityEngine;
 
 namespace Benchmarks
@@ -97,7 +98,8 @@ namespace Benchmarks
             // ocean is in view. The flood region is the center REGION_CHUNKS×REGION_CHUNKS chunks.
             const int centerChunk = VoxelData.DefaultSpawnPosition / VoxelData.ChunkWidth;
             ChunkCoord regionMin = new ChunkCoord(centerChunk - REGION_CHUNKS / 2, centerChunk - REGION_CHUNKS / 2);
-            transform.position = new Vector3(VoxelData.DefaultSpawnPosition, FluidBenchmarkScenarios.SkyWaterTopY + 16f, VoxelData.DefaultSpawnPosition);
+            transform.position = WorldOrigin.VoxelToUnity(new Vector3(
+                VoxelData.DefaultSpawnPosition, FluidBenchmarkScenarios.SkyWaterTopY + 16f, VoxelData.DefaultSpawnPosition));
             transform.rotation = Quaternion.Euler(45f, 0f, 0f); // look down toward the flood
 
             Debug.Log($"[FluidStress] World loaded. Region min chunk {regionMin.X},{regionMin.Z} " +

@@ -1,4 +1,5 @@
 using System;
+using Helpers;
 using Jobs.Generators;
 using UI.Enums;
 using UnityEngine;
@@ -94,9 +95,10 @@ namespace DebugVisualizations
             World world = World.Instance;
             if (world == null || world.JobManager == null || _player == null) return;
 
-            Vector3 pos = _player.transform.position;
-            int gx = Mathf.FloorToInt(pos.x);
-            int gz = Mathf.FloorToInt(pos.z);
+            // gx/gz drive generation sampling, so they are voxel space — the player transform is not.
+            Vector3Int playerVoxel = WorldOrigin.UnityToVoxelCell(_player.transform.position);
+            int gx = playerVoxel.x;
+            int gz = playerVoxel.z;
 
             if (gx != _lastInfoGX || gz != _lastInfoGZ)
             {

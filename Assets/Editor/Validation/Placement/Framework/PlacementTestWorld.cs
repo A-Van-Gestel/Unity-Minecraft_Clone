@@ -97,7 +97,11 @@ namespace Editor.Validation.Placement.Framework
         /// <param name="palette">The block palette assigned to the stub <see cref="BlockDatabase.blockTypes"/>; indices
         /// are the block ids the scenario places and queries (the real <see cref="BlockDatabase"/> for the data-audit
         /// and known-bug repros, or a controlled synthetic palette for the baselines).</param>
-        public PlacementTestWorld(BlockType[] palette)
+        /// <param name="originChunk">The WS-4 floating-origin anchor to drive the controller at. Defaults to the
+        /// identity (0, 0), where Unity space and voxel space coincide — every pre-WS-4 scenario keeps its meaning.
+        /// A non-zero value moves the world's voxel coordinates far out while the harness keeps addressing the same
+        /// small Unity-space cells, which is what proves the controller actually converts.</param>
+        public PlacementTestWorld(BlockType[] palette, ChunkCoord originChunk = default)
         {
             _previousInstance = World.Instance;
             try
@@ -117,13 +121,17 @@ namespace Editor.Validation.Placement.Framework
                 ValidationReflection.SetInstanceProperty(_world, nameof(World.ChunkPool),
                     new ChunkPoolManager(_worldGo.transform));
 
-                // Single center chunk at the world origin (0,0): with this origin every local (0-15) cell maps
-                // 1:1 to a world voxel inside IsVoxelInWorld, so seeding/querying uses plain small coordinates.
-                ChunkData = new ChunkData(new Vector2Int(0, 0));
-                _world.worldData.Chunks[new Vector2Int(0, 0)] = ChunkData;
+                // Single center chunk, seeded at the floating origin's chunk. Scenarios always address small
+                // Unity-space cells (0-15); the controller offsets them onto this chunk's voxel coordinates, so the
+                // whole model shifts with the origin and every existing scenario keeps its meaning at the identity.
+                Vector2Int chunkVoxelPos = originChunk.ToVoxelOrigin();
+                ChunkData = new ChunkData(chunkVoxelPos);
+                _world.worldData.Chunks[chunkVoxelPos] = ChunkData;
 
                 // The REAL production decision object the scenarios drive (no reimplementation in the harness).
-                _controller = new PlacementController(_world);
+                // The origin is injected, so the suite never touches the WorldOrigin global — no leak to restore.
+                _controller = new PlacementController(_world, new Vector3Int(
+                    chunkVoxelPos.x, 0, chunkVoxelPos.y));
             }
             catch
             {

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using Data;
 using Data.Enums;
+using Helpers;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Debug = UnityEngine.Debug;
@@ -250,9 +251,9 @@ namespace Benchmarks
         /// </summary>
         private IEnumerator RunGenerationPass()
         {
-            transform.position = _generationWaypoints[0];
+            transform.position = WorldOrigin.VoxelToUnity(_generationWaypoints[0]);
             _activeWaypointIndex = 1;
-            FaceWaypoint(_generationWaypoints[1]);
+            FaceWaypoint(WorldOrigin.VoxelToUnity(_generationWaypoints[1]));
 
             CurrentGroupName = GROUP_GENERATION;
             TotalWaypointsInActivePass = _generationWaypoints.Count;
@@ -329,9 +330,9 @@ namespace Benchmarks
                 yield break;
             }
 
-            transform.position = _loadingWaypoints[0];
+            transform.position = WorldOrigin.VoxelToUnity(_loadingWaypoints[0]);
             _activeWaypointIndex = 1;
-            FaceWaypoint(_loadingWaypoints[1]);
+            FaceWaypoint(WorldOrigin.VoxelToUnity(_loadingWaypoints[1]));
 
             CurrentGroupName = GROUP_LOADING;
             TotalWaypointsInActivePass = _loadingWaypoints.Count;
@@ -404,7 +405,8 @@ namespace Benchmarks
                 Debug.Log("[Benchmark] Looping loading waypoints.");
             }
 
-            Vector3 target = waypoints[_activeWaypointIndex];
+            // Waypoints are authored in voxel space; from here down everything is Unity space (the transform).
+            Vector3 target = WorldOrigin.VoxelToUnity(waypoints[_activeWaypointIndex]);
             float step = speed * Time.deltaTime;
 
             Vector3 currentPos = transform.position;
@@ -419,7 +421,7 @@ namespace Benchmarks
                 int nextIndex = _activeWaypointIndex < waypoints.Count
                     ? _activeWaypointIndex
                     : (loop ? 0 : _activeWaypointIndex - 1);
-                FaceWaypoint(waypoints[nextIndex]);
+                FaceWaypoint(WorldOrigin.VoxelToUnity(waypoints[nextIndex]));
             }
             else
             {

@@ -47,6 +47,7 @@ namespace Editor.Validation.Placement
             AddBaselineScenarios(scenarios);
             AddDataAuditScenarios(scenarios);
             AddRegressionScenarios(scenarios);
+            AddWorldOriginScenarios(scenarios);
             AddKnownBugScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Placement", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
@@ -73,6 +74,9 @@ namespace Editor.Validation.Placement
 
         /// <summary>Registers the PLAYER_BUGS §03 regression guards (implemented in PlacementValidationSuite.Regression.cs).</summary>
         static partial void AddRegressionScenarios(List<Scenario> scenarios);
+
+        /// <summary>Registers the WS-4a floating-origin call-site guards (implemented in PlacementValidationSuite.WorldOrigin.cs).</summary>
+        static partial void AddWorldOriginScenarios(List<Scenario> scenarios);
 
         /// <summary>Registers expected-red known-bug reproductions (implemented in PlacementValidationSuite.KnownBugs.cs).</summary>
         static partial void AddKnownBugScenarios(List<Scenario> scenarios);
