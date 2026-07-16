@@ -1,6 +1,6 @@
 # World Scaling — WS-4 Floating Origin Design
 
-**Version:** 1.4
+**Version:** 1.5
 **Date:** 2026-07-16
 **Status:** Partially implemented — **WS-4a shipped** (origin plumbing, pinned at the identity);
 WS-4b (the shift) and WS-4c (persistence + tooling) proposed.
@@ -79,17 +79,17 @@ systems, no other runtime `worldPos` consumers except `BorderWallShader.shader` 
 
 ## 2. Current state (what exists today)
 
-| Area                    | State                                                                                                                                                                                                                                                                           |
-|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| The hidden identity     | Unity render space **==** voxel world space, everywhere. Every boundary in §5's tables silently relies on it; WS-4 is precisely the act of breaking this identity and paying for it at each site.                                                                               |
-| `ChunkRelativePosition` | Exists and is sound (int XZ chunk macro + float local, Y unclamped absolute; exact `−` operator; normalizing constructor). Used **only** by `WorldSaveData.spawnPosition`, the v10→v11 migration, and the Chunk Math suite. The runtime never touches it.                       |
-| Player / camera         | `transform.position` is the absolute voxel position; camera is a child. Save: `PlayerSaveData.position` is an absolute `Vector3` in level.dat (v12), restored verbatim on load (`World.cs:753`).                                                                                |
-| Physics                 | Fully custom (`VoxelRigidbody`), no PhysX world-space dependency. Operates on `transform.position`; `World.CheckPhysicsCollision:3373` floors the Unity-space AABB straight into `TryGetVoxel(int)` lookups. `ClampToWorldBorder` clamps against ±`BorderRadius`.               |
-| Interaction             | `PlacementController.MarchRay` marches camera-space floats, floors to `hitCell`; cells feed `VoxelMod.GlobalPosition` (**persisted** to `pending_mods.bin`) and the highlight/place transforms.                                                                                 |
-| Chunk visuals           | `Chunk.Reset` assigns `ChunkPosition = Coord.ToWorldPosition()` (`Chunk.cs:89`); `SectionRenderer`s are children (chunk-local, shift-safe). `ChunkLoadAnimation` caches an absolute `_targetPos`.                                                                               |
-| Streaming               | `PlayerChunkCoord` is assigned via the private `GetChunkCoordFromVector3` helper (`World.cs:681/:1586/:2587`), not `ChunkCoord.FromWorldPosition` directly; every loop after that is chunk-coord-relative (`Mathf.Abs(coord − playerCoord)`), hence origin-independent already. |
-| Shaders                 | `LiquidCore.hlsl` samples noise at `worldPos * scale` (jumps on shift without an offset) and `frac(worldPos)` shore math (invariant under multiple-of-16 shifts). `BorderWallShader` also consumes `worldPos` (§8). No other runtime world-space shaders.                       |
-| Jitter observation      | In-game (2026-07-15, post-WS-3): vertex jitter visible at ~10 000 voxels from origin — earlier than the 16k–65k estimate in `WORLD_SCALING_ANALYSIS.md` §3.3.                                                                                                                   |
+| Area                    | State                                                                                                                                                                                                                                                                                                                                                             |
+|-------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| The hidden identity     | Unity render space **==** voxel world space, everywhere. Every boundary in §5's tables silently relies on it; WS-4 is precisely the act of breaking this identity and paying for it at each site.                                                                                                                                                                 |
+| `ChunkRelativePosition` | Exists and is sound (int XZ chunk macro + float local, Y unclamped absolute; exact `−` operator; normalizing constructor). Used **only** by `WorldSaveData.spawnPosition`, the v10→v11 migration, and the Chunk Math suite. The runtime never touches it.                                                                                                         |
+| Player / camera         | `transform.position` is the absolute voxel position; camera is a child. Save: `PlayerSaveData.position` is an absolute `Vector3` in level.dat (v12), restored verbatim on load. Since **SP-1** the restore runs through the single `Spawn.SpawnResolution` chokepoint in `World.StartWorld` STEP 1 — `Player.LoadSaveData` no longer writes the transform at all. |
+| Physics                 | Fully custom (`VoxelRigidbody`), no PhysX world-space dependency. Operates on `transform.position`; `World.CheckPhysicsCollision:3373` floors the Unity-space AABB straight into `TryGetVoxel(int)` lookups. `ClampToWorldBorder` clamps against ±`BorderRadius`.                                                                                                 |
+| Interaction             | `PlacementController.MarchRay` marches camera-space floats, floors to `hitCell`; cells feed `VoxelMod.GlobalPosition` (**persisted** to `pending_mods.bin`) and the highlight/place transforms.                                                                                                                                                                   |
+| Chunk visuals           | `Chunk.Reset` assigns `ChunkPosition = Coord.ToWorldPosition()` (`Chunk.cs:89`); `SectionRenderer`s are children (chunk-local, shift-safe). `ChunkLoadAnimation` caches an absolute `_targetPos`.                                                                                                                                                                 |
+| Streaming               | `PlayerChunkCoord` is assigned via the private `GetChunkCoordFromVector3` helper (`World.cs:681/:1586/:2587`), not `ChunkCoord.FromWorldPosition` directly; every loop after that is chunk-coord-relative (`Mathf.Abs(coord − playerCoord)`), hence origin-independent already.                                                                                   |
+| Shaders                 | `LiquidCore.hlsl` samples noise at `worldPos * scale` (jumps on shift without an offset) and `frac(worldPos)` shore math (invariant under multiple-of-16 shifts). `BorderWallShader` also consumes `worldPos` (§8). No other runtime world-space shaders.                                                                                                         |
+| Jitter observation      | In-game (2026-07-15, post-WS-3): vertex jitter visible at ~10 000 voxels from origin — earlier than the 16k–65k estimate in `WORLD_SCALING_ANALYSIS.md` §3.3.                                                                                                                                                                                                     |
 
 ---
 
@@ -219,16 +219,21 @@ loop are voxel-chunk-space values that do not change when the origin moves.
 Everything persisted is voxel world space. Two changes:
 
 - **WS-4b (must land with the shift):** `Player.GetSaveData` writes
-  `transform.position + OriginVoxel` (voxel-space absolute `Vector3`); `LoadSaveData` and the
-  `World` startup path set the origin from the saved position first, then place the transform
-  near the Unity origin. Without this, the first post-shift save corrupts the player position.
-  <br>**Where this goes (corrected by the WS-4a audit):** *not* at `World.StartWorld`'s anchor call —
-  that runs before `SaveSystem.LoadWorldGameState`, and the anchor must be derived from the loaded
-  player position, which only exists once the save is parsed. The derivation therefore belongs
-  **inside the load path**: parse the save → `AnchorOrigin(chunkOf(savedVoxelPos))` → write
-  `transform = VoxelToUnity(savedVoxelPos)`, in that order. `World.AnchorOrigin` is the single
-  permitted entry point (it pairs `WorldOrigin.SetOrigin` with the `_WorldOriginOffset` shader push so a
-  re-anchor cannot land without the shader following); WS-4a leaves it pinned to the fresh-world identity.
+  `transform.position + OriginVoxel` (voxel-space absolute `Vector3`); the startup path sets the origin
+  from the saved position first, then places the transform near the Unity origin. Without this, the
+  first post-shift save corrupts the player position.
+  <br>**Where this goes (corrected by the WS-4a audit, re-homed by SP-1):** *not* at `World.StartWorld`'s
+  anchor call — that runs before `SaveSystem.LoadWorldGameState`, and the anchor must be derived from the
+  starting player position, which only exists once the save is parsed. **SP-1 gave that position exactly one
+  home**, so the derivation belongs at the `Spawn.SpawnResolution` chokepoint in `StartWorld` **STEP 1**:
+  `ResolveInitial(...)` → `AnchorOrigin(chunkOf(spawnPosition))` → write
+  `transform = VoxelToUnity(spawnPosition)`, in that order — one site covering all three
+  `SpawnSource`s, not three. (Pre-SP-1 this said "inside the load path / `Player.LoadSaveData`"; that method
+  no longer writes the transform.) `World.AnchorOrigin` is the single permitted entry point (it pairs
+  `WorldOrigin.SetOrigin` with the `_WorldOriginOffset` shader push so a re-anchor cannot land without the
+  shader following); WS-4a leaves it pinned to the fresh-world identity.
+  <br>**STEP 4 is not an anchor site:** it runs after chunk creation, so re-anchoring there would need the
+  §4.3 translate loop. It stays a plain `VoxelToUnity` conversion.
 - **WS-4c:** `PlayerSaveData.position` migrates `Vector3` → `ChunkRelativePosition`
   (**v12→v13**, AOT frozen-DTO protocol, `MigrateLevelDat` only — chunk/region formats
   untouched), removing the ±2²⁴ precision cap on the saved value. Runtime construction uses
@@ -300,7 +305,7 @@ execution checklist; each row becomes a visible `WorldOrigin.*` call.
 | `VisualizerChunkData` (:43/:67)                                             | Placement position converts                                                                                                                                                                                                                                                                                                                  |
 | Collision-bounds debug draw (`World.cs:2947`)                               | `VoxelToUnity(Coord.ToVoxelOrigin()) + local` before `Debug.DrawLine`                                                                                                                                                                                                                                                                        |
 | `BorderWallRenderer.RebuildMesh`                                            | Wall planes at `±ext − OriginVoxel`; keep `uv.x` bands voxel-space for continuity across shifts                                                                                                                                                                                                                                              |
-| Spawn/teleport transform writes (`World.cs:655/:661/:742/:753`)             | Voxel-space spawn values (`WorldSpawnPoint`, `ResolveSpawnHeight`, `GetHighestVoxel`) convert before assignment; `SetSpawnPoint(new ChunkRelativePosition(...))` builds from voxel space                                                                                                                                                     |
+| Spawn transform writes (`World.StartWorld` STEP 1 + STEP 4)                 | Since **SP-1** there are exactly two, both fed by `Spawn.SpawnResolution` (`ResolveInitial` / `ResolveFinal`) and both converting one voxel-space value: `_playerTransform.position = VoxelToUnity(spawnPosition)`. The unit is pure voxel space throughout; `SetSpawnPoint(placement.CanonicalSpawn)` builds from voxel space               |
 | `Clouds` (`Awake` anchor `:46`, `CloudTileCoordFromFloat:352`)              | Pattern lookup adds `OriginVoxel` so the cloud pattern doesn't teleport on shift; tile re-anchoring is player-relative and needs nothing else. Do the pattern wrap in **integer** space (pattern repeats every `_cloudTexWidth`) — the float-`frac` idiom re-introduces large-float precision loss far out; integer modulo is exact for free |
 | Shader global                                                               | `_WorldOriginOffset` (§4.6)                                                                                                                                                                                                                                                                                                                  |
 
@@ -314,7 +319,7 @@ execution checklist; each row becomes a visible `WorldOrigin.*` call.
 | Raycast/placement (`PlacementController.MarchRay/Probe/CanPlaceAt`)                     | March in Unity space; convert resulting integer cells (`hitCell`, `placeCell`) — **fragility hotspot**, see §7 gates                    |
 | `VoxelMod` creation (`PlayerInteraction.cs:75/:93`)                                     | Convert highlight-cell → voxel cell at mod creation (`GlobalPosition` is persisted)                                                     |
 | Player-AABB placement veto (`PlayerInteraction.PlaceCellOverlapsPlayer`)                | Compare in one space consistently (keep Unity space: cell converts back, or veto runs on Unity cells before conversion)                 |
-| `Player.GetSaveData` / `LoadSaveData` + `World` startup (`:648–:763`)                   | §4.4 — origin set from loaded position first, transform placed second                                                                   |
+| `Player.GetSaveData` + the SP-1 `SpawnResolution` chokepoint (`StartWorld` STEP 1)      | §4.4 — origin anchored from the resolved starting position first, transform placed second                                               |
 | `DebugScreen` (:264/:274/:343)                                                          | Display voxel-space coordinates (transform + origin); `GetVoxelState`/`GetChunkFromVector3` queries convert                             |
 | `TerrainGenDebugOverlay` (:97–:150)                                                     | `gx/gz` generation-sampling coordinates add `OriginVoxel`                                                                               |
 | Benchmark controllers (`BenchmarkController:253/:332/:410`, `FluidStressController:98`) | Waypoints are voxel-space values driven into the transform — convert at apply (they run near origin; correctness hygiene)               |
@@ -357,11 +362,11 @@ bounded-position assertion (§4.3 step 4) makes drift loud in dev builds.
 
 ## 7. Phased implementation plan
 
-| Phase                                                          | Scope                                                                                                                                                                                                                                                                                                | Effort | Depends on   |
-|----------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|--------------|
-| **WS-4a — origin plumbing, no shift** ✅ **SHIPPED 2026-07-16, in-game confirmed** | `WorldOrigin` type + helpers; thread every §5 boundary site; call-site audit sweep; suite baselines. Origin pinned `(0,0)` → **zero behavior change**, game bit-identical. Also landed the `_WorldOriginOffset` global + `LiquidCore` sampling (identity-safe at offset 0, so it moved out of WS-4b) |   🟡   | WS-3 ✅       |
-| **WS-4b — the shift**                                          | §4.3 trigger + translate loop; `GetSaveData`/load voxel-space fix (§4.4 — **the one boundary WS-4a deliberately left**); bounded-position assertion                                                                                                                                                  |   🔴   | WS-4a ✅      |
-| **WS-4c — persistence + tooling**                              | `PlayerSaveData.position` → `ChunkRelativePosition`, v12→v13 AOT migration; `/teleport` command — `CMD-2` of [`COMMAND_CONSOLE_SYSTEM.md`](COMMAND_CONSOLE_SYSTEM.md) (console phases CMD-0/1 may land earlier, independently)                                                                       |   🟡   | WS-4b, CMD-1 |
+| Phase                                                                             | Scope                                                                                                                                                                                                                                                                                                | Effort | Depends on      |
+|-----------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|-----------------|
+| **WS-4a — origin plumbing, no shift** ✅ **SHIPPED 2026-07-16, in-game confirmed** | `WorldOrigin` type + helpers; thread every §5 boundary site; call-site audit sweep; suite baselines. Origin pinned `(0,0)` → **zero behavior change**, game bit-identical. Also landed the `_WorldOriginOffset` global + `LiquidCore` sampling (identity-safe at offset 0, so it moved out of WS-4b) |   🟡   | WS-3 ✅          |
+| **WS-4b — the shift**                                                             | §4.3 trigger + translate loop; `GetSaveData`/load voxel-space fix (§4.4 — **the one boundary WS-4a deliberately left**), now a single `AnchorOrigin` at the SP-1 chokepoint rather than three spawn sites; bounded-position assertion                                                                |   🔴   | WS-4a ✅, SP-1 ✅ |
+| **WS-4c — persistence + tooling**                                                 | `PlayerSaveData.position` → `ChunkRelativePosition`, v12→v13 AOT migration; `/teleport` command — `CMD-2` of [`COMMAND_CONSOLE_SYSTEM.md`](COMMAND_CONSOLE_SYSTEM.md) (console phases CMD-0/1 may land earlier, independently)                                                                       |   🟡   | WS-4b, CMD-1    |
 
 WS-4a+b deliver the standalone value (stable far travel); WS-4c extends save precision past
 ±2²⁴ and ships the far-coordinate test harness. Bisectable: each phase compiles and keeps all
@@ -415,8 +420,10 @@ All four closed by the WS-4a audit sweep; kept here as the record of what was ch
 2. **Cached absolute `Vector3` sweep** — ✅ complete. Beyond §5: `ChunkLoadAnimation._targetPos` and
    `Chunk.ChunkPosition` are now Unity space end-to-end (re-derived in `Chunk.Reset`); benchmark
    waypoints convert at apply; UI/tooltip/toolbar `.position` writes are screen space. The **one**
-   remaining unconverted boundary is `Player.GetSaveData`/`LoadSaveData` (`Player.cs:235/:254`),
-   deliberately deferred to WS-4b (§4.4) because both sides must change together or saves corrupt.
+   remaining unconverted boundary is `Player.GetSaveData` (`Player.cs:235`), deliberately deferred to
+   WS-4b (§4.4) because it and the restore side must change together or saves corrupt. Since **SP-1**
+   the restore side is no longer in `Player.LoadSaveData` (which stopped writing the transform) but at
+   the `SpawnResolution` chokepoint — one site instead of two, which is what WS-4b converts.
 3. **Validation-suite world stubs** — ✅ confirmed. Suites never touch the `WorldOrigin` global: the
    Chunk Math origin scenarios restore the identity in a `finally`, and `PlacementController` takes the
    origin as a **per-probe parameter** (see §4.7), so `PlacementTestWorld` drives far origins with no
@@ -497,15 +504,17 @@ graduate to work items).
   deliberately, so the phase stayed bit-identical. MyBox's `Vector3.ToVector3Int()` extension is
   `RoundToInt`, not `FloorToInt`; only floor names the cell *containing* a position, and every WS-4
   conversion (`WorldOrigin.UnityToVoxelCell`, `MarchRay`, `CheckPhysicsCollision`) floors. The survivors are
-  `DebugScreen.cs:271` (`_groundVoxelPos`, a readout) and `World.ResolveSpawnHeight` (`World.cs:3268`, which
+  `DebugScreen.cs:271` (`_groundVoxelPos`, a readout) and `World.ResolveSpawnHeight` (`World.cs:3248`, which
   rounds the spawn XZ before the height probe). Both are pre-existing and only diverge for fractional inputs.
-  WS-4b touches the spawn/load path (§4.4) and will pass over the second one: **do not silently "fix" it**
-  inside the shift work — changing it is a behavior change that deserves its own decision, not a rider on a
-  phase whose contract is "no behavior change except the shift".
+  **SP-1 passed over the second one deliberately** (it moved the call, not the rounding), and WS-4b touches the
+  same path (§4.4) and must pass over it again: **do not silently "fix" it** inside the shift work — changing it
+  is a behavior change that deserves its own decision, not a rider on a phase whose contract is "no behavior
+  change except the shift".
 - **The saved player position is still Unity-space-shaped.** `Player.GetSaveData` writes
   `transform.position` verbatim (`Player.cs:235`), which is correct only while the origin is the
   identity. This is WS-4b's **first** obligation (§4.4): the first post-shift save corrupts the player
-  position if `GetSaveData`/`LoadSaveData` and the load-path origin ordering do not land with the shift.
+  position if `GetSaveData` and the chokepoint's origin ordering do not land with the shift. SP-1 reduced
+  the restore side from two competing writes to one, but changed neither side's space.
 - **Parent-doc drift to sync (docs-sync, with WS-4a):** `WORLD_SCALING_ANALYSIS.md` §3.3 —
   (a) the `VoxelRigidbody`-on-`ChunkRelativePosition` suggestion is superseded by §4.2 here;
   (b) record the observed ~10k jitter onset alongside the 16k–65k estimate; (c) "chunk positions
@@ -515,6 +524,16 @@ graduate to work items).
 
 ## Document History
 
+* **v1.5** - **SP-1 landed as a pre-WS-4b pass** (2026-07-16): `World.StartWorld`'s three spawn/player-position
+  paths (fresh / editor-replay / loaded-save) and its post-chunk height resolve were consolidated into the pure
+  `Spawn.SpawnResolution` decision unit (`Classify` + `ResolveInitial` + `ResolveFinal`), covered by a new
+  **Validate Spawn** suite (9 baselines; Validate All 205→214). Zero behavior change at the pinned identity,
+  in-game confirmed on all three sources. Doc impact here: §4.4's WS-4b origin derivation **re-homed** from
+  "inside the load path / `Player.LoadSaveData`" to the STEP 1 chokepoint — `Player.LoadSaveData` no longer
+  writes the transform, and STEP 4 is named as a non-anchor site (it runs after chunk creation). §2, §5.1's
+  spawn row, §5.2's save/startup row, §7's WS-4b row (now one `AnchorOrigin`, not three spawn sites; depends on
+  SP-1), §8.1 item 2, and §9 updated to match; `ResolveSpawnHeight` line ref corrected `:3268`→`:3248`, with the
+  round-vs-floor non-change restated (SP-1 moved the call, not the rounding).
 * **v1.4** - WS-4a code review (2026-07-16). New **§4.7 "the origin is read fresh, never stored"** — the
   origin is frame state, so reusable decision units take it as a per-call parameter (snapshot atomicity across
   a multi-step march + suite isolation), never as constructor state; states the rule's ceiling (no suite can
@@ -549,4 +568,5 @@ graduate to work items).
 
 **Last Updated:** 2026-07-16
 **Next Review:** when WS-4b starts (its first obligation is the §4.4 `GetSaveData`/load fix — the one
-boundary WS-4a left) or when the noise rider is scheduled.
+boundary WS-4a left, now a single `AnchorOrigin` at SP-1's `SpawnResolution` chokepoint) or when the noise
+rider is scheduled.
