@@ -359,7 +359,7 @@ bounded-position assertion (§4.3 step 4) makes drift loud in dev builds.
 
 | Phase                                                          | Scope                                                                                                                                                                                                                                                                                                | Effort | Depends on   |
 |----------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|--------------|
-| **WS-4a — origin plumbing, no shift** ✅ **SHIPPED 2026-07-16** | `WorldOrigin` type + helpers; thread every §5 boundary site; call-site audit sweep; suite baselines. Origin pinned `(0,0)` → **zero behavior change**, game bit-identical. Also landed the `_WorldOriginOffset` global + `LiquidCore` sampling (identity-safe at offset 0, so it moved out of WS-4b) |   🟡   | WS-3 ✅       |
+| **WS-4a — origin plumbing, no shift** ✅ **SHIPPED 2026-07-16, in-game confirmed** | `WorldOrigin` type + helpers; thread every §5 boundary site; call-site audit sweep; suite baselines. Origin pinned `(0,0)` → **zero behavior change**, game bit-identical. Also landed the `_WorldOriginOffset` global + `LiquidCore` sampling (identity-safe at offset 0, so it moved out of WS-4b) |   🟡   | WS-3 ✅       |
 | **WS-4b — the shift**                                          | §4.3 trigger + translate loop; `GetSaveData`/load voxel-space fix (§4.4 — **the one boundary WS-4a deliberately left**); bounded-position assertion                                                                                                                                                  |   🔴   | WS-4a ✅      |
 | **WS-4c — persistence + tooling**                              | `PlayerSaveData.position` → `ChunkRelativePosition`, v12→v13 AOT migration; `/teleport` command — `CMD-2` of [`COMMAND_CONSOLE_SYSTEM.md`](COMMAND_CONSOLE_SYSTEM.md) (console phases CMD-0/1 may land earlier, independently)                                                                       |   🟡   | WS-4b, CMD-1 |
 
@@ -485,6 +485,14 @@ graduate to work items).
   a play session proves only "nothing regressed". Its positive signal is entirely the non-zero-origin
   suites, and their reach is one call path (placement) plus the helper math. A boundary site that is
   both un-swept and unexercised by those suites stays latent until the first shift.
+  <br>**In-game passes (2026-07-16, both green):** two runs near spawn — one before the code review,
+  one after it — covering world generation around (0,0), player collision, block placement/breakage,
+  and fluid simulation. That is the *no-regression* check, and it exercised the highest-risk changes
+  (the per-probe placement refactor, the startup-ordering move, the physics offset lookup, the
+  `LiquidCore` sampling change). Not covered by those runs, and low-risk-but-unverified until WS-4b
+  makes them observable: `Clouds` (its root-anchor write moved `Awake` → `Initialize`),
+  `BorderWallRenderer`'s per-axis conversion (only renders when a world has `BorderRadius > 0`), a
+  save → reload round-trip, and the `DebugScreen` coordinate readout.
 - **Two coordinate sites still ROUND where the engine otherwise floors** — left untouched by WS-4a
   deliberately, so the phase stayed bit-identical. MyBox's `Vector3.ToVector3Int()` extension is
   `RoundToInt`, not `FloorToInt`; only floor names the cell *containing* a position, and every WS-4
