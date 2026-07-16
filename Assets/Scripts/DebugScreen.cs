@@ -347,7 +347,11 @@ public class DebugScreen : MonoBehaviour
 
     private void PopulateTopLeftBuilder()
     {
+        // Unity space (where the player is rendered) and voxel space (where the player IS) differ by the floating
+        // origin the moment the world re-anchors. The readout leads with voxel space — that is what the save, the
+        // world queries, and every coordinate the player reasons about use — and shows the render-space pair below.
         Vector3 playerPosition = _player.transform.position;
+        Vector3 playerVoxelPosition = playerPosition + WorldOrigin.OriginVoxel;
         Vector2 lookingDirection = GetLookingAngles();
 
         // --- General Info (Always Show) ---
@@ -367,11 +371,17 @@ public class DebugScreen : MonoBehaviour
 
         // --- World & Orientation Info ---
         _topLeftBuilder.AppendLine("WORLD:");
-        _topLeftBuilder.Append("XYZ: ").Append(Mathf.FloorToInt(playerPosition.x))
+        _topLeftBuilder.Append("XYZ: ").Append(Mathf.FloorToInt(playerVoxelPosition.x))
+            .Append(" / ").Append(Mathf.FloorToInt(playerVoxelPosition.y))
+            .Append(" / ").Append(Mathf.FloorToInt(playerVoxelPosition.z));
+        _topLeftBuilder.Append(" | Eye Level: ");
+        _topLeftBuilder.AppendFixed(playerVoxelPosition.y + _player.VoxelRigidbody.collisionHeight * 0.9f, 2);
+        _topLeftBuilder.AppendLine();
+        _topLeftBuilder.Append("Render XYZ: ").Append(Mathf.FloorToInt(playerPosition.x))
             .Append(" / ").Append(Mathf.FloorToInt(playerPosition.y))
             .Append(" / ").Append(Mathf.FloorToInt(playerPosition.z));
-        _topLeftBuilder.Append(" | Eye Level: ");
-        _topLeftBuilder.AppendFixed(playerPosition.y + _player.VoxelRigidbody.collisionHeight * 0.9f, 2);
+        _topLeftBuilder.Append(" | Origin Chunk: ").Append(WorldOrigin.OriginChunk.X)
+            .Append(" / ").Append(WorldOrigin.OriginChunk.Z);
         _topLeftBuilder.AppendLine();
         _topLeftBuilder.Append("Looking Angle H / V: ");
         _topLeftBuilder.AppendFixed(lookingDirection.x, 2);
