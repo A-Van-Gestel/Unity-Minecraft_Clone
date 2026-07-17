@@ -293,7 +293,7 @@ namespace Jobs
             for (int i = 0; i < s_neighborOffsets.Length; i++)
             {
                 Vector2Int origin = cd.Position + s_neighborOffsets[i];
-                if (worldData != null && worldData.Chunks.TryGetValue(origin, out ChunkData neighbor) && neighbor != null)
+                if (worldData != null && worldData.TryGetChunk(origin, out ChunkData neighbor) && neighbor != null)
                 {
                     neighbor.FillJobVoxelMap(_neighborBuffers[i]);
                     _jobNeighbors[i] = _neighborBuffers[i];

@@ -450,7 +450,7 @@ public class World : MonoBehaviour
             //    before we start locking files on the main thread.
             Thread.Sleep(100);
 
-            Debug.Log($"[OnApplicationQuit] Total chunks in world: {worldData.Chunks.Count}");
+            Debug.Log($"[OnApplicationQuit] Total chunks in world: {worldData.ChunkCount}");
             Debug.Log($"[OnApplicationQuit] Chunks marked as modified: {worldData.ModifiedChunks.Count}");
 
             // 3. Save all active/modified chunks SYNCHRONOUSLY.
@@ -517,14 +517,13 @@ public class World : MonoBehaviour
         // Cleanup world data
         if (worldData != null)
         {
-            foreach (ChunkData data in worldData.Chunks.Values)
+            foreach (ChunkData data in worldData.ChunkValues)
             {
                 // POOLING: Return data to pool
                 ChunkPool.ReturnChunkData(data);
             }
 
-            worldData.Chunks.Clear();
-            worldData.InvalidateVoxelQueryCache();
+            worldData.ClearChunks();
             worldData.ModifiedChunks.Clear();
         }
 
@@ -867,7 +866,7 @@ public class World : MonoBehaviour
             ChunkData loaded = await StorageManager.LoadChunkAsync(chunkVoxelPos);
 
             // Ensure the chunk wasn't unloaded or recycled during the "await" above.
-            if (!worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData currentData) || currentData != data)
+            if (!worldData.TryGetChunk(chunkVoxelPos, out ChunkData currentData) || currentData != data)
             {
                 // The chunk was unloaded. Recycle the loaded data to prevent a memory leak.
                 if (loaded != null)
@@ -1096,7 +1095,7 @@ public class World : MonoBehaviour
         {
             // We can use the dictionary directly as we know they were requested
             Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
-            if (worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData cd)) chunksInLoadArea.Add(cd);
+            if (worldData.TryGetChunk(chunkVoxelPos, out ChunkData cd)) chunksInLoadArea.Add(cd);
         }
 
         int lightingLoopIterations = 0;
@@ -1753,7 +1752,7 @@ public class World : MonoBehaviour
             if (_fullLightScanTimer >= FULL_LIGHT_SCAN_SECONDS)
             {
                 _fullLightScanTimer = 0f;
-                foreach (ChunkData cd in worldData.Chunks.Values)
+                foreach (ChunkData cd in worldData.ChunkValues)
                 {
                     if (cd.IsPopulated && (cd.NeedsInitialLighting ||
                                            cd.HasLightChangesToProcess || cd.NeedsEdgeCheck))
@@ -1781,7 +1780,7 @@ public class World : MonoBehaviour
                     if (lightJobsScheduled >= settings.maxLightJobsPerFrame) break; // Respect the throttle
 
                     // If the chunk was unloaded, clean up the stale entry
-                    if (!worldData.Chunks.TryGetValue(pos, out ChunkData chunkData))
+                    if (!worldData.TryGetChunk(pos, out ChunkData chunkData))
                     {
                         _lightWork.Remove(pos);
                         continue;
@@ -2020,7 +2019,7 @@ public class World : MonoBehaviour
     private void QueueNeighborRebuild(ChunkCoord neighborCoord, bool immediate = false)
     {
         Vector2Int neighborVoxelPos = neighborCoord.ToVoxelOrigin();
-        if (worldData.Chunks.TryGetValue(neighborVoxelPos, out ChunkData neighborData) && neighborData.Chunk != null)
+        if (worldData.TryGetChunk(neighborVoxelPos, out ChunkData neighborData) && neighborData.Chunk != null)
         {
             RequestChunkMeshRebuild(neighborData.Chunk, immediate);
         }
@@ -2085,7 +2084,7 @@ public class World : MonoBehaviour
 
             // Only enforce lighting stability checks if the chunk is actually populated with data.
             // If it's an empty placeholder, it has no light to process anyway.
-            if (worldData.Chunks.TryGetValue(neighborV2Pos, out ChunkData neighborData) && neighborData.IsPopulated)
+            if (worldData.TryGetChunk(neighborV2Pos, out ChunkData neighborData) && neighborData.IsPopulated)
             {
                 // Does the neighbor have pending light changes that haven't even been scheduled yet,
                 // OR is waiting for first light is NOT ready to provide lighting data for meshing.
@@ -2116,7 +2115,7 @@ public class World : MonoBehaviour
             if (JobManager.LightingJobs.ContainsKey(neighborCoord)) return false;
 
             Vector2Int neighborV2Pos = neighborCoord.ToVoxelOrigin();
-            if (worldData.Chunks.TryGetValue(neighborV2Pos, out ChunkData diagData) && diagData.IsPopulated)
+            if (worldData.TryGetChunk(neighborV2Pos, out ChunkData diagData) && diagData.IsPopulated)
             {
                 if (diagData.HasLightChangesToProcess || diagData.NeedsInitialLighting) return false;
                 if (diagData.IsAwaitingMainThreadProcess) return false;
@@ -2153,7 +2152,7 @@ public class World : MonoBehaviour
             if (JobManager.GenerationJobs.ContainsKey(neighborCoord)) return false;
 
             Vector2Int neighborV2Pos = neighborCoord.ToVoxelOrigin();
-            if (!worldData.Chunks.TryGetValue(neighborV2Pos, out ChunkData neighborData) ||
+            if (!worldData.TryGetChunk(neighborV2Pos, out ChunkData neighborData) ||
                 !neighborData.IsPopulated)
                 return false;
 
@@ -2195,7 +2194,7 @@ public class World : MonoBehaviour
             }
 
             // Chunk hasn't been created yet, or exists but terrain isn't populated.
-            if (!worldData.Chunks.TryGetValue(neighborCoord.ToVoxelOrigin(), out ChunkData neighborData) ||
+            if (!worldData.TryGetChunk(neighborCoord.ToVoxelOrigin(), out ChunkData neighborData) ||
                 !neighborData.IsPopulated)
             {
                 return false;
@@ -2259,7 +2258,7 @@ public class World : MonoBehaviour
             // --- 1. Get Chunk Data ---
             // We check worldData directly to see if it is loaded/generating
             bool chunkIsReady = false;
-            if (worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData chunkData))
+            if (worldData.TryGetChunk(chunkVoxelPos, out ChunkData chunkData))
             {
                 chunkIsReady = chunkData.IsPopulated;
             }
@@ -2413,8 +2412,7 @@ public class World : MonoBehaviour
 
         _chunkMap[chunk.Coord] = chunk;
         _activeChunks.Add(chunk.Coord);
-        worldData.Chunks[chunk.Coord.ToVoxelOrigin()] = chunk.ChunkData;
-        worldData.InvalidateVoxelQueryCache();
+        worldData.SetChunk(chunk.Coord.ToVoxelOrigin(), chunk.ChunkData);
     }
 
     /// <summary>
@@ -2429,8 +2427,7 @@ public class World : MonoBehaviour
     {
         _chunkMap.Clear();
         _activeChunks.Clear();
-        worldData.Chunks.Clear();
-        worldData.InvalidateVoxelQueryCache();
+        worldData.ClearChunks();
         worldData.ModifiedChunks.Clear();
         _modifications.Clear();
 
@@ -2528,9 +2525,9 @@ public class World : MonoBehaviour
         int unloadDistance = settings.LoadDistance + 2; // Buffer to prevent flickering
 
         // Step A: Identify candidates
-        foreach (KeyValuePair<Vector2Int, ChunkData> kvp in worldData.Chunks)
+        foreach (Vector2Int chunkVoxelKey in worldData.ChunkKeys)
         {
-            ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(kvp.Key);
+            ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkVoxelKey);
 
             // Calculate distance check
             if (Mathf.Abs(chunkCoord.X - PlayerChunkCoord.X) > unloadDistance ||
@@ -2545,7 +2542,7 @@ public class World : MonoBehaviour
         {
             Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
 
-            if (!worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData data))
+            if (!worldData.TryGetChunk(chunkVoxelPos, out ChunkData data))
                 continue;
 
             // Safety: Don't unload if a job is currently touching it
@@ -2573,7 +2570,7 @@ public class World : MonoBehaviour
                 ChunkCoord neighborCoord = chunkCoord.Neighbor(offset.x, offset.z);
                 Vector2Int neighborV2 = neighborCoord.ToVoxelOrigin();
 
-                if (worldData.Chunks.TryGetValue(neighborV2, out ChunkData neighborData) &&
+                if (worldData.TryGetChunk(neighborV2, out ChunkData neighborData) &&
                     neighborData.IsPopulated &&
                     (neighborData.HasLightChangesToProcess || neighborData.NeedsInitialLighting))
                 {
@@ -2638,8 +2635,7 @@ public class World : MonoBehaviour
             }
 
             // 3. Remove Data Reference from World
-            worldData.Chunks.Remove(chunkVoxelPos);
-            worldData.InvalidateVoxelQueryCache();
+            worldData.RemoveChunk(chunkVoxelPos);
 
             // 4. Recycle Data
             // POOLING: Return data to pool
@@ -2721,12 +2717,11 @@ public class World : MonoBehaviour
                 Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
 
                 // If chunk not in memory at all
-                if (!worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData data))
+                if (!worldData.TryGetChunk(chunkVoxelPos, out ChunkData data))
                 {
                     // Create placeholder
                     data = Instance.ChunkPool.GetChunkData(chunkVoxelPos);
-                    worldData.Chunks.Add(chunkVoxelPos, data);
-                    worldData.InvalidateVoxelQueryCache();
+                    worldData.SetChunk(chunkVoxelPos, data);
                 }
 
                 // If it's empty, and not currently fetching from disk, and not currently generating... start the pipeline!
@@ -3863,13 +3858,12 @@ public class World : MonoBehaviour
         _meshBuildQueue.Clear();
 
         // 6. Return all ChunkData to pool and clear world data
-        foreach (ChunkData data in worldData.Chunks.Values)
+        foreach (ChunkData data in worldData.ChunkValues)
         {
             ChunkPool.ReturnChunkData(data);
         }
 
-        worldData.Chunks.Clear();
-        worldData.InvalidateVoxelQueryCache();
+        worldData.ClearChunks();
         worldData.ModifiedChunks.Clear();
 
         // 7. Clear lighting work sets and active chunk tracking

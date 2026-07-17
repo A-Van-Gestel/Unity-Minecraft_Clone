@@ -275,7 +275,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
 
         Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
 
-        if (_world.worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData data) && data.IsPopulated)
+        if (_world.worldData.TryGetChunk(chunkVoxelPos, out ChunkData data) && data.IsPopulated)
             return;
 
         GenerationJobData jobData = _chunkGenerator.ScheduleGeneration(chunkCoord, _activeVoxelListPool);

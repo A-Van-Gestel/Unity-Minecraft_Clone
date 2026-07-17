@@ -234,7 +234,7 @@ namespace Editor.Validation.Behavior.Framework
             {
                 neighbor = new ChunkData(origin);
                 _neighbors[origin] = neighbor;
-                _world.worldData.Chunks[origin] = neighbor; // the seam GetVoxelState resolves
+                _world.worldData.SetChunk(origin, neighbor); // the seam GetVoxelState resolves
             }
 
             neighbor.SetVoxel(lx, ly, lz, BurstVoxelDataBitMapping.PackVoxelData(id, meta));
@@ -561,7 +561,7 @@ namespace Editor.Validation.Behavior.Framework
             // World re-wakes every isActive neighbor of the modified cell. This is the parity-critical half — a
             // cell that quiesced and dropped from the active set is re-evaluated once an adjacent cell changes
             // (e.g. a fluid source re-woken by a freshly-placed flow neighbor). Without it the harness would
-            // freeze behaviour the live engine never produces (a false-confidence golden). Interior-only (Tier-1):
+            // freeze behavior the live engine never produces (a false-confidence golden). Interior-only (Tier-1):
             // a neighbor outside the chunk degrades to "void" here exactly as a cross-chunk read returns null in
             // production, so it is skipped rather than woken.
             foreach (Vector3Int offset in VoxelData.FaceChecks)

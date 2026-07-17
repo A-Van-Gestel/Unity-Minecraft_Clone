@@ -145,7 +145,7 @@ namespace Editor.Validation.Behavior
                 }
 
                 SeedChunkFlood(c, dx, dz); // distinct per-chunk content so neighbor buffers differ
-                wd.Chunks[origin] = c;
+                wd.SetChunk(origin, c);
                 chunks.Add(c);
             }
 

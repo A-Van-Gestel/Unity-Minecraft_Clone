@@ -21,8 +21,29 @@ namespace Data
         [MyBox.ReadOnly]
         public long creationDate;
 
+        // Private backing for the chunk map: every structural mutation goes through SetChunk / RemoveChunk /
+        // ClearChunks, so the VQ-1 topology-version bump can never be forgotten at a call site — the
+        // compile-enforced form of the old "pair every mutation with InvalidateVoxelQueryCache" convention.
         [NonSerialized]
-        public Dictionary<Vector2Int, ChunkData> Chunks = new Dictionary<Vector2Int, ChunkData>();
+        private readonly Dictionary<Vector2Int, ChunkData> _chunks = new Dictionary<Vector2Int, ChunkData>();
+
+        /// <summary>
+        /// Read-only view of the loaded chunk map, keyed by chunk voxel-space origin (see <c>ChunkCoord</c>'s
+        /// scale reference). Mutations go through <see cref="SetChunk"/> / <see cref="RemoveChunk"/> /
+        /// <see cref="ClearChunks"/>, which keep the VQ-1 voxel-query cache coherent. Hot paths prefer
+        /// <see cref="TryGetChunk"/> / <see cref="ChunkValues"/> / <see cref="ChunkKeys"/> — direct,
+        /// struct-enumerator access with no interface dispatch or enumerator boxing.
+        /// </summary>
+        public IReadOnlyDictionary<Vector2Int, ChunkData> Chunks => _chunks;
+
+        /// <summary>The number of loaded chunks.</summary>
+        public int ChunkCount => _chunks.Count;
+
+        /// <summary>The loaded chunks' data, with struct enumeration (GC-free <c>foreach</c> on hot paths).</summary>
+        public Dictionary<Vector2Int, ChunkData>.ValueCollection ChunkValues => _chunks.Values;
+
+        /// <summary>The loaded chunks' voxel-space origins, with struct enumeration (GC-free <c>foreach</c>).</summary>
+        public Dictionary<Vector2Int, ChunkData>.KeyCollection ChunkKeys => _chunks.Keys;
 
         [NonSerialized]
         public HashSet<ChunkData> ModifiedChunks = new HashSet<ChunkData>();
@@ -88,14 +109,14 @@ namespace Data
         {
             ChunkData c;
 
-            if (Chunks.TryGetValue(chunkVoxelPos, out ChunkData chunk))
+            if (_chunks.TryGetValue(chunkVoxelPos, out ChunkData chunk))
                 c = chunk;
             else if (!allowChunkDataCreation)
                 c = null;
             else
             {
                 LoadChunk(chunkVoxelPos);
-                c = Chunks[chunkVoxelPos];
+                c = _chunks[chunkVoxelPos];
             }
 
             return c;
@@ -108,7 +129,7 @@ namespace Data
         public void LoadChunk(Vector2Int chunkVoxelPos)
         {
             // Nothing needs to be loaded if the chunk is already loaded.
-            if (Chunks.ContainsKey(chunkVoxelPos))
+            if (_chunks.ContainsKey(chunkVoxelPos))
                 return;
 
             // Load Chunk from File
@@ -129,16 +150,49 @@ namespace Data
             // Chunk doesn't exist on disk (or loading is disabled/not yet implemented).
             // We create a "placeholder" ChunkData object.
             // The asynchronous job system is responsible for populating it.
-            Chunks.Add(chunkVoxelPos, World.Instance.ChunkPool.GetChunkData(chunkVoxelPos)); // Create placeholder using POOL
+            SetChunk(chunkVoxelPos, World.Instance.ChunkPool.GetChunkData(chunkVoxelPos)); // Create placeholder using POOL
+        }
+
+        /// <summary>Direct, non-virtual chunk lookup by voxel-space origin — the hot-path read.</summary>
+        /// <param name="chunkVoxelPos">The chunk's voxel-space origin.</param>
+        /// <param name="chunkData">The loaded chunk data, or null when not loaded.</param>
+        /// <returns>True when the chunk is loaded.</returns>
+        public bool TryGetChunk(Vector2Int chunkVoxelPos, out ChunkData chunkData) =>
+            _chunks.TryGetValue(chunkVoxelPos, out chunkData);
+
+        /// <summary>Adds or replaces the chunk at a voxel-space origin, keeping the voxel-query cache coherent.</summary>
+        /// <param name="chunkVoxelPos">The chunk's voxel-space origin.</param>
+        /// <param name="chunkData">The chunk data to register.</param>
+        public void SetChunk(Vector2Int chunkVoxelPos, ChunkData chunkData)
+        {
+            _chunks[chunkVoxelPos] = chunkData;
+            InvalidateVoxelQueryCache();
+        }
+
+        /// <summary>Removes the chunk at a voxel-space origin, keeping the voxel-query cache coherent.</summary>
+        /// <param name="chunkVoxelPos">The chunk's voxel-space origin.</param>
+        /// <returns>True when a chunk was removed.</returns>
+        public bool RemoveChunk(Vector2Int chunkVoxelPos)
+        {
+            bool removed = _chunks.Remove(chunkVoxelPos);
+            if (removed) InvalidateVoxelQueryCache();
+            return removed;
+        }
+
+        /// <summary>Removes every loaded chunk, keeping the voxel-query cache coherent.</summary>
+        public void ClearChunks()
+        {
+            _chunks.Clear();
             InvalidateVoxelQueryCache();
         }
 
         /// <summary>
-        /// Invalidates the one-entry voxel-query cache used by <see cref="TryGetVoxel"/>. MUST be called after any
-        /// structural change to <see cref="Chunks"/> (add, remove, or clear), so a cached <see cref="ChunkData"/>
-        /// reference can never outlive its dictionary entry and serve data from a pool-recycled chunk at the same key.
+        /// Invalidates the one-entry voxel-query cache used by <see cref="TryGetVoxel"/>. Called by the chunk-map
+        /// mutators above — the only code that can structurally change <see cref="Chunks"/> — so a cached
+        /// <see cref="ChunkData"/> reference can never outlive its dictionary entry and serve data from a
+        /// pool-recycled chunk at the same key.
         /// </summary>
-        public void InvalidateVoxelQueryCache() => _chunkTopologyVersion++;
+        private void InvalidateVoxelQueryCache() => _chunkTopologyVersion++;
 
 
         /// <summary>
@@ -153,11 +207,10 @@ namespace Data
             if (!IsVoxelInWorld(worldPos)) return false;
 
             Vector2Int chunkVoxelPos = GetChunkCoordFor(worldPos);
-            if (!Chunks.ContainsKey(chunkVoxelPos))
+            if (!_chunks.ContainsKey(chunkVoxelPos))
             {
                 // Create the placeholder
-                Chunks.Add(chunkVoxelPos, World.Instance.ChunkPool.GetChunkData(chunkVoxelPos)); // Create placeholder using POOL
-                InvalidateVoxelQueryCache();
+                SetChunk(chunkVoxelPos, World.Instance.ChunkPool.GetChunkData(chunkVoxelPos)); // Create placeholder using POOL
                 return false;
             }
 
@@ -240,7 +293,7 @@ namespace Data
             {
                 chunkData = _cachedChunkData;
             }
-            else if (Chunks.TryGetValue(chunkKey, out chunkData))
+            else if (_chunks.TryGetValue(chunkKey, out chunkData))
             {
                 _cachedChunkKey = chunkKey;
                 _cachedChunkData = chunkData;
@@ -283,7 +336,7 @@ namespace Data
         private void QueueMeshRebuild(Vector2Int chunkVoxelPos)
         {
             // Try to get the chunk's data.
-            if (Chunks.TryGetValue(chunkVoxelPos, out ChunkData chunkData))
+            if (_chunks.TryGetValue(chunkVoxelPos, out ChunkData chunkData))
             {
                 // If the chunk object exists, request a rebuild.
                 if (chunkData.Chunk != null)
@@ -376,7 +429,7 @@ namespace Data
 
             Vector2Int chunkVoxelPos = GetChunkCoordFor(worldPos);
 
-            if (Chunks.TryGetValue(chunkVoxelPos, out ChunkData chunkData) && chunkData.IsPopulated)
+            if (_chunks.TryGetValue(chunkVoxelPos, out ChunkData chunkData) && chunkData.IsPopulated)
             {
                 Vector3Int localVoxelPos = GetLocalVoxelPositionInChunk(worldPos);
                 if (channel == LightChannel.Block)
@@ -427,7 +480,7 @@ namespace Data
             columns.Add(columnPos);
 
             // Mark the target chunk as needing a lighting update.
-            if (Chunks.TryGetValue(chunkVoxelPos, out ChunkData chunkData))
+            if (_chunks.TryGetValue(chunkVoxelPos, out ChunkData chunkData))
             {
                 chunkData.HasLightChangesToProcess = true;
             }

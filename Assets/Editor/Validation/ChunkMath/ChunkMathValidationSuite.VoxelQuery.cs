@@ -160,7 +160,7 @@ namespace Editor.Validation
             // Teeth: seed a chunk at the past-border origin (chunk index (100,0)); TryGetVoxel must pass the bounds
             // gate and hit the dictionary.
             Vector2Int borderChunkKey = new Vector2Int(1600, 0);
-            wd.Chunks[borderChunkKey] = new ChunkData(borderChunkKey);
+            wd.SetChunk(borderChunkKey, new ChunkData(borderChunkKey));
 
             if (!wd.TryGetVoxel(1600, 64, 0, out _))
             {
@@ -244,7 +244,7 @@ namespace Editor.Validation
             // TryGetVoxel must pass the (now floorless) bounds gate and hit the dictionary. Both an exact-origin and
             // a fractional-negative coordinate floor into that same chunk.
             Vector2Int negChunkKey = new Vector2Int(-16, -16);
-            wd.Chunks[negChunkKey] = new ChunkData(negChunkKey);
+            wd.SetChunk(negChunkKey, new ChunkData(negChunkKey));
 
             if (!wd.TryGetVoxel(-16, 64, -16, out _))
             {
