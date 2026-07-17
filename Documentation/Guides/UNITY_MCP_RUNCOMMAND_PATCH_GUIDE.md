@@ -127,11 +127,15 @@ pointing back to this guide.
 - The package must stay pinned to **2.6.0-pre.1** (external constraint). The embedded copy is the
   same version; `Packages/manifest.json` is unchanged and `packages-lock.json` flips the source to
   `embedded` automatically.
-- `RelayApp~/` (520 MB of relay binaries) is **not** copied — only its `relay.json`, so the
-  package's `ServerInstaller` version check reports "up to date" against the relay already
-  installed at `~/.unity/relay/`. If `~/.unity/relay` is ever wiped, restore the binaries from a
-  registry copy of the package (delete the embed, let Unity re-resolve, reinstall, re-run the
-  script).
+- `RelayApp~/`: the embed keeps `relay.json` **and** the Windows binary `relay_win.exe` (~124 MB);
+  the ~400 MB of mac/linux binaries are skipped (Windows dev only). `relay_win.exe` must be present
+  because `ServerInstaller.InstallOrUpdateRelay` copies the bundled relay from the package to
+  `~/.unity/relay/` whenever the bundled version is newer than the installed one — i.e. on first use
+  and after any package/relay upgrade (the smart part: an upgrade would auto-propagate the new relay
+  if the pin were ever lifted). With only `relay.json`, the version check still reads fine but the
+  copy then fails (`CopyToTargetDir` → "original file does not exist") and the relay never
+  (re)installs — so if `~/.unity/relay` is wiped, the embedded `relay_win.exe` reinstalls it on the
+  next editor load.
 - MCP `Unity_RunCommand` calls that trip the package's unsafe-code classifier (e.g.
   `AssetDatabase.DeleteAsset`) fail with *"User interactions are not supported for MCP tool
   calls"* — by design (the approval UI only exists in the Assistant window). Use a menu item or

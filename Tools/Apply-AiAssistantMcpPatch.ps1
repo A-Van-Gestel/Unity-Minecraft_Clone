@@ -16,8 +16,9 @@ after a fresh clone, or whenever Packages/com.unity.ai.assistant is missing or u
 
 Modes (automatic):
   1. Packages/com.unity.ai.assistant exists          -> (re)apply the patches only. Idempotent.
-  2. Missing, but Library/PackageCache copy exists   -> embed from cache (excludes the 520 MB
-     RelayApp~ binaries; keeps relay.json so the relay version check short-circuits), then patch.
+  2. Missing, but Library/PackageCache copy exists   -> embed from cache (keeps relay.json + the
+     Windows relay_win.exe so ServerInstaller can (re)install the relay; skips the ~400 MB of
+     mac/linux relay binaries), then patch.
   3. Neither exists                                  -> prints recovery steps and exits 1.
 
 Full background: Documentation/Guides/UNITY_MCP_RUNCOMMAND_PATCH_GUIDE.md
@@ -502,14 +503,18 @@ if (-not (Test-Path $EmbedDir)) {
         exit 1
     }
 
-    Write-Host "Embedding from $($cacheDir.FullName) (excluding RelayApp~)..."
+    Write-Host "Embedding from $($cacheDir.FullName) (excluding non-Windows relay binaries)..."
     robocopy $cacheDir.FullName $EmbedDir /E /XD RelayApp~ /NFL /NDL /NJH /NJS | Out-Null
     if ($LASTEXITCODE -gt 7) { throw "robocopy failed with exit code $LASTEXITCODE" }
 
-    # Keep only relay.json: ServerInstaller then reports "relay up to date" instead of warning
-    # every session, and never tries to copy binaries from here (relay lives in ~/.unity/relay).
+    # RelayApp~: keep relay.json AND the Windows binary relay_win.exe. ServerInstaller.InstallOrUpdateRelay
+    # copies the bundled relay from here to ~/.unity/relay whenever the bundled version is newer than the
+    # installed one (IsNewerVersion) - i.e. on first use and after any package/relay upgrade. On Windows
+    # CopyRelayFiles copies relay_win.exe; if it is absent that copy fails ("original file does not exist")
+    # and the relay never (re)installs. The ~400 MB of mac/linux relay binaries are still skipped (Windows dev).
     New-Item -ItemType Directory -Force (Join-Path $EmbedDir 'RelayApp~') | Out-Null
-    Copy-Item (Join-Path $cacheDir.FullName 'RelayApp~\relay.json') (Join-Path $EmbedDir 'RelayApp~\relay.json')
+    Copy-Item (Join-Path $cacheDir.FullName 'RelayApp~\relay.json')    (Join-Path $EmbedDir 'RelayApp~\relay.json')
+    Copy-Item (Join-Path $cacheDir.FullName 'RelayApp~\relay_win.exe') (Join-Path $EmbedDir 'RelayApp~\relay_win.exe')
     Write-Host 'Embed complete.'
 }
 
