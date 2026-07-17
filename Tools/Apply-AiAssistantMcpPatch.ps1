@@ -10,7 +10,9 @@ patches: (1) Mono Assembly.Load fallback that fixes the Unity_RunCommand tool on
 (6) Backport B (from upstream 2.13.0-pre.2, MCP half): MainThreadCommandPump so Unity_RunCommand
     stays responsive while the Editor is unfocused,
 (7) Backport C (from upstream 2.13.0-pre.1): gate Unity.AI.Assistant.Runtime.asmdef on
-    UNITY_EDITOR so the unused chat-runtime assembly is excluded from player builds.
+    UNITY_EDITOR so the unused chat-runtime assembly is excluded from player builds,
+(8) MCP-1 (our own improvement, not an upstream backport): omit localFixedCode from RunCommand
+    success responses to cut per-call token waste (still returned on compile failure).
 
 .DESCRIPTION
 The embedded package is intentionally NOT committed to git (see .gitignore). Run this script
@@ -505,6 +507,26 @@ $patches = @(
     "defineConstraints": [
         "UNITY_EDITOR || UNITY_AI_ASSISTANT_RUNTIME"
     ],
+'@
+    },
+
+    # --- MCP-1: our own improvement (not an upstream backport): trim RunCommand success-response bloat
+    @{
+        Name        = 'MCP-1: omit localFixedCode from RunCommand success response'
+        File        = 'Modules\Unity.AI.MCP.Editor\Tools\RunCommand.cs'
+        Marker      = 'localFixedCode omitted from the success response'
+        Anchor      = @'
+                        executionLogs = executionResult.ExecutionLogs,
+                        localFixedCode = validationResult.LocalFixedCode,
+                        result = resultMessage
+'@
+        Replacement = @'
+                        executionLogs = executionResult.ExecutionLogs,
+                        // PATCHED (see Documentation/Guides/UNITY_MCP_RUNCOMMAND_PATCH_GUIDE.md):
+                        // localFixedCode omitted from the success response - the script compiled fine, so
+                        // echoing the namespace-wrapped rewrite on every call is pure token waste. It is
+                        // still returned on COMPILATION_FAILED above, where it aids debugging.
+                        result = resultMessage
 '@
     }
 )

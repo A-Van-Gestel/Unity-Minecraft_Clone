@@ -133,6 +133,13 @@ pointing back to this guide.
    player-build exclusion is only observable in an actual IL2CPP build; verified here only that the
    editor still compiles clean.
 
+9. **MCP-1 (local improvement, not an upstream backport) — omit `localFixedCode` from RunCommand
+   success responses** (`Modules/Unity.AI.MCP.Editor/Tools/RunCommand.cs`). Every successful
+   `Unity_RunCommand` echoed the full namespace-wrapped rewrite of the script back in the response —
+   pure token waste for the calling agent, on every call. It is now dropped from the success
+   response and kept only on the `COMPILATION_FAILED` response, where it aids debugging. Verified:
+   success responses no longer carry `localFixedCode`; a deliberate compile error still returns it.
+
 ## Embed details / constraints
 
 - The package must stay pinned to **2.6.0-pre.1** (external constraint). The embedded copy is the
