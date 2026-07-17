@@ -537,6 +537,28 @@ namespace UI
 }
 ```
 
+### 4.1. Version-tolerant reads: `LevelDatCodec` (2026-07-17)
+
+Disk migration runs only when a world is **played** — but `level.dat` is *read* earlier and more often:
+the world list, the selection details panel (minimap player marker, border radius), and `World.StartWorld`'s
+editor-replay path all parse it through `SaveSystem.LoadWorldMetadata`. Parsing an old document directly with
+the live `WorldSaveData` was only ever accidentally safe (additive changes default missing fields); the v13
+`player.position` re-type broke it — JsonUtility silently blanks the field (§6), which put every unmigrated
+world's minimap marker at chunk (0, 0).
+
+`Assets/Scripts/Serialization/LevelDatCodec.cs` closes this class of bug by reusing the migration steps as a
+**read codec**: `ReadNormalized(json)` probes the version and, for old documents, folds the pending steps'
+`MigrateLevelDat` transforms over the JSON **in memory** before the live-type parse. The frozen DTOs inside
+the steps are the codec tables, so a future format change extends the read path automatically when its step
+is registered. Three invariants:
+
+- **Read-only.** The codec never writes to disk; on-disk migration (backup, rollback, chunks) remains
+  exclusively `MigrationManager`'s job at Play time.
+- **`version` stays the on-disk value.** Only the *contents* are normalized — `RequiresMigration` and the
+  menu's version UI still key off the real disk version.
+- **Fails open.** A broken step chain degrades to the raw live-type parse (the pre-codec behavior) with an
+  error log, never a blocked world list.
+
 ---
 
 ## 5. The "True DTO" Migration Example (`Migration_v1_to_v2_RemoveNeedsLight.cs`)

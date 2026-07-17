@@ -142,7 +142,10 @@ public static class SaveSystem
         try
         {
             string json = File.ReadAllText(path);
-            return JsonUtility.FromJson<WorldSaveData>(json);
+
+            // Version-tolerant read: old documents are upgraded in memory (never on disk) so live-type parsing
+            // stays correct across non-additive schema changes like the v13 position re-type.
+            return LevelDatCodec.ReadNormalized(json);
         }
         catch (Exception e)
         {
