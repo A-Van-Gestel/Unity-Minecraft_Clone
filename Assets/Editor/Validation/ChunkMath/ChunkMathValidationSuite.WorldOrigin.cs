@@ -279,9 +279,9 @@ namespace Editor.Validation
                         return FailOrigin("WorldOrigin Identity Is Pre-WS-4 Behavior",
                             $"UnityToVoxelCell({pos}) = {WorldOrigin.UnityToVoxelCell(pos)}, legacy floor idiom gives {legacyCell}.");
 
-                    if (!WorldOrigin.UnityToChunk(pos).Equals(ChunkCoord.FromWorldPosition(pos)))
+                    if (!WorldOrigin.UnityToChunk(pos).Equals(ChunkCoord.FromVoxelPosition(pos)))
                         return FailOrigin("WorldOrigin Identity Is Pre-WS-4 Behavior",
-                            $"UnityToChunk({pos}) diverged from the legacy ChunkCoord.FromWorldPosition idiom.");
+                            $"UnityToChunk({pos}) diverged from the legacy ChunkCoord.FromVoxelPosition idiom.");
                 }
 
                 Debug.Log("[PASS] WorldOrigin Identity Is Pre-WS-4 Behavior");

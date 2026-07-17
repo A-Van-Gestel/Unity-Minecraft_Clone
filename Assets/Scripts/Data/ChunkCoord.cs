@@ -35,7 +35,7 @@ namespace Data
     //   Chunk index  → Voxel origin:  chunkCoord.ToVoxelOrigin()
     //   Voxel origin → Chunk index:   ChunkCoord.FromVoxelOrigin(voxelPos)   or   new ChunkCoord(voxelPos)
     //   Chunk index  → World pos:     chunkCoord.ToWorldPosition()           →  Vector3(x*16, 0, z*16)
-    //   World pos    → Chunk index:   ChunkCoord.FromWorldPosition(pos)      →  floors then divides
+    //   Voxel pos    → Chunk index:   ChunkCoord.FromVoxelPosition(pos)      →  floors then divides
     //   Neighbor:                      chunkCoord.Neighbor(dx, dz)            →  offset by chunk indices
     //   ChunkCoord   → region math:   use chunkCoord.X / chunkCoord.Z directly
     // ============================================================
@@ -126,31 +126,6 @@ namespace Data
         public static ChunkCoord FromVoxelPosition(Vector3 voxelPos)
         {
             return new ChunkCoord(ChunkMath.WorldToChunk(voxelPos.x), ChunkMath.WorldToChunk(voxelPos.z));
-        }
-
-        /// <summary>
-        /// Creates a ChunkCoord from a fractional voxel-space position.
-        /// <para>⚠ Despite the name this is <b>voxel</b> space, not Unity space — every caller passes saved or
-        /// query-space data. Prefer <see cref="FromVoxelPosition"/>, which says so; convert a Unity transform with
-        /// <c>WorldOrigin.UnityToChunk</c>.</para>
-        /// </summary>
-        /// <param name="worldPos">The floating-point position in voxel world space.</param>
-        /// <returns>The calculated <see cref="ChunkCoord"/>.</returns>
-        /// <example><c>WorldPos (800.5f, 75f, 800.5f)</c> -> <c>ChunkCoord (50, 50)</c></example>
-        public static ChunkCoord FromWorldPosition(Vector3 worldPos)
-        {
-            return new ChunkCoord(ChunkMath.WorldToChunk(worldPos.x), ChunkMath.WorldToChunk(worldPos.z));
-        }
-
-        /// <summary>
-        /// Creates a ChunkCoord from a 2D Unity world-space position.
-        /// </summary>
-        /// <param name="worldPos">The 2D floating-point world position (X and Z axes) in Unity space.</param>
-        /// <returns>The calculated <see cref="ChunkCoord"/>.</returns>
-        /// <example><c>WorldPos (800.5f, 800.5f)</c> -> <c>ChunkCoord (50, 50)</c></example>
-        public static ChunkCoord FromWorldPosition(Vector2 worldPos)
-        {
-            return new ChunkCoord(ChunkMath.WorldToChunk(worldPos.x), ChunkMath.WorldToChunk(worldPos.y));
         }
 
         #endregion

@@ -75,7 +75,7 @@ namespace Serialization.Migration.Steps
         /// </summary>
         /// <remarks>
         /// Replicates <c>ChunkRelativePosition</c>'s absolute constructor as it stood at v13, frozen:
-        /// <c>Chunk = ChunkCoord.FromWorldPosition(pos)</c> → <c>ChunkMath.WorldToChunk(f)</c> →
+        /// <c>Chunk = ChunkCoord.FromWorldPosition(pos)</c> (renamed <c>FromVoxelPosition</c> after v13) → <c>ChunkMath.WorldToChunk(f)</c> →
         /// <c>(int)floor(f) >> 4</c>, then <c>local = pos − chunk * 16</c>. The floor-then-shift order matters and is
         /// not the same as <c>(int)(f / 16)</c>: C# integer division truncates toward zero, which lands negative
         /// coordinates in the wrong chunk (WS-1's shift/mask rule). The resulting local offset is always in

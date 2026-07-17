@@ -2471,7 +2471,7 @@ public class World : MonoBehaviour
     /// to prevent.</remarks>
     private static ChunkCoord GetChunkCoordFromVector3(Vector3 worldPos)
     {
-        return ChunkCoord.FromWorldPosition(worldPos);
+        return ChunkCoord.FromVoxelPosition(worldPos);
     }
 
     /// <summary>
@@ -3387,7 +3387,7 @@ public class World : MonoBehaviour
 
 
         Vector3Int worldHeight = new Vector3Int(x, yMax, z);
-        ChunkCoord chunkCoord = ChunkCoord.FromWorldPosition(worldPos);
+        ChunkCoord chunkCoord = ChunkCoord.FromVoxelPosition(worldPos);
 
         // Voxel outside the world, highest voxel is world height.
         if (!worldData.IsVoxelInWorld(worldPos))

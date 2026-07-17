@@ -67,7 +67,7 @@ namespace Data.WorldTypes
         public ChunkRelativePosition(Vector3 absoluteWorldPos)
         {
             this = default;
-            Chunk = ChunkCoord.FromWorldPosition(absoluteWorldPos);
+            Chunk = ChunkCoord.FromVoxelPosition(absoluteWorldPos);
             float localX = absoluteWorldPos.x - (Chunk.X * ChunkMath.CHUNK_WIDTH);
             float localZ = absoluteWorldPos.z - (Chunk.Z * ChunkMath.CHUNK_WIDTH);
             localPosition = new Vector3(localX, absoluteWorldPos.y, localZ);
