@@ -95,6 +95,21 @@ pointing back to this guide.
    Definitive `ApiNoLongerSupported` results now return without console logging; all other account
    errors still log as before.
 
+6. **Backport A — `get_components` deep-graph / non-TRS Matrix4x4 crash guard**
+   (`Modules/Unity.AI.MCP.Runtime/Serialization/UnityTypeConverters.cs`,
+   `Modules/Unity.AI.MCP.Editor/Helpers/GameObjectSerializer.cs`,
+   `Modules/Unity.AI.MCP.Editor/Tools/ManageGameObject.cs`) — backported from upstream
+   **2.13.0-pre.1** (UUM-144888). `Unity_ManageGameObject` `get_components` serializes public
+   members via reflection; a member exposing a deep non-`UnityEngine.Object` reference graph
+   overflowed the C stack inside `mono_gc_alloc_obj` and **crashed the Editor** (Newtonsoft's
+   `MaxDepth` guards only the read path). A `DepthLimitedJTokenWriter` now caps write depth at 64 —
+   the existing `JsonSerializationException` catch turns the overflow into a skipped field — and a
+   `Matrix4x4Converter` (registered on both the output and input serializers) emits the 16 elements
+   directly instead of reflecting a non-TRS matrix. Minimal port: `CreateTokenFromValue` keeps its
+   signature (no `SerializationResult`/sentinel machinery). Verified in-editor: a probe component
+   with a 300-deep property returned without crashing (`"Maximum depth 64 exceeded"` warning, field
+   skipped) and a `Matrix4x4` property serialized to `m00..m33`.
+
 ## Embed details / constraints
 
 - The package must stay pinned to **2.6.0-pre.1** (external constraint). The embedded copy is the
