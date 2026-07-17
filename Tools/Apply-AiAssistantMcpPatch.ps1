@@ -8,7 +8,9 @@ patches: (1) Mono Assembly.Load fallback that fixes the Unity_RunCommand tool on
 (5) Backport A (from upstream 2.13.0-pre.1): get_components deep-graph / non-TRS Matrix4x4
     crash guard (DepthLimitedJTokenWriter + Matrix4x4Converter),
 (6) Backport B (from upstream 2.13.0-pre.2, MCP half): MainThreadCommandPump so Unity_RunCommand
-    stays responsive while the Editor is unfocused.
+    stays responsive while the Editor is unfocused,
+(7) Backport C (from upstream 2.13.0-pre.1): gate Unity.AI.Assistant.Runtime.asmdef on
+    UNITY_EDITOR so the unused chat-runtime assembly is excluded from player builds.
 
 .DESCRIPTION
 The embedded package is intentionally NOT committed to git (see .gitignore). Run this script
@@ -487,6 +489,22 @@ $patches = @(
         public void Stop()
         {
             Task toWait = null;
+'@
+    },
+
+    # --- Backport C: keep the unused chat-Assistant runtime assembly out of player builds (from 2.13.0-pre.1)
+    @{
+        Name        = 'Backport C: exclude Unity.AI.Assistant.Runtime from player builds'
+        File        = 'Runtime\Unity.AI.Assistant.Runtime.asmdef'
+        Marker      = 'UNITY_AI_ASSISTANT_RUNTIME'
+        # Backported from upstream 2.13.0-pre.1. With no defineConstraints this assembly (includePlatforms [])
+        # compiled into IL2CPP player builds despite being editor-only in practice - all 8 referencers are
+        # Editor asmdefs, so gating it on the editor drops it from shipped builds with nothing to break.
+        Anchor      = '    "defineConstraints": [],'
+        Replacement = @'
+    "defineConstraints": [
+        "UNITY_EDITOR || UNITY_AI_ASSISTANT_RUNTIME"
+    ],
 '@
     }
 )

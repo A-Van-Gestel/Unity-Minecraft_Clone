@@ -122,6 +122,17 @@ pointing back to this guide.
    `update` hook) is safe; `isRunning` is now `volatile`. The relay binary is unchanged — this only
    fixes the Editor-side drain throttle.
 
+8. **Backport C — keep the chat-Assistant runtime out of player builds**
+   (`Runtime/Unity.AI.Assistant.Runtime.asmdef`) — backported from upstream **2.13.0-pre.1**. The
+   assembly had empty `defineConstraints` with `includePlatforms: []`, so it compiled into IL2CPP
+   player builds even though it is editor-only in practice. Adding the constraint
+   `"UNITY_EDITOR || UNITY_AI_ASSISTANT_RUNTIME"` drops it from shipped builds; all 8 assemblies that
+   reference it are `*.Editor` asmdefs, so nothing in a player build breaks, and in-editor
+   compilation is unchanged (the `UNITY_EDITOR` arm). `Unity.AI.MCP.Runtime` and `Unity.AI.Tracing`
+   also build for all platforms but were left unconstrained upstream, so they are left as-is. The
+   player-build exclusion is only observable in an actual IL2CPP build; verified here only that the
+   editor still compiles clean.
+
 ## Embed details / constraints
 
 - The package must stay pinned to **2.6.0-pre.1** (external constraint). The embedded copy is the
