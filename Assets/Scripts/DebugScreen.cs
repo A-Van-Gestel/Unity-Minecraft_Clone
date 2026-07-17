@@ -6,7 +6,6 @@ using Helpers;
 using Helpers.UI;
 using JetBrains.Annotations;
 using Jobs.BurstData;
-using MyBox;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Profiling;
@@ -263,19 +262,24 @@ public class DebugScreen : MonoBehaviour
     {
         // Unity space (a transform); the voxel-space values below are what the world queries and the readout use.
         Vector3 playerPos = _player.transform.position;
-        Vector3 playerVoxelPos = playerPos + WorldOrigin.OriginVoxel;
 
-        // Update Ground Voxel State
-        Vector3 groundVoxelPosVector3 = playerVoxelPos + Vector3.down;
-        _groundVoxelState = _world.GetVoxelState(groundVoxelPosVector3);
-        _groundVoxelPos = groundVoxelPosVector3.ToVector3Int();
+        // Update Ground Voxel State. Floor in Unity space, then integer-add the origin (WorldOrigin's precision
+        // rule) — a float add of the origin would lose sub-voxel precision past ±2²⁴ and query the wrong cell.
+        // The displayed cell is the queried cell, exactly.
+        Vector3Int groundVoxelPos = WorldOrigin.UnityToVoxelCell(playerPos) + Vector3Int.down;
+        _groundVoxelState = _world.TryGetVoxel(groundVoxelPos.x, groundVoxelPos.y, groundVoxelPos.z,
+            out VoxelState groundState)
+            ? groundState
+            : null;
+        _groundVoxelPos = groundVoxelPos;
 
         // Update Target Voxel State (for Inspector)
         UpdateTargetVoxel();
 
-        // Update Current Chunk
-        _currentChunk = _world.worldData.IsVoxelInWorld(playerVoxelPos)
-            ? _world.GetChunkFromVector3(playerVoxelPos)
+        // Update Current Chunk. The Y gate reads the Unity-space position directly — the origin never shifts
+        // vertically, so its Y IS the voxel-space Y; XZ converts through the integer origin path.
+        _currentChunk = _world.worldData.IsVoxelInWorld(playerPos)
+            ? _world.GetChunkFromChunkCoord(WorldOrigin.UnityToChunk(playerPos))
             : null;
     }
 
@@ -351,7 +355,10 @@ public class DebugScreen : MonoBehaviour
         // origin the moment the world re-anchors. The readout leads with voxel space — that is what the save, the
         // world queries, and every coordinate the player reasons about use — and shows the render-space pair below.
         Vector3 playerPosition = _player.transform.position;
-        Vector3 playerVoxelPosition = playerPosition + WorldOrigin.OriginVoxel;
+
+        // Voxel-space cell via floor-then-integer-add (WorldOrigin's precision rule) — a float add of the origin
+        // would drift the readout past ±2²⁴. Y passes through: the origin never shifts vertically.
+        Vector3Int playerVoxelCell = WorldOrigin.UnityToVoxelCell(playerPosition);
         Vector2 lookingDirection = GetLookingAngles();
 
         // --- General Info (Always Show) ---
@@ -371,11 +378,11 @@ public class DebugScreen : MonoBehaviour
 
         // --- World & Orientation Info ---
         _topLeftBuilder.AppendLine("WORLD:");
-        _topLeftBuilder.Append("XYZ: ").Append(Mathf.FloorToInt(playerVoxelPosition.x))
-            .Append(" / ").Append(Mathf.FloorToInt(playerVoxelPosition.y))
-            .Append(" / ").Append(Mathf.FloorToInt(playerVoxelPosition.z));
+        _topLeftBuilder.Append("XYZ: ").Append(playerVoxelCell.x)
+            .Append(" / ").Append(playerVoxelCell.y)
+            .Append(" / ").Append(playerVoxelCell.z);
         _topLeftBuilder.Append(" | Eye Level: ");
-        _topLeftBuilder.AppendFixed(playerVoxelPosition.y + _player.VoxelRigidbody.collisionHeight * 0.9f, 2);
+        _topLeftBuilder.AppendFixed(playerPosition.y + _player.VoxelRigidbody.collisionHeight * 0.9f, 2);
         _topLeftBuilder.AppendLine();
         _topLeftBuilder.Append("Render XYZ: ").Append(Mathf.FloorToInt(playerPosition.x))
             .Append(" / ").Append(Mathf.FloorToInt(playerPosition.y))
