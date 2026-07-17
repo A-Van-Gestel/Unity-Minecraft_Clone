@@ -12,7 +12,9 @@ patches: (1) Mono Assembly.Load fallback that fixes the Unity_RunCommand tool on
 (7) Backport C (from upstream 2.13.0-pre.1): gate Unity.AI.Assistant.Runtime.asmdef on
     UNITY_EDITOR so the unused chat-runtime assembly is excluded from player builds,
 (8) MCP-1 (our own improvement, not an upstream backport): omit localFixedCode from RunCommand
-    success responses to cut per-call token waste (still returned on compile failure).
+    success responses to cut per-call token waste (still returned on compile failure),
+(9) MCP-2 (our own improvement, not an upstream backport): a Warning during RunCommand no longer
+    fails the whole call (only Error/Exception do), matching RunReadOnlyCommandTool.
 
 .DESCRIPTION
 The embedded package is intentionally NOT committed to git (see .gitignore). Run this script
@@ -527,6 +529,28 @@ $patches = @(
                         // echoing the namespace-wrapped rewrite on every call is pure token waste. It is
                         // still returned on COMPILATION_FAILED above, where it aids debugging.
                         result = resultMessage
+'@
+    },
+
+    # --- MCP-2: our own improvement (not an upstream backport): a Warning must not fail the whole call
+    @{
+        Name        = 'MCP-2: RunCommand warnings no longer fail the call (only Error/Exception do)'
+        File        = 'Modules\Unity.AI.Assistant.Tools\Scripting\RunCommandTool.cs'
+        Marker      = 'A Warning during execution no longer fails the whole command'
+        Anchor      = @'
+            var hasWarningsOrErrors = executionResult.Logs != null && executionResult.Logs.Any(log =>
+                log.LogType == LogType.Warning ||
+                log.LogType == LogType.Error ||
+                log.LogType == LogType.Exception);
+'@
+        Replacement = @'
+            // PATCHED (see Documentation/Guides/UNITY_MCP_RUNCOMMAND_PATCH_GUIDE.md):
+            // A Warning during execution no longer fails the whole command - only Error/Exception do,
+            // matching RunReadOnlyCommandTool. Unity code legitimately logs warnings (deprecations,
+            // validation notes) while the command runs fully; warnings still surface in ExecutionLogs.
+            var hasWarningsOrErrors = executionResult.Logs != null && executionResult.Logs.Any(log =>
+                log.LogType == LogType.Error ||
+                log.LogType == LogType.Exception);
 '@
     }
 )

@@ -140,6 +140,16 @@ pointing back to this guide.
    response and kept only on the `COMPILATION_FAILED` response, where it aids debugging. Verified:
    success responses no longer carry `localFixedCode`; a deliberate compile error still returns it.
 
+10. **MCP-2 (local improvement, not an upstream backport) — a Warning must not fail the whole
+    RunCommand** (`Modules/Unity.AI.Assistant.Tools/Scripting/RunCommandTool.cs`). `ExecuteCommand`
+    treated any `LogType.Warning` in the execution logs as a failure (alongside Error/Exception) and
+    threw, so the MCP layer surfaced `UNEXPECTED_ERROR: Command was executed partially...` even though
+    the command ran fully — a constant false-failure for agents, since Unity code legitimately logs
+    warnings (deprecations, validation notes). The predicate now checks only `Error`/`Exception`,
+    matching the read-only sibling `RunReadOnlyCommandTool`; warnings still surface in `ExecutionLogs`.
+    **Verify (repro doubles as the regression check):** a command calling `result.LogWarning(...)`
+    returns success with the warning in the logs; a command calling `result.LogError(...)` still fails.
+
 ## Embed details / constraints
 
 - The package must stay pinned to **2.6.0-pre.1** (external constraint). The embedded copy is the
