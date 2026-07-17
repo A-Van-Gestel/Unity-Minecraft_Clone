@@ -151,20 +151,27 @@ namespace Physics
         /// </summary>
         private void ClampToWorldBorder()
         {
-            float radius = _world.BorderRadius;
-            if (radius <= 0f) return;
-
-            // Keep the collider fully inside the border; guard tiny radii from inverting the bounds.
-            float limitX = Mathf.Max(0f, radius - CollisionHalfWidthX - BORDER_MARGIN);
-            float limitZ = Mathf.Max(0f, radius - CollisionHalfDepthZ - BORDER_MARGIN);
+            int radius = _world.BorderRadius;
+            if (radius <= 0) return;
 
             // The border is a voxel-space AABB centered on the WORLD origin while the transform is Unity space, so
-            // the limits shift by the origin instead of staying symmetric about the render origin.
+            // the limits shift by the origin instead of staying symmetric about the render origin. The border edge
+            // and origin resolve in integer math FIRST (both can be huge; near the border they cancel to a small
+            // number), and only then does the small fractional collider inset apply in float — subtracting two large
+            // floats instead would round the bound off the true border line past ±2²⁴.
             Vector3Int ov = WorldOrigin.OriginVoxel;
+            float minX = (-(long)radius - ov.x) + CollisionHalfWidthX + BORDER_MARGIN;
+            float maxX = ((long)radius - ov.x) - CollisionHalfWidthX - BORDER_MARGIN;
+            float minZ = (-(long)radius - ov.z) + CollisionHalfDepthZ + BORDER_MARGIN;
+            float maxZ = ((long)radius - ov.z) - CollisionHalfDepthZ - BORDER_MARGIN;
+
+            // Guard tiny radii from inverting the bounds: pin the player to the border's center line instead.
+            if (maxX < minX) minX = maxX = (minX + maxX) * 0.5f;
+            if (maxZ < minZ) minZ = maxZ = (minZ + maxZ) * 0.5f;
 
             Vector3 pos = transform.position;
-            float clampedX = Mathf.Clamp(pos.x, -limitX - ov.x, limitX - ov.x);
-            float clampedZ = Mathf.Clamp(pos.z, -limitZ - ov.z, limitZ - ov.z);
+            float clampedX = Mathf.Clamp(pos.x, minX, maxX);
+            float clampedZ = Mathf.Clamp(pos.z, minZ, maxZ);
 
             if (clampedX != pos.x || clampedZ != pos.z)
                 transform.position = new Vector3(clampedX, pos.y, clampedZ);
