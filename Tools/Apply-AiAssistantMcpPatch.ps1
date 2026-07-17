@@ -6,7 +6,9 @@ patches: (1) Mono Assembly.Load fallback that fixes the Unity_RunCommand tool on
 (3) clear error instead of NullReferenceException when a script uses a blocked namespace,
 (4) silence the per-domain-reload "ApiNoLongerSupported" account-refresh console spam,
 (5) Backport A (from upstream 2.13.0-pre.1): get_components deep-graph / non-TRS Matrix4x4
-    crash guard (DepthLimitedJTokenWriter + Matrix4x4Converter).
+    crash guard (DepthLimitedJTokenWriter + Matrix4x4Converter),
+(6) Backport B (from upstream 2.13.0-pre.2, MCP half): MainThreadCommandPump so Unity_RunCommand
+    stays responsive while the Editor is unfocused.
 
 .DESCRIPTION
 The embedded package is intentionally NOT committed to git (see .gitignore). Run this script
@@ -316,6 +318,174 @@ $patches = @(
                 new UnityEngineObjectConverter(),
                 new Matrix4x4Converter() // PATCHED (backport 2.13.0-pre.1): non-TRS Matrix4x4 support
             }
+'@
+    },
+
+    # --- Backport B: keep MCP responsive while the editor is unfocused (from 2.13.0-pre.2) -------
+    @{
+        Name        = 'Backport B1: volatile isRunning (read from the pump timer thread)'
+        File        = 'Modules\Unity.AI.MCP.Editor\Bridge.cs'
+        Marker      = 'volatile bool isRunning;'
+        Anchor      = '        bool isRunning;'
+        Replacement = '        volatile bool isRunning; // PATCHED (backport 2.13.0-pre.2): read from the pump timer thread'
+    },
+    @{
+        Name        = 'Backport B2: command pump fields'
+        File        = 'Modules\Unity.AI.MCP.Editor\Bridge.cs'
+        Marker      = 'MainThreadCommandPump commandPump;'
+        Anchor      = @'
+        // Command processing
+        int processingCommands;
+'@
+        Replacement = @'
+        // Command processing
+        int processingCommands;
+
+        // PATCHED (see Documentation/Guides/UNITY_MCP_RUNCOMMAND_PATCH_GUIDE.md):
+        // Backported from com.unity.ai.assistant 2.13.0-pre.2. Focus-independent pump that drains
+        // the command queue while EditorApplication.update is throttled (editor unfocused).
+        MainThreadCommandPump commandPump;
+        volatile System.Threading.SynchronizationContext mainThreadContext;
+        const int k_PumpIntervalMs = 100;
+'@
+    },
+    @{
+        Name        = 'Backport B3: start the command pump'
+        File        = 'Modules\Unity.AI.MCP.Editor\Bridge.cs'
+        Marker      = 'commandPump = new MainThreadCommandPump('
+        Anchor      = @'
+                    listenerTask = Task.Run(() => ListenerLoopAsync(cts.Token));
+                    EditorApplication.update += ProcessCommands;
+'@
+        Replacement = @'
+                    listenerTask = Task.Run(() => ListenerLoopAsync(cts.Token));
+                    EditorApplication.update += ProcessCommands;
+
+                    // PATCHED (backport 2.13.0-pre.2): capture the main-thread context so the pump
+                    // can marshal the drain back here, then drive the drain off a focus-independent
+                    // timer so tool calls stay responsive while the editor is unfocused.
+                    mainThreadContext = System.Threading.SynchronizationContext.Current;
+                    commandPump?.Dispose();
+                    commandPump = new MainThreadCommandPump(
+                        hasPendingWork: () => isRunning && !commandQueue.IsEmpty,
+                        requestDrain: RequestDrainOnMainThread,
+                        intervalMs: k_PumpIntervalMs);
+                    commandPump.Start();
+'@
+    },
+    @{
+        Name        = 'Backport B4: dispose the command pump on Stop'
+        File        = 'Modules\Unity.AI.MCP.Editor\Bridge.cs'
+        Marker      = 'try { commandPump?.Dispose(); } catch { }'
+        Anchor      = @'
+            try { EditorApplication.update -= ProcessCommands; } catch { }
+            McpLog.Log("UnityMCPBridge stopped.");
+'@
+        Replacement = @'
+            try { EditorApplication.update -= ProcessCommands; } catch { }
+
+            // PATCHED (backport 2.13.0-pre.2): tear down the focus-independent pump.
+            try { commandPump?.Dispose(); } catch { }
+            commandPump = null;
+            mainThreadContext = null;
+
+            McpLog.Log("UnityMCPBridge stopped.");
+'@
+    },
+    @{
+        Name        = 'Backport B5: pump drain methods + MainThreadCommandPump class'
+        File        = 'Modules\Unity.AI.MCP.Editor\Bridge.cs'
+        Marker      = 'class MainThreadCommandPump'
+        Anchor      = @'
+        public void Stop()
+        {
+            Task toWait = null;
+'@
+        Replacement = @'
+        // PATCHED (see Documentation/Guides/UNITY_MCP_RUNCOMMAND_PATCH_GUIDE.md):
+        // Backported from com.unity.ai.assistant 2.13.0-pre.2. Called from the pump's background
+        // timer thread: marshals the queue drain to the main thread (Unity APIs require it) and
+        // wakes the possibly-throttled editor loop so it runs promptly instead of at the unfocused
+        // tick rate. ProcessCommands is reentrancy-guarded, so dual-driving it (here + the
+        // EditorApplication.update hook) is safe.
+        void RequestDrainOnMainThread()
+        {
+            var ctx = mainThreadContext;
+            if (ctx == null)
+                return;
+
+            ctx.Post(_ =>
+            {
+                ProcessCommands();
+                WakeEditorLoop();
+            }, null);
+        }
+
+        // Forces a player-loop update so the editor ticks again promptly while unfocused.
+        static void WakeEditorLoop()
+        {
+            EditorApplication.QueuePlayerLoopUpdate();
+        }
+
+        // Focus-independent pump that drives the MCP command-queue drain off the throttled
+        // EditorApplication.update tick. A background timer ticks at a steady cadence regardless of
+        // editor focus; when work is pending it calls requestDrain, which marshals the drain to the
+        // main thread. Execution of the commands themselves stays on the main thread.
+        sealed class MainThreadCommandPump : IDisposable
+        {
+            readonly Func<bool> m_HasPendingWork;
+            readonly Action m_RequestDrain;
+            readonly int m_IntervalMs;
+            System.Threading.Timer m_Timer;
+            int m_Ticking;   // reentrancy guard (0/1)
+            volatile bool m_Disposed;
+
+            public MainThreadCommandPump(Func<bool> hasPendingWork, Action requestDrain, int intervalMs)
+            {
+                m_HasPendingWork = hasPendingWork ?? throw new ArgumentNullException(nameof(hasPendingWork));
+                m_RequestDrain = requestDrain ?? throw new ArgumentNullException(nameof(requestDrain));
+                m_IntervalMs = intervalMs;
+                if (intervalMs <= 0) throw new ArgumentOutOfRangeException(nameof(intervalMs), "Must be positive.");
+            }
+
+            public void Start()
+            {
+                if (m_Disposed) return;
+                m_Timer ??= new System.Threading.Timer(_ => Tick(), null, m_IntervalMs, m_IntervalMs);
+            }
+
+            internal void Tick()
+            {
+                if (m_Disposed) return;
+                if (Interlocked.Exchange(ref m_Ticking, 1) == 1) return;
+                try
+                {
+                    if (m_HasPendingWork())
+                        m_RequestDrain();
+                }
+                catch
+                {
+                    // Never let a pump tick throw onto the timer thread.
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref m_Ticking, 0);
+                }
+            }
+
+            public void Dispose()
+            {
+                // A tick already in flight may call requestDrain once more after Dispose() returns;
+                // callers tolerate this (Timer.Dispose does not wait for in-flight callbacks).
+                m_Disposed = true;
+                m_Timer?.Dispose();
+                m_Timer = null;
+            }
+        }
+
+        public void Stop()
+        {
+            Task toWait = null;
 '@
     }
 )

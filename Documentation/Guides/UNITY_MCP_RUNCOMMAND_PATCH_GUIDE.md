@@ -110,6 +110,18 @@ pointing back to this guide.
    with a 300-deep property returned without crashing (`"Maximum depth 64 exceeded"` warning, field
    skipped) and a `Matrix4x4` property serialized to `m00..m33`.
 
+7. **Backport B — keep MCP responsive while the Editor is unfocused**
+   (`Modules/Unity.AI.MCP.Editor/Bridge.cs`) — backported from upstream **2.13.0-pre.2** (MCP half
+   only; the chat/relay-account connection-recovery half is deliberately omitted). The command
+   queue drained off `EditorApplication.update`, which Unity **throttles when the Editor is
+   unfocused**, so tool calls stalled. A focus-independent `MainThreadCommandPump` (a background
+   `System.Threading.Timer`, inlined as a nested class in `Bridge.cs`) now ticks at 100 ms; when
+   work is pending it marshals the drain back to the main thread via the captured
+   `SynchronizationContext` and calls `EditorApplication.QueuePlayerLoopUpdate()` to wake the
+   throttled loop. `ProcessCommands` is reentrancy-guarded, so dual-driving it (pump + the retained
+   `update` hook) is safe; `isRunning` is now `volatile`. The relay binary is unchanged — this only
+   fixes the Editor-side drain throttle.
+
 ## Embed details / constraints
 
 - The package must stay pinned to **2.6.0-pre.1** (external constraint). The embedded copy is the
