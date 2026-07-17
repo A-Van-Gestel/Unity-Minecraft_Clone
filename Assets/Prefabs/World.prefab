@@ -117,7 +117,10 @@ MonoBehaviour:
     m_NumColorKeys: 2
     m_NumAlphaKeys: 2
   player: {fileID: 0}
-  spawnPosition: {x: 0, y: 0, z: 0}
+  spawnPosition:
+    _chunkX: 0
+    _chunkZ: 0
+    localPosition: {x: 0, y: 0, z: 0}
   spawnPositionOffset: {x: 0.5, y: 1.1, z: 0.5}
   debugScreen: {fileID: 0}
   clouds: {fileID: 0}
