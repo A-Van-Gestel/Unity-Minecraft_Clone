@@ -542,16 +542,35 @@ $patches = @(
                 log.LogType == LogType.Warning ||
                 log.LogType == LogType.Error ||
                 log.LogType == LogType.Exception);
+
+            if (hasWarningsOrErrors)
+            {
+                var logs = string.IsNullOrEmpty(formattedLogs) ? "No logs available" : formattedLogs;
+                throw new InvalidOperationException(string.Format(k_CommandExecutionWarningsMessage, logs));
+            }
 '@
         Replacement = @'
             // PATCHED (see Documentation/Guides/UNITY_MCP_RUNCOMMAND_PATCH_GUIDE.md):
             // A Warning during execution no longer fails the whole command - only Error/Exception do,
             // matching RunReadOnlyCommandTool. Unity code legitimately logs warnings (deprecations,
             // validation notes) while the command runs fully; warnings still surface in ExecutionLogs.
-            var hasWarningsOrErrors = executionResult.Logs != null && executionResult.Logs.Any(log =>
+            var hasErrors = executionResult.Logs != null && executionResult.Logs.Any(log =>
                 log.LogType == LogType.Error ||
                 log.LogType == LogType.Exception);
+
+            if (hasErrors)
+            {
+                var logs = string.IsNullOrEmpty(formattedLogs) ? "No logs available" : formattedLogs;
+                throw new InvalidOperationException(string.Format(k_CommandExecutionErrorsMessage, logs));
+            }
 '@
+    },
+    @{
+        Name        = 'MCP-3: rename k_CommandExecutionWarningsMessage -> ...ErrorsMessage (name matches MCP-2 behavior)'
+        File        = 'Modules\Unity.AI.Assistant.Tools\Scripting\RunCommandTool.cs'
+        Marker      = 'k_CommandExecutionErrorsMessage = "Command was executed partially'
+        Anchor      = '        internal const string k_CommandExecutionWarningsMessage = "Command was executed partially, but reported warnings or errors:\n{0}\nConsider reverting changes that may have happened if you retry.";'
+        Replacement = '        internal const string k_CommandExecutionErrorsMessage = "Command was executed partially, but reported errors:\n{0}\nConsider reverting changes that may have happened if you retry.";'
     }
 )
 
