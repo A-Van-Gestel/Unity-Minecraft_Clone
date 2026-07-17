@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__unity-mcp__Unity_ReadConsole",
+      "mcp__codegraph__codegraph_explore",
+      "mcp__unity-api__get_method_signature",
+      "mcp__unity-api__get_namespace",
+      "mcp__unity-api__get_class_reference",
+      "mcp__unity-api__search_unity_api",
+      "mcp__unity-api__get_deprecation_warnings"
+    ]
+  }
+}
