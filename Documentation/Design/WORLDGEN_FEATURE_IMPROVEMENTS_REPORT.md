@@ -75,21 +75,21 @@ Findings are from static code review of the Standard generation pipeline
 
 ### Terrain & World Generation Features
 
-| ID    | Finding                                                                                  | Effort | Risk | Benefit | Seed | Save |
-|-------|------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| TF-1  | Voronoi biome borders are near-straight lines — add selection-coordinate domain warping  |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
-| TF-2  | Biome-owned terrain height → hybrid "shared macro field + per-biome residual"            |   🔴   |  🔴  |   🟢    |  ⚠️  |  ✅   |
-| TF-3  | No climate model — biome placement is a uniform hash; add parameter-space selection      |   🔴   |  🟡  |   🟢    |  ⚠️  |  ✅   |
-| TF-4  | Multi-dimension support (registry, per-dimension storage, generator + lighting profile)  |   🔴   |  🔴  |   🟢    |  ✅   |  ⚠️  |
-| TF-5  | Amplified world type (world-level height amplification; gated on world-scaling Tier A1)  |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
-| TF-6  | Farlands world type (distance-ramped extreme domain warp)                                |   🟡   |  🟢  |   🟡    |  ✅   |  ✅   |
-| TF-7  | Rivers (world-level channel carving, Stage 1 at sea level)                               |   🔴   |  🟡  |   🟢    |  ⚠️  |  ✅   |
-| TF-8  | Biome-selection noise config is silently taken from `biomes[0]` — move to world type     |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
-| TF-9  | No macro world layout — add a world orchestration layer (continents, oceans, coasts)     |   🔴   |  🟡  |   🟢    |  ⚠️  |  ✅   |
-| TF-10 | Multi-piece / large structures (villages, ruins) — one template per grid cell today      |   🔴   |  🟡  |   🟢    |  ⚠️  |  ✅   |
-| TF-11 | Climate-driven surface effects: snow line, ice, biome/foliage tint (gated on TF-3)       |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
-| TF-12 | Generation feature flags read from global Settings, not the world — persist in level.dat |   🟢   |  🟢  |   🟢    |  ✅   |  ⚠️  |
-| TF-13 | No worldgen version stamp — post-freeze terrain changes produce silent seams             |   🟢   |  🟢  |    ⚪    |  ✅   |  ⚠️  |
+| ID    | Finding                                                                                                              | Effort | Risk | Benefit | Seed | Save |
+|-------|----------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| TF-1  | Voronoi biome borders are near-straight lines — add selection-coordinate domain warping                              |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
+| TF-2  | Biome-owned terrain height → hybrid "shared macro field + per-biome residual"                                        |   🔴   |  🔴  |   🟢    |  ⚠️  |  ✅   |
+| TF-3  | No climate model — biome placement is a uniform hash; add parameter-space selection                                  |   🔴   |  🟡  |   🟢    |  ⚠️  |  ✅   |
+| TF-4  | Multi-dimension support (registry, per-dimension storage, generator + lighting profile)                              |   🔴   |  🔴  |   🟢    |  ✅   |  ⚠️  |
+| TF-5  | Amplified world type (world-level height amplification; gated on world-scaling Tier A1)                              |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+| TF-6  | Farlands world type (distance-ramped extreme domain warp)                                                            |   🟡   |  🟢  |   🟡    |  ✅   |  ✅   |
+| TF-7  | Rivers (world-level channel carving, Stage 1 at sea level)                                                           |   🔴   |  🟡  |   🟢    |  ⚠️  |  ✅   |
+| TF-8  | Biome-selection noise config is silently taken from `biomes[0]` — move to world type                                 |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
+| TF-9  | No macro world layout — add a world orchestration layer (continents, oceans, coasts)                                 |   🔴   |  🟡  |   🟢    |  ⚠️  |  ✅   |
+| TF-10 | Multi-piece / large structures (villages, ruins) — one template per grid cell today                                  |   🔴   |  🟡  |   🟢    |  ⚠️  |  ✅   |
+| TF-11 | Climate-driven surface effects: snow line, ice, biome/foliage tint (gated on TF-3)                                   |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
+| TF-12 | Generation feature flags read from global Settings, not the world — persist in level.dat                             |   🟢   |  🟢  |   🟢    |  ✅   |  ⚠️  |
+| TF-13 | No worldgen version stamp — post-freeze terrain changes produce silent seams                                         |   🟢   |  🟢  |    ⚪    |  ✅   |  ⚠️  |
 | TF-14 | ✅ SHIPPED 2026-07-13 — per-world gameplay fence: persist + clamp + minimap + animated border wall (ready to archive) |   🟡   |  🟢  |   🟡    |  ✅   |  ⚠️  |
 
 ---
@@ -972,6 +972,11 @@ the open backlog. Both halves landed:
   level.dat via a standalone **v11 → v12** migration; a player-position clamp in `VoxelRigidbody` (the
   pipeline stays border-blind); a create-menu input; and an origin-centered square on the
   `WorldInfoUtility` minimap.
+  **Amended 2026-07-17 — edit gate.** The fence now also gates player **edits**: place/break outside the
+  border is refused via `World.IsVoxelInsideBorder` ([-radius, radius) cell semantics, matching the wall)
+  applied at the interaction boundary — `PlacementController.CanPlaceAt` (place preview + gate) and the
+  destroy click in `PlayerInteraction` — guarded by two TF-14 baselines in the Placement suite. The
+  pipeline (and all reads) stays border-blind; `IsVoxelInWorld`/`IsChunkInWorld` remain untouched.
 - **Phase 2 — visual wall.** `Minecraft/BorderWall` URP transparent shader (world-anchored scrolling
   bands + camera-distance fade) driven by `BorderWallRenderer` — four camera-following quads that slide
   along the border edges, clamp to the extent so corners meet, cull beyond the terrain draw distance,
@@ -1060,7 +1065,7 @@ items last. RF items are detailed in
 | 13   | **TF-4** Dimensions + save changes          | Parallel serialization track (no seed risk); coordinate v12 bump with RF-1's migration                |
 | 14   | **TF-6** Farlands world type                | Cheap novelty once TF-1's warp helper exists                                                          |
 | 15   | **TF-5** Amplified world type               | Gated on `WORLD_SCALING_ANALYSIS.md` Tier A1 — do not start before the height work                    |
-| 16   | ~~**TF-14** World border~~ ✅ SHIPPED        | Done 2026-07-13 (per-world fence + animated wall); pairs optionally with RF-2's fog                    |
+| 16   | ~~**TF-14** World border~~ ✅ SHIPPED        | Done 2026-07-13 (per-world fence + animated wall); pairs optionally with RF-2's fog                   |
 | 17   | **RF-7** Weather                            | Needs TF-3/TF-11's temperature axis for precipitation type; rendering rides RF-1/RF-2 machinery       |
 | 18   | **RF-4** Torch flicker                      | Polish; 🟢 shader-side, needs a Torch block authored first                                            |
 | 19   | **RF-3** Bloom / post-processing            | Polish; pair with the GS-4 render-tier audit; tint-channel coordination with TF-11                    |

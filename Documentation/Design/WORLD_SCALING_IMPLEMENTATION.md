@@ -74,9 +74,10 @@ The XZ border is removed for **all** worlds, not behind a per-world capability f
 - ❌ Existing worlds silently gain the ability to generate past their former border. Accepted: under
   global-unbounded this is the desired behavior, not a surprise to design around. *(Softened
   2026-07-13: the per-world configurable border — `WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md` TF-14,
-  shipped as a post-WS-2 follow-up — adds a gameplay fence on top; terrain stays border-blind, only
-  player movement is clamped. Upgraded worlds default to **no** fence (the border is opt-in), so WS-2's
-  grow-past-the-edge behavior is unchanged.)*
+  shipped as a post-WS-2 follow-up — adds a gameplay fence on top; terrain stays border-blind, and the
+  player is fenced in gameplay terms: movement is clamped and, since 2026-07-17, place/break edits are
+  gated via `World.IsVoxelInsideBorder` at the interaction boundary. Upgraded worlds default to **no**
+  fence (the border is opt-in), so WS-2's grow-past-the-edge behavior is unchanged.)*
 - Existing-world spawn on upgrade resolves to the **player's last stored location** — already
   persisted as `WorldSaveData.player.position` (absolute `Vector3` in level.dat, restored on every
   load; verified, see OQ-5) — not the old `WorldCentre`. No new field or migration needed.

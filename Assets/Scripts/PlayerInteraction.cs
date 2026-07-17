@@ -82,10 +82,17 @@ public class PlayerInteraction : MonoBehaviour
                 // VoxelMod.GlobalPosition is voxel space (it is persisted), so the probe's Unity-space cell converts.
                 // Read from the probe rather than the highlight transform: the cell is already exact there, with no
                 // float round-trip to re-derive it from.
-                _world.AddModification(new VoxelMod(ToVoxelMod(_lastProbe.HitCell), blockId: BlockIDs.Air)
+                Vector3Int breakVoxel = ToVoxelMod(_lastProbe.HitCell);
+
+                // TF-14: the fence gates edits, not aiming — a block reached through the wall highlights but
+                // cannot be broken. (Placement is gated inside the probe via PlacementController.CanPlaceAt.)
+                if (_world.IsVoxelInsideBorder(breakVoxel))
                 {
-                    ImmediateUpdate = true,
-                });
+                    _world.AddModification(new VoxelMod(breakVoxel, blockId: BlockIDs.Air)
+                    {
+                        ImmediateUpdate = true,
+                    });
+                }
             }
 
             // Place block.

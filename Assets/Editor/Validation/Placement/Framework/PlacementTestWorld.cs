@@ -143,6 +143,13 @@ namespace Editor.Validation.Placement.Framework
             }
         }
 
+        /// <summary>
+        /// Sets the stub world's TF-14 gameplay border half-extent through the real production write chokepoint
+        /// (<see cref="World.SetBorderRadius"/>), so border scenarios exercise the same state the game uses.
+        /// </summary>
+        /// <param name="radius">Border half-extent in voxels, or 0 to disable (the default for every scenario).</param>
+        public void SetBorderRadius(int radius) => _world.SetBorderRadius(radius);
+
         /// <summary>Writes a block at a chunk-local / world position (origin chunk, so local == world for 0-15).</summary>
         /// <param name="x">Cell X (0-15).</param>
         /// <param name="y">Cell Y (0-127).</param>

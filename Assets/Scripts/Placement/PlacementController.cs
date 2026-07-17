@@ -145,7 +145,10 @@ namespace Placement
         {
             Vector3Int placeVoxel = placeCell + originVoxel;
 
-            if (!_world.worldData.IsVoxelInWorld(placeVoxel) || _world.IsCellOccupiedForPlacement(placeVoxel))
+            // TF-14: the per-world border gates player edits (the pipeline stays border-blind, so the voxel may
+            // exist and render out there — it just cannot be edited).
+            if (!_world.worldData.IsVoxelInWorld(placeVoxel) || !_world.IsVoxelInsideBorder(placeVoxel) ||
+                _world.IsCellOccupiedForPlacement(placeVoxel))
                 return false;
 
             // A REQUIRES_SUPPORT block (e.g. grass blades) needs a support-providing block directly beneath it,

@@ -337,7 +337,8 @@ public class World : MonoBehaviour
     /// centered on the world origin. <c>0</c> means disabled (fully unbounded, the default).
     /// A player-only fence: the pipeline (generation, lighting, meshing, storage) is border-blind,
     /// and this value is deliberately NOT consulted by <see cref="IsChunkInWorld(ChunkCoord)"/> or
-    /// <see cref="WorldData.IsVoxelInWorld"/>. Persisted in level.dat and restored on load.
+    /// <see cref="WorldData.IsVoxelInWorld"/>. It gates player movement (<c>VoxelRigidbody</c>'s clamp) and
+    /// player edits (<see cref="IsVoxelInsideBorder"/>). Persisted in level.dat and restored on load.
     /// </summary>
     public int BorderRadius { get; private set; }
 
@@ -349,6 +350,25 @@ public class World : MonoBehaviour
     public void SetBorderRadius(int radius)
     {
         BorderRadius = radius;
+    }
+
+    /// <summary>
+    /// Whether a voxel cell lies inside the per-world gameplay border (TF-14) — always true when the border is
+    /// disabled. The fence gates <b>player edits</b> (place/break); it is deliberately NOT part of
+    /// <see cref="IsChunkInWorld"/> / <see cref="WorldData.IsVoxelInWorld"/>, which gate reads and streaming —
+    /// terrain beyond the fence still loads, renders, and simulates.
+    /// </summary>
+    /// <param name="voxelPos">The absolute <b>voxel-space</b> cell (Unity-space callers convert first).</param>
+    /// <returns>True when the cell may be edited by the player.</returns>
+    // [-radius, radius) cell semantics: a cell spans [x, x+1), so the last inside cell on +X is radius-1 —
+    // flush against the rendered wall at +radius — mirroring the -X side's cell at -radius.
+    public bool IsVoxelInsideBorder(Vector3Int voxelPos)
+    {
+        int radius = BorderRadius;
+        if (radius <= 0) return true;
+
+        return voxelPos.x >= -radius && voxelPos.x < radius &&
+               voxelPos.z >= -radius && voxelPos.z < radius;
     }
 
     /// <summary>
@@ -637,7 +657,7 @@ public class World : MonoBehaviour
                 isEditorReplay = true;
                 loadedWorldType = existingMeta.worldType;
                 SetSpawnPoint(existingMeta.spawnPosition);
-                BorderRadius = existingMeta.borderRadius;
+                SetBorderRadius(existingMeta.borderRadius);
                 Debug.Log($"[World] Editor re-play detected — restoring persisted spawn point: {WorldSpawnPoint}");
             }
         }
@@ -2482,16 +2502,15 @@ public class World : MonoBehaviour
     [CanBeNull]
     public Chunk GetChunkFromVector3(Vector3 pos)
     {
-        int x = ChunkMath.WorldToChunk(pos.x);
-        int z = ChunkMath.WorldToChunk(pos.z);
+        ChunkCoord coord = new ChunkCoord(ChunkMath.WorldToChunk(pos.x), ChunkMath.WorldToChunk(pos.z));
 
         // "Is in World" bounds check before accessing the array.
-        if (!IsChunkInWorld(x, z))
+        if (!IsChunkInWorld(coord))
         {
             return null; // Return null if the coordinate is outside the world.
         }
 
-        return _chunkMap.GetValueOrDefault(ChunkCoord.FromWorldPosition(pos));
+        return _chunkMap.GetValueOrDefault(coord);
     }
 
     /// <summary>
@@ -3707,18 +3726,6 @@ public class World : MonoBehaviour
     /// <param name="chunkCoord">The chunk coordinate.</param>
     /// <returns>True — every chunk coordinate is in the (unbounded) world.</returns>
     internal static bool IsChunkInWorld(ChunkCoord chunkCoord)
-    {
-        return true;
-    }
-
-    /// <summary>
-    /// Checks if the specified X/Z coordinates are within the permitted world boundaries.
-    /// </summary>
-    /// <remarks>WS-3: XZ is fully unbounded — every chunk coordinate is in-world.</remarks>
-    /// <param name="x">The X coordinate.</param>
-    /// <param name="z">The Z coordinate.</param>
-    /// <returns>True — every chunk coordinate is in the (unbounded) world.</returns>
-    private static bool IsChunkInWorld(int x, int z)
     {
         return true;
     }

@@ -48,6 +48,7 @@ namespace Editor.Validation.Placement
             AddDataAuditScenarios(scenarios);
             AddRegressionScenarios(scenarios);
             AddWorldOriginScenarios(scenarios);
+            AddBorderScenarios(scenarios);
             AddKnownBugScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Placement", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
@@ -77,6 +78,9 @@ namespace Editor.Validation.Placement
 
         /// <summary>Registers the WS-4a floating-origin call-site guards (implemented in PlacementValidationSuite.WorldOrigin.cs).</summary>
         static partial void AddWorldOriginScenarios(List<Scenario> scenarios);
+
+        /// <summary>Registers the TF-14 world-border edit-gate guards (implemented in PlacementValidationSuite.Border.cs).</summary>
+        static partial void AddBorderScenarios(List<Scenario> scenarios);
 
         /// <summary>Registers expected-red known-bug reproductions (implemented in PlacementValidationSuite.KnownBugs.cs).</summary>
         static partial void AddKnownBugScenarios(List<Scenario> scenarios);
