@@ -30,6 +30,9 @@ namespace Editor.Validation
             scenarios.Add(new Scenario("ChunkToRegion / RegionLocal Reconstructs Chunk (sweep)", RunRegionSweep));
             scenarios.Add(new Scenario("WorldToChunk == Floor Div (float sweep)", RunWorldToChunkSweep));
             scenarios.Add(new Scenario("Negative-Coordinate Teeth (truncation would fail)", RunNegativeTeeth));
+            scenarios.Add(new Scenario("FloorDiv == Floor Div Oracle (sweep × spacings)", RunFloorDivOracleSweep));
+            scenarios.Add(new Scenario("FloorDiv == Float Idiom In-Band (banded parity)", RunFloorDivFloatParityBands));
+            scenarios.Add(new Scenario("FloorDiv Out-Of-Band Teeth (float idiom diverges)", RunFloorDivOutOfBandTeeth));
         }
 
         /// <summary>Reference floor-division in double precision, independent of the shift/mask implementation.</summary>
@@ -212,6 +215,131 @@ namespace Editor.Validation
             }
 
             Debug.Log("[PASS] Negative-Coordinate Teeth (truncation would fail)");
+            return true;
+        }
+
+        // Guards for ChunkMath.FloorDiv, the general (non-power-of-two divisor) floor division behind
+        // the structure grid-cell election (StandardChunkGenerationJob). Divisor range mirrors the
+        // StructurePoolEntry.spacing authoring range [1, 64].
+        private const int FLOOR_DIV_SPACING_MAX = 64;
+
+        /// <summary>
+        /// <see cref="ChunkMath.FloorDiv"/> must equal the double-precision reference floor-division across
+        /// the signed sweep for every authorable spacing, and at far/extreme fixed values where the float
+        /// idiom it replaces could not go (±2³⁰, the int edges).
+        /// </summary>
+        private static bool RunFloorDivOracleSweep()
+        {
+            int[] farValues =
+            {
+                1 << 30, -(1 << 30), (1 << 30) + 12345, -((1 << 30) + 12345),
+                (1 << 24) + 1, -((1 << 24) + 1), int.MaxValue, int.MinValue,
+            };
+
+            for (int s = 1; s <= FLOOR_DIV_SPACING_MAX; s++)
+            {
+                for (int v = VOXEL_SWEEP_MIN; v <= VOXEL_SWEEP_MAX; v++)
+                {
+                    int expected = RefFloorDiv(v, s);
+                    int actual = ChunkMath.FloorDiv(v, s);
+                    if (actual != expected)
+                    {
+                        Debug.LogError($"[FAIL] FloorDiv == Floor Div Oracle (sweep × spacings) — v={v} s={s} expected {expected}, got {actual}.");
+                        return false;
+                    }
+                }
+
+                foreach (int v in farValues)
+                {
+                    int expected = RefFloorDiv(v, s);
+                    int actual = ChunkMath.FloorDiv(v, s);
+                    if (actual != expected)
+                    {
+                        Debug.LogError($"[FAIL] FloorDiv == Floor Div Oracle (sweep × spacings) — far v={v} s={s} expected {expected}, got {actual}.");
+                        return false;
+                    }
+                }
+            }
+
+            Debug.Log("[PASS] FloorDiv == Floor Div Oracle (sweep × spacings)");
+            return true;
+        }
+
+        /// <summary>
+        /// Non-regression for existing worlds: inside ±2²⁴ (where <c>(float)v</c> is exact),
+        /// <see cref="ChunkMath.FloorDiv"/> must be byte-identical to the float idiom
+        /// <c>(int)floor((float)v / s)</c> it replaced at the structure cell election — sampled as dense
+        /// bands at the origin and at rising magnitudes up to the ±2²⁴ edge itself. Proven exhaustively
+        /// (every in-band value × every spacing) by <c>Tools/Python/verify_floordiv_parity.py</c>;
+        /// this scenario is the standing regression guard over that fact.
+        /// </summary>
+        private static bool RunFloorDivFloatParityBands()
+        {
+            const int BAND_HALF_WIDTH = 2048;
+            int[] bandCenters =
+            {
+                0,
+                1 << 16, -(1 << 16),
+                1 << 20, -(1 << 20),
+                (1 << 24) - BAND_HALF_WIDTH, -((1 << 24) - BAND_HALF_WIDTH),
+            };
+
+            foreach (int center in bandCenters)
+            {
+                for (int v = center - BAND_HALF_WIDTH; v <= center + BAND_HALF_WIDTH; v++)
+                {
+                    for (int s = 1; s <= FLOOR_DIV_SPACING_MAX; s++)
+                    {
+                        int floatIdiom = (int)Math.Floor((float)v / s);
+                        int actual = ChunkMath.FloorDiv(v, s);
+                        if (actual != floatIdiom)
+                        {
+                            Debug.LogError($"[FAIL] FloorDiv == Float Idiom In-Band (banded parity) — v={v} s={s} " +
+                                           $"float idiom {floatIdiom}, FloorDiv {actual}.");
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            Debug.Log("[PASS] FloorDiv == Float Idiom In-Band (banded parity)");
+            return true;
+        }
+
+        /// <summary>
+        /// Teeth: fixed cases just past +2²⁴ where the float idiom provably returns the WRONG cell (first
+        /// divergences found by the exhaustive Python sweep). These assert both that
+        /// <see cref="ChunkMath.FloorDiv"/> is exact there AND that the float idiom disagrees — so the
+        /// in-band parity scenario cannot be green because the two expressions are secretly identical.
+        /// </summary>
+        private static bool RunFloorDivOutOfBandTeeth()
+        {
+            (int value, int spacing, int expected)[] cases =
+            {
+                (16777221, 3, 5592407),
+                (16777219, 5, 3355443),
+                (16777229, 7, 2396747),
+            };
+
+            foreach ((int value, int spacing, int expected) in cases)
+            {
+                int actual = ChunkMath.FloorDiv(value, spacing);
+                if (actual != expected || actual != RefFloorDiv(value, spacing))
+                {
+                    Debug.LogError($"[FAIL] FloorDiv Out-Of-Band Teeth — FloorDiv({value}, {spacing}) expected {expected}, got {actual}.");
+                    return false;
+                }
+
+                int floatIdiom = (int)Math.Floor((float)value / spacing);
+                if (floatIdiom == expected)
+                {
+                    Debug.LogError($"[FAIL] FloorDiv Out-Of-Band Teeth — float idiom({value}, {spacing}) matched {expected}; " +
+                                   "the fix has no teeth (this case must diverge from the float idiom).");
+                    return false;
+                }
+            }
+
+            Debug.Log("[PASS] FloorDiv Out-Of-Band Teeth (float idiom diverges)");
             return true;
         }
     }

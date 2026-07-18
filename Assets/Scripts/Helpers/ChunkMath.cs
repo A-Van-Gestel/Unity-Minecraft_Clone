@@ -79,6 +79,22 @@ namespace Helpers
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int WorldToChunk(float world) => (int)math.floor(world) >> CHUNK_WIDTH_SHIFT;
 
+        /// <summary>
+        /// General integer floor division for divisors that are not powers of two (those use the
+        /// shift helpers above). Exact for any <paramref name="value"/> to the ±2³¹ edge, correct for
+        /// negative values (unlike truncating <c>/</c>) and free of the ±2²⁴ precision cap of the
+        /// <c>(int)math.floor((float)v / d)</c> idiom. Burst-safe.
+        /// </summary>
+        /// <param name="value">The dividend (any sign).</param>
+        /// <param name="divisor">The divisor; must be ≥ 1 (callers clamp — not asserted, Burst code).</param>
+        /// <returns>The floor of <c>value / divisor</c>.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int FloorDiv(int value, int divisor)
+        {
+            int quotient = value / divisor;
+            return (value % divisor != 0 && (value ^ divisor) < 0) ? quotient - 1 : quotient;
+        }
+
         // --- Halo-padded lighting volume (LI-1) ---------------------------------------------------
         // The NeighborhoodLightingJob reads/writes a single padded volume instead of 9 separate neighbor
         // maps. Unlike the section-aware chunk layout above, the padded volume uses a plain linear layout
