@@ -364,11 +364,24 @@ public class World : MonoBehaviour
     // flush against the rendered wall at +radius — mirroring the -X side's cell at -radius.
     public bool IsVoxelInsideBorder(Vector3Int voxelPos)
     {
+        return IsVoxelInsideBorder(voxelPos.x, voxelPos.z);
+    }
+
+    /// <summary>
+    /// Integer-coordinate overload of <see cref="IsVoxelInsideBorder(Vector3Int)"/> — the same rule
+    /// for callers without a <c>Vector3Int</c> in hand (the command console's teleport fence-warn,
+    /// which keeps the <c>Commands</c> namespace free of UnityEngine types).
+    /// </summary>
+    /// <param name="voxelX">The cell's absolute voxel-space X.</param>
+    /// <param name="voxelZ">The cell's absolute voxel-space Z.</param>
+    /// <returns>True when the cell may be edited by the player.</returns>
+    public bool IsVoxelInsideBorder(int voxelX, int voxelZ)
+    {
         int radius = BorderRadius;
         if (radius <= 0) return true;
 
-        return voxelPos.x >= -radius && voxelPos.x < radius &&
-               voxelPos.z >= -radius && voxelPos.z < radius;
+        return voxelX >= -radius && voxelX < radius &&
+               voxelZ >= -radius && voxelZ < radius;
     }
 
     /// <summary>
@@ -1504,6 +1517,92 @@ public class World : MonoBehaviour
         _lastVisualizerPlayerPos -= unityDelta;
     }
 
+    #region CMD-2 teleport arrival hold
+
+    /// <summary>Seconds the arrival hold waits for the destination chunk before the fail-safe release (§3.3).</summary>
+    private const float TELEPORT_HOLD_TIMEOUT_SECONDS = 10f;
+
+    /// <summary>Horizontal offset placing a teleport destination at its voxel cell's center.</summary>
+    private const float TELEPORT_CELL_CENTER = 0.5f;
+
+    private bool _teleportHoldActive;
+    private ChunkCoord _teleportHoldChunk;
+    private Vector3Int _teleportHoldDestVoxel;
+    private bool _teleportHoldResolveSurfaceY;
+    private float _teleportHoldTimer;
+
+    /// <summary>
+    /// Raised when a teleport arrival hold ends. The argument is true when the fail-safe timeout
+    /// released it (the destination chunk never became ready — the player may fall).
+    /// </summary>
+    public event Action<bool> TeleportHoldEnded;
+
+    /// <summary>
+    /// Teleports the player to an absolute voxel-space destination (CMD-2, §4.3): re-anchors the
+    /// floating origin onto the destination chunk, places the transform near the Unity origin, and
+    /// begins the §3.3 arrival hold — the player's simulation stays suspended until the destination
+    /// chunk reports data + mesh ready (or the timeout fail-safe fires). Streaming loads the
+    /// surroundings by itself: <see cref="PlayerChunkCoord"/> changes, so the next
+    /// <see cref="Update"/> runs <see cref="CheckViewDistance"/>.
+    /// </summary>
+    /// <param name="voxelX">Destination voxel X (absolute voxel space).</param>
+    /// <param name="voxelY">Destination voxel Y — used verbatim; ignored when <paramref name="resolveSurfaceY"/>.</param>
+    /// <param name="voxelZ">Destination voxel Z (absolute voxel space).</param>
+    /// <param name="resolveSurfaceY">Resolve Y from the destination surface on arrival-release (the 2-arg /teleport form).</param>
+    public void TeleportPlayer(int voxelX, int voxelY, int voxelZ, bool resolveSurfaceY)
+    {
+        ChunkCoord destChunk = new ChunkCoord(ChunkMath.VoxelToChunk(voxelX), ChunkMath.VoxelToChunk(voxelZ));
+        ShiftOrigin(destChunk);
+
+        // Park at the top of the world while a surface Y resolves, so the release never starts inside terrain.
+        float parkY = resolveSurfaceY ? VoxelData.ChunkHeight - 1 : voxelY;
+        _playerTransform.position = WorldOrigin.VoxelToUnity(
+            new Vector3(voxelX + TELEPORT_CELL_CENTER, parkY, voxelZ + TELEPORT_CELL_CENTER));
+
+        _teleportHoldActive = true;
+        _teleportHoldChunk = destChunk;
+        _teleportHoldDestVoxel = new Vector3Int(voxelX, voxelY, voxelZ);
+        _teleportHoldResolveSurfaceY = resolveSurfaceY;
+        _teleportHoldTimer = 0f;
+        if (player != null && player.VoxelRigidbody != null)
+            player.VoxelRigidbody.IsTeleportHeld = true;
+    }
+
+    /// <summary>
+    /// Polls an active arrival hold once per frame: releases when the destination chunk has populated
+    /// data AND an applied mesh, or when the timeout fail-safe fires. On a 2-arg-form release the
+    /// destination surface is resolved now — the earliest moment the terrain data exists.
+    /// </summary>
+    private void UpdateTeleportHold()
+    {
+        if (!_teleportHoldActive) return;
+
+        _teleportHoldTimer += Time.deltaTime;
+
+        bool ready = worldData.TryGetChunk(_teleportHoldChunk.ToVoxelOrigin(), out ChunkData destData) &&
+                     destData.IsPopulated &&
+                     destData.Chunk != null && destData.Chunk.HasMeshApplied;
+
+        if (!ready && _teleportHoldTimer < TELEPORT_HOLD_TIMEOUT_SECONDS) return;
+
+        if (ready && _teleportHoldResolveSurfaceY)
+        {
+            Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(_teleportHoldDestVoxel);
+            Vector3Int surface = destData.GetHighestVoxel(localPos);
+            _playerTransform.position = WorldOrigin.VoxelToUnity(new Vector3Int(
+                                            _teleportHoldDestVoxel.x, surface.y, _teleportHoldDestVoxel.z))
+                                        + spawnPositionOffset;
+        }
+
+        _teleportHoldActive = false;
+        if (player != null && player.VoxelRigidbody != null)
+            player.VoxelRigidbody.IsTeleportHeld = false;
+
+        TeleportHoldEnded?.Invoke(!ready);
+    }
+
+    #endregion
+
     /// <summary>
     /// Fails loudly if the player has drifted further from the Unity origin than a working floating origin ever
     /// allows (§4.3 step 4). This is WS-4's false-green guard: the failures it catches — a re-anchor that silently
@@ -1691,6 +1790,9 @@ public class World : MonoBehaviour
             ShiftOrigin(PlayerChunkCoord);
 
         AssertPlayerNearOrigin();
+
+        // CMD-2: release the teleport arrival hold once the destination chunk is ready (or times out).
+        UpdateTeleportHold();
 
         // Only update the chunks if the player has moved from the chunk they were previously on.
         if (!PlayerChunkCoord.Equals(_playerLastChunkCoord))

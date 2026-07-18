@@ -25,6 +25,13 @@ public class Chunk
     public ChunkData ChunkData;
     private readonly SectionRenderer[] _sectionRenderers;
 
+    /// <summary>
+    /// True once <see cref="ApplyMeshData"/> has uploaded a mesh in this lifecycle — the
+    /// "destination is visible" half of the teleport arrival-hold release (CMD-2 §3.3).
+    /// Cleared on pool recycle.
+    /// </summary>
+    public bool HasMeshApplied { get; private set; }
+
     // Expose for pool management validation
     public readonly GameObject ChunkGameObject;
 
@@ -117,6 +124,7 @@ public class Chunk
         // Reset State
         _isActive = true;
         _hasPlayedLoadAnimation = false;
+        HasMeshApplied = false; // pool-recycle safety: a recycled visual has no mesh for its new coord yet
         // NOTE: the active-voxel buckets live on ChunkData and are cleared in ChunkData.Reset (data lifecycle),
         // not here — a recycled visual re-linking to a still-valid cached ChunkData keeps its correct active set.
 
@@ -608,6 +616,8 @@ public class Chunk
 
         // Add to the draw queue to be enabled on the main thread
         World.Instance.ChunksToDraw.Enqueue(this);
+
+        HasMeshApplied = true;
     }
 
     /// <summary>

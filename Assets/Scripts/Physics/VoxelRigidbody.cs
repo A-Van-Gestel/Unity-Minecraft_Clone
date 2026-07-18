@@ -1,3 +1,4 @@
+using System;
 using Helpers;
 using UnityEngine;
 
@@ -66,6 +67,14 @@ namespace Physics
         public bool isNoclipping = false;
         public bool isSprinting = false;
 
+        /// <summary>
+        /// True while a teleport arrival hold suspends this body (CMD-2 §3.3): gravity and movement
+        /// freeze until the destination chunk is ready. Set/cleared exclusively by
+        /// <see cref="World.TeleportPlayer"/> and its hold poll.
+        /// </summary>
+        [NonSerialized]
+        public bool IsTeleportHeld;
+
         public bool IsGrounded { get; private set; }
         public Vector3 Velocity { get; private set; }
         public float MoveSpeed { get; private set; }
@@ -125,8 +134,9 @@ namespace Physics
 
         private void FixedUpdate()
         {
-            // Wait for world to finish initial load and meshing to prevent falling through terrain
-            if (!_world.IsWorldLoaded) return;
+            // Wait for world to finish initial load and meshing to prevent falling through terrain,
+            // and freeze while a teleport arrival hold waits for its destination chunk (CMD-2 §3.3).
+            if (!_world.IsWorldLoaded || IsTeleportHeld) return;
 
             CalculateVelocity();
 
