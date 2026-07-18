@@ -1,7 +1,7 @@
 # World Scaling — Implementation Roadmap (Tier B: unbounded XZ)
 
-**Version:** 2.0
-**Date:** 2026-07-17
+**Version:** 2.1
+**Date:** 2026-07-18
 **Status:** **Tier B COMPLETE. WS-2 + WS-3 SHIPPED (2026-07-13) — XZ fully unbounded, both signs. WS-4a + WS-4b + WS-4c's persistence half SHIPPED (2026-07-17, all in-game confirmed) — far travel is stable (flown to ~20k through multiple origin shifts, no jitter) and the saved player position is chunk-relative (level.dat v13), exact to the ±2³¹ edge. Remaining, both deferred by choice: `/teleport` (CMD-2, needs the console) and the v2 noise rider (⚠️ seed-breaking) — terrain still degrades at ~±2²⁴ even though travel no longer does. OQ-1..7 all resolved
 in code.**
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -226,11 +226,19 @@ drop + validation is WS-3**; the rest are separable riders with the homes noted:
   cave RNG site already uses sign-safe avalanche hashing (`Unity.Mathematics.math.hash` on
   `int3`/`int4` — structure cell election `StandardChunkGenerationJob:577`, per-structure seed
   `StandardChunkGenerator:857`, worm-carver trunk/local `StandardWormCarverJob:174/:239`, fluid tick
-  `FluidTickJob:579`). The phase's gating item downgrades to: (a) fix the structure grid-cell
-  derivation `(int)math.floor((float)globalX / spacing)` (`StandardChunkGenerationJob:574`) —
-  floor-correct for negatives but float-precision-capped at ±2²⁴ (spacing is not power-of-two, so
-  the fix is an integer floor-div helper, not shift/mask); (b) a negative-quadrant generation-parity
-    + structure-placement validation scenario.
+  `FluidTickJob:579`). The phase's gating item downgrades to: (a) ✅ **fixed 2026-07-18** — the
+  structure grid-cell derivation `(int)math.floor((float)globalX / spacing)`
+  (`StandardChunkGenerationJob:573-574`, floor-correct for negatives but float-precision-capped at
+  ±2²⁴) now uses `ChunkMath.FloorDiv` (general integer floor-div — spacing is not power-of-two, so
+  shift/mask does not apply), exact to the ±2³¹ edge. Shipped **ungated and non-seed-breaking**: an
+  exhaustive sweep (`Tools/Python/verify_floordiv_parity.py` — every |x| ≤ 2²⁴ × every spacing 1–64)
+  proved the float idiom and the integer floor-div bit-identical in-band, so existing-world structure
+  placement is unchanged everywhere generation is non-degenerate; past ±2²⁴ (the already-degenerate
+  FNL band) election becomes exact instead of drifting. Guarded by three Chunk Math baselines
+  (oracle sweep × spacings, in-band float-parity bands, out-of-band divergence teeth; suite 35→38,
+  prove-red via sabotage — the two negative-correction scenarios flip red on truncating division);
+  (b) a negative-quadrant generation-parity
+    + structure-placement validation scenario — **still open** (no generation suite exists to extend).
 - **V3 codec defensive bump (§3.2).** Rides the border-floor removal so it protects real
   negative-addressed data instead of stamping a no-op version. ⚠️ AOT frozen-DTO migration.
 - **Seed hygiene (§3.4) — root cause identified (OQ-7).** The `Abs(hash)/10000` hack is a
@@ -313,6 +321,12 @@ semantics — accepted as the permanent world limit.
 
 ## Document History
 
+* **v2.1** - §5 rider (a) — the structure cell-election floor-div fix — **shipped 2026-07-18**:
+  `StandardChunkGenerationJob:573-574` swapped from the float idiom to the new `ChunkMath.FloorDiv`,
+  ungated (exhaustive in-band parity proven by `Tools/Python/verify_floordiv_parity.py`, so it is
+  non-seed-breaking by measurement, not just argument), guarded by three new Chunk Math baselines
+  (suite 35→38, prove-red via sabotage). Rider (b), the negative-quadrant generation-parity
+  scenario, stays open. Version/date bumped only for this §5 annotation.
 * **v2.0** - **Tier B COMPLETE** (2026-07-17). WS-4c's persistence half shipped and in-game confirmed over multiple
   migrated saves + the fresh-world flow: the player position is a `ChunkRelativePosition` on disk (**level.dat
   v13**) and stays chunk-relative to the transform, so it is exact to the ±2³¹ edge. Together with WS-4a/WS-4b
@@ -368,6 +382,6 @@ semantics — accepted as the permanent world limit.
 
 ---
 
-**Last Updated:** 2026-07-17
+**Last Updated:** 2026-07-18
 **Next Review:** when the v2 noise rider (§6) or `/teleport` (CMD-2) is scheduled, or when Bug 04 / the
 seed-hygiene fix is. *(TF-14 world border shipped 2026-07-13; WS-4a+b+c shipped 2026-07-17 — Tier B is complete.)*

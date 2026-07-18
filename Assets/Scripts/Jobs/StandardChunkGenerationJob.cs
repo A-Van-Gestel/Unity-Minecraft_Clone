@@ -568,10 +568,11 @@ namespace Jobs
                             }
                         }
 
-                        // Grid-cell election with this entry's spacing
+                        // Grid-cell election with this entry's spacing. Integer floor-div: exact to the
+                        // ±2³¹ edge, both signs (a float division here caps exactness at ±2²⁴).
                         int spacing = math.max(1, entry.Spacing);
-                        int cellX = (int)math.floor((float)globalX / spacing);
-                        int cellZ = (int)math.floor((float)globalZ / spacing);
+                        int cellX = ChunkMath.FloorDiv(globalX, spacing);
+                        int cellZ = ChunkMath.FloorDiv(globalZ, spacing);
 
                         // Seed includes the entry index for independence between entries
                         uint cellHash = math.hash(new int4(cellX, cellZ, BaseSeed, entryIndex));
