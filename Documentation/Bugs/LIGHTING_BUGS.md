@@ -67,3 +67,37 @@ baseline **B91**) is deliberately scoped to face-adjacent seams and excludes thi
 > must settle through an edge-check-inclusive driver to avoid re-flagging this same artifact.)
 
 **Testing environment:** IL2CPP master build, ocean biome (underwater), June 2026.
+
+---
+
+## Bug 19: Far-Lands Sunlight Column Recalc Crashes — Negative Heightmap Index Beyond ±2²⁴
+
+**Severity:** Low (only reachable past the documented noise-degradation threshold, where terrain is already known-degraded)
+**Status:** Open — logged 2026-07-18 during CMD-2 `/teleport` in-game verification; deliberately NOT investigated in that session.
+
+**Description:**
+Teleporting beyond the noise-degradation radius (observed at `/teleport 20000000 64 20000000`, i.e. past ±2²⁴ voxels) produces repeated Burst job exceptions from the lighting pipeline while the far chunks light:
+
+```
+System.IndexOutOfRangeException: Index -32 is out of range of '256' Length.
+  Jobs.NeighborhoodLightingJob.RecalculateSunlightForColumn (NeighborhoodLightingJob.cs:1090)
+```
+
+`RecalculateSunlightForColumn` computes `heightmapIndex = x + VoxelData.ChunkWidth * z` into the 16×16 (`256`) heightmap — an index of `-32` means the *chunk-local* column coordinates arrived negative (e.g. `z = -2`), which the normal pipeline never produces.
+
+**Root Cause Suspected:**
+A global→local column conversion on the sunlight-recalculation queue path that is not sign/precision-safe at far coordinates — the same class of defect as the world-gen floor-div rider (shipped 2026-07-18 for structures): either a `%`-remainder (not floor-mod) global→local conversion going negative in the negative quadrants at extreme magnitude, or float precision (≥2²⁴) corrupting a voxel-space value before the local decompose. Candidate path: `ChunkData.RecalculateSunLightLight` queues **global** column positions via
+`WorldData.QueueSunlightRecalculation`; wherever those are converted back to chunk-local for the job's heightmap lookup is the suspect seam.
+
+**Reproduction Steps:**
+
+1. `/teleport 20000000 64 20000000` (confirm the far-warn).
+2. Wait for the arrival hold to release and surrounding chunks to generate/light.
+3. Observe the Burst `IndexOutOfRangeException` spam from `NeighborhoodLightingJob` (HF-2 per-job fault isolation contains it — no cascade, world remains playable).
+
+**Notes:**
+
+- Terrain past ±2²⁴ is documented-degraded (the v2 noise rider was deliberately deferred — see `WORLD_SCALING_FLOATING_ORIGIN.md`); this entry tracks only the lighting **crash**, which is a hard fault rather than cosmetic degradation and should be fixable independently of the noise rider (integer column math end-to-end).
+- Fix should follow the `validation-driven-bugfix` skill: a deterministic far-coordinate column-recalc repro (expected red) in the lighting suite before touching the conversion.
+
+**Testing environment:** Editor (Mono), fresh world, CMD-2 verification session, 2026-07-18.

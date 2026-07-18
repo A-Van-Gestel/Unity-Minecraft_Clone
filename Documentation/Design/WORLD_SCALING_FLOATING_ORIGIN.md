@@ -1,10 +1,11 @@
 # World Scaling — WS-4 Floating Origin Design
 
-**Version:** 1.7
-**Date:** 2026-07-17
-**Status:** **Implemented** — WS-4a (origin plumbing), WS-4b (the shift), and **WS-4c's persistence half**
-(`ChunkRelativePosition` player position, level.dat v13) are shipped and in-game confirmed. The only WS-4 work
-left is WS-4c's `/teleport` tool (`CMD-2`), deferred to a future session, and the v2 noise rider.
+**Version:** 1.8
+**Date:** 2026-07-18
+**Status:** **Implemented** — every WS-4 phase is shipped and in-game confirmed: WS-4a (origin plumbing),
+WS-4b (the shift), WS-4c persistence (`ChunkRelativePosition` player position, level.dat v13), and WS-4c
+tooling (`/teleport` = CMD-2, 2026-07-18). The only WS-4-adjacent work left is the deferred v2 noise rider
+(terrain degrades past ±2²⁴ — see also lighting Bug 19 for the far-lands lighting crash logged there).
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The far-travel precision phase of the world-scaling track. Unity render space and voxel world
@@ -389,12 +390,12 @@ bounded-position assertion (§4.3 step 4) makes drift loud in dev builds.
 
 ## 7. Phased implementation plan
 
-| Phase                                                                             | Scope                                                                                                                                                                                                                                                                                                   | Effort | Depends on      |
-|-----------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|-----------------|
-| **WS-4a — origin plumbing, no shift** ✅ **SHIPPED 2026-07-16, in-game confirmed** | `WorldOrigin` type + helpers; thread every §5 boundary site; call-site audit sweep; suite baselines. Origin pinned `(0,0)` → **zero behavior change**, game bit-identical. Also landed the `_WorldOriginOffset` global + `LiquidCore` sampling (identity-safe at offset 0, so it moved out of WS-4b)    |   🟡   | WS-3 ✅          |
-| **WS-4b — the shift** ✅ **SHIPPED 2026-07-17, in-game confirmed**                 | §4.3 trigger + translate loop; `GetSaveData`/load voxel-space fix (§4.4 — **the one boundary WS-4a deliberately left**), a single `AnchorOrigin` at the SP-1 chokepoint rather than three spawn sites; bounded-position assertion. Also closed three WS-4a boundary misses the identity had hidden (§9) |   🔴   | WS-4a ✅, SP-1 ✅ |
-| **WS-4c — persistence** ✅ **SHIPPED 2026-07-17, in-game confirmed**               | `PlayerSaveData.position` → `ChunkRelativePosition`, v12→v13 AOT migration, CRP threaded through the load path (+ the frozen-DTO fix the retype forced on four shipped steps — §9)                                                                                                                      |   🟡   | WS-4b ✅         |
-| **WS-4c — tooling** (deferred 2026-07-17)                                         | `/teleport` — `CMD-2` of [`COMMAND_CONSOLE_SYSTEM.md`](COMMAND_CONSOLE_SYSTEM.md) (console phases CMD-0/1 land first). Split from the persistence half, which did not need it                                                                                                                           |   🟡   | CMD-1           |
+| Phase                                                                             | Scope                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Effort | Depends on      |
+|-----------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|-----------------|
+| **WS-4a — origin plumbing, no shift** ✅ **SHIPPED 2026-07-16, in-game confirmed** | `WorldOrigin` type + helpers; thread every §5 boundary site; call-site audit sweep; suite baselines. Origin pinned `(0,0)` → **zero behavior change**, game bit-identical. Also landed the `_WorldOriginOffset` global + `LiquidCore` sampling (identity-safe at offset 0, so it moved out of WS-4b)                                                                                                                                                                                                     |   🟡   | WS-3 ✅          |
+| **WS-4b — the shift** ✅ **SHIPPED 2026-07-17, in-game confirmed**                 | §4.3 trigger + translate loop; `GetSaveData`/load voxel-space fix (§4.4 — **the one boundary WS-4a deliberately left**), a single `AnchorOrigin` at the SP-1 chokepoint rather than three spawn sites; bounded-position assertion. Also closed three WS-4a boundary misses the identity had hidden (§9)                                                                                                                                                                                                  |   🔴   | WS-4a ✅, SP-1 ✅ |
+| **WS-4c — persistence** ✅ **SHIPPED 2026-07-17, in-game confirmed**               | `PlayerSaveData.position` → `ChunkRelativePosition`, v12→v13 AOT migration, CRP threaded through the load path (+ the frozen-DTO fix the retype forced on four shipped steps — §9)                                                                                                                                                                                                                                                                                                                       |   🟡   | WS-4b ✅         |
+| **WS-4c — tooling** ✅ **SHIPPED 2026-07-18, in-game confirmed**                   | `/teleport` — `CMD-2` of [`COMMAND_CONSOLE_SYSTEM.md`](COMMAND_CONSOLE_SYSTEM.md) (that doc owns the shipped surface, v1.6). Execution is the thin wrapper this doc predicted: `World.TeleportPlayer` = `ShiftOrigin(destChunk)` + `VoxelToUnity` placement + an arrival hold (data + mesh, 10 s fail-safe). Far verification (±2×10⁷) confirmed degraded-but-stable terrain and surfaced lighting **Bug 19** (`LIGHTING_BUGS.md`) — a far-coords global→local seam, independent of the origin machinery |   🟡   | CMD-1 ✅         |
 
 WS-4a+b deliver the standalone value (stable far travel); WS-4c extends save precision past
 ±2²⁴ and ships the far-coordinate test harness. Bisectable: each phase compiles and keeps all
@@ -610,6 +611,12 @@ graduate to work items).
 
 ## Document History
 
+* **v1.8** - **WS-4c's tooling half SHIPPED** (2026-07-18): `/teleport` landed as CMD-2 of
+  `COMMAND_CONSOLE_SYSTEM.md` (v1.6 there records the shipped surface + suite B24–B31). The §7
+  WS-4 phase table is now fully ✅. Far-teleport verification (±2×10⁷ voxels) confirmed the
+  documented terrain degradation past ±2²⁴ and surfaced lighting **Bug 19** (negative
+  chunk-local heightmap index in `RecalculateSunlightForColumn` — logged in
+  `LIGHTING_BUGS.md`; a global→local column-math seam, not an origin-machinery defect).
 * **v1.7** - **WS-4c's persistence half SHIPPED** (2026-07-17), in-game confirmed across multiple migrated saves
   and the fresh-world flow: `PlayerSaveData.position` is a `ChunkRelativePosition` (level.dat **v12→v13**,
   `MigrateLevelDat` only, frozen DTOs on both sides), threaded through `SpawnResolution`/`SpawnPlacement` to the
@@ -677,6 +684,6 @@ graduate to work items).
 
 ---
 
-**Last Updated:** 2026-07-17
+**Last Updated:** 2026-07-18
 **Next Review:** when `/teleport` (CMD-2) is scheduled — it needs CMD-1 first — or when the v2 noise rider is,
 whose harness it was always meant to be. WS-4's own work is otherwise complete.
