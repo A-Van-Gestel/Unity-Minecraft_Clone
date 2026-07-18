@@ -70,6 +70,37 @@ namespace UI
 
         private bool _isPauseMenuOpen;
 
+        /// <summary>The runtime-spawned console view (CMD-1). Built in <see cref="Awake"/> — no scene object involved.</summary>
+        private ConsoleUI _console;
+
+        /// <summary>
+        /// Gets or sets whether the command console is open. Opening disables the Gameplay action
+        /// map (so typing cannot trigger hotbar/toggles) and leaves the UI map driving Esc/↑/↓;
+        /// closing restores both maps. Cursor/InUI follow via <see cref="UpdateUIState"/>.
+        /// </summary>
+        public bool IsConsoleOpen
+        {
+            get => _console != null && _console.IsOpen;
+            set
+            {
+                if (_console == null || value == _console.IsOpen)
+                    return;
+
+                if (value)
+                {
+                    _console.Open();
+                    InputManager.Instance.EnableUI();
+                }
+                else
+                {
+                    _console.Close();
+                    InputManager.Instance.EnableAll();
+                }
+
+                UpdateUIState();
+            }
+        }
+
         #endregion
 
         #region Unity Lifecycle
@@ -85,6 +116,11 @@ namespace UI
                 if (creativeInventoryWindow == null) Debug.LogError("CreativeInventoryWindow is not assigned.");
                 if (cursorSlot == null) Debug.LogError("CursorSlot is not assigned.");
                 if (pauseMenuController == null) Debug.LogError("PauseMenuController is not assigned.");
+
+                // Spawn the command console view (runtime-built UI — TouchControls precedent, no scene edit).
+                GameObject consoleObj = new GameObject("Console");
+                consoleObj.transform.SetParent(transform, false);
+                _console = consoleObj.AddComponent<ConsoleUI>();
             }
             else
             {
@@ -99,6 +135,15 @@ namespace UI
 
         private void Update()
         {
+            // Console-open state: the Gameplay map is disabled, so only the UI map's Cancel (Esc)
+            // is live — it closes the console and nothing else runs (Esc chain head, §4.2 CMD-1).
+            if (IsConsoleOpen)
+            {
+                if (InputManager.Instance.ConsoleCancelPressed)
+                    IsConsoleOpen = false;
+                return;
+            }
+
             // Handle Escape key logic
             if (InputManager.Instance.EscapePressed)
             {
@@ -109,6 +154,12 @@ namespace UI
             if (InputManager.Instance.ToggleInventoryPressed && !IsPauseMenuOpen)
             {
                 IsCreativeInventoryOpen = !IsCreativeInventoryOpen;
+            }
+
+            // Handle Console open logic (T). Open-only: while open, T types into the field.
+            if (InputManager.Instance.ToggleConsolePressed && !InUI)
+            {
+                IsConsoleOpen = true;
             }
         }
 
@@ -146,7 +197,7 @@ namespace UI
 
         private void UpdateUIState()
         {
-            InUI = IsCreativeInventoryOpen || IsPauseMenuOpen;
+            InUI = IsCreativeInventoryOpen || IsPauseMenuOpen || IsConsoleOpen;
 
             Cursor.lockState = InUI
                 ? CursorLockMode.None // Makes cursor visible
