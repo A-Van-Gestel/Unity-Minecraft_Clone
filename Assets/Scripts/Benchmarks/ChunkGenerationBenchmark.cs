@@ -126,7 +126,7 @@ namespace Benchmarks
 
         private void Update()
         {
-            if (Keyboard.current != null && Keyboard.current[_triggerKey].wasPressedThisFrame)
+            if (InputManager.Instance != null && InputManager.Instance.DebugKeyPressed(_triggerKey))
                 TriggerBenchmark();
         }
 

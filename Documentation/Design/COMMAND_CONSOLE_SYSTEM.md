@@ -1,8 +1,8 @@
 # Command Console System Design
 
-**Version:** 1.2
+**Version:** 1.3
 **Date:** 2026-07-18
-**Status:** In progress — CMD-0 (engine core + validation suite) implemented 2026-07-18; CMD-1/2 pending.
+**Status:** In progress — CMD-0 (engine core + validation suite) and CMD-1 (console UI) implemented 2026-07-18; CMD-2 pending.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > An in-game command console (Minecraft-chat-style: `T` opens a left-anchored panel with
@@ -236,11 +236,11 @@ warning text says so rather than pretending the destination sticks.
 
 Work items carry the **`CMD-`** prefix (verified unused in `Documentation/`).
 
-| Phase                     | Scope                                                                                                                                                                                                                                                                                                                           | Effort | Depends on     |
-|---------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|----------------|
-| **CMD-0 — engine core** ✅ | Tokenizer, registry, selector resolver (`@player`), confirmation flow, history buffers, `CommandContext`; `HelpCommand`; the validation suite. **Implemented 2026-07-18**: `Assets/Scripts/Commands/` (namespace `Commands`, pure C# — zero Unity usings) + `Validate Command Console` suite (20 baselines, registry suite #10) |   🟡   | —              |
-| **CMD-1 — console UI**    | Panel + ScrollRect + input field, `IsConsoleOpen` state, `ToggleConsole` action, Esc chain, ↑/↓ recall, T-leak guard                                                                                                                                                                                                            |   🟡   | CMD-0          |
-| **CMD-2 — `/teleport`**   | §4.3 command incl. warning/confirm matrix, arrival hold, 2-arg surface form                                                                                                                                                                                                                                                     |   🟡   | CMD-1, WS-4a/b |
+| Phase                     | Scope                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Effort | Depends on     |
+|---------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|----------------|
+| **CMD-0 — engine core** ✅ | Tokenizer, registry, selector resolver (`@player`), confirmation flow, history buffers, `CommandContext`; `HelpCommand`; the validation suite. **Implemented 2026-07-18**: `Assets/Scripts/Commands/` (namespace `Commands`, pure C# — zero Unity usings) + `Validate Command Console` suite (20 baselines, registry suite #10)                                                                                                                                                                                                                                                                                                                                                                                                                                                            |   🟡   | —              |
+| **CMD-1 — console UI** ✅  | Panel + ScrollRect + input field, `IsConsoleOpen` state, `ToggleConsole` action, Esc chain, ↑/↓ recall, T-leak guard. **Implemented 2026-07-18**: runtime-code-built `UI.ConsoleUI` (own overlay canvas, no scene edits) + pure `UI.ConsoleTextFormatter` (suite-pinned severity colors + noparse guard, B21/B22); **the Gameplay action map is disabled while the console is open** (typing can't trigger hotbar/toggles), so Esc/↑/↓ arrive via new UI-map actions (`Cancel`/`HistoryUp`/`HistoryDown`) rather than the gameplay Escape chain. Raw-keyboard bypasses closed: benchmark trigger keys route through the gameplay-gated `InputManager.DebugKeyPressed`, and tripwire baseline B23 fails the suite on any `Keyboard.current` read outside `InputManager` (suite 23, B21–B23) |   🟡   | CMD-0          |
+| **CMD-2 — `/teleport`**   | §4.3 command incl. warning/confirm matrix, arrival hold, 2-arg surface form                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |   🟡   | CMD-1, WS-4a/b |
 
 CMD-0+1 deliver standalone value (a working console with `/help`); CMD-2 is the WS-4c payload —
 the two roadmaps meet there: **WS-4c = CMD-2 + the v12→v13 player-position migration** from
@@ -289,6 +289,19 @@ exists, so the pack is mostly registry plumbing. Effort assumes CMD-0..2 have la
 
 ## Document History
 
+* **v1.3** - CMD-1 shipped: `UI.ConsoleUI` builds its whole panel (overlay canvas, ScrollRect
+  history, TMP input field) in code at runtime, spawned by `WorldUIManager` — zero scene/prefab
+  edits (TouchControls precedent). Input: `ToggleConsole` (T, Gameplay) + `Cancel`/`HistoryUp`/
+  `HistoryDown` (UI map); opening the console **disables the Gameplay map** so typing cannot
+  fire hotbar/toggle actions — the console's Esc therefore rides the UI map's `Cancel`, not the
+  `HandleEscape` gameplay chain (same user-visible behavior as §4.2's "first in the chain").
+  T-leak guarded by next-frame field activation + clear; empty submit closes; severity colors
+  via `ConsoleTextFormatter` (suite baselines B21/B22 — mapping + markup-injection guard).
+  In-game verification caught 4 raw-keyboard bypasses (benchmark trigger keys fired while
+  typing — `Keyboard.current` ignores action-map state): fixed by routing them through the new
+  gameplay-gated `InputManager.DebugKeyPressed(Key)`, guarded by tripwire B23 (prove-red
+  verified: red on the 4 bypasses, green after; any future direct `Keyboard.current` read
+  outside `InputManager` reds the suite). Suite 23. UI feel verified in-game manually per §7.
 * **v1.2** - CMD-0 shipped: `Commands` runtime namespace (13 files, engine instance-based, no
   statics; culture-invariant tokenizer; confirmation check ordered before the `/`-prefix rule;
   duplicate registry keys throw; `@player` resolves to a semantic `CommandTarget`, not a scene
@@ -307,4 +320,4 @@ exists, so the pack is mostly registry plumbing. Effort assumes CMD-0..2 have la
 ---
 
 **Last Updated:** 2026-07-18
-**Next Review:** when CMD-1 starts, or at the WS-4c kickoff (whichever comes first).
+**Next Review:** at the WS-4c kickoff (CMD-2 is its payload).

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Commands;
+using UnityEngine;
 using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.Commands
@@ -65,6 +67,9 @@ namespace Editor.Validation.Commands
             scenarios.Add(new Scenario("B18: /help lists every registered command sorted by name, with usage and aliases", Baseline_HelpListsRegistry));
             scenarios.Add(new Scenario("B19: Registering a duplicate name or alias throws (never a silent override)", Baseline_DuplicateRegistrationThrows));
             scenarios.Add(new Scenario("B20: Selector resolver — '@player' (any case) resolves LocalPlayer; unknown selectors error", Baseline_SelectorResolver));
+            scenarios.Add(new Scenario("B21: Text formatter — severity→color mapping is stable (Info/Warning/Error hex) (CMD-1)", Baseline_FormatterSeverityColors));
+            scenarios.Add(new Scenario("B22: Text formatter — output is noparse-guarded so user-typed TMP markup cannot inject tags (CMD-1)", Baseline_FormatterNoparseGuard));
+            scenarios.Add(new Scenario("B23: Input-bypass tripwire — no runtime script reads Keyboard.current outside InputManager (console map-disable must gate ALL keys) (CMD-1)", Baseline_KeyboardBypassTripwire));
         }
 
         // --- Tokenizer ---
@@ -388,6 +393,64 @@ namespace Editor.Validation.Commands
             ok &= Expect(resolver.TryResolve(upper, out _, out _), "@PLAYER resolves case-insensitively");
             ok &= Expect(!resolver.TryResolve(entity, out _, out string error) && error.Contains("Unknown target"),
                 "@entity-5 is an unknown target in v1");
+            return ok;
+        }
+
+        // --- CMD-1: ConsoleTextFormatter (the UI's pure formatting seam) ---
+
+        private static bool Baseline_FormatterSeverityColors()
+        {
+            bool ok = Expect(
+                UI.ConsoleTextFormatter.Format(new ConsoleLine(ConsoleLineSeverity.Info, "hello"))
+                == $"<color={UI.ConsoleTextFormatter.InfoColor}><noparse>hello</noparse></color>",
+                "Info line formats with the Info color");
+            ok &= Expect(UI.ConsoleTextFormatter.ColorOf(ConsoleLineSeverity.Warning) == UI.ConsoleTextFormatter.WarningColor,
+                "Warning maps to WarningColor");
+            ok &= Expect(UI.ConsoleTextFormatter.ColorOf(ConsoleLineSeverity.Error) == UI.ConsoleTextFormatter.ErrorColor,
+                "Error maps to ErrorColor");
+            return ok;
+        }
+
+        private static bool Baseline_FormatterNoparseGuard()
+        {
+            string formatted = UI.ConsoleTextFormatter.Format(
+                new ConsoleLine(ConsoleLineSeverity.Info, "sneaky </noparse><color=red>injected"));
+            bool ok = Expect(!formatted.Contains("</noparse><color=red>"),
+                "a literal </noparse> in user text cannot terminate the guard");
+            ok &= Expect(formatted.Contains("<noparse>sneaky <color=red>injected</noparse>"),
+                "the rest of the text (markup included) stays inert inside the guard");
+            ok &= Expect(UI.ConsoleTextFormatter.Format(new ConsoleLine(ConsoleLineSeverity.Error, null))
+                         == $"<color={UI.ConsoleTextFormatter.ErrorColor}><noparse></noparse></color>",
+                "null text formats as an empty guarded string");
+            return ok;
+        }
+
+        // --- CMD-1: input-bypass tripwire ---
+
+        /// <summary>Files allowed to read <c>Keyboard.current</c> — the single input choke point.</summary>
+        private static readonly string[] s_keyboardReadAllowlist = { "InputManager.cs" };
+
+        /// <summary>
+        /// B23: scans every runtime script for direct <c>Keyboard.current</c> reads. The console's
+        /// input blocking works by disabling the Gameplay action map, which only gates consumers
+        /// that route through <c>InputManager</c> — a direct device read silently bypasses it
+        /// (the original bug: typing "/help" fired the L-key lighting benchmark). Debug/benchmark
+        /// trigger keys must use <c>InputManager.DebugKeyPressed</c>.
+        /// </summary>
+        private static bool Baseline_KeyboardBypassTripwire()
+        {
+            string scriptsRoot = Path.Combine(Application.dataPath, "Scripts");
+            bool ok = true;
+            foreach (string file in Directory.GetFiles(scriptsRoot, "*.cs", SearchOption.AllDirectories))
+            {
+                if (!File.ReadAllText(file).Contains("Keyboard.current"))
+                    continue;
+
+                string fileName = Path.GetFileName(file);
+                ok &= Expect(Array.IndexOf(s_keyboardReadAllowlist, fileName) >= 0,
+                    $"{fileName} reads Keyboard.current directly — the console's Gameplay-map disable cannot gate it; route through InputManager.DebugKeyPressed instead");
+            }
+
             return ok;
         }
 
