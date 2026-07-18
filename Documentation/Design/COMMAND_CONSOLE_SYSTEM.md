@@ -1,8 +1,8 @@
 # Command Console System Design
 
-**Version:** 1.9
-**Date:** 2026-07-18
-**Status:** **Implemented (v1 arc)** — the full v1 arc is shipped and in-game confirmed 2026-07-18: CMD-0 (engine core + validation suite), CMD-1 (console UI), CMD-2 (`/teleport`), and CMD-3 (the 13-command pack, §8.1). Suite 43 baselines; Validate All 266/266. **Two v2 items now have closed execution plans, ready for a warm start** — CMD-4 relative `~` coordinates (§8.2) and CMD-5 tab autocomplete (§8.3); both **NOT yet implemented**. Remaining §8 items (chat, entity selectors, `/fill`) stay deliberate v2+ work.
+**Version:** 1.10
+**Date:** 2026-07-19
+**Status:** **Implemented (v1 arc + CMD-4)** — the v1 arc (CMD-0..3) plus **CMD-4 relative `~` coordinates** (§8.2) are shipped and in-game confirmed. Suite **47** baselines; Validate All **270/270** across 10 suites. **CMD-5 tab autocomplete** (§8.3) has a closed execution plan, ready for a warm start (**NOT yet implemented**). Remaining §8 items (chat, entity selectors, `/fill`) stay deliberate v2+ work.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > An in-game command console (Minecraft-chat-style: `T` opens a left-anchored panel with
@@ -168,10 +168,10 @@ public interface IConsoleCommand
 ```
 
 - **Tokenizer:** splits on whitespace with quoted-string support; classifies tokens as selector
-  (`@<word>`), number (signed int/float), or word. **`~`-prefixed tokens are reserved** —
-  tokenized as `CommandTokenType.Relative`, then (today) rejected before dispatch with "relative
-  coordinates are not supported yet". CMD-4 (§8.2, plan closed) lifts that rejection and resolves
-  `~` at the coordinate-parse layer; the tokenizer classification is already in place.
+  (`@<word>`), number (signed int/float), or word. **`~`-prefixed tokens** are tokenized as
+  `CommandTokenType.Relative` and resolved at the coordinate-parse layer (CMD-4, §8.2 —
+  implemented): coord-consuming commands add the token's offset to the player's coordinate on that
+  axis; non-coord commands reject a `~` via their own argument checks.
 - **`CommandRegistry`:** name/alias → `IConsoleCommand`; unknown command → error + `/help`
   hint. `HelpCommand` iterates the registry (self-documenting).
 - **`TargetSelectorResolver`:** resolves selector tokens to targets. v1 resolves `@player`
@@ -283,7 +283,7 @@ Work items carry the **`CMD-`** prefix (verified unused in `Documentation/`).
 | **CMD-1 — console UI** ✅           | Panel + ScrollRect + input field, `IsConsoleOpen` state, `ToggleConsole` action, Esc chain, ↑/↓ recall, T-leak guard. **Implemented 2026-07-18**: runtime-code-built `UI.ConsoleUI` (own overlay canvas, no scene edits) + pure `UI.ConsoleTextFormatter` (suite-pinned severity colors + noparse guard, B21/B22); **the Gameplay action map is disabled while the console is open** (typing can't trigger hotbar/toggles), so Esc/↑/↓ arrive via new UI-map actions (`Cancel`/`HistoryUp`/`HistoryDown`) rather than the gameplay Escape chain. Raw-keyboard bypasses closed: benchmark trigger keys route through the gameplay-gated `InputManager.DebugKeyPressed`, and tripwire baseline B23 fails the suite on any `Keyboard.current` read outside `InputManager` (suite 23, B21–B23)                                              |   🟡   | CMD-0          |
 | **CMD-2 — `/teleport`** ✅          | §4.3 command incl. warning/confirm matrix, arrival hold, 2-arg surface form; defines the `CommandContext` world facade (§4.1). **Implemented 2026-07-18, in-game confirmed**: `TeleportCommand` (alias `tp`, zero Unity usings) + `World.TeleportPlayer` (reuses the WS-4b `ShiftOrigin`) + World-owned hold (release = destination `ChunkData.IsPopulated` && `Chunk.HasMeshApplied` [new pool-reset-safe flag], 10 s timeout fail-safe, `TeleportHoldEnded` → console "Arrived."/timeout warning via `CommandEngine.PostLine`) + `VoxelRigidbody.isTeleportHeld` FixedUpdate gate; suite 23→**31** (B24–B31 teleport matrix vs `CommandTeleportTestWorld`, WorldOrigin snapshot/restore, prove-red on B29); far-lands verification surfaced lighting **Bug 19** (pre-existing, logged in `LIGHTING_BUGS.md`)                          |   🟡   | CMD-1, WS-4a/b |
 | **CMD-3 — command pack** ✅         | The §8.1 pack (`/fill` stays out). **Implemented 2026-07-18, in-game confirmed**: 13 commands via `ConsoleCommandInstaller.RegisterAll` (shared production/suite registration list, count-floor B32) — Wave A `/seed` `/where` `/origin [force]` (new public `World.ForceOriginReanchor`), Wave B `/time set` `/set-world-border` (shrink-strand confirm) `/setspawn` `/spawn` (CMD-2 hold reuse) `/fly` `/noclip` `/speed` (keybind coupling replicated), Wave C `/give` (name→ID case-insensitive; `ItemStack.ID` is a **byte** → >255 guard) `/setblock` (new `World.PlaceBlockCommand` owns ForcePlace + `Vector3Int`, keeping `Commands` UnityEngine-free; placed-vs-queued report) `/chunk info`. Shared `CommandArgUtility`; suite 31→**43** (B32–B43, prove-red ×2: B39 coupling, B41 case-insensitivity); Validate All 266/266 |   🟡   | CMD-2 ✅        |
-| **CMD-4 — relative `~` coords** 📋 | Relative coordinates (`~`, `~N`, `~-N`) on the coord-consuming commands (`/teleport`, `/setblock`). **Plan closed 2026-07-18, NOT yet implemented** (§8.2): integer offsets only (v1 coord policy), player base via new `World.TryGetPlayerVoxelCell` (keeps `Commands` UnityEngine-free), global `~`-rejection gate removed. Baseline B9 flips (prove-red→green).                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |   🟢   | CMD-2 ✅        |
+| **CMD-4 — relative `~` coords** ✅ | Relative coordinates (`~`, `~N`, `~-N`) on the coord-consuming commands (`/teleport`, `/setblock`). **Implemented 2026-07-19, in-game confirmed** (§8.2): integer offsets only (v1 coord policy), player base via new `World.TryGetPlayerVoxelCell` (keeps `Commands` UnityEngine-free), global `~`-rejection gate removed. Suite 43→**47** (B9 flipped reserved→dispatches, B44–B47), prove-red exactly 5; Validate All 270/270.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |   🟢   | CMD-2 ✅        |
 | **CMD-5 — tab autocomplete** 📋    | Registry-driven Tab completion. **Plan closed 2026-07-18, NOT yet implemented** (§8.3): scope = command names **+ argument values** via a new opt-in `IArgumentCompleter` (D1); multi-match → common prefix + candidate list (D2); primary names only (D3). Tab **must** route through a UI-map action (B23 tripwire).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |   🟡   | CMD-0 ✅        |
 
 CMD-0+1 deliver standalone value (a working console with `/help`); CMD-2 is the WS-4c payload —
@@ -307,7 +307,7 @@ each phase:
 
 | Version | Extension                                                                                                                                                                                  |
 |---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **v2**  | The **CMD-3 command pack** (§8.1) ✅; **CMD-4 relative `~` coordinates** (§8.2, plan closed 📋); **CMD-5 tab autocomplete** (§8.3, plan closed 📋); selectable/copyable output (unplanned). |
+| **v2**  | The **CMD-3 command pack** (§8.1) ✅; **CMD-4 relative `~` coordinates** (§8.2) ✅; **CMD-5 tab autocomplete** (§8.3, plan closed 📋); selectable/copyable output (unplanned). |
 | **v3+** | Entity selectors (`@entity-<id>`, filters) with the entity system; chat on the unprefixed namespace; permissions on `CommandContext` — each gets a design pass when concrete.              |
 
 ### 8.1 CMD-3 — command pack ✅ (implemented + in-game confirmed 2026-07-18)
@@ -373,12 +373,20 @@ Commands with a null world facade return the graceful `No world is loaded.` erro
 (baseline-able). Out of scope stays: `/fill` (own design pass), autocomplete/selectable output
 (separate v2 items), permissions.
 
-### 8.2 CMD-4 — relative `~` coordinates (plan closed 2026-07-18, **NOT yet implemented**)
+### 8.2 CMD-4 — relative `~` coordinates ✅ (implemented + in-game confirmed 2026-07-19)
 
 Minecraft-style relative coordinates on the two coord-consuming commands. `~` = the player's
 current voxel coordinate on that axis; `~N`/`~-N`/`~+N` = that coordinate plus a signed offset;
-e.g. `/teleport ~ ~10 ~` rises 10 voxels in place. The tokenizer already classifies `~`-prefixed
-tokens as `CommandTokenType.Relative` (CMD-0); the only blocker is the pre-dispatch rejection gate.
+e.g. `/teleport ~ ~10 ~` rises 10 voxels in place. The tokenizer already classified `~`-prefixed
+tokens as `CommandTokenType.Relative` (CMD-0); the only blocker was the pre-dispatch rejection gate.
+
+**Shipped 2026-07-19** exactly as planned below (two commits: A1+A2, then A3+A4). Suite 43→**47**:
+B9 flipped from "reserved-`~` rejected" to "the command runs and receives the `~` token"; B44–B47
+cover 3-arg resolve + signed offsets, the 2-arg surface form + `~`-offset overflow, `~`-with-no-player
+graceful error, and `/setblock` relative. Prove-red verified — re-inserting the gate reddened exactly
+those 5 baselines. Validate All 270/270 across 10 suites. The `RelativeCoordsError` const was retired
+(not repurposed); the no-player message lives on `CommandArgUtility.RelativeNeedsPlayerError`. Original
+plan, for the record:
 
 **Decisions (closed 2026-07-18):**
 
@@ -486,6 +494,15 @@ headless argument-completion tests — confirm when reaching B4.
 
 ## Document History
 
+* **v1.10** - **CMD-4 relative `~` coordinates SHIPPED + in-game confirmed 2026-07-19** (both
+  `/teleport` and `/setblock` verified by hand in relative mode). Implemented exactly per the §8.2
+  plan across two commits (A1+A2 groundwork: `CommandArgUtility.TryParseCoord` relative overload +
+  `World.TryGetPlayerVoxelCell`; A3+A4: removed the global `~`-reject gate in `CommandEngine.Process`,
+  wired both commands with the player-base fetch before parse, suite 43→47). B9 flipped
+  reserved→dispatches; B44–B47 added (resolve/offsets, 2-arg surface + overflow, no-player graceful,
+  `/setblock` relative); prove-red reddened exactly those 5; Validate All 270/270. `RelativeCoordsError`
+  retired in favor of `CommandArgUtility.RelativeNeedsPlayerError`. §7 CMD-4 row + §8.2 + §4.1 tokenizer
+  note + §8 v2 row all flipped to ✅. CMD-5 (§8.3) remains the last planned-but-unimplemented v2 item.
 * **v1.9** - Two v2 items promoted from backlog rows to **closed execution plans** (decision menus
   closed 2026-07-18; both **NOT yet implemented** — the doc now carries enough for a cold session to
   start warm). **CMD-4 relative `~` coordinates** (§8.2): integer offsets only, scope =
@@ -569,4 +586,4 @@ headless argument-completion tests — confirm when reaching B4.
 ---
 
 **Last Updated:** 2026-07-18
-**Next Review:** when CMD-4 (§8.2) or CMD-5 (§8.3) is executed — flip its row/section to Implemented on ship. The remaining §8 items (selectable output, chat, entity selectors, `/fill`) each still need their own design pass before scheduling.
+**Next Review:** when CMD-5 (§8.3) is executed — flip its row/section to Implemented on ship. The remaining §8 items (selectable output, chat, entity selectors, `/fill`) each still need their own design pass before scheduling.
