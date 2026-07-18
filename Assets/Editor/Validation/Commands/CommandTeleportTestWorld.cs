@@ -26,6 +26,7 @@ namespace Editor.Validation.Commands
         private readonly World _world;
         private readonly GameObject _worldGo;
         private readonly GameObject _playerGo;
+        private readonly BlockDatabase _stubDatabase;
         private readonly ChunkCoord _savedOriginChunk;
         private bool _disposed;
 
@@ -51,6 +52,16 @@ namespace Editor.Validation.Commands
             _world.settings = new Settings { enableLighting = false };
             _world.worldData = new WorldData("CommandTeleportTestWorld", 0);
 
+            // Minimal named palette so /give and /setblock name→ID resolution is headless-testable
+            // (index 0 must be Air — the engine-wide convention BlockIDs pins).
+            _stubDatabase = ScriptableObject.CreateInstance<BlockDatabase>();
+            _stubDatabase.blockTypes = new[]
+            {
+                new BlockType { blockName = "Air", isSolid = false },
+                new BlockType { blockName = "Stone", isSolid = true },
+            };
+            ValidationReflection.SetInstanceField(_world, "_blockDatabase", _stubDatabase);
+
             _playerGo = new GameObject("Command_StubPlayer");
             Rigidbody = _playerGo.AddComponent<VoxelRigidbody>();
             Player player = _playerGo.GetComponent<Player>() != null
@@ -60,8 +71,10 @@ namespace Editor.Validation.Commands
             _world.player = player;
             ValidationReflection.SetInstanceField(_world, "_playerTransform", _playerGo.transform);
 
+            // The full production pack via the shared installer (§8.1.1), so any pack command can be
+            // driven against this fixture and a production/suite registration split cannot exist.
             Engine = new CommandEngine(new CommandContext(world: _world, player: player));
-            Engine.Registry.Register(new TeleportCommand());
+            ConsoleCommandInstaller.RegisterAll(Engine.Registry);
         }
 
         /// <summary>Enables the TF-14 border fence on the stub world (0 disables — the default).</summary>
@@ -77,6 +90,7 @@ namespace Editor.Validation.Commands
             WorldOrigin.SetOrigin(_savedOriginChunk);
             if (_playerGo != null) Object.DestroyImmediate(_playerGo);
             if (_worldGo != null) Object.DestroyImmediate(_worldGo);
+            if (_stubDatabase != null) Object.DestroyImmediate(_stubDatabase);
         }
     }
 }

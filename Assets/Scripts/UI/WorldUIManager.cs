@@ -142,9 +142,10 @@ namespace UI
                 World.Instance.TeleportHoldEnded += OnTeleportHoldEnded;
             }
 
-            // Registered even without a world: /help stays consistent, and the command itself
-            // reports "No world is loaded." through its null-facade guard (§4.1).
-            _console.Engine.Registry.Register(new TeleportCommand());
+            // Registered even without a world: /help stays consistent, and world-touching commands
+            // report "No world is loaded." through their null-facade guard (§4.1). The installer is
+            // the shared production/suite registration list (§8.1.1).
+            ConsoleCommandInstaller.RegisterAll(_console.Engine.Registry);
         }
 
         private void OnDestroy()
