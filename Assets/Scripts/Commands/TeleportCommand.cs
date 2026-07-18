@@ -18,13 +18,6 @@ namespace Commands
         /// <summary>Voxel radius beyond which float-driven noise degrades (2²⁴) — the far-warn tier (§4.3).</summary>
         private const long NOISE_DEGRADATION_RADIUS_VOXELS = 1L << 24;
 
-        /// <summary>
-        /// Largest coordinate magnitude treated as inside the addressable world: a small margin under
-        /// <see cref="int.MaxValue"/> keeps neighbor-chunk voxel-origin math (<c>chunk×16</c> ± a chunk)
-        /// from wrapping at the extreme edge (§4.3's ±2³¹⁻ᵋ error tier).
-        /// </summary>
-        private const long ADDRESSABLE_LIMIT_VOXELS = int.MaxValue - 32L;
-
         /// <inheritdoc/>
         public string Name => "teleport";
 
@@ -53,18 +46,18 @@ namespace Commands
 
             bool resolveSurfaceY = coordCount == 2;
 
-            if (!TryParseCoord(args[coordStart], "X", out int x, out string coordError))
+            if (!CommandArgUtility.TryParseCoord(args[coordStart], "X", out int x, out string coordError))
                 return ErrorWithUsage(coordError);
 
             int y = 0;
-            if (!resolveSurfaceY && !TryParseCoord(args[coordStart + 1], "Y", out y, out coordError))
+            if (!resolveSurfaceY && !CommandArgUtility.TryParseCoord(args[coordStart + 1], "Y", out y, out coordError))
                 return ErrorWithUsage(coordError);
 
-            if (!TryParseCoord(args[coordStart + (resolveSurfaceY ? 1 : 2)], "Z", out int z, out coordError))
+            if (!CommandArgUtility.TryParseCoord(args[coordStart + (resolveSurfaceY ? 1 : 2)], "Z", out int z, out coordError))
                 return ErrorWithUsage(coordError);
 
             // --- Hard error tier: permanently outside the addressable world ---
-            if (Math.Abs((long)x) > ADDRESSABLE_LIMIT_VOXELS || Math.Abs((long)z) > ADDRESSABLE_LIMIT_VOXELS)
+            if (Math.Abs((long)x) > CommandArgUtility.AddressableLimitVoxels || Math.Abs((long)z) > CommandArgUtility.AddressableLimitVoxels)
                 return CommandResult.Error("Destination is permanently outside the addressable world (±2^31 voxels).");
 
             if (ctx.World == null)
@@ -104,40 +97,6 @@ namespace Commands
             world.TeleportPlayer(x, y, z, resolveSurfaceY);
             string yText = resolveSurfaceY ? "surface" : y.ToString();
             return CommandResult.Info($"Teleporting to ({x}, {yText}, {z})…");
-        }
-
-        /// <summary>
-        /// Parses one coordinate token as an integer. Distinguishes a typed decimal (usage error)
-        /// from an integer literal too large for <see cref="int"/> (which the tokenizer downgraded
-        /// to a float) — the latter is the §4.3 addressable-world error.
-        /// </summary>
-        /// <param name="token">The coordinate token.</param>
-        /// <param name="axis">The axis name for error text.</param>
-        /// <param name="value">The parsed coordinate.</param>
-        /// <param name="error">The error text on failure; null on success.</param>
-        /// <returns>True when parsed.</returns>
-        private static bool TryParseCoord(CommandToken token, string axis, out int value, out string error)
-        {
-            if (token.Type == CommandTokenType.Number && token.IsInteger)
-            {
-                value = token.Integer;
-                error = null;
-                return true;
-            }
-
-            value = 0;
-            if (token.Type == CommandTokenType.Number)
-            {
-                bool looksDecimal = token.Text.IndexOf('.') >= 0 ||
-                                    token.Text.IndexOf('e') >= 0 || token.Text.IndexOf('E') >= 0;
-                error = looksDecimal
-                    ? $"{axis} must be an integer voxel coordinate."
-                    : $"{axis} is permanently outside the addressable world (±2^31 voxels).";
-                return false;
-            }
-
-            error = $"{axis} is not a number.";
-            return false;
         }
 
         /// <summary>Builds an error line followed by the usage string.</summary>

@@ -1569,6 +1569,41 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
+    /// Dev tool (CMD-3 <c>/origin force</c>): re-anchors the floating origin onto the player's
+    /// current chunk immediately, regardless of the <see cref="WorldOrigin.ShiftThresholdChunks"/>
+    /// threshold — the scriptable form of the WS-4b in-game shift gate.
+    /// </summary>
+    public void ForceOriginReanchor()
+    {
+        ShiftOrigin(WorldOrigin.UnityToChunk(_playerTransform.position));
+    }
+
+    /// <summary>
+    /// Dev tool (CMD-3 <c>/setblock</c>): enqueues a <see cref="ReplacementRule.ForcePlace"/>
+    /// modification at an absolute voxel cell (still refuses UNBREAKABLE targets — the rule's own
+    /// guard). Keeps the <c>Commands</c> namespace free of UnityEngine types by owning the
+    /// <see cref="VoxelMod"/> construction here.
+    /// </summary>
+    /// <param name="voxelX">Target voxel X (absolute voxel space).</param>
+    /// <param name="voxelY">Target voxel Y.</param>
+    /// <param name="voxelZ">Target voxel Z (absolute voxel space).</param>
+    /// <param name="blockId">The block to place.</param>
+    /// <returns>
+    /// True when the target chunk is loaded and populated (the mod applies on this frame's pass);
+    /// false when it will be routed to the persistent pending-mods queue and applied on chunk load.
+    /// </returns>
+    public bool PlaceBlockCommand(int voxelX, int voxelY, int voxelZ, ushort blockId)
+    {
+        AddModification(new VoxelMod(new Vector3Int(voxelX, voxelY, voxelZ), blockId)
+        {
+            Rule = ReplacementRule.ForcePlace,
+        });
+
+        ChunkCoord targetChunk = new ChunkCoord(ChunkMath.VoxelToChunk(voxelX), ChunkMath.VoxelToChunk(voxelZ));
+        return worldData.TryGetChunk(targetChunk.ToVoxelOrigin(), out ChunkData targetData) && targetData.IsPopulated;
+    }
+
+    /// <summary>
     /// Polls an active arrival hold once per frame: releases when the destination chunk has populated
     /// data AND an applied mesh, or when the timeout fail-safe fires. On a 2-arg-form release the
     /// destination surface is resolved now — the earliest moment the terrain data exists.
@@ -1633,7 +1668,11 @@ public class World : MonoBehaviour
     public void SetGlobalLightValue()
     {
         Shader.SetGlobalFloat(s_shaderGlobalLightLevel, globalLightLevel);
-        _playerCamera.backgroundColor = Color.Lerp(night, day, globalLightLevel);
+
+        // Null before StartWorld binds it (and in headless/suite contexts, e.g. the /time command
+        // baseline) — the shader globals above still apply; only the camera tint is skipped.
+        if (_playerCamera != null)
+            _playerCamera.backgroundColor = Color.Lerp(night, day, globalLightLevel);
 
         Color skyColor = _skyLightGradient?.Evaluate(globalLightLevel) ?? Color.white;
         Shader.SetGlobalColor(s_shaderSkyLightColor, skyColor);
