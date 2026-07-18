@@ -1569,6 +1569,30 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
+    /// Resolves the player's current absolute voxel cell (CMD-4 <c>~</c> relative-coordinate base).
+    /// Owning the transform→voxel conversion here keeps the <c>Commands</c> namespace free of
+    /// UnityEngine types (the <see cref="PlaceBlockCommand"/> precedent).
+    /// </summary>
+    /// <param name="voxelX">The player's voxel X on success.</param>
+    /// <param name="voxelY">The player's voxel Y on success.</param>
+    /// <param name="voxelZ">The player's voxel Z on success.</param>
+    /// <returns>True when a player transform exists to resolve; false otherwise (headless / pre-load).</returns>
+    public bool TryGetPlayerVoxelCell(out int voxelX, out int voxelY, out int voxelZ)
+    {
+        if (_playerTransform == null)
+        {
+            voxelX = voxelY = voxelZ = 0;
+            return false;
+        }
+
+        Vector3Int cell = WorldOrigin.UnityToVoxelCell(_playerTransform.position);
+        voxelX = cell.x;
+        voxelY = cell.y;
+        voxelZ = cell.z;
+        return true;
+    }
+
+    /// <summary>
     /// Dev tool (CMD-3 <c>/origin force</c>): re-anchors the floating origin onto the player's
     /// current chunk immediately, regardless of the <see cref="WorldOrigin.ShiftThresholdChunks"/>
     /// threshold — the scriptable form of the WS-4b in-game shift gate.

@@ -14,10 +14,63 @@ namespace Commands
         /// </summary>
         public const long AddressableLimitVoxels = int.MaxValue - 32L;
 
+        /// <summary>Error shown when a relative <c>~</c> coordinate is used but no player is loaded to anchor it (CMD-4).</summary>
+        public const string RelativeNeedsPlayerError = "Relative coordinates require a loaded player.";
+
         /// <summary>
-        /// Parses one coordinate token as an integer voxel coordinate. Distinguishes a typed decimal
-        /// (usage error) from an integer literal too large for <see cref="int"/> (which the tokenizer
-        /// downgraded to a float) — the latter is the §4.3 addressable-world error.
+        /// Parses one coordinate token as an integer voxel coordinate, resolving a relative
+        /// <c>~</c>/<c>~N</c>/<c>~-N</c> token against <paramref name="relativeBase"/> — the player's
+        /// coordinate on this axis (CMD-4, §8.2). Offsets are integer-only (the v1 coord policy); the
+        /// resolved value is range-checked so <c>~</c>-driven overflow hits the addressable-world error.
+        /// </summary>
+        /// <param name="token">The coordinate token.</param>
+        /// <param name="axis">The axis name for error text.</param>
+        /// <param name="relativeAllowed">Whether a <c>~</c> token may resolve (false when no player is loaded).</param>
+        /// <param name="relativeBase">The player's coordinate on this axis, added to a <c>~</c> offset.</param>
+        /// <param name="value">The parsed (resolved) coordinate.</param>
+        /// <param name="error">The error text on failure; null on success.</param>
+        /// <returns>True when parsed.</returns>
+        public static bool TryParseCoord(CommandToken token, string axis, bool relativeAllowed, int relativeBase,
+            out int value, out string error)
+        {
+            if (token.Type == CommandTokenType.Relative)
+            {
+                value = 0;
+                if (!relativeAllowed)
+                {
+                    error = RelativeNeedsPlayerError;
+                    return false;
+                }
+
+                // "~" alone = the base coordinate; "~N"/"~-N" = base + a signed integer offset.
+                string offsetText = token.Text.Substring(1);
+                int offset = 0;
+                if (offsetText.Length > 0 &&
+                    !int.TryParse(offsetText, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out offset))
+                {
+                    error = $"{axis} relative offset must be an integer.";
+                    return false;
+                }
+
+                long resolved = (long)relativeBase + offset;
+                if (Math.Abs(resolved) > AddressableLimitVoxels)
+                {
+                    error = $"{axis} is permanently outside the addressable world (±2^31 voxels).";
+                    return false;
+                }
+
+                value = (int)resolved;
+                error = null;
+                return true;
+            }
+
+            return TryParseCoord(token, axis, out value, out error);
+        }
+
+        /// <summary>
+        /// Parses one coordinate token as an absolute integer voxel coordinate. Distinguishes a typed
+        /// decimal (usage error) from an integer literal too large for <see cref="int"/> (which the
+        /// tokenizer downgraded to a float) — the latter is the §4.3 addressable-world error.
         /// </summary>
         /// <param name="token">The coordinate token.</param>
         /// <param name="axis">The axis name for error text.</param>
