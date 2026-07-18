@@ -1,3 +1,4 @@
+using Commands;
 using UnityEngine;
 
 namespace UI
@@ -128,9 +129,40 @@ namespace UI
             }
         }
 
+        private void Start()
+        {
+            // Attach the console's world facade (§4.1 CMD-2). This cannot happen in Awake: the engine
+            // is built when the console spawns above, and World.Instance is only reliably assigned
+            // once every scene Awake has run. Start is the earliest guaranteed-safe point. Skipped
+            // when no world exists (e.g. UI-only scenes) — world-touching commands then fail
+            // gracefully with their no-world error.
+            if (World.Instance != null)
+            {
+                _console.Engine.Context.AttachWorld(World.Instance, World.Instance.player);
+                World.Instance.TeleportHoldEnded += OnTeleportHoldEnded;
+            }
+
+            // Registered even without a world: /help stays consistent, and the command itself
+            // reports "No world is loaded." through its null-facade guard (§4.1).
+            _console.Engine.Registry.Register(new TeleportCommand());
+        }
+
         private void OnDestroy()
         {
             if (Instance == this) Instance = null;
+            if (World.Instance != null)
+                World.Instance.TeleportHoldEnded -= OnTeleportHoldEnded;
+        }
+
+        /// <summary>Surfaces the teleport arrival-hold outcome (§3.3 CMD-2) in the console.</summary>
+        /// <param name="timedOut">True when the fail-safe timeout released the hold.</param>
+        private void OnTeleportHoldEnded(bool timedOut)
+        {
+            if (timedOut)
+                _console.Engine.PostLine(ConsoleLineSeverity.Warning,
+                    "Teleport hold timed out — the destination never became ready; you may fall.");
+            else
+                _console.Engine.PostLine(ConsoleLineSeverity.Info, "Arrived.");
         }
 
         private void Update()

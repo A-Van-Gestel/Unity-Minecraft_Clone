@@ -37,6 +37,7 @@ namespace Editor.Validation.Commands
         {
             List<Scenario> scenarios = new List<Scenario>();
             AddBaselineScenarios(scenarios);
+            AddTeleportScenarios(scenarios);
             AddKnownBugScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Command Console", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
@@ -57,6 +58,9 @@ namespace Editor.Validation.Commands
 
         /// <summary>Registers the baseline regression scenarios (implemented in CommandConsoleValidationSuite.Baseline.cs).</summary>
         static partial void AddBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Registers the CMD-2 /teleport matrix (implemented in CommandConsoleValidationSuite.Teleport.cs).</summary>
+        static partial void AddTeleportScenarios(List<Scenario> scenarios);
 
         /// <summary>Registers expected-red known-bug reproductions (none yet; the seam for future console bugs authored test-first).</summary>
         static partial void AddKnownBugScenarios(List<Scenario> scenarios);
