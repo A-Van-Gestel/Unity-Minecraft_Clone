@@ -46,14 +46,18 @@ namespace Commands
 
             bool resolveSurfaceY = coordCount == 2;
 
-            if (!CommandArgUtility.TryParseCoord(args[coordStart], "X", out int x, out string coordError))
+            // Player base for any '~' relative coordinates (CMD-4); disallowed when no player is loaded.
+            int baseX = 0, baseY = 0, baseZ = 0;
+            bool relativeAllowed = ctx.World != null && ctx.World.TryGetPlayerVoxelCell(out baseX, out baseY, out baseZ);
+
+            if (!CommandArgUtility.TryParseCoord(args[coordStart], "X", relativeAllowed, baseX, out int x, out string coordError))
                 return ErrorWithUsage(coordError);
 
             int y = 0;
-            if (!resolveSurfaceY && !CommandArgUtility.TryParseCoord(args[coordStart + 1], "Y", out y, out coordError))
+            if (!resolveSurfaceY && !CommandArgUtility.TryParseCoord(args[coordStart + 1], "Y", relativeAllowed, baseY, out y, out coordError))
                 return ErrorWithUsage(coordError);
 
-            if (!CommandArgUtility.TryParseCoord(args[coordStart + (resolveSurfaceY ? 1 : 2)], "Z", out int z, out coordError))
+            if (!CommandArgUtility.TryParseCoord(args[coordStart + (resolveSurfaceY ? 1 : 2)], "Z", relativeAllowed, baseZ, out int z, out coordError))
                 return ErrorWithUsage(coordError);
 
             // --- Hard error tier: permanently outside the addressable world ---

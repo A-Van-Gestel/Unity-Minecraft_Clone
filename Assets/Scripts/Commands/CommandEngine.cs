@@ -22,9 +22,6 @@ namespace Commands
         /// <summary>Hint shown when input lacks the mandatory <c>/</c> prefix.</summary>
         public const string UnprefixedHint = "Commands start with '/' — try /help";
 
-        /// <summary>Error shown when a line contains a reserved <c>~</c> relative-coordinate token.</summary>
-        public const string RelativeCoordsError = "Relative coordinates are not supported yet.";
-
         /// <summary>Error shown for a bare <c>/</c> with no command name.</summary>
         public const string MissingCommandError = "Missing command name — try /help";
 
@@ -165,11 +162,8 @@ namespace Commands
             if (_tokenScratch.Count == 0)
                 return CommandResult.Error(MissingCommandError);
 
-            // Reserved-token gate: reject before dispatch so no command ever sees a '~'.
-            for (int i = 0; i < _tokenScratch.Count; i++)
-                if (_tokenScratch[i].Type == CommandTokenType.Relative)
-                    return CommandResult.Error(RelativeCoordsError);
-
+            // Relative '~' tokens are no longer rejected here (CMD-4): coord-consuming commands
+            // resolve them against the player; other commands reject them via their own arg checks.
             string name = _tokenScratch[0].Text;
             if (!_registry.TryResolve(name, out IConsoleCommand command))
                 return CommandResult.Error($"Unknown command '{name}' — try /help");

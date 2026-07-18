@@ -28,6 +28,10 @@ namespace Editor.Validation.Commands
             scenarios.Add(new Scenario("B29: /teleport fence-warn — outside the TF-14 border warns with the re-clamp truth; 'no' cancels, world untouched (CMD-2)", Teleport_FenceWarnConfirmNo));
             scenarios.Add(new Scenario("B30: /teleport far-warn + combined warnings — every applicable warning lands in a SINGLE confirmation prompt (CMD-2)", Teleport_FarWarnAndCombined));
             scenarios.Add(new Scenario("B31: /teleport without a world facade fails gracefully with the no-world error (CMD-2)", Teleport_NullWorldGraceful));
+            scenarios.Add(new Scenario("B44: /teleport ~ ~ ~ resolves to the player's voxel cell; ~N/~-N apply signed offsets (CMD-4)", Teleport_RelativeResolve));
+            scenarios.Add(new Scenario("B45: /teleport ~ ~ surface form resolves X/Z relative; a ~-offset past the addressable limit is the wrap error (CMD-4)", Teleport_RelativeSurfaceAndOverflow));
+            scenarios.Add(new Scenario("B46: /teleport with a '~' but no loaded player fails gracefully with the relative-needs-player error (CMD-4)", Teleport_RelativeNoPlayer));
+            scenarios.Add(new Scenario("B47: /setblock ~ ~1 ~ resolves to the player's voxel cell (CMD-4)", SetBlock_RelativeResolve));
         }
 
         private static bool Teleport_ValidThreeArg()
@@ -165,6 +169,62 @@ namespace Editor.Validation.Commands
             return Expect(result.Lines.Count == 1 && result.Lines[0].Severity == ConsoleLineSeverity.Error &&
                           result.Lines[0].Text.Contains("No world is loaded"),
                 "a world-less context fails gracefully with the no-world error");
+        }
+
+        private static bool Teleport_RelativeResolve()
+        {
+            using CommandTeleportTestWorld stub = new CommandTeleportTestWorld();
+            stub.PlayerTransform.position = WorldOrigin.VoxelToUnity(new Vector3Int(100, 64, 200));
+
+            CommandResult noop = stub.Engine.Execute("/teleport ~ ~ ~");
+            bool ok = Expect(noop.Lines.Count == 1 && noop.Lines[0].Text.Contains("(100, 64, 200)"),
+                $"'~ ~ ~' resolves to the player cell, got '{(noop.Lines.Count > 0 ? noop.Lines[0].Text : "no lines")}'");
+
+            // Re-anchor the base explicitly (the no-op teleport left the player at the same cell anyway).
+            stub.PlayerTransform.position = WorldOrigin.VoxelToUnity(new Vector3Int(100, 64, 200));
+            CommandResult offset = stub.Engine.Execute("/teleport ~10 ~-4 ~20");
+            ok &= Expect(offset.Lines.Count == 1 && offset.Lines[0].Text.Contains("(110, 60, 220)"),
+                $"'~10 ~-4 ~20' applies signed offsets, got '{(offset.Lines.Count > 0 ? offset.Lines[0].Text : "no lines")}'");
+            return ok;
+        }
+
+        private static bool Teleport_RelativeSurfaceAndOverflow()
+        {
+            using CommandTeleportTestWorld stub = new CommandTeleportTestWorld();
+            stub.PlayerTransform.position = WorldOrigin.VoxelToUnity(new Vector3Int(300, 64, 400));
+
+            CommandResult surface = stub.Engine.Execute("/teleport ~5 ~-5");
+            bool ok = Expect(surface.Lines.Count == 1 && surface.Lines[0].Text.Contains("(305, surface, 395)"),
+                $"2-arg '~5 ~-5' resolves X/Z relative and keeps the surface Y, got '{(surface.Lines.Count > 0 ? surface.Lines[0].Text : "no lines")}'");
+
+            // A relative offset that pushes the resolved coordinate past the addressable limit is the wrap error.
+            ok &= ExpectTeleportError(stub.Engine, "/teleport ~2147483647 64 0", "addressable world",
+                "a ~-offset past the addressable limit is the wrap/addressable error");
+            return ok;
+        }
+
+        private static bool Teleport_RelativeNoPlayer()
+        {
+            CommandEngine engine = new CommandEngine();
+            engine.Registry.Register(new TeleportCommand());
+
+            CommandResult result = engine.Execute("/teleport ~ ~ ~");
+            return Expect(result.Lines.Count > 0 && result.Lines[0].Severity == ConsoleLineSeverity.Error &&
+                          result.Lines[0].Text.Contains("Relative coordinates require"),
+                $"a '~' with no world/player errors with the relative-needs-player message, got " +
+                $"'{(result.Lines.Count > 0 ? result.Lines[0].Text : "no lines")}'");
+        }
+
+        private static bool SetBlock_RelativeResolve()
+        {
+            using CommandTeleportTestWorld stub = new CommandTeleportTestWorld();
+            stub.PlayerTransform.position = WorldOrigin.VoxelToUnity(new Vector3Int(50, 40, 60));
+
+            CommandResult result = stub.Engine.Execute("/setblock ~ ~1 ~ Stone");
+            return Expect(result.Lines.Count == 1 && result.Lines[0].Severity != ConsoleLineSeverity.Error &&
+                          result.Lines[0].Text.Contains("(50, 41, 60)"),
+                $"'/setblock ~ ~1 ~ Stone' resolves to the player cell, got " +
+                $"'{(result.Lines.Count > 0 ? result.Lines[0].Text : "no lines")}'");
         }
 
         /// <summary>Submits a line expected to produce an Error first line containing <paramref name="fragment"/>.</summary>

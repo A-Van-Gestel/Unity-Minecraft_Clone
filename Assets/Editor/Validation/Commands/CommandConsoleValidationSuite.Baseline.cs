@@ -55,7 +55,7 @@ namespace Editor.Validation.Commands
             scenarios.Add(new Scenario("B6: A bare '/' is a missing-command error with a /help hint", Baseline_BareSlash));
             scenarios.Add(new Scenario("B7: An unknown command errors, names the command, and hints /help", Baseline_UnknownCommand));
             scenarios.Add(new Scenario("B8: Aliases dispatch, and command names resolve case-insensitively", Baseline_AliasAndCaseInsensitiveDispatch));
-            scenarios.Add(new Scenario("B9: A reserved '~' token anywhere rejects the line BEFORE dispatch (command never runs)", Baseline_RelativeRejectedBeforeDispatch));
+            scenarios.Add(new Scenario("B9: A '~' token no longer rejects before dispatch — the command runs and receives it as a Relative arg (CMD-4)", Baseline_RelativeReachesDispatch));
             scenarios.Add(new Scenario("B10: The submitted line is echoed into the output ring as an Info line ahead of its results", Baseline_EchoSubmittedLine));
             scenarios.Add(new Scenario("B11: Confirmation — 'yes' and 'y' execute the continuation and clear the pending state", Baseline_ConfirmYes));
             scenarios.Add(new Scenario("B12: Confirmation — 'no' and 'n' cancel with a notice; the continuation never runs", Baseline_ConfirmNo));
@@ -167,15 +167,20 @@ namespace Editor.Validation.Commands
             return Expect(stub.Invocations == 5, $"5 dispatches via name/alias/case variants, got {stub.Invocations}");
         }
 
-        private static bool Baseline_RelativeRejectedBeforeDispatch()
+        private static bool Baseline_RelativeReachesDispatch()
         {
             CommandEngine engine = new CommandEngine();
-            StubCommand stub = new StubCommand("test", null, "/test", null);
+            bool sawRelative = false;
+            StubCommand stub = new StubCommand("test", null, "/test", (ctx, args) =>
+            {
+                sawRelative = args.Count == 2 && args[0].Type == CommandTokenType.Relative;
+                return CommandResult.Empty;
+            });
             engine.Registry.Register(stub);
 
-            CommandResult result = engine.Execute("/test ~ 5");
-            bool ok = Expect(result.Lines.Count == 1 && result.Lines[0].Text == CommandEngine.RelativeCoordsError, "the reserved-'~' error");
-            ok &= Expect(stub.Invocations == 0, "the command never executed");
+            engine.Execute("/test ~ 5");
+            bool ok = Expect(stub.Invocations == 1, "the command runs (the pre-dispatch '~' gate is gone, CMD-4)");
+            ok &= Expect(sawRelative, "the command receives the '~' token as a Relative arg");
             return ok;
         }
 
