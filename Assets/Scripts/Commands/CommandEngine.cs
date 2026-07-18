@@ -118,6 +118,18 @@ namespace Commands
             return result;
         }
 
+        /// <summary>
+        /// Appends a system-originated line to the output ring, outside any command execution —
+        /// e.g. a teleport arrival-hold outcome posted frames after the command returned. Raises
+        /// <see cref="LineAppended"/> like any other line.
+        /// </summary>
+        /// <param name="severity">The line's severity.</param>
+        /// <param name="text">The line text.</param>
+        public void PostLine(ConsoleLineSeverity severity, string text)
+        {
+            AppendLine(new ConsoleLine(severity, text));
+        }
+
         /// <summary>Steps the recall cursor back (↑). Clamps at the oldest command.</summary>
         /// <returns>The recalled command, or null when there is no history.</returns>
         public string RecallPrevious()
