@@ -1,8 +1,8 @@
 # Command Console System Design
 
-**Version:** 1.1
-**Date:** 2026-07-16
-**Status:** Proposed design — not implemented.
+**Version:** 1.2
+**Date:** 2026-07-18
+**Status:** In progress — CMD-0 (engine core + validation suite) implemented 2026-07-18; CMD-1/2 pending.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > An in-game command console (Minecraft-chat-style: `T` opens a left-anchored panel with
@@ -69,14 +69,14 @@ v1 scope).
 
 ## 2. Current state (what exists today)
 
-| Area              | State                                                                                                                                                                                                                    |
-|-------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| UI state          | `WorldUIManager` centralizes UI state: `InUI = IsCreativeInventoryOpen \|\| IsPauseMenuOpen` (:149), cursor lock/visibility follow it. `Player`/`PlayerInteraction`/`TouchControls` gate on `World.InUI`.                     |
-| "Pause" semantics | `InUI` blocks input only — **no `Time.timeScale` write exists in the project**; fluids, streaming, and day/night continue while the inventory is open. Console adopts the same semantics.                                     |
-| Input             | `InputManager` wraps an `InputActionAsset` with Gameplay/UI maps. `T` is unbound in both maps (verified in `GameInputActions.inputactions`). Escape handling is a priority chain in `WorldUIManager.HandleEscape`.            |
-| UI toolkit        | TMP + UGUI (`ScrollRect`) used throughout (`DebugScreen`, menus). No console/command code exists anywhere.                                                                                                                    |
+| Area              | State                                                                                                                                                                                                                          |
+|-------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| UI state          | `WorldUIManager` centralizes UI state: `InUI = IsCreativeInventoryOpen \|\| IsPauseMenuOpen` (:149), cursor lock/visibility follow it. `Player`/`PlayerInteraction`/`TouchControls` gate on `World.InUI`.                      |
+| "Pause" semantics | `InUI` blocks input only — **no `Time.timeScale` write exists in the project**; fluids, streaming, and day/night continue while the inventory is open. Console adopts the same semantics.                                      |
+| Input             | `InputManager` wraps an `InputActionAsset` with Gameplay/UI maps. `T` is unbound in both maps (verified in `GameInputActions.inputactions`). Escape handling is a priority chain in `WorldUIManager.HandleEscape`.             |
+| UI toolkit        | TMP + UGUI (`ScrollRect`) used throughout (`DebugScreen`, menus). No console/command code exists anywhere.                                                                                                                     |
 | Teleport hazard   | `World.CheckPhysicsCollision` treats unloaded chunks as empty (`TryGetVoxel` miss → no hit), and `VoxelRigidbody`'s `IsWorldLoaded` gate covers only the initial load — a raw far teleport drops the player through the world. |
-| Suite precedent   | The Placement suite drives `PlacementController` against a real stub `World` ("exercise the real subsystem"); the engine follows the same pattern.                                                                            |
+| Suite precedent   | The Placement suite drives `PlacementController` against a real stub `World` ("exercise the real subsystem"); the engine follows the same pattern.                                                                             |
 
 ---
 
@@ -189,13 +189,13 @@ native containers, no pooled-type fields (pool-reset-safety not applicable).
 `WorldOrigin` to the destination chunk, place the transform via `WorldOrigin.VoxelToUnity`,
 apply the §3.3 arrival hold, and let streaming load the surroundings. Validation tiers:
 
-| Input condition                                        | Behavior                                                   |
-|--------------------------------------------------------|-------------------------------------------------------------|
-| Unparseable / wrong arity / unknown selector           | Error + usage string; nothing executes                     |
-| Y outside `[0, ChunkHeight)`                           | ⚠️ Warn + confirm (proceed clamps? No — proceeds verbatim) |
-| Outside the TF-14 border fence (when enabled)          | ⚠️ Warn + confirm (fence is a player clamp — see note)     |
-| Beyond the noise-degradation radius (~±16.7M voxels)   | ⚠️ Warn + confirm ("terrain artifacts expected")           |
-| Beyond ±2³¹⁻ᵋ voxels (chunk-origin `×16` wrap)         | Error — permanently outside the addressable world          |
+| Input condition                                      | Behavior                                                   |
+|------------------------------------------------------|------------------------------------------------------------|
+| Unparseable / wrong arity / unknown selector         | Error + usage string; nothing executes                     |
+| Y outside `[0, ChunkHeight)`                         | ⚠️ Warn + confirm (proceed clamps? No — proceeds verbatim) |
+| Outside the TF-14 border fence (when enabled)        | ⚠️ Warn + confirm (fence is a player clamp — see note)     |
+| Beyond the noise-degradation radius (~±16.7M voxels) | ⚠️ Warn + confirm ("terrain artifacts expected")           |
+| Beyond ±2³¹⁻ᵋ voxels (chunk-origin `×16` wrap)       | Error — permanently outside the addressable world          |
 
 Note (border fence): `VoxelRigidbody.ClampToWorldBorder` re-clamps every `FixedUpdate`, so a
 confirmed out-of-fence teleport lands and is immediately clamped back to the fence edge — the
@@ -220,15 +220,15 @@ warning text says so rather than pretending the destination sticks.
 
 ## 6. Constraint compliance checklist
 
-| Project constraint                              | How this design complies                                                                                     |
-|-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
-| Voxels are packed `uint`s, no per-voxel objects | Untouched — no voxel data involvement.                                                                            |
-| Burst jobs 100 % Burst-compatible               | No job code; the engine is main-thread managed code and never referenced from `Assets/Scripts/Jobs/`.             |
-| No GC / LINQ in hot paths                       | Console code runs only on open/submit (not per-frame gameplay); history uses preallocated ring buffers; no LINQ.  |
-| Pooling conventions                             | No pooled types touched; UI elements are persistent, not per-frame instantiated.                                  |
-| No BinaryFormatter/JSON for terrain             | Nothing persisted by this system (command history is session-only in v1).                                         |
-| BlockIDs constants, no raw IDs                  | Not applicable in v1 (no block-referencing commands yet; a future `/setblock` must use `BlockIDs`).               |
-| No magic numbers                                | History capacity, panel sizing, etc. as named constants per the style guide.                                      |
+| Project constraint                              | How this design complies                                                                                         |
+|-------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
+| Voxels are packed `uint`s, no per-voxel objects | Untouched — no voxel data involvement.                                                                           |
+| Burst jobs 100 % Burst-compatible               | No job code; the engine is main-thread managed code and never referenced from `Assets/Scripts/Jobs/`.            |
+| No GC / LINQ in hot paths                       | Console code runs only on open/submit (not per-frame gameplay); history uses preallocated ring buffers; no LINQ. |
+| Pooling conventions                             | No pooled types touched; UI elements are persistent, not per-frame instantiated.                                 |
+| No BinaryFormatter/JSON for terrain             | Nothing persisted by this system (command history is session-only in v1).                                        |
+| BlockIDs constants, no raw IDs                  | Not applicable in v1 (no block-referencing commands yet; a future `/setblock` must use `BlockIDs`).              |
+| No magic numbers                                | History capacity, panel sizing, etc. as named constants per the style guide.                                     |
 
 ---
 
@@ -236,11 +236,11 @@ warning text says so rather than pretending the destination sticks.
 
 Work items carry the **`CMD-`** prefix (verified unused in `Documentation/`).
 
-| Phase                            | Scope                                                                                                                                       | Effort | Depends on      |
-|----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|:------:|-----------------|
-| **CMD-0 — engine core**          | Tokenizer, registry, selector resolver (`@player`), confirmation flow, history buffers, `CommandContext`; `HelpCommand`; the validation suite |   🟡   | —               |
-| **CMD-1 — console UI**           | Panel + ScrollRect + input field, `IsConsoleOpen` state, `ToggleConsole` action, Esc chain, ↑/↓ recall, T-leak guard                          |   🟡   | CMD-0           |
-| **CMD-2 — `/teleport`**          | §4.3 command incl. warning/confirm matrix, arrival hold, 2-arg surface form                                                                    |   🟡   | CMD-1, WS-4a/b  |
+| Phase                     | Scope                                                                                                                                                                                                                                                                                                                           | Effort | Depends on     |
+|---------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|----------------|
+| **CMD-0 — engine core** ✅ | Tokenizer, registry, selector resolver (`@player`), confirmation flow, history buffers, `CommandContext`; `HelpCommand`; the validation suite. **Implemented 2026-07-18**: `Assets/Scripts/Commands/` (namespace `Commands`, pure C# — zero Unity usings) + `Validate Command Console` suite (20 baselines, registry suite #10) |   🟡   | —              |
+| **CMD-1 — console UI**    | Panel + ScrollRect + input field, `IsConsoleOpen` state, `ToggleConsole` action, Esc chain, ↑/↓ recall, T-leak guard                                                                                                                                                                                                            |   🟡   | CMD-0          |
+| **CMD-2 — `/teleport`**   | §4.3 command incl. warning/confirm matrix, arrival hold, 2-arg surface form                                                                                                                                                                                                                                                     |   🟡   | CMD-1, WS-4a/b |
 
 CMD-0+1 deliver standalone value (a working console with `/help`); CMD-2 is the WS-4c payload —
 the two roadmaps meet there: **WS-4c = CMD-2 + the v12→v13 player-position migration** from
@@ -261,9 +261,9 @@ each phase:
 
 ## 8. Extension roadmap (post-CMD-2, in intended order)
 
-| Version | Extension                                                                                                                        |
-|---------|-------------------------------------------------------------------------------------------------------------------------------------|
-| **v2**  | The **CMD-3 command pack** (§8.1); tab autocomplete (registry-driven); selectable/copyable output; relative `~` coordinates.          |
+| Version | Extension                                                                                                                                                                     |
+|---------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **v2**  | The **CMD-3 command pack** (§8.1); tab autocomplete (registry-driven); selectable/copyable output; relative `~` coordinates.                                                  |
 | **v3+** | Entity selectors (`@entity-<id>`, filters) with the entity system; chat on the unprefixed namespace; permissions on `CommandContext` — each gets a design pass when concrete. |
 
 ### 8.1 CMD-3 — candidate command pack (brainstormed 2026-07-16, not yet scheduled)
@@ -271,24 +271,31 @@ each phase:
 Ordered by value ÷ cost; every 🟢 entry is a thin getter/setter over a system that already
 exists, so the pack is mostly registry plumbing. Effort assumes CMD-0..2 have landed.
 
-| Command                              | Backing system (exists today)                                  | Effort | Note                                                                                                                                              |
-|--------------------------------------|-----------------------------------------------------------------|:------:|----------------------------------------------------------------------------------------------------------------------------------------------------|
-| `/where`                             | transform + `WorldOrigin` + region codec                        |   🟢   | Prints voxel pos, chunk, region file, origin chunk. The best WS-4 debugging aid after `/teleport`; pairs with the far-coordinates soak (WS-4 doc §8.2.4) |
-| `/origin` (dev)                      | `WorldOrigin`                                                   |   🟢   | Show the origin / force a shift — makes the WS-4b in-game gate scriptable instead of "fly 1024 units"                                                |
-| `/set-world-border <radius>` / `off` | TF-14 `BorderRadius` + `World.SetBorderRadius` + level.dat v12  |   🟢   | Everything exists; the command is a setter + save. Warn+confirm when shrinking would strand the player outside (the fence re-clamps them inward)     |
-| `/spawn`, `/setspawn`                | `WorldSpawnPoint` (CRP) + `SetSpawnPoint`                       |   🟢   | `/spawn` = teleport-to-CRP (reuses CMD-2's arrival hold); `/setspawn` writes the existing field                                                      |
-| `/time set\|add <t>`                 | `WorldStateData.timeOfDay` + `GlobalLightLevel`                 |   🟢   | Also enables deterministic lighting screenshots/repros                                                                                               |
-| `/seed`                              | `VoxelData.Seed`                                                |   🟢   | Trivial; handy once the seed-hygiene work (Bug 04) starts                                                                                            |
-| `/fly`, `/noclip`, `/speed <n>`      | `VoxelRigidbody` flags                                          |   🟢   | Already keybound (F1/F6); command form adds discoverability + an exact speed value                                                                   |
-| `/give <block> [n]`                  | `BlockIDs` + toolbar/inventory                                  |   🟡   | Needs name→ID lookup (BlockDatabase names); MUST resolve via `BlockIDs`, never raw IDs                                                               |
-| `/setblock X Y Z <block>`            | `VoxelMod` + `World.AddModification`                            |   🟡   | Thin wrapper over the existing mod path; useful for validation repros                                                                                |
-| `/chunk info`                        | `ChunkData` state flags                                         |   🟡   | Dumps the current chunk's pipeline state (lighting flags, mesh state, active voxels) — queryable anywhere; pairs with `chunk-lifecycle` debugging     |
-| `/fill`                              | mass `VoxelMod`                                                 |   🔴   | **Deliberately deferred** — unbounded mod volumes stress the apply path's per-frame budgets; needs its own design pass, don't sneak it in            |
+| Command                              | Backing system (exists today)                                  | Effort | Note                                                                                                                                                     |
+|--------------------------------------|----------------------------------------------------------------|:------:|----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `/where`                             | transform + `WorldOrigin` + region codec                       |   🟢   | Prints voxel pos, chunk, region file, origin chunk. The best WS-4 debugging aid after `/teleport`; pairs with the far-coordinates soak (WS-4 doc §8.2.4) |
+| `/origin` (dev)                      | `WorldOrigin`                                                  |   🟢   | Show the origin / force a shift — makes the WS-4b in-game gate scriptable instead of "fly 1024 units"                                                    |
+| `/set-world-border <radius>` / `off` | TF-14 `BorderRadius` + `World.SetBorderRadius` + level.dat v12 |   🟢   | Everything exists; the command is a setter + save. Warn+confirm when shrinking would strand the player outside (the fence re-clamps them inward)         |
+| `/spawn`, `/setspawn`                | `WorldSpawnPoint` (CRP) + `SetSpawnPoint`                      |   🟢   | `/spawn` = teleport-to-CRP (reuses CMD-2's arrival hold); `/setspawn` writes the existing field                                                          |
+| `/time set\|add <t>`                 | `WorldStateData.timeOfDay` + `GlobalLightLevel`                |   🟢   | Also enables deterministic lighting screenshots/repros                                                                                                   |
+| `/seed`                              | `VoxelData.Seed`                                               |   🟢   | Trivial; handy once the seed-hygiene work (Bug 04) starts                                                                                                |
+| `/fly`, `/noclip`, `/speed <n>`      | `VoxelRigidbody` flags                                         |   🟢   | Already keybound (F1/F6); command form adds discoverability + an exact speed value                                                                       |
+| `/give <block> [n]`                  | `BlockIDs` + toolbar/inventory                                 |   🟡   | Needs name→ID lookup (BlockDatabase names); MUST resolve via `BlockIDs`, never raw IDs                                                                   |
+| `/setblock X Y Z <block>`            | `VoxelMod` + `World.AddModification`                           |   🟡   | Thin wrapper over the existing mod path; useful for validation repros                                                                                    |
+| `/chunk info`                        | `ChunkData` state flags                                        |   🟡   | Dumps the current chunk's pipeline state (lighting flags, mesh state, active voxels) — queryable anywhere; pairs with `chunk-lifecycle` debugging        |
+| `/fill`                              | mass `VoxelMod`                                                |   🔴   | **Deliberately deferred** — unbounded mod volumes stress the apply path's per-frame budgets; needs its own design pass, don't sneak it in                |
 
 ---
 
 ## Document History
 
+* **v1.2** - CMD-0 shipped: `Commands` runtime namespace (13 files, engine instance-based, no
+  statics; culture-invariant tokenizer; confirmation check ordered before the `/`-prefix rule;
+  duplicate registry keys throw; `@player` resolves to a semantic `CommandTarget`, not a scene
+  object) + `Validate Command Console` suite (20 baselines incl. prove-red-verified prefix
+  guards) registered as the 10th aggregate suite. Decisions baked in 2026-07-18: minimal
+  `CommandContext` (world facade deferred to CMD-2), case-insensitive command names, submitted
+  lines echoed as Info. §7 status flipped for CMD-0.
 * **v1.1** - Added §8.1: the CMD-3 candidate command pack (11 commands ranked by value ÷ cost,
   each mapped to its existing backing system; `/fill` explicitly deferred pending an apply-path
   design pass). §8 heading level fixed (was nested under §7).
@@ -299,5 +306,5 @@ exists, so the pack is mostly registry plumbing. Effort assumes CMD-0..2 have la
 
 ---
 
-**Last Updated:** 2026-07-16
-**Next Review:** when CMD-0 starts, or at the WS-4c kickoff (whichever comes first).
+**Last Updated:** 2026-07-18
+**Next Review:** when CMD-1 starts, or at the WS-4c kickoff (whichever comes first).
