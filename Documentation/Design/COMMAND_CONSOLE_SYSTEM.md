@@ -1,8 +1,8 @@
 # Command Console System Design
 
-**Version:** 1.3
+**Version:** 1.4
 **Date:** 2026-07-18
-**Status:** In progress — CMD-0 (engine core + validation suite) and CMD-1 (console UI) implemented 2026-07-18; CMD-2 pending.
+**Status:** In progress — CMD-0 (engine core + validation suite) and CMD-1 (console UI) implemented 2026-07-18; CMD-2 pending; CMD-3 (command pack) plan closed 2026-07-18, executes after CMD-2 (§8.1).
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > An in-game command console (Minecraft-chat-style: `T` opens a left-anchored panel with
@@ -108,8 +108,8 @@ blocked, cursor unlocks, **simulation keeps running** — identical to the inven
   destination and suspends gravity/movement until the destination column's chunk reports
   data + mesh ready (streaming does the loading; the hold piggybacks the same readiness the
   initial-load gate uses), then releases. Also ships the **2-arg form** `/teleport X Z`, which
-  resolves the surface height on arrival (`World.GetHighestVoxel`) — the natural form when far
-  terrain height is unknown.
+  resolves the surface height on arrival (`ChunkData.GetHighestVoxel` — chunk-local; there is no
+  world-level overload) — the natural form when far terrain height is unknown.
 
 ### 3.4 v1 quality-of-life scope ✅ **CHOSEN**
 
@@ -160,7 +160,11 @@ public interface IConsoleCommand
 - **`CommandContext`:** the execution environment — the source (v1: local player; the seat for
   permissions/multiplayer), plus the world facade the command acts through. Commands never
   reach for scene singletons directly, which is what makes the suite's stub-`World` testing
-  work.
+  work. **Facade shape decided 2026-07-18:** concrete nullable `World` + `Player` references on
+  the context (Placement-suite precedent — no interface), optional/defaulting to null so the
+  parameterless construction path and every headless suite call site stay source-compatible;
+  world-touching commands with a null world fail gracefully (`No world is loaded.`). CMD-2
+  defines the facade with `/teleport`; CMD-3 extends it.
 - **Confirmation flow (generic):** any command may return `PendingConfirmation` (prompt +
   continuation). The engine holds at most one; the next submitted line resolves it — `yes`/`y`
   executes the continuation, `no`/`n` cancels, anything else cancels with a notice and is then
@@ -240,7 +244,8 @@ Work items carry the **`CMD-`** prefix (verified unused in `Documentation/`).
 |---------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|----------------|
 | **CMD-0 — engine core** ✅ | Tokenizer, registry, selector resolver (`@player`), confirmation flow, history buffers, `CommandContext`; `HelpCommand`; the validation suite. **Implemented 2026-07-18**: `Assets/Scripts/Commands/` (namespace `Commands`, pure C# — zero Unity usings) + `Validate Command Console` suite (20 baselines, registry suite #10)                                                                                                                                                                                                                                                                                                                                                                                                                                                            |   🟡   | —              |
 | **CMD-1 — console UI** ✅  | Panel + ScrollRect + input field, `IsConsoleOpen` state, `ToggleConsole` action, Esc chain, ↑/↓ recall, T-leak guard. **Implemented 2026-07-18**: runtime-code-built `UI.ConsoleUI` (own overlay canvas, no scene edits) + pure `UI.ConsoleTextFormatter` (suite-pinned severity colors + noparse guard, B21/B22); **the Gameplay action map is disabled while the console is open** (typing can't trigger hotbar/toggles), so Esc/↑/↓ arrive via new UI-map actions (`Cancel`/`HistoryUp`/`HistoryDown`) rather than the gameplay Escape chain. Raw-keyboard bypasses closed: benchmark trigger keys route through the gameplay-gated `InputManager.DebugKeyPressed`, and tripwire baseline B23 fails the suite on any `Keyboard.current` read outside `InputManager` (suite 23, B21–B23) |   🟡   | CMD-0          |
-| **CMD-2 — `/teleport`**   | §4.3 command incl. warning/confirm matrix, arrival hold, 2-arg surface form                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |   🟡   | CMD-1, WS-4a/b |
+| **CMD-2 — `/teleport`**   | §4.3 command incl. warning/confirm matrix, arrival hold, 2-arg surface form; defines the `CommandContext` world facade (§4.1)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |   🟡   | CMD-1, WS-4a/b |
+| **CMD-3 — command pack**  | The §8.1 pack — plan closed 2026-07-18: 10 commands incl. `/spawn` (`/fill` stays out); facade extension + shared `ConsoleCommandInstaller.RegisterAll` seam, then Waves A (read-only) → B (setters + `/spawn`) → C (🟡 commands), suite grown per wave (§8.1)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |   🟡   | CMD-2          |
 
 CMD-0+1 deliver standalone value (a working console with `/help`); CMD-2 is the WS-4c payload —
 the two roadmaps meet there: **WS-4c = CMD-2 + the v12→v13 player-position migration** from
@@ -266,29 +271,75 @@ each phase:
 | **v2**  | The **CMD-3 command pack** (§8.1); tab autocomplete (registry-driven); selectable/copyable output; relative `~` coordinates.                                                  |
 | **v3+** | Entity selectors (`@entity-<id>`, filters) with the entity system; chat on the unprefixed namespace; permissions on `CommandContext` — each gets a design pass when concrete. |
 
-### 8.1 CMD-3 — candidate command pack (brainstormed 2026-07-16, not yet scheduled)
+### 8.1 CMD-3 — command pack (plan closed 2026-07-18; executes after CMD-2)
 
 Ordered by value ÷ cost; every 🟢 entry is a thin getter/setter over a system that already
-exists, so the pack is mostly registry plumbing. Effort assumes CMD-0..2 have landed.
+exists. Effort assumes CMD-0..2 have landed. **Plan decisions closed 2026-07-18** (decision
+menu; don't re-litigate): scope = all rows below except `/fill` (10 commands — `/spawn` is in,
+since CMD-2 lands first and its arrival hold will exist); ordering = after CMD-2, per this
+doc's phasing; facade = the §4.1 concrete nullable `World`+`Player` shape, CMD-3 extends what
+CMD-2 defines; `/time` ships `set` only; `/setblock` uses `ReplacementRule.ForcePlace`.
+Execution plan in §8.1.1.
 
-| Command                              | Backing system (exists today)                                  | Effort | Note                                                                                                                                                     |
-|--------------------------------------|----------------------------------------------------------------|:------:|----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `/where`                             | transform + `WorldOrigin` + region codec                       |   🟢   | Prints voxel pos, chunk, region file, origin chunk. The best WS-4 debugging aid after `/teleport`; pairs with the far-coordinates soak (WS-4 doc §8.2.4) |
-| `/origin` (dev)                      | `WorldOrigin`                                                  |   🟢   | Show the origin / force a shift — makes the WS-4b in-game gate scriptable instead of "fly 1024 units"                                                    |
-| `/set-world-border <radius>` / `off` | TF-14 `BorderRadius` + `World.SetBorderRadius` + level.dat v12 |   🟢   | Everything exists; the command is a setter + save. Warn+confirm when shrinking would strand the player outside (the fence re-clamps them inward)         |
-| `/spawn`, `/setspawn`                | `WorldSpawnPoint` (CRP) + `SetSpawnPoint`                      |   🟢   | `/spawn` = teleport-to-CRP (reuses CMD-2's arrival hold); `/setspawn` writes the existing field                                                          |
-| `/time set\|add <t>`                 | `WorldStateData.timeOfDay` + `GlobalLightLevel`                |   🟢   | Also enables deterministic lighting screenshots/repros                                                                                                   |
-| `/seed`                              | `VoxelData.Seed`                                               |   🟢   | Trivial; handy once the seed-hygiene work (Bug 04) starts                                                                                                |
-| `/fly`, `/noclip`, `/speed <n>`      | `VoxelRigidbody` flags                                         |   🟢   | Already keybound (F1/F6); command form adds discoverability + an exact speed value                                                                       |
-| `/give <block> [n]`                  | `BlockIDs` + toolbar/inventory                                 |   🟡   | Needs name→ID lookup (BlockDatabase names); MUST resolve via `BlockIDs`, never raw IDs                                                                   |
-| `/setblock X Y Z <block>`            | `VoxelMod` + `World.AddModification`                           |   🟡   | Thin wrapper over the existing mod path; useful for validation repros                                                                                    |
-| `/chunk info`                        | `ChunkData` state flags                                        |   🟡   | Dumps the current chunk's pipeline state (lighting flags, mesh state, active voxels) — queryable anywhere; pairs with `chunk-lifecycle` debugging        |
-| `/fill`                              | mass `VoxelMod`                                                |   🔴   | **Deliberately deferred** — unbounded mod volumes stress the apply path's per-frame budgets; needs its own design pass, don't sneak it in                |
+| Command                              | Backing system (exists today)                                  | Effort | Note                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+|--------------------------------------|----------------------------------------------------------------|:------:|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `/where`                             | transform + `WorldOrigin` + region codec                       |   🟢   | Prints voxel pos, chunk, region file, origin chunk. The best WS-4 debugging aid after `/teleport`; pairs with the far-coordinates soak (WS-4 doc §8.2.4)                                                                                                                                                                                                                                                                                                  |
+| `/origin` (dev)                      | `WorldOrigin`                                                  |   🟢   | Show the origin / force a shift — makes the WS-4b in-game gate scriptable instead of "fly 1024 units"                                                                                                                                                                                                                                                                                                                                                     |
+| `/set-world-border <radius>` / `off` | TF-14 `BorderRadius` + `World.SetBorderRadius` + level.dat v12 |   🟢   | Everything exists; the command is a setter + save. Warn+confirm when shrinking would strand the player outside (the fence re-clamps them inward)                                                                                                                                                                                                                                                                                                          |
+| `/spawn`, `/setspawn`                | `WorldSpawnPoint` (CRP) + `SetSpawnPoint`                      |   🟢   | `/spawn` = teleport-to-CRP (reuses CMD-2's arrival hold); `/setspawn` writes the existing field                                                                                                                                                                                                                                                                                                                                                           |
+| `/time set <0..1>`                   | `World.globalLightLevel` (persisted as `timeOfDay`)            |   🟢   | Also enables deterministic lighting screenshots/repros. `add` deferred until RF-1 ships a real clock — today the field is a static light level, so time arithmetic has no meaning                                                                                                                                                                                                                                                                         |
+| `/seed`                              | `VoxelData.Seed`                                               |   🟢   | Trivial; handy once the seed-hygiene work (Bug 04) starts                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `/fly`, `/noclip`, `/speed <n>`      | `VoxelRigidbody` flags                                         |   🟢   | Already keybound (F1/F6); command form adds discoverability + an exact speed value                                                                                                                                                                                                                                                                                                                                                                        |
+| `/give <block> [n]`                  | `BlockIDs` + toolbar/inventory                                 |   🟡   | Needs name→ID lookup (BlockDatabase names); MUST resolve via `BlockIDs`, never raw IDs                                                                                                                                                                                                                                                                                                                                                                    |
+| `/setblock X Y Z <block>`            | `VoxelMod` + `World.AddModification`                           |   🟡   | Thin wrapper over the existing mod path; useful for validation repros. Uses `ReplacementRule.ForcePlace` (decided 2026-07-18 — the `Default` placement-tag gate would silently reject overwriting e.g. stone, defeating the repro purpose; UNBREAKABLE still refuses). Unloaded targets are SAFE: `ApplyModifications` routes them to `ModManager.AddPendingMod` (persistent, auto-applied on chunk load) — the command reports "queued", no guard needed |
+| `/chunk info`                        | `ChunkData` state flags                                        |   🟡   | Dumps the current chunk's pipeline state (lighting flags, mesh state, active voxels) — queryable anywhere; pairs with `chunk-lifecycle` debugging                                                                                                                                                                                                                                                                                                         |
+| `/fill`                              | mass `VoxelMod`                                                |   🔴   | **Deliberately deferred** — unbounded mod volumes stress the apply path's per-frame budgets; needs its own design pass, don't sneak it in                                                                                                                                                                                                                                                                                                                 |
+
+#### 8.1.1 CMD-3 execution plan (closed 2026-07-18)
+
+Runs after CMD-2; each step ends in a verification gate and its own compilable commit.
+
+1. **Facade + registration seam** — extend the §4.1 facade CMD-2 defined (add `Player` if
+   CMD-2 didn't) and add a static `ConsoleCommandInstaller.RegisterAll(registry, context)` that
+   `WorldUIManager` and the suite share, so headless runs register the identical pack.
+   *Gate:* both builds + existing suite green (seam is non-breaking).
+2. **Wave A — read-only:** `/seed`, `/where` (voxel pos / chunk / region via
+   `RegionAddressCodec.ForVersion(...).ChunkVoxelPosToRegionAddress` / origin chunk), `/origin`
+   show + `force` (needs a small public `World` wrapper — the re-anchor path is private).
+   *Gate:* parse/arity/output baselines + the **`/help` count-floor baseline** (asserts the
+   registered-command count — the false-green gate against silently dropped registrations).
+3. **Wave B — setters + `/spawn`:** `/time set <0..1>`, `/set-world-border <r>|off`
+   (shrink-strands-player warn + confirm via the §4.1 `PendingConfirmation` flow), `/setspawn`,
+   `/spawn` (teleport-to-`WorldSpawnPoint` reusing CMD-2's execution + arrival hold), `/fly`,
+   `/noclip`, `/speed <n>`. The fly↔noclip coupling lives at `Player.cs`'s toggle sites, NOT in
+   the properties — the commands must replicate it (noclip⇒flying on; flying-off⇒noclip off).
+   *Gate:* validation-tier + border-confirmation-matrix baselines; state-effect asserts against
+   a slim stub world (the `PlacementTestWorld`/`ValidationReflection` recipe — setter asserts
+   need no chunks/pool); capability commands verified in-game.
+4. **Wave C — 🟡:** `/give` (name→ID via `BlockType.blockName`, case-insensitive), `/setblock`
+   (ForcePlace; see table note), `/chunk info` (dump: `IsPopulated`, `IsLoading`,
+   `NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`,
+   `IsAwaitingMainThreadProcess`, active-voxel count + mesh-side state pinned from `Chunk` at
+   implementation time). *Gate:* parse/lookup-failure baselines headless + a pending-mod-route
+   baseline for `/setblock` on an unloaded chunk; effects verified in-game.
+5. **Doc-sync:** flip the §8.1 rows to implemented; final `Validate All`.
+
+Commands with a null world facade return the graceful `No world is loaded.` error
+(baseline-able). Out of scope stays: `/fill` (own design pass), autocomplete/selectable output
+(separate v2 items), permissions.
 
 ---
 
 ## Document History
 
+* **v1.4** - CMD-3 plan closed (decision menu 2026-07-18): scope = the §8.1 pack minus `/fill`
+  (10 commands — `/spawn` rejoins since CMD-2 executes first, so its arrival hold exists);
+  sequencing = after CMD-2; `CommandContext` facade shape decided (§4.1: concrete nullable
+  `World`+`Player`, Placement precedent, null → graceful error); `/time` = `set` only until
+  RF-1; `/setblock` = `ForcePlace` + safe pending-mod routing for unloaded targets (verified in
+  `ApplyModifications`). Added §8.1.1 execution plan (facade seam → Waves A/B/C, per-wave suite
+  gates, `/help` count-floor false-green guard); CMD-3 row added to §7. Drift fix: §3.3
+  surface-height API is `ChunkData.GetHighestVoxel` (chunk-local), not `World.GetHighestVoxel`.
 * **v1.3** - CMD-1 shipped: `UI.ConsoleUI` builds its whole panel (overlay canvas, ScrollRect
   history, TMP input field) in code at runtime, spawned by `WorldUIManager` — zero scene/prefab
   edits (TouchControls precedent). Input: `ToggleConsole` (T, Gameplay) + `Cancel`/`HistoryUp`/
