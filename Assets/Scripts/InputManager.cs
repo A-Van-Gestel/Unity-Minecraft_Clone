@@ -60,6 +60,7 @@ public class InputManager : MonoBehaviour
     private InputAction _cycleVisModeAction;
     private InputAction _debugCodeAction;
     private InputAction _toggleNoclipAction;
+    private InputAction _toggleConsoleAction;
     private InputAction _hotbar1Action;
     private InputAction _hotbar2Action;
     private InputAction _hotbar3Action;
@@ -76,6 +77,9 @@ public class InputManager : MonoBehaviour
 
     private InputAction _pointAction;
     private InputAction _uiClickAction;
+    private InputAction _cancelAction;
+    private InputAction _historyUpAction;
+    private InputAction _historyDownAction;
 
     // ──────────────────────────────────────────────
     //  Hotbar array (indexed 0–8 for slots 1–9)
@@ -191,6 +195,9 @@ public class InputManager : MonoBehaviour
     public bool ToggleNoclipPressed => _toggleNoclipAction.WasPressedThisFrame()
                                        || (TouchControls.Instance != null && TouchControls.Instance.ToggleNoclipPressed);
 
+    /// <summary><c>true</c> during the frame the Toggle Console button (T) was pressed.</summary>
+    public bool ToggleConsolePressed => _toggleConsoleAction.WasPressedThisFrame();
+
     #endregion
 
     // ==============================================
@@ -204,6 +211,15 @@ public class InputManager : MonoBehaviour
 
     /// <summary><c>true</c> during the frame the left mouse button was first pressed (UI context).</summary>
     public bool UIClickPressed => _uiClickAction.WasPressedThisFrame();
+
+    /// <summary><c>true</c> during the frame Escape was pressed on the UI map (the console's close path while the Gameplay map is disabled).</summary>
+    public bool ConsoleCancelPressed => _cancelAction.WasPressedThisFrame();
+
+    /// <summary><c>true</c> during the frame ↑ was pressed on the UI map (console history recall).</summary>
+    public bool ConsoleHistoryUpPressed => _historyUpAction.WasPressedThisFrame();
+
+    /// <summary><c>true</c> during the frame ↓ was pressed on the UI map (console history recall).</summary>
+    public bool ConsoleHistoryDownPressed => _historyDownAction.WasPressedThisFrame();
 
     #endregion
 
@@ -222,6 +238,26 @@ public class InputManager : MonoBehaviour
             return false;
 
         return _hotbarActions[index].WasPressedThisFrame();
+    }
+
+    // ==============================================
+    //  PUBLIC METHODS — Debug/Benchmark Trigger Keys
+    // ==============================================
+
+    /// <summary>
+    /// Gameplay-gated raw key check for configurable debug/benchmark trigger keys
+    /// (<c>[SerializeField] Key</c> fields that would be overkill as InputActions).
+    /// True the frame <paramref name="key"/> was pressed, but only while the Gameplay map is
+    /// enabled — so UI states that suppress gameplay input (the command console, via
+    /// <c>EnableUI</c>) suppress these keys too. Never read <c>Keyboard.current</c> directly
+    /// outside this class; the Command Console suite's bypass tripwire fails on it.
+    /// </summary>
+    /// <param name="key">The keyboard key to test.</param>
+    /// <returns>True when pressed this frame and gameplay input is active.</returns>
+    public bool DebugKeyPressed(Key key)
+    {
+        return _gameplayMap != null && _gameplayMap.enabled
+               && Keyboard.current != null && Keyboard.current[key].wasPressedThisFrame;
     }
 
     // ==============================================
@@ -311,6 +347,7 @@ public class InputManager : MonoBehaviour
         _cycleVisModeAction = _gameplayMap.FindAction("CycleVisMode", throwIfNotFound: true);
         _debugCodeAction = _gameplayMap.FindAction("DebugCode", throwIfNotFound: true);
         _toggleNoclipAction = _gameplayMap.FindAction("ToggleNoclip", throwIfNotFound: true);
+        _toggleConsoleAction = _gameplayMap.FindAction("ToggleConsole", throwIfNotFound: true);
 
         _hotbar1Action = _gameplayMap.FindAction("Hotbar1", throwIfNotFound: true);
         _hotbar2Action = _gameplayMap.FindAction("Hotbar2", throwIfNotFound: true);
@@ -332,6 +369,9 @@ public class InputManager : MonoBehaviour
         // --- Cache UI Actions ---
         _pointAction = _uiMap.FindAction("Point", throwIfNotFound: true);
         _uiClickAction = _uiMap.FindAction("Click", throwIfNotFound: true);
+        _cancelAction = _uiMap.FindAction("Cancel", throwIfNotFound: true);
+        _historyUpAction = _uiMap.FindAction("HistoryUp", throwIfNotFound: true);
+        _historyDownAction = _uiMap.FindAction("HistoryDown", throwIfNotFound: true);
 
         // --- Touch Controls (mobile only) ---
         if (Application.isMobilePlatform)
