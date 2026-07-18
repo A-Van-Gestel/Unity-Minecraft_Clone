@@ -1,8 +1,8 @@
 # Command Console System Design
 
-**Version:** 1.6
+**Version:** 1.8
 **Date:** 2026-07-18
-**Status:** In progress — CMD-0 (engine core + validation suite), CMD-1 (console UI), and CMD-2 (`/teleport`, the WS-4c tooling payload) implemented + in-game confirmed 2026-07-18; CMD-3 (command pack) plan closed 2026-07-18, next up (§8.1).
+**Status:** **Implemented** — the full v1 arc is shipped and in-game confirmed 2026-07-18: CMD-0 (engine core + validation suite), CMD-1 (console UI), CMD-2 (`/teleport`), and CMD-3 (the 13-command pack, §8.1). Suite 43 baselines; Validate All 266/266. Remaining §8 items (autocomplete, `~` coords, chat, entity selectors, `/fill`) are deliberate v2+ work.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > An in-game command console (Minecraft-chat-style: `T` opens a left-anchored panel with
@@ -275,12 +275,12 @@ Suite note: the teleport matrix (§7) runs against a stub world (`ValidationRefl
 
 Work items carry the **`CMD-`** prefix (verified unused in `Documentation/`).
 
-| Phase                     | Scope                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Effort | Depends on     |
-|---------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|----------------|
-| **CMD-0 — engine core** ✅ | Tokenizer, registry, selector resolver (`@player`), confirmation flow, history buffers, `CommandContext`; `HelpCommand`; the validation suite. **Implemented 2026-07-18**: `Assets/Scripts/Commands/` (namespace `Commands`, pure C# — zero Unity usings) + `Validate Command Console` suite (20 baselines, registry suite #10)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |   🟡   | —              |
-| **CMD-1 — console UI** ✅  | Panel + ScrollRect + input field, `IsConsoleOpen` state, `ToggleConsole` action, Esc chain, ↑/↓ recall, T-leak guard. **Implemented 2026-07-18**: runtime-code-built `UI.ConsoleUI` (own overlay canvas, no scene edits) + pure `UI.ConsoleTextFormatter` (suite-pinned severity colors + noparse guard, B21/B22); **the Gameplay action map is disabled while the console is open** (typing can't trigger hotbar/toggles), so Esc/↑/↓ arrive via new UI-map actions (`Cancel`/`HistoryUp`/`HistoryDown`) rather than the gameplay Escape chain. Raw-keyboard bypasses closed: benchmark trigger keys route through the gameplay-gated `InputManager.DebugKeyPressed`, and tripwire baseline B23 fails the suite on any `Keyboard.current` read outside `InputManager` (suite 23, B21–B23)                     |   🟡   | CMD-0          |
-| **CMD-2 — `/teleport`** ✅ | §4.3 command incl. warning/confirm matrix, arrival hold, 2-arg surface form; defines the `CommandContext` world facade (§4.1). **Implemented 2026-07-18, in-game confirmed**: `TeleportCommand` (alias `tp`, zero Unity usings) + `World.TeleportPlayer` (reuses the WS-4b `ShiftOrigin`) + World-owned hold (release = destination `ChunkData.IsPopulated` && `Chunk.HasMeshApplied` [new pool-reset-safe flag], 10 s timeout fail-safe, `TeleportHoldEnded` → console "Arrived."/timeout warning via `CommandEngine.PostLine`) + `VoxelRigidbody.isTeleportHeld` FixedUpdate gate; suite 23→**31** (B24–B31 teleport matrix vs `CommandTeleportTestWorld`, WorldOrigin snapshot/restore, prove-red on B29); far-lands verification surfaced lighting **Bug 19** (pre-existing, logged in `LIGHTING_BUGS.md`) |   🟡   | CMD-1, WS-4a/b |
-| **CMD-3 — command pack**  | The §8.1 pack — plan closed 2026-07-18: 10 commands incl. `/spawn` (`/fill` stays out); facade extension + shared `ConsoleCommandInstaller.RegisterAll` seam, then Waves A (read-only) → B (setters + `/spawn`) → C (🟡 commands), suite grown per wave (§8.1)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |   🟡   | CMD-2          |
+| Phase                      | Scope                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Effort | Depends on     |
+|----------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|----------------|
+| **CMD-0 — engine core** ✅  | Tokenizer, registry, selector resolver (`@player`), confirmation flow, history buffers, `CommandContext`; `HelpCommand`; the validation suite. **Implemented 2026-07-18**: `Assets/Scripts/Commands/` (namespace `Commands`, pure C# — zero Unity usings) + `Validate Command Console` suite (20 baselines, registry suite #10)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |   🟡   | —              |
+| **CMD-1 — console UI** ✅   | Panel + ScrollRect + input field, `IsConsoleOpen` state, `ToggleConsole` action, Esc chain, ↑/↓ recall, T-leak guard. **Implemented 2026-07-18**: runtime-code-built `UI.ConsoleUI` (own overlay canvas, no scene edits) + pure `UI.ConsoleTextFormatter` (suite-pinned severity colors + noparse guard, B21/B22); **the Gameplay action map is disabled while the console is open** (typing can't trigger hotbar/toggles), so Esc/↑/↓ arrive via new UI-map actions (`Cancel`/`HistoryUp`/`HistoryDown`) rather than the gameplay Escape chain. Raw-keyboard bypasses closed: benchmark trigger keys route through the gameplay-gated `InputManager.DebugKeyPressed`, and tripwire baseline B23 fails the suite on any `Keyboard.current` read outside `InputManager` (suite 23, B21–B23)                                              |   🟡   | CMD-0          |
+| **CMD-2 — `/teleport`** ✅  | §4.3 command incl. warning/confirm matrix, arrival hold, 2-arg surface form; defines the `CommandContext` world facade (§4.1). **Implemented 2026-07-18, in-game confirmed**: `TeleportCommand` (alias `tp`, zero Unity usings) + `World.TeleportPlayer` (reuses the WS-4b `ShiftOrigin`) + World-owned hold (release = destination `ChunkData.IsPopulated` && `Chunk.HasMeshApplied` [new pool-reset-safe flag], 10 s timeout fail-safe, `TeleportHoldEnded` → console "Arrived."/timeout warning via `CommandEngine.PostLine`) + `VoxelRigidbody.isTeleportHeld` FixedUpdate gate; suite 23→**31** (B24–B31 teleport matrix vs `CommandTeleportTestWorld`, WorldOrigin snapshot/restore, prove-red on B29); far-lands verification surfaced lighting **Bug 19** (pre-existing, logged in `LIGHTING_BUGS.md`)                          |   🟡   | CMD-1, WS-4a/b |
+| **CMD-3 — command pack** ✅ | The §8.1 pack (`/fill` stays out). **Implemented 2026-07-18, in-game confirmed**: 13 commands via `ConsoleCommandInstaller.RegisterAll` (shared production/suite registration list, count-floor B32) — Wave A `/seed` `/where` `/origin [force]` (new public `World.ForceOriginReanchor`), Wave B `/time set` `/set-world-border` (shrink-strand confirm) `/setspawn` `/spawn` (CMD-2 hold reuse) `/fly` `/noclip` `/speed` (keybind coupling replicated), Wave C `/give` (name→ID case-insensitive; `ItemStack.ID` is a **byte** → >255 guard) `/setblock` (new `World.PlaceBlockCommand` owns ForcePlace + `Vector3Int`, keeping `Commands` UnityEngine-free; placed-vs-queued report) `/chunk info`. Shared `CommandArgUtility`; suite 31→**43** (B32–B43, prove-red ×2: B39 coupling, B41 case-insensitivity); Validate All 266/266 |   🟡   | CMD-2 ✅        |
 
 CMD-0+1 deliver standalone value (a working console with `/help`); CMD-2 is the WS-4c payload —
 the two roadmaps meet there: **WS-4c = CMD-2 + the v12→v13 player-position migration** from
@@ -306,7 +306,7 @@ each phase:
 | **v2**  | The **CMD-3 command pack** (§8.1); tab autocomplete (registry-driven); selectable/copyable output; relative `~` coordinates.                                                  |
 | **v3+** | Entity selectors (`@entity-<id>`, filters) with the entity system; chat on the unprefixed namespace; permissions on `CommandContext` — each gets a design pass when concrete. |
 
-### 8.1 CMD-3 — command pack (plan closed 2026-07-18; executes after CMD-2)
+### 8.1 CMD-3 — command pack ✅ (implemented + in-game confirmed 2026-07-18)
 
 Ordered by value ÷ cost; every 🟢 entry is a thin getter/setter over a system that already
 exists. Effort assumes CMD-0..2 have landed. **Plan decisions closed 2026-07-18** (decision
@@ -330,7 +330,13 @@ Execution plan in §8.1.1.
 | `/chunk info`                        | `ChunkData` state flags                                        |   🟡   | Dumps the current chunk's pipeline state (lighting flags, mesh state, active voxels) — queryable anywhere; pairs with `chunk-lifecycle` debugging                                                                                                                                                                                                                                                                                                         |
 | `/fill`                              | mass `VoxelMod`                                                |   🔴   | **Deliberately deferred** — unbounded mod volumes stress the apply path's per-frame budgets; needs its own design pass, don't sneak it in                                                                                                                                                                                                                                                                                                                 |
 
-#### 8.1.1 CMD-3 execution plan (closed 2026-07-18)
+#### 8.1.1 CMD-3 execution plan (closed 2026-07-18) — **executed 2026-07-18**
+
+All five steps below ran as planned in the CMD-2 follow-on session (suite gates green at every
+wave, prove-red on B39/B41, Validate All 266/266); step 5's in-game half is pending. Two
+mechanical deltas from execution: the pack is **13** commands (the table's row count; the
+plan's "10" was loose row counting), and `/give` gained a >255-ID guard (`ItemStack.ID` is a
+byte). Original plan, for the record:
 
 Runs after CMD-2; each step ends in a verification gate and its own compilable commit.
 
@@ -367,6 +373,23 @@ Commands with a null world facade return the graceful `No world is loaded.` erro
 
 ## Document History
 
+* **v1.8** - CMD-3 in-game CONFIRMED (all 13 commands verified by hand) — §7/§8.1 flipped to
+  full ✅; the entire v1 console arc (CMD-0..3) is now shipped. Notable emergent integration
+  observed during verification: `/setblock <far> stone` followed by `/teleport <far X Z>`
+  places the queued block first (pending-mods replay on chunk load precedes the arrival hold's
+  readiness release) and the 2-arg surface resolution then lands the player ON the new block —
+  pending mods, hold ordering, and `GetHighestVoxel` composing with zero coordination code.
+* **v1.7** - CMD-3 code-complete + suite-verified (same-day follow-on session): all 13 pack
+  commands shipped via the shared `ConsoleCommandInstaller.RegisterAll` seam (count-floor B32
+  false-green guard, `InstalledCommandCount` 14 incl. `/teleport`); new public `World` surface:
+  `ForceOriginReanchor` (/origin force) + `PlaceBlockCommand` (/setblock's ForcePlace +
+  `Vector3Int` ownership — the `Commands` namespace stays free of UnityEngine usings);
+  `SetGlobalLightValue` null-camera-guarded so /time is headless-testable. Suite 31→43
+  (B32–B43; fixture gained a stub `BlockDatabase` + installer registration;
+  `ValidationReflection.GetInstanceField` added), prove-red ×2 (B39 fly↔noclip coupling, B41
+  case-insensitive name lookup), Validate All 266/266 across 10 suites. Execution deltas
+  recorded in §8.1.1 (13 commands, /give byte-ID guard). §7/§8.1 flip to full ✅ follows the
+  pending in-game pass.
 * **v1.6** - CMD-2 shipped + in-game confirmed (near / 2-arg surface / far≥2²⁴ confirm / fence
   re-clamp / verbatim-Y all verified by hand): §7 row flipped ✅ with the shipped surface
   (facade `AttachWorld` wired in `WorldUIManager.Start` — `Awake` is too early for
@@ -424,4 +447,4 @@ Commands with a null world facade return the graceful `No world is loaded.` erro
 ---
 
 **Last Updated:** 2026-07-18
-**Next Review:** at the WS-4c kickoff (CMD-2 is its payload).
+**Next Review:** when a §8 v2 item (autocomplete, `~` relative coords, chat, entity selectors, `/fill`) gets scheduled — each needs its own design pass.
