@@ -1,8 +1,8 @@
 # Command Console System Design
 
-**Version:** 1.4
+**Version:** 1.5
 **Date:** 2026-07-18
-**Status:** In progress — CMD-0 (engine core + validation suite) and CMD-1 (console UI) implemented 2026-07-18; CMD-2 pending; CMD-3 (command pack) plan closed 2026-07-18, executes after CMD-2 (§8.1).
+**Status:** In progress — CMD-0 (engine core + validation suite) and CMD-1 (console UI) implemented 2026-07-18; CMD-2 plan closed 2026-07-18 (§3.3/§4.3), ready to implement; CMD-3 (command pack) plan closed 2026-07-18, executes after CMD-2 (§8.1).
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > An in-game command console (Minecraft-chat-style: `T` opens a left-anchored panel with
@@ -106,10 +106,28 @@ blocked, cursor unlocks, **simulation keeps running** — identical to the inven
 - **Force `IsFlying` (rejected):** ❌ mutates player capability state as a side effect.
 - **Hold until ready ✅ CHOSEN** (decided 2026-07-16): the command places the player at the
   destination and suspends gravity/movement until the destination column's chunk reports
-  data + mesh ready (streaming does the loading; the hold piggybacks the same readiness the
-  initial-load gate uses), then releases. Also ships the **2-arg form** `/teleport X Z`, which
-  resolves the surface height on arrival (`ChunkData.GetHighestVoxel` — chunk-local; there is no
-  world-level overload) — the natural form when far terrain height is unknown.
+  data + mesh ready (streaming does the loading), then releases. Also ships the **2-arg form**
+  `/teleport X Z`, which resolves the surface height on arrival-release
+  (`ChunkData.GetHighestVoxel` — chunk-local; there is no world-level overload) — the natural
+  form when far terrain height is unknown.
+
+Hold execution decisions (closed 2026-07-18):
+
+- **Release condition = data + mesh** (confirmed): physics only needs the destination chunk's
+  *data* — collision is voxel-based (`TryGetVoxel`; unloaded collides as empty), not
+  mesh-collider-based — so the mesh wait is a UX choice (never drop the player into an
+  invisible-but-collidable world), not a safety one. Note the startup "initial-load gate" is a
+  one-shot coroutine, not a reusable predicate: the hold runs its **own** readiness poll
+  (chunk populated + mesh applied), read-only over the pipeline — no new chunk flags, the
+  pipeline stays teleport-blind.
+- **Timeout fail-safe** (~10 s, named const): a destination chunk that never becomes ready
+  (the CP-* audit documents async-load failures leaving chunks stuck) would otherwise suspend
+  the player forever. On timeout the hold releases with a console warning line — the player
+  might fall if data genuinely never loaded, but can `/teleport` back; no permanent soft-lock.
+- **World-owned hold**: `World` owns chunk-readiness knowledge and the `Update` loop, so the
+  hold state lives there (polled in `Update`); `VoxelRigidbody` only gains a held flag checked
+  in `FixedUpdate` beside the existing `IsWorldLoaded` gate. (The CP refactor may extract it
+  later.)
 
 ### 3.4 v1 quality-of-life scope ✅ **CHOSEN**
 
@@ -188,10 +206,16 @@ native containers, no pooled-type fields (pool-reset-safety not applicable).
 
 ### 4.3 `TeleportCommand`
 
-`/teleport [@target] X Y Z` and `/teleport [@target] X Z` (surface-resolved Y). Coordinates are
-**absolute voxel world space** — post-WS-4 the execution is a thin wrapper: re-anchor
-`WorldOrigin` to the destination chunk, place the transform via `WorldOrigin.VoxelToUnity`,
-apply the §3.3 arrival hold, and let streaming load the surroundings. Validation tiers:
+`/teleport [@target] X Y Z` and `/teleport [@target] X Z` (surface-resolved Y); alias `tp`.
+Coordinates are **absolute voxel world space**, **integer literals only in v1** (decided
+2026-07-18: exact tier math via `CommandToken.Integer`; decimals rejected with a usage hint —
+allowing them later breaks nothing, whereas float range checks get imprecise exactly at the
+> 2²⁴ thresholds the tiers guard). Post-WS-4 the execution is a thin wrapper — a public
+`World.TeleportPlayer(dest, resolveSurfaceY)`: re-anchor via the existing (private)
+`ShiftOrigin` on the destination chunk, place the transform via `WorldOrigin.VoxelToUnity`
+(the transient large-float translate is immediately overwritten, so no precision loss), begin
+> the §3.3 arrival hold, and let streaming load the surroundings (`PlayerChunkCoord` changes →
+`CheckViewDistance` fires on the next `Update` by itself). Validation tiers:
 
 | Input condition                                      | Behavior                                                   |
 |------------------------------------------------------|------------------------------------------------------------|
@@ -204,6 +228,17 @@ apply the §3.3 arrival hold, and let streaming load the surroundings. Validatio
 Note (border fence): `VoxelRigidbody.ClampToWorldBorder` re-clamps every `FixedUpdate`, so a
 confirmed out-of-fence teleport lands and is immediately clamped back to the fence edge — the
 warning text says so rather than pretending the destination sticks.
+
+Tier evaluation order (decided 2026-07-18): hard errors first (arity / unknown selector /
+wrap), then **all** applicable warnings are collected and presented in a **single**
+`PendingConfirmation` listing every warning line (the engine holds at most one pending
+confirmation, so stacking them one-per-warning would drop all but the last).
+
+Suite note: the teleport matrix (§7) runs against a stub world (`ValidationReflection` recipe
+
++ a dummy player GameObject). **`WorldOrigin` is shared static state** — the fixture must
+  snapshot and restore it on `Dispose` (ChunkMath-suite precedent), or a teleport baseline leaks
+  a shifted origin into every subsequent suite.
 
 ---
 
@@ -332,6 +367,14 @@ Commands with a null world facade return the graceful `No world is loaded.` erro
 
 ## Document History
 
+* **v1.5** - CMD-2 plan closed (decision menu 2026-07-18): §3.3 gained the hold execution
+  decisions — release = data + mesh confirmed (with the physics-only-needs-data nuance: the
+  hold runs its own read-only readiness poll, the startup gate is not a reusable predicate),
+  ~10 s timeout fail-safe with console warning (CP-F1-class stall guard), World-owned hold
+  (rigidbody gets only a held flag). §4.3: integer-only coordinates in v1, `tp` alias, the
+  `World.TeleportPlayer` execution wrapper spelled out, single-combined-confirmation tier
+  order, and the suite's `WorldOrigin` snapshot/restore requirement. Scope note: CMD-2 is the
+  command only — the WS-4c persistence half (v13) shipped 2026-07-17 separately.
 * **v1.4** - CMD-3 plan closed (decision menu 2026-07-18): scope = the §8.1 pack minus `/fill`
   (10 commands — `/spawn` rejoins since CMD-2 executes first, so its arrival hold exists);
   sequencing = after CMD-2; `CommandContext` facade shape decided (§4.1: concrete nullable
