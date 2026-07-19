@@ -37,6 +37,7 @@ namespace Commands
         private readonly CommandRingBuffer<string> _commandHistory = new CommandRingBuffer<string>(COMMAND_HISTORY_CAPACITY);
         private readonly List<CommandToken> _tokenScratch = new List<CommandToken>();
         private readonly List<CommandToken> _completionScratch = new List<CommandToken>();
+        private readonly List<string> _matchScratch = new List<string>();
 
         private PendingConfirmation _pending;
 
@@ -184,18 +185,18 @@ namespace Commands
             if (tokenCount == 0 || (tokenCount == 1 && !trailingSpace))
             {
                 string namePartial = tokenCount == 0 ? "" : _completionScratch[0].Text;
-                List<string> matches = new List<string>();
+                _matchScratch.Clear();
                 foreach (IConsoleCommand cmd in _registry.Commands)
                     if (cmd.Name.StartsWith(namePartial, StringComparison.OrdinalIgnoreCase))
-                        matches.Add(cmd.Name);
+                        _matchScratch.Add(cmd.Name);
 
-                if (matches.Count == 0)
+                if (_matchScratch.Count == 0)
                     return CommandCompletion.Unchanged(text);
 
                 // A single match completes fully with a trailing space (ready for arguments); multiple
                 // matches advance only to their shared prefix (bash/Minecraft behavior).
-                string completedName = matches.Count == 1 ? matches[0] + " " : LongestCommonPrefix(matches);
-                return new CommandCompletion("/" + completedName, matches.ToArray());
+                string completedName = _matchScratch.Count == 1 ? _matchScratch[0] + " " : LongestCommonPrefix(_matchScratch);
+                return new CommandCompletion("/" + completedName, _matchScratch.ToArray());
             }
 
             // Argument stage: the command name is complete; delegate to an opt-in completer.
@@ -309,29 +310,10 @@ namespace Commands
         /// returned in the first value's casing (so completion emits the canonical block/command name).</summary>
         /// <param name="values">The candidate strings (at least one).</param>
         /// <returns>Their shared leading prefix (possibly empty).</returns>
-        private static string LongestCommonPrefix(List<string> values)
+        private static string LongestCommonPrefix(IReadOnlyList<string> values)
         {
             string prefix = values[0];
             for (int i = 1; i < values.Count && prefix.Length > 0; i++)
-            {
-                string other = values[i];
-                int max = Math.Min(prefix.Length, other.Length);
-                int j = 0;
-                while (j < max && char.ToLowerInvariant(prefix[j]) == char.ToLowerInvariant(other[j]))
-                    j++;
-                prefix = prefix.Substring(0, j);
-            }
-
-            return prefix;
-        }
-
-        /// <summary>The longest common prefix of the given values (array overload; see the list overload).</summary>
-        /// <param name="values">The candidate strings (at least one).</param>
-        /// <returns>Their shared leading prefix (possibly empty).</returns>
-        private static string LongestCommonPrefix(string[] values)
-        {
-            string prefix = values[0];
-            for (int i = 1; i < values.Length && prefix.Length > 0; i++)
             {
                 string other = values[i];
                 int max = Math.Min(prefix.Length, other.Length);

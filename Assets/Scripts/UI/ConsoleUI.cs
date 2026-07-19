@@ -49,6 +49,7 @@ namespace UI
         private TextMeshProUGUI _ghostText;
         private string _ghostSourceText;
         private int _ghostSourceCaret = -1;
+        private string _ghostSuffix = "";
         private readonly StringBuilder _historyBuilder = new StringBuilder();
         private bool _historyDirty;
         private bool _autoscrollPending;
@@ -119,7 +120,9 @@ namespace UI
         {
             if (_inputField.caretPosition != _inputField.text.Length)
                 return;
-            if (string.IsNullOrEmpty(_engine.Suggest(_inputField.text)))
+            // Accept only when a ghost is actually showing — reuse the already-computed suffix rather
+            // than recomputing the suggestion (ApplyAutocomplete runs the single Complete pass).
+            if (string.IsNullOrEmpty(_ghostSuffix))
                 return;
 
             ApplyAutocomplete(); // a single-candidate input fills to the full completion
@@ -147,6 +150,7 @@ namespace UI
             string suffix = (!string.IsNullOrEmpty(text) && _inputField.caretPosition == text.Length)
                 ? _engine.Suggest(text)
                 : "";
+            _ghostSuffix = suffix; // cached so RightArrow/End accept needn't recompute the suggestion
 
             // Strip any literal </noparse> from the typed text so it can't terminate the transparent
             // prefix's guard and let injected markup render (same guard ConsoleTextFormatter applies).
@@ -195,6 +199,7 @@ namespace UI
             _ghostText.text = "";
             _ghostSourceText = null;
             _ghostSourceCaret = -1;
+            _ghostSuffix = "";
             _panel.SetActive(false);
         }
 
