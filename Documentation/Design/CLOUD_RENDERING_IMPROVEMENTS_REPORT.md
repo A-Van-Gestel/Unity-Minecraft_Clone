@@ -1,7 +1,7 @@
 # Cloud Rendering Improvements Report
 
-**Version:** 1.6
-**Date:** 2026-07-19
+**Version:** 1.7
+**Date:** 2026-07-20
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
@@ -34,6 +34,11 @@ the render-distance-scaling session that produced `c7eabd6`, not assumed.
   (`FL-*`) — foliage sway (FL-1, shipped) reads the same shared wind vector as cloud drift.
   **That vector moved to `World.WindBlocksPerSecond` when FL-1 shipped** (2026-07-19); `Clouds`
   no longer owns it (`LayerWind` reads World). RF-7 later drives the World value.
+- [`VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md`](VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md)
+  (`VX-*`) — experimental volumetrics backlog. CL-5 stays owned here; VX-2 (volumetric fog) is
+  its sibling raymarch pass and shares the depth-composite/transparent-queue watchpoints. CL-7
+  gains an optional upgrade path: sample VX-1's GPU light volume (sky channel) instead of
+  uploading its own 2D density texture — no dependency either way.
 
 ---
 
@@ -54,16 +59,16 @@ the render-distance-scaling session that produced `c7eabd6`, not assumed.
 All remaining CL-* items build on the render-distance-scaled tile system (`c7eabd6`) plus the
 CL-1/CL-2 drift + shader work (`d52b089`, `12e6cf6`, both in-game verified 2026-07-19):
 
-| Area          | Current state (verified)                                                                                                                                                                                                                                                                                                                                                                |
-|---------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Coverage      | `max(viewDistance × 2, 8)` chunks radius; 64-block tiles keyed by **cloud-space tile index** (drift-corrected), pooled GameObjects, one shared `Mesh` per unique pattern tile (`Clouds.GetTileMesh`)                                                                                                                                                                                    |
-| Pattern       | **Procedural seeded (was CL-3 Option A):** `CloudPatternJob` (Burst) — periodic FBM value noise, lowbias32 lattice hash, thresholded at the coverage percentile (0.23 = classic density); knobs 32 cells / 4 octaves / 0.6 persistence calibrated vs `clouds.png` blob stats. Classic texture behind `_useClassicPattern`; still repeats every 512 via `WrapToPattern`                  |
-| Styles        | `CloudStyle` enum: `Off` / `Fast` (down-facing quads only) / `Fancy` (1-block-tall extruded hull, corners inflated by `_depthOffset` against Z-fighting)                                                                                                                                                                                                                                |
-| Shader        | `Minecraft/CloudShader` — unlit; MC-style per-face shading (Fancy-only via the **per-material** `_CloudFaceShading`, v1.4), `SkyLightColor` day/night tint, coverage-edge fade (`_CloudFadeParams`). Transparent with **`ZWrite On`**: depth resolves overlapping faces (v1.1)                                                                                                          |
+| Area          | Current state (verified)                                                                                                                                                                                                                                                                                                                                                                 |
+|---------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Coverage      | `max(viewDistance × 2, 8)` chunks radius; 64-block tiles keyed by **cloud-space tile index** (drift-corrected), pooled GameObjects, one shared `Mesh` per unique pattern tile (`Clouds.GetTileMesh`)                                                                                                                                                                                     |
+| Pattern       | **Procedural seeded (was CL-3 Option A):** `CloudPatternJob` (Burst) — periodic FBM value noise, lowbias32 lattice hash, thresholded at the coverage percentile (0.23 = classic density); knobs 32 cells / 4 octaves / 0.6 persistence calibrated vs `clouds.png` blob stats. Classic texture behind `_useClassicPattern`; still repeats every 512 via `WrapToPattern`                   |
+| Styles        | `CloudStyle` enum: `Off` / `Fast` (down-facing quads only) / `Fancy` (1-block-tall extruded hull, corners inflated by `_depthOffset` against Z-fighting)                                                                                                                                                                                                                                 |
+| Shader        | `Minecraft/CloudShader` — unlit; MC-style per-face shading (Fancy-only via the **per-material** `_CloudFaceShading`, v1.4), `SkyLightColor` day/night tint, coverage-edge fade (`_CloudFadeParams`). Transparent with **`ZWrite On`**: depth resolves overlapping faces (v1.1)                                                                                                           |
 | Motion        | **Wind drift (was CL-1):** cloud-space tiles on a drift-carrying root — per-frame cost is one root transform move; re-key sweep only on cloud-tile crossing; accumulator wraps at the pattern period; wind vector **owned by `World` since FL-1** (`World.WindBlocksPerSecond`, default `(−0.6, 0)`, shared with foliage sway; `Clouds.LayerWind` reads it), RF-7 drives the value later |
-| Lighting/time | **Face shading + tint + edge fade (was CL-2, absorbs RF-2 §5):** top 1.0 / bottom 0.7 / X 0.9 / Z 0.8 on Fancy, flat on Fast; hue follows `SkyLightColor`, brightness follows the shared `VoxelLightToShadow` curve at `sunLuminance = 1`, **normalized to noon** (noon look = authored `_Color` exactly; night matches terrain's relative darkening)                                   |
-| Update driver | Per-frame `Clouds.Update` drift tick (root move only, allocation-free); the re-key sweep runs on cloud-tile crossing and from `CheckViewDistance` / `Reanchor()` / `OnSettingsChanged` → `Reinitialize()` (drift survives reinit)                                                                                                                                                       |
-| Layers        | **Per-layer config array (was CL-6):** `CloudLayerConfig[]` on the `Clouds` component — height, drift multiplier + veer, opacity, style clamp (`min(setting, maxStyle)`), noise knobs, seed salt; per-layer runtime state (drift root, material instance, pattern, pools). Defaults: main 100 + upper 170 (×1.5 drift veered 15°, 60% opacity, always `Fast`, 2× blobs @ 0.12 coverage) |
+| Lighting/time | **Face shading + tint + edge fade (was CL-2, absorbs RF-2 §5):** top 1.0 / bottom 0.7 / X 0.9 / Z 0.8 on Fancy, flat on Fast; hue follows `SkyLightColor`, brightness follows the shared `VoxelLightToShadow` curve at `sunLuminance = 1`, **normalized to noon** (noon look = authored `_Color` exactly; night matches terrain's relative darkening)                                    |
+| Update driver | Per-frame `Clouds.Update` drift tick (root move only, allocation-free); the re-key sweep runs on cloud-tile crossing and from `CheckViewDistance` / `Reanchor()` / `OnSettingsChanged` → `Reinitialize()` (drift survives reinit)                                                                                                                                                        |
+| Layers        | **Per-layer config array (was CL-6):** `CloudLayerConfig[]` on the `Clouds` component — height, drift multiplier + veer, opacity, style clamp (`min(setting, maxStyle)`), noise knobs, seed salt; per-layer runtime state (drift root, material instance, pattern, pools). Defaults: main 100 + upper 170 (×1.5 drift veered 15°, 60% opacity, always `Fast`, 2× blobs @ 0.12 coverage)  |
 
 ---
 
@@ -236,6 +241,9 @@ too); pairs naturally with CL-5 where the slab shader gives the effect for free 
 * **v1.6** - Wind ownership updated for shipped FL-1 (2026-07-19): `_windBlocksPerSecond` moved
   from `Clouds` to `World.WindBlocksPerSecond` (shared with foliage sway; `Clouds.LayerWind`
   reads it; RF-7 drives the World value later). Motion baseline row + FL relationship updated.
+* **v1.7** - Cross-linked the new `VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md` (`VX-*`): CL-5
+  stays owned here (shares the raymarch/depth-composite watchpoints with VX-2); CL-7 may later
+  read VX-1's sky channel instead of its own 2D upload (optional, no dependency).
 * **v1.5** - Cross-linked the new `FOLIAGE_LIVELINESS_IMPROVEMENTS_REPORT.md` (`FL-*`): foliage
   sway shares the `_windBlocksPerSecond` wind vector (relationship list only, no CL-* changes)
 * **v1.4** - **CL-6 SHIPPED & archived** (2026-07-19, `cf8f7b9`, in-game verified): `Clouds`
@@ -276,5 +284,5 @@ too); pairs naturally with CL-5 where the slab shader gives the effect for free 
 
 ---
 
-**Last Updated:** 2026-07-19
+**Last Updated:** 2026-07-20
 **Next Review:** when CL-4 or CL-7 starts (re-verify `Clouds.cs`/`CloudPatternJob.cs`/`CloudShader.shader` against the v1.4 baseline) or on the next RF-7 design pass (wind/weather seam)

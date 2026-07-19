@@ -135,6 +135,11 @@ gates.
   IDs here rather than duplicating them; **their Benefit column is redefined** (player-facing
   value, not frame-time) — do not compare ratings across reports. The combined feature roadmap
   lives at the end of the `TF-*` report.
+- `VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md` (`VX-*`) — experimental-tier volumetric/traced
+  effects (2026-07-20 feasibility pass): its render passes are constrained by `GS-2` (opaque
+  texture) and fold into the `GS-4` tier audit; `MR-8`'s per-chunk 3D-light-texture aside is
+  the same data structure as its VX-1 substrate, and its VX-8 (per-fragment voxel lighting)
+  is the concrete design for MR-8's smooth-lighting escape hatch (constraint (b)).
 
 ---
 
