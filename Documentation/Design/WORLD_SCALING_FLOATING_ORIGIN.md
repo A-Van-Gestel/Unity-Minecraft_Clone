@@ -548,6 +548,17 @@ graduate to work items).
   exists short of a hard world border inside the edge; it is unreachable in normal play (only
   `/teleport` to the edge hits it), and HF-2 per-job fault isolation contains the damage — the
   world stays playable. Revisit only if a gameplay-facing world bound ever ships.
+  <br>**Known symptom inventory at the edge** (all one class, none scheduled for fixing):
+  (a) lighting cross-chunk merge faults with `int.MinValue` chunk/local values (contained by HF-2);
+  (b) `StandardChunkGenerationJob` structure cell election — `cell × spacing ± padding`
+  (`StandardChunkGenerationJob.cs:596`) wraps, inverting the bounds pair so
+  `Random.NextInt(min, max)` throws `ArgumentException: min must be less than or equal to max`
+  inside the Burst job (observed 2026-07-19; the WS-3 `FloorDiv` rider is exact — it is the
+  subsequent multiply that wraps); (c) **quadrant inversion**: int space is a ring, so coordinates
+  crossing ±2³¹ arrive in the sign-mirrored quadrant — teleporting "past" the edge is wraparound,
+  not clamping. All are Burst-job exceptions or coordinate aliasing at a location where terrain is
+  already maximally degraded (the v2 noise rider caps usable radius at ±2²⁴ until it ships, and at
+  ±2³¹ permanently by design).
 - **Liquid noise input precision degrades cosmetically far out** under the raw
   `_WorldOriginOffset` — same class as today's absolute `worldPos`, liquid-only, accepted.
 - ~~**Until WS-4c lands, the saved player position is precise only to ±2²⁴**~~ — **closed 2026-07-17**: it is
@@ -629,6 +640,9 @@ graduate to work items).
   on the float paths; guarded by lighting B95/B96 on a far-anchored harness (prove-red, then
   Validate All 279/279). §9 additionally records the **±2³¹ edge overflow class as documented-only**
   (decision 2026-07-19) and the header/limitations updated to reflect lighting being exact to ±2³¹.
+  Same-day addendum: §9 gained the edge symptom inventory — the generation-side `Random.NextInt`
+  min>max fault (structure cell election multiply wrap, `StandardChunkGenerationJob.cs:596`) and
+  quadrant inversion (int-ring wraparound), both observed at the edge in-game and classified non-issues.
 * **v1.8** - **WS-4c's tooling half SHIPPED** (2026-07-18): `/teleport` landed as CMD-2 of
   `COMMAND_CONSOLE_SYSTEM.md` (v1.6 there records the shipped surface + suite B24–B31). The §7
   WS-4 phase table is now fully ✅. Far-teleport verification (±2×10⁷ voxels) confirmed the
