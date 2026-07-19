@@ -3,6 +3,7 @@ Shader "Minecraft/CloudShader"
     Properties
     {
         _Color ("Color", Color) = (1, 1, 1, 1)
+        _CloudFaceShading ("Face Shading", Range(0, 1)) = 1
     }
     SubShader
     {
@@ -31,20 +32,22 @@ Shader "Minecraft/CloudShader"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Includes/VoxelLighting.hlsl"
 
+            // _CloudFaceShading is PER-MATERIAL since CL-6: layers clamp styles independently
+            // (Fancy main + Fast upper), and a flat layer's bottom-only faces must not darken.
+            // 1 = per-face weights (Fancy), 0 = flat (Fast).
             CBUFFER_START(UnityPerMaterial)
                 half4 _Color;
+                half _CloudFaceShading;
             CBUFFER_END
 
             // Shader globals (set from C#, outside UnityPerMaterial like the block shaders):
             // SkyLightColor — time-of-day sky tint (hue only — brightness lives in the shade curve).
             // GlobalLightLevel / min / max — day/night cycle inputs to the shared shade curve.
-            // _CloudFaceShading — 1 = per-face weights (Fancy), 0 = flat (Fast, all bottom faces).
             // _CloudFadeParams — x = fade start distance (blocks), y = 1 / fade range (Clouds.UpdateClouds).
             half3 SkyLightColor;
             float GlobalLightLevel;
             float minGlobalLightLevel;
             float maxGlobalLightLevel;
-            half _CloudFaceShading;
             float4 _CloudFadeParams;
 
             // Minecraft-style face shading weights, matching the terrain's block-face language.
