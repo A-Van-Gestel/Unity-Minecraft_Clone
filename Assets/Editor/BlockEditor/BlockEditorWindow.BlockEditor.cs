@@ -325,6 +325,7 @@ namespace Editor.BlockEditor
                 }
 
                 _selectedBlock.renderNeighborFaces = EditorGUILayout.Toggle(new GUIContent("Render Neighbor Faces", "Indicates whether the neighboring faces should still be rendered when this block is placed."), _selectedBlock.renderNeighborFaces);
+                _selectedBlock.swayStrength = EditorGUILayout.Slider(new GUIContent("Sway Strength", "Foliage wind-sway strength in [0, 1] (FL-2). 0 = rigid. Only affects blocks rendered in the transparent cutout pass (Render Neighbor Faces); cross-mesh flora ignores this — FL-1 bakes its own root-anchored weights."), _selectedBlock.swayStrength, 0f, 1f);
                 _selectedBlock.isActive = EditorGUILayout.Toggle(new GUIContent("Is Active", "Indicates whether the block has any block behavior."), _selectedBlock.isActive);
 
                 EditorUILayoutHelper.DrawSeparator();
@@ -771,12 +772,15 @@ namespace Editor.BlockEditor
                 isSolid = _selectedBlock.isSolid,
                 collisionBounds = _selectedBlock.collisionBounds,
                 renderNeighborFaces = _selectedBlock.renderNeighborFaces,
+                swayStrength = _selectedBlock.swayStrength,
                 fluidType = _selectedBlock.fluidType,
                 fluidShaderID = _selectedBlock.fluidShaderID,
                 fluidMeshData = _selectedBlock.fluidMeshData,
                 fluidLevel = _selectedBlock.fluidLevel,
                 flowLevels = _selectedBlock.flowLevels,
                 waterfallsMaxSpread = _selectedBlock.waterfallsMaxSpread,
+                infiniteSourceRegeneration = _selectedBlock.infiniteSourceRegeneration,
+                spreadChance = _selectedBlock.spreadChance,
                 opacity = _selectedBlock.opacity,
                 lightEmission = _selectedBlock.lightEmission,
                 lightEmissionColor = _selectedBlock.lightEmissionColor,

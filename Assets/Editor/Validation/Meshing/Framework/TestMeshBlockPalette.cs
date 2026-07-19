@@ -55,8 +55,18 @@ namespace Editor.Validation.Meshing.Framework
         /// </summary>
         public const ushort CrossFlora = 5;
 
+        /// <summary>
+        /// Transparent leaf-like cube with an authored <c>swayStrength</c> (<see cref="SwayStrength"/>) —
+        /// routes through the FL-2 sway post-pass (uniform UV ZW on every emitted vert) that baseline
+        /// B23 guards. Solid + <c>renderNeighborFaces</c>, like production OakLeaves.
+        /// </summary>
+        public const ushort SwayingLeafCube = 6;
+
+        /// <summary>The authored sway strength of <see cref="SwayingLeafCube"/> (0.25 — exact in half precision).</summary>
+        public const float SwayStrength = 0.25f;
+
         /// <summary>Total number of block types in the palette.</summary>
-        public const int Count = 6;
+        public const int Count = 7;
 
         /// <summary>
         /// Builds the palette as managed <see cref="BlockType"/> instances and converts them to the
@@ -78,6 +88,9 @@ namespace Editor.Validation.Meshing.Framework
             jobData[WaterSource] = new BlockTypeJobData(
                 MakeFluid("TestWaterSource", FluidType.WaterLike, fluidShaderID: 0, fluidLevel: 0, flowLevels: 8));
             jobData[CrossFlora] = new BlockTypeJobData(MakeCrossFlora("TestCrossFlora"));
+            BlockType swayingLeaf = MakeCube("TestSwayingLeafCube", isSolid: true, opacity: 1, renderNeighborFaces: true, MetadataSchema.None);
+            swayingLeaf.swayStrength = SwayStrength;
+            jobData[SwayingLeafCube] = new BlockTypeJobData(swayingLeaf);
             return jobData;
         }
 

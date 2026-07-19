@@ -248,6 +248,9 @@ namespace Data
         [MarshalAs(UnmanagedType.U1)]
         public readonly bool RenderNeighborFaces;
 
+        /// <summary>Foliage wind-sway strength in [0, 1] (FL-2); 0 = rigid. Written to the emitted verts' UV Z by the meshing job's sway post-pass.</summary>
+        public readonly float SwayStrength;
+
         public readonly RenderShape RenderShape;
         public readonly int CustomMeshIndex; // -1 if not a custom mesh
 
@@ -305,6 +308,7 @@ namespace Data
             // Block properties
             IsSolid = blockType.isSolid;
             RenderNeighborFaces = blockType.renderNeighborFaces;
+            SwayStrength = blockType.swayStrength;
             RenderShape = blockType.renderShape;
             CustomMeshIndex = customMeshIdx;
 

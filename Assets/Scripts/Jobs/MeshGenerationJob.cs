@@ -443,6 +443,7 @@ namespace Jobs
             }
 
             // --- CASE 4: STANDARD CUBE ---
+            int swayVertStart = _vertexIndex;
             switch (voxelProps.MetadataSchema)
             {
                 case MetadataSchema.None:
@@ -463,6 +464,34 @@ namespace Jobs
                 default:
                     GenerateStandardCubeMesh_Legacy(pos, packedData, id, voxelProps);
                     break;
+            }
+
+            // FL-2: leaf-block shimmer — a sway-flagged cube gets a uniform weight on every emitted
+            // vert (cubes are not rooted, unlike FL-1's cross meshes) plus the same voxel-space phase.
+            // A post-pass over the voxel's vertex range covers all six schema arms in one place.
+            if (voxelProps.SwayStrength > 0f && _vertexIndex > swayVertStart)
+                ApplySwayChannels(swayVertStart, voxelProps.SwayStrength, pos);
+        }
+
+        /// <summary>
+        /// Rewrites the UV ZW sway channels (FL-2) of every vertex emitted for the current voxel:
+        /// Z = the block's authored sway strength, W = the voxel's deterministic wind phase
+        /// (<see cref="VoxelMeshHelper.VoxelHash01"/> over the voxel-space cell, re-anchor-safe).
+        /// </summary>
+        /// <param name="fromVert">First vertex index of the voxel's emitted range.</param>
+        /// <param name="swayStrength">The block's authored sway strength in [0, 1].</param>
+        /// <param name="pos">The voxel's chunk-local position.</param>
+        private void ApplySwayChannels(int fromVert, float swayStrength, Vector3Int pos)
+        {
+            float swayPhase = VoxelMeshHelper.VoxelHash01(
+                (int)ChunkPosition.x + pos.x, pos.y, (int)ChunkPosition.z + pos.z);
+            half z = (half)swayStrength;
+            half w = (half)swayPhase;
+
+            for (int i = fromVert; i < _vertexIndex; i++)
+            {
+                half4 uv = Output.Uvs[i];
+                Output.Uvs[i] = new half4(uv.x, uv.y, z, w);
             }
         }
 

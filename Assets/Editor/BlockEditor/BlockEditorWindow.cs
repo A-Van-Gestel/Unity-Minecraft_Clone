@@ -153,6 +153,7 @@ namespace Editor.BlockEditor
                     stackSize = blockType.stackSize,
                     isSolid = blockType.isSolid,
                     renderNeighborFaces = blockType.renderNeighborFaces,
+                    swayStrength = blockType.swayStrength,
                     fluidType = blockType.fluidType,
                     fluidShaderID = blockType.fluidShaderID,
                     fluidMeshData = blockType.fluidMeshData,
@@ -267,7 +268,7 @@ namespace Editor.BlockEditor
         /// <param name="initialTags">Initial tags to assign to the new preset.</param>
         /// <param name="initialWorldGenCanReplaceTags">Initial world-gen canReplaceTags to assign to the new preset.</param>
         /// <param name="initialPlacementCanReplaceTags">Initial placement canReplaceTags to assign to the new preset.</param>
-        /// <returns>The created preset, or null if the user cancelled.</returns>
+        /// <returns>The created preset, or null if the user canceled.</returns>
         private static BlockTagPreset CreateTagPresetAsset(
             string defaultFileName,
             BlockTags initialTags = BlockTags.NONE,

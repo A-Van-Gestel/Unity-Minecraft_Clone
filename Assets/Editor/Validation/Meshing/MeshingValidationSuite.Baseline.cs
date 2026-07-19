@@ -37,6 +37,7 @@ namespace Editor.Validation.Meshing
             scenarios.Add(new Scenario("B11: smooth lighting encodes uniform corner light to the right UNorm8 values (MH-3 / MR-2 guard)", B11_SmoothLightingUniformCornerValues));
             scenarios.Add(new Scenario("B17: a pooled output reused across scenes equals a fresh buffer (MH-2 / MR-6 stale-reuse guard)", B17_PooledOutputStaleDataGuard));
             scenarios.Add(new Scenario("B22: cross-mesh UV ZW carries sway weight (top/bottom split) + deterministic per-voxel phase; cubes stay ZW=0 (FL-1 guard)", B22_CrossMeshSwayChannels));
+            scenarios.Add(new Scenario("B23: sway-flagged cube writes authored swayStrength + phase to UV ZW on every vert; zero-strength blocks stay ZW=0 (FL-2 guard)", B23_CubeSwayChannels));
 
             // --- Cross-chunk border-face-culling family (B18–B21, MH-10/MH-11) lives in its own partial
             // file (MeshingValidationSuite.CrossChunk.cs) and self-registers here. ---
@@ -959,6 +960,98 @@ namespace Editor.Validation.Meshing
 
             bool passed = MeshAssert.IsTrue($"{label}: 16 verts found in cell", vertsSeen == 16, $"found {vertsSeen}");
             passed &= MeshAssert.IsTrue($"{label}: weight 1 on top verts, 0 on bottom verts", weightsOk, "UV Z split mismatch");
+            passed &= MeshAssert.IsTrue($"{label}: phase uniform across the voxel", phaseUniform, $"first phase={phase:G6}");
+            passed &= MeshAssert.IsTrue($"{label}: phase within [0, 1]", phase >= 0f && phase <= 1f, $"phase={phase:G6}");
+            return passed;
+        }
+
+        /// <summary>
+        /// B23 — FL-2 cube-shimmer guard. A sway-flagged transparent cube (leaf-like) must carry its
+        /// authored <c>swayStrength</c> in UV Z and one deterministic per-voxel phase in UV W on
+        /// <b>every</b> emitted vertex (uniform — cubes shimmer whole, unlike FL-1's rooted crosses);
+        /// two cells get distinct phases; a zero-strength transparent cube in the same scene keeps
+        /// ZW = 0, proving the post-pass keys off the authored strength, not the submesh.
+        /// </summary>
+        private static bool B23_CubeSwayChannels()
+        {
+            using MeshingTestWorld world = new MeshingTestWorld();
+            Vector3Int posA = new Vector3Int(8, 8, 8);
+            Vector3Int posB = new Vector3Int(4, 8, 4);
+            Vector3Int posPlain = new Vector3Int(12, 8, 12); // zero-strength control, same scene
+            world.SetBlock(posA.x, posA.y, posA.z, TestMeshBlockPalette.SwayingLeafCube);
+            world.SetBlock(posB.x, posB.y, posB.z, TestMeshBlockPalette.SwayingLeafCube);
+            world.SetBlock(posPlain.x, posPlain.y, posPlain.z, TestMeshBlockPalette.TransparentCube);
+            MeshDataJobOutput o = world.Run();
+
+            // 3 isolated cubes × 24 verts (renderNeighborFaces blocks don't cull against air).
+            bool passed = MeshAssert.VertexCount("B23 vertex count (3 cubes)", o, 72);
+            passed &= MeshAssert.StructuralInvariants("B23 structural", o);
+            if (o.Vertices.Length != 72) return false;
+
+            passed &= CheckCubeSwayChannels("B23 sway cube A", o, posA, TestMeshBlockPalette.SwayStrength, out float phaseA);
+            passed &= CheckCubeSwayChannels("B23 sway cube B", o, posB, TestMeshBlockPalette.SwayStrength, out float phaseB);
+            passed &= CheckCubeSwayChannels("B23 plain transparent cube", o, posPlain, expectedWeight: 0f, out float phasePlain);
+
+            passed &= MeshAssert.IsTrue("B23 phase differs between cells", phaseA != phaseB,
+                $"phaseA={phaseA:G6} phaseB={phaseB:G6}");
+            passed &= MeshAssert.IsTrue("B23 zero-strength cube keeps phase channel 0", phasePlain == 0f,
+                $"phase={phasePlain:G6}");
+
+            // Determinism: a second run must reproduce the UV stream bit-identically.
+            half4[] firstUvs = o.Uvs.AsArray().ToArray();
+            MeshDataJobOutput o2 = world.Run();
+            bool uvsIdentical = o2.Uvs.Length == firstUvs.Length;
+            if (uvsIdentical)
+            {
+                for (int i = 0; i < firstUvs.Length; i++)
+                {
+                    if (!firstUvs[i].Equals(o2.Uvs[i]))
+                    {
+                        uvsIdentical = false;
+                        break;
+                    }
+                }
+            }
+
+            passed &= MeshAssert.IsTrue("B23 UV stream deterministic across runs", uvsIdentical,
+                $"run1 count={firstUvs.Length} run2 count={o2.Uvs.Length}");
+            return passed;
+        }
+
+        /// <summary>
+        /// Verifies one cube voxel's 24 verts carry <paramref name="expectedWeight"/> in UV Z on every
+        /// vertex and a single shared UV W phase in [0, 1] (identical across the voxel).
+        /// </summary>
+        /// <param name="label">Assertion label prefix.</param>
+        /// <param name="o">The meshing output containing the voxel's verts.</param>
+        /// <param name="pos">The voxel's chunk-local cell.</param>
+        /// <param name="expectedWeight">The UV Z value every vert must carry (half-rounded exact).</param>
+        /// <param name="phase">The voxel's shared phase value (NaN when verts are missing/mismatched).</param>
+        private static bool CheckCubeSwayChannels(string label, MeshDataJobOutput o, Vector3Int pos,
+            float expectedWeight, out float phase)
+        {
+            phase = float.NaN;
+            int vertsSeen = 0;
+            bool weightsOk = true, phaseUniform = true;
+            float expectedHalf = (half)expectedWeight;
+
+            for (int i = 0; i < o.Vertices.Length; i++)
+            {
+                Vector3 v = o.Vertices[i];
+                if (v.x < pos.x || v.x > pos.x + 1 || v.z < pos.z || v.z > pos.z + 1 ||
+                    v.y < pos.y || v.y > pos.y + 1)
+                    continue;
+
+                vertsSeen++;
+                if (o.Uvs[i].z != expectedHalf) weightsOk = false;
+
+                float w = o.Uvs[i].w;
+                if (float.IsNaN(phase)) phase = w;
+                else if (w != phase) phaseUniform = false;
+            }
+
+            bool passed = MeshAssert.IsTrue($"{label}: 24 verts found in cell", vertsSeen == 24, $"found {vertsSeen}");
+            passed &= MeshAssert.IsTrue($"{label}: UV Z == {expectedWeight:G4} on every vert", weightsOk, "UV Z mismatch");
             passed &= MeshAssert.IsTrue($"{label}: phase uniform across the voxel", phaseUniform, $"first phase={phase:G6}");
             passed &= MeshAssert.IsTrue($"{label}: phase within [0, 1]", phase >= 0f && phase <= 1f, $"phase={phase:G6}");
             return passed;
