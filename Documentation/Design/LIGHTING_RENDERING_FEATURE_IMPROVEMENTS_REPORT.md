@@ -308,6 +308,9 @@ correctly with a skybox behind transparents. Seed/Save ✅.
    constant 1.0 for standard blocks today — one channel can carry emissive strength without
    growing the vertex). **Coordinate with TF-11 (climate foliage tint), which claims the RGB
    channels of the same stream** — together they exactly fill it; allocate before either ships.
+   Allocation registry note: the *other* spare stream, `TexCoord0.zw` (half2), is **consumed
+   since 2026-07-19** by FL-1 foliage sway (z = sway weight, w = per-voxel phase; fluid submesh
+   keeps its own shore-push meaning) — the `Color32` stream is the only spare capacity left.
 3. **Quality gating:** bloom + the post stack cost real GPU time on mobile — gate behind the
    settings/device-tier system (`OM1_DEVICE_CALIBRATION.md` budgets; `DATA_DRIVEN_SETTINGS_UI`
    for the toggle). Desktop default on, mobile default off.
