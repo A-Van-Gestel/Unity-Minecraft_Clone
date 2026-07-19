@@ -1,5 +1,8 @@
 using System.Collections.Generic;
 using Helpers;
+using Jobs;
+using Unity.Collections;
+using Unity.Jobs;
 using UnityEngine;
 using UnityEngine.Pool;
 
@@ -8,8 +11,33 @@ public class Clouds : MonoBehaviour
     public int cloudHeight = 100;
     public int cloudDepth = 4;
 
+    [Tooltip("ON = load the pattern from the classic texture below (pre-CL-3 look). OFF = generate a seeded procedural pattern per world.")]
+    [SerializeField]
+    private bool _useClassicPattern = false;
+
+    [Tooltip("Classic pattern texture — only used (and only required) when Use Classic Pattern is on.")]
     [SerializeField]
     private Texture2D _cloudPattern = null;
+
+    [Tooltip("FBM octaves for the procedural pattern. More octaves = more edge detail.")]
+    [Range(1, 6)]
+    [SerializeField]
+    private int _noiseOctaves = 4;
+
+    [Tooltip("Lattice cells across the pattern at the first octave — the blob scale. Higher = smaller cloud masses. 32 calibrated against the classic clouds.png blob statistics.")]
+    [Range(2, 64)]
+    [SerializeField]
+    private int _noiseBasePeriodCells = 32;
+
+    [Tooltip("FBM amplitude falloff per octave. 0.5 = smooth blobs; higher keeps more high-frequency raggedness (MC-style speckled edges). 0.6 calibrated against the classic clouds.png.")]
+    [Range(0.3f, 0.9f)]
+    [SerializeField]
+    private float _noisePersistence = 0.6f;
+
+    [Tooltip("Fraction of the sky covered by cloud. Default 0.23 matches the classic clouds.png density.")]
+    [Range(0.05f, 0.6f)]
+    [SerializeField]
+    private float _cloudCoverage = 0.23f;
 
     [SerializeField]
     private Material _cloudMaterial = null;
@@ -39,6 +67,13 @@ public class Clouds : MonoBehaviour
 
     // Fraction of the coverage radius over which the shader fades the cloudscape's outer edge.
     private const float EDGE_FADE_FRACTION = 0.15f;
+
+    // Width of the procedurally generated pattern (the classic texture happens to match). The pattern —
+    // and therefore the drift wrap and the visible repeat — is periodic at this width.
+    private const int PROCEDURAL_PATTERN_WIDTH = 512;
+
+    // Histogram resolution for the coverage-percentile threshold; 256 bins ≈ 0.4% density granularity.
+    private const int THRESHOLD_HISTOGRAM_BINS = 256;
 
     private static readonly int s_shaderCloudFaceShading = Shader.PropertyToID("_CloudFaceShading");
     private static readonly int s_shaderCloudFadeParams = Shader.PropertyToID("_CloudFadeParams");
@@ -73,15 +108,23 @@ public class Clouds : MonoBehaviour
     // Awake() for dependencies that don't rely on other scripts' Start()
     private void Awake()
     {
-        // Null check is important here for build vs editor asset handling
-        if (_cloudPattern == null)
+        if (_useClassicPattern)
         {
-            Debug.LogError("Cloud Pattern Texture is not assigned in the Inspector!");
-            enabled = false; // Disable the script if texture is missing.
-            return;
+            // Null check is important here for build vs editor asset handling
+            if (_cloudPattern == null)
+            {
+                Debug.LogError("Cloud Pattern Texture is not assigned in the Inspector!");
+                enabled = false; // Disable the script if texture is missing.
+                return;
+            }
+
+            _cloudTexWidth = _cloudPattern.width;
+        }
+        else
+        {
+            _cloudTexWidth = PROCEDURAL_PATTERN_WIDTH;
         }
 
-        _cloudTexWidth = _cloudPattern.width;
         _cloudTileSize = Mathf.Min(CLOUD_TILE_SIZE, _cloudTexWidth);
 
         if (_cloudTexWidth % _cloudTileSize != 0)
@@ -187,6 +230,18 @@ public class Clouds : MonoBehaviour
 
     private void LoadCloudData()
     {
+        if (_useClassicPattern)
+            LoadClassicCloudData();
+        else
+            GenerateCloudData();
+    }
+
+    /// <summary>
+    /// Classic pattern source: thresholds the <see cref="_cloudPattern"/> texture's alpha channel.
+    /// Kept as an instant rollback while the procedural pattern is evaluated (CL-3).
+    /// </summary>
+    private void LoadClassicCloudData()
+    {
         // Ensure the texture is readable. If not, disable clouds to prevent errors.
         if (!_cloudPattern.isReadable)
         {
@@ -206,6 +261,81 @@ public class Clouds : MonoBehaviour
                 _cloudData[x, y] = cloudTex[y * _cloudTexWidth + x].a > 0;
             }
         }
+    }
+
+    /// <summary>
+    /// Procedural pattern source (CL-3): seeded periodic FBM value noise (<see cref="CloudPatternJob"/>),
+    /// thresholded at the <see cref="_cloudCoverage"/> percentile so the sky density is exact regardless
+    /// of the noise distribution. Deterministic per world seed — reloads and <see cref="Reinitialize"/>
+    /// always rebuild the identical sky.
+    /// </summary>
+    private void GenerateCloudData()
+    {
+        NativeArray<float> density = new NativeArray<float>(
+            _cloudTexWidth * _cloudTexWidth, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+
+        try
+        {
+            new CloudPatternJob
+            {
+                PatternWidth = _cloudTexWidth,
+                BasePeriodCells = _noiseBasePeriodCells,
+                Octaves = _noiseOctaves,
+                Persistence = _noisePersistence,
+                Seed = (uint)VoxelData.Seed,
+                Density = density,
+            }.Schedule(density.Length, PROCEDURAL_PATTERN_WIDTH).Complete();
+
+            float threshold = FindCoverageThreshold(density, _cloudCoverage);
+
+            _cloudData = new bool[_cloudTexWidth, _cloudTexWidth];
+            int set = 0;
+            for (int y = 0; y < _cloudTexWidth; y++)
+            {
+                for (int x = 0; x < _cloudTexWidth; x++)
+                {
+                    bool cloud = density[y * _cloudTexWidth + x] > threshold;
+                    _cloudData[x, y] = cloud;
+                    if (cloud) set++;
+                }
+            }
+
+            Debug.Log($"Generated procedural cloud pattern: seed {VoxelData.Seed}, " +
+                      $"coverage {(float)set / density.Length:P1} (target {_cloudCoverage:P1}).");
+        }
+        finally
+        {
+            density.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Finds the density threshold above which exactly the requested fraction of cells lies, via a
+    /// fixed-bin histogram — an exact-coverage percentile, independent of the noise value distribution.
+    /// </summary>
+    /// <param name="density">The generated density field (values in [0, 1]).</param>
+    /// <param name="coverage">Requested fraction of cells above the threshold.</param>
+    /// <returns>The threshold density.</returns>
+    private static float FindCoverageThreshold(NativeArray<float> density, float coverage)
+    {
+        int[] bins = new int[THRESHOLD_HISTOGRAM_BINS];
+        for (int i = 0; i < density.Length; i++)
+        {
+            int bin = Mathf.Clamp((int)(density[i] * THRESHOLD_HISTOGRAM_BINS), 0, THRESHOLD_HISTOGRAM_BINS - 1);
+            bins[bin]++;
+        }
+
+        // Walk down from the densest bin until the requested fraction of cells sits above the cut.
+        int target = Mathf.RoundToInt(coverage * density.Length);
+        int above = 0;
+        for (int bin = THRESHOLD_HISTOGRAM_BINS - 1; bin >= 0; bin--)
+        {
+            above += bins[bin];
+            if (above >= target)
+                return (float)bin / THRESHOLD_HISTOGRAM_BINS;
+        }
+
+        return 0f;
     }
 
     /// <summary>
