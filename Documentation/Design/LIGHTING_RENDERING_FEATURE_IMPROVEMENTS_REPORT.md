@@ -16,6 +16,8 @@ parity (§9–§10, `SkyDarken` model): stored skylight is time-invariant *sky e
 reads derived effective light, never raw storage. Second pass: §3 gained the blue-moonlight
 authoring rules (global sky tint is exact, brightness-in-curve/color-in-gradient split) and §4's
 event tint changed from multiply to lerp/replace.
+**Amended:** 2026-07-19 — cross-linked the new `CLOUD_RENDERING_IMPROVEMENTS_REPORT.md` (`CL-*`):
+CL-2 absorbs RF-2 §5 (clouds tint); RF-7 §4's cloud knobs are received by CL-4.
 Findings are from static review of the light engine (`ushort LightData` RGB model, BFS jobs,
 `LightWorkScheduler`), the shader stack (`VoxelLighting.hlsl` + the three block shaders +
 `UberLiquidShader`), the URP configuration (`Assets/Settings/Rendering/`), and the `World.cs`
@@ -38,6 +40,9 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
   processing) must be quality-tier-gated per its model.
 - [`../Architecture/DATA_DRIVEN_SETTINGS_UI.md`](../Architecture/DATA_DRIVEN_SETTINGS_UI.md) —
   where RF-1's day length / RF-3's quality toggles surface as settings.
+- [`CLOUD_RENDERING_IMPROVEMENTS_REPORT.md`](CLOUD_RENDERING_IMPROVEMENTS_REPORT.md) (`CL-*`) —
+  cloud-layer liveliness backlog: **CL-2 absorbs RF-2 §5** (clouds tint), and RF-7 §4's cloud
+  color/density storm knobs are received by CL-4 there.
 
 ---
 
