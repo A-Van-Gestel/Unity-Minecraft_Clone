@@ -24,6 +24,9 @@ pre-generation tool).
 Phase 2 `Minecraft/BorderWall` shader + `BorderWallRenderer`). Landed as a **standalone level.dat
 v11 → v12** `borderRadius` (int; 0 = disabled) — *not* the TF-12/13 wave — with existing worlds
 upgrading border-disabled. Item is complete and ready to archive from the open backlog.
+**Amended:** 2026-07-20 — combined roadmap gained #22 **RF-8** (animated block textures), added
+to the sibling RF report during the `VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md` (`VX-*`) gap
+sweep; no TF-* changes.
 Findings are from static code review of the Standard generation pipeline
 (`StandardChunkGenerator` → `StandardWormCarverJob` → `StandardChunkGenerationJob` →
 `CaveIsolationFilterJob`) plus the shipped authoring/editor tooling. The Legacy pipeline
@@ -1075,3 +1078,4 @@ items last. RF items are detailed in
 | 19   | **RF-3** Bloom / post-processing            | Polish; pair with the GS-4 render-tier audit; tint-channel coordination with TF-11                    |
 | 20   | **RF-6** SSAO ("GI")                        | Polish; drop-in URP feature                                                                           |
 | 21   | **RF-5** Animated light sources             | Polish with an architectural ceiling — budgeted block-swap animation only                             |
+| 22   | **RF-8** Animated block textures            | Polish; MC-style atlas blitting (`Graphics.CopyTexture` per tick) — zero mesh/shader/vertex contact   |

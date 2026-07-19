@@ -22,6 +22,14 @@ CL-2 absorbs RF-2 §5 (clouds tint); RF-7 §4's cloud knobs are received by CL-4
 (`FL-*`): FL-1/FL-2 foliage sway reads the shared wind vector RF-7 will own; the RF-3 §2 vertex-
 channel allocation (`Color32` = TF-11 RGB + RF-3 emissive) is complemented by FL's claim on the
 spare `uv.zw` half2; RF-1 gates FL-6's fireflies.
+**Amended:** 2026-07-20 — cross-linked the new
+`VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md` (`VX-*`): RF-6's "revisit only alongside a future
+lighting overhaul" deferral now has a home (VX-6, experimental-tier voxel-traced GI); RF-2 §4's
+distance fog stays the default-tier fog under VX-2's experimental volumetric fog.
+**Amended:** 2026-07-20 (later) — the VX gap sweep's non-volumetric ideas were routed here:
+RF-2 gained §6 (sky ambience content v2 — aurora, shooting stars, sun flare), RF-3 gained §5
+(vignette/DoF/motion-blur overrides), RF-7 gained §6 (lightning v2 sketch), and **RF-8 (animated
+block textures via atlas blitting) was added** as a new item (#22 in the combined roadmap).
 Findings are from static review of the light engine (`ushort LightData` RGB model, BFS jobs,
 `LightWorkScheduler`), the shader stack (`VoxelLighting.hlsl` + the three block shaders +
 `UberLiquidShader`), the URP configuration (`Assets/Settings/Rendering/`), and the `World.cs`
@@ -47,6 +55,10 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 - [`CLOUD_RENDERING_IMPROVEMENTS_REPORT.md`](CLOUD_RENDERING_IMPROVEMENTS_REPORT.md) (`CL-*`) —
   cloud-layer liveliness backlog: **CL-2 absorbed RF-2 §5** (clouds tint — shipped 2026-07-19),
   and RF-7 §4's cloud color/density storm knobs are received by CL-4 there.
+- [`VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md`](VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md)
+  (`VX-*`) — experimental-tier volumetrics + software voxel tracing: VX-6 is the gated home for
+  the GI class RF-6 rejected at default tier (RF-6's SSAO verdict stands); VX-2 (volumetric fog)
+  layers above RF-2 §4's default distance fog and consumes RF-1's `SunElevation`/`SkyDarken`.
 
 ---
 
@@ -78,6 +90,7 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 | RF-5 | Animated light sources: RGB emission already shipped; *animation* is BFS-bounded          |   🟡   |  🟡  |    ⚪    |  ✅   |  ✅   |
 | RF-6 | "Some form of GI": SSAO is the pragmatic option; colored sky-bounce rejected with reasons |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | RF-7 | Weather: no rain/snow of any kind; precipitation type gated on TF-3's temperature axis    |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+| RF-8 | Animated block textures: every non-fluid tile is static — flipbook via atlas blitting     |   🟡   |  🟢  |   🟡    |  ✅   |  ✅   |
 
 ---
 
@@ -267,9 +280,21 @@ hardcoded noon, i.e. `SkyDarken = 0`). Save ⚠️ as described.
    [`CLOUD_RENDERING_IMPROVEMENTS_REPORT.md`](CLOUD_RENDERING_IMPROVEMENTS_REPORT.md) — the
    cloud shader samples the `SkyLightColor` global directly (no `material.SetColor` needed);
    already responsive to `/time`, and upgrades further when RF-1's cycle drives the gradient.
+6. **Sky ambience content (v2 — routed here from the VX-* gap sweep, 2026-07-20):** pure
+   content additions to the §1–§3 skybox shader, explicitly *after* the core cycle ships:
+    - **Aurora:** a night-only scrolling noise ribbon in a horizon-zenith band (two octaves of
+      the CL-3 hash-noise family over view direction + time), green-teal gradient, faded by
+      `saturate(-SunElevation)` like the stars; gated rare (elapsedDays hash) or by a
+      `SkyEvent`, and later by climate (cold biomes) when TF-3 ships.
+    - **Shooting stars / meteors:** an occasional seconds-scale streak — hash-seeded start
+      direction + time window in the §3 star-field code; zero state, pure shader function of
+      (elapsedDays, DayFraction).
+    - **Sun lens flare:** cheapest viable = let RF-3's bloom catch the HDR sun disc (free once
+      both ship); a classic sprite-chain flare is deliberately *not* proposed (occlusion
+      queries against voxel depth for a stylistic mismatch — skip).
 
 **Dependencies / ordering.** RF-1 first (needs `DayFraction`/`SunDirection`). Ships as pure
-shader/scene work — no voxel pipeline contact.
+shader/scene work — no voxel pipeline contact. §6 is v2 content after the base skybox.
 
 **Risks.** 🟢 — isolated new shader + scene settings. Watch the liquid shader's reliance on the
 camera opaque texture (`GS-2`) when changing clear flags — verify refraction still samples
@@ -316,6 +341,12 @@ correctly with a skybox behind transparents. Seed/Save ✅.
    for the toggle). Desktop default on, mobile default off.
 4. **Do together with `GS-4`** (render-pipeline tier audit) — same files, same testing pass; and
    note `GS-2`'s opaque-texture concern interacts with any post passes that need scene color.
+5. **Other post effects (routed here from the VX-* gap sweep, 2026-07-20):** once the Volume
+   exists, each is one override — and each is a *separate deliberate art decision* with the
+   same A/B capture sign-off as tonemapping: **vignette** (subtle, cheap, likely the first
+   yes), **depth of field** (screenshot/menu mode only — gameplay DoF fights block reading),
+   **motion blur** (default-off; fast yaw over hard voxel edges reads as smear — adopt only
+   if a capture pass proves otherwise). All tier-gated with the rest of the stack (§3).
 
 **Dependencies / ordering.** Independent; nice after RF-1/RF-2 so night torch-glow bloom lands
 with the cycle. The emissive vertex work should ride a meshing-suite-guarded change (MH pattern).
@@ -445,6 +476,11 @@ tuned to ~0.5–1 block. Quality-tier gate (off on mobile). Do in the same pass 
 
 **Dependencies / ordering.** None hard; pairs with RF-3/`GS-4`.
 
+**Deferral home (2026-07-20):** the rejected GI-class options now have an explicit
+experimental-tier landing zone — `VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md` VX-6
+(voxel-traced 1-bounce GI, off-by-default, desktop-only). This section's default-tier verdict
+(SSAO, and stop there) is unchanged.
+
 **Risks.** 🟢 — additive renderer feature; the only visual risk is stacking with vertex AO
 (tune, capture, sign off). Seed/Save ✅.
 
@@ -482,7 +518,14 @@ TF-11 snow line).
    the blood moon).
 5. **Out of scope for v1 (state explicitly):** snow-layer accumulation and ice formation as
    *block changes* (that is worldgen/tick territory — accumulation would need a budgeted behavior
-   like RF-5's cap), lightning strikes, and gameplay effects (crop growth, mob behavior).
+   like RF-5's cap) and gameplay effects (crop growth, mob behavior).
+6. **Lightning (v2 sketch — routed here from the VX-* gap sweep, 2026-07-20; still out of v1
+   scope):** three decoupled pieces, none touching the light engine — **flash** = the RF-1 §4
+   `SkyEvent` override driven for 2–3 frames (white-blue tint + a raised `globalLightLevel`
+   floor; the same zero-relighting contract as the blood moon — a 100 ms event must never
+   BFS-flood light), **bolt** = a one-off emissive billboard/polyline mesh at a seeded strike
+   point near the player during `Storm`, **thunder** = a delayed audio hook that lands in
+   `SOUND_ENGINE_DESIGN.md` when the sound engine ships.
 
 **Dependencies / ordering.** Rendering rides RF-1 (event tinting) + RF-2 (fog/sky) — build after
 both. Precipitation-by-climate wants TF-3/TF-11 but degrades gracefully. Quality-tier gate the
@@ -493,8 +536,54 @@ tuning; no pipeline, storage, or lighting-semantics contact. Seed ✅ / Save ✅
 
 ---
 
+### RF-8 — Animated block textures (flipbook atlas animation)
+
+**Classification:** Polish — the Minecraft-parity ambience gap for surfaces (fire, portals,
+sea-lantern-style blocks, magma crust). Routed here from the `VX-*` gap sweep (2026-07-20).
+
+**What exists today.**
+
+- Block face textures are static tiles in a single atlas built by the `AtlasPacker` editor tool
+  (`VoxelData.TextureAtlasSizeInBlocks` grid); all three block materials share that `_MainTex`.
+  Face texture IDs are baked into UVs at mesh time.
+- The **only** animated surfaces are the fluids, whose motion is *procedural* in
+  `LiquidCore.hlsl` (the GS-1 noise) — nothing frame-animates a texture anywhere.
+
+**Analysis — where the animation can live:**
+
+| Approach                                                    | Verdict                                                                                                                                                               |
+|-------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Per-vertex "animated" flag + shader-side UV frame cycling   | ❌ Rejected — the vertex format has no spare capacity (`uv.zw` = FL sway, `Color32` reserved TF-11 + RF-3), and per-tile frame metadata would need yet another channel |
+| Re-mesh on animation tick                                   | ❌ Rejected outright — remeshing as an animation driver is the anti-pattern every report here exists to prevent                                                        |
+| **Animate the atlas itself (MC's approach)** (✅ **CHOSEN**) | ✅ Frames authored as strips; a fixed tick GPU-blits the current frame into the tile's atlas slot (`Graphics.CopyTexture`). Zero vertex/mesh/shader change             |
+
+**Proposed design.**
+
+1. `AtlasPacker` gains per-source-texture animation metadata (frame count, frame time; frames
+   authored as a vertical strip, MC-convention). The packer emits the strip frames into a
+   staging texture (or keeps the strip asset) plus a manifest of animated tile slots.
+2. A small `AtlasAnimator` (plain manager on `World`, `WorldTimeManager` pattern): on a fixed
+   tick (~2–10 fps per tile, per-texture rate), `Graphics.CopyTexture` the next frame region
+   into the atlas slot — GPU-side region copy, no CPU pixel work, a handful of tile-sized
+   copies per tick.
+3. **Mip watchpoint (the one real gotcha):** the atlas has a mip chain; `CopyTexture` must copy
+   each mip level of the frame (author strips pre-mipped, or copy from a mipped staging
+   texture) or animated tiles shimmer at distance.
+4. Every consumer inherits the animation for free — all three block shaders, editor previews,
+   and block icons sample the same atlas.
+
+**Dependencies / ordering.** None hard — independent of RF-1..7. Content lands whenever the
+first animated block (fire, portal, …) is authored via the BlockEditor pipeline.
+
+**Risks.** 🟢 — isolated to the atlas asset + one manager; no meshing, lighting, or pipeline
+contact. Verify `CopyTexture` format/mip compatibility on the compressed atlas (may require the
+atlas uncompressed or same-format frame strips). Seed ✅ / Save ✅.
+
+---
+
 ## Roadmap
 
 See the **combined ranked roadmap** at the end of
 [`WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md`](WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md) — RF items
-rank: RF-1 (#1), RF-2 (#5), RF-7 (#17), RF-4 (#18), RF-3 (#19), RF-6 (#20), RF-5 (#21).
+rank: RF-1 (#1), RF-2 (#5), RF-7 (#17), RF-4 (#18), RF-3 (#19), RF-6 (#20), RF-5 (#21),
+RF-8 (#22 — added 2026-07-20).
