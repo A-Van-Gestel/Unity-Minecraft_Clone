@@ -12,6 +12,7 @@ public class FoliageSway : MonoBehaviour
 {
     private static readonly int s_shaderFoliageWindVector = Shader.PropertyToID("FoliageWindVector");
     private static readonly int s_shaderFoliageSwayParams = Shader.PropertyToID("FoliageSwayParams");
+    private static readonly int s_shaderFoliageSwayParams2 = Shader.PropertyToID("FoliageSwayParams2");
 
     [Tooltip("The world whose shared wind vector (and settings) drive the sway.")]
     [SerializeField]
@@ -42,6 +43,27 @@ public class FoliageSway : MonoBehaviour
     [SerializeField]
     private float _referenceWindSpeed = 0.6f;
 
+    [Header("Wave Coherence")]
+    [Tooltip("Wavelength (in blocks, along the wind) of the traveling sway wave. Neighboring foliage within a fraction of this distance moves together; gusts visibly ripple across canopies at this scale.")]
+    [Range(2f, 64f)]
+    [SerializeField]
+    private float _wavelengthBlocks = 14f;
+
+    [Tooltip("How much of each voxel's baked random phase is applied, as a fraction of a full cycle. 0 = perfectly coherent (rigid canopy), 1 = fully independent voxels (the disjointed look). Keep small.")]
+    [Range(0f, 1f)]
+    [SerializeField]
+    private float _phaseJitter = 0.2f;
+
+    [Tooltip("Downward settle at the sway extremes, as a fraction of the horizontal amplitude — makes motion read as bending rather than sliding.")]
+    [Range(0f, 1f)]
+    [SerializeField]
+    private float _verticalBobFraction = 0.3f;
+
+    [Tooltip("Spatial frequency of the slow gust wave relative to the primary wave (lower = broader gust fronts).")]
+    [Range(0.05f, 1f)]
+    [SerializeField]
+    private float _gustSpatialMultiplier = 0.35f;
+
     /// <summary>Pushes the sway globals for this frame (wind may be tweaked at runtime).</summary>
     private void Update()
     {
@@ -62,6 +84,8 @@ public class FoliageSway : MonoBehaviour
         Shader.SetGlobalVector(s_shaderFoliageWindVector, dir * strength);
         Shader.SetGlobalVector(s_shaderFoliageSwayParams,
             new Vector4(_amplitudeBlocks, _frequency, _gustFraction, _gustFrequency));
+        Shader.SetGlobalVector(s_shaderFoliageSwayParams2,
+            new Vector4(2f * Mathf.PI / Mathf.Max(_wavelengthBlocks, 0.01f), _phaseJitter, _verticalBobFraction, _gustSpatialMultiplier));
     }
 
     /// <summary>Freezes all foliage when the driver goes away (globals would otherwise stay stale).</summary>

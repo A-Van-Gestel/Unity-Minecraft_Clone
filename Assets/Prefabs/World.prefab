@@ -174,3 +174,7 @@ MonoBehaviour:
   _gustFraction: 0.35
   _gustFrequency: 0.6
   _referenceWindSpeed: 0.6
+  _wavelengthBlocks: 14
+  _phaseJitter: 0.2
+  _verticalBobFraction: 0.3
+  _gustSpatialMultiplier: 0.35
