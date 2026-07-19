@@ -768,6 +768,44 @@ total.
 
 ---
 
+### ~~24. Far-Lands sunlight column recalc crash — negative heightmap index beyond ±2²⁴~~
+
+**Severity:** Low (only reachable past the noise-degradation threshold)
+**Files:** `WorldData.cs`, `WorldJobManager.cs`, `Helpers/SunlightColumnRouting.cs` (new), `ChunkCoord.cs`, `World.cs`
+**Reported:** July 2026 (logged 2026-07-18 during CMD-2 `/teleport` far verification, ±2×10⁷)
+**Fixed:** July 2026 (2026-07-19, in-game confirmed same day — including at the ±2³¹ edge)
+
+**Symptom:** Teleporting beyond ±2²⁴ voxels produced repeated Burst `IndexOutOfRangeException`s from
+`NeighborhoodLightingJob.RecalculateSunlightForColumn` (heightmap index `−16`/`−32`) while far chunks lit, plus
+`[LIGHTING] Merging ... faulted` errors from `ApplyCrossChunkLightMod` (out-of-range locals). HF-2 fault isolation
+contained it (no cascade), but the far chunks' sunlight was wrong/incomplete.
+
+**Root Cause:** `WorldData.QueueSunlightRecalculation` derived its queue key via
+`GetChunkCoordFor(new Vector3(columnPos.x, 0, columnPos.y))` — an int→float round-trip that loses integer
+precision past ±2²⁴ (float granularity 2 at 2×10⁷). Border columns rounded across the chunk boundary and landed in
+the **adjacent chunk's** queue bucket; the job-build drain then subtracted the *wrong* chunk's origin in exact int
+math, producing chunk-local columns like `z = −1/−2` → heightmap index `−16`/`−32`. The same implicit
+`Vector3Int`→`Vector3` conversion fed the float query APIs at 11 more sites (`ApplyCrossChunkLightMod` and
+siblings), all silently wrong-chunking past ±2²⁴.
+
+**Fix:** Integer column math end-to-end. New shared seam unit `Helpers.SunlightColumnRouting` (pure `ChunkMath`
+shift math, exact to ±2³¹) used by `QueueSunlightRecalculation`, the `WorldJobManager` job-build drain, and
+orphan-column persistence; integer `Vector3Int` overloads on `WorldData.GetChunkCoordFor` /
+`GetLocalVoxelPositionInChunk` / `EnsureChunkExists` and `ChunkCoord.FromVoxelPosition` — overload resolution
+auto-captures every integer call site (exhaustiveness proven with a temporary `[Obsolete(error)]` poison build:
+only genuine-float callers remain) — plus a latched dev-build ±2²⁴ tripwire on the float query paths so a future
+integer-valued-but-float-typed caller fails loudly. The absolute **±2³¹ edge** arithmetic-wraparound class is
+documented-only by decision (see `WORLD_SCALING_FLOATING_ORIGIN.md` §9).
+
+**Validation suite:** `LightingTestWorld` gained far-anchor support (`anchorChunk` ctor param, integer-exact
+harness plumbing) and `QueueFullSunlightRecalcViaGlobalRouting`, which crosses the production routing seam —
+closing fidelity gap **A6** (the harness's local-column seeding had assumed the production round-trip was
+"semantically identical"; it was not). Baselines **B95** (routing integrity at identity / ±2²⁴-boundary / ±2×10⁷
+anchors; prove-red: 95 lost + 184 out-of-range columns per far anchor pre-fix) and **B96** (far-anchor
+differential twin — bit-identical field at +2×10⁷ vs identity). Lighting suite 86→88, Validate All 279/279.
+
+---
+
 ## Fluid
 
 ### ~~01. Cross-chunk fluid simulation stops at chunk borders~~

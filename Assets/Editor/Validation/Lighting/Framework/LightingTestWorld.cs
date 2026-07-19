@@ -150,6 +150,13 @@ namespace Editor.Validation.Lighting.Framework
         /// <summary>The number of chunks along each horizontal axis of the grid.</summary>
         public int GridSize { get; }
 
+        /// <summary>
+        /// World chunk coordinate of grid cell (0,0) — non-zero places the whole grid at far world
+        /// coordinates (see the constructor). The identity (default) is the origin-anchored grid every
+        /// pre-existing scenario runs on.
+        /// </summary>
+        public Vector2Int AnchorChunk { get; }
+
         /// <summary>The managed block type palette used by this world (index = block ID).</summary>
         public BlockTypeJobData[] BlockTypes => _blockTypes;
 
@@ -158,11 +165,16 @@ namespace Editor.Validation.Lighting.Framework
         /// </summary>
         /// <param name="gridSize">Chunks per horizontal axis (3 covers a single 3×3 neighborhood; 5 enables diagonal-stale scenarios).</param>
         /// <param name="blockTypes">The block palette (defaults to <see cref="TestBlockPalette.CreateJobDataArray"/> when null).</param>
-        public LightingTestWorld(int gridSize = 3, BlockTypeJobData[] blockTypes = null)
+        /// <param name="anchorChunk">World chunk coordinate of grid cell (0,0). Non-zero anchors place the
+        /// grid at far world coordinates (e.g. beyond ±2²⁴ voxels) so global↔local column/mod routing is
+        /// exercised at production magnitudes; all world-space positions passed to this instance must then
+        /// lie inside the anchored volume. Defaults to the identity (origin-anchored grid).</param>
+        public LightingTestWorld(int gridSize = 3, BlockTypeJobData[] blockTypes = null, Vector2Int anchorChunk = default)
         {
             if (gridSize < 1) throw new ArgumentOutOfRangeException(nameof(gridSize));
 
             GridSize = gridSize;
+            AnchorChunk = anchorChunk;
             _blockTypes = blockTypes ?? TestBlockPalette.CreateJobDataArray();
             _blockTypesNative = new NativeArray<BlockTypeJobData>(_blockTypes, Allocator.Persistent);
 
@@ -177,7 +189,9 @@ namespace Editor.Validation.Lighting.Framework
                 return (bt.EmissionR, bt.EmissionG, bt.EmissionB);
             };
             _getLoadedChunkByOrigin = originXZ =>
-                _chunks.TryGetValue(new Vector2Int(originXZ.x / VoxelData.ChunkWidth, originXZ.y / VoxelData.ChunkWidth),
+                _chunks.TryGetValue(new Vector2Int(
+                        ChunkMath.VoxelToChunk(originXZ.x) - AnchorChunk.x,
+                        ChunkMath.VoxelToChunk(originXZ.y) - AnchorChunk.y),
                     out TestChunk chunk) && chunk.IsLoaded
                     ? chunk.Data
                     : null;
@@ -190,7 +204,7 @@ namespace Editor.Validation.Lighting.Framework
                 for (int cz = 0; cz < gridSize; cz++)
                 {
                     Vector2Int coord = new Vector2Int(cx, cz);
-                    _chunks[coord] = new TestChunk(coord);
+                    _chunks[coord] = new TestChunk(coord, GridToVoxelOrigin(coord));
                 }
             }
         }
@@ -290,10 +304,10 @@ namespace Editor.Validation.Lighting.Framework
             /// </summary>
             public bool NeighborsReady = true;
 
-            public TestChunk(Vector2Int coord)
+            public TestChunk(Vector2Int coord, Vector2Int voxelOrigin)
             {
                 Coord = coord;
-                VoxelOrigin = coord * VoxelData.ChunkWidth;
+                VoxelOrigin = voxelOrigin;
                 Data = new ChunkData(VoxelOrigin);
             }
         }
@@ -1260,7 +1274,7 @@ namespace Editor.Validation.Lighting.Framework
                     chunk.VoxelOrigin.x + claim.NeighborPos.x, claim.NeighborPos.y,
                     chunk.VoxelOrigin.y + claim.NeighborPos.z);
                 Vector2Int neighborOriginXZ =
-                    WorldToChunkCoord(new Vector2Int(neighborGlobal.x, neighborGlobal.z)) * VoxelData.ChunkWidth;
+                    GridToVoxelOrigin(WorldToChunkCoord(new Vector2Int(neighborGlobal.x, neighborGlobal.z)));
 
                 // Unverifiable (outside the grid or unloaded): keep — the snapshot is the best available data.
                 ChunkData neighborData = _getLoadedChunkByOrigin(neighborOriginXZ);
@@ -1448,8 +1462,10 @@ namespace Editor.Validation.Lighting.Framework
 
             // Sunlight column recalcs (BOTH load modes). The store holds LOCAL columns (0-15); the harness
             // per-chunk recalc queue is also in local space (see QueueFullSunlightRecalc / BeginLightingJob),
-            // so they enqueue directly. Production round-trips local->global->local only because it routes
-            // through the world-level SunlightRecalculationQueue — semantically identical.
+            // so they enqueue directly. Production round-trips local->global->local through the world-level
+            // SunlightRecalculationQueue; that routing seam is covered separately by
+            // QueueFullSunlightRecalcViaGlobalRouting (SunlightColumnRouting), which a far-anchored world
+            // exercises at production magnitudes — the round-trip is NOT precision-free (Bug 19).
             if (_pendingStore.TryGetAndRemove(storeKey, out HashSet<Vector2Int> localCols))
             {
                 foreach (Vector2Int col in localCols)
@@ -1569,11 +1585,24 @@ namespace Editor.Validation.Lighting.Framework
                 : LightingBandChunkBottom.Missing;
         }
 
-        private static Vector2Int WorldToChunkCoord(Vector2Int worldXZ)
+        /// <summary>
+        /// Global voxel column → the GRID coordinate of the containing chunk. Integer-exact at any
+        /// world magnitude (harness plumbing must never inherit the float-precision limits of the
+        /// production paths under test).
+        /// </summary>
+        private Vector2Int WorldToChunkCoord(Vector2Int worldXZ)
         {
             return new Vector2Int(
-                Mathf.FloorToInt(worldXZ.x / (float)VoxelData.ChunkWidth),
-                Mathf.FloorToInt(worldXZ.y / (float)VoxelData.ChunkWidth));
+                ChunkMath.VoxelToChunk(worldXZ.x) - AnchorChunk.x,
+                ChunkMath.VoxelToChunk(worldXZ.y) - AnchorChunk.y);
+        }
+
+        /// <summary>Grid coordinate → the chunk's true world voxel origin (anchor-aware).</summary>
+        internal Vector2Int GridToVoxelOrigin(Vector2Int gridCoord)
+        {
+            return new Vector2Int(
+                (AnchorChunk.x + gridCoord.x) * VoxelData.ChunkWidth,
+                (AnchorChunk.y + gridCoord.y) * VoxelData.ChunkWidth);
         }
     }
 }

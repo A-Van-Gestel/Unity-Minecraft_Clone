@@ -765,8 +765,9 @@ public class World : MonoBehaviour
         List<Awaitable> loadTasks = new List<Awaitable>();
         foreach (ChunkCoord chunkCoord in allChunksToGenerate)
         {
-            // Create placeholder if missing
-            worldData.EnsureChunkExists(chunkCoord.ToWorldPosition());
+            // Create placeholder if missing (integer origin — exact past ±2²⁴, Bug 19 class)
+            Vector2Int placeholderOrigin = chunkCoord.ToVoxelOrigin();
+            worldData.EnsureChunkExists(new Vector3Int(placeholderOrigin.x, 0, placeholderOrigin.y));
 
             // Start the Load/Gen process
             loadTasks.Add(LoadOrGenerateChunk(chunkCoord));
@@ -2626,17 +2627,17 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
-    /// Returns the chunk coordinates for a given <b>voxel-space</b> position.
+    /// Returns the chunk coordinates for a given <b>voxel-space</b> cell.
     /// </summary>
-    /// <param name="worldPos">The voxel-space position.</param>
-    /// <returns>The chunk coordinates for the given voxel-space position.</returns>
+    /// <param name="voxelCell">The voxel-space cell.</param>
+    /// <returns>The chunk coordinates for the given voxel-space cell.</returns>
     /// <remarks>Deliberately NOT origin-converting: it serves voxel-space callers (e.g. <c>VoxelMod.GlobalPosition</c>
     /// routing in <c>ApplyModifications</c>). Unity-space callers convert at their own call site via
     /// <see cref="WorldOrigin.UnityToChunk"/> — mixing both spaces into one helper is the silent-bug class WS-4 exists
-    /// to prevent.</remarks>
-    private static ChunkCoord GetChunkCoordFromVector3(Vector3 worldPos)
+    /// to prevent. Integer-typed so the routing stays exact past ±2²⁴ (Bug 19 class).</remarks>
+    private static ChunkCoord GetChunkCoordFromVector3(Vector3Int voxelCell)
     {
-        return ChunkCoord.FromVoxelPosition(worldPos);
+        return ChunkCoord.FromVoxelPosition(voxelCell);
     }
 
     /// <summary>
@@ -2825,7 +2826,7 @@ public class World : MonoBehaviour
         HashSet<Vector2Int> localCols = HashSetPool<Vector2Int>.Get();
         foreach (Vector2Int gCol in globalCols)
         {
-            localCols.Add(new Vector2Int(gCol.x - chunkVoxelPos.x, gCol.y - chunkVoxelPos.y));
+            localCols.Add(SunlightColumnRouting.ToLocalColumn(gCol, chunkVoxelPos));
         }
 
         LightingStateManager.AddPending(chunkCoord, localCols);

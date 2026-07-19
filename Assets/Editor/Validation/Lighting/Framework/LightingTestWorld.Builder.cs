@@ -59,7 +59,9 @@ namespace Editor.Validation.Lighting.Framework
         public void FillSuperflatFloor(int surfaceY, ushort blockId)
         {
             int worldWidth = GridSize * VoxelData.ChunkWidth;
-            FillBox(new Vector3Int(0, 0, 0), new Vector3Int(worldWidth - 1, surfaceY, worldWidth - 1), blockId);
+            Vector2Int baseOrigin = GridToVoxelOrigin(Vector2Int.zero);
+            FillBox(new Vector3Int(baseOrigin.x, 0, baseOrigin.y),
+                new Vector3Int(baseOrigin.x + worldWidth - 1, surfaceY, baseOrigin.y + worldWidth - 1), blockId);
         }
 
         /// <summary>
@@ -221,6 +223,57 @@ namespace Editor.Validation.Lighting.Framework
             chunk.HasLightWork = true;
         }
 
+        /// <summary>
+        /// Enqueues all 256 columns of a chunk for sunlight recalculation THROUGH the production
+        /// global-column routing seam — each column is expressed as a global voxel column, routed to
+        /// its owning chunk's bucket via <see cref="SunlightColumnRouting.RouteToChunkOrigin"/>, then
+        /// drained back to a chunk-local column via <see cref="SunlightColumnRouting.ToLocalColumn"/> —
+        /// exactly the round-trip production performs between
+        /// <c>WorldData.QueueSunlightRecalculation</c> and the <c>WorldJobManager</c> job-build drain.
+        /// Unlike <see cref="QueueFullSunlightRecalc"/> (which side-steps the seam with local columns),
+        /// this exercises the routing at the grid's true world coordinates, so a far-anchored world
+        /// (see the constructor's <c>anchorChunk</c>) reproduces far-coordinate routing defects.
+        /// No range clamp is applied to the drained local columns — production has none, so a
+        /// mis-routed column reaches the lighting job's heightmap lookup exactly as it does in-game.
+        /// </summary>
+        /// <param name="chunkCoord">The grid coordinate of the chunk whose columns are queued.</param>
+        /// <param name="outOfRangeLocals">The number of delivered columns whose drained local fell
+        /// outside [0, ChunkWidth)² — each one is a negative/overflowing heightmap index in the
+        /// lighting job (0 when the seam routes correctly).</param>
+        /// <returns>The number of columns whose bucket resolved to no grid chunk (lost in routing —
+        /// 0 when the seam routes correctly).</returns>
+        public int QueueFullSunlightRecalcViaGlobalRouting(Vector2Int chunkCoord, out int outOfRangeLocals)
+        {
+            TestChunk source = GetChunk(chunkCoord);
+            int lost = 0;
+            outOfRangeLocals = 0;
+
+            for (int x = 0; x < VoxelData.ChunkWidth; x++)
+            for (int z = 0; z < VoxelData.ChunkWidth; z++)
+            {
+                Vector2Int globalColumn = new Vector2Int(source.VoxelOrigin.x + x, source.VoxelOrigin.y + z);
+                Vector2Int bucketOrigin = SunlightColumnRouting.RouteToChunkOrigin(globalColumn);
+
+                // Deliver into the grid chunk whose voxel origin matches the bucket key — the mirror of
+                // production draining SunlightRecalculationQueue[chunkData.Position] into that chunk's job.
+                TestChunk target = FindChunkByVoxelOrigin(bucketOrigin);
+                if (target == null)
+                {
+                    lost++;
+                    continue;
+                }
+
+                Vector2Int local = SunlightColumnRouting.ToLocalColumn(globalColumn, target.VoxelOrigin);
+                if ((uint)local.x >= VoxelData.ChunkWidth || (uint)local.y >= VoxelData.ChunkWidth)
+                    outOfRangeLocals++;
+
+                target.SunColumnRecalcQueue.Enqueue(local);
+                target.HasLightWork = true;
+            }
+
+            return lost;
+        }
+
         // --- Queries ---
 
         /// <summary>Returns the palette block ID at the given world position.</summary>
@@ -328,13 +381,16 @@ namespace Editor.Validation.Lighting.Framework
         /// <param name="chunkCoord">The grid coordinate to test.</param>
         public bool HasChunk(Vector2Int chunkCoord) => _chunks.ContainsKey(chunkCoord);
 
-        /// <summary>True if the world position lies inside the grid volume.</summary>
+        /// <summary>True if the world position lies inside the grid volume (anchor-aware).</summary>
         /// <param name="worldPos">The world-space voxel position.</param>
         public bool IsInWorld(Vector3Int worldPos)
         {
             int worldWidth = GridSize * VoxelData.ChunkWidth;
-            return worldPos.x >= 0 && worldPos.x < worldWidth &&
-                   worldPos.z >= 0 && worldPos.z < worldWidth &&
+            // long: a far-anchored grid subtracts a large origin — keep the range test overflow-free.
+            long relX = worldPos.x - (long)AnchorChunk.x * VoxelData.ChunkWidth;
+            long relZ = worldPos.z - (long)AnchorChunk.y * VoxelData.ChunkWidth;
+            return relX >= 0 && relX < worldWidth &&
+                   relZ >= 0 && relZ < worldWidth &&
                    worldPos.y >= 0 && worldPos.y < VoxelData.ChunkHeight;
         }
 
@@ -364,12 +420,24 @@ namespace Editor.Validation.Lighting.Framework
 
         // --- Private helpers ---
 
+        /// <summary>Resolves a grid chunk by its true world voxel origin, or null when no grid cell
+        /// sits at that origin (anchor-aware; origins are exact chunk multiples).</summary>
+        private TestChunk FindChunkByVoxelOrigin(Vector2Int voxelOrigin)
+        {
+            Vector2Int gridCoord = new Vector2Int(
+                ChunkMath.VoxelToChunk(voxelOrigin.x) - AnchorChunk.x,
+                ChunkMath.VoxelToChunk(voxelOrigin.y) - AnchorChunk.y);
+            return _chunks.GetValueOrDefault(gridCoord);
+        }
+
         private TestChunk GetChunkForWorldPos(Vector3Int worldPos, out Vector3Int localPos)
         {
             if (!IsInWorld(worldPos))
                 throw new ArgumentOutOfRangeException(nameof(worldPos), $"Position {worldPos} is outside the {GridSize}x{GridSize} test grid.");
 
-            Vector2Int chunkCoord = new Vector2Int(worldPos.x / VoxelData.ChunkWidth, worldPos.z / VoxelData.ChunkWidth);
+            Vector2Int chunkCoord = new Vector2Int(
+                ChunkMath.VoxelToChunk(worldPos.x) - AnchorChunk.x,
+                ChunkMath.VoxelToChunk(worldPos.z) - AnchorChunk.y);
             TestChunk chunk = GetChunk(chunkCoord);
             localPos = new Vector3Int(worldPos.x - chunk.VoxelOrigin.x, worldPos.y, worldPos.z - chunk.VoxelOrigin.y);
             return chunk;

@@ -1,11 +1,12 @@
 # World Scaling — WS-4 Floating Origin Design
 
-**Version:** 1.8
-**Date:** 2026-07-18
+**Version:** 1.9
+**Date:** 2026-07-19
 **Status:** **Implemented** — every WS-4 phase is shipped and in-game confirmed: WS-4a (origin plumbing),
 WS-4b (the shift), WS-4c persistence (`ChunkRelativePosition` player position, level.dat v13), and WS-4c
 tooling (`/teleport` = CMD-2, 2026-07-18). The only WS-4-adjacent work left is the deferred v2 noise rider
-(terrain degrades past ±2²⁴ — see also lighting Bug 19 for the far-lands lighting crash logged there).
+(terrain degrades past ±2²⁴; lighting Bug 19 — the far-lands lighting crash logged there — was fixed
+independently 2026-07-19 via integer column routing, in-game confirmed and archived as `_FIXED_BUGS.md` #24).
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The far-travel precision phase of the world-scaling track. Unity render space and voxel world
@@ -537,7 +538,16 @@ graduate to work items).
 
 - **Terrain generation still degrades at ~±16.7M voxels** — WS-4 deliberately does not touch
   the samplers (§1 non-goals). Travel is stable there; the terrain itself develops FNL
-  float-precision artifacts until the v2 rider ships.
+  float-precision artifacts until the v2 rider ships. The *lighting* crash at those magnitudes
+  (Bug 19, archived as `_FIXED_BUGS.md` #24) was fixed independently 2026-07-19 — integer column
+  routing end-to-end (`SunlightColumnRouting` + `Vector3Int` overloads on the `WorldData`/`ChunkCoord`
+  query APIs), so lighting is exact to the ±2³¹ edge even where terrain is degraded.
+- **The absolute ±2³¹ voxel edge overflows by construction — documented-only (decided 2026-07-19).**
+  At chunk ±2²⁷ the neighbor/halo ±1 arithmetic (`LocalToGlobal`, cross-chunk mod resolution)
+  wraps `int`, producing merge faults with `int.MinValue` chunk/local values. No integer-math fix
+  exists short of a hard world border inside the edge; it is unreachable in normal play (only
+  `/teleport` to the edge hits it), and HF-2 per-job fault isolation contains the damage — the
+  world stays playable. Revisit only if a gameplay-facing world bound ever ships.
 - **Liquid noise input precision degrades cosmetically far out** under the raw
   `_WorldOriginOffset` — same class as today's absolute `worldPos`, liquid-only, accepted.
 - ~~**Until WS-4c lands, the saved player position is precise only to ±2²⁴**~~ — **closed 2026-07-17**: it is
@@ -611,6 +621,14 @@ graduate to work items).
 
 ## Document History
 
+* **v1.9** - **Bug 19 fixed** (2026-07-19): the far-lands sunlight column-recalc crash §7's far
+  verification surfaced is closed — root cause was `WorldData.QueueSunlightRecalculation`'s
+  int→float round-trip mis-chunking columns past ±2²⁴ (plus implicit `Vector3Int`→`Vector3`
+  conversions at 11 query call sites). Fixed by the shared integer `SunlightColumnRouting` seam +
+  `Vector3Int` overloads (auto-capturing every integer caller) + a latched dev-build ±2²⁴ tripwire
+  on the float paths; guarded by lighting B95/B96 on a far-anchored harness (prove-red, then
+  Validate All 279/279). §9 additionally records the **±2³¹ edge overflow class as documented-only**
+  (decision 2026-07-19) and the header/limitations updated to reflect lighting being exact to ±2³¹.
 * **v1.8** - **WS-4c's tooling half SHIPPED** (2026-07-18): `/teleport` landed as CMD-2 of
   `COMMAND_CONSOLE_SYSTEM.md` (v1.6 there records the shipped surface + suite B24–B31). The §7
   WS-4 phase table is now fully ✅. Far-teleport verification (±2×10⁷ voxels) confirmed the
@@ -684,6 +702,6 @@ graduate to work items).
 
 ---
 
-**Last Updated:** 2026-07-18
+**Last Updated:** 2026-07-19
 **Next Review:** when `/teleport` (CMD-2) is scheduled — it needs CMD-1 first — or when the v2 noise rider is,
 whose harness it was always meant to be. WS-4's own work is otherwise complete.

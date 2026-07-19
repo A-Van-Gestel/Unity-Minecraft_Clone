@@ -206,7 +206,28 @@ namespace Data
             // Outside the world, nothing to do.
             if (!IsVoxelInWorld(worldPos)) return false;
 
-            Vector2Int chunkVoxelPos = GetChunkCoordFor(worldPos);
+            return EnsureChunkOriginExists(GetChunkCoordFor(worldPos));
+        }
+
+        /// <summary>
+        /// Integer-exact overload: ensures the chunk containing the given voxel cell exists
+        /// (see <see cref="EnsureChunkExists(Vector3)"/>). Exact to the ±2³¹ edge.
+        /// </summary>
+        /// <param name="voxelCell">The global voxel cell.</param>
+        /// <returns>True when the chunk already existed; false when a placeholder was created or the cell is outside the world.</returns>
+        public bool EnsureChunkExists(Vector3Int voxelCell)
+        {
+            // Outside the world, nothing to do (Y is the only bound since WS-3).
+            if (voxelCell.y is < 0 or >= VoxelData.ChunkHeight) return false;
+
+            return EnsureChunkOriginExists(GetChunkCoordFor(voxelCell));
+        }
+
+        /// <summary>Shared tail of the <c>EnsureChunkExists</c> overloads: creates a pooled placeholder when absent.</summary>
+        /// <param name="chunkVoxelPos">The chunk's voxel-space origin.</param>
+        /// <returns>True when the chunk already existed; false when a placeholder was created.</returns>
+        private bool EnsureChunkOriginExists(Vector2Int chunkVoxelPos)
+        {
             if (!_chunks.ContainsKey(chunkVoxelPos))
             {
                 // Create the placeholder
@@ -220,19 +241,40 @@ namespace Data
         /// <summary>
         /// Calculates the voxel-space world origin of the chunk containing the given world position.
         /// <para>Example: <c>Vector3(20, 0, 20)</c> -> <c>Vector2Int(16, 16)</c> (if ChunkWidth = 16)</para>
+        /// <para>⚠️ Float precision caps at ±2²⁴: integer voxel sources (e.g. <c>Vector3Int</c>
+        /// positions) must use the <see cref="GetChunkCoordFor(Vector3Int)"/> overload, which is exact
+        /// to the ±2³¹ edge — an implicit int→float conversion here silently mis-chunks far
+        /// coordinates (Bug 19).</para>
         /// </summary>
         /// <param name="worldPos">The world position.</param>
         /// <returns>The chunk's voxel-space origin.</returns>
         public Vector2Int GetChunkCoordFor(Vector3 worldPos)
         {
+            AssertWithinFloatPrecision(worldPos.x, worldPos.z);
             int x = ChunkMath.WorldToChunk(worldPos.x) * VoxelData.ChunkWidth;
             int z = ChunkMath.WorldToChunk(worldPos.z) * VoxelData.ChunkWidth;
             return new Vector2Int(x, z);
         }
 
         /// <summary>
+        /// Integer-exact overload: the voxel-space world origin of the chunk containing the given
+        /// voxel cell. Pure shift math — exact to the ±2³¹ edge at any sign.
+        /// </summary>
+        /// <param name="voxelCell">The global voxel cell.</param>
+        /// <returns>The chunk's voxel-space origin.</returns>
+        public Vector2Int GetChunkCoordFor(Vector3Int voxelCell)
+        {
+            return new Vector2Int(
+                ChunkMath.VoxelToChunk(voxelCell.x) * VoxelData.ChunkWidth,
+                ChunkMath.VoxelToChunk(voxelCell.z) * VoxelData.ChunkWidth);
+        }
+
+        /// <summary>
         /// Calculates the local voxel position within a chunk for a given world position.
         /// <para>Example: <c>Vector3(20.5f, 10f, 5f)</c> -> <c>Vector3Int(4, 10, 5)</c> (if ChunkWidth = 16)</para>
+        /// <para>⚠️ Float precision caps at ±2²⁴: integer voxel sources must use the
+        /// <see cref="GetLocalVoxelPositionInChunk(Vector3Int)"/> overload (see
+        /// <see cref="GetChunkCoordFor(Vector3)"/>).</para>
         /// </summary>
         /// <param name="worldPos">The world position.</param>
         /// <returns>The local (0-15) voxel position.</returns>
@@ -244,6 +286,46 @@ namespace Data
                 Mathf.FloorToInt(worldPos.y),
                 Mathf.FloorToInt(worldPos.z - chunkVoxelPos.y));
         }
+
+        /// <summary>
+        /// Integer-exact overload: the chunk-local voxel position of the given global voxel cell.
+        /// Pure mask math — exact to the ±2³¹ edge at any sign.
+        /// </summary>
+        /// <param name="voxelCell">The global voxel cell.</param>
+        /// <returns>The local (0-15 on X/Z) voxel position; Y passes through unchanged.</returns>
+        public Vector3Int GetLocalVoxelPositionInChunk(Vector3Int voxelCell)
+        {
+            return new Vector3Int(
+                ChunkMath.VoxelToLocal(voxelCell.x),
+                voxelCell.y,
+                ChunkMath.VoxelToLocal(voxelCell.z));
+        }
+
+        /// <summary>
+        /// Dev-build tripwire on the float query paths: an XZ magnitude at or beyond 2²⁴ has already
+        /// lost integer precision in the float, so the caller is either a mis-typed integer source
+        /// (route it through the <c>Vector3Int</c> overloads) or genuinely broken far-out float math.
+        /// Latched so a far-out frame logs once instead of spamming per query.
+        /// </summary>
+        /// <param name="x">The world-position X.</param>
+        /// <param name="z">The world-position Z.</param>
+        [System.Diagnostics.Conditional("UNITY_EDITOR"), System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+        private static void AssertWithinFloatPrecision(float x, float z)
+        {
+            const float MAX_EXACT_INT_FLOAT = 1 << 24;
+            if (s_floatPrecisionTripped || (Mathf.Abs(x) < MAX_EXACT_INT_FLOAT && Mathf.Abs(z) < MAX_EXACT_INT_FLOAT))
+                return;
+
+            s_floatPrecisionTripped = true;
+            Debug.LogError($"[WorldData] Float-space chunk query at ({x}, {z}) exceeds float integer precision " +
+                           "(±2^24) — integer voxel sources must use the Vector3Int overloads (Bug 19 class). " +
+                           "Further occurrences suppressed this session.");
+        }
+
+        private static bool s_floatPrecisionTripped;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetFloatPrecisionTripwire() => s_floatPrecisionTripped = false;
 
         #endregion
 
@@ -468,7 +550,7 @@ namespace Data
         /// <param name="columnPos">The column position</param>
         public void QueueSunlightRecalculation(Vector2Int columnPos)
         {
-            Vector2Int chunkVoxelPos = GetChunkCoordFor(new Vector3(columnPos.x, 0, columnPos.y));
+            Vector2Int chunkVoxelPos = SunlightColumnRouting.RouteToChunkOrigin(columnPos);
 
             // OPTIMIZATION: Grab from the global pool
             if (!SunlightRecalculationQueue.TryGetValue(chunkVoxelPos, out HashSet<Vector2Int> columns))

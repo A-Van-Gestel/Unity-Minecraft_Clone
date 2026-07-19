@@ -128,6 +128,17 @@ namespace Data
             return new ChunkCoord(ChunkMath.WorldToChunk(voxelPos.x), ChunkMath.WorldToChunk(voxelPos.z));
         }
 
+        /// <summary>
+        /// Integer-exact overload: the chunk containing the given voxel cell. Pure shift math — exact
+        /// to the ±2³¹ edge (the float overload's precision caps at ±2²⁴ — Bug 19 class).
+        /// </summary>
+        /// <param name="voxelCell">The global voxel cell.</param>
+        /// <returns>The containing chunk's coordinate.</returns>
+        public static ChunkCoord FromVoxelPosition(Vector3Int voxelCell)
+        {
+            return new ChunkCoord(ChunkMath.VoxelToChunk(voxelCell.x), ChunkMath.VoxelToChunk(voxelCell.z));
+        }
+
         #endregion
 
         #region Neighbor Helpers

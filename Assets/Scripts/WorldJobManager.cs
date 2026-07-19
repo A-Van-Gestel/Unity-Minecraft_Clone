@@ -612,7 +612,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
             {
                 foreach (Vector2Int col in columns)
                 {
-                    jobData.SunLightRecalcQueue.Enqueue(new Vector2Int(col.x - chunkData.Position.x, col.y - chunkData.Position.y));
+                    jobData.SunLightRecalcQueue.Enqueue(SunlightColumnRouting.ToLocalColumn(col, chunkData.Position));
                 }
 
                 _world.worldData.SunlightRecalculationQueue.Remove(chunkData.Position);
