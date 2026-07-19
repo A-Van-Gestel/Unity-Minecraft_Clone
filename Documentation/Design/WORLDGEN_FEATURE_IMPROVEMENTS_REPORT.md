@@ -52,6 +52,10 @@ Findings are from static code review of the Standard generation pipeline
 - [`LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md)
   — the `RF-*` sibling report (day/night cycle, sky rendering, lighting effects). The **combined
   ranked roadmap across both reports lives at the end of this document**.
+- [`FOLIAGE_LIVELINESS_IMPROVEMENTS_REPORT.md`](FOLIAGE_LIVELINESS_IMPROVEMENTS_REPORT.md) — the
+  `FL-*` sibling report (foliage sway, flora variety, particles). **TF-11's climate foliage tint
+  is the color half of that report's goal** and stays owned here; FL-3's per-biome flora
+  palettes re-key onto TF-3's climate axes when they ship.
 
 ---
 

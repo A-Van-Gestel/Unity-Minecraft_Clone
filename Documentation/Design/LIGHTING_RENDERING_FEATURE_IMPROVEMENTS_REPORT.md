@@ -18,6 +18,10 @@ authoring rules (global sky tint is exact, brightness-in-curve/color-in-gradient
 event tint changed from multiply to lerp/replace.
 **Amended:** 2026-07-19 — cross-linked the new `CLOUD_RENDERING_IMPROVEMENTS_REPORT.md` (`CL-*`):
 CL-2 absorbs RF-2 §5 (clouds tint); RF-7 §4's cloud knobs are received by CL-4.
+**Amended:** 2026-07-19 (later) — cross-linked the new `FOLIAGE_LIVELINESS_IMPROVEMENTS_REPORT.md`
+(`FL-*`): FL-1/FL-2 foliage sway reads the shared wind vector RF-7 will own; the RF-3 §2 vertex-
+channel allocation (`Color32` = TF-11 RGB + RF-3 emissive) is complemented by FL's claim on the
+spare `uv.zw` half2; RF-1 gates FL-6's fireflies.
 Findings are from static review of the light engine (`ushort LightData` RGB model, BFS jobs,
 `LightWorkScheduler`), the shader stack (`VoxelLighting.hlsl` + the three block shaders +
 `UberLiquidShader`), the URP configuration (`Assets/Settings/Rendering/`), and the `World.cs`
