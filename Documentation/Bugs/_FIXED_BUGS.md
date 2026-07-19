@@ -1151,6 +1151,35 @@ which also tags solid Oak Leaves (every genuinely replaceable plant is also `REP
 
 ---
 
+### ~~03. Far-Lands Voxel Modification Broken — Placement/Breaking Fail Near the ±2³¹ Edge~~
+
+**Severity:** Low (far-lands only; normal-play range unaffected)
+**Files:** `PlacementController.cs`, `PlayerInteraction.cs`, `World.cs` (`ApplyModifications`), `Commands/` (`/setblock`)
+**Reported:** July 2026 (logged 2026-07-19 during the Bug 19 far-coordinate verification session, BEFORE commit `ed8cb69` landed)
+**Fixed:** July 2026 (resolved by `ed8cb69`; re-test confirmed 2026-07-19 — no code change of its own)
+
+**Symptom (observed pre-`ed8cb69`):** Near the ±2³¹ voxel edge (possibly earlier): the placement highlight never
+rendered (only the breakage highlight), breaking did nothing, placing decremented the hotbar without changing the
+world (the `VoxelMod` enqueued at interaction time, then misrouted at apply time), and `/setblock` placed its block
+at a drifted cell.
+
+**Root Cause:** The same int→float round-trip class as lighting Bug 19 (`#24` above), on the mod-application
+seams `ed8cb69` fixed: `World.ApplyModifications`' chunk routing (`World.cs:2421`) and the mod local-position
+derivations (`World.cs:922/:2500`) went through implicit `Vector3Int`→`Vector3` conversions that lose integer
+precision past ±2²⁴ — an integer-correct `VoxelMod` was routed to the adjacent chunk's bucket and/or given a
+wrong local cell, which explains all four symptoms including the `/setblock` "drift" (the command path itself is
+integer end-to-end). The original observations may also have been compounded by chunks persisted in a broken
+state on the pre-fix test world.
+
+**Verification (fresh world, editor, 2026-07-19):** breaking, placing, and highlights all correct at
++16,800,000, +2×10⁷, +2,147,000,000, and +2,147,483,500 (where edits even land correctly in the
+quadrant-wrapped chunk — the §9 documented-only edge class); no `WorldData.AssertWithinFloatPrecision` tripwire
+hits. New far-coordinate observations from the re-test that are NOT this bug: natural-fluid reactivation failure
+(logged as an open entry in `FLUID_BUGS.md`) and near-edge cosmetic/perf items (added to
+`WORLD_SCALING_FLOATING_ORIGIN.md` §9).
+
+---
+
 ## World Generation & Data
 
 ### ~~02. `ProcessGenerationJobs` always uses `biomes[0]` for flora generation~~

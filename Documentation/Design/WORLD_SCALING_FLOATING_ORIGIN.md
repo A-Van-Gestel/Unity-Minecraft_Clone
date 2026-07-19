@@ -556,11 +556,17 @@ graduate to work items).
   inside the Burst job (observed 2026-07-19; the WS-3 `FloorDiv` rider is exact — it is the
   subsequent multiply that wraps); (c) **quadrant inversion**: int space is a ring, so coordinates
   crossing ±2³¹ arrive in the sign-mirrored quadrant — teleporting "past" the edge is wraparound,
-  not clamping. All are Burst-job exceptions or coordinate aliasing at a location where terrain is
-  already maximally degraded (the v2 noise rider caps usable radius at ±2²⁴ until it ships, and at
-  ±2³¹ permanently by design).
+  not clamping. Voxel modification at ~2,147,483,500 was observed working (2026-07-19 re-test) —
+  edits land consistently in the quadrant-wrapped chunk, exactly as the ring model predicts;
+  (d) **meshing slows to multiple seconds per chunk** at the edge (observed 2026-07-19; cause not
+  investigated — same class, not scheduled). All are Burst-job exceptions, coordinate aliasing, or
+  perf collapse at a location where terrain is already maximally degraded (the v2 noise rider caps
+  usable radius at ±2²⁴ until it ships, and at ±2³¹ permanently by design).
 - **Liquid noise input precision degrades cosmetically far out** under the raw
   `_WorldOriginOffset` — same class as today's absolute `worldPos`, liquid-only, accepted.
+  Confirmed in-game near ±2³¹ (2026-07-19 re-test): fluid surfaces render flat blue, the flow
+  vectors having collapsed. Clouds show the same class there — the cloud field generates in
+  stripes near the edge (cosmetic noise-input precision; accepted alongside).
 - ~~**Until WS-4c lands, the saved player position is precise only to ±2²⁴**~~ — **closed 2026-07-17**: it is
   a `ChunkRelativePosition` on disk (v13) and stays chunk-relative all the way to the transform, so it is exact to
   the ±2³¹ edge. The **spawn point** and the terrain height probe still resolve through an absolute `Vector3`
@@ -632,6 +638,14 @@ graduate to work items).
 
 ## Document History
 
+* **v1.10** - **PLAYER_BUGS 03 closed as fixed-by-`ed8cb69`** (2026-07-19): the fresh-world re-test at
+  +16.8M / +2×10⁷ / +2.147×10⁹ / +2,147,483,500 confirmed voxel modification (break/place/highlights,
+  `/setblock`) correct at every magnitude, with no float-tripwire hits — the pre-fix symptoms were the
+  Bug-19 mod-routing seams (archived to `_FIXED_BUGS.md` Player #03). §9 addenda from the same session:
+  edge inventory gained (d) multi-second meshing plus the observed quadrant-wrapped edits working under
+  (c); the liquid-noise cosmetic bullet now records the confirmed flat-blue fluid surfaces and striped
+  clouds near the edge. One genuinely new far-coordinate bug was split out as `FLUID_BUGS.md` #17
+  (naturally-generated fluids don't reactivate on neighbor break; onset unbracketed).
 * **v1.9** - **Bug 19 fixed** (2026-07-19): the far-lands sunlight column-recalc crash §7's far
   verification surfaced is closed — root cause was `WorldData.QueueSunlightRecalculation`'s
   int→float round-trip mis-chunking columns past ±2²⁴ (plus implicit `Vector3Int`→`Vector3`
