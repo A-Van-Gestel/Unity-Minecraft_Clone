@@ -21,6 +21,10 @@ public class Clouds : MonoBehaviour
     [SerializeField]
     private float _depthOffset = 0.0035f;
 
+    [Tooltip("Wind drift velocity in voxel-space XZ blocks per second. Zero freezes the cloudscape. Owned by the inspector for now; a future weather system (RF-7) takes over this value.")]
+    [SerializeField]
+    private Vector2 _windBlocksPerSecond = new Vector2(-0.6f, 0f);
+
     // Cloud tiles are deliberately larger than terrain chunks: coverage now scales with render distance,
     // so fewer, bigger tiles keep the GameObject count bounded (identical pattern tiles share one mesh).
     // Must divide the pattern texture width.
@@ -33,17 +37,31 @@ public class Clouds : MonoBehaviour
     // Floor so very low render distances still get a believable sky instead of a small patch overhead.
     private const int MIN_COVERAGE_RADIUS_CHUNKS = 8;
 
+    // Fraction of the coverage radius over which the shader fades the cloudscape's outer edge.
+    private const float EDGE_FADE_FRACTION = 0.15f;
+
+    private static readonly int s_shaderCloudFaceShading = Shader.PropertyToID("_CloudFaceShading");
+    private static readonly int s_shaderCloudFadeParams = Shader.PropertyToID("_CloudFadeParams");
+
     private bool[,] _cloudData; // Array of bools representing where cloud is.
     private int _cloudTexWidth;
     private int _cloudTileSize;
+
+    // Wind drift, in blocks, wrapped into [0, _cloudTexWidth) — the pattern is periodic, so the wrap is
+    // invisible and keeps the accumulator (and every float derived from it) small forever. Deliberately
+    // NOT reset by Reinitialize: a settings change must not teleport the sky.
+    private Vector2 _driftBlocks;
+
+    // Cloud-space tile the player occupied at the last sweep; re-keying only happens when it changes.
+    private Vector2Int _centerCloudTile;
 
     // Shared mesh per pattern tile (key = pattern-space tile origin). A null value marks a tile the
     // pattern leaves empty, so repeat lookups skip both the mesh build and the GameObject.
     private readonly Dictionary<Vector2Int, Mesh> _tileMeshes = new Dictionary<Vector2Int, Mesh>();
 
-    // Live tile instances keyed by WORLD tile index (voxel cell / tile size) — unlike the old
-    // pattern-space keying, the same pattern tile can appear multiple times once the coverage
-    // radius exceeds one pattern period.
+    // Live tile instances keyed by CLOUD-SPACE tile index (drift-corrected voxel cell / tile size) —
+    // the same pattern tile can appear multiple times once the coverage radius exceeds one pattern
+    // period. Tiles are root-local: per-frame drift moves only the root transform.
     private readonly Dictionary<Vector2Int, MeshFilter> _clouds = new Dictionary<Vector2Int, MeshFilter>();
 
     // Inactive tile GameObjects, reused as the covered area moves with the player.
@@ -81,7 +99,14 @@ public class Clouds : MonoBehaviour
     {
         if (_isInitialized) return;
 
-        AnchorRoot();
+        // Tiles are positioned root-locally (the root carries the drift), so the root pose must be clean.
+        transform.rotation = Quaternion.identity;
+        transform.localScale = Vector3.one;
+
+        // Fast tiles are all bottom faces — per-face weights would just darken them uniformly, so
+        // face shading is a Fancy-only look. A global (not a material property) so the shared
+        // material asset is never mutated at runtime.
+        Shader.SetGlobalFloat(s_shaderCloudFaceShading, _world.settings.clouds == CloudStyle.Fancy ? 1f : 0f);
 
         LoadCloudData();
         if (_cloudData == null) return; // Unreadable pattern texture — LoadCloudData already disabled us.
@@ -94,26 +119,40 @@ public class Clouds : MonoBehaviour
     }
 
     /// <summary>
-    /// Places the cloudscape's root. Deliberately not in Awake: DefaultSpawnPosition is voxel space, so it converts
-    /// through the origin, and Awake runs before World has anchored it. (The tiles themselves don't depend on this —
-    /// UpdateClouds positions each one in Unity space directly.)
-    /// </summary>
-    private void AnchorRoot()
-    {
-        transform.position = WorldOrigin.VoxelToUnity(
-            new Vector3(VoxelData.DefaultSpawnPosition, cloudHeight, VoxelData.DefaultSpawnPosition));
-    }
-
-    /// <summary>
-    /// Re-anchors the cloudscape after a floating-origin shift (WS-4b). The root is world-anchored, so it re-derives;
-    /// the tiles are re-placed immediately rather than waiting for the next chunk crossing to drive UpdateClouds.
+    /// Re-anchors the cloudscape after a floating-origin shift (WS-4b). The sweep re-derives the root from voxel
+    /// space (tiles are root-local), immediately rather than waiting for the next chunk crossing.
     /// </summary>
     public void Reanchor()
     {
         if (!_isInitialized) return;
 
-        AnchorRoot();
         UpdateClouds();
+    }
+
+    /// <summary>
+    /// Per-frame drift tick: advances the wind offset and moves the (single) root transform. The tile
+    /// re-key sweep only runs when the player crosses into a different cloud-space tile — allocation-free
+    /// on every other frame.
+    /// </summary>
+    private void Update()
+    {
+        if (!_isInitialized || _world.settings.clouds == CloudStyle.Off)
+            return;
+
+        if (_windBlocksPerSecond != Vector2.zero)
+        {
+            _driftBlocks += _windBlocksPerSecond * Time.deltaTime;
+            _driftBlocks.x = WrapDrift(_driftBlocks.x);
+            _driftBlocks.y = WrapDrift(_driftBlocks.y);
+        }
+
+        // When the drift accumulator wraps by a pattern period, every cloud-space index shifts by a
+        // whole number of tiles onto identical pattern keys — the sweep below re-keys through the
+        // shared-mesh cache with zero visual change (the pattern is periodic by construction).
+        if (ComputeCenterCloudTile() != _centerCloudTile)
+            UpdateClouds();
+        else
+            PositionRoot();
     }
 
     /// <summary>
@@ -170,10 +209,10 @@ public class Clouds : MonoBehaviour
     }
 
     /// <summary>
-    /// Streams cloud tiles to cover the current coverage radius around the player: releases tiles that
-    /// fell out of range, then places (pooled) instances for every in-range world tile whose pattern
-    /// cell has geometry. In-range tiles are always re-positioned, so a floating-origin shift is
-    /// absorbed by the same pass.
+    /// The tile re-key sweep: recomputes the player's cloud-space tile, re-derives the root, releases
+    /// tiles that fell out of range, and places (pooled) instances for every in-range cloud tile whose
+    /// pattern cell has geometry. Tiles are positioned root-locally, so a floating-origin shift is
+    /// absorbed by the root re-derivation alone.
     /// </summary>
     public void UpdateClouds()
     {
@@ -181,18 +220,22 @@ public class Clouds : MonoBehaviour
         if (!_isInitialized || _world.settings.clouds == CloudStyle.Off)
             return;
 
-        // The pattern is anchored to the WORLD, so tile indexing runs in voxel space — otherwise the
-        // whole cloudscape would jump to a different part of the pattern on an origin re-anchor.
-        Vector3Int playerVoxelCell = WorldOrigin.UnityToVoxelCell(_world.player.transform.position);
-        int centerTileX = ChunkMath.FloorDiv(playerVoxelCell.x, _cloudTileSize);
-        int centerTileZ = ChunkMath.FloorDiv(playerVoxelCell.z, _cloudTileSize);
+        _centerCloudTile = ComputeCenterCloudTile();
+        PositionRoot();
+
         int radiusTiles = Mathf.CeilToInt(CoverageRadiusInBlocks() / (float)_cloudTileSize);
+
+        // The shader fades the cloudscape's outer edge instead of ending in a hard line.
+        float fadeEnd = radiusTiles * _cloudTileSize;
+        float fadeStart = fadeEnd * (1f - EDGE_FADE_FRACTION);
+        Shader.SetGlobalVector(s_shaderCloudFadeParams, new Vector4(fadeStart, 1f / (fadeEnd - fadeStart), 0f, 0f));
 
         // Release out-of-range tiles first so their GameObjects can be reused by this same pass.
         List<Vector2Int> stale = ListPool<Vector2Int>.Get();
         foreach (KeyValuePair<Vector2Int, MeshFilter> pair in _clouds)
         {
-            if (Mathf.Abs(pair.Key.x - centerTileX) > radiusTiles || Mathf.Abs(pair.Key.y - centerTileZ) > radiusTiles)
+            if (Mathf.Abs(pair.Key.x - _centerCloudTile.x) > radiusTiles ||
+                Mathf.Abs(pair.Key.y - _centerCloudTile.y) > radiusTiles)
                 stale.Add(pair.Key);
         }
 
@@ -201,26 +244,82 @@ public class Clouds : MonoBehaviour
 
         ListPool<Vector2Int>.Release(stale);
 
-        for (int tileX = centerTileX - radiusTiles; tileX <= centerTileX + radiusTiles; tileX++)
+        for (int tileX = _centerCloudTile.x - radiusTiles; tileX <= _centerCloudTile.x + radiusTiles; tileX++)
         {
-            for (int tileZ = centerTileZ - radiusTiles; tileZ <= centerTileZ + radiusTiles; tileZ++)
+            for (int tileZ = _centerCloudTile.y - radiusTiles; tileZ <= _centerCloudTile.y + radiusTiles; tileZ++)
             {
-                Vector2Int worldTile = new Vector2Int(tileX, tileZ);
-                Vector3 unityPos = WorldOrigin.VoxelToUnity(
-                    new Vector3(tileX * _cloudTileSize, cloudHeight, tileZ * _cloudTileSize));
+                Vector2Int cloudTile = new Vector2Int(tileX, tileZ);
 
-                if (_clouds.TryGetValue(worldTile, out MeshFilter existing))
+                // Root-local placement keeps every float small regardless of world position; the sweep
+                // re-bases all locals against the new center, so they never exceed the coverage radius.
+                Vector3 localPos = new Vector3(
+                    (tileX - _centerCloudTile.x) * _cloudTileSize, 0f,
+                    (tileZ - _centerCloudTile.y) * _cloudTileSize);
+
+                if (_clouds.TryGetValue(cloudTile, out MeshFilter existing))
                 {
-                    existing.transform.position = unityPos;
+                    existing.transform.localPosition = localPos;
                     continue;
                 }
 
-                Mesh mesh = GetTileMesh(worldTile);
+                Mesh mesh = GetTileMesh(cloudTile);
                 if (mesh == null) continue; // Pattern leaves this tile empty — nothing to render.
 
-                _clouds.Add(worldTile, AcquireTile(mesh, unityPos, worldTile));
+                _clouds.Add(cloudTile, AcquireTile(mesh, localPos, cloudTile));
             }
         }
+    }
+
+    /// <summary>
+    /// The cloud-space tile (drift-corrected voxel cell / tile size) the player is currently over.
+    /// </summary>
+    /// <returns>The player's cloud-space tile index.</returns>
+    private Vector2Int ComputeCenterCloudTile()
+    {
+        // Cloud space = voxel space − drift: the pattern is anchored to cloud space, so it both drifts
+        // with the wind and survives an origin re-anchor without jumping.
+        Vector3Int playerVoxelCell = WorldOrigin.UnityToVoxelCell(_world.player.transform.position);
+        Vector2Int floorDrift = FloorDriftBlocks();
+        return new Vector2Int(
+            ChunkMath.FloorDiv(playerVoxelCell.x - floorDrift.x, _cloudTileSize),
+            ChunkMath.FloorDiv(playerVoxelCell.z - floorDrift.y, _cloudTileSize));
+    }
+
+    /// <summary>
+    /// Places the root at the current center tile's voxel anchor plus the fractional drift. The integer
+    /// part converts through the exact <see cref="WorldOrigin.VoxelToUnity(Vector3Int)"/> overload; only
+    /// the sub-block drift remainder is float math, so placement stays exact at any world position.
+    /// </summary>
+    private void PositionRoot()
+    {
+        Vector2Int floorDrift = FloorDriftBlocks();
+        Vector3Int anchorVoxel = new Vector3Int(
+            _centerCloudTile.x * _cloudTileSize + floorDrift.x,
+            cloudHeight,
+            _centerCloudTile.y * _cloudTileSize + floorDrift.y);
+        Vector2 fracDrift = new Vector2(_driftBlocks.x - floorDrift.x, _driftBlocks.y - floorDrift.y);
+
+        transform.position = WorldOrigin.VoxelToUnity(anchorVoxel) + new Vector3(fracDrift.x, 0f, fracDrift.y);
+    }
+
+    /// <summary>
+    /// The integer (floored) part of the drift accumulator on both axes.
+    /// </summary>
+    /// <returns>The whole-block drift offset.</returns>
+    private Vector2Int FloorDriftBlocks()
+    {
+        return new Vector2Int(Mathf.FloorToInt(_driftBlocks.x), Mathf.FloorToInt(_driftBlocks.y));
+    }
+
+    /// <summary>
+    /// Positive wrap of a drift coordinate into <c>[0, _cloudTexWidth)</c>. The pattern is periodic at
+    /// the texture width, so the wrap is visually a no-op while keeping the accumulator small forever.
+    /// </summary>
+    /// <param name="value">The unwrapped drift coordinate, in blocks.</param>
+    /// <returns>The wrapped coordinate in <c>[0, _cloudTexWidth)</c>.</returns>
+    private float WrapDrift(float value)
+    {
+        return value - Mathf.Floor(value / _cloudTexWidth) * _cloudTexWidth;
     }
 
     /// <summary>
@@ -236,16 +335,16 @@ public class Clouds : MonoBehaviour
     }
 
     /// <summary>
-    /// Returns the shared mesh for the pattern tile under the given world tile, building and caching it
-    /// on first use. Returns null for pattern tiles with no cloud pixels.
+    /// Returns the shared mesh for the pattern tile under the given cloud-space tile, building and
+    /// caching it on first use. Returns null for pattern tiles with no cloud pixels.
     /// </summary>
-    /// <param name="worldTile">World-space tile index (voxel cell / tile size).</param>
+    /// <param name="cloudTile">Cloud-space tile index (drift-corrected voxel cell / tile size).</param>
     /// <returns>The shared tile mesh, or null when the pattern tile is empty (or clouds are off).</returns>
-    private Mesh GetTileMesh(Vector2Int worldTile)
+    private Mesh GetTileMesh(Vector2Int cloudTile)
     {
         Vector2Int patternKey = new Vector2Int(
-            WrapToPattern(worldTile.x * _cloudTileSize),
-            WrapToPattern(worldTile.y * _cloudTileSize));
+            WrapToPattern(cloudTile.x * _cloudTileSize),
+            WrapToPattern(cloudTile.y * _cloudTileSize));
 
         if (_tileMeshes.TryGetValue(patternKey, out Mesh mesh))
             return mesh;
@@ -437,13 +536,14 @@ public class Clouds : MonoBehaviour
     }
 
     /// <summary>
-    /// Takes a tile from the pool (or creates one) and configures it with the given shared mesh and position.
+    /// Takes a tile from the pool (or creates one) and configures it with the given shared mesh and
+    /// root-local position.
     /// </summary>
     /// <param name="mesh">Shared pattern-tile mesh to render.</param>
-    /// <param name="unityPos">Unity-space position of the tile's minimum corner.</param>
-    /// <param name="worldTile">World tile index, used only for the editor-facing name.</param>
+    /// <param name="localPos">Root-local position of the tile's minimum corner (the root carries the drift).</param>
+    /// <param name="cloudTile">Cloud-space tile index, used only for the editor-facing name.</param>
     /// <returns>The tile's MeshFilter (its GameObject is the tile instance).</returns>
-    private MeshFilter AcquireTile(Mesh mesh, Vector3 unityPos, Vector2Int worldTile)
+    private MeshFilter AcquireTile(Mesh mesh, Vector3 localPos, Vector2Int cloudTile)
     {
         MeshFilter tile;
         if (_tilePool.Count > 0)
@@ -454,7 +554,8 @@ public class Clouds : MonoBehaviour
         else
         {
             GameObject newCloudTile = new GameObject();
-            newCloudTile.transform.parent = transform;
+            // worldPositionStays: false — the tile lives in root-local space from birth.
+            newCloudTile.transform.SetParent(transform, false);
             tile = newCloudTile.AddComponent<MeshFilter>();
 
             // sharedMaterial: every tile renders with the one cloud material — a per-tile
@@ -463,10 +564,10 @@ public class Clouds : MonoBehaviour
             mR.sharedMaterial = _cloudMaterial;
         }
 
-        tile.transform.position = unityPos;
+        tile.transform.localPosition = localPos;
         tile.sharedMesh = mesh;
 #if UNITY_EDITOR
-        tile.gameObject.name = $"Cloud {worldTile.x}, {worldTile.y}";
+        tile.gameObject.name = $"Cloud {cloudTile.x}, {cloudTile.y}";
 #endif
         return tile;
     }
