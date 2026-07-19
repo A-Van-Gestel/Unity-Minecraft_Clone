@@ -36,6 +36,7 @@ namespace Editor.Validation.Meshing
             scenarios.Add(new Scenario("B10: post-process rewrites to section-space + interleaves stream 3, chained==separate (MH-5 / MR-5 guard)", B10_PostProcessSectionSpaceAndInterleave));
             scenarios.Add(new Scenario("B11: smooth lighting encodes uniform corner light to the right UNorm8 values (MH-3 / MR-2 guard)", B11_SmoothLightingUniformCornerValues));
             scenarios.Add(new Scenario("B17: a pooled output reused across scenes equals a fresh buffer (MH-2 / MR-6 stale-reuse guard)", B17_PooledOutputStaleDataGuard));
+            scenarios.Add(new Scenario("B22: cross-mesh UV ZW carries sway weight (top/bottom split) + deterministic per-voxel phase; cubes stay ZW=0 (FL-1 guard)", B22_CrossMeshSwayChannels));
 
             // --- Cross-chunk border-face-culling family (B18–B21, MH-10/MH-11) lives in its own partial
             // file (MeshingValidationSuite.CrossChunk.cs) and self-registers here. ---
@@ -847,6 +848,120 @@ namespace Editor.Validation.Meshing
             }
 
             return -1;
+        }
+
+        /// <summary>
+        /// B22 — FL-1 sway-channel guard. Two cross-flora voxels must emit UV ZW sway data:
+        /// Z (weight) exactly 1 on every top (y = pos.y + 1) vertex and exactly 0 on every bottom
+        /// vertex, W (phase) identical across one voxel's 16 verts, inside [0, 1], different between
+        /// the two cells (anti-constant-hash), and bit-identical across two runs (determinism).
+        /// A standard opaque cube in a separate scene must keep ZW = 0 on all verts, proving the
+        /// sway overload never leaks into non-flora emission paths.
+        /// </summary>
+        private static bool B22_CrossMeshSwayChannels()
+        {
+            using MeshingTestWorld world = new MeshingTestWorld();
+            Vector3Int posA = new Vector3Int(8, 8, 8);
+            Vector3Int posB = new Vector3Int(4, 8, 4);
+            world.SetBlock(posA.x, posA.y, posA.z, TestMeshBlockPalette.CrossFlora);
+            world.SetBlock(posB.x, posB.y, posB.z, TestMeshBlockPalette.CrossFlora);
+            MeshDataJobOutput o = world.Run();
+
+            bool passed = MeshAssert.VertexCount("B22 vertex count (2 cross voxels)", o, 32);
+            passed &= MeshAssert.StructuralInvariants("B22 structural", o);
+            if (o.Vertices.Length != 32) return false;
+
+            passed &= MeshAssert.IsTrue("B22 cross routes all triangles to the transparent submesh",
+                o.Triangles.Length == 0 && o.FluidTriangles.Length == 0 && o.TransparentTriangles.Length == 48,
+                $"opaque={o.Triangles.Length} fluid={o.FluidTriangles.Length} transparent={o.TransparentTriangles.Length} (expected 0/0/48)");
+
+            passed &= CheckCrossSwayChannels("B22 voxel A", o, posA, out float phaseA);
+            passed &= CheckCrossSwayChannels("B22 voxel B", o, posB, out float phaseB);
+
+            // Anti-constant guard: a hash that collapsed to one value would make every tuft sway in
+            // lockstep — and would false-green the per-voxel determinism checks above.
+            passed &= MeshAssert.IsTrue("B22 phase differs between cells", phaseA != phaseB,
+                $"phaseA={phaseA:G6} phaseB={phaseB:G6}");
+
+            // Determinism: a second run over the same map must reproduce the UV stream bit-identically
+            // (the phase hash must depend on nothing but the voxel cell).
+            half4[] firstUvs = o.Uvs.AsArray().ToArray();
+            MeshDataJobOutput o2 = world.Run();
+            bool uvsIdentical = o2.Uvs.Length == firstUvs.Length;
+            if (uvsIdentical)
+            {
+                for (int i = 0; i < firstUvs.Length; i++)
+                {
+                    if (!firstUvs[i].Equals(o2.Uvs[i]))
+                    {
+                        uvsIdentical = false;
+                        break;
+                    }
+                }
+            }
+
+            passed &= MeshAssert.IsTrue("B22 UV stream deterministic across runs", uvsIdentical,
+                $"run1 count={firstUvs.Length} run2 count={o2.Uvs.Length}");
+
+            // Non-flora guard: a plain opaque cube keeps ZW = 0 on every vertex — the sway overload
+            // must never leak into the standard-cube emission path.
+            using MeshingTestWorld cubeWorld = new MeshingTestWorld();
+            cubeWorld.SetBlock(8, 8, 8, TestMeshBlockPalette.SolidOpaque);
+            MeshDataJobOutput oc = cubeWorld.Run();
+            bool cubeZeroZw = true;
+            for (int i = 0; i < oc.Uvs.Length; i++)
+            {
+                if (oc.Uvs[i].z != 0f || oc.Uvs[i].w != 0f)
+                {
+                    cubeZeroZw = false;
+                    break;
+                }
+            }
+
+            passed &= MeshAssert.IsTrue("B22 standard cube keeps UV ZW = 0", cubeZeroZw,
+                $"checked {oc.Uvs.Length} verts");
+
+            return passed;
+        }
+
+        /// <summary>
+        /// Verifies one cross-flora voxel's 16 verts: weight (UV Z) is exactly 1 on top verts and 0 on
+        /// bottom verts, and phase (UV W) is a single value shared by all 16, inside [0, 1] (half
+        /// rounding may land a phase just below 1 exactly on 1 — functionally equivalent, sin is 2π-periodic).
+        /// </summary>
+        /// <param name="label">Assertion label prefix.</param>
+        /// <param name="o">The meshing output containing the voxel's verts.</param>
+        /// <param name="pos">The voxel's chunk-local cell.</param>
+        /// <param name="phase">The voxel's shared phase value (NaN when verts are missing/mismatched).</param>
+        private static bool CheckCrossSwayChannels(string label, MeshDataJobOutput o, Vector3Int pos, out float phase)
+        {
+            phase = float.NaN;
+            int vertsSeen = 0;
+            bool weightsOk = true, phaseUniform = true;
+
+            for (int i = 0; i < o.Vertices.Length; i++)
+            {
+                Vector3 v = o.Vertices[i];
+                // Cross verts sit on the cell's corners/edges: x/z in {pos, pos+1}, y in {pos, pos+1}.
+                if (v.x < pos.x || v.x > pos.x + 1 || v.z < pos.z || v.z > pos.z + 1 ||
+                    v.y < pos.y || v.y > pos.y + 1)
+                    continue;
+
+                vertsSeen++;
+                float weight = o.Uvs[i].z;
+                bool isTop = Mathf.Approximately(v.y, pos.y + 1);
+                if (weight != (isTop ? 1f : 0f)) weightsOk = false;
+
+                float w = o.Uvs[i].w;
+                if (float.IsNaN(phase)) phase = w;
+                else if (w != phase) phaseUniform = false;
+            }
+
+            bool passed = MeshAssert.IsTrue($"{label}: 16 verts found in cell", vertsSeen == 16, $"found {vertsSeen}");
+            passed &= MeshAssert.IsTrue($"{label}: weight 1 on top verts, 0 on bottom verts", weightsOk, "UV Z split mismatch");
+            passed &= MeshAssert.IsTrue($"{label}: phase uniform across the voxel", phaseUniform, $"first phase={phase:G6}");
+            passed &= MeshAssert.IsTrue($"{label}: phase within [0, 1]", phase >= 0f && phase <= 1f, $"phase={phase:G6}");
+            return passed;
         }
     }
 }

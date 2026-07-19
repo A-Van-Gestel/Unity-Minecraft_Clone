@@ -106,13 +106,31 @@ namespace Helpers
         /// <summary>
         /// Calculates and appends the precise UV coordinates for a given texture ID to the UV list.
         /// Accounts for the normalized texture atlas size and origin alignment.
-        /// The ZW components are zeroed; they are only meaningful for fluid top faces (shore push).
+        /// The ZW components are zeroed; per-submesh they carry fluid shore push (fluid top faces)
+        /// or foliage sway weight/phase (cross meshes, via the sway overload).
         /// </summary>
         /// <param name="textureID">The index of the texture within the atlas.</param>
         /// <param name="uv">The local UV offset for the current vertex.</param>
         /// <param name="uvs">The native list of UVs to append to.</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void AddTexture(int textureID, Vector2 uv, ref NativeList<half4> uvs)
+        {
+            AddTexture(textureID, uv, swayWeight: 0f, swayPhase: 0f, ref uvs);
+        }
+
+        /// <summary>
+        /// Sway-aware variant of <see cref="AddTexture(int, Vector2, ref NativeList{half4})"/>:
+        /// writes the atlas UV to XY and foliage sway data to ZW (FL-1). The transparent block
+        /// shader reads Z as the vertex's sway displacement weight and W as its per-voxel wind
+        /// phase; every non-sway emission path keeps ZW at zero via the plain overload.
+        /// </summary>
+        /// <param name="textureID">The index of the texture within the atlas.</param>
+        /// <param name="uv">The local UV offset for the current vertex.</param>
+        /// <param name="swayWeight">Sway displacement weight in [0, 1] (0 = vertex never moves).</param>
+        /// <param name="swayPhase">Per-voxel wind phase in [0, 1), from <see cref="VoxelHash01"/>.</param>
+        /// <param name="uvs">The native list of UVs to append to.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void AddTexture(int textureID, Vector2 uv, float swayWeight, float swayPhase, ref NativeList<half4> uvs)
         {
             float y = Mathf.FloorToInt((float)textureID / VoxelData.TextureAtlasSizeInBlocks);
             float x = textureID - y * VoxelData.TextureAtlasSizeInBlocks;
@@ -125,7 +143,29 @@ namespace Helpers
             x += VoxelData.NormalizedBlockTextureSize * uv.x;
             y += VoxelData.NormalizedBlockTextureSize * uv.y;
 
-            uvs.Add((half4)new float4(x, y, 0f, 0f)); // MR-2: Float16×4. zw = 0; shore push is fluid-only
+            uvs.Add((half4)new float4(x, y, swayWeight, swayPhase)); // MR-2: Float16×4
+        }
+
+        /// <summary>
+        /// Deterministic per-voxel hash mapped to [0, 1) (lowbias32-style avalanche). Hash the
+        /// <b>voxel-space</b> cell, never a Unity-space position: the result then survives
+        /// floating-origin re-anchors and chunk re-meshes bit-identically (WS-4 rule).
+        /// Used for the foliage sway phase (FL-1); FL-4's per-voxel variation reuses it.
+        /// </summary>
+        /// <param name="x">Voxel-space cell X.</param>
+        /// <param name="y">Voxel-space cell Y.</param>
+        /// <param name="z">Voxel-space cell Z.</param>
+        /// <returns>A deterministic pseudo-random value in [0, 1).</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float VoxelHash01(int x, int y, int z)
+        {
+            uint h = (uint)x * 0x9E3779B1u ^ (uint)y * 0x85EBCA77u ^ (uint)z * 0xC2B2AE3Du;
+            h ^= h >> 16;
+            h *= 0x7FEB352Du;
+            h ^= h >> 15;
+            h *= 0x846CA68Bu;
+            h ^= h >> 16;
+            return h * (1f / 4294967296f);
         }
 
         /// <summary>
@@ -571,6 +611,7 @@ namespace Helpers
         private static void AddCrossQuad(
             Vector3 bl, Vector3 tl, Vector3 br, Vector3 tr, Vector3 normal, int textureID, Color32 vertexColor,
             Color32 lightBL, Color32 lightTL, Color32 lightBR, Color32 lightTR, in Vector3Int position,
+            float swayPhase,
             ref int vertexIndex, ref NativeList<Vector3> vertices, ref NativeList<int> transparentTriangles,
             ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
             ref NativeList<Color32> lightData)
@@ -595,10 +636,12 @@ namespace Helpers
             lightData.Add(lightBR);
             lightData.Add(lightTR);
 
-            AddTexture(textureID, new Vector2(0, 0), ref uvs); // BL
-            AddTexture(textureID, new Vector2(0, 1), ref uvs); // TL
-            AddTexture(textureID, new Vector2(1, 0), ref uvs); // BR
-            AddTexture(textureID, new Vector2(1, 1), ref uvs); // TR
+            // FL-1: grass bends from the root — only the two top (y=1) verts carry sway weight,
+            // so the base stays planted and the mesh can never displace into the ground.
+            AddTexture(textureID, new Vector2(0, 0), swayWeight: 0f, swayPhase, ref uvs); // BL
+            AddTexture(textureID, new Vector2(0, 1), swayWeight: 1f, swayPhase, ref uvs); // TL
+            AddTexture(textureID, new Vector2(1, 0), swayWeight: 0f, swayPhase, ref uvs); // BR
+            AddTexture(textureID, new Vector2(1, 1), swayWeight: 1f, swayPhase, ref uvs); // TR
 
             EmitQuadTriangles(lightBL, lightTL, lightBR, lightTR, vertexIndex, ref transparentTriangles);
 
@@ -610,12 +653,14 @@ namespace Helpers
         /// Bypasses standard neighbor culling and uses diagonal normals.
         /// Per-vertex light values are read from <paramref name="cornerLights"/>, which is pre-populated
         /// by the caller with either smooth corner-averaged values or uniform flat values.
+        /// Sway data rides the UV ZW channels (FL-1): top verts get weight 1, bottom verts 0, and
+        /// every vert carries <paramref name="swayPhase"/> so the shader can de-synchronize tufts.
         /// </summary>
         [BurstCompile]
         [SkipLocalsInit]
         public static void GenerateCrossMesh(
             int textureID, in CrossMeshCornerLights cornerLights,
-            in Vector3Int position,
+            in Vector3Int position, float swayPhase,
             ref int vertexIndex,
             ref NativeList<Vector3> vertices, ref NativeList<int> transparentTriangles,
             ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
@@ -653,22 +698,22 @@ namespace Helpers
 
             // Plane 1 front: bl=(0,0,0), tl=(0,1,0), br=(1,0,1), tr=(1,1,1)
             AddCrossQuad(p1_bl, p1_tl, p1_br, p1_tr, normal1_front, textureID, vertexColor,
-                light_0_0_0, light_0_1_0, light_1_0_1, light_1_1_1, in position,
+                light_0_0_0, light_0_1_0, light_1_0_1, light_1_1_1, in position, swayPhase,
                 ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
 
             // Plane 1 back: bl=(1,0,1), tl=(1,1,1), br=(0,0,0), tr=(0,1,0)
             AddCrossQuad(p1_br, p1_tr, p1_bl, p1_tl, normal1_back, textureID, vertexColor,
-                light_1_0_1, light_1_1_1, light_0_0_0, light_0_1_0, in position,
+                light_1_0_1, light_1_1_1, light_0_0_0, light_0_1_0, in position, swayPhase,
                 ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
 
             // Plane 2 front: bl=(1,0,0), tl=(1,1,0), br=(0,0,1), tr=(0,1,1)
             AddCrossQuad(p2_bl, p2_tl, p2_br, p2_tr, normal2_front, textureID, vertexColor,
-                light_1_0_0, light_1_1_0, light_0_0_1, light_0_1_1, in position,
+                light_1_0_0, light_1_1_0, light_0_0_1, light_0_1_1, in position, swayPhase,
                 ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
 
             // Plane 2 back: bl=(0,0,1), tl=(0,1,1), br=(1,0,0), tr=(1,1,0)
             AddCrossQuad(p2_br, p2_tr, p2_bl, p2_tl, normal2_back, textureID, vertexColor,
-                light_0_0_1, light_0_1_1, light_1_0_0, light_1_1_0, in position,
+                light_0_0_1, light_0_1_1, light_1_0_0, light_1_1_0, in position, swayPhase,
                 ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
         }
 

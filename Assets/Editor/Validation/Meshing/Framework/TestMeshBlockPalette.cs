@@ -48,8 +48,15 @@ namespace Editor.Validation.Meshing.Framework
         /// </summary>
         public const ushort WaterSource = 4;
 
+        /// <summary>
+        /// Non-solid cross-mesh flora (grass-blades-like): <see cref="RenderShape.CrossMesh"/> routes
+        /// through <c>GenerateCrossMesh</c> — the FL-1 sway-channel path (UV ZW weight/phase) that
+        /// baseline B22 guards. Opacity 0, never culls or occludes neighbors.
+        /// </summary>
+        public const ushort CrossFlora = 5;
+
         /// <summary>Total number of block types in the palette.</summary>
-        public const int Count = 5;
+        public const int Count = 6;
 
         /// <summary>
         /// Builds the palette as managed <see cref="BlockType"/> instances and converts them to the
@@ -70,6 +77,7 @@ namespace Editor.Validation.Meshing.Framework
                 MakeCube("TestOrientedOpaque", isSolid: true, opacity: 15, renderNeighborFaces: false, MetadataSchema.HorizontalOnly));
             jobData[WaterSource] = new BlockTypeJobData(
                 MakeFluid("TestWaterSource", FluidType.WaterLike, fluidShaderID: 0, fluidLevel: 0, flowLevels: 8));
+            jobData[CrossFlora] = new BlockTypeJobData(MakeCrossFlora("TestCrossFlora"));
             return jobData;
         }
 
@@ -117,6 +125,20 @@ namespace Editor.Validation.Meshing.Framework
             block.opacity = opacity;
             block.renderNeighborFaces = renderNeighborFaces;
             block.metadataSchema = schema;
+            return block;
+        }
+
+        /// <summary>
+        /// Constructs a non-solid cross-mesh flora <see cref="BlockType"/> that routes through the
+        /// <c>GenerateCrossMesh</c> path (two intersecting diagonal planes, transparent submesh).
+        /// </summary>
+        private static BlockType MakeCrossFlora(string name)
+        {
+            BlockType block = MakeBaseBlock(name);
+            block.isSolid = false;
+            block.opacity = 0;
+            block.renderNeighborFaces = false;
+            block.renderShape = RenderShape.CrossMesh;
             return block;
         }
 

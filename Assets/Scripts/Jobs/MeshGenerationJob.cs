@@ -411,8 +411,13 @@ namespace Jobs
                     crossLights.BotL0 = crossLights.BotL1 = crossLights.BotL2 = crossLights.BotL3 = flat;
                 }
 
+                // FL-1: per-voxel wind phase, hashed in voxel space (ChunkPosition is the chunk's
+                // voxel-space origin) so it survives floating-origin re-anchors and re-meshes.
+                float swayPhase = VoxelMeshHelper.VoxelHash01(
+                    (int)ChunkPosition.x + pos.x, pos.y, (int)ChunkPosition.z + pos.z);
+
                 VoxelMeshHelper.GenerateCrossMesh(textureID, in crossLights,
-                    pos, ref _vertexIndex, ref Output.Vertices, ref Output.TransparentTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                    pos, swayPhase, ref _vertexIndex, ref Output.Vertices, ref Output.TransparentTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals,
                     ref Output.LightData);
                 return;
             }
