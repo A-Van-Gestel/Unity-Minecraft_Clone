@@ -1,6 +1,6 @@
 # Cloud Rendering Improvements Report
 
-**Version:** 1.1
+**Version:** 1.2
 **Date:** 2026-07-19
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -57,7 +57,7 @@ CL-1/CL-2 drift + shader work (`d52b089`, `12e6cf6`, both in-game verified 2026-
 | Styles        | `CloudStyle` enum: `Off` / `Fast` (down-facing quads only) / `Fancy` (1-block-tall extruded hull, corners inflated by `_depthOffset` against Z-fighting)                                                                                                                             |
 | Shader        | `Minecraft/CloudShader` — unlit; MC-style per-face shading (Fancy-only via `_CloudFaceShading` global), `SkyLightColor` day/night tint, coverage-edge fade (`_CloudFadeParams`). Transparent with **`ZWrite On`**: depth resolves overlapping faces (see the v1.1 history entry)     |
 | Motion        | **Wind drift (was CL-1):** cloud-space tiles on a drift-carrying root — per-frame cost is one root transform move; re-key sweep only on cloud-tile crossing; accumulator wraps at the pattern period; `_windBlocksPerSecond` inspector vector (default `(−0.6, 0)`), RF-7 owns it later |
-| Lighting/time | **Face shading + tint + edge fade (was CL-2, absorbs RF-2 §5):** top 1.0 / bottom 0.7 / X 0.9 / Z 0.8 on Fancy, flat on Fast; tint follows `/time` via the existing `SkyLightColor` global                                                                                            |
+| Lighting/time | **Face shading + tint + edge fade (was CL-2, absorbs RF-2 §5):** top 1.0 / bottom 0.7 / X 0.9 / Z 0.8 on Fancy, flat on Fast; hue follows `SkyLightColor`, brightness follows the shared `VoxelLightToShadow` curve at `sunLuminance = 1`, **normalized to noon** (noon look = authored `_Color` exactly; night matches terrain's relative darkening)              |
 | Update driver | Per-frame `Clouds.Update` drift tick (root move only, allocation-free); the re-key sweep runs on cloud-tile crossing and from `CheckViewDistance` / `Reanchor()` / `OnSettingsChanged` → `Reinitialize()` (drift survives reinit)                                                     |
 | Layers        | One layer at `cloudHeight = 100`; `cloudDepth` field exists but is unused (hull is hardcoded 1 block tall via `VoxelVerts`)                                                                                                                                                          |
 
@@ -261,6 +261,10 @@ too); pairs naturally with CL-5 where the slab shader gives the effect for free 
 
 ## Document History
 
+* **v1.2** - **Night-brightness fix** (2026-07-19, in-game verified): `SkyLightColor` is hue-only
+  (brightness lives in the shade curve per the RF-1 split), so clouds rendered full-bright at
+  night — the shader now applies the shared `VoxelLightToShadow` curve at `sunLuminance = 1`,
+  normalized to noon (daytime look unchanged by construction). Baseline row updated.
 * **v1.1** - **CL-1 + CL-2 SHIPPED & archived** (2026-07-19, `d52b089` + `12e6cf6`, in-game
   verified): wind drift (cloud-space tiles on a drift-carrying root, pattern-period-wrapped
   accumulator, exact `VoxelToUnity(Vector3Int)` anchor, inspector wind vector) + shader
