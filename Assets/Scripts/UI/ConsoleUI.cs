@@ -148,9 +148,11 @@ namespace UI
                 ? _engine.Suggest(text)
                 : "";
 
+            // Strip any literal </noparse> from the typed text so it can't terminate the transparent
+            // prefix's guard and let injected markup render (same guard ConsoleTextFormatter applies).
             _ghostText.text = string.IsNullOrEmpty(suffix)
                 ? ""
-                : $"<color=#00000000><noparse>{text}</noparse></color><color=#{GHOST_COLOR_HEX}>{suffix}</color>";
+                : $"<color=#00000000><noparse>{ConsoleTextFormatter.StripNoparse(text)}</noparse></color><color=#{GHOST_COLOR_HEX}>{suffix}</color>";
         }
 
         private void LateUpdate()

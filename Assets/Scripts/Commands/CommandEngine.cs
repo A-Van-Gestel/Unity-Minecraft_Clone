@@ -161,19 +161,22 @@ namespace Commands
         /// <returns>The completion result; <see cref="CommandCompletion.Unchanged"/> when nothing applies.</returns>
         public CommandCompletion Complete(string input)
         {
-            string text = input ?? "";
+            // Trim LEADING whitespace only (a trailing space is semantic — it distinguishes a fresh
+            // argument slot from an in-progress token); this mirrors Execute's Trim so a stray leading
+            // space no longer makes completion diverge from what the line would run as.
+            string text = (input ?? "").TrimStart();
             bool hasSlash = text.StartsWith("/", StringComparison.Ordinal);
 
             // Only slash-commands complete. Non-empty unprefixed input is chat-reserved and left alone;
             // empty input offers the whole command list (and supplies the leading '/').
             if (!hasSlash && text.Length > 0)
-                return CommandCompletion.Unchanged(input);
+                return CommandCompletion.Unchanged(text);
 
             string body = hasSlash ? text.Substring(1) : text;
-            bool trailingSpace = body.Length > 0 && char.IsWhiteSpace(body[body.Length - 1]);
+            bool trailingSpace = body.Length > 0 && char.IsWhiteSpace(body[^1]);
 
             if (!CommandTokenizer.Tokenize(body, _completionScratch, out _))
-                return CommandCompletion.Unchanged(input);
+                return CommandCompletion.Unchanged(text);
 
             int tokenCount = _completionScratch.Count;
 
@@ -187,7 +190,7 @@ namespace Commands
                         matches.Add(cmd.Name);
 
                 if (matches.Count == 0)
-                    return CommandCompletion.Unchanged(input);
+                    return CommandCompletion.Unchanged(text);
 
                 // A single match completes fully with a trailing space (ready for arguments); multiple
                 // matches advance only to their shared prefix (bash/Minecraft behavior).
@@ -198,7 +201,7 @@ namespace Commands
             // Argument stage: the command name is complete; delegate to an opt-in completer.
             if (!_registry.TryResolve(_completionScratch[0].Text, out IConsoleCommand command) ||
                 !(command is IArgumentCompleter completer))
-                return CommandCompletion.Unchanged(input);
+                return CommandCompletion.Unchanged(text);
 
             // With a trailing space the caret starts a fresh argument (empty partial); otherwise the
             // last token is the in-progress argument being completed.
@@ -207,22 +210,22 @@ namespace Commands
 
             string[] candidates = completer.CompleteArgument(argIndex, argPartial, _context);
             if (candidates == null || candidates.Length == 0)
-                return CommandCompletion.Unchanged(input);
+                return CommandCompletion.Unchanged(text);
 
             string replacement = candidates.Length == 1 ? candidates[0] + " " : LongestCommonPrefix(candidates);
 
             string completedLine;
             if (trailingSpace)
             {
-                completedLine = input + replacement;
+                completedLine = text + replacement;
             }
             else
             {
-                // The partial is a literal tail of the raw input only for unquoted tokens; the quoted
-                // edge (partial with quotes stripped) can't be substring-replaced safely, so decline.
-                if (!input.EndsWith(argPartial, StringComparison.Ordinal))
-                    return CommandCompletion.Unchanged(input);
-                completedLine = input.Substring(0, input.Length - argPartial.Length) + replacement;
+                // The partial is a literal tail of the trimmed input only for unquoted tokens; the
+                // quoted edge (partial with quotes stripped) can't be substring-replaced safely, so decline.
+                if (!text.EndsWith(argPartial, StringComparison.Ordinal))
+                    return CommandCompletion.Unchanged(text);
+                completedLine = text.Substring(0, text.Length - argPartial.Length) + replacement;
             }
 
             return new CommandCompletion(completedLine, candidates);

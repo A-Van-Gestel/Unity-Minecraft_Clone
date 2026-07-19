@@ -21,14 +21,34 @@ namespace UI
         /// <summary>
         /// Formats one line as TMP rich text: severity color wrapping the text, with the text
         /// itself protected by <c>&lt;noparse&gt;</c> so user-typed markup cannot inject tags
-        /// (any literal <c>&lt;/noparse&gt;</c> in the text is stripped to keep the guard intact).
+        /// (any literal <c>&lt;/noparse&gt;</c> in the text is stripped via <see cref="StripNoparse"/>
+        /// to keep the guard intact).
         /// </summary>
         /// <param name="line">The console line to format.</param>
         /// <returns>The rich-text string for the history view.</returns>
         public static string Format(ConsoleLine line)
         {
-            string safe = line.Text?.Replace("</noparse>", "") ?? "";
+            string safe = StripNoparse(line.Text);
             return $"<color={ColorOf(line.Severity)}><noparse>{safe}</noparse></color>";
+        }
+
+        /// <summary>
+        /// Removes every literal <c>&lt;/noparse&gt;</c> from <paramref name="text"/> so it cannot
+        /// terminate a surrounding <c>&lt;noparse&gt;</c> guard and let injected markup render. Loops
+        /// until none remain: a single pass can splice a fresh <c>&lt;/noparse&gt;</c> from the
+        /// surrounding characters (e.g. <c>&lt;/nop&lt;/noparse&gt;arse&gt;</c>). Shared by
+        /// <see cref="Format"/> and the CMD-5 inline-ghost overlay.
+        /// </summary>
+        /// <param name="text">The raw user text to neutralize (null treated as empty).</param>
+        /// <returns>The text with all <c>&lt;/noparse&gt;</c> occurrences removed.</returns>
+        public static string StripNoparse(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return "";
+
+            while (text.Contains("</noparse>"))
+                text = text.Replace("</noparse>", "");
+            return text;
         }
 
         /// <summary>The rich-text color for a severity.</summary>

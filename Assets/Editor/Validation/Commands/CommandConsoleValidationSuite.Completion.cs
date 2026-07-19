@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Commands;
+using UI;
 using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.Commands
@@ -19,6 +20,8 @@ namespace Editor.Validation.Commands
             scenarios.Add(new Scenario("B50: Complete — opt-in argument completion fills block names (canonical case) for /give arg0 and /setblock arg3; a non-completing slot is a no-op (CMD-5)", Completion_ArgumentBlockNames));
             scenarios.Add(new Scenario("B51: Complete — /set-world-border completes 'off'; a command without a completer and chat-reserved input are no-ops (CMD-5)", Completion_OptInBoundary));
             scenarios.Add(new Scenario("B52: Suggest — a unique prefix yields the trimmed inline ghost suffix; an ambiguous/empty/fully-typed input yields nothing (CMD-5)", Completion_InlineSuggestion));
+            scenarios.Add(new Scenario("B53: StripNoparse — removes every </noparse> incl. one spliced from surrounding text (loop-until-stable); null/empty safe (CMD-5 ghost guard)", Completion_StripNoparseGuard));
+            scenarios.Add(new Scenario("B54: Complete — a leading space no longer defeats completion (trimmed like Execute); trailing space stays semantic (CMD-5)", Completion_LeadingWhitespaceTrimmed));
         }
 
         /// <summary>An engine with the full production pack registered (no world facade — name completion needs none).</summary>
@@ -148,6 +151,46 @@ namespace Editor.Validation.Commands
             using CommandTeleportTestWorld stub = new CommandTeleportTestWorld();
             ok &= Expect(stub.Engine.Suggest("/give st") == "one", $"'/give st' suggests block-name remainder 'one', got '{stub.Engine.Suggest("/give st")}'");
             ok &= Expect(stub.Engine.Suggest("/give ") == "", "a fresh slot with multiple block candidates suggests nothing inline");
+            return ok;
+        }
+
+        private static bool Completion_StripNoparseGuard()
+        {
+            // Plain text is untouched.
+            bool ok = Expect(ConsoleTextFormatter.StripNoparse("give stone") == "give stone",
+                "plain text is unchanged");
+
+            // A literal </noparse> is removed so it cannot terminate the guard.
+            ok &= Expect(ConsoleTextFormatter.StripNoparse("a</noparse>b") == "ab",
+                "a literal </noparse> is stripped");
+
+            // Re-creation edge: a single pass would splice a fresh </noparse> from the surrounding
+            // characters; the loop must remove that too.
+            ok &= Expect(ConsoleTextFormatter.StripNoparse("</nop</noparse>arse>") == "",
+                "a </noparse> spliced from surrounding text is also removed (loop-until-stable)");
+
+            // Null/empty are safe and normalize to empty.
+            ok &= Expect(ConsoleTextFormatter.StripNoparse(null) == "" && ConsoleTextFormatter.StripNoparse("") == "",
+                "null/empty yield empty");
+            return ok;
+        }
+
+        private static bool Completion_LeadingWhitespaceTrimmed()
+        {
+            CommandEngine engine = NewPackEngine();
+
+            // A leading space must not defeat completion — it should behave like the trimmed line.
+            CommandCompletion spaced = engine.Complete("  /gi");
+            CommandCompletion clean = engine.Complete("/gi");
+            bool ok = Expect(spaced.CompletedText == clean.CompletedText && spaced.CompletedText == "/give ",
+                $"a leading space completes like the trimmed line, got '{spaced.CompletedText}'");
+            ok &= Expect(spaced.Candidates.Length == 1, "the leading-space input still finds the single candidate");
+
+            // Leading whitespace before the '/' still enters command-name completion.
+            const int expected = ConsoleCommandInstaller.InstalledCommandCount + 1;
+            CommandCompletion spacedSlash = engine.Complete("   /");
+            ok &= Expect(spacedSlash.Candidates.Length == expected,
+                $"leading whitespace before '/' still offers the full pack ({expected}), got {spacedSlash.Candidates.Length}");
             return ok;
         }
     }
