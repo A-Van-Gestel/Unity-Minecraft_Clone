@@ -20,25 +20,31 @@ namespace Jobs
     public struct CloudPatternJob : IJobParallelFor
     {
         /// <summary>Width (and height) of the square pattern, in cells.</summary>
-        [ReadOnly] public int PatternWidth;
+        [ReadOnly]
+        public int PatternWidth;
 
         /// <summary>Lattice cells across the pattern at the first octave; each octave doubles it.</summary>
-        [ReadOnly] public int BasePeriodCells;
+        [ReadOnly]
+        public int BasePeriodCells;
 
         /// <summary>Number of FBM octaves (doubling frequency per octave).</summary>
-        [ReadOnly] public int Octaves;
+        [ReadOnly]
+        public int Octaves;
 
         /// <summary>
         /// Amplitude multiplier per octave (FBM gain). 0.5 is classic smooth FBM; higher values keep
         /// more high-frequency raggedness — the lever that fragments blob edges into MC-style speckle.
         /// </summary>
-        [ReadOnly] public float Persistence;
+        [ReadOnly]
+        public float Persistence;
 
         /// <summary>World seed salting every lattice hash.</summary>
-        [ReadOnly] public uint Seed;
+        [ReadOnly]
+        public uint Seed;
 
         /// <summary>Output density field, row-major, <c>PatternWidth²</c> values in [0, 1].</summary>
-        [WriteOnly] public NativeArray<float> Density;
+        [WriteOnly]
+        public NativeArray<float> Density;
 
         /// <inheritdoc/>
         public void Execute(int index)

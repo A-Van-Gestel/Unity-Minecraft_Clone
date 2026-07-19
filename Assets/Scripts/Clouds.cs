@@ -319,9 +319,9 @@ public class Clouds : MonoBehaviour
     private static float FindCoverageThreshold(NativeArray<float> density, float coverage)
     {
         int[] bins = new int[THRESHOLD_HISTOGRAM_BINS];
-        for (int i = 0; i < density.Length; i++)
+        foreach (float t in density)
         {
-            int bin = Mathf.Clamp((int)(density[i] * THRESHOLD_HISTOGRAM_BINS), 0, THRESHOLD_HISTOGRAM_BINS - 1);
+            int bin = Mathf.Clamp((int)(t * THRESHOLD_HISTOGRAM_BINS), 0, THRESHOLD_HISTOGRAM_BINS - 1);
             bins[bin]++;
         }
 
