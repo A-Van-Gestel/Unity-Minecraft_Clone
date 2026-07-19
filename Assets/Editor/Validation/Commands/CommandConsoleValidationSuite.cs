@@ -39,6 +39,7 @@ namespace Editor.Validation.Commands
             AddBaselineScenarios(scenarios);
             AddTeleportScenarios(scenarios);
             AddCommandPackScenarios(scenarios);
+            AddCompletionScenarios(scenarios);
             AddKnownBugScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Command Console", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
@@ -65,6 +66,9 @@ namespace Editor.Validation.Commands
 
         /// <summary>Registers the CMD-3 command-pack baselines (implemented in CommandConsoleValidationSuite.Pack.cs).</summary>
         static partial void AddCommandPackScenarios(List<Scenario> scenarios);
+
+        /// <summary>Registers the CMD-5 Tab-completion baselines (implemented in CommandConsoleValidationSuite.Completion.cs).</summary>
+        static partial void AddCompletionScenarios(List<Scenario> scenarios);
 
         /// <summary>Registers expected-red known-bug reproductions (none yet; the seam for future console bugs authored test-first).</summary>
         static partial void AddKnownBugScenarios(List<Scenario> scenarios);

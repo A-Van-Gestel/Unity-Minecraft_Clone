@@ -8,7 +8,7 @@ namespace Commands
     /// (decided 2026-07-18 — placement-tag rules would reject overwriting stone; UNBREAKABLE still
     /// refuses). Unloaded targets route to the persistent pending-mods queue and apply on load.
     /// </summary>
-    public sealed class SetBlockCommand : IConsoleCommand
+    public sealed class SetBlockCommand : IConsoleCommand, IArgumentCompleter
     {
         private static readonly string[] s_noAliases = Array.Empty<string>();
 
@@ -56,5 +56,9 @@ namespace Commands
                 ? $"Placed {blockName} at ({x}, {y}, {z})."
                 : $"{blockName} queued for ({x}, {y}, {z}) — chunk not loaded; applies when it loads.");
         }
+
+        /// <inheritdoc/>
+        public string[] CompleteArgument(int argIndex, string partial, CommandContext ctx) =>
+            argIndex == 3 ? CommandArgUtility.MatchBlockNames(ctx.World, partial) : Array.Empty<string>();
     }
 }

@@ -80,6 +80,8 @@ public class InputManager : MonoBehaviour
     private InputAction _cancelAction;
     private InputAction _historyUpAction;
     private InputAction _historyDownAction;
+    private InputAction _autocompleteAction;
+    private InputAction _acceptSuggestionAction;
 
     // ──────────────────────────────────────────────
     //  Hotbar array (indexed 0–8 for slots 1–9)
@@ -221,6 +223,12 @@ public class InputManager : MonoBehaviour
     /// <summary><c>true</c> during the frame ↓ was pressed on the UI map (console history recall).</summary>
     public bool ConsoleHistoryDownPressed => _historyDownAction.WasPressedThisFrame();
 
+    /// <summary><c>true</c> during the frame Tab was pressed on the UI map (console Tab autocomplete).</summary>
+    public bool ConsoleAutocompletePressed => _autocompleteAction.WasPressedThisFrame();
+
+    /// <summary><c>true</c> during the frame RightArrow/End was pressed on the UI map (accept the console's inline suggestion).</summary>
+    public bool ConsoleAcceptSuggestionPressed => _acceptSuggestionAction.WasPressedThisFrame();
+
     #endregion
 
     // ==============================================
@@ -257,7 +265,7 @@ public class InputManager : MonoBehaviour
     public bool DebugKeyPressed(Key key)
     {
         return _gameplayMap != null && _gameplayMap.enabled
-               && Keyboard.current != null && Keyboard.current[key].wasPressedThisFrame;
+                                    && Keyboard.current != null && Keyboard.current[key].wasPressedThisFrame;
     }
 
     // ==============================================
@@ -372,6 +380,8 @@ public class InputManager : MonoBehaviour
         _cancelAction = _uiMap.FindAction("Cancel", throwIfNotFound: true);
         _historyUpAction = _uiMap.FindAction("HistoryUp", throwIfNotFound: true);
         _historyDownAction = _uiMap.FindAction("HistoryDown", throwIfNotFound: true);
+        _autocompleteAction = _uiMap.FindAction("ConsoleAutocomplete", throwIfNotFound: true);
+        _acceptSuggestionAction = _uiMap.FindAction("ConsoleAcceptSuggestion", throwIfNotFound: true);
 
         // --- Touch Controls (mobile only) ---
         if (Application.isMobilePlatform)

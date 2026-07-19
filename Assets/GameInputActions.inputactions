@@ -691,6 +691,24 @@
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
+                },
+                {
+                    "name": "ConsoleAutocomplete",
+                    "type": "Button",
+                    "id": "20000001-0000-0000-0000-000000000007",
+                    "expectedControlType": "Button",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
+                },
+                {
+                    "name": "ConsoleAcceptSuggestion",
+                    "type": "Button",
+                    "id": "20000001-0000-0000-0000-000000000008",
+                    "expectedControlType": "Button",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
                 }
             ],
             "bindings": [
@@ -779,6 +797,39 @@
                     "processors": "",
                     "groups": "",
                     "action": "HistoryDown",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "b2000007-0000-0000-0000-000000000001",
+                    "path": "<Keyboard>/tab",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "ConsoleAutocomplete",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "b2000008-0000-0000-0000-000000000001",
+                    "path": "<Keyboard>/rightArrow",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "ConsoleAcceptSuggestion",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "b2000008-0000-0000-0000-000000000002",
+                    "path": "<Keyboard>/end",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "ConsoleAcceptSuggestion",
                     "isComposite": false,
                     "isPartOfComposite": false
                 }

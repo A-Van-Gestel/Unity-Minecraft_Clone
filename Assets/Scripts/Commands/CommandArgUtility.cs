@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using Data;
 
@@ -126,6 +127,31 @@ namespace Commands
             id = 0;
             error = $"Unknown block '{blockName}'.";
             return false;
+        }
+
+        /// <summary>
+        /// Returns every block name in the database that starts with <paramref name="partial"/>
+        /// (case-insensitive), in canonical casing — the Tab-completion source for <c>/give</c> and
+        /// <c>/setblock</c> (CMD-5). Air is included; the commands enforce their own rules on execute.
+        /// </summary>
+        /// <param name="world">The world whose block database to scan (null yields no candidates).</param>
+        /// <param name="partial">The prefix typed so far (empty matches every named block).</param>
+        /// <returns>The matching canonical block names; an empty array when none match or no world is loaded.</returns>
+        public static string[] MatchBlockNames(World world, string partial)
+        {
+            if (world == null)
+                return Array.Empty<string>();
+
+            BlockType[] types = world.BlockTypes;
+            List<string> matches = new List<string>();
+            foreach (BlockType type in types)
+            {
+                if (type != null && !string.IsNullOrEmpty(type.blockName) &&
+                    type.blockName.StartsWith(partial, StringComparison.OrdinalIgnoreCase))
+                    matches.Add(type.blockName);
+            }
+
+            return matches.ToArray();
         }
 
         /// <summary>Parses an optional on/off word token.</summary>

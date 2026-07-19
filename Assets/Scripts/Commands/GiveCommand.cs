@@ -8,7 +8,7 @@ namespace Commands
     /// slot (CMD-3 §8.1). Names resolve via the block database (case-insensitive; quote multi-word
     /// names); the count clamps to the block's stack size.
     /// </summary>
-    public sealed class GiveCommand : IConsoleCommand
+    public sealed class GiveCommand : IConsoleCommand, IArgumentCompleter
     {
         private static readonly string[] s_noAliases = Array.Empty<string>();
 
@@ -60,5 +60,9 @@ namespace Commands
             string clampNote = given < count ? $" (clamped to the stack size of {stackSize})" : "";
             return CommandResult.Info($"Gave {given} × {ctx.World.BlockTypes[id].blockName}{clampNote}.");
         }
+
+        /// <inheritdoc/>
+        public string[] CompleteArgument(int argIndex, string partial, CommandContext ctx) =>
+            argIndex == 0 ? CommandArgUtility.MatchBlockNames(ctx.World, partial) : Array.Empty<string>();
     }
 }

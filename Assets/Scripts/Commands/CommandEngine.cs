@@ -36,6 +36,7 @@ namespace Commands
         private readonly CommandRingBuffer<ConsoleLine> _output = new CommandRingBuffer<ConsoleLine>(OUTPUT_CAPACITY);
         private readonly CommandRingBuffer<string> _commandHistory = new CommandRingBuffer<string>(COMMAND_HISTORY_CAPACITY);
         private readonly List<CommandToken> _tokenScratch = new List<CommandToken>();
+        private readonly List<CommandToken> _completionScratch = new List<CommandToken>();
 
         private PendingConfirmation _pending;
 
@@ -148,6 +149,109 @@ namespace Commands
             return _recallCursor < _commandHistory.Count ? _commandHistory[_recallCursor] : null;
         }
 
+        /// <summary>
+        /// Computes the Tab-completion for a partial input line (CMD-5, §8.3). Pure — no output is
+        /// posted; the caller applies <see cref="CommandCompletion.CompletedText"/> to the field and
+        /// lists the candidates itself. The first token completes against registered command names
+        /// (primary names only); once the name is complete, completion delegates to the command's
+        /// <see cref="IArgumentCompleter"/> (when it implements one). Completion always operates at the
+        /// end of the line — caret position is not consulted.
+        /// </summary>
+        /// <param name="input">The current (partial) input line, with or without its leading <c>/</c>.</param>
+        /// <returns>The completion result; <see cref="CommandCompletion.Unchanged"/> when nothing applies.</returns>
+        public CommandCompletion Complete(string input)
+        {
+            string text = input ?? "";
+            bool hasSlash = text.StartsWith("/", StringComparison.Ordinal);
+
+            // Only slash-commands complete. Non-empty unprefixed input is chat-reserved and left alone;
+            // empty input offers the whole command list (and supplies the leading '/').
+            if (!hasSlash && text.Length > 0)
+                return CommandCompletion.Unchanged(input);
+
+            string body = hasSlash ? text.Substring(1) : text;
+            bool trailingSpace = body.Length > 0 && char.IsWhiteSpace(body[body.Length - 1]);
+
+            if (!CommandTokenizer.Tokenize(body, _completionScratch, out _))
+                return CommandCompletion.Unchanged(input);
+
+            int tokenCount = _completionScratch.Count;
+
+            // Command-name stage: nothing typed yet, or the first token is still being typed.
+            if (tokenCount == 0 || (tokenCount == 1 && !trailingSpace))
+            {
+                string namePartial = tokenCount == 0 ? "" : _completionScratch[0].Text;
+                List<string> matches = new List<string>();
+                foreach (IConsoleCommand cmd in _registry.Commands)
+                    if (cmd.Name.StartsWith(namePartial, StringComparison.OrdinalIgnoreCase))
+                        matches.Add(cmd.Name);
+
+                if (matches.Count == 0)
+                    return CommandCompletion.Unchanged(input);
+
+                // A single match completes fully with a trailing space (ready for arguments); multiple
+                // matches advance only to their shared prefix (bash/Minecraft behavior).
+                string completedName = matches.Count == 1 ? matches[0] + " " : LongestCommonPrefix(matches);
+                return new CommandCompletion("/" + completedName, matches.ToArray());
+            }
+
+            // Argument stage: the command name is complete; delegate to an opt-in completer.
+            if (!_registry.TryResolve(_completionScratch[0].Text, out IConsoleCommand command) ||
+                !(command is IArgumentCompleter completer))
+                return CommandCompletion.Unchanged(input);
+
+            // With a trailing space the caret starts a fresh argument (empty partial); otherwise the
+            // last token is the in-progress argument being completed.
+            int argIndex = trailingSpace ? tokenCount - 1 : tokenCount - 2;
+            string argPartial = trailingSpace ? "" : _completionScratch[tokenCount - 1].Text;
+
+            string[] candidates = completer.CompleteArgument(argIndex, argPartial, _context);
+            if (candidates == null || candidates.Length == 0)
+                return CommandCompletion.Unchanged(input);
+
+            string replacement = candidates.Length == 1 ? candidates[0] + " " : LongestCommonPrefix(candidates);
+
+            string completedLine;
+            if (trailingSpace)
+            {
+                completedLine = input + replacement;
+            }
+            else
+            {
+                // The partial is a literal tail of the raw input only for unquoted tokens; the quoted
+                // edge (partial with quotes stripped) can't be substring-replaced safely, so decline.
+                if (!input.EndsWith(argPartial, StringComparison.Ordinal))
+                    return CommandCompletion.Unchanged(input);
+                completedLine = input.Substring(0, input.Length - argPartial.Length) + replacement;
+            }
+
+            return new CommandCompletion(completedLine, candidates);
+        }
+
+        /// <summary>
+        /// The inline suggestion suffix for a partial input line (CMD-5 ghost text) — the gray text
+        /// shown after the caret. Non-empty only when completion is unambiguous (exactly one
+        /// candidate); an ambiguous prefix shows nothing inline and is resolved with Tab (common
+        /// prefix + candidate list). Pure — derived from <see cref="Complete"/>, so the UI just renders
+        /// the returned suffix and the suite asserts on it directly.
+        /// </summary>
+        /// <param name="input">The current (partial) input line.</param>
+        /// <returns>The suffix to display in gray after the input, or an empty string when none applies.</returns>
+        public string Suggest(string input)
+        {
+            string text = input ?? "";
+            CommandCompletion completion = Complete(text);
+
+            // Only a single, unambiguous candidate produces a ghost; multiple candidates stay a Tab affair.
+            if (completion.Candidates.Length != 1 ||
+                !completion.CompletedText.StartsWith(text, StringComparison.OrdinalIgnoreCase))
+                return "";
+
+            // The completion appends a trailing space after a full single match; the ghost shows only
+            // the visible remainder of the word.
+            return completion.CompletedText.Substring(text.Length).TrimEnd();
+        }
+
         /// <summary>Runs the prefix → tokenize → dispatch pipeline on a line with no confirmation pending.</summary>
         /// <param name="trimmed">The trimmed, non-empty input line.</param>
         /// <returns>The produced result (its pending confirmation, if any, is stored by the caller via <see cref="AppendResult"/>).</returns>
@@ -196,6 +300,45 @@ namespace Commands
         {
             _output.Add(consoleLine);
             LineAppended?.Invoke(consoleLine);
+        }
+
+        /// <summary>The longest common prefix of the given values, compared case-insensitively but
+        /// returned in the first value's casing (so completion emits the canonical block/command name).</summary>
+        /// <param name="values">The candidate strings (at least one).</param>
+        /// <returns>Their shared leading prefix (possibly empty).</returns>
+        private static string LongestCommonPrefix(List<string> values)
+        {
+            string prefix = values[0];
+            for (int i = 1; i < values.Count && prefix.Length > 0; i++)
+            {
+                string other = values[i];
+                int max = Math.Min(prefix.Length, other.Length);
+                int j = 0;
+                while (j < max && char.ToLowerInvariant(prefix[j]) == char.ToLowerInvariant(other[j]))
+                    j++;
+                prefix = prefix.Substring(0, j);
+            }
+
+            return prefix;
+        }
+
+        /// <summary>The longest common prefix of the given values (array overload; see the list overload).</summary>
+        /// <param name="values">The candidate strings (at least one).</param>
+        /// <returns>Their shared leading prefix (possibly empty).</returns>
+        private static string LongestCommonPrefix(string[] values)
+        {
+            string prefix = values[0];
+            for (int i = 1; i < values.Length && prefix.Length > 0; i++)
+            {
+                string other = values[i];
+                int max = Math.Min(prefix.Length, other.Length);
+                int j = 0;
+                while (j < max && char.ToLowerInvariant(prefix[j]) == char.ToLowerInvariant(other[j]))
+                    j++;
+                prefix = prefix.Substring(0, j);
+            }
+
+            return prefix;
         }
 
         /// <summary>Whether a line is an affirmative confirmation reply.</summary>

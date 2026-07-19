@@ -35,6 +35,9 @@ namespace UI
         private static readonly Color s_inputBG = new Color(0f, 0f, 0f, 0.75f);
         private static readonly Color s_inputText = new Color(0.95f, 0.95f, 0.95f, 1f);
 
+        /// <summary>TMP hex tint of the inline autocomplete ghost suffix — dim gray, PowerShell-style (CMD-5).</summary>
+        private const string GHOST_COLOR_HEX = "8A8A8A";
+
         /// <summary>Scroll positions at or below this normalized value count as "at the bottom" for autoscroll.</summary>
         private const float AUTOSCROLL_EPSILON = 0.01f;
 
@@ -43,6 +46,9 @@ namespace UI
         private ScrollRect _scrollRect;
         private TextMeshProUGUI _historyText;
         private TMP_InputField _inputField;
+        private TextMeshProUGUI _ghostText;
+        private string _ghostSourceText;
+        private int _ghostSourceCaret = -1;
         private readonly StringBuilder _historyBuilder = new StringBuilder();
         private bool _historyDirty;
         private bool _autoscrollPending;
@@ -73,11 +79,78 @@ namespace UI
             if (!IsOpen)
                 return;
 
-            // ↑/↓ history recall (UI action map — the gameplay map is disabled while open).
+            // ↑/↓ history recall + Tab autocomplete + RightArrow/End accept (UI action map — the
+            // gameplay map is disabled while open).
             if (InputManager.Instance.ConsoleHistoryUpPressed)
                 SetInputText(_engine.RecallPrevious());
             else if (InputManager.Instance.ConsoleHistoryDownPressed)
                 SetInputText(_engine.RecallNext());
+            else if (InputManager.Instance.ConsoleAutocompletePressed)
+                ApplyAutocomplete();
+            else if (InputManager.Instance.ConsoleAcceptSuggestionPressed)
+                TryAcceptInlineSuggestion();
+
+            RefreshGhostIfChanged();
+        }
+
+        /// <summary>
+        /// Applies Tab autocomplete: replaces the field text with the engine's completion, and lists
+        /// the candidates in history when the completion is ambiguous (≥2 matches). Re-activates the
+        /// field because Tab can move EventSystem selection off it (the documented T-leak class).
+        /// </summary>
+        private void ApplyAutocomplete()
+        {
+            CommandCompletion completion = _engine.Complete(_inputField.text);
+
+            _inputField.text = completion.CompletedText;
+            _inputField.caretPosition = _inputField.text.Length;
+            _inputField.ActivateInputField();
+
+            if (completion.Candidates.Length > 1)
+                _engine.PostLine(ConsoleLineSeverity.Info, string.Join("  ", completion.Candidates));
+        }
+
+        /// <summary>
+        /// Accepts the inline ghost suggestion (RightArrow/End): fills the field to the single-candidate
+        /// completion — but only when a ghost is actually showing and the caret is at the end, so a
+        /// RightArrow/End that just moves the caret is left to the input field.
+        /// </summary>
+        private void TryAcceptInlineSuggestion()
+        {
+            if (_inputField.caretPosition != _inputField.text.Length)
+                return;
+            if (string.IsNullOrEmpty(_engine.Suggest(_inputField.text)))
+                return;
+
+            ApplyAutocomplete(); // a single-candidate input fills to the full completion
+        }
+
+        /// <summary>Recomputes the inline ghost only when the field text or caret changed (no steady-state work).</summary>
+        private void RefreshGhostIfChanged()
+        {
+            if (_inputField.text == _ghostSourceText && _inputField.caretPosition == _ghostSourceCaret)
+                return;
+
+            _ghostSourceText = _inputField.text;
+            _ghostSourceCaret = _inputField.caretPosition;
+            UpdateGhost();
+        }
+
+        /// <summary>
+        /// Renders the gray inline suggestion after the caret. A fully transparent copy of the typed
+        /// text reserves the exact width so the gray suffix lines up right at the caret; the suffix is
+        /// hidden when there is none or the caret is not at the end of the line.
+        /// </summary>
+        private void UpdateGhost()
+        {
+            string text = _inputField.text;
+            string suffix = (!string.IsNullOrEmpty(text) && _inputField.caretPosition == text.Length)
+                ? _engine.Suggest(text)
+                : "";
+
+            _ghostText.text = string.IsNullOrEmpty(suffix)
+                ? ""
+                : $"<color=#00000000><noparse>{text}</noparse></color><color=#{GHOST_COLOR_HEX}>{suffix}</color>";
         }
 
         private void LateUpdate()
@@ -117,6 +190,9 @@ namespace UI
 
             _inputField.DeactivateInputField();
             _inputField.text = "";
+            _ghostText.text = "";
+            _ghostSourceText = null;
+            _ghostSourceCaret = -1;
             _panel.SetActive(false);
         }
 
@@ -290,6 +366,42 @@ namespace UI
             }
 
             _inputField.onSubmit.AddListener(OnSubmit);
+
+            BuildGhostOverlay();
+        }
+
+        /// <summary>
+        /// Builds the inline-suggestion ghost: a non-interactive TMP text laid over the input field's
+        /// own text, sharing its viewport, rect, font, size, and alignment so a transparent-prefixed
+        /// suffix aligns to the caret. Parented under the text component's viewport for identical clipping.
+        /// </summary>
+        private void BuildGhostOverlay()
+        {
+            TMP_Text src = _inputField.textComponent;
+
+            GameObject ghostGo = new GameObject("GhostSuggestion", typeof(RectTransform));
+            ghostGo.transform.SetParent(src.rectTransform.parent, false);
+
+            RectTransform srcRect = src.rectTransform;
+            RectTransform ghostRect = (RectTransform)ghostGo.transform;
+            ghostRect.anchorMin = srcRect.anchorMin;
+            ghostRect.anchorMax = srcRect.anchorMax;
+            ghostRect.pivot = srcRect.pivot;
+            ghostRect.offsetMin = srcRect.offsetMin;
+            ghostRect.offsetMax = srcRect.offsetMax;
+            ghostRect.SetAsLastSibling();
+
+            _ghostText = ghostGo.AddComponent<TextMeshProUGUI>();
+            _ghostText.font = src.font;
+            _ghostText.fontSize = FONT_SIZE;
+            _ghostText.alignment = src.alignment;
+            _ghostText.margin = src.margin;
+            _ghostText.richText = true;
+            _ghostText.raycastTarget = false;
+            _ghostText.textWrappingMode = TextWrappingModes.NoWrap;
+            _ghostText.overflowMode = TextOverflowModes.Overflow;
+            _ghostText.color = Color.white;
+            _ghostText.text = "";
         }
     }
 }

@@ -8,9 +8,10 @@ namespace Commands
     /// (CMD-3 §8.1). A shrink that would strand the player outside warns + confirms (the fence
     /// re-clamps them inward every FixedUpdate). Persisted to level.dat on the next save.
     /// </summary>
-    public sealed class WorldBorderCommand : IConsoleCommand
+    public sealed class WorldBorderCommand : IConsoleCommand, IArgumentCompleter
     {
         private static readonly string[] s_noAliases = Array.Empty<string>();
+        private static readonly string[] s_offCandidate = { "off" };
 
         /// <inheritdoc/>
         public string Name => "set-world-border";
@@ -71,6 +72,15 @@ namespace Commands
             return CommandResult.Info(radius > 0
                 ? $"World border set to ±{radius} voxels (persisted on the next save)."
                 : "World border disabled (persisted on the next save).");
+        }
+
+        /// <inheritdoc/>
+        public string[] CompleteArgument(int argIndex, string partial, CommandContext ctx)
+        {
+            // Only the literal 'off' is completable; a radius is a free number with no candidates.
+            if (argIndex == 0 && "off".StartsWith(partial, StringComparison.OrdinalIgnoreCase))
+                return s_offCandidate;
+            return Array.Empty<string>();
         }
     }
 }

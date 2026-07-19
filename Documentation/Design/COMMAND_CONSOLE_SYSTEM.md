@@ -1,8 +1,8 @@
 # Command Console System Design
 
-**Version:** 1.10
+**Version:** 1.11
 **Date:** 2026-07-19
-**Status:** **Implemented (v1 arc + CMD-4)** — the v1 arc (CMD-0..3) plus **CMD-4 relative `~` coordinates** (§8.2) are shipped and in-game confirmed. Suite **47** baselines; Validate All **270/270** across 10 suites. **CMD-5 tab autocomplete** (§8.3) has a closed execution plan, ready for a warm start (**NOT yet implemented**). Remaining §8 items (chat, entity selectors, `/fill`) stay deliberate v2+ work.
+**Status:** **Implemented (v1 arc + CMD-4 + CMD-5)** — the v1 arc (CMD-0..3), **CMD-4 relative `~` coordinates** (§8.2), and **CMD-5 tab autocomplete + PowerShell-style inline ghost suggestion** (§8.3) are all shipped and in-game confirmed. Suite **52** baselines; Validate All **275/275** across 10 suites. Remaining §8 items (selectable/copyable output, chat, entity selectors, `/fill`) stay deliberate v2+ work.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > An in-game command console (Minecraft-chat-style: `T` opens a left-anchored panel with
@@ -57,8 +57,8 @@ v1 scope).
   command habits. **v2+**, see §8.
 - **Entity selectors beyond `@player`** — the selector token shape and resolver interface ship
   in v1; `@entity-<id>` resolution lands with the entity system (**v2+**, §8).
-- **Tab autocomplete & selectable/copyable output** — deferred to **v2** (decided 2026-07-16);
-  the registry already exposes what autocomplete needs.
+- **Tab autocomplete** shipped in **CMD-5** (§8.3, 2026-07-19), including a PowerShell-style inline
+  ghost suggestion; **selectable/copyable output** stays deferred to a later v2 item.
 - **Permissions / cheats gating** — the execution context carries a source (§4.1) so
   permissions can attach later; v1 is a dev tool, always allowed.
 - **True simulation pause** — rejected for the console (decided 2026-07-16): the job pipeline
@@ -277,14 +277,14 @@ Suite note: the teleport matrix (§7) runs against a stub world (`ValidationRefl
 
 Work items carry the **`CMD-`** prefix (verified unused in `Documentation/`).
 
-| Phase                              | Scope                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Effort | Depends on     |
-|------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|----------------|
-| **CMD-0 — engine core** ✅          | Tokenizer, registry, selector resolver (`@player`), confirmation flow, history buffers, `CommandContext`; `HelpCommand`; the validation suite. **Implemented 2026-07-18**: `Assets/Scripts/Commands/` (namespace `Commands`, pure C# — zero Unity usings) + `Validate Command Console` suite (20 baselines, registry suite #10)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |   🟡   | —              |
-| **CMD-1 — console UI** ✅           | Panel + ScrollRect + input field, `IsConsoleOpen` state, `ToggleConsole` action, Esc chain, ↑/↓ recall, T-leak guard. **Implemented 2026-07-18**: runtime-code-built `UI.ConsoleUI` (own overlay canvas, no scene edits) + pure `UI.ConsoleTextFormatter` (suite-pinned severity colors + noparse guard, B21/B22); **the Gameplay action map is disabled while the console is open** (typing can't trigger hotbar/toggles), so Esc/↑/↓ arrive via new UI-map actions (`Cancel`/`HistoryUp`/`HistoryDown`) rather than the gameplay Escape chain. Raw-keyboard bypasses closed: benchmark trigger keys route through the gameplay-gated `InputManager.DebugKeyPressed`, and tripwire baseline B23 fails the suite on any `Keyboard.current` read outside `InputManager` (suite 23, B21–B23)                                              |   🟡   | CMD-0          |
-| **CMD-2 — `/teleport`** ✅          | §4.3 command incl. warning/confirm matrix, arrival hold, 2-arg surface form; defines the `CommandContext` world facade (§4.1). **Implemented 2026-07-18, in-game confirmed**: `TeleportCommand` (alias `tp`, zero Unity usings) + `World.TeleportPlayer` (reuses the WS-4b `ShiftOrigin`) + World-owned hold (release = destination `ChunkData.IsPopulated` && `Chunk.HasMeshApplied` [new pool-reset-safe flag], 10 s timeout fail-safe, `TeleportHoldEnded` → console "Arrived."/timeout warning via `CommandEngine.PostLine`) + `VoxelRigidbody.isTeleportHeld` FixedUpdate gate; suite 23→**31** (B24–B31 teleport matrix vs `CommandTeleportTestWorld`, WorldOrigin snapshot/restore, prove-red on B29); far-lands verification surfaced lighting **Bug 19** (pre-existing, logged in `LIGHTING_BUGS.md`)                          |   🟡   | CMD-1, WS-4a/b |
-| **CMD-3 — command pack** ✅         | The §8.1 pack (`/fill` stays out). **Implemented 2026-07-18, in-game confirmed**: 13 commands via `ConsoleCommandInstaller.RegisterAll` (shared production/suite registration list, count-floor B32) — Wave A `/seed` `/where` `/origin [force]` (new public `World.ForceOriginReanchor`), Wave B `/time set` `/set-world-border` (shrink-strand confirm) `/setspawn` `/spawn` (CMD-2 hold reuse) `/fly` `/noclip` `/speed` (keybind coupling replicated), Wave C `/give` (name→ID case-insensitive; `ItemStack.ID` is a **byte** → >255 guard) `/setblock` (new `World.PlaceBlockCommand` owns ForcePlace + `Vector3Int`, keeping `Commands` UnityEngine-free; placed-vs-queued report) `/chunk info`. Shared `CommandArgUtility`; suite 31→**43** (B32–B43, prove-red ×2: B39 coupling, B41 case-insensitivity); Validate All 266/266 |   🟡   | CMD-2 ✅        |
-| **CMD-4 — relative `~` coords** ✅ | Relative coordinates (`~`, `~N`, `~-N`) on the coord-consuming commands (`/teleport`, `/setblock`). **Implemented 2026-07-19, in-game confirmed** (§8.2): integer offsets only (v1 coord policy), player base via new `World.TryGetPlayerVoxelCell` (keeps `Commands` UnityEngine-free), global `~`-rejection gate removed. Suite 43→**47** (B9 flipped reserved→dispatches, B44–B47), prove-red exactly 5; Validate All 270/270.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |   🟢   | CMD-2 ✅        |
-| **CMD-5 — tab autocomplete** 📋    | Registry-driven Tab completion. **Plan closed 2026-07-18, NOT yet implemented** (§8.3): scope = command names **+ argument values** via a new opt-in `IArgumentCompleter` (D1); multi-match → common prefix + candidate list (D2); primary names only (D3). Tab **must** route through a UI-map action (B23 tripwire).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |   🟡   | CMD-0 ✅        |
+| Phase                                         | Scope                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Effort | Depends on     |
+|-----------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|----------------|
+| **CMD-0 — engine core** ✅                     | Tokenizer, registry, selector resolver (`@player`), confirmation flow, history buffers, `CommandContext`; `HelpCommand`; the validation suite. **Implemented 2026-07-18**: `Assets/Scripts/Commands/` (namespace `Commands`, pure C# — zero Unity usings) + `Validate Command Console` suite (20 baselines, registry suite #10)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |   🟡   | —              |
+| **CMD-1 — console UI** ✅                      | Panel + ScrollRect + input field, `IsConsoleOpen` state, `ToggleConsole` action, Esc chain, ↑/↓ recall, T-leak guard. **Implemented 2026-07-18**: runtime-code-built `UI.ConsoleUI` (own overlay canvas, no scene edits) + pure `UI.ConsoleTextFormatter` (suite-pinned severity colors + noparse guard, B21/B22); **the Gameplay action map is disabled while the console is open** (typing can't trigger hotbar/toggles), so Esc/↑/↓ arrive via new UI-map actions (`Cancel`/`HistoryUp`/`HistoryDown`) rather than the gameplay Escape chain. Raw-keyboard bypasses closed: benchmark trigger keys route through the gameplay-gated `InputManager.DebugKeyPressed`, and tripwire baseline B23 fails the suite on any `Keyboard.current` read outside `InputManager` (suite 23, B21–B23)                                              |   🟡   | CMD-0          |
+| **CMD-2 — `/teleport`** ✅                     | §4.3 command incl. warning/confirm matrix, arrival hold, 2-arg surface form; defines the `CommandContext` world facade (§4.1). **Implemented 2026-07-18, in-game confirmed**: `TeleportCommand` (alias `tp`, zero Unity usings) + `World.TeleportPlayer` (reuses the WS-4b `ShiftOrigin`) + World-owned hold (release = destination `ChunkData.IsPopulated` && `Chunk.HasMeshApplied` [new pool-reset-safe flag], 10 s timeout fail-safe, `TeleportHoldEnded` → console "Arrived."/timeout warning via `CommandEngine.PostLine`) + `VoxelRigidbody.isTeleportHeld` FixedUpdate gate; suite 23→**31** (B24–B31 teleport matrix vs `CommandTeleportTestWorld`, WorldOrigin snapshot/restore, prove-red on B29); far-lands verification surfaced lighting **Bug 19** (pre-existing, logged in `LIGHTING_BUGS.md`)                          |   🟡   | CMD-1, WS-4a/b |
+| **CMD-3 — command pack** ✅                    | The §8.1 pack (`/fill` stays out). **Implemented 2026-07-18, in-game confirmed**: 13 commands via `ConsoleCommandInstaller.RegisterAll` (shared production/suite registration list, count-floor B32) — Wave A `/seed` `/where` `/origin [force]` (new public `World.ForceOriginReanchor`), Wave B `/time set` `/set-world-border` (shrink-strand confirm) `/setspawn` `/spawn` (CMD-2 hold reuse) `/fly` `/noclip` `/speed` (keybind coupling replicated), Wave C `/give` (name→ID case-insensitive; `ItemStack.ID` is a **byte** → >255 guard) `/setblock` (new `World.PlaceBlockCommand` owns ForcePlace + `Vector3Int`, keeping `Commands` UnityEngine-free; placed-vs-queued report) `/chunk info`. Shared `CommandArgUtility`; suite 31→**43** (B32–B43, prove-red ×2: B39 coupling, B41 case-insensitivity); Validate All 266/266 |   🟡   | CMD-2 ✅        |
+| **CMD-4 — relative `~` coords** ✅             | Relative coordinates (`~`, `~N`, `~-N`) on the coord-consuming commands (`/teleport`, `/setblock`). **Implemented 2026-07-19, in-game confirmed** (§8.2): integer offsets only (v1 coord policy), player base via new `World.TryGetPlayerVoxelCell` (keeps `Commands` UnityEngine-free), global `~`-rejection gate removed. Suite 43→**47** (B9 flipped reserved→dispatches, B44–B47), prove-red exactly 5; Validate All 270/270.                                                                                                                                                                                                                                                                                                                                                                                                       |   🟢   | CMD-2 ✅        |
+| **CMD-5 — tab autocomplete + inline ghost** ✅ | Registry-driven Tab completion **+ PowerShell-style inline gray ghost suggestion**. **Implemented + in-game confirmed 2026-07-19** (§8.3): command names + argument values via a new opt-in `IArgumentCompleter` (D1), multi-match → common prefix + candidate list (D2), primary names only (D3); Tab routes through a UI-map action (B23 held). Inline ghost via pure `CommandEngine.Suggest` (single-candidate only) + a gray TMP overlay; **Tab / RightArrow / End** accept. Suite 47→**52** (B48–B52), prove-red B48; Validate All 275/275.                                                                                                                                                                                                                                                                                        |   🟢   | CMD-0 ✅        |
 
 CMD-0+1 deliver standalone value (a working console with `/help`); CMD-2 is the WS-4c payload —
 the two roadmaps meet there: **WS-4c = CMD-2 + the v12→v13 player-position migration** from
@@ -305,10 +305,10 @@ each phase:
 
 ## 8. Extension roadmap (post-CMD-2, in intended order)
 
-| Version | Extension                                                                                                                                                                                  |
-|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **v2**  | The **CMD-3 command pack** (§8.1) ✅; **CMD-4 relative `~` coordinates** (§8.2) ✅; **CMD-5 tab autocomplete** (§8.3, plan closed 📋); selectable/copyable output (unplanned). |
-| **v3+** | Entity selectors (`@entity-<id>`, filters) with the entity system; chat on the unprefixed namespace; permissions on `CommandContext` — each gets a design pass when concrete.              |
+| Version | Extension                                                                                                                                                                     |
+|---------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **v2**  | The **CMD-3 command pack** (§8.1) ✅; **CMD-4 relative `~` coordinates** (§8.2) ✅; **CMD-5 tab autocomplete + inline ghost** (§8.3) ✅; selectable/copyable output (unplanned). |
+| **v3+** | Entity selectors (`@entity-<id>`, filters) with the entity system; chat on the unprefixed namespace; permissions on `CommandContext` — each gets a design pass when concrete. |
 
 ### 8.1 CMD-3 — command pack ✅ (implemented + in-game confirmed 2026-07-18)
 
@@ -429,10 +429,34 @@ plan, for the record:
 **Out of scope:** `^` caret/local (look-relative) coordinates — a distinct Minecraft feature, not
 requested; relative coords on non-coord commands.
 
-### 8.3 CMD-5 — tab autocomplete (plan closed 2026-07-18, **NOT yet implemented**)
+### 8.3 CMD-5 — tab autocomplete + inline ghost ✅ (implemented + in-game confirmed 2026-07-19)
 
-Registry-driven Tab completion in the console input field. The registry already exposes everything
-the name-completion path needs (`CommandRegistry.Commands` → `IConsoleCommand.Name`).
+Registry-driven Tab completion in the console input field, plus a PowerShell-style inline gray
+"ghost" suggestion. The registry already exposes everything the name-completion path needs
+(`CommandRegistry.Commands` → `IConsoleCommand.Name`).
+
+**Shipped 2026-07-19** across three commits (completion core + suite → Tab UI wiring → inline ghost).
+The pure core (`CommandEngine.Complete`) and the ghost derivation (`CommandEngine.Suggest`) are
+suite-pinned; the UI (ghost overlay, key wiring) is in-game confirmed per §7. Execution deltas from
+the plan below, for the record:
+
+- **Inline ghost suggestion added mid-implementation** (user request 2026-07-19), *reversing* the
+  original "candidates list into history instead — no ghost-text widget" out-of-scope call. Delivered
+  as a pure `CommandEngine.Suggest(input)` (returns the gray suffix only for a single unambiguous
+  candidate; ambiguous/empty/fully-typed → empty, so the multi-match Tab behavior is untouched) driving
+  a non-interactive TMP overlay that renders `<transparent>typed</transparent><gray>suffix</gray>` so
+  the ghost aligns to the caret. A long-line horizontal-scroll misalignment guard was considered and
+  **deliberately deferred** until it actually overflows (short console commands never hit it).
+- **Accept keys = Tab + RightArrow + End** (decision 2026-07-19): the inline ghost accepts on
+  RightArrow/End (caret-at-end guarded) as well as Tab, via a new UI-map `ConsoleAcceptSuggestion`
+  action (RightArrow + End bindings) — B23-clean, no direct device reads.
+- **`IArgumentCompleter` signature** = `string[] CompleteArgument(int argIndex, string partial, CommandContext ctx)`
+  (the simple index+partial+ctx shape); **completion operates at end-of-input only** (no caret param).
+- Suite 47→**52**: B48 (name single/empty/no-match/full-pack), B49 (common prefix), B50 (block-name
+  args + coord no-op), B51 (`off` + no-completer + chat no-ops), B52 (`Suggest` ghost). Prove-red
+  verified on B48 (dropping the trailing space reddened exactly it). Validate All 275/275 across 10 suites.
+
+Original plan, for the record:
 
 **Decisions (closed 2026-07-18, decision menu — don't re-litigate):**
 
@@ -481,19 +505,34 @@ the name-completion path needs (`CommandRegistry.Commands` → `IConsoleCommand.
 (2) A3+A4 → (3) B1+B1b+B4 → (4) B2+B3 → (5) B5. CMD-4 and CMD-5 are independent — either may ship
 first.
 
-**Out of scope:** inline suggestion dropdown / ghost-text widget (candidates list into history
-instead); selectable/copyable output (separate v2 item); argument completion for commands that
-don't opt into `IArgumentCompleter`.
+**Out of scope:** a multi-candidate suggestion *dropdown* widget (the single-candidate inline ghost
+shipped; multiple candidates still list into history); the long-line ghost-alignment overflow guard
+(deferred until it overflows in practice); selectable/copyable output (separate v2 item); argument
+completion for commands that don't opt into `IArgumentCompleter`.
 
-**Assumptions to verify at execution time:** (1) Tab can be captured via a UI-map InputAction
-without the EventSystem stealing it / TMP inserting a tab char — same risk class as the T-leak,
-verified in-game at B3. (2) The CMD-3 stub `BlockDatabase` fixture exposes `BlockTypes` for
-headless argument-completion tests — confirm when reaching B4.
+**Assumptions — all verified on ship (2026-07-19):** (1) Tab/RightArrow/End captured via UI-map
+InputActions without the EventSystem stealing them or TMP inserting a tab char — confirmed in-game.
+(2) The CMD-3 stub `CommandTeleportTestWorld` exposes `BlockTypes` (Air + Stone) for headless
+argument-completion tests — confirmed (reused by B50/B52).
 
 ---
 
 ## Document History
 
+* **v1.11** - **CMD-5 tab autocomplete + PowerShell-style inline ghost SHIPPED + in-game confirmed
+  2026-07-19.** Three commits: (1) pure completion core — `CommandEngine.Complete` + a new opt-in
+  `IArgumentCompleter` (`string[] CompleteArgument(int argIndex, string partial, CommandContext ctx)`)
+  on `/give`/`/setblock`/`/set-world-border`, `CommandArgUtility.MatchBlockNames`, suite 47→51
+  (B48–B51, prove-red B48); (2) Tab UI wiring — `ConsoleAutocomplete` UI-map action + `ConsoleUI`
+  (B23 held); (3) inline ghost — pure `CommandEngine.Suggest` (single-candidate suffix only) + a gray
+  non-interactive TMP overlay (`<transparent>typed</transparent><gray>suffix</gray>` for caret
+  alignment), accepted by **Tab / RightArrow / End** (new `ConsoleAcceptSuggestion` UI-map action,
+  caret-at-end guarded), suite →**52** (B52). The ghost **reverses** the original out-of-scope
+  "no ghost-text widget" call (user request); the long-line alignment guard is deferred until it
+  overflows. Decisions closed 2026-07-19: simple completer signature, end-of-input-only caret,
+  Tab+RightArrow/End accept. Multi-match behavior unchanged (common prefix + candidate list). Validate
+  All 275/275 across 10 suites. §7 CMD-5 row + §8 v2 row + §8.3 + §1 non-goal all flipped to ✅ — the
+  whole planned CMD arc (CMD-0..5) is now shipped.
 * **v1.10** - **CMD-4 relative `~` coordinates SHIPPED + in-game confirmed 2026-07-19** (both
   `/teleport` and `/setblock` verified by hand in relative mode). Implemented exactly per the §8.2
   plan across two commits (A1+A2 groundwork: `CommandArgUtility.TryParseCoord` relative overload +
@@ -585,5 +624,5 @@ headless argument-completion tests — confirm when reaching B4.
 
 ---
 
-**Last Updated:** 2026-07-18
-**Next Review:** when CMD-5 (§8.3) is executed — flip its row/section to Implemented on ship. The remaining §8 items (selectable output, chat, entity selectors, `/fill`) each still need their own design pass before scheduling.
+**Last Updated:** 2026-07-19
+**Next Review:** the whole planned CMD arc (CMD-0..5) has shipped. The remaining §8 items (selectable/copyable output, chat on the unprefixed namespace, entity selectors, `/fill`, and the deferred long-line ghost-alignment guard) each still need their own design pass before scheduling.
