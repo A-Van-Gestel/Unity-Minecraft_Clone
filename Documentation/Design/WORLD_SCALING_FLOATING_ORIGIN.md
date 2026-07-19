@@ -1,6 +1,6 @@
 # World Scaling — WS-4 Floating Origin Design
 
-**Version:** 1.9
+**Version:** 1.11
 **Date:** 2026-07-19
 **Status:** **Implemented** — every WS-4 phase is shipped and in-game confirmed: WS-4a (origin plumbing),
 WS-4b (the shift), WS-4c persistence (`ChunkRelativePosition` player position, level.dat v13), and WS-4c
@@ -222,9 +222,11 @@ ShiftThresholdChunks`. One frame, main thread, allocation-free (`World.ShiftOrig
 Rebuilt-per-frame consumers need nothing: highlight/place blocks (`PlaceCursorBlocks`) and `BorderWallRenderer`
 (`LateUpdate` full rebuild). Two corrections from executing this (v1.6): **the debug screen holds no cross-frame
 Unity-space cache** — it recomputes from the transform each interval, so it needs nothing here — and the **`Clouds`
-root is cosmetic**, because `UpdateClouds` places each tile player-relative in Unity space. The clouds still get an
-explicit `Reanchor()`: `UpdateClouds` is otherwise only driven by `CheckViewDistance`, i.e. on a chunk crossing, and
-while a shift frame *is* a chunk crossing today, that is a coincidence and not a contract.
+root is cosmetic**. Since the render-distance-scaled cloud rework (v1.11), `UpdateClouds` re-derives every tile from
+its world tile index through `VoxelToUnity` — the tiles are in the *re-derived* class above, drift-free by
+construction. The clouds still get an explicit `Reanchor()`: `UpdateClouds` is otherwise only driven by
+`CheckViewDistance`, i.e. on a chunk crossing, and while a shift frame *is* a chunk crossing today, that is a
+coincidence and not a contract.
 
 **Must NOT shift:** skybox, directional light, UI, camera-local state. Verified absent: PhysX
 bodies, particle systems, tweens (no DOTween usage repo-wide).
@@ -335,7 +337,7 @@ execution checklist; each row becomes a visible `WorldOrigin.*` call.
 | Collision-bounds debug draw (`World.cs:2947`)                               | `VoxelToUnity(Coord.ToVoxelOrigin()) + local` before `Debug.DrawLine`                                                                                                                                                                                                                                                                        |
 | `BorderWallRenderer.RebuildMesh`                                            | Wall planes at `±ext − OriginVoxel`; keep `uv.x` bands voxel-space for continuity across shifts                                                                                                                                                                                                                                              |
 | Spawn transform writes (`World.StartWorld` STEP 1 + STEP 4)                 | Since **SP-1** there are exactly two, both fed by `Spawn.SpawnResolution` (`ResolveInitial` / `ResolveFinal`) and both converting one voxel-space value: `_playerTransform.position = VoxelToUnity(spawnPosition)`. The unit is pure voxel space throughout; `SetSpawnPoint(placement.CanonicalSpawn)` builds from voxel space               |
-| `Clouds` (`Awake` anchor `:46`, `CloudTileCoordFromFloat:352`)              | Pattern lookup adds `OriginVoxel` so the cloud pattern doesn't teleport on shift; tile re-anchoring is player-relative and needs nothing else. Do the pattern wrap in **integer** space (pattern repeats every `_cloudTexWidth`) — the float-`frac` idiom re-introduces large-float precision loss far out; integer modulo is exact for free |
+| `Clouds` (`AnchorRoot`, `UpdateClouds`)                                     | Tiles are keyed by world tile index (voxel space) and each placement converts via `VoxelToUnity` (re-derived class, drift-free; v1.11 rework). The pattern lookup wraps in **integer** space (`WrapToPattern`; pattern repeats every `_cloudTexWidth`) — the float-`frac` idiom re-introduces large-float precision loss far out; integer modulo is exact for free |
 | Shader global                                                               | `_WorldOriginOffset` (§4.6)                                                                                                                                                                                                                                                                                                                  |
 
 ### 5.2 Unity → Voxel (queries from transforms)
@@ -638,6 +640,14 @@ graduate to work items).
 
 ## Document History
 
+* **v1.11** - **Cloud coverage scaled to render distance** (2026-07-19): `Clouds.cs` reworked — coverage
+  radius is now `max(viewDistance × 2, 8)` chunks instead of one fixed 512-block pattern period, so the
+  cloudscape reaches past the fog line at every render distance. Tiles are keyed by **world tile index**
+  (the same pattern tile can repeat when coverage exceeds a period) and every placement re-derives through
+  `VoxelToUnity`, moving clouds from the "player-relative, needs nothing" class to the re-derived class in
+  §4.3/§5.1 (both updated); `Reanchor()`'s contract is unchanged. Tile size 16→64 blocks with one shared
+  mesh per unique pattern tile and pooled instances, keeping the worst-case tile count at parity with the
+  old fixed grid. Integer pattern wrap (`WrapToPattern`) retained exactly as specified here.
 * **v1.10** - **PLAYER_BUGS 03 closed as fixed-by-`ed8cb69`** (2026-07-19): the fresh-world re-test at
   +16.8M / +2×10⁷ / +2.147×10⁹ / +2,147,483,500 confirmed voxel modification (break/place/highlights,
   `/setblock`) correct at every magnitude, with no float-tripwire hits — the pre-fix symptoms were the

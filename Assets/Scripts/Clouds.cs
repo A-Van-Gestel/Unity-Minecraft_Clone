@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Helpers;
 using UnityEngine;
+using UnityEngine.Pool;
 
 public class Clouds : MonoBehaviour
 {
@@ -20,12 +21,33 @@ public class Clouds : MonoBehaviour
     [SerializeField]
     private float _depthOffset = 0.0035f;
 
+    // Cloud tiles are deliberately larger than terrain chunks: coverage now scales with render distance,
+    // so fewer, bigger tiles keep the GameObject count bounded (identical pattern tiles share one mesh).
+    // Must divide the pattern texture width.
+    private const int CLOUD_TILE_SIZE = 64;
+
+    // Coverage radius in chunks = viewDistance * this. Clouds sit high above the terrain, so extending
+    // them past the render distance keeps the sky filled to the horizon instead of ending mid-view.
+    private const int VIEW_DISTANCE_MULTIPLIER = 2;
+
+    // Floor so very low render distances still get a believable sky instead of a small patch overhead.
+    private const int MIN_COVERAGE_RADIUS_CHUNKS = 8;
+
     private bool[,] _cloudData; // Array of bools representing where cloud is.
     private int _cloudTexWidth;
     private int _cloudTileSize;
-    private Vector3Int _offset;
 
-    private readonly Dictionary<Vector2Int, GameObject> _clouds = new Dictionary<Vector2Int, GameObject>();
+    // Shared mesh per pattern tile (key = pattern-space tile origin). A null value marks a tile the
+    // pattern leaves empty, so repeat lookups skip both the mesh build and the GameObject.
+    private readonly Dictionary<Vector2Int, Mesh> _tileMeshes = new Dictionary<Vector2Int, Mesh>();
+
+    // Live tile instances keyed by WORLD tile index (voxel cell / tile size) — unlike the old
+    // pattern-space keying, the same pattern tile can appear multiple times once the coverage
+    // radius exceeds one pattern period.
+    private readonly Dictionary<Vector2Int, MeshFilter> _clouds = new Dictionary<Vector2Int, MeshFilter>();
+
+    // Inactive tile GameObjects, reused as the covered area moves with the player.
+    private readonly Stack<MeshFilter> _tilePool = new Stack<MeshFilter>();
 
     // A flag to ensure we don't try to update before we're ready.
     private bool _isInitialized = false;
@@ -42,11 +64,19 @@ public class Clouds : MonoBehaviour
         }
 
         _cloudTexWidth = _cloudPattern.width;
-        _cloudTileSize = VoxelData.ChunkWidth;
-        _offset = new Vector3Int(-(_cloudTexWidth / 2), 0, -(_cloudTexWidth / 2));
+        _cloudTileSize = Mathf.Min(CLOUD_TILE_SIZE, _cloudTexWidth);
+
+        if (_cloudTexWidth % _cloudTileSize != 0)
+        {
+            Debug.LogError($"Cloud Pattern width ({_cloudTexWidth}) must be divisible by the cloud tile size ({_cloudTileSize}).");
+            enabled = false;
+        }
     }
 
-    // This is our new public initialization method.
+    /// <summary>
+    /// Loads the cloud pattern and places the initial tile set around the player.
+    /// Called by <see cref="World"/> once the world (and its origin) is ready.
+    /// </summary>
     public void Initialize()
     {
         if (_isInitialized) return;
@@ -54,7 +84,7 @@ public class Clouds : MonoBehaviour
         AnchorRoot();
 
         LoadCloudData();
-        CreateClouds();
+        if (_cloudData == null) return; // Unreadable pattern texture — LoadCloudData already disabled us.
 
         // Initialization is done.
         _isInitialized = true;
@@ -87,17 +117,31 @@ public class Clouds : MonoBehaviour
     }
 
     /// <summary>
-    /// Destroys all existing cloud tiles and re-creates them with the current cloud style setting.
-    /// Called when the cloud style is changed at runtime (e.g. from the pause menu settings).
+    /// Destroys all existing cloud tiles and shared meshes, then re-creates them with the current cloud
+    /// style setting. Called when the cloud style is changed at runtime (e.g. from the pause menu settings).
     /// </summary>
     public void Reinitialize()
     {
-        foreach (GameObject cloud in _clouds.Values)
+        foreach (MeshFilter tile in _clouds.Values)
         {
-            if (cloud != null) Destroy(cloud);
+            if (tile != null) Destroy(tile.gameObject);
         }
 
         _clouds.Clear();
+
+        while (_tilePool.Count > 0)
+        {
+            MeshFilter tile = _tilePool.Pop();
+            if (tile != null) Destroy(tile.gameObject);
+        }
+
+        // The meshes are shared assets owned by this component, not by the tiles — destroy them explicitly.
+        foreach (Mesh mesh in _tileMeshes.Values)
+        {
+            if (mesh != null) Destroy(mesh);
+        }
+
+        _tileMeshes.Clear();
         _isInitialized = false;
         Initialize();
     }
@@ -125,79 +169,113 @@ public class Clouds : MonoBehaviour
         }
     }
 
-    private void CreateClouds()
-    {
-        if (_world.settings.clouds == CloudStyle.Off)
-            return;
-
-        for (int x = 0; x < _cloudTexWidth; x += _cloudTileSize)
-        {
-            for (int y = 0; y < _cloudTexWidth; y += _cloudTileSize)
-            {
-                Mesh cloudMesh;
-                switch (_world.settings.clouds)
-                {
-                    case CloudStyle.Fast:
-                        cloudMesh = CreateFastCloudMesh(x, y);
-                        break;
-                    case CloudStyle.Fancy:
-                        cloudMesh = CreateFancyCloudMesh(x, y);
-                        break;
-                    case CloudStyle.Off:
-                        cloudMesh = null;
-                        break;
-                    default:
-                        Debug.LogError("Unknown Cloud Style");
-                        cloudMesh = null;
-                        break;
-                }
-
-                // If we don't have a mesh, skip to the next tile.
-                if (cloudMesh is null) continue;
-
-                Vector3 position = new Vector3(x, cloudHeight, y);
-
-                // Doesn't seem to be needed --> Center the clouds based around the center of the world
-                // position += transform.position - new Vector3(cloudTexWidth / 2f, 0, cloudTexWidth / 2f);
-                // position.y = cloudHeight;
-
-                // x/y are already pattern-space (0.._cloudTexWidth), so they ARE the key — no wrap, and in
-                // particular no origin conversion: unlike UpdateClouds, this loop never holds a Unity-space value.
-                _clouds.Add(new Vector2Int(x, y), CreateCloudTile(cloudMesh, position));
-            }
-        }
-    }
-
+    /// <summary>
+    /// Streams cloud tiles to cover the current coverage radius around the player: releases tiles that
+    /// fell out of range, then places (pooled) instances for every in-range world tile whose pattern
+    /// cell has geometry. In-range tiles are always re-positioned, so a floating-origin shift is
+    /// absorbed by the same pass.
+    /// </summary>
     public void UpdateClouds()
     {
         // Don't run if not initialized or clouds are off.
         if (!_isInitialized || _world.settings.clouds == CloudStyle.Off)
             return;
 
-        for (int x = 0; x < _cloudTexWidth; x += _cloudTileSize)
+        // The pattern is anchored to the WORLD, so tile indexing runs in voxel space — otherwise the
+        // whole cloudscape would jump to a different part of the pattern on an origin re-anchor.
+        Vector3Int playerVoxelCell = WorldOrigin.UnityToVoxelCell(_world.player.transform.position);
+        int centerTileX = ChunkMath.FloorDiv(playerVoxelCell.x, _cloudTileSize);
+        int centerTileZ = ChunkMath.FloorDiv(playerVoxelCell.z, _cloudTileSize);
+        int radiusTiles = Mathf.CeilToInt(CoverageRadiusInBlocks() / (float)_cloudTileSize);
+
+        // Release out-of-range tiles first so their GameObjects can be reused by this same pass.
+        List<Vector2Int> stale = ListPool<Vector2Int>.Get();
+        foreach (KeyValuePair<Vector2Int, MeshFilter> pair in _clouds)
         {
-            for (int y = 0; y < _cloudTexWidth; y += _cloudTileSize)
+            if (Mathf.Abs(pair.Key.x - centerTileX) > radiusTiles || Mathf.Abs(pair.Key.y - centerTileZ) > radiusTiles)
+                stale.Add(pair.Key);
+        }
+
+        foreach (Vector2Int key in stale)
+            ReleaseTile(key);
+
+        ListPool<Vector2Int>.Release(stale);
+
+        for (int tileX = centerTileX - radiusTiles; tileX <= centerTileX + radiusTiles; tileX++)
+        {
+            for (int tileZ = centerTileZ - radiusTiles; tileZ <= centerTileZ + radiusTiles; tileZ++)
             {
-                // Unity space: the tile grid follows the player, so it re-anchors across a shift for free.
-                Vector3 position = _world.player.transform.position + new Vector3(x, 0, y) + _offset;
-                position = new Vector3(RoundToCloud(position.x), cloudHeight, RoundToCloud(position.z));
+                Vector2Int worldTile = new Vector2Int(tileX, tileZ);
+                Vector3 unityPos = WorldOrigin.VoxelToUnity(
+                    new Vector3(tileX * _cloudTileSize, cloudHeight, tileZ * _cloudTileSize));
 
-                // The pattern, unlike the tiles, is anchored to the WORLD — so the lookup converts to voxel space.
-                // Without this the whole cloudscape would jump to a different part of the pattern on a re-anchor.
-                Vector2Int cloudPosition = CloudTileKeyFromVoxel(WorldOrigin.UnityToVoxelCell(position));
-
-                // Check to prevent "KeyNotFoundException", though it shouldn't happen now.
-                if (_clouds.TryGetValue(cloudPosition, out GameObject cloud))
+                if (_clouds.TryGetValue(worldTile, out MeshFilter existing))
                 {
-                    cloud.transform.position = position;
+                    existing.transform.position = unityPos;
+                    continue;
                 }
+
+                Mesh mesh = GetTileMesh(worldTile);
+                if (mesh == null) continue; // Pattern leaves this tile empty — nothing to render.
+
+                _clouds.Add(worldTile, AcquireTile(mesh, unityPos, worldTile));
             }
         }
     }
 
-    private int RoundToCloud(float value)
+    /// <summary>
+    /// The distance (in blocks) clouds extend from the player: double the render distance, floored at
+    /// <see cref="MIN_COVERAGE_RADIUS_CHUNKS"/> chunks, so the cloudscape always reaches past the fog line.
+    /// </summary>
+    /// <returns>The cloud coverage radius in blocks.</returns>
+    private int CoverageRadiusInBlocks()
     {
-        return Mathf.FloorToInt(value / _cloudTileSize) * _cloudTileSize;
+        int radiusChunks = Mathf.Max(
+            _world.settings.viewDistance * VIEW_DISTANCE_MULTIPLIER, MIN_COVERAGE_RADIUS_CHUNKS);
+        return radiusChunks * VoxelData.ChunkWidth;
+    }
+
+    /// <summary>
+    /// Returns the shared mesh for the pattern tile under the given world tile, building and caching it
+    /// on first use. Returns null for pattern tiles with no cloud pixels.
+    /// </summary>
+    /// <param name="worldTile">World-space tile index (voxel cell / tile size).</param>
+    /// <returns>The shared tile mesh, or null when the pattern tile is empty (or clouds are off).</returns>
+    private Mesh GetTileMesh(Vector2Int worldTile)
+    {
+        Vector2Int patternKey = new Vector2Int(
+            WrapToPattern(worldTile.x * _cloudTileSize),
+            WrapToPattern(worldTile.y * _cloudTileSize));
+
+        if (_tileMeshes.TryGetValue(patternKey, out Mesh mesh))
+            return mesh;
+
+        switch (_world.settings.clouds)
+        {
+            case CloudStyle.Fast:
+                mesh = CreateFastCloudMesh(patternKey.x, patternKey.y);
+                break;
+            case CloudStyle.Fancy:
+                mesh = CreateFancyCloudMesh(patternKey.x, patternKey.y);
+                break;
+            case CloudStyle.Off:
+                mesh = null;
+                break;
+            default:
+                Debug.LogError("Unknown Cloud Style");
+                mesh = null;
+                break;
+        }
+
+        // Cache empty tiles as null so neither the mesh build nor the GameObject is repeated for them.
+        if (mesh != null && mesh.vertexCount == 0)
+        {
+            Destroy(mesh);
+            mesh = null;
+        }
+
+        _tileMeshes.Add(patternKey, mesh);
+        return mesh;
     }
 
     private Mesh CreateFastCloudMesh(int x, int z)
@@ -358,31 +436,54 @@ public class Clouds : MonoBehaviour
         return _cloudData[x, z];
     }
 
-    private GameObject CreateCloudTile(Mesh mesh, Vector3 position)
+    /// <summary>
+    /// Takes a tile from the pool (or creates one) and configures it with the given shared mesh and position.
+    /// </summary>
+    /// <param name="mesh">Shared pattern-tile mesh to render.</param>
+    /// <param name="unityPos">Unity-space position of the tile's minimum corner.</param>
+    /// <param name="worldTile">World tile index, used only for the editor-facing name.</param>
+    /// <returns>The tile's MeshFilter (its GameObject is the tile instance).</returns>
+    private MeshFilter AcquireTile(Mesh mesh, Vector3 unityPos, Vector2Int worldTile)
     {
-        GameObject newCloudTile = new GameObject();
-        newCloudTile.transform.position = position;
-        newCloudTile.transform.parent = transform;
+        MeshFilter tile;
+        if (_tilePool.Count > 0)
+        {
+            tile = _tilePool.Pop();
+            tile.gameObject.SetActive(true);
+        }
+        else
+        {
+            GameObject newCloudTile = new GameObject();
+            newCloudTile.transform.parent = transform;
+            tile = newCloudTile.AddComponent<MeshFilter>();
+
+            // sharedMaterial: every tile renders with the one cloud material — a per-tile
+            // .material copy would break batching and leak instances.
+            MeshRenderer mR = newCloudTile.AddComponent<MeshRenderer>();
+            mR.sharedMaterial = _cloudMaterial;
+        }
+
+        tile.transform.position = unityPos;
+        tile.sharedMesh = mesh;
 #if UNITY_EDITOR
-        newCloudTile.name = $"Cloud {position.x}, {position.z}";
+        tile.gameObject.name = $"Cloud {worldTile.x}, {worldTile.y}";
 #endif
-        MeshFilter mF = newCloudTile.AddComponent<MeshFilter>();
-        MeshRenderer mR = newCloudTile.AddComponent<MeshRenderer>();
-
-        mR.material = _cloudMaterial;
-        mF.mesh = mesh;
-
-        return newCloudTile;
+        return tile;
     }
 
     /// <summary>
-    /// Wraps an absolute voxel-space cell onto the repeating cloud pattern, yielding the tile's dictionary key.
+    /// Deactivates the tile at the given world tile key and returns it to the pool.
     /// </summary>
-    /// <param name="voxelCell">The absolute voxel-space cell the tile sits over.</param>
-    /// <returns>The pattern-space tile key, both components in <c>[0, _cloudTexWidth)</c>.</returns>
-    private Vector2Int CloudTileKeyFromVoxel(Vector3Int voxelCell)
+    /// <param name="worldTile">World tile index of the tile to release.</param>
+    private void ReleaseTile(Vector2Int worldTile)
     {
-        return new Vector2Int(WrapToPattern(voxelCell.x), WrapToPattern(voxelCell.z));
+        MeshFilter tile = _clouds[worldTile];
+        _clouds.Remove(worldTile);
+
+        if (tile == null) return;
+
+        tile.gameObject.SetActive(false);
+        _tilePool.Push(tile);
     }
 
     /// <summary>
