@@ -1,16 +1,16 @@
 # Cloud Rendering Improvements Report
 
-**Version:** 1.3
+**Version:** 1.4
 **Date:** 2026-07-19
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
-> The backlog for making the **cloud layer feel alive** — a procedural (optionally infinite)
-> pattern, slow shape evolution, extra layers, a volumetric quality tier, and cloud shadows.
-> Ranked internally (§Recommended order); deliberately **not** folded into the combined TF/RF
-> roadmap — clouds are a self-contained cosmetic system. The original v1 pair — **CL-1 wind
-> drift + CL-2 shading/tint/fade — SHIPPED 2026-07-19** (archived from this backlog, v1.1);
-> every remaining item builds on the drift-space plumbing that work introduced.
+> The backlog for making the **cloud layer feel alive** — slow shape evolution, a volumetric
+> quality tier, cloud shadows, and an infinite non-repeating pattern. Ranked internally
+> (§Recommended order); deliberately **not** folded into the combined TF/RF roadmap — clouds are
+> a self-contained cosmetic system. Shipped and archived so far (all 2026-07-19): **CL-1 wind
+> drift + CL-2 shading/tint/fade** (v1.1), **CL-3-A procedural seeded pattern** (v1.3), and
+> **CL-6 second parallax layer** (v1.4); every remaining item builds on that substrate.
 
 **Audited:** 2026-07-19, at commit `c7eabd6` (branch `feat/world-scaling`).
 Findings are from a full read of `Assets/Scripts/Clouds.cs` (same-session rework, so current by
@@ -55,11 +55,11 @@ CL-1/CL-2 drift + shader work (`d52b089`, `12e6cf6`, both in-game verified 2026-
 | Coverage      | `max(viewDistance × 2, 8)` chunks radius; 64-block tiles keyed by **cloud-space tile index** (drift-corrected), pooled GameObjects, one shared `Mesh` per unique pattern tile (`Clouds.GetTileMesh`)                                                                                  |
 | Pattern       | **Procedural seeded (was CL-3 Option A):** `CloudPatternJob` (Burst) — periodic FBM value noise, lowbias32 lattice hash, thresholded at the coverage percentile (0.23 = classic density); knobs 32 cells / 4 octaves / 0.6 persistence calibrated vs `clouds.png` blob stats. Classic texture behind `_useClassicPattern`; still repeats every 512 via `WrapToPattern` |
 | Styles        | `CloudStyle` enum: `Off` / `Fast` (down-facing quads only) / `Fancy` (1-block-tall extruded hull, corners inflated by `_depthOffset` against Z-fighting)                                                                                                                             |
-| Shader        | `Minecraft/CloudShader` — unlit; MC-style per-face shading (Fancy-only via `_CloudFaceShading` global), `SkyLightColor` day/night tint, coverage-edge fade (`_CloudFadeParams`). Transparent with **`ZWrite On`**: depth resolves overlapping faces (see the v1.1 history entry)     |
+| Shader        | `Minecraft/CloudShader` — unlit; MC-style per-face shading (Fancy-only via the **per-material** `_CloudFaceShading`, v1.4), `SkyLightColor` day/night tint, coverage-edge fade (`_CloudFadeParams`). Transparent with **`ZWrite On`**: depth resolves overlapping faces (v1.1)      |
 | Motion        | **Wind drift (was CL-1):** cloud-space tiles on a drift-carrying root — per-frame cost is one root transform move; re-key sweep only on cloud-tile crossing; accumulator wraps at the pattern period; `_windBlocksPerSecond` inspector vector (default `(−0.6, 0)`), RF-7 owns it later |
 | Lighting/time | **Face shading + tint + edge fade (was CL-2, absorbs RF-2 §5):** top 1.0 / bottom 0.7 / X 0.9 / Z 0.8 on Fancy, flat on Fast; hue follows `SkyLightColor`, brightness follows the shared `VoxelLightToShadow` curve at `sunLuminance = 1`, **normalized to noon** (noon look = authored `_Color` exactly; night matches terrain's relative darkening)              |
 | Update driver | Per-frame `Clouds.Update` drift tick (root move only, allocation-free); the re-key sweep runs on cloud-tile crossing and from `CheckViewDistance` / `Reanchor()` / `OnSettingsChanged` → `Reinitialize()` (drift survives reinit)                                                     |
-| Layers        | One layer at `cloudHeight = 100`; `cloudDepth` field exists but is unused (hull is hardcoded 1 block tall via `VoxelVerts`)                                                                                                                                                          |
+| Layers        | **Per-layer config array (was CL-6):** `CloudLayerConfig[]` on the `Clouds` component — height, drift multiplier + veer, opacity, style clamp (`min(setting, maxStyle)`), noise knobs, seed salt; per-layer runtime state (drift root, material instance, pattern, pools). Defaults: main 100 + upper 170 (×1.5 drift veered 15°, 60% opacity, always `Fast`, 2× blobs @ 0.12 coverage) |
 
 ---
 
@@ -70,7 +70,6 @@ CL-1/CL-2 drift + shader work (`d52b089`, `12e6cf6`, both in-game verified 2026-
 | CL-3 | Pattern repeats every 512 blocks — infinite non-repeating pattern  |   🟡   |  🟡  |   ⚪    |  ✅   |  ✅   |
 | CL-4 | Frozen shapes — slow density evolution + weather-driven coverage   |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 | CL-5 | `Volumetric` quality tier — raymarched slab above the voxel styles |   🔴   |  🟡  |   🟡    |  ✅   |  ✅   |
-| CL-6 | Single layer — second high-altitude parallax layer                 |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
 | CL-7 | Cloud shadows — pattern projected as terrain sunlight attenuation  |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 | CL-8 | Flying through clouds does nothing — in-cloud screen fog           |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
 
@@ -165,25 +164,6 @@ the GS-4 render-tier audit.
 
 ---
 
-### CL-6 — Second high-altitude cloud layer
-
-**Classification:** Minor polish, very cheap now that the drift plumbing is shipped.
-
-**What exists today:** One layer at `cloudHeight = 100`. The `Clouds` component is effectively
-singleton-shaped but nothing structurally prevents a second instance.
-
-**Proposal:** generalize `Clouds` config into a small per-layer struct (height, tile scale,
-drift multiplier, opacity, style clamp) and run 1–2 layers: e.g. main at 100, a sparser
-higher layer at ~170 with 2× pattern scale, 1.5× drift, 60% opacity, `Fast` style always
-(distant layer never needs `Fancy` hulls). Different speeds give genuine parallax — a strong
-"alive sky" cue for almost no code.
-
-**Dependencies / cross-links:** the shipped drift (a per-layer drift multiplier is the point).
-Layer configs are inspector data on the existing `Clouds` object — no settings-UI change
-needed for v1.
-
----
-
 ### CL-7 — Cloud shadows on terrain
 
 **Classification:** Polish, high-impact ambience (ground visibly responds to the sky).
@@ -228,7 +208,7 @@ too); pairs naturally with CL-5 where the slab shader gives the effect for free 
 | Wave | Items                  | Rationale                                                                              |
 |------|------------------------|------------------------------------------------------------------------------------------|
 | v1   | ~~CL-1 → CL-2~~        | ✅ **SHIPPED 2026-07-19** (`d52b089` + `12e6cf6`, in-game verified; archived in v1.1)   |
-| v2   | ~~CL-3 Option A~~ → CL-6 | Option A ✅ **SHIPPED 2026-07-19** (`cfaca87`, archived in v1.3); parallax layers next |
+| v2   | ~~CL-3 Option A → CL-6~~ | Both ✅ **SHIPPED 2026-07-19** (`cfaca87` + `cf8f7b9`, archived in v1.3/v1.4)          |
 | v3   | CL-4 → CL-7            | Field substrate + weather knobs (waits on/degrades without RF-7), shadows               |
 | v4   | CL-5, CL-8, CL-3 (infinite) | Volumetric tier once the field/texture path exists; CL-8 and the infinite pattern ride along |
 
@@ -249,6 +229,16 @@ too); pairs naturally with CL-5 where the slab shader gives the effect for free 
 
 ## Document History
 
+* **v1.4** - **CL-6 SHIPPED & archived** (2026-07-19, `cf8f7b9`, in-game verified): `Clouds`
+  generalized to a `CloudLayerConfig[]` (height, drift multiplier + **veer degrees** — winds veer
+  with altitude, a user-accepted extension of the sketch — opacity, style clamp, per-layer noise
+  knobs, seed salt) with per-layer runtime state on runtime-created drift roots; defaults ship the
+  main layer (100, unchanged) plus an upper layer (170, ×1.5 drift veered 15°, 60% opacity,
+  always `Fast`, 2× blobs @ 0.12 coverage). Blob scale comes from the noise knobs, not transform
+  scaling — no new coordinate space. Deviation from the entry's "almost no code": CL-2's
+  `_CloudFaceShading` **global** was wrong for mixed per-layer styles (a flat `Fast` layer would
+  face-shade) — moved into the `UnityPerMaterial` CBUFFER; opacity rides each layer material's
+  `_Color` alpha. Baseline Layers/Shader rows updated.
 * **v1.3** - **CL-3 Option A SHIPPED & archived** (2026-07-19, `cfaca87`, in-game verified across
   seeds): seeded periodic FBM value noise in a Burst `CloudPatternJob`, thresholded at the
   coverage **percentile** (exact 0.23 density match to `clouds.png`), classic texture kept behind
@@ -278,4 +268,4 @@ too); pairs naturally with CL-5 where the slab shader gives the effect for free 
 ---
 
 **Last Updated:** 2026-07-19
-**Next Review:** when CL-6 or CL-4 starts (re-verify `Clouds.cs`/`CloudPatternJob.cs`/`CloudShader.shader` against the v1.3 baseline) or on the next RF-7 design pass (wind/weather seam)
+**Next Review:** when CL-4 or CL-7 starts (re-verify `Clouds.cs`/`CloudPatternJob.cs`/`CloudShader.shader` against the v1.4 baseline) or on the next RF-7 design pass (wind/weather seam)
