@@ -43,6 +43,8 @@ Shader "Minecraft/Transparent Blocks"
 
             VoxelV2F vertFunction(VoxelAppdata v)
             {
+                // FL-1: wind sway for flora — a no-op for verts whose baked sway weight (uv.z) is 0.
+                v.vertex.xyz = ApplyFoliageSway(v.vertex.xyz, v.uv.zw);
                 return VoxelVert(v);
             }
 

@@ -3039,7 +3039,6 @@ MonoBehaviour:
   _cloudMaterial: {fileID: 2100000, guid: 861bcc19e949283479bc12c433ad1e22, type: 2}
   _world: {fileID: 1731500968}
   _depthOffset: 0.0035
-  _windBlocksPerSecond: {x: -0.6, y: 0}
 --- !u!4 &806419710
 Transform:
   m_ObjectHideFlags: 0

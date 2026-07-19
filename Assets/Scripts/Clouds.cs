@@ -96,7 +96,7 @@ public class Clouds : MonoBehaviour
     [SerializeField]
     private Texture2D _cloudPattern = null;
 
-    [Tooltip("Cloud layers, bottom-up. Per-layer height, drift multiplier/veer, opacity, style clamp, and noise knobs; the shared wind vector below is scaled and veered per layer.")]
+    [Tooltip("Cloud layers, bottom-up. Per-layer height, drift multiplier/veer, opacity, style clamp, and noise knobs; the shared wind vector (owned by World) is scaled and veered per layer.")]
     [SerializeField]
     private CloudLayerConfig[] _layers =
     {
@@ -124,9 +124,6 @@ public class Clouds : MonoBehaviour
     [SerializeField]
     private float _depthOffset = 0.0035f;
 
-    [Tooltip("Wind drift velocity in voxel-space XZ blocks per second, shared by all layers (each layer scales/veers it). Zero freezes the cloudscape. Owned by the inspector for now; a future weather system (RF-7) takes over this value.")]
-    [SerializeField]
-    private Vector2 _windBlocksPerSecond = new Vector2(-0.6f, 0f);
 
     // Cloud tiles are deliberately larger than terrain chunks: coverage scales with render distance,
     // so fewer, bigger tiles keep the GameObject count bounded (identical pattern tiles share one mesh).
@@ -324,7 +321,7 @@ public class Clouds : MonoBehaviour
         float rad = config.driftVeerDegrees * Mathf.Deg2Rad;
         float cos = Mathf.Cos(rad);
         float sin = Mathf.Sin(rad);
-        Vector2 v = _windBlocksPerSecond;
+        Vector2 v = _world.WindBlocksPerSecond; // shared wind, owned by World (FL-1 promotion; RF-7 takes over later)
         return new Vector2(v.x * cos - v.y * sin, v.x * sin + v.y * cos) * config.driftMultiplier;
     }
 

@@ -11,6 +11,7 @@ GameObject:
   - component: {fileID: 927538490966982780}
   - component: {fileID: 3602352557729800983}
   - component: {fileID: 715589282694584058}
+  - component: {fileID: 2845961039914578517}
   m_Layer: 0
   m_Name: World
   m_TagString: Untagged
@@ -58,6 +59,7 @@ MonoBehaviour:
     fluidRefraction: 100
     smoothLighting: 1
     clouds: 2
+    enableFoliageSway: 1
     vSync: 1
     unlimitedFps: 0
     maxFps: 120
@@ -124,6 +126,7 @@ MonoBehaviour:
   spawnPositionOffset: {x: 0.5, y: 1.1, z: 0.5}
   debugScreen: {fileID: 0}
   clouds: {fileID: 0}
+  _windBlocksPerSecond: {x: -0.6, y: 0}
   _borderWall: {fileID: 0}
   worldData:
     worldName: Prototype
@@ -153,3 +156,21 @@ MonoBehaviour:
   creativeInventoryWindow: {fileID: 0}
   cursorSlot: {fileID: 0}
   pauseMenuController: {fileID: 0}
+--- !u!114 &2845961039914578517
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2574360936984693049}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fc7c222c6d1932646a2d07ca58c8b060, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::FoliageSway
+  _world: {fileID: 3602352557729800983}
+  _amplitudeBlocks: 0.08
+  _frequency: 1.8
+  _gustFraction: 0.35
+  _gustFrequency: 0.6
+  _referenceWindSpeed: 0.6

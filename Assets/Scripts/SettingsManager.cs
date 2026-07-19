@@ -229,10 +229,19 @@ public class Settings
     public CloudStyle clouds = CloudStyle.Fancy;
 
     /// <summary>
+    /// If true, flora (grass blades and future foliage) sways in the wind via shader vertex animation.
+    /// </summary>
+    [SettingField(SettingsTab.Graphics, Label = "Foliage Sway", Order = 6)]
+    [Tooltip("Animates flora (grass blades) swaying in the wind.\n\n" +
+             TooltipTags.Performance + "A small amount of extra vertex shader work; negligible on desktop.\n" +
+             TooltipTags.DefaultColorStart + "On" + TooltipTags.DefaultColorEnd)]
+    public bool enableFoliageSway = true;
+
+    /// <summary>
     /// Vertical synchronization mode. Maps directly to <see cref="QualitySettings.vSyncCount"/>.
     /// </summary>
     [Header("Frame Rate")]
-    [SettingField(SettingsTab.Graphics, Label = "VSync", Order = 6)]
+    [SettingField(SettingsTab.Graphics, Label = "VSync", Order = 7)]
     [Tooltip("Controls vertical synchronization.\n\n" +
              TooltipTags.BulletOptionStart + "Off" + TooltipTags.BulletOptionEnd + "No VSync. Lowest input latency.\n" +
              TooltipTags.BulletOptionStart + "On" + TooltipTags.BulletOptionEnd + "Eliminates tearing. +1 frame latency. FPS halves if GPU can't keep up.\n" +
@@ -244,7 +253,7 @@ public class Settings
     /// If true, the frame rate is uncapped (renders as fast as possible) when VSync is off.
     /// Overrides <see cref="maxFps"/> when enabled.
     /// </summary>
-    [SettingField(SettingsTab.Graphics, Label = "Unlimited FPS", Order = 7)]
+    [SettingField(SettingsTab.Graphics, Label = "Unlimited FPS", Order = 8)]
     [DisabledWhen(nameof(vSync), ComparisonOp.NotEqual, VSyncMode.Off)]
     [Tooltip("Removes the frame rate cap entirely when VSync is off.\n" +
              "The application renders as fast as possible.\n\n" +

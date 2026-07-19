@@ -146,6 +146,16 @@ public class World : MonoBehaviour
     [Header("Clouds")]
     public Clouds clouds;
 
+    [Tooltip("Wind drift velocity in voxel-space XZ blocks per second, shared by clouds (per-layer scale/veer) and foliage sway (FL-1). Zero freezes both. Owned by the inspector for now; a future weather system (RF-7) takes over this value.")]
+    [SerializeField]
+    private Vector2 _windBlocksPerSecond = new Vector2(-0.6f, 0f);
+
+    /// <summary>
+    /// The shared wind vector, in voxel-space XZ blocks per second. Single source of truth for
+    /// every wind consumer (cloud drift, foliage sway); a future weather system (RF-7) drives it.
+    /// </summary>
+    public Vector2 WindBlocksPerSecond => _windBlocksPerSecond;
+
     [Header("World Border")]
     [Tooltip("Renders the per-world gameplay border wall. Inactive when the world has no border.")]
     [SerializeField]
