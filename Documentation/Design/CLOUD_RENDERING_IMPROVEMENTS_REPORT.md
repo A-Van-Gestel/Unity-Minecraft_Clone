@@ -1,6 +1,6 @@
 # Cloud Rendering Improvements Report
 
-**Version:** 1.2
+**Version:** 1.3
 **Date:** 2026-07-19
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -53,7 +53,7 @@ CL-1/CL-2 drift + shader work (`d52b089`, `12e6cf6`, both in-game verified 2026-
 | Area          | Current state (verified)                                                                                                                                                                                                                                                             |
 |---------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Coverage      | `max(viewDistance × 2, 8)` chunks radius; 64-block tiles keyed by **cloud-space tile index** (drift-corrected), pooled GameObjects, one shared `Mesh` per unique pattern tile (`Clouds.GetTileMesh`)                                                                                  |
-| Pattern       | Static 512×512 `clouds.png` (the Minecraft pattern), alpha-thresholded into `bool[,] _cloudData` once at init (`LoadCloudData`); repeats every 512 blocks via integer `WrapToPattern`                                                                                                |
+| Pattern       | **Procedural seeded (was CL-3 Option A):** `CloudPatternJob` (Burst) — periodic FBM value noise, lowbias32 lattice hash, thresholded at the coverage percentile (0.23 = classic density); knobs 32 cells / 4 octaves / 0.6 persistence calibrated vs `clouds.png` blob stats. Classic texture behind `_useClassicPattern`; still repeats every 512 via `WrapToPattern` |
 | Styles        | `CloudStyle` enum: `Off` / `Fast` (down-facing quads only) / `Fancy` (1-block-tall extruded hull, corners inflated by `_depthOffset` against Z-fighting)                                                                                                                             |
 | Shader        | `Minecraft/CloudShader` — unlit; MC-style per-face shading (Fancy-only via `_CloudFaceShading` global), `SkyLightColor` day/night tint, coverage-edge fade (`_CloudFadeParams`). Transparent with **`ZWrite On`**: depth resolves overlapping faces (see the v1.1 history entry)     |
 | Motion        | **Wind drift (was CL-1):** cloud-space tiles on a drift-carrying root — per-frame cost is one root transform move; re-key sweep only on cloud-tile crossing; accumulator wraps at the pattern period; `_windBlocksPerSecond` inspector vector (default `(−0.6, 0)`), RF-7 owns it later |
@@ -67,7 +67,7 @@ CL-1/CL-2 drift + shader work (`d52b089`, `12e6cf6`, both in-game verified 2026-
 
 | ID   | Finding                                                            | Effort | Risk | Benefit | Seed | Save |
 |------|--------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| CL-3 | Static ripped pattern — procedural seeded (optionally infinite)    |   🟡   |  🟢  |   🟡    |  ✅   |  ✅   |
+| CL-3 | Pattern repeats every 512 blocks — infinite non-repeating pattern  |   🟡   |  🟡  |   ⚪    |  ✅   |  ✅   |
 | CL-4 | Frozen shapes — slow density evolution + weather-driven coverage   |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 | CL-5 | `Volumetric` quality tier — raymarched slab above the voxel styles |   🔴   |  🟡  |   🟡    |  ✅   |  ✅   |
 | CL-6 | Single layer — second high-altitude parallax layer                 |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
@@ -78,29 +78,16 @@ CL-1/CL-2 drift + shader work (`d52b089`, `12e6cf6`, both in-game verified 2026-
 
 ## Detail sections
 
-### CL-3 — Procedural cloud pattern (seeded, optionally infinite)
+### CL-3 — Infinite non-repeating cloud pattern (the former Option B)
 
-**Classification:** Polish with identity value — replaces the ripped Minecraft `clouds.png`
-with an own-engine pattern; kills visible 512-block repetition at high render distance.
+**Classification:** Minor polish. The seeded periodic pattern (former Option A) **SHIPPED
+2026-07-19** (`cfaca87`, archived — see the v1.3 history entry); what remains is dropping the
+512-block repetition entirely.
 
-**What exists today:** `LoadCloudData` thresholds `clouds.png` once into a 512×512 bool grid;
-the pattern repeats every 512 blocks (deliberately exact via `WrapToPattern`).
+**What exists today:** `CloudPatternJob` generates the seeded periodic pattern per world
+(baseline table); it repeats every 512 blocks, exactly like the classic texture did.
 
-**Proposal — two tiers, explicit verdict:**
-
-#### Option A — Seeded periodic noise pattern (✅ **CHOSEN for v1 of this item**)
-
-Generate the 512×512 bool grid at init from thresholded FBM value noise made **periodic at the
-grid width** (lattice wraps mod 512 — textbook tileable noise), seeded from the world seed.
-
-- ✅ Drop-in: everything downstream (`_cloudData`, wrap, mesh cache) is untouched.
-- ✅ Per-world unique skies; threshold = future weather-coverage knob (CL-4).
-- ✅ Trivial to generate in a Burst job or a one-shot managed loop at init (<1 ms class).
-- ❌ Still repeats every 512 blocks (same as today, so no regression).
-
-#### Option B — Infinite non-repeating pattern (deferred follow-up, not rejected)
-
-Drop periodicity: sample unbounded noise per 64-block pattern tile on demand, keyed by world
+**Proposal:** sample unbounded noise per 64-block pattern tile on demand, keyed by world
 tile; mesh cache becomes LRU-evicted instead of 64-entry-max.
 
 - ✅ No repetition at any render distance.
@@ -108,9 +95,9 @@ tile; mesh cache becomes LRU-evicted instead of 64-entry-max.
   (the ±2²⁴ float degradation class from WS-4 §9 applies to noise inputs).
 - ❌ Interacts with the shipped wind drift (cache thrash along the wind axis) — design for it.
 
-**Dependencies / cross-links:** none hard for Option A. Option B wants a
-look at WS-4 §9's noise-precision notes. Seed ✅ per the legend (terrain is untouched; the
-*sky* varying by seed is the feature).
+**Dependencies / cross-links:** wants a look at WS-4 §9's noise-precision notes. Seed ✅ per
+the legend (terrain is untouched). Reuse the shipped job's avalanche-hash noise — see the
+v1.3 hash lesson before swapping noise sources.
 
 ---
 
@@ -133,7 +120,8 @@ names cloud color/density as storm levers but has nothing to drive.
 3. Coverage transitions (weather change) reuse the same budgeted sweep — clouds visibly thicken
    as a storm rolls in, which is most of RF-7 §4's storm-sky read.
 
-**Dependencies / cross-links:** CL-3 Option A (scalar field) is the natural substrate; RF-7
+**Dependencies / cross-links:** the shipped `CloudPatternJob` already produces the scalar
+field pre-threshold — CL-4 retains it instead of discarding it after the bool derivation; RF-7
 supplies the weather state (this item degrades to a dev-console knob until then). Risk 🟡 only
 because per-frame remeshing needs the budget honored (no hot-path GC — pool the mesh lists per
 `GENERAL_OPTIMIZATION_GUIDE.md`).
@@ -237,12 +225,12 @@ too); pairs naturally with CL-5 where the slab shader gives the effect for free 
 
 ## Recommended order
 
-| Wave | Items                  | Rationale                                                                            |
-|------|------------------------|----------------------------------------------------------------------------------------|
-| v1   | ~~CL-1 → CL-2~~        | ✅ **SHIPPED 2026-07-19** (`d52b089` + `12e6cf6`, in-game verified; archived in v1.1) |
-| v2   | CL-3 (Option A) → CL-6 | Own-engine seeded pattern, then parallax layers (trivial on the drift plumbing)       |
-| v3   | CL-4 → CL-7            | Field substrate + weather knobs (waits on/degrades without RF-7), shadows             |
-| v4   | CL-5, CL-8             | Volumetric tier once the field/texture path exists; CL-8 rides along                  |
+| Wave | Items                  | Rationale                                                                              |
+|------|------------------------|------------------------------------------------------------------------------------------|
+| v1   | ~~CL-1 → CL-2~~        | ✅ **SHIPPED 2026-07-19** (`d52b089` + `12e6cf6`, in-game verified; archived in v1.1)   |
+| v2   | ~~CL-3 Option A~~ → CL-6 | Option A ✅ **SHIPPED 2026-07-19** (`cfaca87`, archived in v1.3); parallax layers next |
+| v3   | CL-4 → CL-7            | Field substrate + weather knobs (waits on/degrades without RF-7), shadows               |
+| v4   | CL-5, CL-8, CL-3 (infinite) | Volumetric tier once the field/texture path exists; CL-8 and the infinite pattern ride along |
 
 ---
 
@@ -261,6 +249,16 @@ too); pairs naturally with CL-5 where the slab shader gives the effect for free 
 
 ## Document History
 
+* **v1.3** - **CL-3 Option A SHIPPED & archived** (2026-07-19, `cfaca87`, in-game verified across
+  seeds): seeded periodic FBM value noise in a Burst `CloudPatternJob`, thresholded at the
+  coverage **percentile** (exact 0.23 density match to `clouds.png`), classic texture kept behind
+  `_useClassicPattern`, inspector knobs calibrated against the classic pattern's blob statistics
+  (668 blobs / median 7 / largest 3244 vs reference 1210 / 8 / 3842). CL-3 re-scoped to the
+  former Option B (infinite non-repeating). **Hash lesson:** `math.hash(uint4)` is a near-linear
+  lane-multiply hash — its lattice correlation renders as strand/banding artifacts in thresholded
+  value noise on every seed; the job uses a sequential lowbias32 avalanche mix instead. Also
+  learned: `IJobParallelFor` restricts container writes to the current index — per-row batching
+  trips the safety system (job rewritten per-cell).
 * **v1.2** - **Night-brightness fix** (2026-07-19, in-game verified): `SkyLightColor` is hue-only
   (brightness lives in the shade curve per the RF-1 split), so clouds rendered full-bright at
   night — the shader now applies the shared `VoxelLightToShadow` curve at `sunLuminance = 1`,
@@ -280,4 +278,4 @@ too); pairs naturally with CL-5 where the slab shader gives the effect for free 
 ---
 
 **Last Updated:** 2026-07-19
-**Next Review:** when CL-3 or CL-6 starts (re-verify `Clouds.cs`/`CloudShader.shader` against the v1.1 baseline) or on the next RF-7 design pass (wind/weather seam)
+**Next Review:** when CL-6 or CL-4 starts (re-verify `Clouds.cs`/`CloudPatternJob.cs`/`CloudShader.shader` against the v1.3 baseline) or on the next RF-7 design pass (wind/weather seam)
