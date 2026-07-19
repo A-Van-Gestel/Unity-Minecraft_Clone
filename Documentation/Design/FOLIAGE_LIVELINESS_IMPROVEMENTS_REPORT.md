@@ -1,10 +1,11 @@
 # Foliage & Flora Liveliness Improvements Report
 
-**Version:** 1.1
+**Version:** 1.2
 **Date:** 2026-07-19
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.
-Shipped and archived so far: **FL-1 wind sway** (v1.1, 2026-07-19, in-game verified) — see Document
-History for the shipped shape every remaining sway item (FL-2/FL-8) builds on.
+Shipped and archived so far: **FL-1 wind sway** (v1.1) and **FL-2 leaf shimmer + the coherent
+traveling-wave sway model** (v1.2), both 2026-07-19, in-game verified — the "What exists today"
+table below is the substrate every remaining sway item (FL-8) builds on.
 
 > The master backlog for making the **grass / foliage layer feel alive** in the VoxelEngine —
 > wind sway (vertex animation), per-voxel visual variation, flora variety, ambient and
@@ -70,7 +71,6 @@ item's "What exists today".
 
 | ID   | Finding                                                                                    | Effort | Risk | Benefit | Seed | Save |
 |------|--------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| FL-2 | Leaf-block sway/shimmer — per-BlockType "sways" flag reusing the FL-1 weight channel       |   🟢   |  🟡  |   🟢    |  ✅   |  ✅   |
 | FL-3 | Flora variety — new CrossMesh block types + per-biome minor-flora palettes                 |   🟡   |  🟢  |   🟢    |  ⚠️  |  ✅   |
 | FL-4 | Per-voxel cross-mesh variation — deterministic hash offset / mirror / scale at mesh time   |   🟢   |  🟢  |   🟢    |  ✅   |  ✅   |
 | FL-5 | Two-block-tall plants (tall grass, large fern) — paired-half placement/removal semantics   |   🟡   |  🟡  |   🟡    |  ⚠️  |  ✅   |
@@ -79,65 +79,31 @@ item's "What exists today".
 | FL-8 | Player rustle — flora near the player pushes away (shader global), optional audio hook     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | FL-9 | Flora life-cycle behaviors — grass-blades spread/decay, sapling growth (tick system)       |   🔴   |  🟡  |   🟡    |  ✅   |  ✅   |
 
-**Suggested order:** FL-4 → FL-2 (both extend the shipped FL-1 substrate; same meshing-suite arc)
-→ FL-3 (content) → FL-8 (trivial now that FL-1's vertex path exists) → FL-6/FL-7 (particles, one
+**Suggested order:** FL-4 (extends the shipped sway substrate; same meshing-suite arc) → FL-3
+(content) → FL-8 (trivial now that the sway vertex path exists) → FL-6/FL-7 (particles, one
 budgeting pass) → FL-5 → FL-9. TF-11 (tint) is the missing color half of the same goal and ranks
 alongside these in the combined roadmap.
 
 ---
 
-## What exists today (shipped FL-1 substrate)
+## What exists today (shipped FL-1 + FL-2 substrate)
 
-FL-1 shipped 2026-07-19 (in-game verified); every remaining sway item builds on this shape:
+FL-1 and FL-2 shipped 2026-07-19 (in-game verified); every remaining sway item builds on this shape:
 
-| Area            | Shipped state                                                                                                                                                                                          |
-|-----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Channel encoding | Cross-mesh verts carry `uv.z` = sway weight (1 top / 0 bottom — roots planted) and `uv.w` = per-voxel phase; every other emission path writes `zw = 0` (fluid shore push has its own submesh meaning) |
-| Phase hash      | `VoxelMeshHelper.VoxelHash01` (lowbias32-style) over the **voxel-space** cell (`ChunkPosition + pos` in the meshing job) — deterministic across re-mesh and floating-origin re-anchors                  |
-| Shader          | `ApplyFoliageSway` in `VoxelCommon.hlsl` (primary sine + slower gust, phase-de-synced), called only by `TransparentBlockShader`'s vertex stage; `VoxelAppdata.uv` widened `float2 → float4`             |
-| Wind ownership  | **Promoted `Clouds` → `World`**: `World._windBlocksPerSecond` (+ public `WindBlocksPerSecond`) is the single wind source; `Clouds.LayerWind` and foliage both read it; RF-7 later drives the value      |
-| Driver          | `FoliageSway` component on the `World` prefab — amplitude/frequency/gust/reference-speed knobs, pushes `FoliageWindVector`/`FoliageSwayParams` globals per frame, zeroes wind when disabled              |
-| Setting         | `enableFoliageSway` (Graphics → Effects, default on, `SettingsManager.cs`)                                                                                                                              |
-| Suite guard     | Meshing baseline **B22** (+ `CrossFlora` palette entry): weight split, phase uniform/deterministic/cell-distinct, standard cubes keep `zw = 0`; prove-red witnessed                                     |
+| Area            | Shipped state                                                                                                                                                                                                                                            |
+|-----------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Channel encoding | Cross-mesh verts carry `uv.z` = sway weight (1 top / 0 bottom — roots planted, FL-1); sway-flagged cubes carry their authored `BlockType.swayStrength` on **every** vert via a per-voxel post-pass in `GenerateVoxelMeshData` (FL-2 — covers all six schema arms in one place; custom meshes excluded). `uv.w` = per-voxel hash. Every other path writes `zw = 0` |
+| Phase hash      | `VoxelMeshHelper.VoxelHash01` (lowbias32-style) over the **voxel-space** cell (`ChunkPosition + pos` in the meshing job) — deterministic across re-mesh and floating-origin re-anchors                                                                    |
+| Sway model      | **Spatially coherent traveling wave** (`ApplyFoliageSway`, `VoxelCommon.hlsl`): the dominant phase is `distance-along-wind` through voxel-space XZ (re-anchor-safe via `_WorldOriginOffset`, the LiquidCore precedent), so gusts ripple across canopies/meadows; the baked `uv.w` is a small jitter only. Plus a slower broad gust wave and a `wave²` vertical settle so extremes read as bending. Transparent shader only; `VoxelAppdata.uv` is `float4` |
+| Block authoring | `BlockType.swayStrength` (`[Range(0,1)]`, BlockEditor slider; carried into `BlockTypeJobData`); OakLeaves = 0.25. Only transparent-pass blocks visibly sway (opaque shader ignores the channel — documented in the tooltip)                              |
+| Wind ownership  | **Promoted `Clouds` → `World`**: `World._windBlocksPerSecond` (+ public `WindBlocksPerSecond`) is the single wind source; `Clouds.LayerWind` and foliage both read it; RF-7 later drives the value                                                        |
+| Driver          | `FoliageSway` component on the `World` prefab — amplitude/frequency/gust/reference-speed + wave-coherence knobs (wavelength 14 blocks, phase jitter 0.2, vertical bob 0.3, gust spatial 0.35), pushes `FoliageWindVector`/`FoliageSwayParams`/`FoliageSwayParams2` per frame |
+| Setting         | `enableFoliageSway` (Graphics → Effects, default on, `SettingsManager.cs`)                                                                                                                                                                                |
+| Suite guard     | Meshing baselines **B22** (cross-mesh, + `CrossFlora` palette entry) and **B23** (cube shimmer, + `SwayingLeafCube` entry): weight semantics, phase uniform/deterministic/cell-distinct, zero-strength blocks keep `zw = 0`; both prove-red witnessed     |
 
 ---
 
 ## Detail sections
-
-### FL-2 — Leaf-block sway / canopy shimmer
-
-**Classification:** Core (paired with FL-1 — trees are the biggest on-screen foliage mass).
-
-**What exists today.** `OakLeaves` (`BlockIDs.cs:38`) is a standard **cube** with
-`renderNeighborFaces = true`, rendered through the same `TransparentBlockShader` cutout pass as
-every other transparent block (glass-like blocks, cactus). There is no per-block way to say
-"this block's vertices may move" — the shader cannot distinguish a leaf vert from a glass vert.
-
-**Gap / finding:** even with FL-1, tree canopies stay rigid — and canopies dominate the visual
-field far more than ground tufts.
-
-**Proposal.**
-
-1. Add a **`swayStrength` (byte or 0–1 float) field to `BlockType`** (authored in the
-   BlockEditor, carried into `BlockTypeJobData`), defaulting to 0. `OakLeaves` gets a small
-   value; future flora/leaf types opt in per block. No raw-ID special-casing in the mesher.
-2. The cube-face emission path writes `uv.z = swayStrength` for **all 4 verts of a face** (cubes
-   are not rooted — the whole block shimmers with a much smaller amplitude than grass bend) and
-   the same voxel-hash phase in `uv.w`. Same `ApplyFoliageSway()` as FL-1; amplitude scales with
-   `uv.z` so one shader path serves bend (grass, weight 1 top / 0 bottom) and shimmer (leaves,
-   uniform small weight).
-3. **Clipping trade-off (explicit):** leaf verts displacing means faces adjacent to solid blocks
-   can micro-gap or interpenetrate. Keep amplitude ≤ ~0.03 blocks; verdict ✅ acceptable — the
-   cutout texture hides sub-pixel seams. ❌ *Rejected:* culling-aware sway masks per face
-   (neighbor-dependent weights would re-couple meshing to neighbor state for a cosmetic).
-4. Suite guard: baseline asserting `uv.z` equals the palette block's authored `swayStrength` on
-   cube faces and `0` for non-sway blocks.
-
-**Dependencies / cross-links:** FL-1 ✅ shipped (weight channel + `ApplyFoliageSway` available); BlockEditor +
-`Generate Block IDs` workflow for the new BlockType field (no ID changes, so no regen needed —
-field-only change to `BlockDatabase.asset`).
-
----
 
 ### FL-3 — Flora variety: new CrossMesh block types + per-biome palettes
 
@@ -354,6 +320,18 @@ RF-1 effective-light queries; TG-4 cleanup (pending) touches the same scheduler.
 
 ## Document History
 
+* **v1.2** - **FL-2 SHIPPED & archived** (2026-07-19, in-game verified, Validate All 281/281):
+  `BlockType.swayStrength` (`[Range(0,1)]`, BlockEditor slider, `BlockTypeJobData` mirror) written
+  to `uv.zw` by a per-voxel **post-pass** in `GenerateVoxelMeshData` (deviation from the sketch's
+  per-face threading — one site covers all six cube schema arms; custom meshes excluded), OakLeaves
+  authored 0.25, meshing baseline B23 + `SwayingLeafCube` palette entry (prove-red witnessed).
+  Second deviation, after the first in-game pass read as disjointed per-voxel wobble: the shared
+  sway model was **reworked to a spatially coherent traveling wave** — dominant phase =
+  distance-along-wind through voxel-space XZ (`_WorldOriginOffset`, the LiquidCore re-anchor
+  precedent), baked phase demoted to a small jitter, plus a broad gust wave and a `wave²` vertical
+  settle; new `FoliageSwayParams2` global + wave-coherence knobs on `FoliageSway` (wavelength /
+  jitter / bob / gust-spatial). Drive-by fix: BlockEditor `DuplicateSelectedBlock` no longer drops
+  `infiniteSourceRegeneration`/`spreadChance`. Substrate table updated to the combined FL-1+FL-2 shape.
 * **v1.1** - **FL-1 SHIPPED & archived** (2026-07-19, in-game verified, Validate All 280/280):
   `uv.zw` sway weight/phase baked in `GenerateCrossMesh`/`AddCrossQuad` (top 1 / bottom 0,
   `VoxelHash01` voxel-space phase), `ApplyFoliageSway` in `VoxelCommon.hlsl` (transparent shader
@@ -368,4 +346,4 @@ RF-1 effective-light queries; TG-4 cleanup (pending) touches the same scheduler.
 ---
 
 **Last Updated:** 2026-07-19
-**Next Review:** when FL-2 or FL-4 starts (re-verify the shipped-substrate table against `VoxelMeshHelper`/`VoxelCommon.hlsl`) or on the next gap sweep
+**Next Review:** when FL-4 starts (re-verify the shipped-substrate table against `VoxelMeshHelper`/`VoxelCommon.hlsl`) or on the next gap sweep
