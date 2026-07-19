@@ -41,8 +41,8 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 - [`../Architecture/DATA_DRIVEN_SETTINGS_UI.md`](../Architecture/DATA_DRIVEN_SETTINGS_UI.md) —
   where RF-1's day length / RF-3's quality toggles surface as settings.
 - [`CLOUD_RENDERING_IMPROVEMENTS_REPORT.md`](CLOUD_RENDERING_IMPROVEMENTS_REPORT.md) (`CL-*`) —
-  cloud-layer liveliness backlog: **CL-2 absorbs RF-2 §5** (clouds tint), and RF-7 §4's cloud
-  color/density storm knobs are received by CL-4 there.
+  cloud-layer liveliness backlog: **CL-2 absorbed RF-2 §5** (clouds tint — shipped 2026-07-19),
+  and RF-7 §4's cloud color/density storm knobs are received by CL-4 there.
 
 ---
 
@@ -259,8 +259,10 @@ hardcoded noon, i.e. `SkyDarken = 0`). Save ⚠️ as described.
    (extend `SetGlobalLightValue()`), fog end ≈ view distance — this doubles as chunk pop-in
    concealment, a rendering win independent of the cycle. (Per-shader cost of `FOG` variants:
    fold into the `GS-4` render-tier audit.)
-5. **Clouds tint:** multiply the cloud material color by `SkyLightColor` so clouds darken/tint
-   with time (one `material.SetColor` in `SetGlobalLightValue()`).
+5. **Clouds tint:** ✅ **SHIPPED 2026-07-19** via CL-2 in
+   [`CLOUD_RENDERING_IMPROVEMENTS_REPORT.md`](CLOUD_RENDERING_IMPROVEMENTS_REPORT.md) — the
+   cloud shader samples the `SkyLightColor` global directly (no `material.SetColor` needed);
+   already responsive to `/time`, and upgrades further when RF-1's cycle drives the gradient.
 
 **Dependencies / ordering.** RF-1 first (needs `DayFraction`/`SunDirection`). Ships as pure
 shader/scene work — no voxel pipeline contact.

@@ -1,6 +1,6 @@
 # World Scaling — WS-4 Floating Origin Design
 
-**Version:** 1.11
+**Version:** 1.12
 **Date:** 2026-07-19
 **Status:** **Implemented** — every WS-4 phase is shipped and in-game confirmed: WS-4a (origin plumbing),
 WS-4b (the shift), WS-4c persistence (`ChunkRelativePosition` player position, level.dat v13), and WS-4c
@@ -222,11 +222,11 @@ ShiftThresholdChunks`. One frame, main thread, allocation-free (`World.ShiftOrig
 Rebuilt-per-frame consumers need nothing: highlight/place blocks (`PlaceCursorBlocks`) and `BorderWallRenderer`
 (`LateUpdate` full rebuild). Two corrections from executing this (v1.6): **the debug screen holds no cross-frame
 Unity-space cache** — it recomputes from the transform each interval, so it needs nothing here — and the **`Clouds`
-root is cosmetic**. Since the render-distance-scaled cloud rework (v1.11), `UpdateClouds` re-derives every tile from
-its world tile index through `VoxelToUnity` — the tiles are in the *re-derived* class above, drift-free by
-construction. The clouds still get an explicit `Reanchor()`: `UpdateClouds` is otherwise only driven by
-`CheckViewDistance`, i.e. on a chunk crossing, and while a shift frame *is* a chunk crossing today, that is a
-coincidence and not a contract.
+root carries the whole cloudscape**. Since the CL-1 wind-drift rework (v1.12), tiles are root-local: the sweep
+re-derives only the root, from the player's cloud-space tile through the exact `VoxelToUnity(Vector3Int)` overload
+plus a sub-block drift remainder — the *re-derived* class above, drift-free by construction. The clouds still get an
+explicit `Reanchor()`: it forces that sweep immediately, rather than waiting for the per-frame drift tick's next
+cloud-tile crossing to trigger one.
 
 **Must NOT shift:** skybox, directional light, UI, camera-local state. Verified absent: PhysX
 bodies, particle systems, tweens (no DOTween usage repo-wide).
@@ -337,7 +337,7 @@ execution checklist; each row becomes a visible `WorldOrigin.*` call.
 | Collision-bounds debug draw (`World.cs:2947`)                               | `VoxelToUnity(Coord.ToVoxelOrigin()) + local` before `Debug.DrawLine`                                                                                                                                                                                                                                                                        |
 | `BorderWallRenderer.RebuildMesh`                                            | Wall planes at `±ext − OriginVoxel`; keep `uv.x` bands voxel-space for continuity across shifts                                                                                                                                                                                                                                              |
 | Spawn transform writes (`World.StartWorld` STEP 1 + STEP 4)                 | Since **SP-1** there are exactly two, both fed by `Spawn.SpawnResolution` (`ResolveInitial` / `ResolveFinal`) and both converting one voxel-space value: `_playerTransform.position = VoxelToUnity(spawnPosition)`. The unit is pure voxel space throughout; `SetSpawnPoint(placement.CanonicalSpawn)` builds from voxel space               |
-| `Clouds` (`AnchorRoot`, `UpdateClouds`)                                     | Tiles are keyed by world tile index (voxel space) and each placement converts via `VoxelToUnity` (re-derived class, drift-free; v1.11 rework). The pattern lookup wraps in **integer** space (`WrapToPattern`; pattern repeats every `_cloudTexWidth`) — the float-`frac` idiom re-introduces large-float precision loss far out; integer modulo is exact for free |
+| `Clouds` (`PositionRoot`, `UpdateClouds`)                                   | Tiles are root-local, keyed by cloud-space tile index (voxel − wind drift); only the root converts, via the exact `VoxelToUnity(Vector3Int)` overload + a sub-block drift remainder (re-derived class; v1.12 rework). The drift accumulator wraps at the pattern period and the pattern lookup wraps in **integer** space (`WrapToPattern`) — the float-`frac` idiom re-introduces large-float precision loss far out; integer/wrapped math is exact for free |
 | Shader global                                                               | `_WorldOriginOffset` (§4.6)                                                                                                                                                                                                                                                                                                                  |
 
 ### 5.2 Unity → Voxel (queries from transforms)
@@ -640,6 +640,13 @@ graduate to work items).
 
 ## Document History
 
+* **v1.12** - **CL-1 cloud wind drift** (2026-07-19, `d52b089`): tiles moved from per-tile
+  `VoxelToUnity` re-derivation to **root-local placement** — the `Clouds` root alone re-derives
+  (exact integer anchor + wrapped sub-block drift remainder), tiles are keyed by cloud-space
+  index (voxel − drift), and a per-frame drift tick moves only the root. §4.3 and the §5.1
+  clouds row updated; the drift accumulator wraps at the pattern period, so no unbounded float
+  ever forms (§5.1's integer-wrap rule extended to the drift path). `Reanchor()` contract
+  unchanged.
 * **v1.11** - **Cloud coverage scaled to render distance** (2026-07-19): `Clouds.cs` reworked — coverage
   radius is now `max(viewDistance × 2, 8)` chunks instead of one fixed 512-block pattern period, so the
   cloudscape reaches past the fog line at every render distance. Tiles are keyed by **world tile index**
