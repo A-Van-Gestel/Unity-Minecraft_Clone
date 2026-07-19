@@ -54,6 +54,11 @@ namespace UI
         private bool _historyDirty;
         private bool _autoscrollPending;
 
+        // UI_BUGS #04 diagnostics (temporary — remove with the #04 instrumentation): watchdog
+        // state that detects the panel changing active state outside Open()/Close().
+        private bool _diagLastPanelActive;
+        private bool _diagExpectedTransition;
+
         /// <summary>The console engine this view drives (commands register on its <see cref="CommandEngine.Registry"/>).</summary>
         public CommandEngine Engine => _engine;
 
@@ -77,6 +82,18 @@ namespace UI
 
         private void Update()
         {
+            // UI_BUGS #04 diagnostic: catch the panel's activeSelf flipping without Open()/Close()
+            // having run (candidate class 1 — external deactivation / state desync). Remove with
+            // the #04 instrumentation.
+            bool diagPanelActive = _panel != null && _panel.activeSelf;
+            if (diagPanelActive != _diagLastPanelActive)
+            {
+                if (!_diagExpectedTransition)
+                    Debug.LogWarning($"[UIBUG04] Console panel active state changed OUTSIDE Open()/Close(): {_diagLastPanelActive} -> {diagPanelActive}. {DiagUIBug04State()}, frame={Time.frameCount}");
+                _diagExpectedTransition = false;
+                _diagLastPanelActive = diagPanelActive;
+            }
+
             if (!IsOpen)
                 return;
 
@@ -180,20 +197,32 @@ namespace UI
         public void Open()
         {
             if (IsOpen)
+            {
+                // UI_BUGS #04 diagnostic — remove with the #04 instrumentation.
+                Debug.Log($"[UIBUG04] Open() no-op (already open). {DiagUIBug04State()}");
                 return;
+            }
 
+            _diagExpectedTransition = true; // UI_BUGS #04 diagnostic
             _panel.SetActive(true);
             _historyDirty = true;
             _autoscrollPending = true;
             StartCoroutine(FocusInputNextFrame());
+            // UI_BUGS #04 diagnostic — remove with the #04 instrumentation.
+            Debug.Log($"[UIBUG04] Open(): {DiagUIBug04State()}");
         }
 
         /// <summary>Closes the panel. Called by <see cref="WorldUIManager"/>.</summary>
         public void Close()
         {
             if (!IsOpen)
+            {
+                // UI_BUGS #04 diagnostic — remove with the #04 instrumentation.
+                Debug.Log($"[UIBUG04] Close() no-op (already closed). {DiagUIBug04State()}");
                 return;
+            }
 
+            _diagExpectedTransition = true; // UI_BUGS #04 diagnostic
             _inputField.DeactivateInputField();
             _inputField.text = "";
             _ghostText.text = "";
@@ -201,6 +230,37 @@ namespace UI
             _ghostSourceCaret = -1;
             _ghostSuffix = "";
             _panel.SetActive(false);
+            // UI_BUGS #04 diagnostic — remove with the #04 instrumentation.
+            Debug.Log($"[UIBUG04] Close(): {DiagUIBug04State()}");
+        }
+
+        // UI_BUGS #04 diagnostics (temporary — remove with the #04 instrumentation): a disable
+        // of this component means an ANCESTOR GameObject was deactivated (or the object is being
+        // torn down) — the watchdog above cannot see that, so log it here.
+        private void OnEnable()
+        {
+            Debug.Log($"[UIBUG04] ConsoleUI OnEnable. {DiagUIBug04State()}, frame={Time.frameCount}");
+        }
+
+        private void OnDisable()
+        {
+            Debug.LogWarning($"[UIBUG04] ConsoleUI OnDisable — ancestor deactivated or teardown. {DiagUIBug04State()}, frame={Time.frameCount}");
+        }
+
+        /// <summary>
+        /// UI_BUGS #04 diagnostic: panel/input-field state summary — discriminates "panel inactive"
+        /// (state desync) from "panel active but field unfocused/hidden" (focus loss). Remove with
+        /// the #04 instrumentation.
+        /// </summary>
+        /// <returns>A log-friendly summary of the panel and input-field state.</returns>
+        public string DiagUIBug04State()
+        {
+            if (_panel == null)
+                return "panel=null";
+            return $"panelActiveSelf={_panel.activeSelf}, panelInHierarchy={_panel.activeInHierarchy}, " +
+                   $"inputGoActive={(_inputField != null && _inputField.gameObject.activeInHierarchy)}, " +
+                   $"inputFocused={(_inputField != null && _inputField.isFocused)}, " +
+                   $"inputText='{(_inputField != null ? _inputField.text : "<null>")}'";
         }
 
         /// <summary>
@@ -212,6 +272,8 @@ namespace UI
             yield return null;
             _inputField.text = "";
             _inputField.ActivateInputField();
+            // UI_BUGS #04 diagnostic — remove with the #04 instrumentation.
+            Debug.Log($"[UIBUG04] FocusInputNextFrame ran. {DiagUIBug04State()}, frame={Time.frameCount}");
         }
 
         /// <summary>Marks the history view dirty; autoscrolls only when the view was already at the bottom.</summary>

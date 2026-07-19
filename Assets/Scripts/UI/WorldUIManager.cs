@@ -1,5 +1,7 @@
 using Commands;
 using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.InputSystem;
 
 namespace UI
 {
@@ -85,7 +87,11 @@ namespace UI
             set
             {
                 if (_console == null || value == _console.IsOpen)
+                {
+                    // UI_BUGS #04 diagnostic — remove with the #04 instrumentation.
+                    Debug.Log($"[UIBUG04] IsConsoleOpen={value} ignored ({(_console == null ? "console is null" : "already in that state")}). {DiagUIBug04Snapshot()}");
                     return;
+                }
 
                 if (value)
                 {
@@ -99,6 +105,8 @@ namespace UI
                 }
 
                 UpdateUIState();
+                // UI_BUGS #04 diagnostic — remove with the #04 instrumentation.
+                Debug.Log($"[UIBUG04] IsConsoleOpen -> {value}. {DiagUIBug04Snapshot()}");
             }
         }
 
@@ -168,6 +176,11 @@ namespace UI
 
         private void Update()
         {
+            // UI_BUGS #04 diagnostic: raw map-independent T probe — catches presses that
+            // ToggleConsolePressed would swallow (disabled Gameplay map) or the !InUI guard
+            // would eat. Remove with the #04 instrumentation.
+            bool diagRawT = InputManager.Instance.DiagnosticRawKeyPressed(Key.T);
+
             // Console-open state: the Gameplay map is disabled, so only the UI map's Cancel (Esc)
             // is live — it closes the console and nothing else runs (Esc chain head, §4.2 CMD-1).
             if (IsConsoleOpen)
@@ -176,6 +189,11 @@ namespace UI
                     IsConsoleOpen = false;
                 return;
             }
+
+            // UI_BUGS #04 diagnostic: this is the failure-moment capture — a T press while the
+            // console believes it is closed. Remove with the #04 instrumentation.
+            if (diagRawT)
+                Debug.Log($"[UIBUG04] Raw T while console closed: ToggleConsolePressed={InputManager.Instance.ToggleConsolePressed}. {DiagUIBug04Snapshot()}");
 
             // Handle Escape key logic
             if (InputManager.Instance.EscapePressed)
@@ -226,6 +244,22 @@ namespace UI
             {
                 IsPauseMenuOpen = true;
             }
+        }
+
+        /// <summary>
+        /// UI_BUGS #04 diagnostic: one-line snapshot of every state the console-toggle path
+        /// depends on. Remove with the #04 instrumentation.
+        /// </summary>
+        /// <returns>A log-friendly summary of InUI, menu states, action maps, console panel/field state, and EventSystem selection.</returns>
+        public string DiagUIBug04Snapshot()
+        {
+            string consoleState = _console == null
+                ? "console=null"
+                : $"consoleGoActive={_console.gameObject.activeInHierarchy}, {_console.DiagUIBug04State()}";
+            GameObject selected = EventSystem.current != null ? EventSystem.current.currentSelectedGameObject : null;
+            return $"InUI={InUI}, inventoryOpen={IsCreativeInventoryOpen}, pauseOpen={_isPauseMenuOpen}, " +
+                   $"gameplayMap={InputManager.Instance.DiagnosticGameplayMapEnabled}, uiMap={InputManager.Instance.DiagnosticUIMapEnabled}, " +
+                   $"{consoleState}, selected={(selected != null ? selected.name : "none")}, frame={Time.frameCount}";
         }
 
         private void UpdateUIState()

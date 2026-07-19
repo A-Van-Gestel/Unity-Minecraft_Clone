@@ -88,6 +88,9 @@ namespace UI
         /// </summary>
         public void EnterSettings()
         {
+            // UI_BUGS #04 diagnostic (settings-visit bracket, open side) — remove with the #04 instrumentation.
+            Debug.Log($"[UIBUG04] EnterSettings. {(WorldUIManager.Instance != null ? WorldUIManager.Instance.DiagUIBug04Snapshot() : "no WorldUIManager")}");
+
             // Disable the pause menu
             if (pauseMenuPanel != null)
                 pauseMenuPanel.SetActive(false);
@@ -140,6 +143,9 @@ namespace UI
             // Reload settings to apply any changes made
             World.Instance.settings = SettingsManager.LoadSettings();
             World.Instance.OnSettingsChanged();
+
+            // UI_BUGS #04 diagnostic (settings-visit bracket, close side, post-apply) — remove with the #04 instrumentation.
+            Debug.Log($"[UIBUG04] OnSettingsClosed (settings applied). {(WorldUIManager.Instance != null ? WorldUIManager.Instance.DiagUIBug04Snapshot() : "no WorldUIManager")}");
         }
 
         /// <summary>
