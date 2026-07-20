@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Data;
 using Data.WorldTypes;
 using Jobs;
@@ -52,6 +53,15 @@ namespace Editor.Validation.Generation
 
         /// <summary>Total march steps across all worms in the most recent run (diagnostic).</summary>
         public int LastTotalSteps { get; private set; }
+
+        private readonly List<WormTelemetryEntry> _lastTelemetry = new List<WormTelemetryEntry>();
+
+        /// <summary>
+        /// Per-worm telemetry from the most recent <see cref="RunWormMask"/> call (managed snapshot).
+        /// Used by the cross-chunk determinism baseline to compare per-cell simulation between two
+        /// adjacent chunks. Overwritten on each run — copy out if you need to retain it.
+        /// </summary>
+        public IReadOnlyList<WormTelemetryEntry> LastTelemetry => _lastTelemetry;
 
         /// <summary>Diagnostic: whether the loaded trunk-worm config is enabled.</summary>
         public bool DiagTrunkEnabled => _trunkConfig.Enabled;
@@ -232,8 +242,12 @@ namespace Editor.Validation.Generation
 
             LastWormCount = telemetry.Length;
             LastTotalSteps = 0;
+            _lastTelemetry.Clear();
             for (int i = 0; i < telemetry.Length; i++)
+            {
                 LastTotalSteps += telemetry[i].ActualSteps;
+                _lastTelemetry.Add(telemetry[i]);
+            }
             telemetry.Dispose();
             return mask;
         }

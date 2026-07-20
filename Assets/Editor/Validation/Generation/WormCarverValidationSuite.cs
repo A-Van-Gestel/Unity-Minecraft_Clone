@@ -32,6 +32,13 @@ namespace Editor.Validation.Generation
         private const int GRID = 16; // cells per axis aggregated (enough to guarantee spawns)
         private const int SEED = 1337;
 
+        // Column-spread bounds. Relative (precise must beat classic by a margin) rather than an absolute
+        // count, so legitimate cave-tuning that shifts worm density can't false-red the suite (review #4).
+        private const int COLUMN_SPREAD_MARGIN = 3;   // precise distinct columns must exceed classic by this
+        private const int CLASSIC_COLLAPSE_MAX = 3;   // classic far-band collapses to at most this many columns on an axis
+        private const int IN_BAND_MIN_COLUMNS = 4;    // precise in-band must be at least this non-degenerate
+        private const int MIN_CROSS_CHUNK_WORMS = 8;  // vacuous-pass guard for the cross-chunk determinism baseline
+
         // Recorded Classic32 in-band golden — guards the WC-1 claim that cellOrigin==0 collapses to the
         // classic float path bit-identically. Regenerate ONLY on a deliberate classic-behavior change.
         private const ulong CLASSIC_IN_BAND_GOLDEN = 16972300629807613903UL;
@@ -45,11 +52,12 @@ namespace Editor.Validation.Generation
         {
             List<Scenario> scenarios = new List<Scenario>
             {
-                new Scenario("B1 far-band liveness (Precise64 non-degenerate)", B1_FarBandLiveness),
+                new Scenario("B1 far-band precision win (Precise64 spreads, Classic32 collapses)", B1_FarBandPrecisionWin),
                 new Scenario("B2 far-band classic-collapse pin (Classic32 degenerate)", B2_FarBandClassicCollapse),
                 new Scenario("B3 in-band precise non-degenerate (frame change safe)", B3_InBandPrecise),
                 new Scenario("B4 determinism (scatter re-simulation purity)", B4_Determinism),
                 new Scenario("B5 Classic32 in-band golden (bit-identity)", B5_ClassicGolden),
+                new Scenario("B6 cross-chunk determinism (scatter re-sim purity across chunks)", B6_CrossChunkDeterminism),
             };
             return ValidationSuiteRunner.Execute("Worm Carver", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
@@ -62,14 +70,21 @@ namespace Editor.Validation.Generation
 
         // --- Scenarios ---------------------------------------------------------------------------
 
-        private static bool B1_FarBandLiveness()
+        private static bool B1_FarBandPrecisionWin()
         {
-            using WormCarverTestFixture fx = new WormCarverTestFixture(SEED, FastNoiseLite.CoordinatePrecision.Precise64);
-            MaskStats s = Aggregate(fx, FAR_CHUNK);
-            Debug.Log($"  [B1] Precise64 @2³⁰: worms={s.Worms}, steps={s.Steps}, carved={s.CarvedBits}, distinctLocalX={s.DistinctLocalX}, distinctLocalZ={s.DistinctLocalZ}");
-            bool ok = Expect(s.CarvedBits > 0, "Precise64 far-band must carve worm voxels (worms spawned)");
-            ok &= Expect(s.DistinctLocalX >= 8 && s.DistinctLocalZ >= 8,
-                "Precise64 far-band caves must spread across many X and Z columns (not a flattened plane)");
+            // Compare the two precisions at the SAME ±2³⁰ anchor: only the frame differs. Precise must
+            // spread across meaningfully more columns than classic. Relative (not an absolute count), so
+            // biome cave-tuning that changes worm density can't false-red this (review #4); both-carved>0
+            // keeps the comparison non-vacuous (review #2).
+            using WormCarverTestFixture precise = new WormCarverTestFixture(SEED, FastNoiseLite.CoordinatePrecision.Precise64);
+            using WormCarverTestFixture classic = new WormCarverTestFixture(SEED, FastNoiseLite.CoordinatePrecision.Classic32);
+            MaskStats p = Aggregate(precise, FAR_CHUNK);
+            MaskStats c = Aggregate(classic, FAR_CHUNK);
+            Debug.Log($"  [B1] @2³⁰ precise(carved={p.CarvedBits}, X={p.DistinctLocalX}, Z={p.DistinctLocalZ}) vs classic(carved={c.CarvedBits}, X={c.DistinctLocalX}, Z={c.DistinctLocalZ})");
+            bool ok = Expect(p.CarvedBits > 0 && c.CarvedBits > 0, "Both precisions must carve worm voxels far out (else the comparison is vacuous)");
+            ok &= Expect(p.DistinctLocalX >= c.DistinctLocalX + COLUMN_SPREAD_MARGIN &&
+                         p.DistinctLocalZ >= c.DistinctLocalZ + COLUMN_SPREAD_MARGIN,
+                "Precise64 far-band caves must spread across more X and Z columns than Classic32 (the cell-local frame win)");
             return ok;
         }
 
@@ -78,10 +93,12 @@ namespace Editor.Validation.Generation
             using WormCarverTestFixture fx = new WormCarverTestFixture(SEED, FastNoiseLite.CoordinatePrecision.Classic32);
             MaskStats s = Aggregate(fx, FAR_CHUNK);
             Debug.Log($"  [B2] Classic32 @2³⁰: carved={s.CarvedBits}, distinctLocalX={s.DistinctLocalX}, distinctLocalZ={s.DistinctLocalZ}");
-            // The classic float path is documented to freeze X/Z far out (§2 #2). This pins that the
-            // degradation is real and that the Precise64 win in B1 is genuine, not a metric artifact.
-            return Expect(s.DistinctLocalX <= 3 || s.DistinctLocalZ <= 3,
+            // The classic float path is documented to freeze X/Z far out (§2 #2). Require carves first so
+            // a regression that silences classic worms can't satisfy the collapse bound vacuously (review #2).
+            bool ok = Expect(s.CarvedBits > 0, "Classic32 far-band must still carve worm voxels (else the collapse assert is vacuous)");
+            ok &= Expect(s.DistinctLocalX <= CLASSIC_COLLAPSE_MAX || s.DistinctLocalZ <= CLASSIC_COLLAPSE_MAX,
                 "Classic32 far-band caves must collapse in at least one axis (documented Far-Lands freeze)");
+            return ok;
         }
 
         private static bool B3_InBandPrecise()
@@ -90,15 +107,19 @@ namespace Editor.Validation.Generation
             MaskStats s = Aggregate(fx, IN_BAND_CHUNK);
             Debug.Log($"  [B3] Precise64 in-band: worms={s.Worms}, steps={s.Steps}, carved={s.CarvedBits}, distinctLocalX={s.DistinctLocalX}, distinctLocalZ={s.DistinctLocalZ}");
             bool ok = Expect(s.CarvedBits > 0, "Precise64 in-band must carve worm voxels");
-            ok &= Expect(s.DistinctLocalX >= 8 && s.DistinctLocalZ >= 8, "Precise64 in-band caves must be non-degenerate");
+            ok &= Expect(s.DistinctLocalX >= IN_BAND_MIN_COLUMNS && s.DistinctLocalZ >= IN_BAND_MIN_COLUMNS,
+                "Precise64 in-band caves must be non-degenerate (the frame change did not break in-band generation)");
             return ok;
         }
 
         private static bool B4_Determinism()
         {
             using WormCarverTestFixture fx = new WormCarverTestFixture(SEED, FastNoiseLite.CoordinatePrecision.Precise64);
-            ulong h1 = HashChunk(fx, new int2(FAR_CHUNK * VoxelData.ChunkWidth, 0));
-            ulong h2 = HashChunk(fx, new int2(FAR_CHUNK * VoxelData.ChunkWidth, 0));
+            // Diagonal far anchor: both X and Z frozen in classic — the worst case the WC-0 survey found
+            // (vertical monoliths), so determinism is checked where the frame math is most exercised (review #8).
+            int2 anchor = new int2(FAR_CHUNK * VoxelData.ChunkWidth, FAR_CHUNK * VoxelData.ChunkWidth);
+            ulong h1 = HashChunk(fx, anchor);
+            ulong h2 = HashChunk(fx, anchor);
             return Expect(h1 == h2, "Re-simulating the same chunk must produce an identical worm mask");
         }
 
@@ -111,6 +132,71 @@ namespace Editor.Validation.Generation
                 return Expect(false, $"Golden not yet recorded — bake CLASSIC_IN_BAND_GOLDEN = {hash}UL and re-run");
             return Expect(hash == CLASSIC_IN_BAND_GOLDEN,
                 "Classic32 in-band mask must stay bit-identical to the recorded golden (cellOrigin==0 collapse)");
+        }
+
+        private static bool B6_CrossChunkDeterminism()
+        {
+            // Scatter invariant (§4): a worm's simulation is a pure function of its cell, so two DIFFERENT
+            // chunks that both re-simulate the same cell must compute the same worm path. Compare per-cell
+            // telemetry between two adjacent chunks at a far anchor; ignore mask-seek worms, whose
+            // divergence is a documented, deliberate cross-chunk behavior (§4) — not a frame defect.
+            using WormCarverTestFixture fx = new WormCarverTestFixture(SEED, FastNoiseLite.CoordinatePrecision.Precise64);
+            int2 anchorA = new int2(FAR_CHUNK * VoxelData.ChunkWidth, FAR_CHUNK * VoxelData.ChunkWidth);
+            int2 anchorB = new int2((FAR_CHUNK + 1) * VoxelData.ChunkWidth, FAR_CHUNK * VoxelData.ChunkWidth);
+
+            Dictionary<long, List<long>> cellsA = CollectWormSignaturesByCell(fx, anchorA);
+            Dictionary<long, List<long>> cellsB = CollectWormSignaturesByCell(fx, anchorB);
+
+            int comparedWorms = 0, mismatchedCells = 0;
+            foreach (KeyValuePair<long, List<long>> kv in cellsA)
+            {
+                if (!cellsB.TryGetValue(kv.Key, out List<long> sigsB)) continue; // cell not in both search windows
+                List<long> sigsA = kv.Value;
+                sigsA.Sort();
+                sigsB.Sort();
+                if (sigsA.Count != sigsB.Count || !ListsEqual(sigsA, sigsB)) mismatchedCells++;
+                comparedWorms += sigsA.Count;
+            }
+
+            Debug.Log($"  [B6] cross-chunk: sharedCellsCompared={cellsA.Count}, wormsCompared={comparedWorms}, mismatchedCells={mismatchedCells}");
+            bool ok = Expect(comparedWorms >= MIN_CROSS_CHUNK_WORMS,
+                "Cross-chunk test must compare a meaningful number of shared-cell worms (else it is vacuous)");
+            ok &= Expect(mismatchedCells == 0,
+                "The same cell must simulate identically in two different chunks (scatter re-simulation purity)");
+            return ok;
+        }
+
+        /// <summary>
+        /// Runs one chunk and groups its non-mask-seek worm telemetry by origin cell. Key packs
+        /// (originChunkX, originChunkZ); each value is a list of per-worm signatures packing
+        /// (ConfiguredLength, ActualSteps, TerminationReason) — the frame-sensitive simulation outputs.
+        /// </summary>
+        private static Dictionary<long, List<long>> CollectWormSignaturesByCell(WormCarverTestFixture fx, int2 chunkVoxelPos)
+        {
+            NativeBitArray mask = fx.RunWormMask(chunkVoxelPos);
+            mask.Dispose();
+
+            Dictionary<long, List<long>> byCell = new Dictionary<long, List<long>>();
+            foreach (global::Jobs.Data.WormTelemetryEntry e in fx.LastTelemetry)
+            {
+                if (e.MaskSeekAttempts != 0) continue; // exclude the deliberate mask-seek divergence path (§4)
+                long cellKey = ((long)e.OriginChunkX << 32) ^ (uint)e.OriginChunkZ;
+                long sig = ((long)(ushort)e.ConfiguredLength << 24) | ((long)(ushort)e.ActualSteps << 8) | e.TerminationReason;
+                if (!byCell.TryGetValue(cellKey, out List<long> list))
+                {
+                    list = new List<long>();
+                    byCell[cellKey] = list;
+                }
+                list.Add(sig);
+            }
+            return byCell;
+        }
+
+        private static bool ListsEqual(List<long> a, List<long> b)
+        {
+            for (int i = 0; i < a.Count; i++)
+                if (a[i] != b[i]) return false;
+            return true;
         }
 
         // --- Helpers -----------------------------------------------------------------------------
