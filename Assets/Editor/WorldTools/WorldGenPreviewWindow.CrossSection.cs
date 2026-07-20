@@ -675,6 +675,10 @@ namespace Editor.WorldTools
                     CaveZoneNoises = data.CaveZoneNoises,
                     IsSingleBiomeMode = forceBiomeIdx >= 0,
                     ForceBiomeIndex = math.max(0, forceBiomeIdx),
+                    // Mirror the generator's gating so the cross-section preview reflects what a
+                    // world of the current precision actually generates far from origin (WC-1).
+                    UseCellLocalFrame = FastNoiseFactory.GlobalCoordinatePrecision
+                                        == FastNoiseLite.CoordinatePrecision.Precise64,
                     MultiNoise = data.MultiNoise,
                     TrunkConfig = data.TrunkConfig,
                     FeatureFlags = GenerationFeatureFlags.Default,

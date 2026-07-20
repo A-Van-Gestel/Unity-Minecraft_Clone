@@ -428,7 +428,7 @@ namespace Jobs
         /// </summary>
         private bool IsWormMaskSetAtLocal(int2 cellOrigin, float3 localPos)
         {
-            int2 chunkLocalCorner = new int2(ChunkPosition.x, ChunkPosition.y) - cellOrigin;
+            int2 chunkLocalCorner = ChunkPosition - cellOrigin;
             int lx = (int)math.floor(localPos.x) - chunkLocalCorner.x;
             int ly = (int)math.floor(localPos.y);
             int lz = (int)math.floor(localPos.z) - chunkLocalCorner.y;
@@ -801,7 +801,7 @@ namespace Jobs
             // The current chunk corner expressed in the cell frame — exact integer subtraction, so the
             // clip bounds and carve delta stay small floats far out (fixes the §2 #4 int→float rounding).
             // Classic32 (cellOrigin == 0) leaves this equal to ChunkPosition (bit-identical).
-            int2 chunkLocalCorner = new int2(ChunkPosition.x, ChunkPosition.y) - cellOrigin;
+            int2 chunkLocalCorner = ChunkPosition - cellOrigin;
             float3 chunkMinLocal = new float3(chunkLocalCorner.x, 0, chunkLocalCorner.y);
             float3 chunkMaxLocal = new float3(chunkLocalCorner.x + VoxelData.ChunkWidth, VoxelData.ChunkHeight, chunkLocalCorner.y + VoxelData.ChunkWidth);
 
