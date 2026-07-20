@@ -149,7 +149,7 @@ namespace Editor.Jobs
 
                     if (Enable3DDensity)
                     {
-                        float dx = worldX, dy = SliceY, dz = worldZ;
+                        double dx = worldX, dy = SliceY, dz = worldZ;
                         if (EnableDensityWarp)
                             DensityWarpNoise.DomainWarp(ref dx, ref dy, ref dz);
                         density += DensityNoise.GetNoise(dx, dy, dz) * DensityAmplitude;

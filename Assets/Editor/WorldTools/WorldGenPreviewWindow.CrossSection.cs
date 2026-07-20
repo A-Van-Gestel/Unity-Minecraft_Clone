@@ -1138,7 +1138,7 @@ namespace Editor.WorldTools
 
                 if (biome.Enable3DDensity && y >= bandLow && y <= bandHigh)
                 {
-                    float dx = globalX, dy = y, dz = globalZ;
+                    double dx = globalX, dy = y, dz = globalZ;
                     if (biome.EnableDensityWarp)
                         data.DensityWarpNoises[biomeIndex].DomainWarp(ref dx, ref dy, ref dz);
                     density += data.DensityNoises[biomeIndex].GetNoise(dx, dy, dz) * effectiveDensityAmplitude;
@@ -1249,7 +1249,7 @@ namespace Editor.WorldTools
 
                         if (caveLayer.Mode == CaveMode.Cheese)
                         {
-                            float cx = globalX, cy = y, cz = globalZ;
+                            double cx = globalX, cy = y, cz = globalZ;
                             if (caveLayer.EnableWarp) data.CaveWarpNoises[cIdx].DomainWarp(ref cx, ref cy, ref cz);
                             if (caveNoise.GetNoise(cx, cy, cz) > effectiveThreshold)
                             {
@@ -1265,7 +1265,7 @@ namespace Editor.WorldTools
                         }
                         else if (caveLayer.Mode == CaveMode.Spaghetti2D)
                         {
-                            float bound = caveNoise.GetNoise(globalX * 0.25f, y * 0.25f, globalZ * 0.25f);
+                            float bound = caveNoise.GetNoise(globalX * 0.25, y * 0.25, globalZ * 0.25);
                             if (bound < effectiveThreshold - 0.2f) continue;
                             float noiseVal = (caveNoise.GetNoise(globalX, y) + caveNoise.GetNoise(y, globalZ) +
                                               caveNoise.GetNoise(globalX, globalZ) + caveNoise.GetNoise(y, globalX) +
@@ -1284,7 +1284,7 @@ namespace Editor.WorldTools
                         }
                         else if (caveLayer.Mode == CaveMode.Noodle)
                         {
-                            float cx = globalX, cy = y, cz = globalZ;
+                            double cx = globalX, cy = y, cz = globalZ;
                             if (caveLayer.EnableWarp) data.CaveWarpNoises[cIdx].DomainWarp(ref cx, ref cy, ref cz);
                             float raw = caveNoise.GetNoise(cx, cy, cz);
                             float noiseVal = 1.0f - (math.sqrt(raw * raw + StandardCaveLayerJobData.NoodleSmoothRadiusSq) - StandardCaveLayerJobData.NoodleSmoothOffset);
@@ -1302,7 +1302,7 @@ namespace Editor.WorldTools
                         }
                         else if (caveLayer.Mode == CaveMode.Spaghetti3D)
                         {
-                            float cx = globalX, cy = y, cz = globalZ;
+                            double cx = globalX, cy = y, cz = globalZ;
                             if (caveLayer.EnableWarp) data.CaveWarpNoises[cIdx].DomainWarp(ref cx, ref cy, ref cz);
                             float rawA = caveNoise.GetNoise(cx, cy, cz);
                             float rawB = data.CaveSpaghetti3DNoises[cIdx].GetNoise(cx, cy, cz);

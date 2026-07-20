@@ -252,6 +252,7 @@ namespace Editor.Validation
                 Test_NormalizeRange();
                 Test_BatchGridBitIdentical(configs);
                 Test_FactoryMethods();
+                Test_CoordinatePrecision();
             }
 
             /// <summary>
@@ -493,6 +494,86 @@ namespace Editor.Validation
                 }
             }
 
+            /// <summary>
+            /// Precise64 coordinate-pipeline guards:
+            /// (1) in-band, Precise64 tracks Classic32 within a small drift tolerance;
+            /// (2) at ±2³⁰, Precise64 output still varies sample-to-sample (no precision collapse);
+            /// (3) at ±2³⁰, Classic32 collapses into constant runs — pins the preserved
+            ///     "Far Lands" behavior, and doubles as the prove-red for (2): a Precise64
+            ///     pipeline that secretly narrows to float fails (2) exactly the way (3) passes.
+            /// </summary>
+            private void Test_CoordinatePrecision()
+            {
+                // Continuous-output configs only — piecewise-constant outputs (Cellular CellValue)
+                // legitimately repeat between adjacent samples and would false-fail the variance checks.
+                var smoothTypes = new[]
+                {
+                    FastNoiseLite.NoiseType.Perlin,
+                    FastNoiseLite.NoiseType.OpenSimplex2,
+                    FastNoiseLite.NoiseType.OpenSimplex2S,
+                    FastNoiseLite.NoiseType.Value,
+                };
+
+                const long FAR_BASE = 1L << 30;
+                const int SAMPLES = 64;
+                const float IN_BAND_DRIFT_TOLERANCE = 5e-3f;
+
+                foreach (FastNoiseLite.NoiseType type in smoothTypes)
+                foreach (bool fbm in new[] { false, true })
+                {
+                    string name = $"{type}{(fbm ? "+FBm" : "")}";
+
+                    FastNoiseLite classic = FastNoiseLite.Create(SEED);
+                    classic.SetFrequency(FREQUENCY);
+                    classic.SetNoiseType(type);
+                    if (fbm)
+                    {
+                        classic.SetFractalType(FastNoiseLite.FractalType.FBm);
+                        classic.SetFractalOctaves(FRACTAL_OCTAVES);
+                    }
+
+                    FastNoiseLite precise = classic;
+                    precise.SetCoordinatePrecision(FastNoiseLite.CoordinatePrecision.Precise64);
+
+                    // (1) In-band parity: same terrain within ULP-drift tolerance.
+                    for (int i = 0; i < SAMPLES; i++)
+                    {
+                        int x = -32768 + i * 1021;
+                        int z = 17 + i * 769;
+                        AssertNear(classic.GetNoise(x, z), precise.GetNoise(x, z), IN_BAND_DRIFT_TOLERANCE,
+                            $"Precision in-band 2D {name} ({x},{z})");
+                        AssertNear(classic.GetNoise(x, 61, z), precise.GetNoise(x, 61, z), IN_BAND_DRIFT_TOLERANCE,
+                            $"Precision in-band 3D {name} ({x},61,{z})");
+                    }
+
+                    // (2) + (3) Far-band adjacent-sample variance, both signs.
+                    foreach (long sign in new[] { 1L, -1L })
+                    {
+                        int preciseNonZero = 0;
+                        int classicZero = 0;
+                        float prevPrecise = precise.GetNoise(sign * FAR_BASE, 12345.0);
+                        float prevClassic = classic.GetNoise(sign * FAR_BASE, 12345.0);
+                        for (int i = 1; i < SAMPLES; i++)
+                        {
+                            double x = sign * FAR_BASE + i;
+                            float vp = precise.GetNoise(x, 12345.0);
+                            float vc = classic.GetNoise(x, 12345.0);
+                            if (math.abs(vp - prevPrecise) > 1e-6f) preciseNonZero++;
+                            if (vc == prevClassic) classicZero++;
+                            prevPrecise = vp;
+                            prevClassic = vc;
+                        }
+
+                        AssertTrue(preciseNonZero >= (SAMPLES - 1) / 4,
+                            $"Precision far-band {name} @ {sign * FAR_BASE}: Precise64 collapsed " +
+                            $"({preciseNonZero}/{SAMPLES - 1} adjacent samples vary)");
+                        AssertTrue(classicZero >= (SAMPLES - 1) * 4 / 5,
+                            $"Precision far-band {name} @ {sign * FAR_BASE}: Classic32 unexpectedly precise " +
+                            $"({classicZero}/{SAMPLES - 1} adjacent samples identical) — Far Lands behavior lost");
+                    }
+                }
+            }
+
             // ===== Golden Value Tests =====
 
             public void RunGoldenValueTests()
@@ -582,19 +663,19 @@ namespace Editor.Validation
 
                     foreach (float2 c in s_coords2D)
                     {
-                        float wx = c.x, wy = c.y;
+                        double wx = c.x, wy = c.y;
                         fnl.DomainWarp(ref wx, ref wy);
-                        values.Add(wx);
-                        values.Add(wy);
+                        values.Add((float)wx);
+                        values.Add((float)wy);
                     }
 
                     foreach (float3 c in s_coords3D)
                     {
-                        float wx = c.x, wy = c.y, wz = c.z;
+                        double wx = c.x, wy = c.y, wz = c.z;
                         fnl.DomainWarp(ref wx, ref wy, ref wz);
-                        values.Add(wx);
-                        values.Add(wy);
-                        values.Add(wz);
+                        values.Add((float)wx);
+                        values.Add((float)wy);
+                        values.Add((float)wz);
                     }
                 }
 

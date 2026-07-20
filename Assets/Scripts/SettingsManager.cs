@@ -343,6 +343,19 @@ public class Settings
              TooltipTags.Note + "Requires a new world or unexplored chunks to take effect.")]
     public bool enableMinorFloraPass = true;
 
+    /// <summary>
+    /// If true, world generation uses the classic 32-bit float noise pipeline, whose precision
+    /// artifacts progressively corrupt terrain past ~±16.7 million blocks ("Far Lands").
+    /// When false, a 64-bit coordinate pipeline keeps generation artifact-free to the world edge.
+    /// </summary>
+    [SettingField(SettingsTab.World, Label = "Far Lands (Classic Noise)", Order = 6)]
+    [InitializationField]
+    [Tooltip("Uses the classic 32-bit float noise pipeline for world generation.\n\n" +
+             "Terrain progressively corrupts past ~16.7 million blocks from the origin — the mythical \"Far Lands\".\n" +
+             "When disabled, generation uses a 64-bit precision pipeline that stays artifact-free out to the world edge (±2.1 billion blocks).\n\n" +
+             TooltipTags.Note + "Applies to chunks generated after the next world load. Chunks generated under a different mode may not match at their borders far from spawn.")]
+    public bool enableFarLands = false;
+
     #endregion
 
     #region Performance Tab

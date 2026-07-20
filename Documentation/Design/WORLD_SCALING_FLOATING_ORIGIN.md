@@ -1,12 +1,13 @@
 # World Scaling — WS-4 Floating Origin Design
 
-**Version:** 1.12
-**Date:** 2026-07-19
+**Version:** 1.13
+**Date:** 2026-07-20
 **Status:** **Implemented** — every WS-4 phase is shipped and in-game confirmed: WS-4a (origin plumbing),
 WS-4b (the shift), WS-4c persistence (`ChunkRelativePosition` player position, level.dat v13), and WS-4c
-tooling (`/teleport` = CMD-2, 2026-07-18). The only WS-4-adjacent work left is the deferred v2 noise rider
-(terrain degrades past ±2²⁴; lighting Bug 19 — the far-lands lighting crash logged there — was fixed
-independently 2026-07-19 via integer column routing, in-game confirmed and archived as `_FIXED_BUGS.md` #24).
+tooling (`/teleport` = CMD-2, 2026-07-18). The v2 noise rider is **implemented 2026-07-20** (suite-guarded,
+in-game far verification pending) — see the extension roadmap and `WORLD_SCALING_IMPLEMENTATION.md` §6.
+(Lighting Bug 19 — the far-lands lighting crash logged there — was fixed
+independently 2026-07-19 via integer column routing, in-game confirmed and archived as `_FIXED_BUGS.md` #24.)
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The far-travel precision phase of the world-scaling track. Unity render space and voxel world
@@ -457,7 +458,7 @@ found a defect in a surface v1.3's §9 had explicitly parked as "unverified rath
 
 | Version | Extension                                                                                                                                                                                                                                       |
 |---------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **v2**  | Generation noise-precision rider (`WORLD_SCALING_IMPLEMENTATION.md` §6) — double base offsets, ⚠️ seed-breaking, world-version-gated. Uses the WS-4c teleport as its harness. Extends the usable radius from ~16.7M to the permanent ±2³¹ edge. |
+| **v2**  | ✅ **IMPLEMENTED 2026-07-20** — generation noise-precision rider (`WORLD_SCALING_IMPLEMENTATION.md` §6): FNL `Precise64` double coordinate pipeline behind the global "Far Lands (Classic Noise)" setting (default precise; deviation from the world-version-gating spec — user decision). Extends the usable radius from ~16.7M to the permanent ±2³¹ edge; classic pipeline (and its Far Lands) preserved bit-identically as the opt-in mode. In-game far verification via `/teleport` pending. |
 | **v3+** | Entity system adoption of §4.5's rule — gets its own design doc when entities become concrete.                                                                                                                                                  |
 
 ---
@@ -538,9 +539,13 @@ graduate to work items).
 
 ## 9. Limitations (stated as consequences)
 
-- **Terrain generation still degrades at ~±16.7M voxels** — WS-4 deliberately does not touch
-  the samplers (§1 non-goals). Travel is stable there; the terrain itself develops FNL
-  float-precision artifacts until the v2 rider ships. The *lighting* crash at those magnitudes
+- ~~**Terrain generation still degrades at ~±16.7M voxels**~~ — **closed 2026-07-20 (v2 rider
+  implemented; in-game far verification pending)**: `FastNoiseLite` gained a `Precise64` double
+  coordinate pipeline (global "Far Lands (Classic Noise)" setting, default precise), so generation
+  is artifact-free toward the ±2³¹ edge; the classic float pipeline — and its Far Lands — is
+  preserved bit-identically as the opt-in mode. Detail in
+  [`WORLD_SCALING_IMPLEMENTATION.md`](WORLD_SCALING_IMPLEMENTATION.md) §6. Residual: worm-carver
+  worm positions stay float (far worm caves keep some degradation in precise mode). The *lighting* crash at those magnitudes
   (Bug 19, archived as `_FIXED_BUGS.md` #24) was fixed independently 2026-07-19 — integer column
   routing end-to-end (`SunlightColumnRouting` + `Vector3Int` overloads on the `WorldData`/`ChunkCoord`
   query APIs), so lighting is exact to the ±2³¹ edge even where terrain is degraded.
@@ -640,6 +645,11 @@ graduate to work items).
 
 ## Document History
 
+* **v1.13** - **v2 noise rider implemented** (2026-07-20, suite-guarded, in-game far verification
+  pending): §9's terrain-degradation limitation closed (struck through with residuals noted) and
+  the extension-roadmap v2 row flipped. The rider's shipped design — FNL `Precise64` double
+  pipeline, global Far Lands setting (default precise), bit-identical classic path — is owned by
+  [`WORLD_SCALING_IMPLEMENTATION.md`](WORLD_SCALING_IMPLEMENTATION.md) §6 (v2.2).
 * **v1.12** - **CL-1 cloud wind drift** (2026-07-19, `d52b089`): tiles moved from per-tile
   `VoxelToUnity` re-derivation to **root-local placement** — the `Clouds` root alone re-derives
   (exact integer anchor + wrapped sub-block drift remainder), tiles are keyed by cloud-space

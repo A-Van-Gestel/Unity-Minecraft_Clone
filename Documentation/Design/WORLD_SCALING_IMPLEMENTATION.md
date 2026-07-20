@@ -1,9 +1,8 @@
 # World Scaling — Implementation Roadmap (Tier B: unbounded XZ)
 
-**Version:** 2.1
-**Date:** 2026-07-18
-**Status:** **Tier B COMPLETE. WS-2 + WS-3 SHIPPED (2026-07-13) — XZ fully unbounded, both signs. WS-4a + WS-4b + WS-4c's persistence half SHIPPED (2026-07-17, all in-game confirmed) — far travel is stable (flown to ~20k through multiple origin shifts, no jitter) and the saved player position is chunk-relative (level.dat v13), exact to the ±2³¹ edge. Remaining, both deferred by choice: `/teleport` (CMD-2, needs the console) and the v2 noise rider (⚠️ seed-breaking) — terrain still degrades at ~±2²⁴ even though travel no longer does. OQ-1..7 all resolved
-in code.**
+**Version:** 2.2
+**Date:** 2026-07-20
+**Status:** **Tier B COMPLETE. WS-2 + WS-3 SHIPPED (2026-07-13) — XZ fully unbounded, both signs. WS-4a + WS-4b + WS-4c SHIPPED (2026-07-17/18, all in-game confirmed) — far travel is stable, saved player position chunk-relative (level.dat v13), `/teleport` live. The v2 noise rider is IMPLEMENTED (2026-07-20, suite-guarded — FNL `Precise64` double coordinate pipeline behind the global "Far Lands" setting, default precise; in-game far verification pending): generation is artifact-free past ±2²⁴ with the classic float pipeline preserved bit-identically as the opt-in Far Lands mode. OQ-1..7 all resolved in code.**
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The decided execution path for scaling the world horizontally. Analysis (`WORLD_SCALING_ANALYSIS.md`)
@@ -292,6 +291,36 @@ matter what WS-4 ships; with it (plus WS-3's negatives) the stable range extends
 integer edge at ±2³¹ voxels, where `×16` chunk-origin wrap makes the world end with old-border wall
 semantics — accepted as the permanent world limit.
 
+> ✅ **IMPLEMENTED 2026-07-20** (suite-guarded; in-game far verification pending), with **two spec
+> deviations**, both deliberate:
+>
+> 1. **The primary mechanism above was found insufficient at execution and is superseded by the
+>    fallback.** Narrowing `(double)(base + local) * freq` back to float still quantizes *relative
+>    to the noise lattice* — at ±2³¹ with freq 0.005 the product is ~10⁷, where float's step is a
+>    full lattice cell, so Far Lands persist wholesale (the fractal octaves' lacunarity multiplies
+>    re-amplify the magnitude besides). What shipped is the fallback made mode-switched:
+>    `FastNoiseLite` gained a **`CoordinatePrecision`** field (`Classic32`/`Precise64`) and a
+>    **double public API** (`GetNoise`/`DomainWarp`/`GetCellularEdgeData`/`GetNoiseGrid` — replaced,
+>    not overloaded: an int argument would silently bind to a float overload). `Precise64` carries
+>    the coordinate in double through the frequency multiply, fractal chain, and lattice floor,
+>    narrowing only the in-`[0,1)` fractional deltas; gradient/hash math stays float. `Classic32`
+>    narrows at entry and runs the untouched float pipeline — **bit-identical, golden-file-proven**
+>    (the far-lands aesthetic is preserved exactly). Generators split head/core; cellular got
+>    dedicated double bodies (its loops consume the absolute coordinate). The float-only `snoise`
+>    dither/wiggle sites wrap their inputs to 2¹⁸/2²² -block periods (seams half-period offset from
+>    spawn) on the precise path only.
+> 2. **Global setting instead of world-version gating** (user decision 2026-07-20): World tab →
+>    "Far Lands (Classic Noise)", **default off = Precise64**, read at generator init
+>    (`WorldJobManager` → `FastNoiseFactory.GlobalCoordinatePrecision`). Consequences accepted:
+>    existing worlds' *new* far chunks change on first post-update load, and chunks generated under
+>    different modes may mismatch at their borders far out (in-band, Precise64 tracks Classic32
+>    within ULP-level drift — suite-pinned ≤ 5e-3).
+>
+> Guards: FNL suite 13 994 → **15 050** (in-band parity, far-band ±2³⁰ variance, classic-collapse
+> pin — the last asserts Far Lands *still exist* in classic mode), prove-red via entry-narrow
+> sabotage. Deferred: worm-carver worm positions stay float (far-out worm caves keep some
+> degradation in precise mode); `LegacyNoise` frozen; the OQ-7 seed-magnitude fix remains separate.
+
 ---
 
 ## 7. Open questions — **all resolved 2026-07-13** (read-before-claim: every answer verified in code)
@@ -321,6 +350,13 @@ semantics — accepted as the permanent world limit.
 
 ## Document History
 
+* **v2.2** - **v2 noise rider IMPLEMENTED** (2026-07-20, suite-guarded, in-game far verification
+  pending): FNL `CoordinatePrecision.Precise64` double coordinate pipeline + double public API,
+  classic float path preserved bit-identically (golden file, 15 050 tests) as the opt-in global
+  "Far Lands (Classic Noise)" setting (default precise — deviation from the world-version-gating
+  spec, user decision). §6 annotated with the shipped design and the finding that the spec's
+  primary per-chunk-base-offset mechanism is mathematically insufficient (fallback promoted).
+  snoise dither/wiggle period-wrapped on the precise path; worm-carver float positions deferred.
 * **v2.1** - §5 rider (a) — the structure cell-election floor-div fix — **shipped 2026-07-18**:
   `StandardChunkGenerationJob:573-574` swapped from the float idiom to the new `ChunkMath.FloorDiv`,
   ungated (exhaustive in-band parity proven by `Tools/Python/verify_floordiv_parity.py`, so it is

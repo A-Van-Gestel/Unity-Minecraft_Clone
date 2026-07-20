@@ -3,6 +3,7 @@ using Data;
 using Data.JobData;
 using Data.Structures;
 using Data.WorldTypes;
+using Helpers;
 using Jobs.BurstData;
 using Jobs.Data;
 using Jobs.Helpers;
@@ -348,7 +349,7 @@ namespace Jobs.Generators
         }
 
         /// <inheritdoc />
-        public GenerationJobData ScheduleGeneration(ChunkCoord coord, global::Helpers.ActiveVoxelListPool activeVoxelPool = null)
+        public GenerationJobData ScheduleGeneration(ChunkCoord coord, ActiveVoxelListPool activeVoxelPool = null)
         {
             Vector2Int chunkVoxelPos = coord.ToVoxelOrigin();
 
@@ -607,7 +608,7 @@ namespace Jobs.Generators
 
                     if (caveLayer.Mode == CaveMode.Spaghetti2D)
                     {
-                        float bound = caveNoise.GetNoise(globalPos.x * 0.25f, y * 0.25f, globalPos.z * 0.25f);
+                        float bound = caveNoise.GetNoise(globalPos.x * 0.25, y * 0.25, globalPos.z * 0.25);
                         if (bound < effectiveThreshold - 0.2f) continue;
 
                         noiseVal = (caveNoise.GetNoise(globalPos.x, y) + caveNoise.GetNoise(y, globalPos.z) +
@@ -797,7 +798,7 @@ namespace Jobs.Generators
                         if (biome.Enable3DDensity)
                         {
                             float effAmp = biome.DensityAmplitude * borderFade;
-                            float dx = gx, dy = sliceY, dz = gz;
+                            double dx = gx, dy = sliceY, dz = gz;
                             if (biome.EnableDensityWarp)
                                 _biomeDensityWarpNoises[biomeIndex].DomainWarp(ref dx, ref dy, ref dz);
                             density += _biomeDensityNoises[biomeIndex].GetNoise(dx, dy, dz) * effAmp;

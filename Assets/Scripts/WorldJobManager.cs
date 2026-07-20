@@ -9,6 +9,7 @@ using Jobs.BurstData;
 using Jobs.Data;
 using Jobs.Generators;
 using Legacy;
+using Libraries;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
@@ -220,9 +221,15 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
                 "Ensure all unimplemented types are remapped to a supported type before constructing WorldJobManager."),
         };
 
-        _chunkGenerator.Initialize(VoxelData.Seed, activeWorldType, globalJobData);
-
         Settings settings = SettingsManager.LoadSettings();
+
+        // Must precede generator initialization — the factory stamps the precision onto every
+        // noise instance it creates during Initialize.
+        FastNoiseFactory.GlobalCoordinatePrecision = settings.enableFarLands
+            ? FastNoiseLite.CoordinatePrecision.Classic32
+            : FastNoiseLite.CoordinatePrecision.Precise64;
+
+        _chunkGenerator.Initialize(VoxelData.Seed, activeWorldType, globalJobData);
 
         // OM-1: size the native buffer pool's retention cap to the device (calibrated; default 512 on desktop).
         _jobArrayPool = new ChunkJobArrayPool(settings.chunkJobArrayPoolRetention);
