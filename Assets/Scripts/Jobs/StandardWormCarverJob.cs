@@ -52,6 +52,17 @@ namespace Jobs
         [ReadOnly]
         public int ForceBiomeIndex;
 
+        /// <summary>
+        /// When true (Precise64 worlds), worms simulate in a per-cell-local float frame so
+        /// positions stay small and exact at any world coordinate; world coordinates are formed
+        /// as exact <see cref="double"/> only at noise/height/carve boundaries (WC-1). When false
+        /// (Classic32 "Far Lands"), the cell origin is (0,0), collapsing every expression back to
+        /// the classic absolute-world float path bit-identically.
+        /// </summary>
+        [ReadOnly]
+        [MarshalAs(UnmanagedType.U1)]
+        public bool UseCellLocalFrame;
+
         /// <summary>Multi-noise terrain height data for surface-relative fade. Passed through for <see cref="BiomeBlender.CalculateBlendedTerrainHeight"/>.</summary>
         [ReadOnly]
         public MultiNoiseData MultiNoise;
@@ -152,10 +163,6 @@ namespace Jobs
             int currentChunkX = ChunkMath.VoxelToChunk(ChunkPosition.x);
             int currentChunkZ = ChunkMath.VoxelToChunk(ChunkPosition.y);
 
-            // Define the bounding box of the CURRENT chunk in global space
-            float3 chunkMin = new float3(ChunkPosition.x, 0, ChunkPosition.y);
-            float3 chunkMax = new float3(ChunkPosition.x + VoxelData.ChunkWidth, VoxelData.ChunkHeight, ChunkPosition.y + VoxelData.ChunkWidth);
-
             for (int cx = currentChunkX - chunkSearchRadius; cx <= currentChunkX + chunkSearchRadius; cx++)
             {
                 for (int cz = currentChunkZ - chunkSearchRadius; cz <= currentChunkZ + chunkSearchRadius; cz++)
@@ -163,9 +170,20 @@ namespace Jobs
                     int globalCx = cx * VoxelData.ChunkWidth;
                     int globalCz = cz * VoxelData.ChunkWidth;
 
-                    float centerX = globalCx + VoxelData.ChunkWidth * 0.5f;
-                    float centerZ = globalCz + VoxelData.ChunkWidth * 0.5f;
-                    int biomeIndex = GetBiomeIndex(centerX, centerZ);
+                    // Worms spawn cell-local in Precise64 (origin subtracted so the sub-cell offset
+                    // stays exact far out); Classic32 keeps the classic absolute-world spawn.
+                    int spawnBaseX = UseCellLocalFrame ? 0 : globalCx;
+                    int spawnBaseZ = UseCellLocalFrame ? 0 : globalCz;
+
+                    // Cell-center biome sampling. Precise64 keeps the integer corner exact;
+                    // Classic32 preserves the classic float32 rounding (bit-identical).
+                    double centerWorldX = UseCellLocalFrame
+                        ? globalCx + VoxelData.ChunkWidth * 0.5
+                        : globalCx + VoxelData.ChunkWidth * 0.5f;
+                    double centerWorldZ = UseCellLocalFrame
+                        ? globalCz + VoxelData.ChunkWidth * 0.5
+                        : globalCz + VoxelData.ChunkWidth * 0.5f;
+                    int biomeIndex = GetBiomeIndex(centerWorldX, centerWorldZ);
                     StandardBiomeAttributesJobData biome = Biomes[biomeIndex];
 
                     // --- Trunk worms (world-level scatter grid) ---
@@ -185,9 +203,9 @@ namespace Jobs
                                 trunkStack.Add(new WormState
                                 {
                                     Pos = new float3(
-                                        globalCx + trunkRand.NextFloat(0, VoxelData.ChunkWidth),
+                                        spawnBaseX + trunkRand.NextFloat(0, VoxelData.ChunkWidth),
                                         trunkRand.NextFloat(TrunkConfig.MinHeight, TrunkConfig.MaxHeight),
-                                        globalCz + trunkRand.NextFloat(0, VoxelData.ChunkWidth)
+                                        spawnBaseZ + trunkRand.NextFloat(0, VoxelData.ChunkWidth)
                                     ),
                                     Yaw = trunkRand.NextFloat(0, math.PI * 2f),
                                     Pitch = trunkRand.NextFloat(-math.PI * 0.25f, math.PI * 0.25f),
@@ -228,7 +246,7 @@ namespace Jobs
                                 SurfaceDeflectionStrength = TrunkConfig.SurfaceDeflectionStrength,
                             };
 
-                            SimulateWormStack(ref trunkRand, trunkStack, trunkParams, chunkMin, chunkMax, cx, cz);
+                            SimulateWormStack(ref trunkRand, trunkStack, trunkParams, cx, cz);
                             trunkStack.Dispose();
                         }
                     }
@@ -239,7 +257,7 @@ namespace Jobs
                     uint chunkHash = math.hash(new int3(cx, cz, BaseSeed));
                     Random rand = new Random(math.max(1u, chunkHash));
 
-                    float chunkZoneNoise = CaveZoneNoises[biomeIndex].GetNoise(centerX, centerZ);
+                    float chunkZoneNoise = CaveZoneNoises[biomeIndex].GetNoise(centerWorldX, centerWorldZ);
 
                     for (int layerIdx = 0; layerIdx < biome.CaveLayerCount; layerIdx++)
                     {
@@ -265,9 +283,9 @@ namespace Jobs
                             {
                                 // Initialize worm parameters
                                 Pos = new float3(
-                                    globalCx + rand.NextFloat(0, VoxelData.ChunkWidth),
+                                    spawnBaseX + rand.NextFloat(0, VoxelData.ChunkWidth),
                                     rand.NextFloat(caveLayer.MinHeight, caveLayer.MaxHeight),
-                                    globalCz + rand.NextFloat(0, VoxelData.ChunkWidth)
+                                    spawnBaseZ + rand.NextFloat(0, VoxelData.ChunkWidth)
                                 ),
                                 Yaw = rand.NextFloat(0, math.PI * 2f),
                                 Pitch = rand.NextFloat(-math.PI * 0.25f, math.PI * 0.25f),
@@ -308,7 +326,7 @@ namespace Jobs
                             SurfaceDeflectionStrength = caveLayer.SurfaceDeflectionStrength,
                         };
 
-                        SimulateWormStack(ref rand, wormStack, localParams, chunkMin, chunkMax, cx, cz);
+                        SimulateWormStack(ref rand, wormStack, localParams, cx, cz);
                         wormStack.Dispose();
                     }
                 }
@@ -317,7 +335,16 @@ namespace Jobs
 
         #region Helpers
 
-        private int GetBiomeIndex(float worldX, float worldZ)
+        /// <summary>
+        /// Forms an exact world X from a cell-local X. In Classic32 <paramref name="cellOrigin"/> is
+        /// (0,0), so this reduces to a plain <see cref="double"/> widening (bit-identical to today).
+        /// </summary>
+        private static double ToWorldX(int2 cellOrigin, float localX) => cellOrigin.x + (double)localX;
+
+        /// <summary>Forms an exact world Z from a cell-local Z. See <see cref="ToWorldX"/>.</summary>
+        private static double ToWorldZ(int2 cellOrigin, float localZ) => cellOrigin.y + (double)localZ;
+
+        private int GetBiomeIndex(double worldX, double worldZ)
         {
             if (IsSingleBiomeMode) return ForceBiomeIndex;
             float biomeNoise = BiomeSelectionNoise.GetNoise(worldX, worldZ);
@@ -325,7 +352,7 @@ namespace Jobs
             return math.clamp(idx, 0, Biomes.Length - 1);
         }
 
-        private float GetTerrainHeight(float worldX, float worldZ)
+        private float GetTerrainHeight(double worldX, double worldZ)
         {
             return BiomeBlender.CalculateBlendedTerrainHeight(
                 (int)math.floor(worldX), (int)math.floor(worldZ),
@@ -333,35 +360,40 @@ namespace Jobs
                 IsSingleBiomeMode, ForceBiomeIndex, out _);
         }
 
-        private float EvaluateLayerNoise(int noiseArrayIndex, CaveMode mode, float3 pos)
+        private float EvaluateLayerNoise(int noiseArrayIndex, CaveMode mode, int2 cellOrigin, float3 localPos)
         {
+            // Per-axis widening: X/Z gain the exact integer cell origin; Y (0..height) is already exact.
+            double x = ToWorldX(cellOrigin, localPos.x);
+            double y = localPos.y;
+            double z = ToWorldZ(cellOrigin, localPos.z);
+
             if (mode == CaveMode.Spaghetti2D)
             {
-                float ab = CaveNoises[noiseArrayIndex].GetNoise(pos.x, pos.y);
-                float bc = CaveNoises[noiseArrayIndex].GetNoise(pos.y, pos.z);
-                float ac = CaveNoises[noiseArrayIndex].GetNoise(pos.x, pos.z);
-                float ba = CaveNoises[noiseArrayIndex].GetNoise(pos.y, pos.x);
-                float cb = CaveNoises[noiseArrayIndex].GetNoise(pos.z, pos.y);
-                float ca = CaveNoises[noiseArrayIndex].GetNoise(pos.z, pos.x);
+                float ab = CaveNoises[noiseArrayIndex].GetNoise(x, y);
+                float bc = CaveNoises[noiseArrayIndex].GetNoise(y, z);
+                float ac = CaveNoises[noiseArrayIndex].GetNoise(x, z);
+                float ba = CaveNoises[noiseArrayIndex].GetNoise(y, x);
+                float cb = CaveNoises[noiseArrayIndex].GetNoise(z, y);
+                float ca = CaveNoises[noiseArrayIndex].GetNoise(z, x);
                 return (ab + bc + ac + ba + cb + ca) / 6f;
             }
 
             if (mode == CaveMode.Noodle)
             {
-                float raw = CaveNoises[noiseArrayIndex].GetNoise(pos.x, pos.y, pos.z);
+                float raw = CaveNoises[noiseArrayIndex].GetNoise(x, y, z);
                 return 1.0f - (math.sqrt(raw * raw + StandardCaveLayerJobData.NoodleSmoothRadiusSq) - StandardCaveLayerJobData.NoodleSmoothOffset);
             }
 
             if (mode == CaveMode.Spaghetti3D)
             {
-                float rawA = CaveNoises[noiseArrayIndex].GetNoise(pos.x, pos.y, pos.z);
-                float rawB = CaveSpaghetti3DNoises[noiseArrayIndex].GetNoise(pos.x, pos.y, pos.z);
+                float rawA = CaveNoises[noiseArrayIndex].GetNoise(x, y, z);
+                float rawB = CaveSpaghetti3DNoises[noiseArrayIndex].GetNoise(x, y, z);
                 return 1.0f - (math.sqrt(rawA * rawA + rawB * rawB
                                                      + StandardCaveLayerJobData.Spaghetti3DSmoothRadiusSq)
                                - StandardCaveLayerJobData.Spaghetti3DSmoothOffset);
             }
 
-            return CaveNoises[noiseArrayIndex].GetNoise(pos.x, pos.y, pos.z);
+            return CaveNoises[noiseArrayIndex].GetNoise(x, y, z);
         }
 
         private const int MASK_SEEK_PROBE_COUNT = 6;
@@ -389,14 +421,17 @@ namespace Jobs
         }
 
         /// <summary>
-        /// Checks whether the worm mask has been set at the given world position.
-        /// Returns false for positions outside the current chunk.
+        /// Checks whether the worm mask has been set at the given cell-local position.
+        /// Returns false for positions outside the current chunk. In Classic32
+        /// <paramref name="cellOrigin"/> is (0,0), so <paramref name="localPos"/> is absolute-world
+        /// and this reduces to the classic chunk-relative floor (bit-identical).
         /// </summary>
-        private bool IsWormMaskSetAtWorld(float3 worldPos)
+        private bool IsWormMaskSetAtLocal(int2 cellOrigin, float3 localPos)
         {
-            int lx = (int)math.floor(worldPos.x) - ChunkPosition.x;
-            int ly = (int)math.floor(worldPos.y);
-            int lz = (int)math.floor(worldPos.z) - ChunkPosition.y;
+            int2 chunkLocalCorner = new int2(ChunkPosition.x, ChunkPosition.y) - cellOrigin;
+            int lx = (int)math.floor(localPos.x) - chunkLocalCorner.x;
+            int ly = (int)math.floor(localPos.y);
+            int lz = (int)math.floor(localPos.z) - chunkLocalCorner.y;
 
             if (lx < 0 || lx >= VoxelData.ChunkWidth ||
                 ly < 0 || ly >= VoxelData.ChunkHeight ||
@@ -409,8 +444,14 @@ namespace Jobs
         private const int BIOME_CACHE_INTERVAL = 16;
 
         private void SimulateWormStack(ref Random rand, NativeList<WormState> wormStack, WormParams p,
-            float3 chunkMin, float3 chunkMax, int originCx, int originCz)
+            int originCx, int originCz)
         {
+            // Cell-local simulation frame origin: the cell corner in Precise64, (0,0) in Classic32.
+            // Worm positions are relative to this; world coordinates are formed exactly at each boundary.
+            int2 cellOrigin = UseCellLocalFrame
+                ? new int2(originCx * VoxelData.ChunkWidth, originCz * VoxelData.ChunkWidth)
+                : int2.zero;
+
             float safeSquash = math.max(p.SquashFactor, 0.01f);
             float invSquash = 1f / safeSquash;
 
@@ -455,7 +496,7 @@ namespace Jobs
                     float t = math.saturate((float)step / totalLength);
                     float wave = math.sin(t * math.PI * p.RadiusWaveCount) * 0.5f + 0.5f;
                     float radiusFactor = p.RadiusNoiseStrength > 0f
-                        ? math.lerp(wave, math.saturate(radiusNoise.GetNoise(pos.x, pos.y, pos.z) * 0.5f + 0.5f), p.RadiusNoiseStrength)
+                        ? math.lerp(wave, math.saturate(radiusNoise.GetNoise(ToWorldX(cellOrigin, pos.x), pos.y, ToWorldZ(cellOrigin, pos.z)) * 0.5f + 0.5f), p.RadiusNoiseStrength)
                         : wave;
                     float radius = math.lerp(p.RadiusMin, p.RadiusMax, radiusFactor);
 
@@ -474,7 +515,7 @@ namespace Jobs
                         {
                             cachedSurfaceX = floorX;
                             cachedSurfaceZ = floorZ;
-                            cachedSurfaceHeightValue = GetTerrainHeight(pos.x, pos.z);
+                            cachedSurfaceHeightValue = GetTerrainHeight(ToWorldX(cellOrigin, pos.x), ToWorldZ(cellOrigin, pos.z));
                         }
                     }
 
@@ -491,7 +532,7 @@ namespace Jobs
                     {
                         if (step % BIOME_CACHE_INTERVAL == 0)
                         {
-                            cachedStepBiomeIdx = GetBiomeIndex(pos.x, pos.z);
+                            cachedStepBiomeIdx = GetBiomeIndex(ToWorldX(cellOrigin, pos.x), ToWorldZ(cellOrigin, pos.z));
 
                             // Traversal blocking — trigger fade or hard termination
                             if (!Biomes[cachedStepBiomeIdx].TrunkTraversalAllowed)
@@ -576,7 +617,7 @@ namespace Jobs
 
                         // Trunk worms sample biome at look-ahead position (cross-biome aware);
                         // local worms use their origin biome
-                        int seekBiomeIndex = p.IsTrunk ? GetBiomeIndex(lookPos.x, lookPos.z) : p.OriginBiomeIndex;
+                        int seekBiomeIndex = p.IsTrunk ? GetBiomeIndex(ToWorldX(cellOrigin, lookPos.x), ToWorldZ(cellOrigin, lookPos.z)) : p.OriginBiomeIndex;
                         StandardBiomeAttributesJobData seekBiome = Biomes[seekBiomeIndex];
 
                         bool foundCave = false;
@@ -591,7 +632,7 @@ namespace Jobs
                             bool isSeekable = p.IsTrunk ? seekLayer.IsSeekableByTrunkWorms : seekLayer.IsSeekableByLocalWorms;
                             if (!isSeekable) continue;
 
-                            float noiseVal = EvaluateLayerNoise(cIdx, seekLayer.Mode, lookPos);
+                            float noiseVal = EvaluateLayerNoise(cIdx, seekLayer.Mode, cellOrigin, lookPos);
                             if (noiseVal > seekLayer.Threshold - 0.1f)
                             {
                                 foundCave = true;
@@ -637,7 +678,7 @@ namespace Jobs
                             for (int di = 1; di <= MASK_SEEK_DISTANCE_STEPS; di++)
                             {
                                 float d = p.SeekDistance * di / MASK_SEEK_DISTANCE_STEPS;
-                                if (IsWormMaskSetAtWorld(pos + probeDir * d))
+                                if (IsWormMaskSetAtLocal(cellOrigin, pos + probeDir * d))
                                 {
                                     float dot = math.dot(curDir, probeDir);
                                     if (dot > bestDot)
@@ -724,7 +765,7 @@ namespace Jobs
 
                     // Carving Phase — skip if radius was fully suppressed by depth or traversal fade
                     if (radius > MIN_CARVE_RADIUS)
-                        CarveBlocksInChunk(pos, radius, safeSquash, invSquash, chunkMin, chunkMax);
+                        CarveBlocksInChunk(pos, radius, safeSquash, invSquash, cellOrigin);
 
                     // Terminate after the final fade carve (radius was 1/fadeTotal on this step)
                     if (fadeTotal > 0 && fadeRemaining <= 0)
@@ -755,26 +796,33 @@ namespace Jobs
             }
         }
 
-        private void CarveBlocksInChunk(float3 pos, float radius, float squashFactor, float invSquash, float3 chunkMin, float3 chunkMax)
+        private void CarveBlocksInChunk(float3 pos, float radius, float squashFactor, float invSquash, int2 cellOrigin)
         {
+            // The current chunk corner expressed in the cell frame — exact integer subtraction, so the
+            // clip bounds and carve delta stay small floats far out (fixes the §2 #4 int→float rounding).
+            // Classic32 (cellOrigin == 0) leaves this equal to ChunkPosition (bit-identical).
+            int2 chunkLocalCorner = new int2(ChunkPosition.x, ChunkPosition.y) - cellOrigin;
+            float3 chunkMinLocal = new float3(chunkLocalCorner.x, 0, chunkLocalCorner.y);
+            float3 chunkMaxLocal = new float3(chunkLocalCorner.x + VoxelData.ChunkWidth, VoxelData.ChunkHeight, chunkLocalCorner.y + VoxelData.ChunkWidth);
+
             float radSq = radius * radius;
             float yRadius = radius * squashFactor;
             float earlyOutSq = math.max(radSq, yRadius * yRadius);
-            float3 closestPt = math.clamp(pos, chunkMin, chunkMax);
+            float3 closestPt = math.clamp(pos, chunkMinLocal, chunkMaxLocal);
             if (math.distancesq(pos, closestPt) > earlyOutSq) return;
-            int minX = math.max(0, (int)math.floor(pos.x - radius) - ChunkPosition.x);
-            int maxX = math.min(VoxelData.ChunkWidth - 1, (int)math.ceil(pos.x + radius) - ChunkPosition.x);
+            int minX = math.max(0, (int)math.floor(pos.x - radius) - chunkLocalCorner.x);
+            int maxX = math.min(VoxelData.ChunkWidth - 1, (int)math.ceil(pos.x + radius) - chunkLocalCorner.x);
             int minY = math.max(1, (int)math.floor(pos.y - yRadius));
             int maxY = math.min(VoxelData.ChunkHeight - 1, (int)math.ceil(pos.y + yRadius));
-            int minZ = math.max(0, (int)math.floor(pos.z - radius) - ChunkPosition.y);
-            int maxZ = math.min(VoxelData.ChunkWidth - 1, (int)math.ceil(pos.z + radius) - ChunkPosition.y);
+            int minZ = math.max(0, (int)math.floor(pos.z - radius) - chunkLocalCorner.y);
+            int maxZ = math.min(VoxelData.ChunkWidth - 1, (int)math.ceil(pos.z + radius) - chunkLocalCorner.y);
             for (int x = minX; x <= maxX; x++)
             {
                 for (int y = minY; y <= maxY; y++)
                 {
                     for (int z = minZ; z <= maxZ; z++)
                     {
-                        float3 delta = new float3(ChunkPosition.x + x - pos.x, (y - pos.y) * invSquash, ChunkPosition.y + z - pos.z);
+                        float3 delta = new float3(chunkLocalCorner.x + x - pos.x, (y - pos.y) * invSquash, chunkLocalCorner.y + z - pos.z);
                         if (math.lengthsq(delta) <= radSq)
                         {
                             int flatIndex = ChunkMath.GetFlattenedIndexInChunk(x, y, z);

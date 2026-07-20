@@ -276,6 +276,22 @@ The `16f` denominator models a virtual target 16 blocks ahead horizontally, prod
 **Implemented as:** A `WormYAttraction` serializable struct (matching the `WormNoiseSeeking` grouping pattern) with fields `strength` (0-1, default 0 = disabled), `minY`, and `maxY`. Used as `wormYAttraction` on `StandardCaveLayer` (per-biome local worms, default band [20, 40]) and `yAttraction` on `TrunkWormConfig` (world-level trunk worms, default band [15, 35]). Per-biome override via `trunkYAttractionCenterOverride` on `StandardBiomeAttributes` --- shifts the trunk band center while preserving the global band width (same pattern as
 `trunkVerticalBiasOverride`). Job data structs keep the fields flat (`WormYAttractionStrength`, `WormYAttractionMin`, `WormYAttractionMax`) for Burst blittability. Applied in `SimulateWormStack` after horizontal bias and before noise seeking. The runtime normalizes `min <= max` via `math.min`/`math.max` to guard against inverted config. `BiomeConfigValidator` warns when the attraction band is inverted, doesn't overlap the spawn height range, or strength exceeds 0.8.
 
+#### 3.1.5 Far-Coordinate Precision --- Cell-Local Simulation Frame (Implemented)
+
+**Problem:** Worm positions are `float3` accumulators. Far from the origin the `float` ulp exceeds a
+march step, so spawn offsets, march increments, and carve deltas quantize *before* any noise call —
+worm tunnels flatten into axis-aligned planes/spikes past ~±2²⁴ voxels (the `Precise64` noise rider
+cannot recover this "garbage-in"). Onset and observed symptoms are inventoried in
+[`../../Design/WORM_CARVER_FAR_COORDINATE_PRECISION.md`](../../Design/WORM_CARVER_FAR_COORDINATE_PRECISION.md).
+
+**Solution:** In `Precise64` worlds the worm simulates in a **cell-local frame** — `WormState.Pos` is
+relative to the origin cell corner (bounded to a few hundred blocks by the 16-chunk search cap, so
+small floats stay exact). World coordinates are formed as exact `double` only at the noise/height/carve
+boundaries (`ToWorldX`/`ToWorldZ` = `cellOrigin + (double)local`; X/Z gain the integer cell origin, Y is
+already exact). A single `UseCellLocalFrame` flag drives it: with `cellOrigin == (0,0)` (Classic32 "Far
+Lands") every expression collapses to the classic absolute-float path **bit-identically**, so there is
+one code path, not two. Guarded by the `Validate Worm Carver` suite (`Assets/Editor/Validation/Generation/`).
+
 ### 3.2 Zone Attenuation: Per-Layer Opt-In (Implemented)
 
 **Problem:** Zone Attenuation currently applies globally to all cave layers in a biome. This makes sense for suppressing Noodle everywhere, but it also suppresses Worm Carvers and Cheese chambers that don't need it.
@@ -551,7 +567,7 @@ This is a **narrowing** of the current behavior: today all non-worm layers are s
 2. Multiple local worms from different origin chunks can also see each other's carvings (earlier scatter loop entries write before later ones read).
 3. Cross-chunk connections continue to rely on indirect noise seeking toward shared cheese chambers (Section 3.4.3).
 
-**Implemented as:** Two fields on the `WormNoiseSeeking` struct: `maskSeekChance` (0-1, default 0 = disabled) and `maskSeekMinSteps` (0-100, default 30). `OutputWormMask` on `StandardWormCarverJob` changed from `[WriteOnly]` to read-write (safe because `IJob` is single-threaded). A helper method `IsWormMaskSetAtWorld(float3)` converts world positions to local chunk coordinates and returns `false` for out-of-chunk positions.
+**Implemented as:** Two fields on the `WormNoiseSeeking` struct: `maskSeekChance` (0-1, default 0 = disabled) and `maskSeekMinSteps` (0-100, default 30). `OutputWormMask` on `StandardWormCarverJob` changed from `[WriteOnly]` to read-write (safe because `IJob` is single-threaded). A helper method `IsWormMaskSetAtLocal(int2 cellOrigin, float3 localPos)` (renamed from `IsWormMaskSetAtWorld` by the far-coordinate precision work, §3.1.5) converts cell-local positions to local chunk coordinates and returns `false` for out-of-chunk positions.
 
 **How it works at runtime:**
 

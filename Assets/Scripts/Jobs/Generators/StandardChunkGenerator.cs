@@ -385,6 +385,8 @@ namespace Jobs.Generators
                     CaveZoneNoises = _caveZoneNoises,
                     IsSingleBiomeMode = _isSingleBiomeMode,
                     ForceBiomeIndex = _forceBiomeIndex,
+                    UseCellLocalFrame = FastNoiseFactory.GlobalCoordinatePrecision
+                                        == FastNoiseLite.CoordinatePrecision.Precise64,
                     MultiNoise = new MultiNoiseData
                     {
                         ContinentalnessNoises = _biomeContinentalnessNoises,
