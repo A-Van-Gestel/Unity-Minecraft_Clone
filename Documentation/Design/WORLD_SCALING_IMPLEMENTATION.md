@@ -320,11 +320,11 @@ semantics — accepted as the permanent world limit.
 >
 > Guards: FNL suite 13 994 → **15 050** (in-band parity, far-band ±2³⁰ variance, classic-collapse
 > pin — the last asserts Far Lands *still exist* in classic mode), prove-red via entry-narrow
-> sabotage. Deferred: worm-carver worm positions stay float (far-out worm caves keep some
-> degradation in precise mode) — analyzed 2026-07-20 in
+> sabotage. Worm-carver residual **✅ shipped 2026-07-20** — worm positions moved to a cell-local
+> simulation frame (Precise64-gated, Classic32 bit-identical), so worm caves generate correctly to
+> the ±2³¹ border in precise mode; in-game confirmed, `Validate Worm Carver` suite green. See
 > [`WORM_CARVER_FAR_COORDINATE_PRECISION.md`](WORM_CARVER_FAR_COORDINATE_PRECISION.md) (WC-*,
-> draft blocked on its §9 open questions); `LegacyNoise` frozen; the OQ-7 seed-magnitude fix
-> remains separate.
+> Implemented). `LegacyNoise` frozen; the OQ-7 seed-magnitude fix remains separate.
 
 ---
 
@@ -355,6 +355,10 @@ semantics — accepted as the permanent world limit.
 
 ## Document History
 
+* **v2.5** - Worm-carver residual **shipped + in-game confirmed 2026-07-20**: §6's deferred item flipped
+  to done — cell-local simulation frame (Precise64-gated, Classic32 bit-identical), worm caves correct to
+  the ±2³¹ border, `Validate Worm Carver` suite green. Horizontal-scaling generation track now fully closed
+  (terrain + structures + worm caves all far-coordinate-exact in precise mode).
 * **v2.4** - Worm-carver residual analyzed (2026-07-20): §6's deferred item now points at
   [`WORM_CARVER_FAR_COORDINATE_PRECISION.md`](WORM_CARVER_FAR_COORDINATE_PRECISION.md) (WC-*
   draft — cell-local frame preferred, open questions §9 recorded for a later session).

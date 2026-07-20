@@ -1,9 +1,11 @@
 # Worm Carver Far-Coordinate Precision Design
 
-**Version:** 1.0
+**Version:** 2.0
 **Date:** 2026-07-20
-**Status:** Draft — next worm-carver session (blocked on the §9 open questions; the user was
-unavailable to answer them when this analysis was written, so they are recorded here instead).
+**Status:** ✅ **Implemented** (WC-0/WC-1/WC-2 shipped 2026-07-20; in-game confirmed — worm caves
+generate correctly with the fix to the ±2³¹ world border, Classic32 "Far Lands" path preserved).
+The §9 open questions were all resolved by the user before implementation; their answers are
+recorded inline in §9 and drove §5's verdict (Option A, Precise64-gated).
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The v2 noise rider (shipped 2026-07-20) made `FastNoiseLite` exact to ±2³¹, but the worm
@@ -125,6 +127,17 @@ correct everywhere a survival player will ever dig. The degradation band is ±2�
 underground, and gradual — which is why the v2 rider's in-game verification ("terrain normal at
 the border") did not contradict it: surface terrain is FNL-driven and now exact; worm tunnels
 under it are not. This also caps the priority ceiling of the whole design (§9 Q4).
+
+**Observed in-game (WC-0 survey, 2026-07-20).** The far survey confirmed §2 #1 and #2 together, and
+sharpened the onset. A Python float32 march spike showed the classic path collapses to a **single
+X/Z column already at ±2²⁴** for a shallow, small-radius worm (a ~1-block step is below the 2-block
+ulp there, so the increment rounds entirely away) — *earlier and sharper* than this section's original
+"gradual, near-total past ±2²⁸" estimate; steeper/larger-radius worms still degrade more gradually.
+In-game at a diagonal far anchor (both X and Z large) caves appear as **vertical air monoliths/spikes**
+(X+Z frozen, Y retains precision); at an axis-split anchor (X far, Z≈0) they flatten into **single-block
+X-planes spaced exactly 16 blocks apart** — the 16-spacing being the direct signature of §2 #1, every
+worm in a chunk-cell snapping to the cell's 16-multiple corner. The cell-local frame (spike, then
+shipped) stays exact to ±2³⁰ in the same test.
 
 ---
 
@@ -268,10 +281,18 @@ generation suite) running the job headlessly on fixture data:
 
 ---
 
-## 9. Open questions (record of what the user must decide — none assumed)
+## 9. Open questions — ✅ all resolved 2026-07-20
 
-Recorded 2026-07-20 because the user was unavailable to answer during analysis. Each names what
-resolves it and where the answer lands.
+Originally recorded because the user was unavailable during analysis; all were answered before
+implementation. **Resolutions:** Q1 → **gate on Precise64** (Classic32 keeps today's absolute-float
+worms bit-identical, matching the v2-rider precedent). Q2 → **in-band divergence accepted** in
+Precise64 (Option A, no distance-gate; low-risk because precise mode was one day old, so no far
+saved worm caves existed yet). Q3 → **Option A confirmed as primary** (its diff proved mechanical;
+the double3 fallback was not needed — no march-loop benchmark required). Q4 → **scheduled and
+shipped** (the WC-0 spike + far survey converted §2's predictions to observed symptoms — see §3.3 —
+and confirmed the fix is worth completing the world-scaling track). Q5 → **seeded a general
+generation-parity suite** (`Validate Worm Carver`, the first citizen of the generation suite the
+WS-3 rider (b) had been waiting for). Each question's original framing is preserved below.
 
 1. **Gated or ungated?** Should the worm fix ride the existing "Far Lands (Classic Noise)"
    setting (classic keeps today's absolute-float worm behavior — arguably the far-out worm
@@ -305,14 +326,18 @@ resolves it and where the answer lands.
 
 ## 10. Phased implementation plan
 
-| Phase                         | Scope                                                                                                                                        | Effort | Depends on             |
-|-------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|:------:|------------------------|
-| **WC-0 — decisions + spike**  | Resolve §9 Q1–Q4; 30-line spike of the cell-local frame on the march loop only; optional worm-march double A/B (Q3); in-game far survey (Q4) |   🟢   | §9 answers             |
-| **WC-1 — the frame change**   | Execute the §6 inventory (gated per Q1); regenerate or preserve golden mask per Q1/Q3                                                        |   🟡   | WC-0                   |
-| **WC-2 — validation harness** | §7 baselines 1–3 (+ 4 advisory), homed per Q5; prove-red via rebase sabotage                                                                 |   🟡   | WC-1 (built alongside) |
+| Phase                           | Scope                                                                                                                                                                                                                                                                                               | Effort | Depends on             |
+|---------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|------------------------|
+| **WC-0 — decisions + spike** ✅  | Resolved §9 Q1–Q4; float32 march spike (cell-local exact to 2³⁰, classic collapses at 2²⁴); in-game far survey confirmed §2 #1+#2 (§3.3). Double A/B not needed (Q3)                                                                                                                                |   🟢   | §9 answers             |
+| **WC-1 — the frame change** ✅   | Executed the §6 inventory as a single parameterized path — `UseCellLocalFrame` bool, effective `cellOrigin` (=cell corner in Precise64 / (0,0) in Classic32), `ToWorldX/ToWorldZ` boundary widening; Classic32 bit-identical by construction                                                        |   🟡   | WC-0                   |
+| **WC-2 — validation harness** ✅ | Seeded `Validate Worm Carver` (suite #11): 5 baselines green — B1 precise-far liveness, B2 classic-far collapse (built-in prove-red), B3 precise-in-band, B4 determinism, B5 Classic32 golden hash. `WormCarverTestFixture` reads `OutputWormMask` directly to isolate worms from noise-field caves |   🟡   | WC-1 (built alongside) |
 
-WC-1 + WC-2 ship together (validation built alongside, per house rule). WC-0 is a session-start
-conversation plus an hour of code.
+WC-1 + WC-2 shipped together (validation built alongside, per house rule). The chosen implementation
+collapsed the "gated doubles the validation matrix" cost from §5: because Classic32 is bit-identical
+by the `cellOrigin==0` collapse, one code path serves both modes and a single golden baseline (B5)
+guards the classic path — no second simulation path was needed. The explicit rebase-sabotage prove-red
+(§7.1) is satisfied by construction: B2 (classic far-band) *is* the unfixed collapse, red at the same
+±2³⁰ anchor where B1 (precise) is green.
 
 ### Extension roadmap
 
@@ -325,6 +350,11 @@ conversation plus an hour of code.
 
 ## Document History
 
+* **v2.0** - Implemented (WC-0/1/2 shipped + in-game confirmed 2026-07-20). §9 all resolved inline
+  (Option A, Precise64-gated, in-band drift accepted, general gen-parity suite). §3.3 gained the WC-0
+  survey observations (single-column collapse at ±2²⁴ for shallow worms; vertical monoliths at diagonal
+  far anchors; 16-spaced X-planes = §2 #1 signature). §10 phases marked done. Fix confirmed correct to
+  the ±2³¹ border, exceeding the ±2²⁴→edge design target; Classic32 "Far Lands" preserved bit-identically.
 * **v1.0** - Initial draft: full float-precision inventory of `StandardWormCarverJob` (7
   surfaces, onset bands), scatter-determinism invariant articulated, cell-local frame preferred
   (double3 fallback, distance-gate rejected-unless-Q2), validation sketch, and §9 open
