@@ -265,6 +265,24 @@ generation suite) running the job headlessly on fixture data:
    attempts/successes — compare in-band rates pre/post to catch an accidental behavioral change
    from exact probes (§4's noted sensitivity). Advisory, not a hard baseline.
 
+**As shipped (WC-2 + review hardening), the `Validate Worm Carver` suite is 6 baselines:** B1 the
+far-band precision win (precise spreads across *more* columns than classic at the same ±2³⁰ anchor —
+a *relative* comparison, so biome cave-tuning can't false-red it, and both-carved>0 so it can't
+false-green), B2 classic far-band collapse (carved>0 first, so a silenced-classic regression can't
+satisfy it vacuously), B3 precise in-band non-degenerate, B4 same-chunk determinism at the diagonal
+far anchor, B5 the Classic32 in-band golden hash, and **B6 the §4 cross-chunk determinism teeth** —
+two adjacent chunks must simulate each shared cell identically (per-cell worm telemetry compared,
+excluding mask-seek worms whose cross-chunk divergence is the deliberate behavior §4 documents;
+prove-red by making the frame depend on `ChunkPosition`).
+
+> **Validation coverage note (review #6).** B5's golden is captured by the in-editor harness. If the
+> editor runs jobs under Mono rather than Burst, it does not directly exercise the `FloatMode.Fast`
+> path a shipped IL2CPP world uses. Classic32 bit-identity is therefore backed by the editor golden
+> *plus* the arithmetic argument that adding the integer `0` cell origin never changes a finite value
+> (and the v2 rider's classic-golden precedent) — accepted as a low-risk residual rather than
+> re-captured from an IL2CPP build. The ±2³¹-edge `int` overflow of `(int)floor(worldX)` in
+> `GetTerrainHeight` (review #5) stays out of scope per §1 (the edge int-wrap is documented-only).
+
 ---
 
 ## 8. Constraint compliance checklist
@@ -350,6 +368,12 @@ guards the classic path — no second simulation path was needed. The explicit r
 
 ## Document History
 
+* **v2.1** - Code-review hardening 2026-07-20: `Validate Worm Carver` grew B6 (cross-chunk
+  determinism, the §4 teeth, prove-red confirmed); B1 became a relative precise-vs-classic column
+  comparison and B2/B1 gained carved>0 guards (no more magic-threshold fragility or zero-carve
+  false-green); B4 moved to the diagonal far anchor. The WorldGen cross-section preview now mirrors
+  the generator's precision gating. #6 (Burst-path golden) accepted as a low-risk residual (§7 note);
+  #5 (±2³¹ int overflow) confirmed out of scope per §1.
 * **v2.0** - Implemented (WC-0/1/2 shipped + in-game confirmed 2026-07-20). §9 all resolved inline
   (Option A, Precise64-gated, in-band drift accepted, general gen-parity suite). §3.3 gained the WC-0
   survey observations (single-column collapse at ±2²⁴ for shallow worms; vertical monoliths at diagonal
