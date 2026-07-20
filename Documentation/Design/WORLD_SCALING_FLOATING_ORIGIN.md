@@ -1,6 +1,6 @@
 # World Scaling — WS-4 Floating Origin Design
 
-**Version:** 1.14
+**Version:** 1.15
 **Date:** 2026-07-20
 **Status:** **Implemented** — every WS-4 phase is shipped and in-game confirmed: WS-4a (origin plumbing),
 WS-4b (the shift), WS-4c persistence (`ChunkRelativePosition` player position, level.dat v13), and WS-4c
@@ -545,7 +545,9 @@ graduate to work items).
   is artifact-free toward the ±2³¹ edge; the classic float pipeline — and its Far Lands — is
   preserved bit-identically as the opt-in mode. Detail in
   [`WORLD_SCALING_IMPLEMENTATION.md`](WORLD_SCALING_IMPLEMENTATION.md) §6. Residual: worm-carver
-  worm positions stay float (far worm caves keep some degradation in precise mode). The *lighting* crash at those magnitudes
+  worm positions stay float (far worm caves keep some degradation in precise mode) — analyzed in
+  [`WORM_CARVER_FAR_COORDINATE_PRECISION.md`](WORM_CARVER_FAR_COORDINATE_PRECISION.md) (WC-* draft,
+  open questions pending). The *lighting* crash at those magnitudes
   (Bug 19, archived as `_FIXED_BUGS.md` #24) was fixed independently 2026-07-19 — integer column
   routing end-to-end (`SunlightColumnRouting` + `Vector3Int` overloads on the `WorldData`/`ChunkCoord`
   query APIs), so lighting is exact to the ±2³¹ edge even where terrain is degraded.
@@ -645,6 +647,8 @@ graduate to work items).
 
 ## Document History
 
+* **v1.15** - Worm-carver residual cross-linked (2026-07-20): §9's residual note now points at
+  [`WORM_CARVER_FAR_COORDINATE_PRECISION.md`](WORM_CARVER_FAR_COORDINATE_PRECISION.md).
 * **v1.14** - **v2 noise rider in-game confirmed** (2026-07-20): terrain noise verified normal
   in-game up to and including the ±2³¹ integer-limit world border. §9 closure, extension-roadmap
   v2 row, and status line flipped from "verification pending" to confirmed.

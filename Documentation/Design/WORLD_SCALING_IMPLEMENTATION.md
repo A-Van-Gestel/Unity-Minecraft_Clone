@@ -1,6 +1,6 @@
 # World Scaling — Implementation Roadmap (Tier B: unbounded XZ)
 
-**Version:** 2.3
+**Version:** 2.4
 **Date:** 2026-07-20
 **Status:** **Tier B COMPLETE. WS-2 + WS-3 SHIPPED (2026-07-13) — XZ fully unbounded, both signs. WS-4a + WS-4b + WS-4c SHIPPED (2026-07-17/18, all in-game confirmed) — far travel is stable, saved player position chunk-relative (level.dat v13), `/teleport` live. The v2 noise rider is SHIPPED + IN-GAME CONFIRMED (2026-07-20, terrain normal even at the ±2³¹ integer-limit world border — FNL `Precise64` double coordinate pipeline behind the global "Far Lands" setting, default precise): generation is artifact-free to the world edge with the classic float
 pipeline preserved bit-identically as the opt-in Far Lands mode. The world-scaling track is fully closed. OQ-1..7 all resolved in code.**
@@ -321,7 +321,10 @@ semantics — accepted as the permanent world limit.
 > Guards: FNL suite 13 994 → **15 050** (in-band parity, far-band ±2³⁰ variance, classic-collapse
 > pin — the last asserts Far Lands *still exist* in classic mode), prove-red via entry-narrow
 > sabotage. Deferred: worm-carver worm positions stay float (far-out worm caves keep some
-> degradation in precise mode); `LegacyNoise` frozen; the OQ-7 seed-magnitude fix remains separate.
+> degradation in precise mode) — analyzed 2026-07-20 in
+> [`WORM_CARVER_FAR_COORDINATE_PRECISION.md`](WORM_CARVER_FAR_COORDINATE_PRECISION.md) (WC-*,
+> draft blocked on its §9 open questions); `LegacyNoise` frozen; the OQ-7 seed-magnitude fix
+> remains separate.
 
 ---
 
@@ -352,6 +355,9 @@ semantics — accepted as the permanent world limit.
 
 ## Document History
 
+* **v2.4** - Worm-carver residual analyzed (2026-07-20): §6's deferred item now points at
+  [`WORM_CARVER_FAR_COORDINATE_PRECISION.md`](WORM_CARVER_FAR_COORDINATE_PRECISION.md) (WC-*
+  draft — cell-local frame preferred, open questions §9 recorded for a later session).
 * **v2.3** - **v2 noise rider IN-GAME CONFIRMED** (2026-07-20, committed): terrain noise verified
   normal in-game up to and including the ±2³¹ integer-limit world border under the default
   Precise64 pipeline. Status + §6 annotation flipped from "verification pending" to confirmed —
