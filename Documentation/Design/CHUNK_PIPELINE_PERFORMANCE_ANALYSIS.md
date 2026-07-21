@@ -5,9 +5,11 @@
 > generation, and (2) slow initial world *loading* (not creation) of already-generated chunks.
 >
 > Status: **Partially implemented.** §1.1 (job NativeArray pooling) shipped 2026-06-11 — see the
-> "Implemented" note in §1. §3.1 + §3.2 (generation in-flight cap + out-of-range discard) shipped
-> 2026-07-21 — see the "Implemented" note in §3. All other findings remain open. Each finding includes
-> a recommendation and an Impact Analysis in the style of `CODEBASE_IMPROVEMENTS.md`.
+> "Implemented" note in §1. §3.1 + §3.2 (generation in-flight cap + out-of-range discard) and §3
+> **recommendation 3** (unload light-pending out-of-range chunks via persistence, with CP-5's
+> `ChunkUnloadDecision` extraction) shipped 2026-07-21 — see the "Implemented" notes in §3. §3.4
+> (time budgets), §3.5 (panic gate), and all other findings remain open. Each finding includes a
+> recommendation and an Impact Analysis in the style of `CODEBASE_IMPROVEMENTS.md`.
 
 **Analyzed:** 2026-06-11, at commit `8f90450` (branch `feat/Modular-World-Generation-&-World-Types`).
 **Analysis is static (code reading), not yet confirmed by profiler capture.** See §7 for the
@@ -257,6 +259,32 @@ remain open. On-disk format unchanged (no migration).
       **disk-latency-dependent** (≈ `cap × disk-miss-probe-latency-in-frames`; ~2×cap on fast storage, higher on
       slow flash). A latency-independent hard ceiling would require a persistent in-flight counter, deliberately
       declined in favor of this soft cap (overlaps SU-2).
+
+### ✅ Implemented (2026-07-21): Recommendation 3 — unload light-pending out-of-range chunks via persistence
+
+The 🔴-rated unload-path item (§3.3 pinned-trail fix), landed on **CP-5's `ChunkUnloadDecision` seam** as the
+design anticipated. On-disk format unchanged (no migration — `NeedsInitialLighting` is already in the chunk
+format and `pending_lighting.bin` already exists). Recommendations 4 (time budgets) and 5 (panic gate) remain open.
+
+- **CP-5 extraction (prerequisite).** The monolithic deferral block in `World.UnloadChunks` became the pure,
+  truth-table-baselined `Helpers/ChunkUnloadDecision.Evaluate(in ChunkUnloadFacts)`; `UnloadChunks` gathers facts
+  and switches on the result. New suite `Minecraft Clone/Dev/Validate Chunk Unload Decision` (9 baselines).
+- **The fix (rec 3).** Two coordinated changes:
+    - **Strand guard narrowed to in-range neighbors.** The §9.6 strand scan now ignores a would-be-stranded
+      neighbor that is *itself* beyond the unload distance (it is being reclaimed too, so stranding it is
+      harmless). The guard still defers for in-range neighbors — the deadlock stays closed
+      (`Architecture/CHUNK_LIFECYCLE_PIPELINE.md` §9.6).
+    - **`UnloadPersistLightPending` arm.** An out-of-range chunk pinned only by its own pending/initial lighting
+      (which can never complete — missing-neighbor gate) forces `NeedsInitialLighting = true` (full re-light on
+      reload, captured by the synchronous save snapshot), persists its pending sunlight columns via the existing
+      `LightingStateManager.AddPending` / `World.PersistOrphanedSunlightColumns`, and unloads instead of deferring
+      forever. Precedence `job → in-range-strand → persist-light → unload` keeps strand above persist so a chunk an
+      in-range neighbor needs always defers.
+- **Measured (CP-1 counters, before → after, fly-out soak):** total loaded **1096 → 363**; beyond-unload
+  *unreclaimable* **743 → ~0–2**; `Deferred — light` **308 → 0**; `Deferred — strand` **395 → 0–2** (the residual
+  is a bounded, self-resolving boundary shell around a stuck buffer-band chunk — see the pipeline doc §9.6). No
+  artifacts; durability (edit → unload → reload) confirmed. Full evidence: CP-5 Amended block in
+  [`CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md`](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) §7.
 
 ---
 

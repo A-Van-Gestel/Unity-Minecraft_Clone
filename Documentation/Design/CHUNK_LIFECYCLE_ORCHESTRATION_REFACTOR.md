@@ -470,6 +470,42 @@ ship their suites/baselines in the same commit as the code.
 - **Doc-sync:** pipeline doc §9.6 (points at the decision + its baselines as the now-testable
   guard). **Serialization:** none.
 
+> **Amended (2026-07-21, branch `feat/world-scaling`): CP-5 + P-4 rec 3 SHIPPED together; regression-green + in-game confirmed.**
+> Shipped as two bisectable commits (uncommitted at time of writing): (1) CP-5 behavior-identical extraction —
+> `Helpers/ChunkUnloadDecision.cs` (`Evaluate(in ChunkUnloadFacts)`, precedence job→light→strand→unload) +
+> `UnloadChunks` routed through it, CP-1 tallies keyed off the enum; new suite
+> `Minecraft Clone/Dev/Validate Chunk Unload Decision` (registry `ExpectedSuiteCount` 11→12). (2) P-4 rec 3 —
+> the strand fact narrowed to **in-range** neighbors (`!IsBeyondUnloadDistance`), new `UnloadPersistLightPending`
+> arm (force `NeedsInitialLighting=true` → persist columns → unload), precedence reordered to
+> job→in-range-strand→persist-light→unload, `UnloadedLightPersisted` HUD counter.
+>
+> **Decisions taken** (session decision-menu): (1) *in-range-only* strand defer (out-of-range strand neighbors no
+> longer block — the trail-drain lever); (2) persist via *force `NeedsInitialLighting`* (correct-by-construction
+> re-light on reload, captured by the synchronous `SaveChunkAsync` snapshot — no new persistence machinery, no
+> migration); (3) truth-table home = a *new* suite (matches ChunkMath/LightWorkScheduler precedent). `DeferLightPending`
+> is retained in the enum but no longer returned for out-of-range chunks (its per-pass count now reads ~0 — the
+> drained signal), superseding this doc's "LP-3 may shrink `DeferLightPending`" note (LP-3 will now shrink the
+> *fact term* `ProcessingLight`, not the arm).
+>
+> **Prove-red done** (manual, both commits): (a) invert the strand term in `Evaluate` → in commit 1 reds *only*
+> the §9.6 witnesses B4/B5 (+ their B8 rows); (b) remove the `UnloadPersistLightPending` arm → reds *only* the
+> persist witnesses B3/B9 (+ B8 `1010`). Suite 9/9 after revert.
+>
+> **Verification:** `dotnet build` both csproj clean; universal gate green against fresh DLLs — **Chunk Unload
+> Decision 9/9, Lighting 88/88, Meshing 23/23, Mesh Build Queue 9/9** (Mesh Build Queue B7 zero-alloc inconclusive
+> on editor Mono, as always).
+>
+> **In-game soak re-measure (mirrors the CP-1 §7 soak entry).** Fly-out then stationary. Read-only `World.Instance`
+> classification walk, before (CP-1) → after: **totalLoaded 1096 → 363; beyond-unload *unreclaimable* 743 → ~0–2;
+> `Deferred — light` 308 → 0; `Deferred — strand` 395 → 0–2.** The pinned trail (§3.3 / F6) is drained. The only
+> residual is a **bounded boundary shell**: an out-of-range chunk (Chebyshev dist 11, boundary=10) strand-deferred
+> by a single *buffer-band* neighbor (dist 10, kept in-range) that is stuck `NeedsInitialLighting` because *its*
+> outer neighbors are gone — correct §9.6 behavior, perimeter-bounded (not the old area trail), and self-resolving
+> the instant the player moves it past the boundary (confirmed: strand returns to 0). No visual artifacts; no
+> stranded/black chunks; `[LIGHTING RESCUE]` logs confirm the persist path fires. **Durability:** edit a block →
+> fly past unload (unloaded via the new arm) → return → the edit and its lighting are correct (force-relight +
+> normal modified-chunk save both hold). CP-5 is DONE; P-4 rec 3 §3 is Implemented (see perf-analysis doc).
+
 ### CP-6 — Save-on-unload durability (🟡, failure-path behavior change)
 
 - **Scope:** §4.3 — `SaveChunkAsync` surfaces success/failure; `ModifiedChunks.Remove` moves to
@@ -526,8 +562,9 @@ ship their suites/baselines in the same commit as the code.
 
 * **v1.0** - Initial design (outer-lifecycle census + F1–F9 findings + CP-1…CP-7 phased plan at `0a12036`)
 * **v1.1** - Added F10 (generation fault-path double-release; surfaced by the 2026-07-10 branch code review of `feat/async-lighting-validation-suite`)
+* **v1.2** - CP-5 (`ChunkUnloadDecision` extraction) + P-4 rec 3 (persist-and-unload the pinned trail) SHIPPED on `feat/world-scaling`; regression-green, prove-red + in-game soak/durability confirmed (Amended block in §7 CP-5)
 
 ---
 
-**Last Updated:** 2026-07-10
+**Last Updated:** 2026-07-21
 **Next Review:** when CP-1 starts (re-verify §2 line anchors against HEAD), or when Tier A/B or palette work is scheduled (re-check §5 constraints)
