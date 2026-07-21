@@ -2700,11 +2700,23 @@ public class World : MonoBehaviour
     /// <summary>
     /// Extra radius (in chunks) beyond <see cref="Settings.LoadDistance"/> at which a chunk is unloaded.
     /// The gap between LoadDistance and this boundary is hysteresis that prevents unload/reload flickering
-    /// at the streaming edge. Shared by <see cref="UnloadChunks"/> and the §3.2 out-of-range generation
-    /// discard (WorldJobManager.ProcessGenerationJobs) so the discard boundary can never drift inside the
-    /// unload boundary — which would strand a permanent unpopulated hole in the buffer band.
+    /// at the streaming edge. Consumed only via <see cref="IsBeyondUnloadDistance"/>.
     /// </summary>
     public const int UnloadDistanceBuffer = 2;
+
+    /// <summary>
+    /// Whether the given chunk lies beyond the unload boundary (<see cref="Settings.LoadDistance"/> +
+    /// <see cref="UnloadDistanceBuffer"/>) from the player's current chunk. Single source of truth for the
+    /// boundary shared by <see cref="UnloadChunks"/> (what it reclaims) and the §3.2 out-of-range generation
+    /// discard (<c>WorldJobManager.ProcessGenerationJobs</c>) — defining the comparison once ensures the
+    /// discard boundary can never drift inside the unload boundary, which would strand a permanent
+    /// unpopulated hole in the buffer band.
+    /// </summary>
+    /// <param name="coord">The chunk coordinate to test.</param>
+    /// <returns><c>true</c> if the chunk is outside the unload boundary and eligible for reclamation.</returns>
+    public bool IsBeyondUnloadDistance(ChunkCoord coord) =>
+        Mathf.Max(Mathf.Abs(coord.X - PlayerChunkCoord.X), Mathf.Abs(coord.Z - PlayerChunkCoord.Z))
+        > settings.LoadDistance + UnloadDistanceBuffer;
 
     /// <summary>
     /// Unloads chunks that are outside the load distance.
@@ -2718,16 +2730,13 @@ public class World : MonoBehaviour
 
         // OPTIMIZATION: Use ListPool to avoid allocations
         List<ChunkCoord> chunksToRemove = ListPool<ChunkCoord>.Get();
-        int unloadDistance = settings.LoadDistance + UnloadDistanceBuffer;
 
         // Step A: Identify candidates
         foreach (Vector2Int chunkVoxelKey in worldData.ChunkKeys)
         {
             ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkVoxelKey);
 
-            // Calculate distance check
-            if (Mathf.Abs(chunkCoord.X - PlayerChunkCoord.X) > unloadDistance ||
-                Mathf.Abs(chunkCoord.Z - PlayerChunkCoord.Z) > unloadDistance)
+            if (IsBeyondUnloadDistance(chunkCoord))
             {
                 chunksToRemove.Add(chunkCoord);
             }
@@ -2894,11 +2903,14 @@ public class World : MonoBehaviour
     /// </list>
     /// The two are <b>separate</b> conditions, not a sum, so disk-<i>hit</i> chunks (which never become
     /// generation jobs) flow at up to <c>cap</c>/frame without being starved behind generation. The cost of
-    /// decoupling: within a single frame the memory bound reads a not-yet-updated <c>GenerationJobs.Count</c>,
-    /// so a frame that admits many disk-<i>miss</i> chunks while the count is already high can transiently
-    /// push tracked jobs to ~2×<c>cap</c> before the next frame's re-check throttles admission. That overshoot
-    /// is bounded and drains within a frame or two; it is the accepted trade for not throttling saved-region
-    /// disk loads behind new-terrain generation (finding #3 / overlaps SU-2).
+    /// decoupling: within a single frame the memory bound reads a not-yet-updated <c>GenerationJobs.Count</c>
+    /// (admitted disk-<i>miss</i> chunks call <c>ScheduleGeneration</c> only in a later-frame continuation), so
+    /// each frame can admit up to <c>cap</c> new requests regardless of how many prior admissions are still
+    /// resolving into jobs. Worst-case tracked jobs are therefore <b>disk-latency-dependent</b>: roughly
+    /// <c>cap × (disk-miss-probe latency in frames)</c> — about 2×<c>cap</c> on fast storage, higher on slow
+    /// flash (the OM-1 constrained-device case). This is the accepted trade for not throttling saved-region
+    /// disk loads behind new-terrain generation (finding #3 / overlaps SU-2); a <b>latency-independent</b> hard
+    /// ceiling would require a persistent in-flight counter, deliberately declined in favor of this soft cap.
     /// </remarks>
     private void DrainGenerationRequests()
     {
@@ -2907,7 +2919,8 @@ public class World : MonoBehaviour
 
         // Two independent bounds (see remarks): GenerationJobs.Count < cap is the memory bound; admittedThisFrame
         // < cap is the per-frame flood bound (LoadOrGenerateChunk is async, so admissions don't raise the count
-        // in-loop). Keeping them separate — not summed — lets disk-hit loads flow without eating gen headroom.
+        // in-loop). Keeping them separate — not summed — lets disk-hit loads flow without eating gen headroom;
+        // the trade is a disk-latency-dependent overshoot (~cap × disk-miss-latency-in-frames), see remarks.
         while (_generationRequestQueue.Count > 0
                && JobManager.GenerationJobs.Count < cap
                && admittedThisFrame < cap)

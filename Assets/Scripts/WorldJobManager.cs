@@ -806,27 +806,22 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
                 // chunk is now beyond the unload boundary, populating + lighting + meshing it is wasted work
                 // for a chunk World.UnloadChunks is about to reclaim (the memory-spiral relief in
                 // CHUNK_PIPELINE_PERFORMANCE_ANALYSIS §3.2). Dispose the result instead — the unmodified
-                // generation output is fully seed-regenerable, so there is nothing to save. The threshold
-                // shares World.UnloadDistanceBuffer with UnloadChunks so it can never drift inside the
-                // unload boundary. Gated on EnablePersistence: when unloading is disabled (keepChunksInMemory)
-                // UnloadChunks never reclaims the placeholder, so discarding there would strand a permanent
-                // hole — populate normally instead. IsLoading is cleared so that if the player returns to
-                // range before UnloadChunks reclaims the placeholder, CheckViewDistance's !IsLoading guard
-                // re-enqueues it (otherwise the chunk is stuck unpopulated + unloadable forever). Runs inside
-                // the fault-isolation try so a release fault here can't abort the whole pass.
-                if (_world.settings.EnablePersistence)
+                // generation output is fully seed-regenerable, so there is nothing to save. The boundary is
+                // World.IsBeyondUnloadDistance (the same predicate UnloadChunks reclaims by, so the discard
+                // boundary can never drift inside the unload boundary). Gated on EnablePersistence: when
+                // unloading is disabled (keepChunksInMemory) UnloadChunks never reclaims the placeholder, so
+                // discarding there would strand a permanent hole — populate normally instead. IsLoading is
+                // cleared so that if the player returns to range before UnloadChunks reclaims the placeholder,
+                // CheckViewDistance's !IsLoading guard re-enqueues it (otherwise the chunk is stuck unpopulated
+                // + unloadable forever). Runs inside the fault-isolation try so a release fault can't abort the pass.
+                if (_world.settings.EnablePersistence && _world.IsBeyondUnloadDistance(jobEntry.Key))
                 {
-                    int genDistX = Mathf.Abs(jobEntry.Key.X - _world.PlayerChunkCoord.X);
-                    int genDistZ = Mathf.Abs(jobEntry.Key.Z - _world.PlayerChunkCoord.Z);
-                    if (Mathf.Max(genDistX, genDistZ) > _world.settings.LoadDistance + World.UnloadDistanceBuffer)
-                    {
-                        if (_world.worldData.TryGetChunk(jobEntry.Key.ToVoxelOrigin(), out ChunkData staleData))
-                            staleData.IsLoading = false;
-                        ReleaseGenerationJobData(jobEntry.Value);
-                        _completedGenJobs.Add(jobEntry.Key);
-                        released = true;
-                        continue;
-                    }
+                    if (_world.worldData.TryGetChunk(jobEntry.Key.ToVoxelOrigin(), out ChunkData staleData))
+                        staleData.IsLoading = false;
+                    ReleaseGenerationJobData(jobEntry.Value);
+                    _completedGenJobs.Add(jobEntry.Key);
+                    released = true;
+                    continue;
                 }
 
                 ChunkData chunkData = _world.worldData.RequestChunk(jobEntry.Key.ToVoxelOrigin(), true);

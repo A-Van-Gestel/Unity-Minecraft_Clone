@@ -223,36 +223,40 @@ remain open. On-disk format unchanged (no migration).
 
 - **§3.1 in-flight generation cap.** Generation is now driven by a per-frame drain instead of
   edge-triggered fire-and-forget, mirroring the existing mesh in-flight cap:
-  - `World.CheckViewDistance` no longer fires `LoadOrGenerateChunk` directly — it rebuilds a
-    nearest-first `_generationRequestQueue` (+ `_pendingGenerationRequests` dedup set) each
-    boundary crossing.
-  - New `World.DrainGenerationRequests()` (called each frame right after `ProcessGenerationJobs`)
-    admits queued requests only while `GenerationJobs.Count + admittedThisFrame <
+    - `World.CheckViewDistance` no longer fires `LoadOrGenerateChunk` directly — it rebuilds a
+      nearest-first `_generationRequestQueue` (+ `_pendingGenerationRequests` dedup set) each
+      boundary crossing.
+    - New `World.DrainGenerationRequests()` (called each frame right after `ProcessGenerationJobs`)
+      admits queued requests only while `GenerationJobs.Count + admittedThisFrame <
     settings.maxInFlightGenerationJobs`. `IsLoading` moved to admission time. The per-frame drain
-    (not a `break` inside the edge-triggered spiral) is required: a naive spiral cap would leave
-    permanent holes when the player stops after a crossing, since `CheckViewDistance` does not
-    re-run until the next crossing.
-  - **Cap value (OM-1):** new `settings.maxInFlightGenerationJobs` (default 32), RAM-scaled by
-    `DeviceCalibration` in the same memory-cap taxonomy as `maxInFlightMeshJobs`.
-  - **Soft cap:** the gate counts tracked jobs + this frame's admissions only; a disk-*miss* chunk
-    can briefly overshoot while awaiting its (sub-frame) disk probe. Overshoot is bounded, holds no
-    job buffers, and disk-*hit* chunks never become generation jobs so they never count. The
-    startup path (`ForceCompleteDataJobsCoroutine`) is unaffected — `Update` early-returns until
-    `_isWorldLoaded`, so it schedules directly, bypassing the cap (avoids the §1.1 pooling incident).
+      (not a `break` inside the edge-triggered spiral) is required: a naive spiral cap would leave
+      permanent holes when the player stops after a crossing, since `CheckViewDistance` does not
+      re-run until the next crossing.
+    - **Cap value (OM-1):** new `settings.maxInFlightGenerationJobs` (default 32), RAM-scaled by
+      `DeviceCalibration` in the same memory-cap taxonomy as `maxInFlightMeshJobs`.
+    - **Soft cap:** the gate counts tracked jobs + this frame's admissions only; a disk-*miss* chunk
+      can briefly overshoot while awaiting its (sub-frame) disk probe. Overshoot is bounded, holds no
+      job buffers, and disk-*hit* chunks never become generation jobs so they never count. The
+      startup path (`ForceCompleteDataJobsCoroutine`) is unaffected — `Update` early-returns until
+      `_isWorldLoaded`, so it schedules directly, bypassing the cap (avoids the §1.1 pooling incident).
 - **§3.2 out-of-range discard.** `WorldJobManager.ProcessGenerationJobs` discards a completed job
   whose chunk is now beyond the unload boundary (`LoadDistance + World.UnloadDistanceBuffer`, a
   shared constant so the discard boundary can never drift inside the unload boundary):
   `ReleaseGenerationJobData` + skip populate/structures/lighting. No save — unmodified generation
   output is seed-regenerable. The unpopulated placeholder is reclaimed by `UnloadChunks`.
-  - **Runs inside the HF-2 fault-isolation `try`** so a release fault can't abort the whole pass.
-  - **Gated on `EnablePersistence`:** when unloading is disabled (`keepChunksInMemory`) `UnloadChunks`
-    never reclaims the placeholder, so the chunk is populated normally instead of stranding a hole.
-  - **Clears `IsLoading`:** otherwise a chunk that re-enters load range before `UnloadChunks` reclaims
-    it would be blocked from re-enqueue by `CheckViewDistance`'s `!IsLoading` guard — a permanent hole.
-  - **Disk-load decoupling (§3.1 drain):** the cap uses two separate bounds
-    (`GenerationJobs.Count < cap` **and** `admittedThisFrame < cap`, not their sum) so saved-region disk
-    loads are not throttled behind new-terrain generation; the trade is a bounded ~2×cap transient in
-    tracked jobs when a frame admits many disk-miss chunks at a high count.
+    - **Runs inside the HF-2 fault-isolation `try`** so a release fault can't abort the whole pass.
+    - **Gated on `EnablePersistence`:** when unloading is disabled (`keepChunksInMemory`) `UnloadChunks`
+      never reclaims the placeholder, so the chunk is populated normally instead of stranding a hole.
+    - **Clears `IsLoading`:** otherwise a chunk that re-enters load range before `UnloadChunks` reclaims
+      it would be blocked from re-enqueue by `CheckViewDistance`'s `!IsLoading` guard — a permanent hole.
+    - **Disk-load decoupling (§3.1 drain):** the cap uses two separate bounds
+      (`GenerationJobs.Count < cap` **and** `admittedThisFrame < cap`, not their sum) so saved-region disk
+      loads are not throttled behind new-terrain generation. Because admitted disk-miss chunks call
+      `ScheduleGeneration` only in a later-frame continuation, each frame admits up to `cap` new requests
+      regardless of how many prior admissions are still resolving — so the worst-case tracked-job overshoot is
+      **disk-latency-dependent** (≈ `cap × disk-miss-probe-latency-in-frames`; ~2×cap on fast storage, higher on
+      slow flash). A latency-independent hard ceiling would require a persistent in-flight counter, deliberately
+      declined in favor of this soft cap (overlaps SU-2).
 
 ---
 
