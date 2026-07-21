@@ -481,7 +481,8 @@ public class DebugScreen : MonoBehaviour
         if (!_world.settings.debugHudShowChunkLifecycle) return;
 
         _middleLeftBuilder.AppendLine("CHUNK LIFECYCLE (CP-1):");
-        _middleLeftBuilder.Append("Unloaded last pass: ").Append(_world.UnloadedLastPass).AppendLine();
+        _middleLeftBuilder.Append("Unloaded last pass: ").Append(_world.UnloadedLastPass)
+            .Append(" (light-persisted: ").Append(_world.UnloadedLightPersisted).Append(')').AppendLine();
         _middleLeftBuilder.Append(" └ Deferred — job: ").Append(_world.UnloadDeferJobRunning)
             .Append(" | light: ").Append(_world.UnloadDeferLightPending)
             .Append(" | strand: ").Append(_world.UnloadDeferWouldStrand).AppendLine();

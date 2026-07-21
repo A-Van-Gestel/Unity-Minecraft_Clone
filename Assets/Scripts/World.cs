@@ -327,6 +327,7 @@ public class World : MonoBehaviour
     private long _unloadDeferLightPending;
     private long _unloadDeferWouldStrand;
     private long _unloadedLastPass;
+    private long _unloadedLightPersisted;
 
     /// <summary>Deferred unloads because a generation/mesh/lighting job still owns the chunk (CP-1, F6).</summary>
     public long UnloadDeferJobRunning => _unloadDeferJobRunning;
@@ -339,6 +340,10 @@ public class World : MonoBehaviour
 
     /// <summary>Chunks actually unloaded in the most recent <c>UnloadChunks</c> pass (CP-1).</summary>
     public long UnloadedLastPass => _unloadedLastPass;
+
+    /// <summary>Chunks unloaded via the P-4 rec 3 persist-and-unload arm in the most recent pass (subset of
+    /// <see cref="UnloadedLastPass"/> — the pinned-trail drain in action).</summary>
+    public long UnloadedLightPersisted => _unloadedLightPersisted;
 
     // Load-arm fault counter (F1). Dev/editor-only: incremented via CountLoadFault, compiled out in release.
     private static long s_loadArmFaults;
@@ -2863,7 +2868,7 @@ public class World : MonoBehaviour
         if (!settings.EnablePersistence)
         {
             // No pass ran — publish zeroed CP-1 tallies so the HUD doesn't show stale counts in keep-in-memory mode.
-            _unloadDeferJobRunning = _unloadDeferLightPending = _unloadDeferWouldStrand = _unloadedLastPass = 0;
+            _unloadDeferJobRunning = _unloadDeferLightPending = _unloadDeferWouldStrand = _unloadedLastPass = _unloadedLightPersisted = 0;
             return;
         }
 
@@ -2871,7 +2876,8 @@ public class World : MonoBehaviour
         List<ChunkCoord> chunksToRemove = ListPool<ChunkCoord>.Get();
 
         // CP-1: per-pass deferral/unload tallies (F6 — the §3.3-perf "pinned trail" made observable).
-        int deferJob = 0, deferLight = 0, deferStrand = 0, unloaded = 0;
+        // lightPersisted counts the P-4 rec 3 persist-and-unload arm (a subset of unloaded).
+        int deferJob = 0, deferLight = 0, deferStrand = 0, unloaded = 0, lightPersisted = 0;
 
         // Step A: Identify candidates
         foreach (Vector2Int chunkVoxelKey in worldData.ChunkKeys)
@@ -2892,28 +2898,25 @@ public class World : MonoBehaviour
             if (!worldData.TryGetChunk(chunkVoxelPos, out ChunkData data))
                 continue;
 
-            // Safety: Don't unload if a job is currently touching it
+            // CP-5: gather facts for the pure unload decision. Candidates are pre-filtered to
+            // beyond-unload in Step A, so BeyondUnloadDistance is true here.
+
+            // Safety: Don't unload if a job is currently touching it.
             bool isJobRunning = JobManager.GenerationJobs.ContainsKey(chunkCoord)
                                 || JobManager.MeshJobs.ContainsKey(chunkCoord)
                                 || JobManager.LightingJobs.ContainsKey(chunkCoord);
 
-            // Check data state logic to prevent unloading chunks that have lighting work in the pipeline but no active job.
+            // Pending main-thread lighting work with no active job.
             bool isProcessingLight = data.IsAwaitingMainThreadProcess ||
                                      data.HasLightChangesToProcess;
 
-            if (isJobRunning || isProcessingLight)
-            {
-                // Skip unload - chunk is still being processed. Count the reason (job pin takes precedence).
-                if (isJobRunning) deferJob++;
-                else deferLight++;
-                continue;
-            }
-
-            // Safety: Don't unload if doing so would strand a neighbor that needs this chunk's data
-            // for lighting. A stranded neighbor with HasLightChangesToProcess or NeedsInitialLighting
-            // would be unable to schedule its lighting job (AreNeighborsDataReady would fail),
-            // unable to mesh (HasLightChangesToProcess blocks), and unable to unload (same flag blocks).
-            bool wouldStrandNeighbor = false;
+            // Safety: Don't unload if doing so would strand an IN-RANGE neighbor that needs this chunk's
+            // data for lighting. Such a neighbor (HasLightChangesToProcess or NeedsInitialLighting) would
+            // be unable to schedule its lighting job (AreNeighborsDataReady would fail), unable to mesh
+            // (HasLightChangesToProcess blocks), and unable to unload (same flag blocks) — pipeline §9.6.
+            // An OUT-OF-RANGE strand neighbor is excluded (P-4 rec 3): it is itself being reclaimed on this
+            // or a later pass, so stranding it is harmless — this is what lets the pinned trail drain.
+            bool wouldStrandInRangeNeighbor = false;
             foreach (Vector3Int offset in VoxelData.AllNeighborOffsets)
             {
                 ChunkCoord neighborCoord = chunkCoord.Neighbor(offset.x, offset.z);
@@ -2921,18 +2924,46 @@ public class World : MonoBehaviour
 
                 if (worldData.TryGetChunk(neighborV2, out ChunkData neighborData) &&
                     neighborData.IsPopulated &&
-                    (neighborData.HasLightChangesToProcess || neighborData.NeedsInitialLighting))
+                    (neighborData.HasLightChangesToProcess || neighborData.NeedsInitialLighting) &&
+                    !IsBeyondUnloadDistance(neighborCoord))
                 {
-                    wouldStrandNeighbor = true;
+                    wouldStrandInRangeNeighbor = true;
                     break;
                 }
             }
 
-            if (wouldStrandNeighbor)
+            ChunkUnloadDecision.Result decision = ChunkUnloadDecision.Evaluate(
+                new ChunkUnloadDecision.ChunkUnloadFacts(
+                    beyondUnloadDistance: true,
+                    jobRunning: isJobRunning,
+                    processingLight: isProcessingLight,
+                    wouldStrandInRangeNeighbor: wouldStrandInRangeNeighbor));
+
+            switch (decision)
             {
-                deferStrand++;
-                continue; // Defer unload — neighbor still needs us
+                case ChunkUnloadDecision.Result.DeferJobRunning:
+                    deferJob++;
+                    continue;
+                case ChunkUnloadDecision.Result.DeferLightPending:
+                    deferLight++;
+                    continue;
+                case ChunkUnloadDecision.Result.DeferWouldStrand:
+                    deferStrand++;
+                    continue; // Defer unload — an in-range neighbor still needs us
+                case ChunkUnloadDecision.Result.KeepInRange:
+                    continue; // Unreachable: Step A pre-filters to beyond-unload candidates.
+                case ChunkUnloadDecision.Result.UnloadPersistLightPending:
+                    // P-4 rec 3: this out-of-range chunk is pinned only by its own pending lighting, which
+                    // can never complete (missing-neighbor gate). Force a full re-light on reload — captured
+                    // by the synchronous save snapshot (SaveChunkAsync), or fresh on regeneration for an
+                    // unmodified chunk — then fall through to the shared persist/save/teardown below. Its
+                    // pending sunlight columns are persisted by step 1; edits (if any) are saved by step 2.
+                    data.NeedsInitialLighting = true;
+                    lightPersisted++;
+                    break;
             }
+
+            // decision == Unload or UnloadPersistLightPending — proceed to persist / save / pool teardown.
 
             // 1. Persist Orphaned Lighting Queue
             if (worldData.SunlightRecalculationQueue.TryGetValue(chunkVoxelPos, out HashSet<Vector2Int> globalCols))
@@ -2998,6 +3029,7 @@ public class World : MonoBehaviour
         _unloadDeferLightPending = deferLight;
         _unloadDeferWouldStrand = deferStrand;
         _unloadedLastPass = unloaded;
+        _unloadedLightPersisted = lightPersisted;
 
         // 5. Return temp pools back to pool list
         ListPool<ChunkCoord>.Release(chunksToRemove); // Free the ListPool
