@@ -311,6 +311,13 @@ public class World : MonoBehaviour
     private readonly HashSet<ChunkCoord> _currentViewChunks = new HashSet<ChunkCoord>();
     private readonly List<ChunkCoord> _chunksToRemove = new List<ChunkCoord>();
 
+    // --- Generation request backpressure (P-4 §3.1) ---
+    // CheckViewDistance enqueues missing chunks nearest-first (rebuilt each boundary crossing) instead of
+    // firing generation immediately; DrainGenerationRequests admits them each frame while the in-flight
+    // generation-job count stays under settings.maxInFlightGenerationJobs. The set dedups queue entries.
+    private readonly Queue<ChunkCoord> _generationRequestQueue = new Queue<ChunkCoord>();
+    private readonly HashSet<ChunkCoord> _pendingGenerationRequests = new HashSet<ChunkCoord>();
+
     // --- Transient flags ---
     /// <summary>
     /// Indicates whether the world startup process has completed and the world is ready to be used.
@@ -1899,6 +1906,10 @@ public class World : MonoBehaviour
         //    This might add new chunks to the chunksToBuildMesh list.
         JobManager.ProcessGenerationJobs();
 
+        // 1b. Admit queued generation requests under the in-flight cap (P-4 §3.1). Runs after the drain
+        //     above so completions this frame free headroom for new admissions immediately.
+        DrainGenerationRequests();
+
         // 2. Apply all queued voxel modifications (from player and world gen).
         long applyStart = WorldFrameProfiler.Begin();
         if (!_applyingModifications)
@@ -2687,6 +2698,15 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
+    /// Extra radius (in chunks) beyond <see cref="Settings.LoadDistance"/> at which a chunk is unloaded.
+    /// The gap between LoadDistance and this boundary is hysteresis that prevents unload/reload flickering
+    /// at the streaming edge. Shared by <see cref="UnloadChunks"/> and the §3.2 out-of-range generation
+    /// discard (WorldJobManager.ProcessGenerationJobs) so the discard boundary can never drift inside the
+    /// unload boundary — which would strand a permanent unpopulated hole in the buffer band.
+    /// </summary>
+    public const int UnloadDistanceBuffer = 2;
+
+    /// <summary>
     /// Unloads chunks that are outside the load distance.
     /// Saves them if modified, destroys the GameObject, and removes data from memory.
     /// </summary>
@@ -2698,7 +2718,7 @@ public class World : MonoBehaviour
 
         // OPTIMIZATION: Use ListPool to avoid allocations
         List<ChunkCoord> chunksToRemove = ListPool<ChunkCoord>.Get();
-        int unloadDistance = settings.LoadDistance + 2; // Buffer to prevent flickering
+        int unloadDistance = settings.LoadDistance + UnloadDistanceBuffer;
 
         // Step A: Identify candidates
         foreach (Vector2Int chunkVoxelKey in worldData.ChunkKeys)
@@ -2859,6 +2879,45 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
+    /// Drains queued generation requests (built by <see cref="CheckViewDistance"/>) in nearest-first order,
+    /// admitting new ones only while the in-flight generation-job count stays below
+    /// <see cref="Settings.maxInFlightGenerationJobs"/> (P-4 §3.1 backpressure). Called once per frame.
+    /// </summary>
+    /// <remarks>
+    /// Soft cap: the gate counts tracked generation jobs plus this frame's admissions, mirroring the mesh
+    /// in-flight cap. A request admitted here enters the async <see cref="LoadOrGenerateChunk"/> disk-load
+    /// phase before it becomes a tracked generation job, so the true in-flight total can briefly exceed the
+    /// cap by the number of disk-miss chunks still awaiting their disk probe. That overshoot is bounded and
+    /// small (a not-on-disk probe resolves in well under a frame) and holds no job buffers, so it does not
+    /// defeat the native-memory ceiling the cap enforces. Disk-<i>hit</i> chunks never become generation
+    /// jobs, so they never count against this cap at all.
+    /// </remarks>
+    private void DrainGenerationRequests()
+    {
+        int cap = Mathf.Max(1, settings.maxInFlightGenerationJobs);
+        int admittedThisFrame = 0;
+
+        // admittedThisFrame covers requests admitted this frame that are still in the async disk-load phase
+        // and have not yet become tracked jobs. Gating on the sum bounds per-frame admission to the headroom,
+        // so one frame cannot flood the whole backlog into the async pipeline (LoadOrGenerateChunk is async,
+        // unlike the synchronous mesh schedule whose count rises in-loop).
+        while (_generationRequestQueue.Count > 0 && JobManager.GenerationJobs.Count + admittedThisFrame < cap)
+        {
+            ChunkCoord chunkCoord = _generationRequestQueue.Dequeue();
+            _pendingGenerationRequests.Remove(chunkCoord);
+
+            // Re-validate: the chunk may have been populated, unloaded, started loading, or had its job
+            // scheduled between enqueue and now. Skips do not consume this frame's headroom.
+            if (!worldData.TryGetChunk(chunkCoord.ToVoxelOrigin(), out ChunkData data)) continue;
+            if (data.IsPopulated || data.IsLoading || JobManager.GenerationJobs.ContainsKey(chunkCoord)) continue;
+
+            data.IsLoading = true;
+            _ = LoadOrGenerateChunk(chunkCoord);
+            admittedThisFrame++;
+        }
+    }
+
+    /// <summary>
     /// Checks the view distance and updates the active chunks.
     /// </summary>
     private void CheckViewDistance()
@@ -2873,6 +2932,12 @@ public class World : MonoBehaviour
 
         // OPTIMIZATION: Clear cached sets instead of allocating new ones
         _currentViewChunks.Clear();
+
+        // Rebuild the generation request backlog nearest-first from the current position (P-4 §3.1).
+        // Requests not yet admitted by the per-frame drain are re-enqueued below if still needed; ones
+        // that have left the load square are correctly dropped by not being re-added.
+        _generationRequestQueue.Clear();
+        _pendingGenerationRequests.Clear();
 
         int viewDist = settings.viewDistance;
         int loadDist = settings.LoadDistance;
@@ -2900,12 +2965,14 @@ public class World : MonoBehaviour
                     worldData.SetChunk(chunkVoxelPos, data);
                 }
 
-                // If it's empty, and not currently fetching from disk, and not currently generating... start the pipeline!
-                if (!data.IsPopulated && !data.IsLoading && !JobManager.GenerationJobs.ContainsKey(chunkCoord))
+                // If it's empty, and not currently fetching from disk, and not currently generating...
+                // queue it for the capped per-frame drain (P-4 §3.1) instead of starting the pipeline
+                // immediately. IsLoading is set when the request is actually admitted (DrainGenerationRequests),
+                // so the chunk stays eligible until then; the set dedups against this crossing's enqueues.
+                if (!data.IsPopulated && !data.IsLoading && !JobManager.GenerationJobs.ContainsKey(chunkCoord)
+                    && _pendingGenerationRequests.Add(chunkCoord))
                 {
-                    // Trigger Async Load
-                    data.IsLoading = true;
-                    _ = LoadOrGenerateChunk(chunkCoord);
+                    _generationRequestQueue.Enqueue(chunkCoord);
                 }
 
                 // If within view distance, it's a candidate for being active.

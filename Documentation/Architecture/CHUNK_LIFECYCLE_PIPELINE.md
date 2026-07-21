@@ -27,7 +27,7 @@ Each `ChunkData` instance carries the following transient flags that control pip
 | Flag                          | Type | Set By                                                                                                                              | Cleared By                                                | Purpose                                                                                                               |
 |-------------------------------|------|-------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------|
 | `IsPopulated`                 | bool | `Populate()` / `PopulateFromSave()`                                                                                                 | `Reset()` (pool recycle)                                  | Voxel data exists and is valid                                                                                        |
-| `IsLoading`                   | bool | `CheckViewDistance()`                                                                                                               | Never explicitly cleared (reset on pool recycle)          | Prevents duplicate disk load requests                                                                                 |
+| `IsLoading`                   | bool | `DrainGenerationRequests()` (at admission; `CheckViewDistance()` only *enqueues*, P-4 §3.1)                                          | Never explicitly cleared (reset on pool recycle)          | Prevents duplicate disk load requests                                                                                 |
 | `NeedsInitialLighting`        | bool | `ProcessGenerationJobs()` / `PopulateFromSave()`                                                                                    | `Update()` lighting scan after scheduling initial pass    | Chunk has terrain but no lighting yet                                                                                 |
 | `HasLightChangesToProcess`    | bool | `AddToSunLightQueue()`, `AddToBlockLightQueue()`, cross-chunk mods, edge check scheduling                                           | `ScheduleLightingUpdate()`                                | Pending light changes in managed queues                                                                               |
 | `NeedsEdgeCheck`              | bool | Post-stabilization re-arm (`ProcessLightingJobs`), neighbor propagation, or disk load                                               | `ScheduleLightingUpdate()`                                | Border voxels need validation against neighbors                                                                       |
@@ -133,8 +133,9 @@ Every frame, `Update()` executes the following steps in order. Understanding thi
 
 ```mermaid
 flowchart TD
-    A["1. CheckViewDistance()"] --> B["2. ProcessGenerationJobs()"]
-    B --> C["3. ApplyModifications()"]
+    A["1. CheckViewDistance()<br/>(enqueues gen requests, on crossing)"] --> B["2. ProcessGenerationJobs()"]
+    B --> B1b["1b. DrainGenerationRequests()<br/>(admit under in-flight cap, P-4 §3.1)"]
+    B1b --> C["3. ApplyModifications()"]
     C --> D["4. ProcessLightingJobs()<br/>(from PREVIOUS frame)"]
     D --> E["5. Lighting Ready-Set Scan<br/>(iterates LightWorkScheduler's ready set)"]
     E --> F["6. ProcessMeshJobs()<br/>(from PREVIOUS frame)"]
@@ -257,11 +258,17 @@ foreach pos in snapshot:
 
 ```mermaid
 flowchart TD
-    subgraph "CheckViewDistance (Main Thread)"
+    subgraph "CheckViewDistance (Main Thread, on crossing)"
         A1["Player moves to new chunk coord"] --> A2["Spiral loop identifies missing chunks"]
         A2 --> A3["Create placeholder ChunkData<br/>worldData.Chunks.Add()"]
-        A3 --> A4["Set IsLoading = true"]
-        A4 --> A5["LoadOrGenerateChunk()"]
+        A3 --> A3b["Enqueue nearest-first<br/>(_generationRequestQueue, P-4 §3.1)"]
+    end
+
+    subgraph "DrainGenerationRequests (Main Thread, each frame)"
+        A3b --> A4{"GenerationJobs.Count + admitted<br/>&lt; maxInFlightGenerationJobs?"}
+        A4 -- No --> AWAIT["Leave queued for a later frame"]
+        A4 -- Yes --> A4b["Set IsLoading = true"]
+        A4b --> A5["LoadOrGenerateChunk()"]
     end
 
     subgraph "LoadOrGenerateChunk (Async)"
@@ -279,7 +286,9 @@ flowchart TD
 
     subgraph "ProcessGenerationJobs (Main Thread, next frame)"
         C1 --> D1["job.Handle.Complete()"]
-        D1 --> D2["chunkData.Populate(map, heightMap)"]
+        D1 --> DDISC{"Chunk now beyond<br/>unload boundary? (P-4 §3.2)"}
+        DDISC -- Yes --> DDISC2["ReleaseGenerationJobData()<br/>discard, no populate/save<br/>(UnloadChunks reclaims placeholder)"]
+        DDISC -- No --> D2["chunkData.Populate(map, heightMap)"]
         D2 --> D3["Apply flora mods (trees)"]
         D3 --> D4["Apply pending mods from disk"]
         D4 --> D5["Restore pending lighting columns"]

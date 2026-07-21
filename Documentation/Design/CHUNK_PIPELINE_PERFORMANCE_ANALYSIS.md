@@ -5,8 +5,9 @@
 > generation, and (2) slow initial world *loading* (not creation) of already-generated chunks.
 >
 > Status: **Partially implemented.** §1.1 (job NativeArray pooling) shipped 2026-06-11 — see the
-> "Implemented" note in §1. All other findings remain open. Each finding includes a recommendation
-> and an Impact Analysis in the style of `CODEBASE_IMPROVEMENTS.md`.
+> "Implemented" note in §1. §3.1 + §3.2 (generation in-flight cap + out-of-range discard) shipped
+> 2026-07-21 — see the "Implemented" note in §3. All other findings remain open. Each finding includes
+> a recommendation and an Impact Analysis in the style of `CODEBASE_IMPROVEMENTS.md`.
 
 **Analyzed:** 2026-06-11, at commit `8f90450` (branch `feat/Modular-World-Generation-&-World-Types`).
 **Analysis is static (code reading), not yet confirmed by profiler capture.** See §7 for the
@@ -170,13 +171,14 @@ dirty-section mask emitted by the lighting job so untouched sections are skipped
 
 Production is unbounded while consumption is fixed-per-frame:
 
-1. **Unbounded scheduling.** `World.CheckViewDistance` (`World.cs`, ~line 2111) fire-and-forgets
+1. **Unbounded scheduling.** `World.CheckViewDistance` (`World.cs:2864`) fire-and-forgets
    `LoadOrGenerateChunk` for *every* missing chunk in the load square on every chunk-boundary
    crossing. No cap on in-flight generation jobs, no cancellation when a chunk leaves the radius.
+   *(Addressed by the §3.1 fix below.)*
 2. **Backlog holds memory.** Completed-but-unprocessed `GenerationJobs` keep their `Map`/`HeightMap`
    native arrays alive until `ProcessGenerationJobs` reaches them, which is budget-limited
    (`maxStructureModsPerFrame`). At sub-10 FPS the backlog physically pins memory.
-3. **Chunks behind the player can't unload.** `World.UnloadChunks` (~line 1937) skips any chunk
+3. **Chunks behind the player can't unload.** `World.UnloadChunks` (`World.cs:2702`) skips any chunk
    with a running job or `HasLightChangesToProcess` / `IsAwaitingMainThreadProcess`, and the
    `wouldStrandNeighbor` check additionally pins neighbors of pending chunks. Freshly generated
    chunks all carry `NeedsInitialLighting` / `HasLightChangesToProcess`; lighting drains at
@@ -186,7 +188,7 @@ Production is unbounded while consumption is fixed-per-frame:
    32 light jobs/frame = 1,920/s; at 8 FPS it collapses to 256/s — throughput is lowest exactly
    when the backlog is largest. The death spiral is self-reinforcing.
 5. **Draw queue trickle.** `Update()` dequeues only **one** chunk from `ChunksToDraw` per frame
-   (`World.cs`, ~line 1302) while up to 10 mesh jobs/frame can complete. If this is deliberate
+   (`World.cs:2087`) while up to 10 mesh jobs/frame can complete. If this is deliberate
    GPU-upload spreading, it should also be time-budgeted; at low FPS it backs up.
 
 ### Recommendations
@@ -212,6 +214,37 @@ Production is unbounded while consumption is fixed-per-frame:
 > - **Effort:** 🟡 Medium — items 1, 2, 4, 5 are localized; item 3 touches pipeline invariants.
 > - **Risk:** 🟡 Medium→🔴 High for item 3 (deadlock history; consult `chunk-lifecycle` skill).
 > - **Benefit:** 🟢 High — directly eliminates the cascading memory failure mode.
+
+### ✅ Implemented (2026-07-21): Recommendations 1 (in-flight cap) + 2 (out-of-range discard)
+
+The two production-side backpressure items that do **not** touch the deadlock-prone unload path.
+Recommendations 3 (unload light-pending via persistence), 4 (time-based budgets), and 5 (panic gate)
+remain open. On-disk format unchanged (no migration).
+
+- **§3.1 in-flight generation cap.** Generation is now driven by a per-frame drain instead of
+  edge-triggered fire-and-forget, mirroring the existing mesh in-flight cap:
+  - `World.CheckViewDistance` no longer fires `LoadOrGenerateChunk` directly — it rebuilds a
+    nearest-first `_generationRequestQueue` (+ `_pendingGenerationRequests` dedup set) each
+    boundary crossing.
+  - New `World.DrainGenerationRequests()` (called each frame right after `ProcessGenerationJobs`)
+    admits queued requests only while `GenerationJobs.Count + admittedThisFrame <
+    settings.maxInFlightGenerationJobs`. `IsLoading` moved to admission time. The per-frame drain
+    (not a `break` inside the edge-triggered spiral) is required: a naive spiral cap would leave
+    permanent holes when the player stops after a crossing, since `CheckViewDistance` does not
+    re-run until the next crossing.
+  - **Cap value (OM-1):** new `settings.maxInFlightGenerationJobs` (default 32), RAM-scaled by
+    `DeviceCalibration` in the same memory-cap taxonomy as `maxInFlightMeshJobs`.
+  - **Soft cap:** the gate counts tracked jobs + this frame's admissions only; a disk-*miss* chunk
+    can briefly overshoot while awaiting its (sub-frame) disk probe. Overshoot is bounded, holds no
+    job buffers, and disk-*hit* chunks never become generation jobs so they never count. The
+    startup path (`ForceCompleteDataJobsCoroutine`) is unaffected — `Update` early-returns until
+    `_isWorldLoaded`, so it schedules directly, bypassing the cap (avoids the §1.1 pooling incident).
+- **§3.2 out-of-range discard.** `WorldJobManager.ProcessGenerationJobs`, immediately after
+  `Handle.Complete()`, discards a completed job whose chunk is now beyond the unload boundary
+  (`LoadDistance + World.UnloadDistanceBuffer`, a new shared constant so the discard boundary can
+  never drift inside the unload boundary): `ReleaseGenerationJobData` + skip populate/structures/
+  lighting. No save — unmodified generation output is seed-regenerable. The unpopulated placeholder
+  is reclaimed by `UnloadChunks`, which clears its `IsLoading` via `ChunkData.Reset`.
 
 ---
 
@@ -293,7 +326,7 @@ O(chunks × lighting passes) into near-pure deserialization.
 
 1. **§4.3 instrumentation** — confirm or kill the RGB-stability theory before touching lighting code.
 2. ✅ ~~**§1.1 pool the job NativeArrays** — low effort, large win, no architecture change.~~ (Done 2026-06-11.)
-3. **§3.1 + §3.2 generation in-flight cap + out-of-range discard** — stops the memory spiral.
+3. ✅ ~~**§3.1 + §3.2 generation in-flight cap + out-of-range discard** — stops the memory spiral.~~ (Done 2026-07-21 — see the "Implemented" note in §3.)
 4. **§3.4 time-based budgets** (+ §3.5 panic gate).
 5. **§4.4 "lighting stable" save bit** (serialization migration).
 6. **§2 jobified lighting merge**, then **§1.2/§1.3** deeper copy reductions.

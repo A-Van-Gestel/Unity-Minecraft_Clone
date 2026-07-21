@@ -432,6 +432,14 @@ public class Settings
     public int maxInFlightMeshJobs = 20;
 
     /// <summary>
+    /// Maximum generation jobs allowed in flight before <c>World</c> pauses scheduling new ones to let
+    /// <c>ProcessGenerationJobs</c> drain (memory cap + backpressure; P-4 §3.1). Calibrated from system
+    /// RAM; the default is the desktop ceiling (generation was previously uncapped, so there is no older
+    /// literal to reproduce).
+    /// </summary>
+    public int maxInFlightGenerationJobs = 32;
+
+    /// <summary>
     /// Buffers retained per type in the chunk job array pool — the native-memory retention ceiling
     /// (OM-1). Calibrated from system RAM; default reproduces the historical constant (≈96 MB worst case).
     /// </summary>
@@ -721,6 +729,7 @@ public static class SettingsManager
             settings.maxMeshRebuildsPerFrame = result.MaxMeshRebuildsPerFrame;
             settings.maxLightJobsPerFrame = result.MaxLightJobsPerFrame;
             settings.maxInFlightMeshJobs = result.MaxInFlightMeshJobs;
+            settings.maxInFlightGenerationJobs = result.MaxInFlightGenerationJobs;
             settings.chunkJobArrayPoolRetention = result.JobArrayPoolRetention;
             settings.calibrationVersion = DeviceCalibration.CalibrationVersion;
             Debug.Log($"[SettingsManager] Device-calibrated budgets (OM-1): {result}");

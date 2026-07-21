@@ -12,7 +12,8 @@
 > scaling model (not an absolute time-slice — the time-slice regressed the desktop); the `IsolatedJobProbe`
 > extraction is **mesh-only** (the lighting leg is self-contained to avoid refactoring a lighting-suite
 > guard). The calibrated knobs persist as `Settings` fields: `maxMeshRebuildsPerFrame`,
-> `maxLightJobsPerFrame`, `maxInFlightMeshJobs`, `chunkJobArrayPoolRetention`, `calibrationVersion`.
+> `maxLightJobsPerFrame`, `maxInFlightMeshJobs`, `maxInFlightGenerationJobs` (P-4 §3.1, added 2026-07-21),
+> `chunkJobArrayPoolRetention`, `calibrationVersion`.
 > Desktop sanity verified: an i9-9900K / 64 GB box resolves in a **player build** to exactly the
 > historical 10 / 32 / 20 / 512.
 >
@@ -108,8 +109,9 @@ tie-breaker, never the primary axis.
 ### 3.1 Memory caps (continuous, spec-derived)
 
 ```
-JobArrayPoolRetention = min(512, f(systemMemorySize))   // 512 reproduces on high-RAM desktop
-MaxInFlightMeshJobs   = g(JobArrayPoolRetention)         // keep retention ≈ (light+mesh)*9 coupling honest
+JobArrayPoolRetention    = min(512, f(systemMemorySize))   // 512 reproduces on high-RAM desktop
+MaxInFlightMeshJobs      = g(JobArrayPoolRetention)         // keep retention ≈ (light+mesh)*9 coupling honest
+MaxInFlightGenerationJobs = g'(JobArrayPoolRetention)       // P-4 §3.1; retention-scaled, ceiling 32 (no prior literal)
 ```
 
 `f`/`g` are documented monotonic functions with a floor (never starve the pipeline) and a ceiling at
