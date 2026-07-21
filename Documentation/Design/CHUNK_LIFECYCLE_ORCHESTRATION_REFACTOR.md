@@ -397,6 +397,15 @@ ship their suites/baselines in the same commit as the code.
 > stall or durability loss in normal play (F1/F5 injection tests still pending). Pool churn: **chunk pool
 > destroys 0 while data/section churn (145/346)** — the **F4** width-vs-area asymmetry, CP-7 evidence.
 > **This soak strongly prioritizes P-4 rec 3 / CP-5** (🔴, deadlock history — own plan + `chunk-lifecycle`).
+>
+> **Amended (2026-07-21): F1/F5 fault-injection confirmed the probes fire on real faults.** Via temporary one-shot
+> inject hooks in `ChunkStorageManager` (reverted after — not committed): **F5** — armed `InjectSaveFaultOnce`
+> and called `SaveChunkAsync` on a loaded chunk → `SavesFired 0→1, SavesCompleted 0 (unchanged), SavesFailed
+> 0→1`, plus the swallow-catch logged `[SaveChunkAsync] Failed … CP-1 TEMP injected save fault` — the F5
+> durability hole is now observable. **F1** — armed `InjectLoadFaultOnce`, flew one chunk in → `LoadArmFaults
+> 0→1` (fault propagated through the load arm to the wrapper catch) **and** `StuckLoading 0→1` (the faulted
+> placeholder stayed `IsLoading && !IsPopulated` across two ~1s scans). Confirms the stuck placeholder does NOT
+> self-recover pre-CP-3 (the `!IsLoading` re-enqueue gate keeps skipping it) — the exact F1 stall CP-3 closes.
 
 ### CP-2 — WS-1 execution: shift/mask chunk math + NS-5 equivalence suite (🟡)
 
