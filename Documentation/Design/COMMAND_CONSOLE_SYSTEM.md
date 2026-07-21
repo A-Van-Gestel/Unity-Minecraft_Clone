@@ -1,8 +1,8 @@
 # Command Console System Design
 
-**Version:** 1.11
-**Date:** 2026-07-19
-**Status:** **Implemented (v1 arc + CMD-4 + CMD-5)** — the v1 arc (CMD-0..3), **CMD-4 relative `~` coordinates** (§8.2), and **CMD-5 tab autocomplete + PowerShell-style inline ghost suggestion** (§8.3) are all shipped and in-game confirmed. Suite **52** baselines; Validate All **275/275** across 10 suites. Remaining §8 items (selectable/copyable output, chat, entity selectors, `/fill`) stay deliberate v2+ work.
+**Version:** 1.12
+**Date:** 2026-07-21
+**Status:** **Implemented (v1 arc + CMD-4 + CMD-5)** — the v1 arc (CMD-0..3), **CMD-4 relative `~` coordinates** (§8.2), and **CMD-5 tab autocomplete + PowerShell-style inline ghost suggestion** (§8.3) are all shipped and in-game confirmed. Suite **54** baselines; Validate All **287/287** across 11 suites (2026-07-21). Remaining §8 items (selectable/copyable output, chat, entity selectors, `/fill`) stay deliberate v2+ work.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > An in-game command console (Minecraft-chat-style: `T` opens a left-anchored panel with
@@ -205,6 +205,21 @@ colors via TMP rich text.
 
 Threading/ownership: everything main-thread. The engine is plain managed code — no jobs, no
 native containers, no pooled-type fields (pool-reset-safety not applicable).
+
+**Resilience (UI_BUGS #04).** The whole hierarchy is runtime-built and owned by this view, so a
+heavy chunk-churn / floating-origin rebase (e.g. a far-lands `/teleport`) can — through an
+as-yet-unidentified engine/TMP-internal teardown — destroy a built object (observed: the input
+field) out from under the live view. `RebuildMissingChildren()` therefore **self-heals at
+whatever level died**: the whole `ConsolePanel` (rebuilt under the surviving canvas via
+`BuildPanel()`), or an individual build-unit (history view, input field, or the ghost overlay
+alone). It runs from `Open()` (before showing — `Open()` returns `bool` and `WorldUIManager`
+skips the action-map swap if it fails, so a failed heal can't soft-lock input) **and** from
+`Update()` while open (a child destroyed mid-session is rebuilt and refocused). Relatedly,
+`LateUpdate` **no-ops while closed** — a line posted to a closed console (e.g. the teleport
+arrival-hold outcome after an `Esc`-close mid-hold) must not drive a canvas rebuild on the
+inactive panel subtree; `Open()` re-marks the dirty/scroll flags, so no posted line is lost.
+Root cause is not yet pinned (no project code destroys the field); see
+`Documentation/Bugs/UI_BUGS.md` #04.
 
 ### 4.3 `TeleportCommand`
 
@@ -519,6 +534,21 @@ argument-completion tests — confirmed (reused by B50/B52).
 
 ## Document History
 
+* **v1.12** - **ConsoleUI resilience hardening (UI_BUGS #04), in-game confirmed 2026-07-21.** A natural repro
+  confirmed the failure mode: a built object is *destroyed* out from under the live view (e.g. `_inputField`
+  Unity-null while the panel survives) during heavy chunk churn — a far-lands `/teleport` (user-confirmed) or a
+  render-distance change, both of which force a full chunk-set re-stream; leading unproven theory is an
+  `Esc`-close *during* the teleport arrival hold. No project code destroys it (every `Destroy` in `Assets/Scripts`
+  swept), so the destroyer is engine/TMP-internal. Permanent fixes: `RebuildMissingChildren` self-heals at
+  whatever level died — the whole `ConsolePanel` (via extracted `BuildPanel()` under the surviving canvas), or an
+  individual history-view / input-field / ghost-overlay build-unit — called from `Open()` (which now returns
+  `bool`; the `WorldUIManager` caller skips the action-map swap on failure) **and** from `Update()` while open;
+  `LateUpdate` no-ops while closed; and `WorldUIManager.Update` recovers a stale-`InUI` soft-lock (needed when the
+  `ConsolePanel` is destroyed *while open*, which the self-heal alone couldn't reach). Deleting the input field,
+  history view, or whole panel at runtime all recover on the next open. A permanent lightweight tripwire remains
+  (`InputFieldDeathSentinel` + the self-heal warnings) while the root cause is unresolved; the heavy `[UIBUG04]`
+  investigative scaffolding was removed the same day. §4.2 gained a Resilience note. Root cause tracked in
+  `UI_BUGS.md` #04.
 * **v1.11** - **CMD-5 tab autocomplete + PowerShell-style inline ghost SHIPPED + in-game confirmed
   2026-07-19.** Three commits: (1) pure completion core — `CommandEngine.Complete` + a new opt-in
   `IArgumentCompleter` (`string[] CompleteArgument(int argIndex, string partial, CommandContext ctx)`)
@@ -624,5 +654,5 @@ argument-completion tests — confirmed (reused by B50/B52).
 
 ---
 
-**Last Updated:** 2026-07-19
+**Last Updated:** 2026-07-21
 **Next Review:** the whole planned CMD arc (CMD-0..5) has shipped. The remaining §8 items (selectable/copyable output, chat on the unprefixed namespace, entity selectors, `/fill`, and the deferred long-line ghost-alignment guard) each still need their own design pass before scheduling.
