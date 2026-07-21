@@ -76,6 +76,7 @@ MonoBehaviour:
     maxLightJobsPerFrame: 32
     maxStructureModsPerFrame: 5000
     maxInFlightMeshJobs: 20
+    maxInFlightGenerationJobs: 32
     chunkJobArrayPoolRetention: 512
     calibrationVersion: 0
     benchmarkRegionSize: 64
@@ -84,6 +85,17 @@ MonoBehaviour:
     enableDiagnosticLogs: 0
     enableWaterDiagnosticLogs: 0
     enableSaveSystemDiagnosticLogs: 0
+    debugHudShowFps: 1
+    debugHudShowGraphicsApi: 1
+    debugHudShowWorldInfo: 1
+    debugHudShowPlayerInfo: 1
+    debugHudShowChunkStats: 1
+    debugHudShowSectionInfo: 1
+    debugHudShowGroundVoxel: 1
+    debugHudShowTargetVoxel: 1
+    debugHudShowChunkLifecycle: 0
+    debugHudShowPerformance: 1
+    debugHudShowVisualization: 1
     enableVolatileSaveData: 1
   _worldTypeRegistry: {fileID: 11400000, guid: 3038e8b8e1ab9ae44802528aa73aa06a, type: 2}
   globalLightLevel: 1
