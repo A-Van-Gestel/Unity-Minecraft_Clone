@@ -23,6 +23,15 @@ If a user request violates these constraints, REJECT the request, explain why it
 - **Do NOT manually edit:** `.meta`, `.prefab`, `.unity` (scene), or `.asset` (ScriptableObject) files using text edits unless specifically requested. Let the Unity Editor handle serialization.
 - **File operations** (moves, renames, deletes, merge conflicts, `[FormerlySerializedAs]`, orphaned `.meta` files) are covered by the `unity-file-ops` skill under `.agents/skills/`. The `.meta` GUID rule is authoritative there.
 
+## Unity Static Fields & Domain Reload
+
+Adding a mutable `static` field to a MonoBehaviour/manager repeatedly trips Rider's **UDR0004/UDR0005** ("Domain Reload Analyzer"). With *Enter Play Mode → Reload Domain* disabled (this project's setup), statics are **not** re-initialized between play sessions, so a stale value leaks into the next run. Two rules:
+
+- **Reset every mutable static on play-mode entry.** A field initializer (`= 0`) is not enough — it only runs on domain reload. Zero it from code that runs each play start.
+- **One `[RuntimeInitializeOnLoadMethod]` per class (UDR0005).** Do NOT add a second `[RuntimeInitializeOnLoadMethod]` reset method to a class that already has one. Fold the reset into the class's existing one (e.g. `World.DomainReset`); only add a fresh `[RuntimeInitializeOnLoadMethod]` in a class that has none. `const`/`readonly` statics and `[ThreadStatic]` are exempt (never mutated across sessions).
+
+Applies to any `static` that accumulates runtime state (counters, caches, singleton back-references, event lists).
+
 ## Block System
 
 - **Always use `BlockIDs` constants, never raw IDs.** Reference blocks via `BlockIDs.Stone`, `BlockIDs.Grass`, `BlockIDs.Air`, etc. — never hardcode raw `ushort` literals or guess IDs. The class is auto-generated at `Assets/Scripts/Data/BlockIDs.cs` from `BlockDatabase.asset`.
