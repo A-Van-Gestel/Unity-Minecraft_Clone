@@ -269,30 +269,6 @@ public class InputManager : MonoBehaviour
     }
 
     // ==============================================
-    //  UI_BUGS #04 DIAGNOSTICS (temporary — remove with the #04 instrumentation)
-    // ==============================================
-
-    /// <summary>
-    /// UI_BUGS #04 diagnostic: raw, action-map-independent key probe, so the console-toggle
-    /// path can detect a T press even when the Gameplay map is disabled (which would make
-    /// <c>ToggleConsolePressed</c> silently return false). Lives inside <c>InputManager</c>
-    /// deliberately — the Command Console suite's B23 tripwire forbids <c>Keyboard.current</c>
-    /// reads anywhere else. Remove together with the rest of the #04 instrumentation.
-    /// </summary>
-    /// <param name="key">The keyboard key to test.</param>
-    /// <returns>True the frame the key was pressed, regardless of action-map state.</returns>
-    public bool DiagnosticRawKeyPressed(Key key)
-    {
-        return Keyboard.current != null && Keyboard.current[key].wasPressedThisFrame;
-    }
-
-    /// <summary>UI_BUGS #04 diagnostic: whether the Gameplay action map is currently enabled.</summary>
-    public bool DiagnosticGameplayMapEnabled => _gameplayMap != null && _gameplayMap.enabled;
-
-    /// <summary>UI_BUGS #04 diagnostic: whether the UI action map is currently enabled.</summary>
-    public bool DiagnosticUIMapEnabled => _uiMap != null && _uiMap.enabled;
-
-    // ==============================================
     //  PUBLIC METHODS — Action Map Switching
     // ==============================================
 

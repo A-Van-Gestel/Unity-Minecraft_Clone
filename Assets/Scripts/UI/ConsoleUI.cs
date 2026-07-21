@@ -54,11 +54,6 @@ namespace UI
         private bool _historyDirty;
         private bool _autoscrollPending;
 
-        // UI_BUGS #04 diagnostics (temporary — remove with the #04 instrumentation): watchdog
-        // state that detects the panel changing active state outside Open()/Close().
-        private bool _diagLastPanelActive;
-        private bool _diagExpectedTransition;
-
         /// <summary>The console engine this view drives (commands register on its <see cref="CommandEngine.Registry"/>).</summary>
         public CommandEngine Engine => _engine;
 
@@ -82,19 +77,13 @@ namespace UI
 
         private void Update()
         {
-            // UI_BUGS #04 diagnostic: catch the panel's activeSelf flipping without Open()/Close()
-            // having run (candidate class 1 — external deactivation / state desync). Remove with
-            // the #04 instrumentation.
-            bool diagPanelActive = _panel != null && _panel.activeSelf;
-            if (diagPanelActive != _diagLastPanelActive)
-            {
-                if (!_diagExpectedTransition)
-                    Debug.LogWarning($"[UIBUG04] Console panel active state changed OUTSIDE Open()/Close(): {_diagLastPanelActive} -> {diagPanelActive}. {DiagUIBug04State()}, frame={Time.frameCount}");
-                _diagExpectedTransition = false;
-                _diagLastPanelActive = diagPanelActive;
-            }
-
             if (!IsOpen)
+                return;
+
+            // UI_BUGS #04: heal any child destroyed while the console is open before Update and
+            // LateUpdate dereference it (both read _inputField/_ghostText/_scrollRect/_historyText).
+            // Bail this frame only if the panel itself is gone.
+            if (!RebuildMissingChildren())
                 return;
 
             // ↑/↓ history recall + Tab autocomplete + RightArrow/End accept (UI action map — the
@@ -178,6 +167,12 @@ namespace UI
 
         private void LateUpdate()
         {
+            // Nothing to render while closed: a line posted to a closed console (e.g. the teleport
+            // arrival-hold outcome after an Esc-close mid-hold) must not drive a canvas rebuild on
+            // the inactive panel subtree. Open() re-marks both flags, so no posted line is lost.
+            if (!IsOpen)
+                return;
+
             // Coalesce per-line append events into at most one text rebuild + scroll per frame.
             if (_historyDirty)
             {
@@ -193,74 +188,120 @@ namespace UI
             }
         }
 
-        /// <summary>Opens the panel and focuses the input field (T-leak-guarded). Called by <see cref="WorldUIManager"/>.</summary>
-        public void Open()
+        /// <summary>Opens the panel and focuses the input field (T-leak-guarded), self-healing any destroyed child first. Called by <see cref="WorldUIManager"/>.</summary>
+        /// <returns>True when the console opened (or was already open); false when the panel itself is gone and it could not open.</returns>
+        public bool Open()
         {
             if (IsOpen)
-            {
-                // UI_BUGS #04 diagnostic — remove with the #04 instrumentation.
-                Debug.Log($"[UIBUG04] Open() no-op (already open). {DiagUIBug04State()}");
-                return;
-            }
+                return true;
 
-            _diagExpectedTransition = true; // UI_BUGS #04 diagnostic
+            // A heavy chunk-churn / origin-rebase can destroy the input field (and, defensively,
+            // any built child) out from under the live view (UI_BUGS #04). Reconstruct whatever is
+            // missing before showing, so the console can never open unusable.
+            if (!RebuildMissingChildren())
+                return false; // The panel itself is gone — a full teardown Awake owns, not Open().
+
             _panel.SetActive(true);
             _historyDirty = true;
             _autoscrollPending = true;
             StartCoroutine(FocusInputNextFrame());
-            // UI_BUGS #04 diagnostic — remove with the #04 instrumentation.
-            Debug.Log($"[UIBUG04] Open(): {DiagUIBug04State()}");
+            return true;
         }
 
         /// <summary>Closes the panel. Called by <see cref="WorldUIManager"/>.</summary>
         public void Close()
         {
             if (!IsOpen)
-            {
-                // UI_BUGS #04 diagnostic — remove with the #04 instrumentation.
-                Debug.Log($"[UIBUG04] Close() no-op (already closed). {DiagUIBug04State()}");
                 return;
-            }
 
-            _diagExpectedTransition = true; // UI_BUGS #04 diagnostic
             _inputField.DeactivateInputField();
             _inputField.text = "";
             _ghostText.text = "";
-            _ghostSourceText = null;
-            _ghostSourceCaret = -1;
-            _ghostSuffix = "";
+            ResetGhostTracking();
             _panel.SetActive(false);
-            // UI_BUGS #04 diagnostic — remove with the #04 instrumentation.
-            Debug.Log($"[UIBUG04] Close(): {DiagUIBug04State()}");
-        }
-
-        // UI_BUGS #04 diagnostics (temporary — remove with the #04 instrumentation): a disable
-        // of this component means an ANCESTOR GameObject was deactivated (or the object is being
-        // torn down) — the watchdog above cannot see that, so log it here.
-        private void OnEnable()
-        {
-            Debug.Log($"[UIBUG04] ConsoleUI OnEnable. {DiagUIBug04State()}, frame={Time.frameCount}");
-        }
-
-        private void OnDisable()
-        {
-            Debug.LogWarning($"[UIBUG04] ConsoleUI OnDisable — ancestor deactivated or teardown. {DiagUIBug04State()}, frame={Time.frameCount}");
         }
 
         /// <summary>
-        /// UI_BUGS #04 diagnostic: panel/input-field state summary — discriminates "panel inactive"
-        /// (state desync) from "panel active but field unfocused/hidden" (focus loss). Remove with
-        /// the #04 instrumentation.
+        /// Reconstructs any built object destroyed out from under the view (UI_BUGS #04) so
+        /// <see cref="Open"/> can never present a broken console. Heals at whatever level died: the
+        /// whole panel (rebuilt under the surviving canvas), or an individual build-unit (history
+        /// view, input field, ghost overlay). Clears a stray remnant first so a partial survivor
+        /// cannot leave a duplicate.
         /// </summary>
-        /// <returns>A log-friendly summary of the panel and input-field state.</returns>
-        public string DiagUIBug04State()
+        /// <returns>True when the panel exists (already whole or healed); false only if the rebuild failed.</returns>
+        private bool RebuildMissingChildren()
         {
             if (_panel == null)
-                return "panel=null";
-            return $"panelActiveSelf={_panel.activeSelf}, panelInHierarchy={_panel.activeInHierarchy}, " +
-                   $"inputGoActive={(_inputField != null && _inputField.gameObject.activeInHierarchy)}, " +
-                   $"inputFocused={(_inputField != null && _inputField.isFocused)}, " +
-                   $"inputText='{(_inputField != null ? _inputField.text : "<null>")}'";
+            {
+                // The ConsolePanel child was destroyed but this component (and its canvas) survive,
+                // so rebuild the whole panel + contents rather than giving up. Only the Console
+                // GameObject / canvas being destroyed is unrecoverable — but then this code can't run.
+                Debug.LogWarning($"Console panel destroyed externally; rebuilding it (UI_BUGS #04, root cause unresolved). frame={Time.frameCount}");
+                DestroyChildByName(transform, "ConsolePanel");
+                BuildPanel();
+                ResetGhostTracking();
+                _historyDirty = true; // repopulate history from the engine's ring on the next LateUpdate
+                if (_panel == null)
+                {
+                    Debug.LogError("Console panel rebuild failed; cannot open (UI_BUGS #04).");
+                    return false;
+                }
+
+                return true; // BuildPanel reconstructed the panel, history, and input field.
+            }
+
+            RectTransform panelRect = (RectTransform)_panel.transform;
+
+            if (_scrollRect == null || _historyText == null)
+            {
+                Debug.LogWarning($"Console history view destroyed externally; rebuilding (UI_BUGS #04, root cause unresolved). frame={Time.frameCount}");
+                DestroyChildByName(panelRect, "History");
+                BuildHistoryView(panelRect);
+                _historyDirty = true; // repopulate from the engine's ring on the next LateUpdate
+            }
+
+            if (_inputField == null)
+            {
+                Debug.LogWarning($"Console input field destroyed externally; rebuilding (UI_BUGS #04, root cause unresolved). frame={Time.frameCount}");
+                DestroyChildByName(panelRect, "Input");
+                BuildInputField(panelRect);
+                ResetGhostTracking();
+                // Mid-open heal must refocus; Open()'s own coroutine covers the closed->open case (panel not yet active here).
+                if (IsOpen)
+                    _inputField.ActivateInputField();
+            }
+            else if (_ghostText == null)
+            {
+                // Only the inline-suggestion overlay died — rebuild it alone, preserving the live field and its typed text.
+                Debug.LogWarning($"Console ghost overlay destroyed externally; rebuilding (UI_BUGS #04, root cause unresolved). frame={Time.frameCount}");
+                BuildGhostOverlay();
+                ResetGhostTracking();
+            }
+            else if (!_inputField.gameObject.activeSelf)
+            {
+                // Belt-and-suspenders for the demoted "field alive but GameObject inactive" hypothesis.
+                _inputField.gameObject.SetActive(true);
+            }
+
+            return true;
+        }
+
+        /// <summary>Clears the cached inline-ghost tracking so it recomputes against the current field (mirrors <see cref="Close"/>).</summary>
+        private void ResetGhostTracking()
+        {
+            _ghostSourceText = null;
+            _ghostSourceCaret = -1;
+            _ghostSuffix = "";
+        }
+
+        /// <summary>Destroys a direct child of <paramref name="parent"/> by name when a remnant survives, so a rebuild cannot duplicate it.</summary>
+        /// <param name="parent">The transform whose child to clear.</param>
+        /// <param name="childName">The child GameObject name ("ConsolePanel", "History", or "Input").</param>
+        private static void DestroyChildByName(Transform parent, string childName)
+        {
+            Transform remnant = parent.Find(childName);
+            if (remnant != null)
+                Destroy(remnant.gameObject);
         }
 
         /// <summary>
@@ -272,8 +313,6 @@ namespace UI
             yield return null;
             _inputField.text = "";
             _inputField.ActivateInputField();
-            // UI_BUGS #04 diagnostic — remove with the #04 instrumentation.
-            Debug.Log($"[UIBUG04] FocusInputNextFrame ran. {DiagUIBug04State()}, frame={Time.frameCount}");
         }
 
         /// <summary>Marks the history view dirty; autoscrolls only when the view was already at the bottom.</summary>
@@ -330,7 +369,7 @@ namespace UI
         //  Hierarchy construction (runtime, code-only)
         // ──────────────────────────────────────────────
 
-        /// <summary>Builds the overlay canvas, panel, scrollable history, and input field.</summary>
+        /// <summary>Builds the overlay canvas (once, in <see cref="Awake"/>) then the panel and its contents.</summary>
         private void BuildHierarchy()
         {
             // Own overlay canvas so the console sorts above the HUD without touching scene objects.
@@ -342,6 +381,16 @@ namespace UI
             scaler.referenceResolution = new Vector2(REFERENCE_WIDTH, REFERENCE_HEIGHT);
             gameObject.AddComponent<GraphicRaycaster>();
 
+            BuildPanel();
+        }
+
+        /// <summary>
+        /// Builds the panel backdrop and its history + input children under this view's canvas.
+        /// Separate from the one-time canvas setup so it can be re-called to self-heal a destroyed
+        /// panel (UI_BUGS #04) without duplicating the canvas components on this GameObject.
+        /// </summary>
+        private void BuildPanel()
+        {
             // Panel: bottom-left translucent backdrop.
             _panel = new GameObject("ConsolePanel", typeof(RectTransform), typeof(Image));
             _panel.transform.SetParent(transform, false);
@@ -412,6 +461,7 @@ namespace UI
             GameObject inputGo = TMP_DefaultControls.CreateInputField(new TMP_DefaultControls.Resources());
             inputGo.name = "Input";
             inputGo.transform.SetParent(panelRect, false);
+            inputGo.AddComponent<InputFieldDeathSentinel>(); // UI_BUGS #04 tripwire — see the class below.
 
             RectTransform inputRect = (RectTransform)inputGo.transform;
             inputRect.anchorMin = new Vector2(0f, 0f);
@@ -471,6 +521,19 @@ namespace UI
             _ghostText.overflowMode = TextOverflowModes.Overflow;
             _ghostText.color = Color.white;
             _ghostText.text = "";
+        }
+
+        // UI_BUGS #04 tripwire (permanent while root cause unresolved): the field self-heals, but this
+        // logs the exact frame it dies mid-play for correlation. scene.isLoaded is false during scene /
+        // play-session / app teardown, so normal shutdown is suppressed.
+        private sealed class InputFieldDeathSentinel : MonoBehaviour
+        {
+            private void OnDestroy()
+            {
+                if (!gameObject.scene.isLoaded)
+                    return;
+                Debug.LogWarning($"Console input field destroyed externally mid-play (UI_BUGS #04, root cause unresolved). frame={Time.frameCount}");
+            }
         }
     }
 }
