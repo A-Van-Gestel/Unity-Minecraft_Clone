@@ -794,23 +794,6 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
                 continue;
             }
 
-            // §3.2 Out-of-range discard: if the player moved so far during this job's flight that the
-            // chunk is now beyond the unload boundary, populating + lighting + meshing it is wasted work
-            // for a chunk World.UnloadChunks is about to reclaim (this is the memory-spiral relief in
-            // CHUNK_PIPELINE_PERFORMANCE_ANALYSIS §3.2). Dispose the result instead — the unmodified
-            // generation output is fully seed-regenerable, so there is nothing to save. The placeholder
-            // (unpopulated, no light flags, beyond unloadDistance) is reclaimed by UnloadChunks, which
-            // clears its IsLoading via ChunkData.Reset. The threshold shares World.UnloadDistanceBuffer
-            // with UnloadChunks so it can never drift inside the unload boundary.
-            int genDistX = Mathf.Abs(jobEntry.Key.X - _world.PlayerChunkCoord.X);
-            int genDistZ = Mathf.Abs(jobEntry.Key.Z - _world.PlayerChunkCoord.Z);
-            if (Mathf.Max(genDistX, genDistZ) > _world.settings.LoadDistance + World.UnloadDistanceBuffer)
-            {
-                ReleaseGenerationJobData(jobEntry.Value);
-                _completedGenJobs.Add(jobEntry.Key);
-                continue;
-            }
-
             // Fault isolation, stage 2 (HF-2): one faulted job must not abort the pass — released
             // jobs stranded in GenerationJobs get re-touched every frame (the ObjectDisposedException
             // cascade, fidelity B7). The budget-retry paths (jobFullyProcessed) intentionally keep the
@@ -819,6 +802,33 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
             bool released = false;
             try
             {
+                // §3.2 Out-of-range discard: if the player moved so far during this job's flight that the
+                // chunk is now beyond the unload boundary, populating + lighting + meshing it is wasted work
+                // for a chunk World.UnloadChunks is about to reclaim (the memory-spiral relief in
+                // CHUNK_PIPELINE_PERFORMANCE_ANALYSIS §3.2). Dispose the result instead — the unmodified
+                // generation output is fully seed-regenerable, so there is nothing to save. The threshold
+                // shares World.UnloadDistanceBuffer with UnloadChunks so it can never drift inside the
+                // unload boundary. Gated on EnablePersistence: when unloading is disabled (keepChunksInMemory)
+                // UnloadChunks never reclaims the placeholder, so discarding there would strand a permanent
+                // hole — populate normally instead. IsLoading is cleared so that if the player returns to
+                // range before UnloadChunks reclaims the placeholder, CheckViewDistance's !IsLoading guard
+                // re-enqueues it (otherwise the chunk is stuck unpopulated + unloadable forever). Runs inside
+                // the fault-isolation try so a release fault here can't abort the whole pass.
+                if (_world.settings.EnablePersistence)
+                {
+                    int genDistX = Mathf.Abs(jobEntry.Key.X - _world.PlayerChunkCoord.X);
+                    int genDistZ = Mathf.Abs(jobEntry.Key.Z - _world.PlayerChunkCoord.Z);
+                    if (Mathf.Max(genDistX, genDistZ) > _world.settings.LoadDistance + World.UnloadDistanceBuffer)
+                    {
+                        if (_world.worldData.TryGetChunk(jobEntry.Key.ToVoxelOrigin(), out ChunkData staleData))
+                            staleData.IsLoading = false;
+                        ReleaseGenerationJobData(jobEntry.Value);
+                        _completedGenJobs.Add(jobEntry.Key);
+                        released = true;
+                        continue;
+                    }
+                }
+
                 ChunkData chunkData = _world.worldData.RequestChunk(jobEntry.Key.ToVoxelOrigin(), true);
 
                 // --- STAGE 1: Populate with base terrain (Once per chunk) ---

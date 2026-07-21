@@ -239,12 +239,20 @@ remain open. On-disk format unchanged (no migration).
     job buffers, and disk-*hit* chunks never become generation jobs so they never count. The
     startup path (`ForceCompleteDataJobsCoroutine`) is unaffected — `Update` early-returns until
     `_isWorldLoaded`, so it schedules directly, bypassing the cap (avoids the §1.1 pooling incident).
-- **§3.2 out-of-range discard.** `WorldJobManager.ProcessGenerationJobs`, immediately after
-  `Handle.Complete()`, discards a completed job whose chunk is now beyond the unload boundary
-  (`LoadDistance + World.UnloadDistanceBuffer`, a new shared constant so the discard boundary can
-  never drift inside the unload boundary): `ReleaseGenerationJobData` + skip populate/structures/
-  lighting. No save — unmodified generation output is seed-regenerable. The unpopulated placeholder
-  is reclaimed by `UnloadChunks`, which clears its `IsLoading` via `ChunkData.Reset`.
+- **§3.2 out-of-range discard.** `WorldJobManager.ProcessGenerationJobs` discards a completed job
+  whose chunk is now beyond the unload boundary (`LoadDistance + World.UnloadDistanceBuffer`, a
+  shared constant so the discard boundary can never drift inside the unload boundary):
+  `ReleaseGenerationJobData` + skip populate/structures/lighting. No save — unmodified generation
+  output is seed-regenerable. The unpopulated placeholder is reclaimed by `UnloadChunks`.
+  - **Runs inside the HF-2 fault-isolation `try`** so a release fault can't abort the whole pass.
+  - **Gated on `EnablePersistence`:** when unloading is disabled (`keepChunksInMemory`) `UnloadChunks`
+    never reclaims the placeholder, so the chunk is populated normally instead of stranding a hole.
+  - **Clears `IsLoading`:** otherwise a chunk that re-enters load range before `UnloadChunks` reclaims
+    it would be blocked from re-enqueue by `CheckViewDistance`'s `!IsLoading` guard — a permanent hole.
+  - **Disk-load decoupling (§3.1 drain):** the cap uses two separate bounds
+    (`GenerationJobs.Count < cap` **and** `admittedThisFrame < cap`, not their sum) so saved-region disk
+    loads are not throttled behind new-terrain generation; the trade is a bounded ~2×cap transient in
+    tracked jobs when a frame admits many disk-miss chunks at a high count.
 
 ---
 

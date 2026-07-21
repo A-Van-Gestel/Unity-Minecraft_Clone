@@ -2884,24 +2884,33 @@ public class World : MonoBehaviour
     /// <see cref="Settings.maxInFlightGenerationJobs"/> (P-4 §3.1 backpressure). Called once per frame.
     /// </summary>
     /// <remarks>
-    /// Soft cap: the gate counts tracked generation jobs plus this frame's admissions, mirroring the mesh
-    /// in-flight cap. A request admitted here enters the async <see cref="LoadOrGenerateChunk"/> disk-load
-    /// phase before it becomes a tracked generation job, so the true in-flight total can briefly exceed the
-    /// cap by the number of disk-miss chunks still awaiting their disk probe. That overshoot is bounded and
-    /// small (a not-on-disk probe resolves in well under a frame) and holds no job buffers, so it does not
-    /// defeat the native-memory ceiling the cap enforces. Disk-<i>hit</i> chunks never become generation
-    /// jobs, so they never count against this cap at all.
+    /// Soft cap with two independent bounds (both use the same <c>cap</c>):
+    /// <list type="bullet">
+    /// <item><b>Memory bound</b> — <c>GenerationJobs.Count &lt; cap</c> bounds tracked generation-job buffers.</item>
+    /// <item><b>Flood bound</b> — <c>admittedThisFrame &lt; cap</c> caps per-frame admissions, since
+    /// <see cref="LoadOrGenerateChunk"/> is async (a chunk enters the disk-load phase before it becomes a
+    /// tracked job, unlike the synchronous mesh schedule whose count rises in-loop) — without it one frame
+    /// would flood the whole backlog into the async pipeline.</item>
+    /// </list>
+    /// The two are <b>separate</b> conditions, not a sum, so disk-<i>hit</i> chunks (which never become
+    /// generation jobs) flow at up to <c>cap</c>/frame without being starved behind generation. The cost of
+    /// decoupling: within a single frame the memory bound reads a not-yet-updated <c>GenerationJobs.Count</c>,
+    /// so a frame that admits many disk-<i>miss</i> chunks while the count is already high can transiently
+    /// push tracked jobs to ~2×<c>cap</c> before the next frame's re-check throttles admission. That overshoot
+    /// is bounded and drains within a frame or two; it is the accepted trade for not throttling saved-region
+    /// disk loads behind new-terrain generation (finding #3 / overlaps SU-2).
     /// </remarks>
     private void DrainGenerationRequests()
     {
         int cap = Mathf.Max(1, settings.maxInFlightGenerationJobs);
         int admittedThisFrame = 0;
 
-        // admittedThisFrame covers requests admitted this frame that are still in the async disk-load phase
-        // and have not yet become tracked jobs. Gating on the sum bounds per-frame admission to the headroom,
-        // so one frame cannot flood the whole backlog into the async pipeline (LoadOrGenerateChunk is async,
-        // unlike the synchronous mesh schedule whose count rises in-loop).
-        while (_generationRequestQueue.Count > 0 && JobManager.GenerationJobs.Count + admittedThisFrame < cap)
+        // Two independent bounds (see remarks): GenerationJobs.Count < cap is the memory bound; admittedThisFrame
+        // < cap is the per-frame flood bound (LoadOrGenerateChunk is async, so admissions don't raise the count
+        // in-loop). Keeping them separate — not summed — lets disk-hit loads flow without eating gen headroom.
+        while (_generationRequestQueue.Count > 0
+               && JobManager.GenerationJobs.Count < cap
+               && admittedThisFrame < cap)
         {
             ChunkCoord chunkCoord = _generationRequestQueue.Dequeue();
             _pendingGenerationRequests.Remove(chunkCoord);

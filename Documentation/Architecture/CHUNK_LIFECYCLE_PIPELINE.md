@@ -27,7 +27,7 @@ Each `ChunkData` instance carries the following transient flags that control pip
 | Flag                          | Type | Set By                                                                                                                              | Cleared By                                                | Purpose                                                                                                               |
 |-------------------------------|------|-------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------|
 | `IsPopulated`                 | bool | `Populate()` / `PopulateFromSave()`                                                                                                 | `Reset()` (pool recycle)                                  | Voxel data exists and is valid                                                                                        |
-| `IsLoading`                   | bool | `DrainGenerationRequests()` (at admission; `CheckViewDistance()` only *enqueues*, P-4 §3.1)                                          | Never explicitly cleared (reset on pool recycle)          | Prevents duplicate disk load requests                                                                                 |
+| `IsLoading`                   | bool | `DrainGenerationRequests()` (at admission; `CheckViewDistance()` only *enqueues*, P-4 §3.1)                                          | `ChunkData.Reset()` (pool recycle); **§3.2 out-of-range discard** in `ProcessGenerationJobs` clears it so a chunk returning to range re-enqueues instead of stranding | Prevents duplicate disk load requests                                                                                 |
 | `NeedsInitialLighting`        | bool | `ProcessGenerationJobs()` / `PopulateFromSave()`                                                                                    | `Update()` lighting scan after scheduling initial pass    | Chunk has terrain but no lighting yet                                                                                 |
 | `HasLightChangesToProcess`    | bool | `AddToSunLightQueue()`, `AddToBlockLightQueue()`, cross-chunk mods, edge check scheduling                                           | `ScheduleLightingUpdate()`                                | Pending light changes in managed queues                                                                               |
 | `NeedsEdgeCheck`              | bool | Post-stabilization re-arm (`ProcessLightingJobs`), neighbor propagation, or disk load                                               | `ScheduleLightingUpdate()`                                | Border voxels need validation against neighbors                                                                       |
@@ -286,8 +286,8 @@ flowchart TD
 
     subgraph "ProcessGenerationJobs (Main Thread, next frame)"
         C1 --> D1["job.Handle.Complete()"]
-        D1 --> DDISC{"Chunk now beyond<br/>unload boundary? (P-4 §3.2)"}
-        DDISC -- Yes --> DDISC2["ReleaseGenerationJobData()<br/>discard, no populate/save<br/>(UnloadChunks reclaims placeholder)"]
+        D1 --> DDISC{"Persistence on AND chunk now<br/>beyond unload boundary? (P-4 §3.2)"}
+        DDISC -- Yes --> DDISC2["Clear IsLoading + ReleaseGenerationJobData()<br/>discard, no populate/save<br/>(UnloadChunks reclaims; return-to-range re-enqueues)"]
         DDISC -- No --> D2["chunkData.Populate(map, heightMap)"]
         D2 --> D3["Apply flora mods (trees)"]
         D3 --> D4["Apply pending mods from disk"]
