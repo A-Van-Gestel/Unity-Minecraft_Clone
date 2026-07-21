@@ -62,6 +62,7 @@ namespace UI
             SettingsTab.World,
             SettingsTab.Performance,
             SettingsTab.Benchmark,
+            SettingsTab.DebugScreen,
             SettingsTab.Dev,
         };
 
@@ -553,6 +554,12 @@ namespace UI
         /// <summary>
         /// Instantiates a tab button and content panel for the given tab.
         /// </summary>
+        /// <summary>Inserts spaces before interior capitals so a camelCase tab name (e.g. "DebugScreen") renders as "Debug Screen"; single-word tabs are unchanged.</summary>
+        /// <param name="s">The raw enum name to prettify.</param>
+        /// <returns>The spaced display string.</returns>
+        private static string SplitCamelCase(string s) =>
+            System.Text.RegularExpressions.Regex.Replace(s, "(?<=[a-z0-9])([A-Z])", " $1");
+
         private TabEntry CreateTab(SettingsTab tab)
         {
             // Instantiate tab button
@@ -565,7 +572,7 @@ namespace UI
             // Set button label text
             TextMeshProUGUI buttonLabel = buttonObj.GetComponentInChildren<TextMeshProUGUI>();
             if (buttonLabel != null)
-                buttonLabel.text = tab.ToString();
+                buttonLabel.text = SplitCamelCase(tab.ToString());
 
             Button button = buttonObj.GetComponent<Button>();
 
