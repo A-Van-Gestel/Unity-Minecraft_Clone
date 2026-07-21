@@ -2945,6 +2945,9 @@ public class World : MonoBehaviour
                     deferJob++;
                     continue;
                 case ChunkUnloadDecision.Result.DeferLightPending:
+                    // Currently unreachable — Evaluate no longer returns this since P-4 rec 3 routes
+                    // light-pending out-of-range chunks to UnloadPersistLightPending. Retained as the
+                    // CP-1 tally slot / LP-3 coordination point (see the enum's docstring).
                     deferLight++;
                     continue;
                 case ChunkUnloadDecision.Result.DeferWouldStrand:
@@ -2954,13 +2957,16 @@ public class World : MonoBehaviour
                     continue; // Unreachable: Step A pre-filters to beyond-unload candidates.
                 case ChunkUnloadDecision.Result.UnloadPersistLightPending:
                     // P-4 rec 3: this out-of-range chunk is pinned only by its own pending lighting, which
-                    // can never complete (missing-neighbor gate). Force a full re-light on reload — captured
-                    // by the synchronous save snapshot (SaveChunkAsync), or fresh on regeneration for an
-                    // unmodified chunk — then fall through to the shared persist/save/teardown below. Its
-                    // pending sunlight columns are persisted by step 1; edits (if any) are saved by step 2.
-                    data.NeedsInitialLighting = true;
+                    // can never complete (missing-neighbor gate). Persist/save/teardown as for Unload; if it
+                    // carries edits, the save block below also forces a full re-light on reload.
                     lightPersisted++;
                     break;
+                case ChunkUnloadDecision.Result.Unload:
+                    break; // Proceed to teardown.
+                default:
+                    // Defensive: a future arm must add its own case. Defer (never wrongly unload) and log loud.
+                    Debug.LogError($"[UnloadChunks] Unhandled unload decision {decision} for {chunkCoord} — deferring.");
+                    continue;
             }
 
             // decision == Unload or UnloadPersistLightPending — proceed to persist / save / pool teardown.
@@ -2983,6 +2989,14 @@ public class World : MonoBehaviour
             // 2. Save if modified
             if (worldData.ModifiedChunks.Contains(data))
             {
+                // P-4 rec 3: a persist-arm chunk that carries edits must re-light fully on reload (its
+                // in-flight lighting could never complete). Force it here — right before the snapshot, which
+                // SaveChunkAsync takes synchronously so the flag is captured. Unmodified persist-arm chunks
+                // are not saved and regenerate from seed (fresh lighting), so they need no flag — keeping this
+                // off their path avoids flagging a chunk we immediately delete (review finding #1).
+                if (decision == ChunkUnloadDecision.Result.UnloadPersistLightPending)
+                    data.NeedsInitialLighting = true;
+
                 // Fire and forget (StorageManager handles the Snapshot lifecycle)
                 Task saveTask = StorageManager.SaveChunkAsync(data, _shutdownTokenSource.Token);
 
