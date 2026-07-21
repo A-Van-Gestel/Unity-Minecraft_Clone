@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using UnityEngine;
 
 namespace Helpers
@@ -33,6 +34,12 @@ namespace Helpers
         }
 
         public int ActiveCount { get; private set; } // Atomic update recommended if strict accuracy needed, but volatile int is okay for debug stats
+
+        // Interlocked: destroys can run on the main thread (prune) while the pool is touched by background serialization.
+        private long _totalDestroyed;
+
+        /// <summary>Cumulative count of instances permanently destroyed by pruning/clear (CP-1 pool-churn probe).</summary>
+        public long TotalDestroyed => Interlocked.Read(ref _totalDestroyed);
 
         // Pruning State
         private float _cleanupTimer = 0f;
@@ -88,6 +95,7 @@ namespace Helpers
                 while (_pool.Count > 0)
                 {
                     _destroyAction(_pool.Pop());
+                    Interlocked.Increment(ref _totalDestroyed);
                 }
 
                 ActiveCount = 0;
@@ -119,7 +127,11 @@ namespace Helpers
                 }
 
                 // Destroy OUTSIDE lock
-                if (item != null) _destroyAction(item);
+                if (item != null)
+                {
+                    _destroyAction(item);
+                    Interlocked.Increment(ref _totalDestroyed);
+                }
             }
         }
     }

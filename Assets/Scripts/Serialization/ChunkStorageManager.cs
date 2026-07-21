@@ -14,6 +14,30 @@ namespace Serialization
         private readonly string _saveFolderPath;
         private readonly IRegionAddressCodec _codec;
 
+        // CP-1 save-durability probe (F5 evidence). Static so the debug HUD can read them without a manager ref.
+        // Interlocked: SaveChunkAsync's body resumes on a ThreadPool thread, so Completed/Failed cross threads.
+        private static long s_savesFired;
+        private static long s_savesCompleted;
+        private static long s_savesFailed;
+
+        /// <summary>Cumulative count of <see cref="SaveChunkAsync"/> invocations (CP-1 probe).</summary>
+        public static long SavesFired => Interlocked.Read(ref s_savesFired);
+
+        /// <summary>Cumulative count of async saves that reached the write without throwing (CP-1 probe).</summary>
+        public static long SavesCompleted => Interlocked.Read(ref s_savesCompleted);
+
+        /// <summary>Cumulative count of async saves that threw and were swallowed by the catch (CP-1 probe; the F5 durability hole CP-6 closes).</summary>
+        public static long SavesFailed => Interlocked.Read(ref s_savesFailed);
+
+        /// <summary>Resets the CP-1 save counters on each play-mode entry (safe when domain reload is disabled).</summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetSaveProbeCounters()
+        {
+            s_savesFired = 0;
+            s_savesCompleted = 0;
+            s_savesFailed = 0;
+        }
+
         // Concurrent Dictionary with Lazy to ensure thread-safe, single initialization of RegionFiles
         private readonly ConcurrentDictionary<Vector2Int, Lazy<RegionFile>> _regions = new ConcurrentDictionary<Vector2Int, Lazy<RegionFile>>();
 
@@ -128,6 +152,8 @@ namespace Serialization
         /// <returns>A task representing the asynchronous save operation.</returns>
         public async Task SaveChunkAsync(ChunkData data, CancellationToken cancellationToken = default)
         {
+            Interlocked.Increment(ref s_savesFired);
+
             // 1. Get Preferred Algorithm from Global Settings
             CompressionAlgorithm algorithm = World.Instance.settings.saveCompression;
 
@@ -147,7 +173,7 @@ namespace Serialization
                 {
                     // Serialize
                     int length = ChunkSerializer.Serialize(snapshot, buffer, algorithm);
-                    // Check token again before disk write to prevent writing partial/cancelled state
+                    // Check token again before disk write to prevent writing partial/canceled state
                     if (length <= 0 || cancellationToken.IsCancellationRequested) return;
 
                     // Write
@@ -155,6 +181,10 @@ namespace Serialization
                     RegionFile region = GetRegion(regionCoord);
 
                     region.SaveChunkData(lx, lz, buffer, length, algorithm);
+
+                    // Count only a real disk write (skips the length<=0 / canceled early-returns above),
+                    // so SavesCompleted reflects actual writes rather than every non-throwing invocation.
+                    Interlocked.Increment(ref s_savesCompleted);
                 }, cancellationToken);
             }
             catch (OperationCanceledException)
@@ -163,6 +193,7 @@ namespace Serialization
             }
             catch (Exception e)
             {
+                Interlocked.Increment(ref s_savesFailed);
                 Debug.LogError($"[SaveChunkAsync] Failed to save chunk at voxelPos {data.Position.ToString()}: {e.Message}");
             }
             finally

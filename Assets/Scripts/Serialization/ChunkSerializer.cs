@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using Data;
 using Helpers;
 using UnityEngine;
@@ -28,6 +29,17 @@ namespace Serialization
         //          instead of full LightData. New flag 0x03 for light-only with full LightData.
         //          See Migration_v9_to_v10_StripLightBitsAndNewFlags.cs.
         private const byte CURRENT_CHUNK_VERSION = 7;
+
+        // CP-1 probe (F1 corruption signal): parse failures only — distinct from the benign "not on disk"
+        // null in ChunkStorageManager.LoadChunkAsync. Runs on the background deserialize thread.
+        private static long s_deserializeFailures;
+
+        /// <summary>Cumulative count of chunk payloads that failed to deserialize and returned null (CP-1 probe).</summary>
+        public static long DeserializeFailures => Interlocked.Read(ref s_deserializeFailures);
+
+        /// <summary>Resets the CP-1 deserialize-failure counter on each play-mode entry (safe when domain reload is disabled).</summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetDeserializeProbeCounter() => s_deserializeFailures = 0;
 
         // Section type flags (v7).
         // 0x00: Voxels + uniform sky level (1B sky + 2B nonAirCount + voxels)
@@ -95,6 +107,7 @@ namespace Serialization
                     }
                     catch (Exception ex)
                     {
+                        Interlocked.Increment(ref s_deserializeFailures);
                         Debug.LogWarning($"[Deserialize] Chunk {debugCoord} deserialization failed ({algorithm}). Payload: {data.Length} bytes. Error: {ex.GetType().Name} - {ex.Message}");
                         return null;
                     }

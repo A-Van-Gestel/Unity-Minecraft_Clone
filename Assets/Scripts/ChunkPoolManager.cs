@@ -27,6 +27,13 @@ public class ChunkPoolManager
     public int PooledBorders => _borderPool.PooledCount;
     public int PooledVisualizers => _visualizerPool.PooledCount;
 
+    // Cumulative prune/clear destroy counts per pool (CP-1 pool-churn probe; F4 evidence for CP-7).
+    public long DestroyedChunks => _chunkPool.TotalDestroyed;
+    public long DestroyedData => _dataPool.TotalDestroyed;
+    public long DestroyedSections => _sectionPool.TotalDestroyed;
+    public long DestroyedBorders => _borderPool.TotalDestroyed;
+    public long DestroyedVisualizers => _visualizerPool.TotalDestroyed;
+
     // --- Cleanup Settings ---
     private int _targetViewDistance;
     private const float POOL_BUFFER_PERCENTAGE = 1.25f; // Keep 25% extra as buffer

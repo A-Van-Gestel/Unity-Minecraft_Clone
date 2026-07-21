@@ -351,6 +351,53 @@ ship their suites/baselines in the same commit as the code.
   save-heavy exit) with results recorded here (Amended line). CP-3/6/7 read this evidence.
 - **Doc-sync:** none (no behavior). **Serialization:** none.
 
+> **Amended (2026-07-21, branch `feat/world-scaling`): implemented; regression-green; in-game soak pending.**
+> Probes shipped, no behavior change. Files (the §7 3-file scope was under-listed — real edit set):
+> `Helpers/DynamicPool.cs` + `Helpers/ConcurrentDynamicPool.cs` (cumulative `TotalDestroyed`, `Interlocked`
+> on the concurrent pool) surfaced per-pool via `ChunkPoolManager.Destroyed*`; `ChunkStorageManager.cs`
+> (`SavesFired`/`SavesCompleted`/`SavesFailed` — fired at method entry so both fire sites are captured,
+> failed in the existing swallow-catch); `ChunkSerializer.cs` (`DeserializeFailures` in the parse catch);
+> `World.cs` (load-arm fault wrapper `LoadOrGenerateChunk` → `LoadOrGenerateChunkInner`; unload per-reason
+> deferral + per-pass tallies; stuck-`IsLoading` detector on the fail-safe scan); `DebugScreen.cs`
+> (middle-left "CHUNK LIFECYCLE (CP-1)" panel, Full mode).
+>
+> **Decisions taken** (session decision-menu): (1) *always-on* display counters (unload/save/pool/deserialize),
+> only the load-arm fault counter + stuck detector dev-gated via dual `[Conditional]`; (2) the fail-safe scan
+> was *restructured to always walk* `ChunkValues` — the stuck detector rides the existing lighting scan when
+> lighting is on and a dedicated dev-only walk when it is off, so it works in all configs without a second
+> walk; (3) `SavesFailed` increments *inside the existing catch* (real failure count, pure probe).
+>
+> **Drift corrections found vs this doc's pre-P-4 §2.1/F1 audit** (fold in when §2 is next re-anchored):
+> (A) `CheckViewDistance` no longer fires `LoadOrGenerateChunk` — it enqueues; `DrainGenerationRequests`
+> (P-4 §3.1) is the sole runtime fire site and sets `IsLoading` at admission. The "await site W:2551 /
+> gate W:2547" anchors are stale. (B) `IsLoading` now *has* a non-`Reset` clear site
+> (`WorldJobManager` §3.2 discard); "nothing clears `IsLoading`" holds only for the *fault* path now.
+> (C) There are **two** `SaveChunkAsync` fire sites (`UnloadChunks` + `SaveModifiedChunks`); F5 names only
+> the first. (D) The load-arm wrapper is the exact seam CP-3 converts (its `catch` → log → clear
+> `IsLoading` → return).
+>
+> **Verification done:** `dotnet build Assembly-CSharp.csproj` clean (0 errors); Unity recompiled (fresh DLL);
+> universal gate green against fresh DLL — **Lighting 88/88, Meshing 23/23, Mesh Build Queue 9/9**, no errors /
+> `[FAIL]` / isolation violations. The fail-safe-scan restructure is the risk edit; Lighting 88/88 (incl.
+> convergence) is its regression proof.
+>
+> **Amended (2026-07-21): in-game soak result — Q1 answered, and it confirms the §3.3 pinned-trail is real.**
+> Fly-around soak then stationary ≥10 s (the pinned set did **not** drain while stationary). HUD after settling:
+> `Unloaded last pass 17 · Deferred job 0 / light 308 / strand 395 · Saves 1795/1795/0 · Deserialize 0 ·
+> Load-arm faults 0 · Stuck loading 0 · Pool destroys chunk 0 / data 145 / sect 346`. A read-only live probe
+> (`World.Instance` walk) classified the pinned set: **totalLoaded 1096, beyondUnload 743 (all populated),
+> lightPending 327, initialLighting 231, needsEdge 137, awaitingMainThread 0; of the 343 light-/initial-pinned
+> chunks, 343 have a missing neighbor and 0 have all neighbors present; strandCandidates 739.** Verdict:
+> **~68 % of loaded chunks sit beyond unload distance and cannot be reclaimed** — trailing-edge chunks whose
+> outer neighbors were never generated fail the neighbor-data gate, so their lighting never completes, so
+> `UnloadChunks` light-pins them permanently and strand-pins their inward neighbors. `awaitingMainThread=0` +
+> `allNeighborsPresent=0` rule out a genuine stall — this is exactly the **F6 / §3.3 pinned-trail** and the
+> target of **P-4 rec 3 / CP-5** (unload light-pending out-of-range chunks by persisting their pending lighting).
+> Clean signals: **Saves 0 failed (F5 clean), Deserialize 0, Load-arm faults 0, Stuck loading 0** — no silent
+> stall or durability loss in normal play (F1/F5 injection tests still pending). Pool churn: **chunk pool
+> destroys 0 while data/section churn (145/346)** — the **F4** width-vs-area asymmetry, CP-7 evidence.
+> **This soak strongly prioritizes P-4 rec 3 / CP-5** (🔴, deadlock history — own plan + `chunk-lifecycle`).
+
 ### CP-2 — WS-1 execution: shift/mask chunk math + NS-5 equivalence suite (🟡)
 
 - **Scope:** §4.2. Helpers in `ChunkMath` (`public const`/aggressive-inline static int ops);

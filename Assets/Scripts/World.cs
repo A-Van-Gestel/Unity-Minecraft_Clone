@@ -318,6 +318,43 @@ public class World : MonoBehaviour
     private readonly Queue<ChunkCoord> _generationRequestQueue = new Queue<ChunkCoord>();
     private readonly HashSet<ChunkCoord> _pendingGenerationRequests = new HashSet<ChunkCoord>();
 
+    // --- CP-1 lifecycle observability probes ---
+    // Always-on tallies (unload deferral reasons, per-pass unload count) surfaced on the debug HUD.
+    // The load-arm fault counter and stuck-IsLoading detector are dev/editor-only (see CountLoadFault / the
+    // fail-safe scan). None of these change behavior — they instrument the silent-by-construction failure
+    // modes catalogued in CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md §2.4 (F1/F5/F6) so CP-3/6/7 land on data.
+    private long _unloadDeferJobRunning;
+    private long _unloadDeferLightPending;
+    private long _unloadDeferWouldStrand;
+    private long _unloadedLastPass;
+
+    /// <summary>Deferred unloads because a generation/mesh/lighting job still owns the chunk (CP-1, F6).</summary>
+    public long UnloadDeferJobRunning => _unloadDeferJobRunning;
+
+    /// <summary>Deferred unloads because the chunk had pending light work (CP-1, F6).</summary>
+    public long UnloadDeferLightPending => _unloadDeferLightPending;
+
+    /// <summary>Deferred unloads because a populated neighbor still needed this chunk's data (CP-1, F6 §9.6 strand rule).</summary>
+    public long UnloadDeferWouldStrand => _unloadDeferWouldStrand;
+
+    /// <summary>Chunks actually unloaded in the most recent <c>UnloadChunks</c> pass (CP-1).</summary>
+    public long UnloadedLastPass => _unloadedLastPass;
+
+    // Load-arm fault counter (F1). Dev/editor-only: incremented via CountLoadFault, compiled out in release.
+    private static long s_loadArmFaults;
+
+    /// <summary>Cumulative faults escaping the load arm (dev/editor builds only; F1 — today's silent loss, until CP-3).</summary>
+    public static long LoadArmFaults => Interlocked.Read(ref s_loadArmFaults);
+
+    // Stuck-IsLoading detector state (F1): coords seen IsLoading && !IsPopulated in the previous fail-safe scan,
+    // and the count that persisted across two consecutive scans (i.e. stuck >= ~1s). Dev/editor-only.
+    private readonly HashSet<Vector2Int> _prevScanLoadingChunks = new HashSet<Vector2Int>();
+    private readonly HashSet<Vector2Int> _scanLoadingChunks = new HashSet<Vector2Int>();
+    private int _stuckLoadingChunks;
+
+    /// <summary>Chunks stuck <c>IsLoading &amp;&amp; !IsPopulated</c> across two consecutive ~1s scans (dev/editor only; F1).</summary>
+    public int StuckLoadingChunks => _stuckLoadingChunks;
+
     // --- Transient flags ---
     /// <summary>
     /// Indicates whether the world startup process has completed and the world is ready to be used.
@@ -418,6 +455,7 @@ public class World : MonoBehaviour
     private static void DomainReset()
     {
         Instance = null;
+        s_loadArmFaults = 0; // CP-1 probe: reset here, not via a 2nd RuntimeInitializeOnLoadMethod (UDR0005 — one per class).
     }
 
     private void Awake()
@@ -874,12 +912,96 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
+    /// Load/generate entry point. Thin fault-observing wrapper around <see cref="LoadOrGenerateChunkInner"/>:
+    /// CP-1 counts any fault escaping the load arm (F1) then re-throws to preserve today's behavior (the fault
+    /// still faults the discarded Awaitable). This <c>catch</c> is the exact seam CP-3 converts into the load
+    /// failure contract (log → clear <c>IsLoading</c> → return, making the placeholder retryable).
+    /// </summary>
+    /// <param name="chunkCoord">The chunk to load from disk or schedule for generation.</param>
+    private async Awaitable LoadOrGenerateChunk(ChunkCoord chunkCoord)
+    {
+        try
+        {
+            await LoadOrGenerateChunkInner(chunkCoord);
+        }
+        catch (OperationCanceledException)
+        {
+            // Benign teardown/shutdown cancellation of the discarded Awaitable — not an F1 fault. Rethrow uncounted.
+            throw;
+        }
+        catch (Exception)
+        {
+            CountLoadFault();
+            throw;
+        }
+    }
+
+    /// <summary>Increments the CP-1 load-arm fault counter (dev/editor builds only; compiled out in release).</summary>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private static void CountLoadFault() => Interlocked.Increment(ref s_loadArmFaults);
+
+    /// <summary>
+    /// CP-1 stuck-<c>IsLoading</c> detector (F1), dev/editor only: records a chunk seen
+    /// <c>IsLoading &amp;&amp; !IsPopulated</c> during the current fail-safe scan. Called per chunk from the
+    /// scan walk; <see cref="FinalizeStuckLoadingScan"/> reconciles it against the previous scan.
+    /// </summary>
+    /// <param name="cd">The chunk being scanned.</param>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private void TrackStuckLoadingChunk(ChunkData cd)
+    {
+        if (cd.IsLoading && !cd.IsPopulated)
+            _scanLoadingChunks.Add(cd.Position);
+    }
+
+    /// <summary>
+    /// CP-1 (dev/editor only): finalizes a fail-safe scan. A chunk present in both this scan and the
+    /// previous one has been <c>IsLoading &amp;&amp; !IsPopulated</c> for ≥ ~1s (the F1 stuck signal); that
+    /// intersection count is reported via <see cref="StuckLoadingChunks"/>. The current set then becomes
+    /// the previous for the next scan.
+    /// </summary>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private void FinalizeStuckLoadingScan()
+    {
+        int stuck = 0;
+        foreach (Vector2Int pos in _scanLoadingChunks)
+            if (_prevScanLoadingChunks.Contains(pos))
+                stuck++;
+        _stuckLoadingChunks = stuck;
+
+        _prevScanLoadingChunks.Clear();
+        foreach (Vector2Int pos in _scanLoadingChunks) _prevScanLoadingChunks.Add(pos);
+        _scanLoadingChunks.Clear();
+    }
+
+    /// <summary>
+    /// CP-1 (dev/editor only): drives the stuck-<c>IsLoading</c> detector's ~1s walk when lighting is
+    /// disabled — the fail-safe lighting scan (its normal host) does not run in that config. Reuses
+    /// <see cref="FULL_LIGHT_SCAN_SECONDS"/> cadence and the same per-chunk/finalize helpers.
+    /// </summary>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private void ScanStuckLoadingChunksUnlit()
+    {
+        _fullLightScanTimer += Time.deltaTime;
+        if (_fullLightScanTimer < FULL_LIGHT_SCAN_SECONDS) return;
+        _fullLightScanTimer = 0f;
+
+        foreach (ChunkData cd in worldData.ChunkValues)
+            TrackStuckLoadingChunk(cd);
+        FinalizeStuckLoadingScan();
+    }
+
+    /// <summary>
     /// The core async pipeline:
     /// 1. Check Memory (Done by caller usually)
     /// 2. Check Disk (Async)
     /// 3. If missing, Schedule Gen (Job)
     /// </summary>
-    private async Awaitable LoadOrGenerateChunk(ChunkCoord chunkCoord)
+    /// <param name="chunkCoord">The chunk to load from disk or schedule for generation.</param>
+    private async Awaitable LoadOrGenerateChunkInner(ChunkCoord chunkCoord)
     {
         Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -1922,6 +2044,13 @@ public class World : MonoBehaviour
 
         // 4. Schedule lighting jobs from the ready set (only chunks whose gates can plausibly pass —
         //    parked chunks re-enter via promotion events or the fail-safe scan; see LightWorkScheduler).
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        // CP-1: the stuck-IsLoading detector normally rides the fail-safe lighting scan below, which is
+        // gated on enableLighting. When lighting is disabled that scan never runs, so drive the detector's
+        // own ~1s walk here instead (dev/editor only; single walk either way).
+        if (!settings.enableLighting) ScanStuckLoadingChunksUnlit();
+#endif
+
         if (settings.enableLighting)
         {
             // Drain the thread-safe staging queue into the main-thread ready set.
@@ -1946,7 +2075,12 @@ public class World : MonoBehaviour
                     {
                         _lightWork.AddReady(cd.Position);
                     }
+
+                    // CP-1 stuck-IsLoading detector shares this ~1s full-chunk walk (dev/editor only).
+                    TrackStuckLoadingChunk(cd);
                 }
+
+                FinalizeStuckLoadingScan();
 
                 int failSafePromoted = _lightWork.PromoteAll();
 
@@ -2726,10 +2860,18 @@ public class World : MonoBehaviour
     {
         // Guard Chunk Unloading
         // If Persistence is disabled, we intentionally keep ALL chunks in memory.
-        if (!settings.EnablePersistence) return;
+        if (!settings.EnablePersistence)
+        {
+            // No pass ran — publish zeroed CP-1 tallies so the HUD doesn't show stale counts in keep-in-memory mode.
+            _unloadDeferJobRunning = _unloadDeferLightPending = _unloadDeferWouldStrand = _unloadedLastPass = 0;
+            return;
+        }
 
         // OPTIMIZATION: Use ListPool to avoid allocations
         List<ChunkCoord> chunksToRemove = ListPool<ChunkCoord>.Get();
+
+        // CP-1: per-pass deferral/unload tallies (F6 — the §3.3-perf "pinned trail" made observable).
+        int deferJob = 0, deferLight = 0, deferStrand = 0, unloaded = 0;
 
         // Step A: Identify candidates
         foreach (Vector2Int chunkVoxelKey in worldData.ChunkKeys)
@@ -2761,7 +2903,9 @@ public class World : MonoBehaviour
 
             if (isJobRunning || isProcessingLight)
             {
-                // Skip unload - chunk is still being processed
+                // Skip unload - chunk is still being processed. Count the reason (job pin takes precedence).
+                if (isJobRunning) deferJob++;
+                else deferLight++;
                 continue;
             }
 
@@ -2786,6 +2930,7 @@ public class World : MonoBehaviour
 
             if (wouldStrandNeighbor)
             {
+                deferStrand++;
                 continue; // Defer unload — neighbor still needs us
             }
 
@@ -2845,7 +2990,14 @@ public class World : MonoBehaviour
             // 4. Recycle Data
             // POOLING: Return data to pool
             ChunkPool.ReturnChunkData(data);
+            unloaded++;
         }
+
+        // CP-1: publish this pass's tallies for the debug HUD.
+        _unloadDeferJobRunning = deferJob;
+        _unloadDeferLightPending = deferLight;
+        _unloadDeferWouldStrand = deferStrand;
+        _unloadedLastPass = unloaded;
 
         // 5. Return temp pools back to pool list
         ListPool<ChunkCoord>.Release(chunksToRemove); // Free the ListPool
