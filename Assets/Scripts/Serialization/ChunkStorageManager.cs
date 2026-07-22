@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Data;
 using Helpers;
 using UnityEngine;
+using UnityEngine.Pool;
 
 namespace Serialization
 {
@@ -172,6 +173,7 @@ namespace Serialization
         public void SaveChunk(ChunkData data)
         {
             CompressionAlgorithm algorithm = World.Instance.settings.saveCompression;
+            long seq = NextSaveSequence(); // data-capture stamp (the live data is read below)
 
             // Get buffer from pool to avoid GC allocation on main thread
             byte[] buffer = SerializationBufferPool.Get();
@@ -186,10 +188,26 @@ namespace Serialization
                 }
 
                 WriteToRegion(data.Position, buffer, length, algorithm);
+
+                // Live data is at least as fresh as any pending registry snapshot for this coord —
+                // drop such an entry rather than letting a later retry regress this write.
+                StageSupersede(data.Position, seq);
             }
             catch (Exception e)
             {
                 Debug.LogError($"[SaveChunk] Failed to save chunk at voxelPos {data.Position.ToString()}: {e.Message}");
+
+                // CP-6: the sync path gets the same durability contract as the async one — snapshot the
+                // still-live data and hand it to the retry registry (per-frame drain at force-unload;
+                // one extra Dispose-time attempt at quit) instead of losing the edits.
+                try
+                {
+                    StageFailedSave(CreateSerializationSnapshot(data), seq);
+                }
+                catch (Exception snapshotEx)
+                {
+                    Debug.LogError($"[SaveChunk] Could not stage failed save for retry ({snapshotEx.Message}) — edits to chunk at voxelPos {data.Position.ToString()} are lost.");
+                }
             }
             finally
             {
@@ -217,8 +235,10 @@ namespace Serialization
             // 2. Get Buffer
             byte[] buffer = SerializationBufferPool.Get();
 
-            // 3. Create a thread-safe snapshot on the Main Thread (Zero GC via Pooling)
+            // 3. Create a thread-safe snapshot on the Main Thread (Zero GC via Pooling), stamped with
+            //    its data-freshness sequence (the registry compares stamps, not completion order).
             ChunkData snapshot = CreateSerializationSnapshot(data);
+            long seq = NextSaveSequence();
 
             ChunkSaveResult result;
             try
@@ -287,11 +307,17 @@ namespace Serialization
             //                     staged snapshot synchronously, so those edits are not silently lost.
             //   FailedPermanent → pool: deterministic failure, retrying is an infinite loop; loss already
             //                     logged loudly above.
-            //   Written         → pool.
+            //   Written         → pool + a supersede op, so any OLDER pending registry entry for this
+            //                     coord is dropped instead of later regressing the bytes just written.
             if (result == ChunkSaveResult.Failed || result == ChunkSaveResult.Canceled)
-                StageFailedSave(snapshot);
+            {
+                StageFailedSave(snapshot, seq);
+            }
             else
+            {
                 World.Instance.ChunkPool.ReturnChunkData(snapshot);
+                if (result == ChunkSaveResult.Written) StageSupersede(data.Position, seq);
+            }
 
             return result;
         }
@@ -302,6 +328,11 @@ namespace Serialization
         /// </summary>
         public void Dispose()
         {
+            // CP-6: a manager teardown (quit, world switch) must not silently discard registry entries
+            // whose retry never landed — make one final write attempt each while the regions are still
+            // open, then release what remains loudly.
+            ReleaseRegistryOnDispose();
+
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
             Debug.Log($"[ChunkStorageManager] Disposing {_regions.Count} region files...");
 #endif
@@ -339,34 +370,108 @@ namespace Serialization
             public ChunkData Snapshot;
             public int Attempts;
             public double NextAttemptTime;
+            public long Seq;
         }
 
-        private readonly ConcurrentQueue<ChunkData> _failedSaveStaging = new ConcurrentQueue<ChunkData>();
+        /// <summary>One registry staging operation: a failed/canceled save handing over its snapshot, or
+        /// a successful write superseding any older pending entry for its coord. Freshness is decided by
+        /// <see cref="Seq"/> — stamped at data-capture time — NOT by queue order, so overlapping saves for
+        /// the same coord whose completions interleave out of order still resolve to the newest data.</summary>
+        private readonly struct StagingOp
+        {
+            /// <summary>The chunk's voxel-space world origin this op targets.</summary>
+            public readonly Vector2Int Coord;
+
+            /// <summary>The failed save's snapshot (ownership transfers with the op), or null for a
+            /// supersede op (a successful write for <see cref="Coord"/> landed).</summary>
+            public readonly ChunkData Snapshot;
+
+            /// <summary>The save's freshness sequence, stamped when its data was captured (snapshot
+            /// creation / sync save entry) — a higher value always means newer data.</summary>
+            public readonly long Seq;
+
+            /// <summary>Creates a staging op (snapshot hand-off when <paramref name="snapshot"/> is
+            /// non-null, supersede otherwise).</summary>
+            /// <param name="coord">The chunk's voxel-space world origin.</param>
+            /// <param name="snapshot">The failed save's snapshot, or null for a supersede.</param>
+            /// <param name="seq">The save's data-capture sequence.</param>
+            public StagingOp(Vector2Int coord, ChunkData snapshot, long seq)
+            {
+                Coord = coord;
+                Snapshot = snapshot;
+                Seq = seq;
+            }
+        }
+
+        private readonly ConcurrentQueue<StagingOp> _registryStaging = new ConcurrentQueue<StagingOp>();
         private readonly Dictionary<Vector2Int, FailedSaveEntry> _failedSaves = new Dictionary<Vector2Int, FailedSaveEntry>();
+        private int _stagedSnapshotCount; // snapshot ops in _registryStaging (supersede ops excluded)
+        private long _saveSequence; // monotonic data-freshness stamp (see StagingOp.Seq)
 
         /// <summary>Failed saves currently awaiting retry (staged + registered). Debug HUD readout.</summary>
-        public int PendingFailedSaves => _failedSaveStaging.Count + _failedSaves.Count;
+        public int PendingFailedSaves => _stagedSnapshotCount + _failedSaves.Count;
+
+        /// <summary>Stamps a save with the next data-freshness sequence. Call at data-capture time
+        /// (snapshot creation / sync serialize) — captures are serialized per coord in practice, so a
+        /// higher stamp reliably means newer data.</summary>
+        /// <returns>The save's sequence value.</returns>
+        private long NextSaveSequence() => Interlocked.Increment(ref _saveSequence);
 
         /// <summary>Hands a failed save's snapshot to the retry registry (callable from any thread).</summary>
         /// <param name="snapshot">The serialization snapshot whose ownership transfers to the registry.</param>
-        private void StageFailedSave(ChunkData snapshot) => _failedSaveStaging.Enqueue(snapshot);
+        /// <param name="seq">The save's data-capture sequence (<see cref="NextSaveSequence"/>).</param>
+        private void StageFailedSave(ChunkData snapshot, long seq)
+        {
+            Interlocked.Increment(ref _stagedSnapshotCount);
+            _registryStaging.Enqueue(new StagingOp(snapshot.Position, snapshot, seq));
+        }
 
-        /// <summary>Moves staged failures into the main-thread registry map. On a duplicate coord the newer
-        /// snapshot supersedes and the older one returns to the pool. Main thread only.</summary>
+        /// <summary>Records that a successful write for <paramref name="chunkVoxelPos"/> landed (any
+        /// thread): any pending registry entry with an OLDER sequence is stale — replaying it would
+        /// overwrite the newer bytes — and is dropped when the op drains. A NEWER failure keeps its
+        /// entry regardless of arrival order (sequence comparison, not queue order).</summary>
+        /// <param name="chunkVoxelPos">The chunk's voxel-space world origin that was just written.</param>
+        /// <param name="seq">The successful save's data-capture sequence.</param>
+        private void StageSupersede(Vector2Int chunkVoxelPos, long seq) =>
+            _registryStaging.Enqueue(new StagingOp(chunkVoxelPos, null, seq));
+
+        /// <summary>Applies staged ops to the main-thread registry map: snapshot ops insert, or replace
+        /// only when strictly newer (the older snapshot returns to the pool, whichever it is); supersede
+        /// ops drop the coord's entry only when the entry is older than the write. Main thread only.</summary>
         private void DrainStagingIntoRegistry()
         {
-            while (_failedSaveStaging.TryDequeue(out ChunkData snapshot))
+            while (_registryStaging.TryDequeue(out StagingOp op))
             {
-                if (_failedSaves.TryGetValue(snapshot.Position, out FailedSaveEntry existing))
+                if (op.Snapshot != null)
                 {
-                    World.Instance.ChunkPool.ReturnChunkData(existing.Snapshot);
-                    existing.Snapshot = snapshot;
-                    existing.Attempts = 0;
-                    existing.NextAttemptTime = 0d; // due immediately
+                    Interlocked.Decrement(ref _stagedSnapshotCount);
+                    if (_failedSaves.TryGetValue(op.Coord, out FailedSaveEntry existing))
+                    {
+                        if (op.Seq > existing.Seq)
+                        {
+                            World.Instance.ChunkPool.ReturnChunkData(existing.Snapshot);
+                            existing.Snapshot = op.Snapshot;
+                            existing.Attempts = 0;
+                            existing.NextAttemptTime = 0d; // due immediately
+                            existing.Seq = op.Seq;
+                        }
+                        else
+                        {
+                            // The op's snapshot is the older one (out-of-order completion) — drop it.
+                            World.Instance.ChunkPool.ReturnChunkData(op.Snapshot);
+                        }
+                    }
+                    else
+                    {
+                        _failedSaves.Add(op.Coord, new FailedSaveEntry { Snapshot = op.Snapshot, Seq = op.Seq });
+                    }
                 }
-                else
+                else if (_failedSaves.TryGetValue(op.Coord, out FailedSaveEntry entry) && entry.Seq < op.Seq)
                 {
-                    _failedSaves.Add(snapshot.Position, new FailedSaveEntry { Snapshot = snapshot });
+                    // A write with newer data than this entry's snapshot reached disk — replaying the
+                    // snapshot would regress it. (A newer entry survives an older write's supersede.)
+                    World.Instance.ChunkPool.ReturnChunkData(entry.Snapshot);
+                    _failedSaves.Remove(op.Coord);
                 }
             }
         }
@@ -437,28 +542,36 @@ namespace Serialization
             if (_failedSaves.Count == 0) return 0;
 
             int recovered = 0;
-            List<Vector2Int> coords = new List<Vector2Int>(_failedSaves.Keys); // rare path; removal-safe iteration
-            foreach (Vector2Int coord in coords)
+            List<Vector2Int> coords = ListPool<Vector2Int>.Get(); // removal-safe iteration
+            try
             {
-                FailedSaveEntry entry = _failedSaves[coord];
-                ChunkSaveResult attempt = WriteSnapshot(entry.Snapshot);
-                if (attempt == ChunkSaveResult.Written)
+                foreach (Vector2Int key in _failedSaves.Keys) coords.Add(key);
+                foreach (Vector2Int coord in coords)
                 {
-                    recovered++;
-                }
-                else if (attempt == ChunkSaveResult.FailedPermanent)
-                {
-                    Debug.LogError($"[SaveRetry] Final flush: unrecoverable save for chunk at voxelPos {coord.ToString()} — this session's edits to that chunk are lost.");
-                }
-                else
-                {
-                    // Retryable — keep the entry (and its snapshot) for the per-frame drain / a later flush.
-                    Debug.LogError($"[SaveRetry] Final flush failed for chunk at voxelPos {coord.ToString()} — entry retained for retry.");
-                    continue;
-                }
+                    FailedSaveEntry entry = _failedSaves[coord];
+                    ChunkSaveResult attempt = WriteSnapshot(entry.Snapshot);
+                    if (attempt == ChunkSaveResult.Written)
+                    {
+                        recovered++;
+                    }
+                    else if (attempt == ChunkSaveResult.FailedPermanent)
+                    {
+                        Debug.LogError($"[SaveRetry] Final flush: unrecoverable save for chunk at voxelPos {coord.ToString()} — this session's edits to that chunk are lost.");
+                    }
+                    else
+                    {
+                        // Retryable — keep the entry (and its snapshot) for the per-frame drain / a later flush.
+                        Debug.LogError($"[SaveRetry] Final flush failed for chunk at voxelPos {coord.ToString()} — entry retained for retry.");
+                        continue;
+                    }
 
-                World.Instance.ChunkPool.ReturnChunkData(entry.Snapshot);
-                _failedSaves.Remove(coord);
+                    World.Instance.ChunkPool.ReturnChunkData(entry.Snapshot);
+                    _failedSaves.Remove(coord);
+                }
+            }
+            finally
+            {
+                ListPool<Vector2Int>.Release(coords);
             }
 
             return recovered;
@@ -533,6 +646,51 @@ namespace Serialization
             {
                 SerializationBufferPool.Return(buffer);
             }
+        }
+
+        /// <summary>
+        /// Final registry teardown for <see cref="Dispose"/>: one last write attempt per pending entry
+        /// (while the regions are still open), then every remaining snapshot is released with a loud
+        /// per-chunk error — a storage-manager swap can no longer discard retained edits silently.
+        /// When <c>World.Instance</c> is already gone (the OnDestroy fallback path) no write or pool
+        /// return is possible; entries are dropped with the same loud accounting.
+        /// </summary>
+        private void ReleaseRegistryOnDispose()
+        {
+            bool worldAlive = World.Instance != null;
+            if (worldAlive)
+            {
+                // Bounded multi-pass: a save failing concurrently with Dispose can stage between one
+                // pass's staging drain and its write attempts — give stragglers a real attempt while
+                // the regions are still open (new failures stop once writes stop, so this terminates).
+                const int DISPOSE_FLUSH_PASSES = 3;
+                for (int i = 0; i < DISPOSE_FLUSH_PASSES && PendingFailedSaves > 0; i++)
+                    FlushFailedSavesSync();
+            }
+
+            int lost = 0;
+
+            // Anything still staged (post-flush stragglers) or retained by the flush is unrecoverable
+            // through this manager — drain both stores.
+            while (_registryStaging.TryDequeue(out StagingOp op))
+            {
+                if (op.Snapshot == null) continue; // supersede ops carry nothing
+                Interlocked.Decrement(ref _stagedSnapshotCount);
+                lost++;
+                Debug.LogError($"[SaveRetry] Dispose: pending save for chunk at voxelPos {op.Coord.ToString()} could not be written — this session's edits to that chunk are lost.");
+                if (worldAlive) World.Instance.ChunkPool.ReturnChunkData(op.Snapshot);
+            }
+
+            foreach (KeyValuePair<Vector2Int, FailedSaveEntry> kvp in _failedSaves)
+            {
+                lost++;
+                Debug.LogError($"[SaveRetry] Dispose: pending save for chunk at voxelPos {kvp.Key.ToString()} could not be written — this session's edits to that chunk are lost.");
+                if (worldAlive) World.Instance.ChunkPool.ReturnChunkData(kvp.Value.Snapshot);
+            }
+
+            _failedSaves.Clear();
+            if (lost > 0)
+                Debug.LogError($"[SaveRetry] Dispose released {lost.ToString()} unrecoverable pending save(s).");
         }
 
         /// <summary>Resolves the chunk's region address and writes the serialized payload — the single

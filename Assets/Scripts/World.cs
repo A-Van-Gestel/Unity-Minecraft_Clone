@@ -4244,37 +4244,49 @@ public class World : MonoBehaviour
     /// </param>
     private void SaveAllModifiedChunks(bool synchronous)
     {
+        // CP-6: the synchronous arm is the last-chance path (quit / force-unload) — flush pending
+        // failed/canceled saves FIRST and regardless of whether any chunk is currently modified:
+        // (a) the registry can hold edits for chunks long gone from ModifiedChunks, so the empty-set
+        //     early return below must not skip them;
+        // (b) registry snapshots are never fresher than live data, so writing them BEFORE the live
+        //     saves means the newest bytes always land last (a flush after the loop could overwrite
+        //     a just-synced chunk with its older failed-save snapshot).
+        if (synchronous && StorageManager != null)
+        {
+            int recovered = StorageManager.FlushFailedSavesSync();
+            if (recovered > 0) Debug.Log($"[SaveAllModifiedChunks] Flush recovered {recovered.ToString()} failed save(s).");
+        }
+
         if (worldData.ModifiedChunks.Count == 0) return;
 
         // Snapshot the list to avoid collection modification errors
-        List<ChunkData> chunksToSave = new List<ChunkData>(worldData.ModifiedChunks);
-        worldData.ModifiedChunks.Clear();
-
-        Debug.Log($"Saving {chunksToSave.Count.ToString()} modified chunks (Sync: {synchronous.ToString()})...");
-
-        foreach (ChunkData data in chunksToSave)
+        List<ChunkData> chunksToSave = ListPool<ChunkData>.Get();
+        try
         {
-            if (synchronous)
+            chunksToSave.AddRange(worldData.ModifiedChunks);
+            worldData.ModifiedChunks.Clear();
+
+            Debug.Log($"Saving {chunksToSave.Count.ToString()} modified chunks (Sync: {synchronous.ToString()})...");
+
+            foreach (ChunkData data in chunksToSave)
             {
-                StorageManager.SaveChunk(data); // Sync method
-            }
-            else
-            {
-                // Pass the token so manual saves don't keep running if we suddenly quit.
-                // CP-6: a failure lands in the retry registry (drained per frame) and a quit-canceled
-                // save stages its snapshot for the quit flush, so the up-front ModifiedChunks.Clear
-                // above no longer silently loses the chunk's edits on either path.
-                _ = StorageManager.SaveChunkAsync(data, _shutdownTokenSource.Token);
+                if (synchronous)
+                {
+                    StorageManager.SaveChunk(data); // Sync method
+                }
+                else
+                {
+                    // Pass the token so manual saves don't keep running if we suddenly quit.
+                    // CP-6: a failure lands in the retry registry (drained per frame) and a quit-canceled
+                    // save stages its snapshot for the quit flush, so the up-front ModifiedChunks.Clear
+                    // above no longer silently loses the chunk's edits on either path.
+                    _ = StorageManager.SaveChunkAsync(data, _shutdownTokenSource.Token);
+                }
             }
         }
-
-        // CP-6: the synchronous arm is the last-chance path (quit / force-unload) — make the final
-        // attempt on every pending failed save before storage is disposed. A save that still fails
-        // here is lost, but loudly (per-chunk error), never silently.
-        if (synchronous)
+        finally
         {
-            int recovered = StorageManager.FlushFailedSavesSync();
-            if (recovered > 0) Debug.Log($"[SaveAllModifiedChunks] Final flush recovered {recovered.ToString()} failed save(s).");
+            ListPool<ChunkData>.Release(chunksToSave);
         }
     }
 

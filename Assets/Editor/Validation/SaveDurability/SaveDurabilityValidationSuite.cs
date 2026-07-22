@@ -56,6 +56,9 @@ namespace Editor.Validation.SaveDurability
                 new Scenario("B7: quit flush — FlushFailedSavesSync lands the pending save", QuitFlushLandsPendingSave),
                 new Scenario("B8: canceled save — Canceled surfaced, snapshot staged, quit flush recovers it", CanceledSaveStagedForQuitFlush),
                 new Scenario("B9: deterministic zero-length failure — FailedPermanent, never enters the retry loop", PermanentFailureNeverRetries),
+                new Scenario("B10: successful write supersedes older pending entry; newer failure survives (FIFO)", SuccessfulWriteSupersedesPendingEntry),
+                new Scenario("B11: Dispose makes a final attempt on pending saves — edits survive a manager swap", DisposeFlushesPendingSaves),
+                new Scenario("B12: sync SaveChunk failure stages a snapshot — edits recoverable, not just logged", SyncSaveFailureStagesSnapshot),
             };
             return ValidationSuiteRunner.Execute("Save Durability", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -77,6 +80,10 @@ namespace Editor.Validation.SaveDurability
             private readonly GameObject _worldGo;
             private readonly World _previousInstance;
             private readonly string _worldName;
+
+            /// <summary>The fixture's unique volatile world name (for scenarios that stand up a second
+            /// <see cref="ChunkStorageManager"/> on the same save, e.g. the B11 manager swap).</summary>
+            public string WorldName => _worldName;
 
             public Fixture()
             {
@@ -317,6 +324,7 @@ namespace Editor.Validation.SaveDurability
             ChunkStorageManager.InjectZeroLengthSerializes(1);
             bool ok = Check("save reports FailedPermanent", RunSave(fx, data) == ChunkSaveResult.FailedPermanent);
             ok &= Check("nothing entered the retry registry", fx.Storage.PendingFailedSaves == 0);
+            ok &= Check("nothing written to disk", RunLoad(fx, pos) == null);
             World.Instance.ChunkPool.ReturnChunkData(data);
 
             // Retry path: a retryable failure whose RETRY turns deterministic must drop the entry, not loop.
@@ -328,6 +336,102 @@ namespace Editor.Validation.SaveDurability
             ChunkStorageManager.InjectZeroLengthSerializes(1);
             ok &= Check("deterministic retry recovers nothing", fx.Storage.DrainFailedSaveRetries(ignoreBackoff: true) == 0);
             ok &= Check("entry dropped (no infinite retry loop)", fx.Storage.PendingFailedSaves == 0);
+            ok &= Check("still nothing written to disk", RunLoad(fx, pos) == null);
+            return ok;
+        }
+
+        /// <summary>B10. Red when: a pending stale registry entry is not invalidated by a NEWER
+        /// successful write for its coord (the retry would regress the newer bytes), or when a failure
+        /// staged AFTER a success is wrongly dropped (FIFO order broken).</summary>
+        private static bool SuccessfulWriteSupersedesPendingEntry()
+        {
+            using Fixture fx = new Fixture();
+
+            // Phase A: fail v1, then a newer save succeeds — the stale entry must be dropped.
+            Vector2Int posA = new Vector2Int(16, 48);
+            ChunkData v1 = MakeEditedChunk(posA, BlockIDs.Stone);
+            ChunkStorageManager.InjectSaveFaults(1);
+            bool ok = Check("v1 save reports Failed", RunSave(fx, v1) == ChunkSaveResult.Failed);
+            World.Instance.ChunkPool.ReturnChunkData(v1);
+
+            ChunkData v2 = MakeEditedChunk(posA, BlockIDs.Grass);
+            ok &= Check("v2 save reports Written", RunSave(fx, v2) == ChunkSaveResult.Written);
+            World.Instance.ChunkPool.ReturnChunkData(v2);
+
+            ok &= Check("drain replays nothing (stale entry superseded)", fx.Storage.DrainFailedSaveRetries(ignoreBackoff: true) == 0);
+            ok &= Check("registry empty", fx.Storage.PendingFailedSaves == 0);
+            ok &= LoadedEditEquals(fx, posA, BlockIDs.Grass, "disk keeps the newer write (v1 not replayed)");
+
+            // Phase B: fail v1 → success v2 → fail v3, drained in ONE pass — FIFO must keep v3 alive.
+            Vector2Int posB = new Vector2Int(48, 16);
+            ChunkData b1 = MakeEditedChunk(posB, BlockIDs.Stone);
+            ChunkStorageManager.InjectSaveFaults(1);
+            ok &= Check("b1 save reports Failed", RunSave(fx, b1) == ChunkSaveResult.Failed);
+            World.Instance.ChunkPool.ReturnChunkData(b1);
+
+            ChunkData b2 = MakeEditedChunk(posB, BlockIDs.Stone);
+            ok &= Check("b2 save reports Written", RunSave(fx, b2) == ChunkSaveResult.Written);
+            World.Instance.ChunkPool.ReturnChunkData(b2);
+
+            ChunkData b3 = MakeEditedChunk(posB, BlockIDs.Grass);
+            ChunkStorageManager.InjectSaveFaults(1);
+            ok &= Check("b3 save reports Failed", RunSave(fx, b3) == ChunkSaveResult.Failed);
+            World.Instance.ChunkPool.ReturnChunkData(b3);
+
+            ok &= Check("drain recovers the newer failure (b3)", fx.Storage.DrainFailedSaveRetries(ignoreBackoff: true) == 1);
+            ok &= Check("registry empty after recovery", fx.Storage.PendingFailedSaves == 0);
+            ok &= LoadedEditEquals(fx, posB, BlockIDs.Grass, "newer failure survived the earlier supersede");
+            return ok;
+        }
+
+        /// <summary>B11. Red when: disposing the storage manager (quit / world switch) discards pending
+        /// registry entries without a final write attempt — a manager swap would silently lose edits.</summary>
+        private static bool DisposeFlushesPendingSaves()
+        {
+            using Fixture fx = new Fixture();
+            Vector2Int pos = new Vector2Int(64, 0);
+            ChunkData data = MakeEditedChunk(pos, BlockIDs.Stone);
+
+            ChunkStorageManager.InjectSaveFaults(1);
+            bool ok = Check("save reports Failed", RunSave(fx, data) == ChunkSaveResult.Failed);
+            World.Instance.ChunkPool.ReturnChunkData(data);
+
+            // Manager teardown with a pending entry: Dispose's final attempt must land the write.
+            fx.Storage.Dispose();
+
+            // A fresh manager on the same world (the swap) must see the edit on disk.
+            ChunkStorageManager second = new ChunkStorageManager(fx.WorldName, useVolatilePath: true, SaveSystem.CURRENT_VERSION);
+            try
+            {
+                ChunkData loaded = Task.Run(() => second.LoadChunkAsync(pos)).GetAwaiter().GetResult();
+                if (loaded == null) return Check("edit survived the manager swap — chunk missing on disk", false);
+                ushort id = BurstVoxelDataBitMapping.GetId(loaded.GetVoxel(EDIT_X, EDIT_Y, EDIT_Z));
+                ok &= Check($"edit survived the manager swap (expected {BlockIDs.Stone.ToString()}, got {id.ToString()})", id == BlockIDs.Stone);
+                World.Instance.ChunkPool.ReturnChunkData(loaded);
+            }
+            finally
+            {
+                second.Dispose();
+            }
+
+            return ok;
+        }
+
+        /// <summary>B12. Red when: a failed synchronous save (quit / force-unload loop) only logs and
+        /// loses the edits instead of staging a snapshot into the retry registry.</summary>
+        private static bool SyncSaveFailureStagesSnapshot()
+        {
+            using Fixture fx = new Fixture();
+            Vector2Int pos = new Vector2Int(64, 16);
+            ChunkData data = MakeEditedChunk(pos, BlockIDs.Grass);
+
+            ChunkStorageManager.InjectSaveFaults(1);
+            fx.Storage.SaveChunk(data); // sync path — returns void; failure must stage internally
+            World.Instance.ChunkPool.ReturnChunkData(data);
+
+            bool ok = Check("failed sync save staged a snapshot", fx.Storage.PendingFailedSaves == 1);
+            ok &= Check("flush recovers the sync failure", fx.Storage.FlushFailedSavesSync() == 1);
+            ok &= LoadedEditEquals(fx, pos, BlockIDs.Grass, "edit survived the failed sync save");
             return ok;
         }
     }
