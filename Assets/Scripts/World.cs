@@ -1607,23 +1607,13 @@ public class World : MonoBehaviour
         // Force complete all scheduled lighting jobs immediately.
         foreach (LightingJobData job in JobManager.LightingJobs.Values)
         {
-            job.Handle.Complete(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
+            // Hoist off the readonly iteration variable so Complete() runs without a hidden defensive copy.
+            JobHandle handle = job.Handle;
+            handle.Complete();
         }
 
         // Process their results.
         JobManager.ProcessLightingJobs();
-    }
-
-    private void CompleteAndProcessMeshJobs()
-    {
-        // Force complete all scheduled mesh jobs immediately.
-        foreach (MeshingJobData job in JobManager.MeshJobs.Values)
-        {
-            job.Handle.Complete(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
-        }
-
-        // Process their results.
-        JobManager.ProcessMeshJobs();
     }
 
     /// <summary>
