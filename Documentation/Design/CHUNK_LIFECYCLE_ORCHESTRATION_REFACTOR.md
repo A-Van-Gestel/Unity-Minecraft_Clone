@@ -519,6 +519,57 @@ ship their suites/baselines in the same commit as the code.
 - **Doc-sync:** pipeline doc unload step; `INFINITE_WORLD_STORAGE_...md` save-boundary note.
   **Serialization:** none (no format change — failure-path bookkeeping only).
 
+> **Amended (2026-07-22, branch `feat/world-scaling`): CP-6 SHIPPED; regression-green + suite prove-red done; in-game injection/durability run pending.**
+> Shipped as: `Serialization/ChunkSaveResult.cs` (new — `Written`/`Canceled`/`Failed`);
+> `ChunkStorageManager.SaveChunkAsync` → `Task<ChunkSaveResult>` (generic catch surfaces `Failed`; the
+> previously-silent `length<=0` async skip now logs + counts as `Failed`; `Canceled` never retries) + a
+> coord-keyed **failed-save retry registry** owned by the storage manager (thread-safe staging →
+> main-thread map; newer failure supersedes older, superseded snapshot back to pool): per-frame
+> `DrainFailedSaveRetries` from `World.Update` (one due entry/frame, backoff 1→30 s, entries never dropped
+> mid-session), `LoadChunkAsync` reload guard (sync-flush the coord before reading disk — closes the
+> stale-reload race), `FlushFailedSavesSync` in the synchronous `SaveAllModifiedChunks` arm (quit /
+> force-unload, before `Dispose`); dev-only `InjectSaveFaults` seam; HUD `retry-pending` readout beside the
+> CP-1 save counters. New suite `Minecraft Clone/Dev/Validate Save Durability` (B1–B8; registry
+> `ExpectedSuiteCount` 12→13).
+>
+> **Decisions taken** (session decision-menu): (1) retry shape = **retained-snapshot registry** — §9 Q4
+> answered: a coord-only retry list cannot work, the recycled `ChunkData` leaves the edits alive *only* in
+> the serialization snapshot, so the snapshot's ownership transfers to the registry; consequently
+> `ModifiedChunks.Remove` **stays at fire time** (§4.3's "remove in a success continuation" is unsound for
+> the unload site — a recycled ref must never linger in the `HashSet<ChunkData>`); (2) reload guard = yes;
+> (3) second fire site: the registry mechanism covers `SaveModifiedChunks`' async arm automatically, sync
+> arm gains only the final flush; (4) validation = permanent seam + suite. **Drift corrections:** §4.3's
+> "retry list drained by a later `UnloadChunks` pass" was unworkable — `UnloadChunks` runs only on
+> chunk-boundary crossings, so the drain is per-frame in `Update`.
+>
+> **Prove-red done (mechanical):** routing the `Failed` arm's snapshot back to the pool (pre-fix shape)
+> reds exactly B2–B7 ("chunk missing on disk" = the silently-lost edit); B1/B8 stay green. Reverted.
+> **Verification:** both csproj clean; Save Durability 8/8 green against fresh DLLs; **Validate All
+> 304/304 across all 13 suites** (Lighting 88/88, Meshing 23/23, Mesh Build Queue 9/9 — B7 zero-alloc
+> inconclusive on editor Mono, as always). **In-game F5 injection + durability run CONFIRMED
+> (2026-07-22):** armed `InjectSaveFaults(1)` + programmatic Stone edit in a nearby chunk → fly-out
+> unloaded the area; the fault hit an unload save (`SavesFailed 0→1`), and the registry recovered it via
+> the `World.Update` drain (`[SaveRetry] Recovered … after 1 attempt(s)`); the edited chunk unloaded,
+> saved normally, and on return the edit was present. Counters reconciled across the whole soak:
+> **Fired 648 / Completed 648 / Failed 1 / retry-pending 0** — every fired save reached disk despite the
+> failure (pre-CP-6, the faulted chunk's data would not exist on disk). Normal save/exit smoke green
+(clean quit, no console errors).
+>
+> **Amended (2026-07-22): post-ship code-review hardening (same uncommitted change).** Review findings
+> fixed: (1) **quit-canceled saves stage their snapshot** into the registry (closes the
+> manual-save-then-quit hole — `SaveAllModifiedChunks(false)` Clears membership up-front, the shutdown
+> token cancels the in-flight writes, and pre-fix nothing recovered them; the quit flush now writes staged
+> canceled snapshots synchronously; residual: a continuation that hasn't staged before the flush runs is
+> still lost — the 100 ms cancellation-propagation sleep covers the practical window); (2) **zero-length
+> serialization → `FailedPermanent`** (deterministic — released loudly, never enters the retry loop; new
+> `InjectZeroLengthSerializes` seam + B9); (3) **flush retains retryable entries** (force-unload no longer
+> drops recoverable edits; moot at real quit); (4) **single shared write core `WriteToRegion`** hosting
+> the fault seam (sync/async/retry paths can no longer drift; sync quit saves now injectable too);
+> (5) injection-counter clamp race fixed (`CompareExchange`). Dropped by decision: in-flight-save reload
+> window (comment + limitation only), main-thread retry hitch (accepted), startup drain dead window
+> (unreachable). Suite now **B1–B9**; B8 rewritten to the canceled-staging contract; prove-red re-run —
+> mutating the disposition (un-stage Canceled + stage FailedPermanent) reds exactly B8/B9.
+
 ### CP-7 — Pool sizing + constants unification (🟢)
 
 - **Scope:** (a) resolve F4 with CP-1's churn data: either the formula becomes the commented area
@@ -554,7 +605,10 @@ ship their suites/baselines in the same commit as the code.
 3. **F4 intent** — was the width-sized spare pool deliberate? Measurement (CP-1) plus a look at
    `DynamicPool.UpdatePruning`'s exact semantics answers it; CP-7 records the verdict.
 4. **CP-6 retry shape** — coord-keyed retry list vs. success-continuation-only, constrained by the
-   immediate pool recycle of the saved `ChunkData`. Executor decides and documents.
+   immediate pool recycle of the saved `ChunkData`. ✅ **ANSWERED (2026-07-22, CP-6 Amended block):**
+   retained-snapshot registry — the recycled `ChunkData` leaves the edits alive only in the
+   serialization snapshot, so a coord-only list has nothing to save and a success-continuation cannot
+   re-mark a recycled ref; ownership of the snapshot transfers to the storage-manager registry instead.
 
 ---
 
@@ -563,8 +617,9 @@ ship their suites/baselines in the same commit as the code.
 * **v1.0** - Initial design (outer-lifecycle census + F1–F9 findings + CP-1…CP-7 phased plan at `0a12036`)
 * **v1.1** - Added F10 (generation fault-path double-release; surfaced by the 2026-07-10 branch code review of `feat/async-lighting-validation-suite`)
 * **v1.2** - CP-5 (`ChunkUnloadDecision` extraction) + P-4 rec 3 (persist-and-unload the pinned trail) SHIPPED on `feat/world-scaling`; regression-green, prove-red + in-game soak/durability confirmed (Amended block in §7 CP-5)
+* **v1.3** - CP-6 (save-on-unload durability, F5) SHIPPED on `feat/world-scaling`: `ChunkSaveResult` contract + failed-save retry registry + reload guard + quit flush + `Validate Save Durability` suite (B1–B8); §9 Q4 answered (Amended block in §7 CP-6)
 
 ---
 
-**Last Updated:** 2026-07-21
+**Last Updated:** 2026-07-22
 **Next Review:** when CP-1 starts (re-verify §2 line anchors against HEAD), or when Tier A/B or palette work is scheduled (re-check §5 constraints)

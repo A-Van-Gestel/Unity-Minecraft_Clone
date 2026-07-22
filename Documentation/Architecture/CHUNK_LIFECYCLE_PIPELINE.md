@@ -643,6 +643,12 @@ if (isJobRunning || isProcessingLight) continue; // Skip unload
 Precedence is `job → in-range-strand → persist-light → unload`: the strand check sits **above** the light-persist arm so a chunk an in-range neighbor needs always defers rather than shedding its lighting. The only residual is a bounded boundary shell — out-of-range chunks whose *buffer-band* (kept, in-range) neighbor is stuck light-pending — which self-resolves the moment the player moves it past the boundary. Verified in-game (soak: beyond-unload-unreclaimable 743 → ~0–2, `Deferred — light` 308 → 0; durability: edit → unload → reload preserves the edit
 and its lighting).
 
+**Unload save failure contract (CP-6).** The modified-chunk save the teardown fires is no longer fire-and-forget-with-swallowed-failure (the F5 silent-data-loss hole): `ChunkStorageManager.SaveChunkAsync` returns `ChunkSaveResult` (`Written`/`Canceled`/`Failed`/`FailedPermanent`), and a `Failed` **or `Canceled`** save hands its serialization snapshot — the edits' only surviving copy once the `ChunkData` is pool-recycled a few lines later — to the storage manager's coord-keyed **failed-save retry registry**. `ModifiedChunks.Remove` deliberately stays at
+fire time: durability responsibility
+transfers with the snapshot, and the recycled `ChunkData` ref must never linger in (or re-enter) `ModifiedChunks`, where the pool would hand it to a different chunk. The registry is drained per frame (`World.Update` → `DrainFailedSaveRetries`, backoff 1→30 s), flushed synchronously for a coord about to be loaded (`LoadChunkAsync` reload guard — a returning player never reads pre-edit bytes), and flushed one final time in the synchronous `SaveAllModifiedChunks` path at quit/force-unload (retryably-failing entries are retained there, so a live-session
+force-unload keeps them recoverable). Staging `Canceled` saves matters because cancellation only comes from the quit token, and a canceled save's chunk may already be gone from `ModifiedChunks` — the quit flush writes the staged snapshot synchronously. Deterministic failures (zero-length serialization) are `FailedPermanent`: released loudly, never retried.
+Guarded by `Minecraft Clone/Dev/Validate Save Durability` (B1–B9, dev-only `InjectSaveFaults`/`InjectZeroLengthSerializes` seams); see the CP doc §4.3/§7 CP-6 and the storage doc §5.1.
+
 ---
 
 ## 10. Key File Reference

@@ -466,8 +466,11 @@ Main Thread                            Background Thread (ThreadPool)
                                     6. Lock region file (_fileLock)
                                     7. Write sector-aligned record to disk
                                     8. Update location table entry
-9. Return buffer + snapshot
-   to their pools (finally)
+9. Return buffer to its pool
+   (finally); snapshot → pool on
+   Written/FailedPermanent, →
+   failed-save retry registry on
+   Failed/Canceled (CP-6)
 ```
 
 **Memory Management:**  
@@ -475,6 +478,16 @@ Uses `SerializationBufferPool` to recycle byte arrays, and `ChunkStorageManager.
 
 **Cancellation:**  
 `SaveChunkAsync` takes a `CancellationToken` (the world's shutdown token) so in-flight async saves abort cleanly on quit instead of racing the synchronous shutdown flush.
+
+**Failure Handling (CP-6 durability contract):**  
+`SaveChunkAsync` returns `Task<ChunkSaveResult>` (`Written` / `Canceled` / `Failed` / `FailedPermanent`) instead of swallowing exceptions. On `Failed` **or `Canceled`**, the serialization snapshot — the edits' only surviving copy once the live `ChunkData` is pool-recycled by `UnloadChunks` (or cleared from `ModifiedChunks` by a manual save) — transfers to the storage manager's **failed-save retry registry** (coord-keyed; a newer entry for the same coord supersedes the older snapshot) rather than returning to the pool. Staging `Canceled` matters because
+cancellation only comes from the quit token: without it, a save canceled mid-quit after its chunk left `ModifiedChunks` would lose the edits silently. `FailedPermanent` (zero-length serialization — deterministic, retrying can never succeed) releases the snapshot with a loud per-chunk error instead of entering the retry loop. The registry is drained three ways:
+
+1. **Per-frame retry** — `World.Update` calls `DrainFailedSaveRetries()` (one due entry per frame, exponential backoff 1→30 s, loud error per failed attempt; retryable entries are never dropped mid-session, deterministic ones are dropped loudly).
+2. **Reload guard** — `LoadChunkAsync` synchronously flushes a pending retry for its coord before reading disk, so a returning player never loads pre-edit bytes. (Known window: a save still *in flight* for that coord is invisible to the guard — closing it would need per-coord in-flight tracking.)
+3. **Quit flush** — the synchronous `SaveAllModifiedChunks` path calls `FlushFailedSavesSync()` (one attempt per entry, before `StorageManager.Dispose`); recovered and deterministic entries are removed, **retryably-failing entries are retained** (moot at real quit; preserves recoverability when the same path runs from a live-session force-unload).
+
+All three save paths (sync, async, retry) share one write core (`WriteToRegion`), which also hosts the dev-only fault seam. The contract is guarded by `Minecraft Clone/Dev/Validate Save Durability` (B1–B9) with dev-only injection seams (`ChunkStorageManager.InjectSaveFaults`, `InjectZeroLengthSerializes`).
 
 **Thread Safety:**  
 Each region file takes an exclusive private `_fileLock` for both reads and writes (`FileStream` position is not thread-safe). Multiple chunks in different regions can save concurrently.
@@ -1177,8 +1190,9 @@ Pre-migration backups are created as sibling world folders named `{WorldName}_Ba
 * **v1.6** - Added LZ4 Compression implementation details and documented resolution of Chunk Regeneration bugs
 * **v1.7** - Synced with codebase: sector-based region file layout, versioned region addressing (`RegionAddressCodec` V1/V2), chunk format v7 (flag-based sections, uniform-sky optimization, RGB light queues), v5+ pending mods Meta byte, `pending_lighting.bin` rename + `pending_blocklight.bin` format, save snapshotting/cancellation, 8-neighbor data-ready gate, completed player state & AOT migration checklist items
 * **v1.8** - Renamed `CompressionAlgorithm.GZip` → `Deflate` for accuracy (value 1 has always been raw headerless DEFLATE, not GZip). On-disk value 1 unchanged, so existing saves stay byte-compatible — source-only rename, no format bump/migration (MT-6)
+* **v1.9** - CP-6 save-boundary durability: `SaveChunkAsync` surfaces `ChunkSaveResult`, failed saves route their snapshot to the failed-save retry registry (per-frame drain + reload guard + quit flush) instead of silently losing session edits (F5). Review hardening in the same change: quit-canceled saves stage their snapshot too (closes the manual-save-then-quit hole), zero-length serialization is `FailedPermanent` (no retry loop), flush retains retryable entries, single shared write core. No format change — failure-path bookkeeping only
 
 ---
 
-**Last Updated:** 2026-07-01  
+**Last Updated:** 2026-07-22  
 **Next Review:** Chunk prioritization or Defragmentation
