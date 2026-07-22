@@ -569,6 +569,31 @@ ship their suites/baselines in the same commit as the code.
 > window (comment + limitation only), main-thread retry hitch (accepted), startup drain dead window
 > (unreachable). Suite now **B1–B9**; B8 rewritten to the canceled-staging contract; prove-red re-run —
 > mutating the disposition (un-stage Canceled + stage FailedPermanent) reds exactly B8/B9.
+>
+> **Amended (2026-07-22): second review round (post-commit `ca171b7`).** Two quit-flush ordering bugs
+> found and fixed: (1) the `ModifiedChunks.Count == 0` early return in `SaveAllModifiedChunks` skipped
+> `FlushFailedSavesSync` entirely — a quit with no currently-modified chunk silently lost every pending
+> registry entry (the F5 hole re-opened through the guard clause); (2) the flush ran AFTER the per-chunk
+> sync saves, so a stale registry snapshot could overwrite the newer just-synced bytes for the same
+> coord. Both fixed by one restructure: flush FIRST, outside the early return (snapshots ≤ live data in
+> freshness ⇒ newest bytes always land last). Plus: (3) **supersede rule** — every successful write
+> (sync + async) stages a supersede op into a single ordered staging queue (`StagingOp`), dropping any
+> OLDER pending entry for its coord when drained (a stale snapshot must never regress newer data; FIFO
+> protects a newer failure) — new **B10** with two-phase FIFO witness; (4) `Dispose` makes a final write
+> attempt per remaining registry entry (world-switch swap can't silently discard retained edits;
+> `World.Instance`-dead OnDestroy fallback drops loudly) — new **B11** (manager-swap round-trip);
+> (5) `ListPool` for the save-list snapshot. Suite **B1–B11**; prove-red — disabling the supersede
+> enqueue reds exactly B10 (its failure message IS the guarded regression: stale v1 replayed over v2).
+>
+> **Amended (2026-07-22): third review round (same uncommitted change).** (1) Supersede decisions moved
+> from staging-queue order to a **monotonic data-freshness sequence stamped at capture time** (snapshot
+> creation / sync serialize) — closes the overlapping-same-coord-saves inversion where an OLDER save
+> failing slower than a NEWER save's completion could resurrect stale data (narrow, not directly
+> baselinable without private access; B10 witnesses the seq path); (2) **sync `SaveChunk` failures now
+> snapshot-and-stage** (force-unload live path recoverable via drain; quit gets the Dispose attempt) —
+> new **B12**, prove-red exact (disable staging → only B12 red); (3) Dispose flush is bounded multi-pass
+> (post-flush stragglers get a real write attempt); (4) `ListPool` + try/finally on both pooled lists.
+> Suite **B1–B12**.
 
 ### CP-7 — Pool sizing + constants unification (🟢)
 
