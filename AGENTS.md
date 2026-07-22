@@ -95,7 +95,7 @@ When a change touches the chunk generation → lighting → meshing pipeline spe
 
 - **Think First:** For any feature or refactor that touches multiple files, output a brief, bulleted step-by-step plan before writing any code.
 - **Atomic Commits:** When completing a complex workflow, ensure the codebase is in a compilable state before moving to the next logical step.
-- **Compile Command:** Run `dotnet build "Assembly-CSharp.csproj"` in your terminal/command execution tool. When the change touches any file under `Assets/Editor/`, also build the editor assembly: `dotnet build "Assembly-CSharp-Editor.csproj"`. Editor-only code lives in a separate assembly that `Assembly-CSharp.csproj` does not compile — a green runtime build does not guarantee editor code compiles.
+- **Compile Command:** Run `dotnet build "Assembly-CSharp.csproj"` in your terminal/command execution tool. When the change touches any file under `Assets/Editor/`, also build the editor assembly: `dotnet build "Assembly-CSharp-Editor.csproj"`. Editor-only code lives in a separate assembly that `Assembly-CSharp.csproj` does not compile — a green runtime build does not guarantee editor code compiles. Alternatively, the Rider MCP pair `build_solution_start` → `build_solution_state` builds every assembly (runtime + editor) in one call and closes that gap.
 - **New `.cs` files & stale projects (Unity gotcha):** A *newly-created* `.cs` file is not in the `.csproj` until Unity regenerates it. This cuts **both** ways: `dotnet build` reports **phantom `CS0103` "does not exist in the current context"** for the new type even though the code is correct, **and — more dangerously — it reports a FALSE GREEN for the new file itself**, because a file absent from the `.csproj` is never compiled, so real errors inside it are invisible. Let Unity import it first — `AssetDatabase.Refresh()` via `Unity_RunCommand` (or just
   focus the Editor) — then re-run `dotnet build`.
 - **`IsCompiling == false` does not mean "my code is loaded".** `RequestScriptCompilation()` is *asynchronous*, so `Unity_ManageEditor → GetState` can report idle simply because the compile has not started yet. Two consequences: (1) if the domain reload lands **mid-`Unity_RunCommand`**, the executing script's context is torn down and the MCP call **never returns** (it burns the full idle timeout); (2) a **failed** Unity compile leaves the previous DLL in place, so `Unity_RunCommand` keeps compiling against **stale assemblies** and emits errors that
@@ -192,6 +192,28 @@ The Unity Editor exposes live tools via the `unity-mcp` MCP server. These provid
 - `Unity_ManageEditor` Play/Pause/Stop controls affect the editor's play state — always confirm with the user before entering play mode.
 
 For full parameter schemas, example calls, recipes, and profiler tool details, see the `unity-mcp` skill under `.agents/skills/`.
+
+## MCP Tools: Rider (JetBrains IDE)
+
+The `rider` MCP server exposes Rider's inspection, refactoring, and build engines. Only a curated subset is enabled — the rest (Unreal/database/debugger tools, duplicates of built-in file tools, and `analyze_calls`, which cannot resolve C# symbols) are permission-denied in `.claude/settings.json`; do not go looking for them. Every tool takes a `rootFolder` parameter — always pass the repo root.
+
+| Tool                                                                                                                       | Use when                                                                                                                                                                     |
+|----------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `lint_files` / `get_file_problems`                                                                                         | Run Rider/ReSharper inspections on edited files — catches dead code, impure-struct-copy warnings, and UDR domain-reload analyzer hits that `dotnet build` cannot report       |
+| `rename_refactoring`                                                                                                       | Solution-wide symbol rename incl. `nameof(...)` and XML-doc `<see cref>` refs. ALWAYS run `preview: true` first and audit the blast radius                                    |
+| `safe_delete`                                                                                                              | Delete a symbol only if unused; refuses with a conflict list otherwise. `preview: true` doubles as a dead-code check                                                          |
+| `extract_method` / `extract_interface` / `extract_base_class` / `change_api_signature` / `move_type_to_namespace` / `reorganize_namespaces` | Structural refactorings on the same engine                                                                                                                                   |
+| `build_solution_start` + `build_solution_state`                                                                            | Build ALL assemblies (runtime + editor) in one shot — covers the editor-assembly gap of the two-step `dotnet build`. Poll state with the returned `sessionId`                 |
+| `reformat_file`                                                                                                            | Apply the solution code style to edited files (verified no-op on already-conforming files)                                                                                   |
+| `get_project_problems`                                                                                                     | Solution-wide Problems View snapshot — run a build first to populate it                                                                                                      |
+| `get_all_open_file_paths` / `open_file_in_editor`                                                                          | See which files the user has open in Rider (orientation context) / navigate the user to a file                                                                               |
+| `post_edit_quality_check`                                                                                                  | Hook-oriented combined reformat + lint; for direct use prefer `reformat_file` and `lint_files`                                                                               |
+
+### Rules
+
+- Requires Rider to be running with the solution open — if calls fail, fall back to the file-based workflow and mention it.
+- Rider refactorings do NOT handle Unity-side concerns: `.meta` sibling renames, `[FormerlySerializedAs]`, prefab/scene GUID references. The `refactor-safely` and `unity-file-ops` guardrails still apply on top of any Rider-applied refactoring.
+- A Rider build is MSBuild against Unity-generated `.csproj` files — the "new `.cs` file not yet in the project" and stale-DLL gotchas from the Execution Protocol apply to it exactly as they do to `dotnet build`.
 
 ## System Environment & Capabilities
 
