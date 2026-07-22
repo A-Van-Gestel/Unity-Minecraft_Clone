@@ -109,6 +109,33 @@ Diff the draft against `CLAUDE.md` and `Documentation/Guides/CODING_STYLE_GUIDE.
 | Editor tooling / windows / menu items | lifecycle cleanup (textures/meshes/materials), domain reload survival, batchmode viability, stale-compiled-code gotcha | `editor-tool`, `unity-mcp` (recipes) |
 | Documented bug fix | deterministic prove-red repro before the fix, baseline promotion after in-game confirmation | `validation-driven-bugfix` |
 | Warm start from a doc/report | doc-vs-code drift check on every asserted count/name/API (see `SKILL.md` Step 0) | `docs-sync` (for the corrections) |
+| Failure-path / durability / retry-replay change | full pack below (no owning skill) | — |
 
 Packs route to their owning skills for the actual rules — this table exists so the review
 *selects* the right packs, not to duplicate their content.
+
+### Pack: failure-path / durability / retry-replay changes
+
+Triggers when the plan gives an operation a failure contract, adds retry/recovery, or retains
+data for later replay (a registry, queue, or pending store). Provenance: CP-6 (2026-07-22) —
+a solid plan still needed **three** post-implementation review rounds, and every finding traces
+to one of these four checks skipped at plan time (worked record: the three Amended blocks in
+`Documentation/Design/CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md` §7 CP-6).
+
+1. **Enumerate the full outcome lattice** of the operation, not just "success/failure":
+   success / **cancellation** / transient failure / **deterministic failure** — and give every
+   cell an explicit disposition in the plan. CP-6: the unplanned `Canceled` cell was a silent
+   quit-time data-loss hole; the unplanned deterministic cell was an infinite retry loop.
+2. **Draw the path × lifecycle-exit matrix**: every code path that performs the operation
+   (sync AND async arms, retry arm) × every lifecycle moment the mechanism must survive
+   (normal play, quit, force-unload/world-switch, owner `Dispose`/swap, reload of the same
+   key). Each cell is either covered or an explicit accepted limitation. CP-6's rounds 2–3
+   were almost entirely uncovered cells (sync arm, Dispose discard, quit-flush ordering).
+3. **State the freshness invariant** the moment stale copies are retained for replay:
+   "a retained copy must never overwrite newer data" — then audit EVERY write ordering
+   against it (replay vs. live save, flush vs. per-item saves, out-of-order completion of
+   overlapping operations). Prefer a freshness stamp taken at data-capture time over any
+   queue/arrival-order reasoning. CP-6: three separate bugs were this one unstated invariant.
+4. **Audit existing guard clauses** of any method the plan adds responsibilities to — an
+   early return written for the old contract can silently gate the new work. CP-6: a
+   `Count == 0` early return skipped the new quit flush entirely, re-opening the fixed hole.
