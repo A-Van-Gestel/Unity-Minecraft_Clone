@@ -1,0 +1,334 @@
+using System;
+using System.IO;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using Data;
+using Editor.Validation.Framework;
+using Jobs.BurstData;
+using Serialization;
+using UnityEditor;
+using UnityEngine;
+
+namespace Editor.Validation.SaveDurability
+{
+    /// <summary>
+    /// Validation suite for the CP-6 save durability contract (design doc
+    /// <c>CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md</c> §4.3, finding F5): a failed chunk save must
+    /// surface <see cref="ChunkSaveResult.Failed"/> to its caller and hand its serialization snapshot —
+    /// the edits' only surviving copy once the live <see cref="ChunkData"/> is pool-recycled — to the
+    /// failed-save retry registry, which re-attempts the write until it lands (per-frame drain, reload
+    /// guard, quit-time flush). Faults are injected via the dev-only
+    /// <see cref="ChunkStorageManager.InjectSaveFaults"/> seam; each scenario stands up an isolated stub
+    /// <c>World.Instance</c> + a volatile-path <see cref="ChunkStorageManager"/> and round-trips real
+    /// region files.
+    /// <para>All scenarios are <b>baselines</b> (must stay green); a failure is a regression of the F5
+    /// durability hole (silently lost session edits).</para>
+    /// <para><b>Prove-red:</b> routing the Failed/Canceled arms' snapshot back to the pool instead of
+    /// <c>StageFailedSave</c> in <see cref="ChunkStorageManager.SaveChunkAsync"/> reds B2–B8 (the edit
+    /// no longer survives); routing FailedPermanent into the registry reds B9 (retry loop); B1 stays
+    /// green (happy path untouched).</para>
+    /// </summary>
+    public static class SaveDurabilityValidationSuite
+    {
+        /// <summary>Runs every scenario and prints a categorized summary via the shared runner.</summary>
+        [MenuItem("Minecraft Clone/Dev/Validate Save Durability")]
+        public static void RunAll() => Execute();
+
+        /// <summary>
+        /// Builds and runs the durability scenarios, returning the categorized result (the headless/CI
+        /// entry point). Uses <see cref="KnownBugChannel.Unimplemented"/> for parity with the other
+        /// pure-logic suites; the channel is currently unused (baselines only).
+        /// </summary>
+        /// <param name="logToConsole">When false, runs silently and only returns the result (for headless/CI use).</param>
+        /// <param name="showProgress">When false, suppresses this suite's own progress bar (the aggregate runner drives one).</param>
+        /// <returns>The categorized, timed result of the run.</returns>
+        public static ValidationRunResult Execute(bool logToConsole = true, bool showProgress = true)
+        {
+            List<Scenario> scenarios = new List<Scenario>
+            {
+                new Scenario("B1: happy path — save Written, nothing pending, edit round-trips", HappyRoundTrip),
+                new Scenario("B2: injected fault — Failed surfaced, snapshot owned by retry registry", FailureSurfacesAndRegisters),
+                new Scenario("B3: drain retry recovers the failed save — edit survives on disk", DrainRecoversFailedSave),
+                new Scenario("B4: persistent fault — entry retained across a failed retry, recovered after", PersistentFaultRetainsEntry),
+                new Scenario("B5: newer failed save supersedes older for the same coord", NewerFailedSaveSupersedes),
+                new Scenario("B6: reload guard — pending retry flushed before the chunk load reads disk", ReloadGuardFlushesBeforeLoad),
+                new Scenario("B7: quit flush — FlushFailedSavesSync lands the pending save", QuitFlushLandsPendingSave),
+                new Scenario("B8: canceled save — Canceled surfaced, snapshot staged, quit flush recovers it", CanceledSaveStagedForQuitFlush),
+                new Scenario("B9: deterministic zero-length failure — FailedPermanent, never enters the retry loop", PermanentFailureNeverRetries),
+            };
+            return ValidationSuiteRunner.Execute("Save Durability", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
+        }
+
+        // --- Fixture -----------------------------------------------------------------------------
+
+        /// <summary>Chunk-local coordinates of the scenario edit (arbitrary interior voxel).</summary>
+        private const int EDIT_X = 3, EDIT_Y = 40, EDIT_Z = 7;
+
+        /// <summary>
+        /// Isolated save-system fixture: stubs <c>World.Instance</c> (settings + concurrent chunk pool —
+        /// everything <see cref="ChunkStorageManager"/> and <see cref="ChunkSerializer"/> reach for) and
+        /// stands up a real <see cref="ChunkStorageManager"/> on a unique volatile-path world. Disposal
+        /// disarms fault injection, restores the previous <c>World.Instance</c>, and deletes the temp save.
+        /// </summary>
+        private sealed class Fixture : IDisposable
+        {
+            public readonly ChunkStorageManager Storage;
+            private readonly GameObject _worldGo;
+            private readonly World _previousInstance;
+            private readonly string _worldName;
+
+            public Fixture()
+            {
+                _previousInstance = World.Instance;
+                _worldName = $"SaveDurabilityTest_{Guid.NewGuid():N}";
+                try
+                {
+                    _worldGo = new GameObject("SaveDurability_StubWorld");
+                    // AddComponent on a MonoBehaviour runs no Awake in edit mode — the component is only
+                    // the typed Instance target; we wire the two members the save path reads.
+                    World world = _worldGo.AddComponent<World>();
+                    world.settings = new Settings();
+                    world.worldData = new WorldData(_worldName, 0);
+                    ValidationReflection.SetInstanceProperty(world, nameof(World.ChunkPool),
+                        new ChunkPoolManager(_worldGo.transform));
+                    ValidationReflection.SetStaticProperty(typeof(World), nameof(World.Instance), world);
+
+                    Storage = new ChunkStorageManager(_worldName, useVolatilePath: true, SaveSystem.CURRENT_VERSION);
+                }
+                catch
+                {
+                    Dispose();
+                    throw;
+                }
+            }
+
+            public void Dispose()
+            {
+                ChunkStorageManager.InjectSaveFaults(0);
+                ChunkStorageManager.InjectZeroLengthSerializes(0);
+                Storage?.Dispose();
+                ValidationReflection.SetStaticProperty(typeof(World), nameof(World.Instance), _previousInstance);
+                if (_worldGo != null) UnityEngine.Object.DestroyImmediate(_worldGo);
+
+                string savePath = SaveSystem.GetSavePath(_worldName, useVolatilePath: true);
+                if (Directory.Exists(savePath)) Directory.Delete(savePath, recursive: true);
+            }
+        }
+
+        // --- Helpers -----------------------------------------------------------------------------
+
+        /// <summary>Builds a pooled chunk at <paramref name="pos"/> carrying one edit of <paramref name="blockId"/>.</summary>
+        private static ChunkData MakeEditedChunk(Vector2Int pos, ushort blockId)
+        {
+            ChunkData data = World.Instance.ChunkPool.GetChunkData(pos);
+            data.SetVoxel(EDIT_X, EDIT_Y, EDIT_Z, BurstVoxelDataBitMapping.PackVoxelData(blockId, 0));
+            return data;
+        }
+
+        /// <summary>
+        /// Runs <see cref="ChunkStorageManager.SaveChunkAsync"/> to completion. Wrapped in
+        /// <see cref="Task.Run(Func{Task})"/> so its continuations resume on the ThreadPool instead of
+        /// being posted to the (blocked) editor main thread — blocking directly would deadlock.
+        /// </summary>
+        private static ChunkSaveResult RunSave(Fixture fx, ChunkData data, CancellationToken token = default) =>
+            Task.Run(() => fx.Storage.SaveChunkAsync(data, token)).GetAwaiter().GetResult();
+
+        /// <summary>Runs <see cref="ChunkStorageManager.LoadChunkAsync"/> to completion (same wrapping as <see cref="RunSave"/>).</summary>
+        private static ChunkData RunLoad(Fixture fx, Vector2Int pos) =>
+            Task.Run(() => fx.Storage.LoadChunkAsync(pos)).GetAwaiter().GetResult();
+
+        /// <summary>Loads the chunk and checks its edit voxel matches <paramref name="expectedBlockId"/> (returns the shell to the pool).</summary>
+        private static bool LoadedEditEquals(Fixture fx, Vector2Int pos, ushort expectedBlockId, string label)
+        {
+            ChunkData loaded = RunLoad(fx, pos);
+            if (loaded == null) return Check($"{label} — chunk missing on disk", false);
+
+            ushort id = BurstVoxelDataBitMapping.GetId(loaded.GetVoxel(EDIT_X, EDIT_Y, EDIT_Z));
+            bool ok = Check($"{label} (expected id {expectedBlockId.ToString()}, got {id.ToString()})", id == expectedBlockId);
+            World.Instance.ChunkPool.ReturnChunkData(loaded);
+            return ok;
+        }
+
+        /// <summary>Logs a single assertion as PASS/FAIL and returns its result for AND-chaining.</summary>
+        private static bool Check(string label, bool condition)
+        {
+            if (condition) Debug.Log($"  [PASS] {label}");
+            else Debug.LogError($"  [FAIL] {label}");
+            return condition;
+        }
+
+        // --- Scenarios ---------------------------------------------------------------------------
+
+        /// <summary>B1. Red when: the happy save path breaks (contract, write, or round-trip).</summary>
+        private static bool HappyRoundTrip()
+        {
+            using Fixture fx = new Fixture();
+            Vector2Int pos = new Vector2Int(0, 0);
+            ChunkData data = MakeEditedChunk(pos, BlockIDs.Stone);
+
+            bool ok = Check("save reports Written", RunSave(fx, data) == ChunkSaveResult.Written);
+            ok &= Check("nothing pending in the retry registry", fx.Storage.PendingFailedSaves == 0);
+            ok &= LoadedEditEquals(fx, pos, BlockIDs.Stone, "edit round-trips through the region file");
+
+            World.Instance.ChunkPool.ReturnChunkData(data);
+            return ok;
+        }
+
+        /// <summary>B2. Red when: a failed save is swallowed again (F5) or its snapshot is returned to the pool instead of the registry.</summary>
+        private static bool FailureSurfacesAndRegisters()
+        {
+            using Fixture fx = new Fixture();
+            ChunkData data = MakeEditedChunk(new Vector2Int(0, 0), BlockIDs.Stone);
+            long failedBefore = ChunkStorageManager.SavesFailed;
+
+            ChunkStorageManager.InjectSaveFaults(1);
+            bool ok = Check("save reports Failed", RunSave(fx, data) == ChunkSaveResult.Failed);
+            ok &= Check("SavesFailed counted the failure", ChunkStorageManager.SavesFailed > failedBefore);
+            ok &= Check("registry owns exactly one pending snapshot", fx.Storage.PendingFailedSaves == 1);
+
+            // The live data is recycled immediately in production (UnloadChunks) — mirror that here to
+            // prove the registry's snapshot, not this object, carries the edits.
+            World.Instance.ChunkPool.ReturnChunkData(data);
+            return ok;
+        }
+
+        /// <summary>B3. The core F5 durability guarantee. Red when: the retry drain cannot land a failed save's edits on disk.</summary>
+        private static bool DrainRecoversFailedSave()
+        {
+            using Fixture fx = new Fixture();
+            Vector2Int pos = new Vector2Int(16, 0);
+            ChunkData data = MakeEditedChunk(pos, BlockIDs.Grass);
+
+            ChunkStorageManager.InjectSaveFaults(1);
+            bool ok = Check("save reports Failed", RunSave(fx, data) == ChunkSaveResult.Failed);
+            World.Instance.ChunkPool.ReturnChunkData(data); // production recycles before the retry runs
+
+            ok &= Check("drain recovers one save", fx.Storage.DrainFailedSaveRetries(ignoreBackoff: true) == 1);
+            ok &= Check("registry empty after recovery", fx.Storage.PendingFailedSaves == 0);
+            ok &= LoadedEditEquals(fx, pos, BlockIDs.Grass, "edit survived the failed save via retry");
+            return ok;
+        }
+
+        /// <summary>B4. Red when: a failed retry drops the entry (edits lost) instead of retaining it for a later attempt.</summary>
+        private static bool PersistentFaultRetainsEntry()
+        {
+            using Fixture fx = new Fixture();
+            Vector2Int pos = new Vector2Int(0, 16);
+            ChunkData data = MakeEditedChunk(pos, BlockIDs.Stone);
+
+            ChunkStorageManager.InjectSaveFaults(2); // initial save + first retry both fault
+            bool ok = Check("save reports Failed", RunSave(fx, data) == ChunkSaveResult.Failed);
+            World.Instance.ChunkPool.ReturnChunkData(data);
+
+            ok &= Check("faulted retry recovers nothing", fx.Storage.DrainFailedSaveRetries(ignoreBackoff: true) == 0);
+            ok &= Check("entry retained after the failed retry", fx.Storage.PendingFailedSaves == 1);
+            ok &= Check("next retry recovers the save", fx.Storage.DrainFailedSaveRetries(ignoreBackoff: true) == 1);
+            ok &= LoadedEditEquals(fx, pos, BlockIDs.Stone, "edit survived two consecutive faults");
+            return ok;
+        }
+
+        /// <summary>B5. Red when: a duplicate-coord failure keeps the stale snapshot (older edits would overwrite newer ones).</summary>
+        private static bool NewerFailedSaveSupersedes()
+        {
+            using Fixture fx = new Fixture();
+            Vector2Int pos = new Vector2Int(16, 16);
+
+            ChunkData v1 = MakeEditedChunk(pos, BlockIDs.Stone);
+            ChunkStorageManager.InjectSaveFaults(1);
+            bool ok = Check("first save reports Failed", RunSave(fx, v1) == ChunkSaveResult.Failed);
+            World.Instance.ChunkPool.ReturnChunkData(v1);
+
+            ChunkData v2 = MakeEditedChunk(pos, BlockIDs.Grass);
+            ChunkStorageManager.InjectSaveFaults(1);
+            ok &= Check("second save reports Failed", RunSave(fx, v2) == ChunkSaveResult.Failed);
+            World.Instance.ChunkPool.ReturnChunkData(v2);
+
+            ok &= Check("drain recovers the coord once", fx.Storage.DrainFailedSaveRetries(ignoreBackoff: true) == 1);
+            ok &= Check("registry empty (older snapshot superseded, not queued)", fx.Storage.PendingFailedSaves == 0);
+            ok &= LoadedEditEquals(fx, pos, BlockIDs.Grass, "disk carries the newer edit");
+            return ok;
+        }
+
+        /// <summary>B6. Red when: a load can read pre-edit bytes while that coord's failed save is still pending (stale-reload race).</summary>
+        private static bool ReloadGuardFlushesBeforeLoad()
+        {
+            using Fixture fx = new Fixture();
+            Vector2Int pos = new Vector2Int(32, 0);
+            ChunkData data = MakeEditedChunk(pos, BlockIDs.Grass);
+
+            ChunkStorageManager.InjectSaveFaults(1);
+            bool ok = Check("save reports Failed", RunSave(fx, data) == ChunkSaveResult.Failed);
+            World.Instance.ChunkPool.ReturnChunkData(data);
+
+            // No drain in between — the load itself must flush the pending retry first.
+            ok &= LoadedEditEquals(fx, pos, BlockIDs.Grass, "load returns the edited data, not stale disk");
+            ok &= Check("registry drained by the reload guard", fx.Storage.PendingFailedSaves == 0);
+            return ok;
+        }
+
+        /// <summary>B7. Red when: the quit-time flush no longer makes the final attempt on pending failed saves.</summary>
+        private static bool QuitFlushLandsPendingSave()
+        {
+            using Fixture fx = new Fixture();
+            Vector2Int pos = new Vector2Int(0, 32);
+            ChunkData data = MakeEditedChunk(pos, BlockIDs.Stone);
+
+            ChunkStorageManager.InjectSaveFaults(1);
+            bool ok = Check("save reports Failed", RunSave(fx, data) == ChunkSaveResult.Failed);
+            World.Instance.ChunkPool.ReturnChunkData(data);
+
+            ok &= Check("quit flush recovers one save", fx.Storage.FlushFailedSavesSync() == 1);
+            ok &= Check("registry empty after flush", fx.Storage.PendingFailedSaves == 0);
+            ok &= LoadedEditEquals(fx, pos, BlockIDs.Stone, "edit persisted by the final flush");
+            return ok;
+        }
+
+        /// <summary>B8. The manual-save-then-quit hole: a save canceled by the quit token may belong to a
+        /// chunk already cleared from ModifiedChunks, so its snapshot must be staged and written by the
+        /// quit-time flush. Red when: a Canceled save's snapshot is dropped (edits silently lost at quit).</summary>
+        private static bool CanceledSaveStagedForQuitFlush()
+        {
+            using Fixture fx = new Fixture();
+            Vector2Int pos = new Vector2Int(48, 0);
+            ChunkData data = MakeEditedChunk(pos, BlockIDs.Stone);
+
+            using CancellationTokenSource cts = new CancellationTokenSource();
+            cts.Cancel();
+            bool ok = Check("save reports Canceled", RunSave(fx, data, cts.Token) == ChunkSaveResult.Canceled);
+            World.Instance.ChunkPool.ReturnChunkData(data); // chunk gone from ModifiedChunks in production
+
+            ok &= Check("canceled snapshot staged in the registry", fx.Storage.PendingFailedSaves == 1);
+            ok &= Check("quit flush writes the canceled save", fx.Storage.FlushFailedSavesSync() == 1);
+            ok &= Check("registry empty after flush", fx.Storage.PendingFailedSaves == 0);
+            ok &= LoadedEditEquals(fx, pos, BlockIDs.Stone, "edit persisted by the quit flush");
+            return ok;
+        }
+
+        /// <summary>B9. Red when: a deterministic (zero-length serialization) failure enters the retry
+        /// registry — an infinite retry loop with a permanently pinned snapshot.</summary>
+        private static bool PermanentFailureNeverRetries()
+        {
+            using Fixture fx = new Fixture();
+            Vector2Int pos = new Vector2Int(0, 48);
+
+            // Direct save: zero-length serialization → FailedPermanent, snapshot released, nothing staged.
+            ChunkData data = MakeEditedChunk(pos, BlockIDs.Stone);
+            ChunkStorageManager.InjectZeroLengthSerializes(1);
+            bool ok = Check("save reports FailedPermanent", RunSave(fx, data) == ChunkSaveResult.FailedPermanent);
+            ok &= Check("nothing entered the retry registry", fx.Storage.PendingFailedSaves == 0);
+            World.Instance.ChunkPool.ReturnChunkData(data);
+
+            // Retry path: a retryable failure whose RETRY turns deterministic must drop the entry, not loop.
+            ChunkData data2 = MakeEditedChunk(pos, BlockIDs.Grass);
+            ChunkStorageManager.InjectSaveFaults(1);
+            ok &= Check("second save reports Failed (retryable)", RunSave(fx, data2) == ChunkSaveResult.Failed);
+            World.Instance.ChunkPool.ReturnChunkData(data2);
+
+            ChunkStorageManager.InjectZeroLengthSerializes(1);
+            ok &= Check("deterministic retry recovers nothing", fx.Storage.DrainFailedSaveRetries(ignoreBackoff: true) == 0);
+            ok &= Check("entry dropped (no infinite retry loop)", fx.Storage.PendingFailedSaves == 0);
+            return ok;
+        }
+    }
+}

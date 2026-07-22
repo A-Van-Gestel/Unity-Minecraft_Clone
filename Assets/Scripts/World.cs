@@ -519,7 +519,7 @@ public class World : MonoBehaviour
             _shutdownTokenSource?.Cancel();
 
             // 2. Brief delay to let cancellation propagate (Fixes Race Condition)
-            //    This allows background threads to hit the "if (cancelled) return" check
+            //    This allows background threads to hit the "if (canceled) return" check
             //    before we start locking files on the main thread.
             Thread.Sleep(100);
 
@@ -1054,7 +1054,7 @@ public class World : MonoBehaviour
                 // flags fire the staging callback from PopulateFromSave, so this is for the neighbors.
                 _lightWork.PromoteNeighborhood(chunkVoxelPos);
 
-                // Apply Pending Mods (Trees, etc that spilled over)
+                // Apply Pending Mods (Trees, etc. that spilled over)
                 if (ModManager.TryGetModsForChunk(chunkCoord, out List<VoxelMod> pendingMods))
                 {
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -1872,7 +1872,7 @@ public class World : MonoBehaviour
             // The worker-count guard falls back to the serial tick on genuinely core-starved hosts (≤2 cores → <2 Job
             // workers), where the Schedule + blocking-Complete overhead would exceed the win; every real target —
             // even a 2021 midrange 8-core phone — clears it. (Temporary: retires with the serial path once
-            // parallel-only ships.) Otherwise run the unchanged Phase-3 serial per-chunk tick.
+            // parallel-only ships.) Otherwise, run the unchanged Phase-3 serial per-chunk tick.
             if (_enableFluidBurstTick && _enableParallelFluidTick
                                       && JobsUtility.JobWorkerCount >= MIN_PARALLEL_WORKER_THREADS)
             {
@@ -2036,6 +2036,11 @@ public class World : MonoBehaviour
         // 1b. Admit queued generation requests under the in-flight cap (P-4 §3.1). Runs after the drain
         //     above so completions this frame free headroom for new admissions immediately.
         DrainGenerationRequests();
+
+        // 1c. CP-6: retry at most one pending failed save (cheap no-op when the registry is empty).
+        //     Per-frame rather than per-UnloadChunks pass — UnloadChunks only runs on chunk-boundary
+        //     crossings, so a stationary player would otherwise never drain a failed save.
+        StorageManager?.DrainFailedSaveRetries();
 
         // 2. Apply all queued voxel modifications (from player and world gen).
         long applyStart = WorldFrameProfiler.Begin();
@@ -2997,14 +3002,22 @@ public class World : MonoBehaviour
                 if (decision == ChunkUnloadDecision.Result.UnloadPersistLightPending)
                     data.NeedsInitialLighting = true;
 
-                // Fire and forget (StorageManager handles the Snapshot lifecycle)
-                Task saveTask = StorageManager.SaveChunkAsync(data, _shutdownTokenSource.Token);
+                // Fire and forget (StorageManager handles the Snapshot lifecycle). CP-6: a failed save is
+                // no longer silent — SaveChunkAsync hands the snapshot (the edits' only surviving copy once
+                // `data` is pool-recycled below) to the failed-save retry registry, which re-attempts until
+                // the write lands (drained per frame; flushed synchronously at quit).
+                Task<ChunkSaveResult> saveTask = StorageManager.SaveChunkAsync(data, _shutdownTokenSource.Token);
 
                 saveTask.ContinueWith(t =>
                 {
-                    if (t.IsFaulted) Debug.LogError($"[UnloadChunks] Save failed for {chunkCoord}: {t.Exception}");
+                    // Failures surface as ChunkSaveResult.Failed and route to the retry registry; a faulted
+                    // task here means SaveChunkAsync itself broke its contract — log loud.
+                    if (t.IsFaulted) Debug.LogError($"[UnloadChunks] Save task faulted for {chunkCoord}: {t.Exception}");
                 });
 
+                // Safe to unmark at fire time: durability responsibility transfers to the save (and, on
+                // failure, its retry registry). The recycled `data` ref must never linger in ModifiedChunks —
+                // the pool would hand it to another chunk, falsely marking it modified.
                 worldData.ModifiedChunks.Remove(data);
             }
 
@@ -4247,9 +4260,21 @@ public class World : MonoBehaviour
             }
             else
             {
-                // Pass the token so manual saves don't keep running if we suddenly quit
+                // Pass the token so manual saves don't keep running if we suddenly quit.
+                // CP-6: a failure lands in the retry registry (drained per frame) and a quit-canceled
+                // save stages its snapshot for the quit flush, so the up-front ModifiedChunks.Clear
+                // above no longer silently loses the chunk's edits on either path.
                 _ = StorageManager.SaveChunkAsync(data, _shutdownTokenSource.Token);
             }
+        }
+
+        // CP-6: the synchronous arm is the last-chance path (quit / force-unload) — make the final
+        // attempt on every pending failed save before storage is disposed. A save that still fails
+        // here is lost, but loudly (per-chunk error), never silently.
+        if (synchronous)
+        {
+            int recovered = StorageManager.FlushFailedSavesSync();
+            if (recovered > 0) Debug.Log($"[SaveAllModifiedChunks] Final flush recovered {recovered.ToString()} failed save(s).");
         }
     }
 

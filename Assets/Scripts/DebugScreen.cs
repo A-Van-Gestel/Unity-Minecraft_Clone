@@ -488,7 +488,8 @@ public class DebugScreen : MonoBehaviour
             .Append(" | strand: ").Append(_world.UnloadDeferWouldStrand).AppendLine();
         _middleLeftBuilder.Append("Saves — fired: ").Append(ChunkStorageManager.SavesFired)
             .Append(" | ok: ").Append(ChunkStorageManager.SavesCompleted)
-            .Append(" | failed: ").Append(ChunkStorageManager.SavesFailed).AppendLine();
+            .Append(" | failed: ").Append(ChunkStorageManager.SavesFailed)
+            .Append(" | retry-pending: ").Append(_world.StorageManager?.PendingFailedSaves ?? 0).AppendLine();
         _middleLeftBuilder.Append("Deserialize failures: ").Append(ChunkSerializer.DeserializeFailures).AppendLine();
         _middleLeftBuilder.Append("Load-arm faults (dev): ").Append(World.LoadArmFaults).AppendLine();
         _middleLeftBuilder.Append("Stuck loading (dev): ").Append(_world.StuckLoadingChunks).AppendLine();
