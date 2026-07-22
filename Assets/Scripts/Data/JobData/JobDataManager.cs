@@ -48,11 +48,18 @@ namespace Data.JobData
         /// </summary>
         public void Dispose()
         {
-            if (BlockTypesJobData.IsCreated) BlockTypesJobData.Dispose();
-            if (CustomMeshesJobData.IsCreated) CustomMeshesJobData.Dispose();
-            if (CustomFacesJobData.IsCreated) CustomFacesJobData.Dispose();
-            if (CustomVertsJobData.IsCreated) CustomVertsJobData.Dispose();
-            if (CustomTrisJobData.IsCreated) CustomTrisJobData.Dispose();
+            // Hoisted off the readonly fields so Dispose() runs without hidden defensive copies.
+            NativeArray<BlockTypeJobData> blockTypes = BlockTypesJobData;
+            NativeArray<CustomMeshData> customMeshes = CustomMeshesJobData;
+            NativeArray<CustomFaceData> customFaces = CustomFacesJobData;
+            NativeArray<CustomVertData> customVerts = CustomVertsJobData;
+            NativeArray<int> customTris = CustomTrisJobData;
+
+            if (blockTypes.IsCreated) blockTypes.Dispose();
+            if (customMeshes.IsCreated) customMeshes.Dispose();
+            if (customFaces.IsCreated) customFaces.Dispose();
+            if (customVerts.IsCreated) customVerts.Dispose();
+            if (customTris.IsCreated) customTris.Dispose();
         }
     }
 }

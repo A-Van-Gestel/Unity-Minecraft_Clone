@@ -776,11 +776,14 @@ namespace Data
             else if (!newIsLightObstructing && localY == currentHeight)
             {
                 // Scan downwards from here to find the NEW highest light-obstructing block.
+                // Hoisted off the readonly parameter: the generic isn't readonly-constrained, so calling
+                // through `obstruction` directly would defensively copy it every iteration.
+                TObstruction obstructionLookup = obstruction;
                 ushort newHeight = 0;
                 for (int y = localY - 1; y >= 0; y--)
                 {
                     ushort checkId = BurstVoxelDataBitMapping.GetId(GetVoxel(localX, y, localZ));
-                    if (obstruction.IsLightObstructing(checkId))
+                    if (obstructionLookup.IsLightObstructing(checkId))
                     {
                         newHeight = (ushort)y;
                         break; // Found the new highest block, stop scanning.

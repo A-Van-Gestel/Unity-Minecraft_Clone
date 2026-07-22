@@ -1080,7 +1080,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     /// Must only be called after <c>Handle.Complete()</c>.
     /// </summary>
     /// <param name="jobData">The completed generation job data.</param>
-    private void ReleaseGenerationJobData(in GenerationJobData jobData)
+    private void ReleaseGenerationJobData(GenerationJobData jobData)
     {
         // Return the pooled list BEFORE Dispose (which skips it via the ActiveVoxelsFromPool guard).
         if (jobData.ActiveVoxelsFromPool)
@@ -1097,7 +1097,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     /// <c>Chunk.ApplyMeshData</c> has uploaded it).
     /// </summary>
     /// <param name="jobData">The completed meshing job data.</param>
-    private void ReleaseMeshingJobInputs(in MeshingJobData jobData)
+    private void ReleaseMeshingJobInputs(MeshingJobData jobData)
     {
         _jobArrayPool.Return(jobData.Map);
         _jobArrayPool.Return(jobData.LightMap);
@@ -1112,7 +1112,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     /// Non-pooled jobs are fully disposed instead. Must only be called after <c>Handle.Complete()</c>.
     /// </summary>
     /// <param name="jobData">The completed lighting job data.</param>
-    private void ReleaseLightingJobData(in LightingJobData jobData)
+    private void ReleaseLightingJobData(LightingJobData jobData)
     {
         // Non-pooled jobs (startup coroutine's TempJob path) own all their buffers — dispose them.
         if (!jobData.UsesPooledBuffers)
@@ -1730,7 +1730,10 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     {
         foreach (GenerationJobData job in GenerationJobs.Values)
         {
-            job.Handle.Complete();
+            // Hoist off the readonly iteration variable so Complete() runs without a hidden defensive copy
+            // (same pattern in the two loops below).
+            JobHandle handle = job.Handle;
+            handle.Complete();
             // Releases an enrolled (not-yet-terminally-completed) job — returns its pooled list to the pool
             // (freed by _activeVoxelListPool.Dispose() below) and disposes the rest. These jobs never reached
             // the terminal ReleaseGenerationJobData in ProcessGenerationJobs, so this is their only release.
@@ -1739,14 +1742,16 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
 
         foreach (MeshingJobData job in MeshJobs.Values)
         {
-            job.Handle.Complete();
+            JobHandle handle = job.Handle;
+            handle.Complete();
             _meshOutputPool.Return(job.Output); // returned then freed by _meshOutputPool.Dispose() below
             ReleaseMeshingJobInputs(job);
         }
 
         foreach (LightingJobData job in LightingJobs.Values)
         {
-            job.Handle.Complete();
+            JobHandle handle = job.Handle;
+            handle.Complete();
             ReleaseLightingJobData(job);
         }
 

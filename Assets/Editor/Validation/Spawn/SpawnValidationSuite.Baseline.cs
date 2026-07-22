@@ -193,11 +193,13 @@ namespace Editor.Validation
 
             bool ok = Expect(probe.Calls.Count == 1 && probe.Calls[0] == initial.ToAbsoluteWorldPosition(),
                 $"Fresh probed {probe.Calls.Count} time(s) at [{string.Join(", ", probe.Calls)}], expected once at {initial}.");
-            ok &= Expect(placement.PlayerVoxelPosition.ToAbsoluteWorldPosition() == surface,
+            ChunkRelativePosition placedPlayer = placement.PlayerVoxelPosition;
+            ChunkRelativePosition canonicalSpawn = placement.CanonicalSpawn;
+            ok &= Expect(placedPlayer.ToAbsoluteWorldPosition() == surface,
                 $"Fresh placed the player at {placement.PlayerVoxelPosition}, expected the probed surface {surface}.");
             ok &= Expect(placement.ShouldCanonicalizeSpawn, "Fresh must canonicalize its resolved surface as the spawn point.");
-            ok &= Expect(placement.CanonicalSpawn.ToAbsoluteWorldPosition() == surface,
-                $"Fresh canonical spawn = {placement.CanonicalSpawn.ToAbsoluteWorldPosition()}, expected {surface}.");
+            ok &= Expect(canonicalSpawn.ToAbsoluteWorldPosition() == surface,
+                $"Fresh canonical spawn = {canonicalSpawn.ToAbsoluteWorldPosition()}, expected {surface}.");
             return ok;
         }
 
@@ -215,7 +217,8 @@ namespace Editor.Validation
 
             bool ok = Expect(probe.Calls.Count == 1 && probe.Calls[0] == initial.ToAbsoluteWorldPosition(),
                 $"EditorReplay probed {probe.Calls.Count} time(s) at [{string.Join(", ", probe.Calls)}], expected once at {initial}.");
-            ok &= Expect(placement.PlayerVoxelPosition.ToAbsoluteWorldPosition() == surface,
+            ChunkRelativePosition placedPlayer = placement.PlayerVoxelPosition;
+            ok &= Expect(placedPlayer.ToAbsoluteWorldPosition() == surface,
                 $"EditorReplay placed the player at {placement.PlayerVoxelPosition}, expected {surface}.");
             ok &= Expect(!placement.ShouldCanonicalizeSpawn,
                 "EditorReplay must not rewrite the persisted spawn point.");
@@ -245,8 +248,9 @@ namespace Editor.Validation
                 $"{spawnPoint.ToAbsoluteWorldPosition()} — never the player position.");
             ok &= Expect(placement.ShouldCanonicalizeSpawn,
                 "LoadedSave must canonicalize a spawn point the probe resolved.");
-            ok &= Expect(placement.CanonicalSpawn.ToAbsoluteWorldPosition() == resolvedSpawn,
-                $"LoadedSave canonical spawn = {placement.CanonicalSpawn.ToAbsoluteWorldPosition()}, expected {resolvedSpawn}.");
+            ChunkRelativePosition canonicalSpawn = placement.CanonicalSpawn;
+            ok &= Expect(canonicalSpawn.ToAbsoluteWorldPosition() == resolvedSpawn,
+                $"LoadedSave canonical spawn = {canonicalSpawn.ToAbsoluteWorldPosition()}, expected {resolvedSpawn}.");
             return ok;
         }
 
