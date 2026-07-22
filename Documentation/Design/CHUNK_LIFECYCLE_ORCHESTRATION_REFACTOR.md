@@ -328,6 +328,16 @@ is touched (CP-4 does not touch its rule logic, but run it anyway: cheap);
 - **Doc-sync:** `WORLD_SCALING_ANALYSIS.md` §3.2/§6 (WS-1 → executed, pointer here);
   `PERFORMANCE_IMPROVEMENTS_REPORT.md` WS-1 row status; `CHUNK_LIFECYCLE_PIPELINE.md` untouched.
 
+> **Drift note (2026-07-22, pre-execution):** most of this packet was executed OUT OF BAND —
+> **WS-1 shipped independently 2026-07-12** (`WORLD_SCALING_ANALYSIS.md` §3.2 ✅ / §6): the
+> `Helpers/ChunkMath` shift/mask helpers exist and are live, `RegionAddressCodec.V2Codec` routes
+> through them (step-1 truncation bug gone), the equivalence guard landed in the existing
+> **"Chunk Math" suite** (38 baselines at 2026-07-22 — negative-domain sweeps + boundary cases;
+> this packet's "new suite" framing is stale), and the **no-V3-bump** decision was taken and
+> recorded there (§8 v2 item resolved). Per `VALIDATION_SUITE_COVERAGE_ROADMAP.md` NS-5, the
+> outstanding residue is: **the V2/V3 region-codec pins**, a residual call-site audit at HEAD
+> (post-2026-07-12 code, e.g. CP-4's alignment assert), and this packet's Amended close-out.
+
 ### CP-3 — Load-arm failure contract + NS-1 robustness seed (🟡, failure-path behavior change)
 
 - **Scope:** §3.3 Option B — try/catch the `LoadOrGenerateChunk` body (fault → one
