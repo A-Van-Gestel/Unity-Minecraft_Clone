@@ -827,7 +827,7 @@ public class World : MonoBehaviour
         {
             // Create placeholder if missing (integer origin — exact past ±2²⁴, Bug 19 class)
             Vector2Int placeholderOrigin = chunkCoord.ToVoxelOrigin();
-            worldData.EnsureChunkExists(new Vector3Int(placeholderOrigin.x, 0, placeholderOrigin.y));
+            worldData.GetOrCreatePlaceholder(placeholderOrigin);
 
             // Start the Load/Gen process
             loadTasks.Add(LoadOrGenerateChunk(chunkCoord));
@@ -3210,13 +3210,8 @@ public class World : MonoBehaviour
             {
                 Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
 
-                // If chunk not in memory at all
-                if (!worldData.TryGetChunk(chunkVoxelPos, out ChunkData data))
-                {
-                    // Create placeholder
-                    data = Instance.ChunkPool.GetChunkData(chunkVoxelPos);
-                    worldData.SetChunk(chunkVoxelPos, data);
-                }
+                // Get the chunk, creating its placeholder when not in memory (single creation site, CP-4).
+                ChunkData data = worldData.GetOrCreatePlaceholder(chunkVoxelPos);
 
                 // If it's empty, and not currently fetching from disk, and not currently generating...
                 // queue it for the capped per-frame drain (P-4 §3.1) instead of starting the pipeline

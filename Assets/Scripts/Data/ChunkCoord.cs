@@ -86,7 +86,7 @@ namespace Data
 
         /// <summary>
         /// Returns the Unity world-space position of this chunk's origin as a Vector3 (Y = 0).
-        /// Use this for <c>Transform.position</c>, <c>EnsureChunkExists</c>, and similar APIs.
+        /// Use this for <c>Transform.position</c> and similar Vector3-taking APIs.
         /// <para>Formula: <c>(X * ChunkWidth, 0, Z * ChunkWidth)</c></para>
         /// </summary>
         /// <returns>A <see cref="Vector3"/> representing the Unity world position of the chunk's origin.</returns>

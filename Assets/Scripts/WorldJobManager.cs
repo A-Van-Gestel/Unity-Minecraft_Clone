@@ -824,6 +824,12 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
                     continue;
                 }
 
+#if UNITY_EDITOR
+                // CP-4: a tracked generation job pins its placeholder against unload (ChunkUnloadDecision
+                // job arm), so the create-true below can never actually create — assert that stays structural.
+                Debug.Assert(_world.worldData.TryGetChunk(jobEntry.Key.ToVoxelOrigin(), out _),
+                    "ProcessGenerationJobs: placeholder missing for a tracked generation job — job-pinning broken?");
+#endif
                 ChunkData chunkData = _world.worldData.RequestChunk(jobEntry.Key.ToVoxelOrigin(), true);
 
                 // --- STAGE 1: Populate with base terrain (Once per chunk) ---

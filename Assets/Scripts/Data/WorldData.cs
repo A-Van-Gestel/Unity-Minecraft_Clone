@@ -103,54 +103,22 @@ namespace Data
         /// Requests a chunk at the specified voxel-space world origin.
         /// </summary>
         /// <param name="chunkVoxelPos">The world origin of the chunk (X * ChunkWidth, Z * ChunkWidth).</param>
-        /// <param name="allowChunkDataCreation">If true, a placeholder chunk will be created if it doesn't exist.</param>
+        /// <param name="allowChunkDataCreation">If true, a placeholder chunk is created (via
+        /// <see cref="GetOrCreatePlaceholder"/>) when the coord has no loaded chunk.
+        /// ⚠️ Resurrect semantics: for a coord whose chunk was <b>unloaded</b>, this creates a fresh,
+        /// UNPOPULATED placeholder — it does not restore the unloaded chunk's data (disk restore is the
+        /// load pipeline's job). Callers that must not silently resurrect a placeholder pass false.
+        /// The pipeline's create-true callers are safe by construction: <c>ProcessGenerationJobs</c>
+        /// (its tracked job pins the placeholder against unload) and the <c>Chunk</c> visual re-link
+        /// (<c>CheckViewDistance</c>'s spiral created every load-distance placeholder earlier in the same
+        /// call) — both editor-asserted at the call site; <c>GetHighestVoxel</c> relies on creation.</param>
         /// <returns>The ChunkData object if found or created; otherwise, null.</returns>
         public ChunkData RequestChunk(Vector2Int chunkVoxelPos, bool allowChunkDataCreation)
         {
-            ChunkData c;
+            if (allowChunkDataCreation)
+                return GetOrCreatePlaceholder(chunkVoxelPos);
 
-            if (_chunks.TryGetValue(chunkVoxelPos, out ChunkData chunk))
-                c = chunk;
-            else if (!allowChunkDataCreation)
-                c = null;
-            else
-            {
-                LoadChunk(chunkVoxelPos);
-                c = _chunks[chunkVoxelPos];
-            }
-
-            return c;
-        }
-
-        /// <summary>
-        /// Ensures a chunk is loaded into memory, either from disk or by creating a generation placeholder.
-        /// </summary>
-        /// <param name="chunkVoxelPos">The world origin of the chunk.</param>
-        public void LoadChunk(Vector2Int chunkVoxelPos)
-        {
-            // Nothing needs to be loaded if the chunk is already loaded.
-            if (_chunks.ContainsKey(chunkVoxelPos))
-                return;
-
-            // Load Chunk from File
-            if (World.Instance.settings.EnablePersistence)
-            {
-                // PHASE 3 TODO-old: Replace the legacy save-system code below with ChunkStorageManager.LoadChunkAsync
-                // TODO-new: This was the original place where chunks where loaded from disk, I believe this is the correct place (eg: data related), but is currently moved into World class itself.
-                /*
-                ChunkData chunk = SaveSystem.LoadChunk(worldName, chunkVector2Coord);
-                if (chunk != null)
-                {
-                    Chunks.Add(chunkVector2Coord, chunk);
-                    return;
-                }
-                */
-            }
-
-            // Chunk doesn't exist on disk (or loading is disabled/not yet implemented).
-            // We create a "placeholder" ChunkData object.
-            // The asynchronous job system is responsible for populating it.
-            SetChunk(chunkVoxelPos, World.Instance.ChunkPool.GetChunkData(chunkVoxelPos)); // Create placeholder using POOL
+            return _chunks.TryGetValue(chunkVoxelPos, out ChunkData chunk) ? chunk : null;
         }
 
         /// <summary>Direct, non-virtual chunk lookup by voxel-space origin — the hot-path read.</summary>
@@ -196,46 +164,31 @@ namespace Data
 
 
         /// <summary>
-        /// This method is called by a modification that needs a chunk which may not exist yet.
-        /// We can't populate it here, but we can make sure the placeholder exists so the mod can be queued.
+        /// Gets the chunk at the given voxel-space origin, creating a pooled placeholder when absent —
+        /// the single placeholder-creation site (CP-4 / F2). Creation stays on
+        /// <see cref="ChunkPoolManager.GetChunkData"/> so the pool's <c>Reset</c> runs (bumping
+        /// <c>ChunkData.LifecycleEpoch</c> for pool-ABA detection). Deliberately does NOT set
+        /// <c>IsLoading</c> or enqueue generation — admission in <c>World.DrainGenerationRequests</c>
+        /// owns both (P-4 §3.1); the placeholder stays eligible until admitted.
         /// </summary>
-        /// <param name="worldPos">The world position</param>
-        /// <returns>Boolean representing if chunk already existed (TRUE), or if a placeholder was created (FALSE) or outside the world (FALSE)</returns>
-        public bool EnsureChunkExists(Vector3 worldPos)
+        /// <param name="chunkVoxelPos">The chunk's voxel-space origin. Must be chunk-origin-aligned —
+        /// unlike the retired <c>EnsureChunkExists</c> overloads, this method does NOT normalize
+        /// arbitrary voxel positions (convert via <see cref="GetChunkCoordFor(Vector3Int)"/> first).</param>
+        /// <returns>The existing chunk, or the freshly created unpopulated placeholder.</returns>
+        public ChunkData GetOrCreatePlaceholder(Vector2Int chunkVoxelPos)
         {
-            // Outside the world, nothing to do.
-            if (!IsVoxelInWorld(worldPos)) return false;
+#if UNITY_EDITOR
+            // A misaligned key would register a phantom chunk no origin-based lookup can ever find —
+            // assert alignment (sign-safe: any negative multiple of ChunkWidth still yields remainder 0).
+            Debug.Assert(chunkVoxelPos.x % VoxelData.ChunkWidth == 0 && chunkVoxelPos.y % VoxelData.ChunkWidth == 0,
+                "GetOrCreatePlaceholder: position is not a chunk origin — normalize via GetChunkCoordFor first.");
+#endif
+            if (_chunks.TryGetValue(chunkVoxelPos, out ChunkData chunkData))
+                return chunkData;
 
-            return EnsureChunkOriginExists(GetChunkCoordFor(worldPos));
-        }
-
-        /// <summary>
-        /// Integer-exact overload: ensures the chunk containing the given voxel cell exists
-        /// (see <see cref="EnsureChunkExists(Vector3)"/>). Exact to the ±2³¹ edge.
-        /// </summary>
-        /// <param name="voxelCell">The global voxel cell.</param>
-        /// <returns>True when the chunk already existed; false when a placeholder was created or the cell is outside the world.</returns>
-        public bool EnsureChunkExists(Vector3Int voxelCell)
-        {
-            // Outside the world, nothing to do (Y is the only bound since WS-3).
-            if (voxelCell.y is < 0 or >= VoxelData.ChunkHeight) return false;
-
-            return EnsureChunkOriginExists(GetChunkCoordFor(voxelCell));
-        }
-
-        /// <summary>Shared tail of the <c>EnsureChunkExists</c> overloads: creates a pooled placeholder when absent.</summary>
-        /// <param name="chunkVoxelPos">The chunk's voxel-space origin.</param>
-        /// <returns>True when the chunk already existed; false when a placeholder was created.</returns>
-        private bool EnsureChunkOriginExists(Vector2Int chunkVoxelPos)
-        {
-            if (!_chunks.ContainsKey(chunkVoxelPos))
-            {
-                // Create the placeholder
-                SetChunk(chunkVoxelPos, World.Instance.ChunkPool.GetChunkData(chunkVoxelPos)); // Create placeholder using POOL
-                return false;
-            }
-
-            return true;
+            ChunkData placeholder = World.Instance.ChunkPool.GetChunkData(chunkVoxelPos);
+            SetChunk(chunkVoxelPos, placeholder);
+            return placeholder;
         }
 
         /// <summary>

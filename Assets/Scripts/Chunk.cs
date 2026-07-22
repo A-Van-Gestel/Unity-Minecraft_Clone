@@ -130,6 +130,13 @@ public class Chunk
 
         Vector2Int worldPosKey = Coord.ToVoxelOrigin();
 
+#if UNITY_EDITOR
+        // CP-4: CheckViewDistance's spiral creates every load-distance placeholder before activating
+        // visuals, so the create-true below can never actually create — assert that stays structural.
+        Debug.Assert(World.Instance.worldData.TryGetChunk(worldPosKey, out _),
+            "Chunk visual re-link: ChunkData missing at activation — spiral placeholder creation broken?");
+#endif
+
         // Link Data
         // NOTE: We retrieve the existing data (loaded or generated) from WorldData.
         ChunkData = World.Instance.worldData.RequestChunk(worldPosKey, true);
