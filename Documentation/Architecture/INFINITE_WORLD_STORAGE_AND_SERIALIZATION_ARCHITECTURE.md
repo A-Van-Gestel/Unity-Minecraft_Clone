@@ -1,7 +1,6 @@
 # Design Document: Infinite World Storage & Serialization Architecture
 
-**Version:** 1.7
-**Date:** 2026-06-13  
+**Version:** 1.7 **Date:** 2026-06-13  
 **Status:** Implemented (Stable)  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
@@ -587,32 +586,16 @@ if (LightingStateManager.TryGetAndRemove(coord, out HashSet<Vector2Int> localCol
 ```
 
 **Failure Handling (CP-3 load-boundary contract):**  
-The load pipeline distinguishes three outcomes, and the distinction is load-bearing — collapsing a
-fault into the null result would regenerate terrain over the player's saved data:
+The load pipeline distinguishes three outcomes, and the distinction is load-bearing — collapsing a fault into the null result would regenerate terrain over the player's saved data:
 
-1. **Not on disk / corrupt payload → null.** `RegionFile.LoadChunkData` returns null for its
-   explicit corrupt-shape branches (missing entry, invalid length, truncated record, unknown
-   compression byte), and `ChunkSerializer.Deserialize` catches any parse failure (truncated /
-   garbage / wrong-version payload), **returns the pooled shell and its already-attached sections
-   to the concurrent pools** (no leak — the mid-parse acquisition is unwound), and returns null.
-   The caller regenerates the chunk — the deliberate corrupt-file escape hatch.
-2. **Transient I/O fault → throw.** Unexpected exceptions in `LoadChunkData` rethrow, and a
-   faulted `Lazy<RegionFile>` in `GetRegion` is evicted before the rethrow (a `Lazy` caches its
-   factory exception forever — without eviction one transient open fault would poison the whole
-   region for the session). The fault crosses the `Task` boundary and lands in
-   `World.LoadOrGenerateChunk`'s CP-3 contract: one error log → `IsLoading` cleared
-   (identity-guarded) → natural retry on the next boundary crossing.
+1. **Not on disk / corrupt payload → null.** `RegionFile.LoadChunkData` returns null for its explicit corrupt-shape branches (missing entry, invalid length, truncated record, unknown compression byte), and `ChunkSerializer.Deserialize` catches any parse failure (truncated / garbage / wrong-version payload), **returns the pooled shell and its already-attached sections to the concurrent pools** (no leak — the mid-parse acquisition is unwound), and returns null. The caller regenerates the chunk — the deliberate corrupt-file escape hatch.
+2. **Transient I/O fault → throw.** Unexpected exceptions in `LoadChunkData` rethrow, and a faulted `Lazy<RegionFile>` in `GetRegion` is evicted before the rethrow (a `Lazy` caches its factory exception forever — without eviction one transient open fault would poison the whole region for the session). The fault crosses the `Task` boundary and lands in
+   `World.LoadOrGenerateChunk`'s CP-3 contract: one error log → `IsLoading` cleared (identity-guarded) → natural retry on the next boundary crossing.
 3. **Success → hydrate.** Unchanged (§ Step 9 below).
 
-The write side shares the loud-failure rule: `RegionFile.SaveChunkData` rethrows unexpected write
-faults instead of swallowing them, so `SaveChunkAsync` reports `Failed` (→ CP-6 retry registry)
+The write side shares the loud-failure rule: `RegionFile.SaveChunkData` rethrows unexpected write faults instead of swallowing them, so `SaveChunkAsync` reports `Failed` (→ CP-6 retry registry)
 rather than a false `Written`; its deterministic "chunk too big" arm throws the typed
-`ChunkTooLargeException`, which every save path maps to `FailedPermanent` (B13). A partially
-initialized `RegionFile` disposes its `FileStream` before rethrowing, so a transient open fault
-never leaks the exclusive handle (which would turn every eviction-retry re-open into a sharing
-violation). Migration reads (`MigrationManager`) wrap `LoadChunkData` in a small bounded retry so
-a transient fault doesn't drop a healthy chunk from the migrated world as "corrupted".
-The CP-6 reload guard (`FlushPendingRetryFor`) stays in `LoadChunkAsync`'s synchronous
+`ChunkTooLargeException`, which every save path maps to `FailedPermanent` (B13). A partially initialized `RegionFile` disposes its `FileStream` before rethrowing, so a transient open fault never leaks the exclusive handle (which would turn every eviction-retry re-open into a sharing violation). Migration reads (`MigrationManager`) wrap `LoadChunkData` in a small bounded retry so a transient fault doesn't drop a healthy chunk from the migrated world as "corrupted". The CP-6 reload guard (`FlushPendingRetryFor`) stays in `LoadChunkAsync`'s synchronous
 prefix, ahead of everything above. Guarded by `Minecraft Clone/Dev/Validate Deserialization
 Robustness` (NS-1 seed, B1–B7) with the dev-only `ChunkStorageManager.InjectLoadFaults` seam.
 
@@ -673,7 +656,7 @@ public Dictionary<Vector2Int, HashSet<Vector2Int>> SunlightRecalculationQueue;
 
 ### 6.3. Unload Safety Protocol
 
-**In World.UnloadChunks():**
+**In World.UnloadChunks ():**
 
 ```csharp
 // Step 1: Check for active work
@@ -719,7 +702,7 @@ if (worldData.ModifiedChunks.Contains(data))
 
 ### 6.4. Load Restoration Protocol
 
-**In World.LoadOrGenerateChunk():**
+**In World.LoadOrGenerateChunk ():**
 
 ```csharp
 ChunkData loaded = await StorageManager.LoadChunkAsync(pos);
@@ -776,7 +759,7 @@ During lighting job execution, neighbor chunks may unload. Light updates targeti
 
 **Solution - Batched Deferred Updates (per channel):**
 
-**In WorldJobManager.ProcessLightingJobs():**
+**In WorldJobManager.ProcessLightingJobs ():**
 
 ```csharp
 foreach (LightModification mod in jobData.Mods)
@@ -934,11 +917,11 @@ An edge chunk at (0, 50) only waits for its in-world neighbors. Out-of-bounds ne
 
 | Operation                      | Target  | Measured | Status |
 |--------------------------------|---------|----------|--------|
-| Chunk Save (Main Thread)       | < 1ms   | ~0.3ms   | ✅      |
-| Chunk Load (Async)             | < 5ms   | ~3ms     | ✅      |
-| Lighting Restoration           | < 2ms   | ~1ms     | ✅      |
-| Memory (Active Chunks)         | < 1000  | ~500-800 | ✅      |
-| File Size (Per Chunk, Deflate) | < 100KB | ~50KB    | ✅      |
+| Chunk Save (Main Thread)       | < 1ms   | ~0.3ms   | ✅     |
+| Chunk Load (Async)             | < 5ms   | ~3ms     | ✅     |
+| Lighting Restoration           | < 2ms   | ~1ms     | ✅     |
+| Memory (Active Chunks)         | < 1000  | ~500-800 | ✅     |
+| File Size (Per Chunk, Deflate) | < 100KB | ~50KB    | ✅     |
 
 ### 9.2. Bottleneck Analysis
 
@@ -987,10 +970,10 @@ Extensive testing with circular flying patterns (worst-case scenario). No black 
 
 **Files Modified:**
 
-* `ChunkData.cs` - PopulateFromSave()
+* `ChunkData.cs` - PopulateFromSave ()
 * `LightingStateManager.cs` - New file
-* `World.cs` - UnloadChunks(), LoadOrGenerateChunk()
-* `WorldJobManager.cs` - ProcessLightingJobs()
+* `World.cs` - UnloadChunks (), LoadOrGenerateChunk ()
+* `WorldJobManager.cs` - ProcessLightingJobs ()
 
 ### 10.2. Logging Spam ✅ RESOLVED
 
@@ -1023,12 +1006,11 @@ Load a world, fly to edge (0,0) or (99,99), verify no permanent dark strips.
 **Root Cause:**
 
 1. **Race Condition:** `EnsureChunkExists` in `WorldData` was implicitly scheduling a Generation Job. In `StartWorld`, this job raced against the async `LoadChunk` task. Often, the Generation Job would finish *after* the disk load, overwriting the saved data with fresh terrain.
-2. **Flush Failure:** `OnApplicationQuit` was writing chunk bytes to the `FileStream` but not explicitly Disposing/Flushing the `StorageManager`. This meant the Region File's **Header Table (Offsets)** was not updated on disk. On reload, the game read the old offsets (0), assumed
-   the chunk didn't exist, and regenerated it.
+2. **Flush Failure:** `OnApplicationQuit` was writing chunk bytes to the `FileStream` but not explicitly Disposing/Flushing the `StorageManager`. This meant the Region File's **Header Table (Offsets)** was not updated on disk. On reload, the game read the old offsets (0), assumed the chunk didn't exist, and regenerated it.
 
 **Resolution:**
 
-1. Refactored `EnsureChunkExists` to only create the data placeholder, moving the responsibility of scheduling generation to `LoadOrGenerateChunk`.
+1. Refactored `EnsureChunkExists` to only create the data placeholder, moving the responsibility of scheduling generation to `LoadOrGenerateChunk`. *(`EnsureChunkExists` has since been retired — CP-4 consolidated the placeholder-only behavior into `WorldData.GetOrCreatePlaceholder`.)*
 2. Added explicit `StorageManager.Dispose()` in `OnApplicationQuit` to force-flush file buffers to physical disk.
 
 ### 10.4. Seed Mismatch ✅ RESOLVED
