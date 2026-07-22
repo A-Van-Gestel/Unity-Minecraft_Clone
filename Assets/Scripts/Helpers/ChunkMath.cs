@@ -69,6 +69,16 @@ namespace Helpers
         public static int ChunkToRegionLocal(int chunk) => chunk & REGION_MASK;
 
         /// <summary>
+        /// True when the voxel coordinate is an exact chunk origin (a multiple of <see cref="CHUNK_WIDTH"/>),
+        /// correct for negative coordinates. The sanctioned alignment test — use this instead of inline
+        /// <c>% CHUNK_WIDTH == 0</c> (equivalent for the ==0 case, but keeps chunk math on the helpers). Burst-safe.
+        /// </summary>
+        /// <param name="voxel">A voxel coordinate on one axis (X or Z).</param>
+        /// <returns>True when the coordinate lies on a chunk origin.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsChunkAligned(int voxel) => (voxel & CHUNK_WIDTH_MASK) == 0;
+
+        /// <summary>
         /// Floor-divides a floating-point world coordinate to its chunk index: floors to the integer voxel
         /// coordinate first (full float precision), then shifts. Equivalent to
         /// <c>Mathf.FloorToInt(world / CHUNK_WIDTH)</c> for the reachable range but Burst-safe

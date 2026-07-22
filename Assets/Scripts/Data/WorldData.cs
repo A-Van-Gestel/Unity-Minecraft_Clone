@@ -179,8 +179,8 @@ namespace Data
         {
 #if UNITY_EDITOR
             // A misaligned key would register a phantom chunk no origin-based lookup can ever find —
-            // assert alignment (sign-safe: any negative multiple of ChunkWidth still yields remainder 0).
-            Debug.Assert(chunkVoxelPos.x % VoxelData.ChunkWidth == 0 && chunkVoxelPos.y % VoxelData.ChunkWidth == 0,
+            // assert alignment (sign-safe for both signs via the sanctioned ChunkMath helper).
+            Debug.Assert(ChunkMath.IsChunkAligned(chunkVoxelPos.x) && ChunkMath.IsChunkAligned(chunkVoxelPos.y),
                 "GetOrCreatePlaceholder: position is not a chunk origin — normalize via GetChunkCoordFor first.");
 #endif
             if (_chunks.TryGetValue(chunkVoxelPos, out ChunkData chunkData))

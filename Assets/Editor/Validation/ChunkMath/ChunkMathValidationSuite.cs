@@ -8,10 +8,11 @@ namespace Editor.Validation
     /// Validation suite for the chunk coordinate / addressing math — the "Chunk Math" suite. Covers
     /// <see cref="Data.WorldTypes.ChunkRelativePosition"/> (serialization, normalization, operators), the WS-1
     /// <see cref="Helpers.ChunkMath"/> shift/mask equivalence sweep, the VQ-1 integer voxel-query decomposition
-    /// parity, the WS-2 unbounded-+XZ bounds, the V2 region-codec identity pin, and the WS-4a
-    /// <see cref="Helpers.WorldOrigin"/> Unity↔voxel conversions. Every scenario is a baseline
+    /// parity, the WS-2 unbounded-+XZ bounds, the V2 region-codec identity pin, the WS-4a
+    /// <see cref="Helpers.WorldOrigin"/> Unity↔voxel conversions, and the NS-5 V1/V2 region-codec pins
+    /// (CP-2 close-out). Every scenario is a baseline
     /// (must stay green). Scenario implementations live in the partial files (<c>.ChunkRelativePosition.cs</c>,
-    /// <c>.ShiftMask.cs</c>, <c>.VoxelQuery.cs</c>, <c>.WorldOrigin.cs</c>).
+    /// <c>.ShiftMask.cs</c>, <c>.VoxelQuery.cs</c>, <c>.WorldOrigin.cs</c>, <c>.RegionCodec.cs</c>).
     /// </summary>
     /// <remarks>Deliberately kept in <c>namespace Editor.Validation</c> (not <c>Editor.Validation.ChunkMath</c>)
     /// despite living in the <c>ChunkMath/</c> folder: a <c>.ChunkMath</c> namespace would shadow the
@@ -35,6 +36,7 @@ namespace Editor.Validation
             AddShiftMaskScenarios(scenarios);
             AddVoxelQueryScenarios(scenarios);
             AddWorldOriginScenarios(scenarios);
+            AddRegionCodecScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Chunk Math", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
 
@@ -49,5 +51,8 @@ namespace Editor.Validation
 
         /// <summary>Registers the WS-4a WorldOrigin Unity↔voxel conversion baselines (partial file .WorldOrigin.cs).</summary>
         static partial void AddWorldOriginScenarios(List<Scenario> scenarios);
+
+        /// <summary>Registers the NS-5 V1/V2 region-codec pins — expected-value, ±2³¹, and legacy-contract baselines (partial file .RegionCodec.cs).</summary>
+        static partial void AddRegionCodecScenarios(List<Scenario> scenarios);
     }
 }

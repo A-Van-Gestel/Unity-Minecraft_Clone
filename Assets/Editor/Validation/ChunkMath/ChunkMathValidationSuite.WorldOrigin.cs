@@ -307,7 +307,7 @@ namespace Editor.Validation
                     WorldOrigin.SetOrigin(origin);
                     Vector3Int ov = WorldOrigin.OriginVoxel;
 
-                    if (ov.x % ChunkMath.CHUNK_WIDTH != 0 || ov.z % ChunkMath.CHUNK_WIDTH != 0)
+                    if (!ChunkMath.IsChunkAligned(ov.x) || !ChunkMath.IsChunkAligned(ov.z))
                         return FailOrigin("WorldOrigin OriginVoxel Is Chunk-Aligned",
                             $"origin {origin.X},{origin.Z} -> OriginVoxel {ov} is not a multiple of {ChunkMath.CHUNK_WIDTH}.");
 

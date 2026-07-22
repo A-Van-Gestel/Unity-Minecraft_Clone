@@ -27,6 +27,7 @@ namespace Editor.Validation
             scenarios.Add(new Scenario("VoxelToChunk == Floor Div (sweep)", RunVoxelToChunkSweep));
             scenarios.Add(new Scenario("VoxelToChunk == Legacy FloorToInt (positives)", RunVoxelToChunkLegacyParity));
             scenarios.Add(new Scenario("VoxelToLocal Reconstructs Voxel (sweep)", RunVoxelToLocalSweep));
+            scenarios.Add(new Scenario("IsChunkAligned == (VoxelToLocal == 0) (sweep)", RunIsChunkAlignedSweep));
             scenarios.Add(new Scenario("ChunkToRegion / RegionLocal Reconstructs Chunk (sweep)", RunRegionSweep));
             scenarios.Add(new Scenario("WorldToChunk == Floor Div (float sweep)", RunWorldToChunkSweep));
             scenarios.Add(new Scenario("Negative-Coordinate Teeth (truncation would fail)", RunNegativeTeeth));
@@ -122,6 +123,29 @@ namespace Editor.Validation
             }
 
             Debug.Log("[PASS] VoxelToLocal Reconstructs Voxel (sweep)");
+            return true;
+        }
+
+        /// <summary>
+        /// <see cref="ChunkMath.IsChunkAligned"/> is definitionally "the local coordinate is zero" — pin the
+        /// equivalence against <see cref="ChunkMath.VoxelToLocal"/> across the signed sweep (CP-2 close-out;
+        /// guards the alignment helper the <c>GetOrCreatePlaceholder</c> assert and WorldOrigin suite adopted).
+        /// </summary>
+        private static bool RunIsChunkAlignedSweep()
+        {
+            for (int v = VOXEL_SWEEP_MIN; v <= VOXEL_SWEEP_MAX; v++)
+            {
+                bool aligned = ChunkMath.IsChunkAligned(v);
+                bool localZero = ChunkMath.VoxelToLocal(v) == 0;
+                if (aligned != localZero)
+                {
+                    Debug.LogError($"[FAIL] IsChunkAligned == (VoxelToLocal == 0) (sweep) — v={v} " +
+                                   $"IsChunkAligned={aligned}, VoxelToLocal==0 is {localZero}.");
+                    return false;
+                }
+            }
+
+            Debug.Log("[PASS] IsChunkAligned == (VoxelToLocal == 0) (sweep)");
             return true;
         }
 
