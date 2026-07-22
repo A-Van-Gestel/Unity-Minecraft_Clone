@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Editor.Validation.Behavior;
 using Editor.Validation.ChunkUnload;
 using Editor.Validation.Commands;
+using Editor.Validation.DeserializationRobustness;
 using Editor.Validation.Generation;
 using Editor.Validation.Lighting;
 using Editor.Validation.LightScheduler;
@@ -49,7 +50,7 @@ namespace Editor.Validation.Framework
     public static class ValidationSuiteRegistry
     {
         /// <summary>The number of standard suites expected on the list — a floor the aggregate runner asserts against.</summary>
-        public const int ExpectedSuiteCount = 13;
+        public const int ExpectedSuiteCount = 14;
 
         /// <summary>The registered suites, in run/report order.</summary>
         public static readonly IReadOnlyList<RegisteredSuite> Suites = new[]
@@ -63,6 +64,7 @@ namespace Editor.Validation.Framework
             new RegisteredSuite("Chunk Math", ChunkMathValidationSuite.Execute),
             new RegisteredSuite("Chunk Unload Decision", ChunkUnloadDecisionValidationSuite.Execute),
             new RegisteredSuite("Save Durability", SaveDurabilityValidationSuite.Execute),
+            new RegisteredSuite("Deserialization Robustness", DeserializationRobustnessValidationSuite.Execute),
             new RegisteredSuite("Spawn", SpawnValidationSuite.Execute),
             new RegisteredSuite("Command Console", CommandConsoleValidationSuite.Execute),
             new RegisteredSuite("Worm Carver", WormCarverValidationSuite.Execute),

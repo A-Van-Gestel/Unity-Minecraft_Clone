@@ -917,14 +917,24 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
-    /// Load/generate entry point. Thin fault-observing wrapper around <see cref="LoadOrGenerateChunkInner"/>:
-    /// CP-1 counts any fault escaping the load arm (F1) then re-throws to preserve today's behavior (the fault
-    /// still faults the discarded Awaitable). This <c>catch</c> is the exact seam CP-3 converts into the load
-    /// failure contract (log → clear <c>IsLoading</c> → return, making the placeholder retryable).
+    /// Load/generate entry point wearing the CP-3 load failure contract (F1, design doc §3.3 Option B):
+    /// any fault escaping <see cref="LoadOrGenerateChunkInner"/> is counted (CP-1 probe), logged once, and
+    /// the placeholder's <c>IsLoading</c> is cleared so the next <see cref="CheckViewDistance"/> boundary
+    /// crossing re-enqueues it — natural retry for transient I/O faults, while corrupt payloads keep their
+    /// own <c>Deserialize → null → regenerate</c> arm inside the Inner body. Benign teardown cancellation
+    /// stays a rethrow (a stuck flag on a dying world is moot).
     /// </summary>
     /// <param name="chunkCoord">The chunk to load from disk or schedule for generation.</param>
     private async Awaitable LoadOrGenerateChunk(ChunkCoord chunkCoord)
     {
+        // Captured before the async body so the fault path can verify the placeholder it clears is the
+        // SAME instance AND lifecycle it started with (mirrors the Inner mid-await unload guard) — a
+        // late fault must not clear IsLoading on a successor load admitted after an unload/recreate of
+        // this coord. The epoch closes the ABA hole where the pool re-issues the same object.
+        Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
+        worldData.TryGetChunk(chunkVoxelPos, out ChunkData admitted);
+        int admittedEpoch = admitted?.LifecycleEpoch ?? 0;
+
         try
         {
             await LoadOrGenerateChunkInner(chunkCoord);
@@ -934,10 +944,14 @@ public class World : MonoBehaviour
             // Benign teardown/shutdown cancellation of the discarded Awaitable — not an F1 fault. Rethrow uncounted.
             throw;
         }
-        catch (Exception)
+        catch (Exception e)
         {
             CountLoadFault();
-            throw;
+            Debug.LogError($"[LoadOrGenerateChunk] Load failed for chunk {chunkCoord}: {e.GetType().Name} - {e.Message}. " +
+                           "Placeholder released for retry on the next boundary crossing.");
+            if (admitted != null && worldData.TryGetChunk(chunkVoxelPos, out ChunkData current)
+                                 && current == admitted && admitted.LifecycleEpoch == admittedEpoch)
+                admitted.IsLoading = false;
         }
     }
 
@@ -1018,13 +1032,19 @@ public class World : MonoBehaviour
 
         if (data.IsPopulated) return; // Already done
 
+        // Captured before the await so the unload guard below can detect a pool-ABA recycle (the pool
+        // re-issuing this same instance as a successor placeholder for this coord) — reference equality
+        // alone cannot (CP-3; same epoch guard as the LoadOrGenerateChunk fault path).
+        int epochAtEntry = data.LifecycleEpoch;
+
         // 1. Try Load from Disk if allowed
         if (settings.EnablePersistence)
         {
             ChunkData loaded = await StorageManager.LoadChunkAsync(chunkVoxelPos);
 
             // Ensure the chunk wasn't unloaded or recycled during the "await" above.
-            if (!worldData.TryGetChunk(chunkVoxelPos, out ChunkData currentData) || currentData != data)
+            if (!worldData.TryGetChunk(chunkVoxelPos, out ChunkData currentData) || currentData != data
+                                                                                 || data.LifecycleEpoch != epochAtEntry)
             {
                 // The chunk was unloaded. Recycle the loaded data to prevent a memory leak.
                 if (loaded != null)

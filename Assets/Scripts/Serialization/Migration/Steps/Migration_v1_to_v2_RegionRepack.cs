@@ -158,47 +158,60 @@ namespace Serialization.Migration.Steps
 
             foreach (Vector2Int localCoord in oldRegion.GetAllChunkCoords())
             {
-                (byte[] compressedData, CompressionAlgorithm oldAlgorithm) = oldRegion.LoadChunkData(localCoord.x, localCoord.y);
-                if (compressedData == null) continue;
-
-                // ── Step 1: decode V1 address → chunk index ───────────────────
-                // The V1 decoder reverses the broken encoder to recover the true
-                // chunk index (e.g. slot (0, localCoord.x=0) in broken region r.10.0
-                // → voxelX 320 → chunkIndex 20).
-                Vector2Int chunkIndex = v1Codec.RegionSlotToChunkIndex(
-                    brokenRX, brokenRZ,
-                    localCoord.x, localCoord.y);
-
-                // ── Step 2: re-encode chunk index → correct V2 address ────────
-                // ChunkVoxelPosToRegionAddress expects the voxel-space world origin
-                // (ChunkData.position = chunkIndex * ChunkWidth). We reconstruct it
-                // here with V1's hardcoded ChunkWidth of 16 to avoid a live
-                // dependency on VoxelData.ChunkWidth. The V2 encoder divides it
-                // back to a chunk index internally, so the round-trip is exact.
-                Vector2Int chunkVoxelPos = new Vector2Int(
-                    chunkIndex.x * V1_CHUNK_WIDTH,
-                    chunkIndex.y * V1_CHUNK_WIDTH);
-
-                (Vector2Int correctRegionCoord, int correctLocalX, int correctLocalZ) =
-                    v2Codec.ChunkVoxelPosToRegionAddress(chunkVoxelPos);
-
-                // ── Step 3: get or create the target new region file ──────────
-                (int x, int y) regionKey = (correctRegionCoord.x, correctRegionCoord.y);
-                if (!newRegions.TryGetValue(regionKey, out RegionFile newRegion))
+                // Per-chunk fault isolation: RegionFile throws on unexpected read/write faults, so
+                // without this guard one faulting chunk would abort the whole repack. A failing chunk
+                // is skipped like MigrationManager's corrupted-chunk path: regenerated from seed.
+                try
                 {
-                    string newFilePath = Path.Combine(
-                        newRegionPath,
-                        $"r.{correctRegionCoord.x}.{correctRegionCoord.y}.bin");
-                    newRegion = new RegionFile(newFilePath);
-                    newRegions[regionKey] = newRegion;
+                    (byte[] compressedData, CompressionAlgorithm oldAlgorithm) = oldRegion.LoadChunkData(localCoord.x, localCoord.y);
+                    if (compressedData == null) continue;
+
+                    // ── Step 1: decode V1 address → chunk index ───────────────────
+                    // The V1 decoder reverses the broken encoder to recover the true
+                    // chunk index (e.g. slot (0, localCoord.x=0) in broken region r.10.0
+                    // → voxelX 320 → chunkIndex 20).
+                    Vector2Int chunkIndex = v1Codec.RegionSlotToChunkIndex(
+                        brokenRX, brokenRZ,
+                        localCoord.x, localCoord.y);
+
+                    // ── Step 2: re-encode chunk index → correct V2 address ────────
+                    // ChunkVoxelPosToRegionAddress expects the voxel-space world origin
+                    // (ChunkData.position = chunkIndex * ChunkWidth). We reconstruct it
+                    // here with V1's hardcoded ChunkWidth of 16 to avoid a live
+                    // dependency on VoxelData.ChunkWidth. The V2 encoder divides it
+                    // back to a chunk index internally, so the round-trip is exact.
+                    Vector2Int chunkVoxelPos = new Vector2Int(
+                        chunkIndex.x * V1_CHUNK_WIDTH,
+                        chunkIndex.y * V1_CHUNK_WIDTH);
+
+                    (Vector2Int correctRegionCoord, int correctLocalX, int correctLocalZ) =
+                        v2Codec.ChunkVoxelPosToRegionAddress(chunkVoxelPos);
+
+                    // ── Step 3: get or create the target new region file ──────────
+                    (int x, int y) regionKey = (correctRegionCoord.x, correctRegionCoord.y);
+                    if (!newRegions.TryGetValue(regionKey, out RegionFile newRegion))
+                    {
+                        string newFilePath = Path.Combine(
+                            newRegionPath,
+                            $"r.{correctRegionCoord.x}.{correctRegionCoord.y}.bin");
+                        newRegion = new RegionFile(newFilePath);
+                        newRegions[regionKey] = newRegion;
+                    }
+
+                    // ── Step 4: recompress and write at the correct address ────────
+                    byte[] rawData = Decompress(compressedData, oldAlgorithm);
+                    byte[] recompressed = Compress(rawData, targetCompression);
+
+                    newRegion.SaveChunkData(correctLocalX, correctLocalZ, recompressed, recompressed.Length, targetCompression);
+                    chunksProcessed++;
                 }
-
-                // ── Step 4: recompress and write at the correct address ────────
-                byte[] rawData = Decompress(compressedData, oldAlgorithm);
-                byte[] recompressed = Compress(rawData, targetCompression);
-
-                newRegion.SaveChunkData(correctLocalX, correctLocalZ, recompressed, recompressed.Length, targetCompression);
-                chunksProcessed++;
+                catch (Exception ex)
+                {
+                    // Chunk is corrupted or its read/write faulted — skip it (the engine regenerates
+                    // it from seed), mirroring MigrationManager's per-chunk corrupted-chunk handling.
+                    Debug.LogWarning(
+                        $"[Migration v1→v2] Skipping chunk at slot ({localCoord.x}, {localCoord.y}) in {Path.GetFileName(oldFilePath)}: {ex.Message}");
+                }
             }
 
             return chunksProcessed;

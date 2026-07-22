@@ -64,13 +64,19 @@ namespace Serialization
             using MemoryStream memoryStream = new MemoryStream(outputBuffer);
 
             // Create wrapper. leaveOpen=true allows us to check position after flush.
-            using (Stream compressionStream = CompressionFactory.CreateOutputStream(memoryStream, algorithm, leaveOpen: true))
+            // For CompressionAlgorithm.None the factory returns memoryStream ITSELF — disposing it here
+            // would close the stream before the Position read below (the same identity guard Deserialize
+            // uses for its input wrapper).
+            Stream compressionStream = CompressionFactory.CreateOutputStream(memoryStream, algorithm, leaveOpen: true);
+            try
             {
                 // Use UTF8 and leaveOpen=true for the writer too.
-                using (BinaryWriter writer = new BinaryWriter(compressionStream, Encoding.UTF8, true))
-                {
-                    WriteChunkInternal(writer, data);
-                }
+                using BinaryWriter writer = new BinaryWriter(compressionStream, Encoding.UTF8, true);
+                WriteChunkInternal(writer, data);
+            }
+            finally
+            {
+                if (compressionStream != memoryStream) compressionStream.Dispose();
             }
 
             return (int)memoryStream.Position;
@@ -197,6 +203,7 @@ namespace Serialization
         // --- Internal Read Logic ---
         private static ChunkData ReadChunkInternal(BinaryReader reader, Vector2Int coord, int totalLen)
         {
+            ChunkData chunk = null; // hoisted so the catch can return the pooled shell on a mid-parse throw
             try
             {
                 // --- Chunk Header ---
@@ -213,7 +220,7 @@ namespace Serialization
                 if (x != coord.x || z != coord.y)
                     Debug.LogWarning($"[ReadChunkInternal] Chunk coord mismatch at {coord}. Read: {x},{z}");
 
-                ChunkData chunk = World.Instance.ChunkPool.GetChunkData(new Vector2Int(x, z)); // Get from POOL
+                chunk = World.Instance.ChunkPool.GetChunkData(new Vector2Int(x, z)); // Get from POOL
 
                 // --- State Flags ---
                 chunk.NeedsInitialLighting = reader.ReadBoolean();
@@ -266,6 +273,12 @@ namespace Serialization
             {
                 long curr = reader.BaseStream.CanSeek ? reader.BaseStream.Position : -1;
                 Debug.LogError($"[ReadChunkInternal] Deserialize Crash at stream pos {curr}. Expected Payload Size: {totalLen}");
+
+                // CP-3 (F1 sub-finding): a mid-parse throw must not strand the pooled shell or its
+                // already-attached sections — return them before Deserialize's catch turns this into
+                // the corrupt-payload null. Thread-safe: the data/section pools are concurrent.
+                if (chunk != null)
+                    World.Instance.ChunkPool.ReturnChunkData(chunk);
                 throw;
             }
         }

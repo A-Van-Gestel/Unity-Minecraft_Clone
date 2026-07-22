@@ -32,10 +32,12 @@ namespace Serialization
         public static long SavesFailed => Interlocked.Read(ref s_savesFailed);
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-        // CP-6 test seams: upcoming save write attempts that throw / serializations that return 0 bytes
-        // (dev-only fault injection).
+        // CP-6/CP-3 test seams: upcoming save write attempts that throw / serializations that return
+        // 0 bytes / chunk load reads that throw (dev-only fault injection).
         private static int s_injectedSaveFaults;
         private static int s_injectedZeroLengthSerializes;
+        private static int s_injectedLoadFaults;
+        private static int s_injectedTooLargeSaves;
 
         /// <summary>Arms the dev-only save fault injection: the next <paramref name="count"/> save write
         /// attempts (initial, retry, or sync quit save — any thread) throw before touching disk. Used by
@@ -48,19 +50,64 @@ namespace Serialization
         /// take the <see cref="ChunkSaveResult.FailedPermanent"/> arm, never the retry loop.</summary>
         /// <param name="count">Number of consecutive serializations to zero out (0 disarms).</param>
         public static void InjectZeroLengthSerializes(int count) => Interlocked.Exchange(ref s_injectedZeroLengthSerializes, count);
+
+        /// <summary>Arms the dev-only load fault injection: the next <paramref name="count"/> chunk load
+        /// reads throw from the background thread before touching the region file — the transient-I/O
+        /// shape the CP-3 load-arm failure contract converts into a retryable placeholder (fault ≠
+        /// "not on disk"). Used by the Validate Deserialization Robustness suite and manual F1
+        /// prove-red runs; compiled out of release builds.</summary>
+        /// <param name="count">Number of consecutive load attempts to fault (0 disarms).</param>
+        public static void InjectLoadFaults(int count) => Interlocked.Exchange(ref s_injectedLoadFaults, count);
+
+        /// <summary>Arms the dev-only too-large-save injection: the next <paramref name="count"/> save
+        /// write attempts throw <see cref="ChunkTooLargeException"/> — the deterministic record-limit
+        /// failure every save path must map to <see cref="ChunkSaveResult.FailedPermanent"/> (never the
+        /// retry loop, never a false Written).</summary>
+        /// <param name="count">Number of consecutive attempts to fault (0 disarms).</param>
+        public static void InjectTooLargeSaves(int count) => Interlocked.Exchange(ref s_injectedTooLargeSaves, count);
+#endif
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        /// <summary>Atomically consumes one armed injection from <paramref name="counter"/> — the single
+        /// decrement-and-clamp core shared by every dev-only seam. Clamps the disarmed counter back to 0
+        /// without racing a concurrent re-arm: only restores 0 if the value is still the negative this
+        /// call produced (a fresh <c>Inject*(n)</c> wins otherwise).</summary>
+        /// <param name="counter">The seam's armed-count field.</param>
+        /// <returns>True when an injection was armed and this attempt should fault.</returns>
+        private static bool TryConsumeInjection(ref int counter)
+        {
+            int observed = Interlocked.Decrement(ref counter);
+            if (observed >= 0) return true;
+            Interlocked.CompareExchange(ref counter, 0, observed);
+            return false;
+        }
 #endif
 
         /// <summary>Throws when the dev-only save fault injection is armed (no-op in release builds).</summary>
         private static void ThrowIfInjectedSaveFault()
         {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            int observed = Interlocked.Decrement(ref s_injectedSaveFaults);
-            if (observed >= 0)
+            if (TryConsumeInjection(ref s_injectedSaveFaults))
                 throw new IOException("[CP-6 TEST] Injected save fault");
+#endif
+        }
 
-            // Clamp the disarmed counter back to 0 without racing a concurrent re-arm: only restore 0 if
-            // the value is still the negative we produced (a fresh InjectSaveFaults(n) wins otherwise).
-            Interlocked.CompareExchange(ref s_injectedSaveFaults, 0, observed);
+        /// <summary>Throws <see cref="ChunkTooLargeException"/> when the dev-only too-large-save
+        /// injection is armed (no-op in release builds).</summary>
+        private static void ThrowIfInjectedTooLargeSave()
+        {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (TryConsumeInjection(ref s_injectedTooLargeSaves))
+                throw new ChunkTooLargeException("[CP-3 TEST] Injected too-large save");
+#endif
+        }
+
+        /// <summary>Throws when the dev-only load fault injection is armed (no-op in release builds).</summary>
+        private static void ThrowIfInjectedLoadFault()
+        {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (TryConsumeInjection(ref s_injectedLoadFaults))
+                throw new IOException("[CP-3 TEST] Injected load fault");
 #endif
         }
 
@@ -73,9 +120,7 @@ namespace Serialization
         private static int SerializeWithInjection(ChunkData source, byte[] buffer, CompressionAlgorithm algorithm)
         {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            int observed = Interlocked.Decrement(ref s_injectedZeroLengthSerializes);
-            if (observed >= 0) return 0;
-            Interlocked.CompareExchange(ref s_injectedZeroLengthSerializes, 0, observed);
+            if (TryConsumeInjection(ref s_injectedZeroLengthSerializes)) return 0;
 #endif
             return ChunkSerializer.Serialize(source, buffer, algorithm);
         }
@@ -90,6 +135,8 @@ namespace Serialization
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             s_injectedSaveFaults = 0;
             s_injectedZeroLengthSerializes = 0;
+            s_injectedLoadFaults = 0;
+            s_injectedTooLargeSaves = 0;
 #endif
         }
 
@@ -138,6 +185,10 @@ namespace Serialization
             // Run I/O on background thread
             return await Task.Run(() =>
             {
+                // CP-3 dev-only fault seam — a thrown load fault must surface as a FAULTED task (retry),
+                // never as the null "not on disk" result (which would regenerate over saved data).
+                ThrowIfInjectedLoadFault();
+
                 (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(chunkVoxelPos);
                 RegionFile region = GetRegion(regionCoord);
 
@@ -192,6 +243,11 @@ namespace Serialization
                 // Live data is at least as fresh as any pending registry snapshot for this coord —
                 // drop such an entry rather than letting a later retry regress this write.
                 StageSupersede(data.Position, seq);
+            }
+            catch (ChunkTooLargeException e)
+            {
+                // Deterministic — staging for retry would loop forever; the loss is loud and final.
+                Debug.LogError($"[SaveChunk] Chunk at voxelPos {data.Position.ToString()} exceeds the region record limit — edits to this chunk are lost. ({e.Message})");
             }
             catch (Exception e)
             {
@@ -285,6 +341,14 @@ namespace Serialization
             {
                 // Expected during quit — the synchronous quit-time save path owns final persistence.
                 result = ChunkSaveResult.Canceled;
+            }
+            catch (ChunkTooLargeException e)
+            {
+                // Deterministic record-limit failure — retrying can never succeed, so this must take
+                // the FailedPermanent arm (snapshot released loudly), never the retry registry.
+                Interlocked.Increment(ref s_savesFailed);
+                Debug.LogError($"[SaveChunkAsync] Chunk at voxelPos {data.Position.ToString()} exceeds the region record limit — edits to this chunk cannot be persisted. ({e.Message})");
+                result = ChunkSaveResult.FailedPermanent;
             }
             catch (Exception e)
             {
@@ -636,6 +700,12 @@ namespace Serialization
                 Interlocked.Increment(ref s_savesCompleted);
                 return ChunkSaveResult.Written;
             }
+            catch (ChunkTooLargeException e)
+            {
+                Interlocked.Increment(ref s_savesFailed);
+                Debug.LogError($"[SaveRetry] Chunk at voxelPos {snapshot.Position.ToString()} exceeds the region record limit — not retryable. ({e.Message})");
+                return ChunkSaveResult.FailedPermanent;
+            }
             catch (Exception e)
             {
                 Interlocked.Increment(ref s_savesFailed);
@@ -703,6 +773,7 @@ namespace Serialization
         private void WriteToRegion(Vector2Int chunkVoxelPos, byte[] buffer, int length, CompressionAlgorithm algorithm)
         {
             ThrowIfInjectedSaveFault();
+            ThrowIfInjectedTooLargeSave();
 
             (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(chunkVoxelPos);
             GetRegion(regionCoord).SaveChunkData(lx, lz, buffer, length, algorithm);
@@ -714,11 +785,26 @@ namespace Serialization
 
         private RegionFile GetRegion(Vector2Int regionCoord)
         {
-            return _regions.GetOrAdd(regionCoord, coord => new Lazy<RegionFile>(() =>
+            Lazy<RegionFile> lazy = _regions.GetOrAdd(regionCoord, coord => new Lazy<RegionFile>(() =>
             {
                 string path = Path.Combine(_saveFolderPath, $"r.{coord.x}.{coord.y}.bin");
                 return new RegionFile(path);
-            })).Value;
+            }));
+
+            try
+            {
+                return lazy.Value;
+            }
+            catch
+            {
+                // CP-3: Lazy<T> caches a thrown factory exception forever — without eviction, one
+                // transient open fault (file lock, AV scan) would poison this region for the whole
+                // session, defeating the clear-and-retry load contract. Value-conditional remove so a
+                // healthy replacement entry created by another thread is never evicted.
+                ((ICollection<KeyValuePair<Vector2Int, Lazy<RegionFile>>>)_regions)
+                    .Remove(new KeyValuePair<Vector2Int, Lazy<RegionFile>>(regionCoord, lazy));
+                throw;
+            }
         }
 
         private static ChunkData CreateSerializationSnapshot(ChunkData source)

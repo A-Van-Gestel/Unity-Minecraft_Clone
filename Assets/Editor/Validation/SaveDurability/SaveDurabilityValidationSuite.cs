@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -19,7 +18,7 @@ namespace Editor.Validation.SaveDurability
     /// the edits' only surviving copy once the live <see cref="ChunkData"/> is pool-recycled — to the
     /// failed-save retry registry, which re-attempts the write until it lands (per-frame drain, reload
     /// guard, quit-time flush). Faults are injected via the dev-only
-    /// <see cref="ChunkStorageManager.InjectSaveFaults"/> seam; each scenario stands up an isolated stub
+    /// <see cref="ChunkStorageManager.InjectSaveFaults"/> (+ zero-length / too-large) seams; each scenario stands up an isolated stub
     /// <c>World.Instance</c> + a volatile-path <see cref="ChunkStorageManager"/> and round-trips real
     /// region files.
     /// <para>All scenarios are <b>baselines</b> (must stay green); a failure is a regression of the F5
@@ -59,6 +58,7 @@ namespace Editor.Validation.SaveDurability
                 new Scenario("B10: successful write supersedes older pending entry; newer failure survives (FIFO)", SuccessfulWriteSupersedesPendingEntry),
                 new Scenario("B11: Dispose makes a final attempt on pending saves — edits survive a manager swap", DisposeFlushesPendingSaves),
                 new Scenario("B12: sync SaveChunk failure stages a snapshot — edits recoverable, not just logged", SyncSaveFailureStagesSnapshot),
+                new Scenario("B13: too-large chunk write — FailedPermanent, never staged, no retry loop", TooLargeWriteIsPermanent),
             };
             return ValidationSuiteRunner.Execute("Save Durability", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -68,58 +68,12 @@ namespace Editor.Validation.SaveDurability
         /// <summary>Chunk-local coordinates of the scenario edit (arbitrary interior voxel).</summary>
         private const int EDIT_X = 3, EDIT_Y = 40, EDIT_Z = 7;
 
-        /// <summary>
-        /// Isolated save-system fixture: stubs <c>World.Instance</c> (settings + concurrent chunk pool —
-        /// everything <see cref="ChunkStorageManager"/> and <see cref="ChunkSerializer"/> reach for) and
-        /// stands up a real <see cref="ChunkStorageManager"/> on a unique volatile-path world. Disposal
-        /// disarms fault injection, restores the previous <c>World.Instance</c>, and deletes the temp save.
-        /// </summary>
-        private sealed class Fixture : IDisposable
+        /// <summary>Suite fixture: the shared <see cref="StorageValidationFixture"/> (stub
+        /// <c>World.Instance</c> + volatile-path storage + all-seam disarm) under this suite's prefix.</summary>
+        private sealed class Fixture : StorageValidationFixture
         {
-            public readonly ChunkStorageManager Storage;
-            private readonly GameObject _worldGo;
-            private readonly World _previousInstance;
-            private readonly string _worldName;
-
-            /// <summary>The fixture's unique volatile world name (for scenarios that stand up a second
-            /// <see cref="ChunkStorageManager"/> on the same save, e.g. the B11 manager swap).</summary>
-            public string WorldName => _worldName;
-
-            public Fixture()
+            public Fixture() : base("SaveDurabilityTest")
             {
-                _previousInstance = World.Instance;
-                _worldName = $"SaveDurabilityTest_{Guid.NewGuid():N}";
-                try
-                {
-                    _worldGo = new GameObject("SaveDurability_StubWorld");
-                    // AddComponent on a MonoBehaviour runs no Awake in edit mode — the component is only
-                    // the typed Instance target; we wire the two members the save path reads.
-                    World world = _worldGo.AddComponent<World>();
-                    world.settings = new Settings();
-                    world.worldData = new WorldData(_worldName, 0);
-                    ValidationReflection.SetInstanceProperty(world, nameof(World.ChunkPool),
-                        new ChunkPoolManager(_worldGo.transform));
-                    ValidationReflection.SetStaticProperty(typeof(World), nameof(World.Instance), world);
-
-                    Storage = new ChunkStorageManager(_worldName, useVolatilePath: true, SaveSystem.CURRENT_VERSION);
-                }
-                catch
-                {
-                    Dispose();
-                    throw;
-                }
-            }
-
-            public void Dispose()
-            {
-                ChunkStorageManager.InjectSaveFaults(0);
-                ChunkStorageManager.InjectZeroLengthSerializes(0);
-                Storage?.Dispose();
-                ValidationReflection.SetStaticProperty(typeof(World), nameof(World.Instance), _previousInstance);
-                if (_worldGo != null) UnityEngine.Object.DestroyImmediate(_worldGo);
-
-                string savePath = SaveSystem.GetSavePath(_worldName, useVolatilePath: true);
-                if (Directory.Exists(savePath)) Directory.Delete(savePath, recursive: true);
             }
         }
 
@@ -139,6 +93,8 @@ namespace Editor.Validation.SaveDurability
         /// being posted to the (blocked) editor main thread — blocking directly would deadlock.
         /// </summary>
         private static ChunkSaveResult RunSave(Fixture fx, ChunkData data, CancellationToken token = default) =>
+            // Deliberately NOT Task.Run's token overload: a pre-canceled token there would skip the delegate entirely, and B8 needs SaveChunkAsync itself to observe the cancellation.
+            // ReSharper disable once MethodSupportsCancellation
             Task.Run(() => fx.Storage.SaveChunkAsync(data, token)).GetAwaiter().GetResult();
 
         /// <summary>Runs <see cref="ChunkStorageManager.LoadChunkAsync"/> to completion (same wrapping as <see cref="RunSave"/>).</summary>
@@ -432,6 +388,35 @@ namespace Editor.Validation.SaveDurability
             bool ok = Check("failed sync save staged a snapshot", fx.Storage.PendingFailedSaves == 1);
             ok &= Check("flush recovers the sync failure", fx.Storage.FlushFailedSavesSync() == 1);
             ok &= LoadedEditEquals(fx, pos, BlockIDs.Grass, "edit survived the failed sync save");
+            return ok;
+        }
+
+        /// <summary>B13. Red when: a too-large chunk write (region record limit) reports a false
+        /// Written, enters the retry registry (infinite loop), or a retryable entry whose RETRY turns
+        /// too-large is kept — the deterministic failure must be FailedPermanent everywhere.</summary>
+        private static bool TooLargeWriteIsPermanent()
+        {
+            using Fixture fx = new Fixture();
+            Vector2Int pos = new Vector2Int(80, 0);
+
+            // Direct save: record-limit throw → FailedPermanent, snapshot released, nothing staged.
+            ChunkData data = MakeEditedChunk(pos, BlockIDs.Stone);
+            ChunkStorageManager.InjectTooLargeSaves(1);
+            bool ok = Check("save reports FailedPermanent", RunSave(fx, data) == ChunkSaveResult.FailedPermanent);
+            ok &= Check("nothing entered the retry registry", fx.Storage.PendingFailedSaves == 0);
+            ok &= Check("nothing written to disk", RunLoad(fx, pos) == null);
+            World.Instance.ChunkPool.ReturnChunkData(data);
+
+            // Retry path: a retryable failure whose RETRY turns too-large must drop the entry, not loop.
+            ChunkData data2 = MakeEditedChunk(pos, BlockIDs.Grass);
+            ChunkStorageManager.InjectSaveFaults(1);
+            ok &= Check("second save reports Failed (retryable)", RunSave(fx, data2) == ChunkSaveResult.Failed);
+            World.Instance.ChunkPool.ReturnChunkData(data2);
+
+            ChunkStorageManager.InjectTooLargeSaves(1);
+            ok &= Check("too-large retry recovers nothing", fx.Storage.DrainFailedSaveRetries(ignoreBackoff: true) == 0);
+            ok &= Check("entry dropped (no infinite retry loop)", fx.Storage.PendingFailedSaves == 0);
+            ok &= Check("still nothing written to disk", RunLoad(fx, pos) == null);
             return ok;
         }
     }

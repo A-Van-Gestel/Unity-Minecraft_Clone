@@ -350,7 +350,7 @@ namespace Serialization.Migration
 
                 try
                 {
-                    (byte[] compressedData, CompressionAlgorithm oldCompression) = oldRegion.LoadChunkData(localCoord.x, localCoord.y);
+                    (byte[] compressedData, CompressionAlgorithm oldCompression) = LoadChunkDataWithRetry(oldRegion, localCoord);
                     if (compressedData == null) continue;
 
 #if UNITY_EDITOR
@@ -408,6 +408,36 @@ namespace Serialization.Migration
 
 
             return (chunksProcessed, corruptedChunks, false);
+        }
+
+        /// <summary>Attempts within one region read (worst case blocks ~100 ms per faulted chunk).</summary>
+        private const int TRANSIENT_READ_RETRIES = 3;
+
+        /// <summary>Delay between region-read retry attempts.</summary>
+        private const int TRANSIENT_READ_RETRY_DELAY_MS = 50;
+
+        /// <summary>
+        /// Reads a chunk record with a small bounded retry: <see cref="RegionFile.LoadChunkData"/> throws
+        /// on transient I/O faults (CP-3 contract), and without a retry one AV-scan hiccup would drop a
+        /// healthy chunk from the migrated world as "corrupted" (regenerated from seed). Still-failing
+        /// reads rethrow into the caller's per-chunk corrupted-chunk handling.
+        /// </summary>
+        /// <param name="region">The source region file.</param>
+        /// <param name="localCoord">The chunk's local coordinates within the region.</param>
+        /// <returns>The raw record payload and its compression algorithm (null payload = not present).</returns>
+        private static (byte[] data, CompressionAlgorithm algorithm) LoadChunkDataWithRetry(RegionFile region, Vector2Int localCoord)
+        {
+            for (int attempt = 1;; attempt++)
+            {
+                try
+                {
+                    return region.LoadChunkData(localCoord.x, localCoord.y);
+                }
+                catch when (attempt < TRANSIENT_READ_RETRIES)
+                {
+                    System.Threading.Thread.Sleep(TRANSIENT_READ_RETRY_DELAY_MS);
+                }
+            }
         }
 
         // -------------------------------------------------------------------------

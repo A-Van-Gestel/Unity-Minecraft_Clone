@@ -22,6 +22,11 @@ public class ChunkPoolManager
     // --- Statistics ---
     public int ActiveChunks => _chunkPool.ActiveCount;
     public int PooledChunks => _chunkPool.PooledCount;
+
+    // Active (checked-out) counts for the concurrent data pools — the NS-1 deserialize-robustness
+    // suite's leak balance assertions (a corrupt payload must not strand a pooled shell/section).
+    public int ActiveData => _dataPool.ActiveCount;
+    public int ActiveSections => _sectionPool.ActiveCount;
     public int PooledData => _dataPool.PooledCount;
     public int PooledSections => _sectionPool.PooledCount;
     public int PooledBorders => _borderPool.PooledCount;

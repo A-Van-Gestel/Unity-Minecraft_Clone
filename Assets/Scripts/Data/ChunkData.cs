@@ -234,6 +234,17 @@ namespace Data
 
         #region Pooling Support
 
+        [NonSerialized]
+        private int _lifecycleEpoch;
+
+        /// <summary>
+        /// Monotonic pool-lifecycle counter, bumped by every <see cref="Reset"/>. Lets async code that
+        /// captured this instance detect a recycle in between — reference equality alone is defeated by
+        /// the pool handing the same object back for the same coord (ABA); the CP-3 load-arm fault path
+        /// compares this before clearing <see cref="IsLoading"/>. Its "reset" IS the increment.
+        /// </summary>
+        public int LifecycleEpoch => _lifecycleEpoch;
+
         /// <summary>
         /// Resets the ChunkData for reuse.
         /// Returns all contained ChunkSections to the pool and clears internal state.
@@ -241,6 +252,8 @@ namespace Data
         /// <param name="pos">The new voxel-space world origin for the recycled chunk.</param>
         public void Reset(Vector2Int pos)
         {
+            _lifecycleEpoch++; // pool-reset-safety: the epoch's reset is the bump itself (see property doc)
+
             Position = pos;
             IsPopulated = false;
             IsLoading = false;
