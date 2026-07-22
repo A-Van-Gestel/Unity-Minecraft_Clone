@@ -59,6 +59,13 @@ CI/coverage/XML gaps close via the VS-2 extensions instead.
   robustness slice (truncated/garbage/wrong-version payloads → `Deserialize` returns null, no
   throw, no pooled-shell leak).
 - **Effort:** 🟡 core (1–5) → 🔴 with migration fixtures (6); build 1–5 first.
+- **Partial status (2026-07-22):** the CP-3 robustness slice shipped as
+  `Minecraft Clone/Dev/Validate Deserialization Robustness` (B1–B7): truncated / garbage /
+  wrong-version / corrupt-tail payloads → null, no throw, no pooled-shell/section leak (pool
+  active-count balance), fault ≠ "not-on-disk" contract at `LoadChunkAsync` (dev-only
+  `InjectLoadFaults` seam), corrupt-on-disk → null through the full storage stack. Parts 1–5
+  above (round-trip identity, golden bytes, compression matrix, `RegionFile` mechanics, pending
+  stores) remain open and should grow in this suite.
 
 ---
 

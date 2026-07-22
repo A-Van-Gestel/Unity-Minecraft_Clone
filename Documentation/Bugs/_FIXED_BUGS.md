@@ -1469,6 +1469,30 @@ frame API or switching to `K4os.Compression.LZ4`; any world saved while 0.6.1 wa
 
 ---
 
+### ~~04. `ChunkSerializer.Serialize` throws `ObjectDisposedException` with `CompressionAlgorithm.None` (worlds on None could never save)~~
+
+**Severity:** Bug (total save failure for one supported setting)
+**Files:** `ChunkSerializer.cs` — `Serialize`, `CompressionFactory.cs` — `CreateOutputStream`
+**Fixed:** 2026-07-22 (found by the CP-3 `Validate Deserialization Robustness` suite's first run)
+
+**Symptom:** Every chunk save with `saveCompression = None` threw
+`ObjectDisposedException: Cannot access a closed Stream` and wrote nothing — a world configured
+with the documented "raw bytes" debugging algorithm could not persist any chunk.
+
+**Root Cause:** For `None`, `CompressionFactory.CreateOutputStream` returns the destination
+`MemoryStream` **itself** (there is no wrapper to create), but `Serialize` disposed the returned
+stream in a `using` despite passing `leaveOpen: true` — closing the MemoryStream before the
+`memoryStream.Position` read that computes the payload length. Deflate/LZ4 were unaffected
+(their wrappers are separate objects, and disposing them is required to flush).
+
+**Fix:** `Serialize` now mirrors `Deserialize`'s existing identity guard: the compression stream
+is disposed in a `finally` only when it is not the underlying MemoryStream
+(`if (compressionStream != memoryStream) compressionStream.Dispose();`), preserving the
+dispose-to-flush behavior for real compression wrappers. Guarded by the Deserialization
+Robustness suite (B1 round-trips with `None`).
+
+---
+
 ## User Interface
 
 ### ~~02. Shortcut Info Panel~~
