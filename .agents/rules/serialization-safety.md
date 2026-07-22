@@ -29,7 +29,7 @@ Changes to these files can silently corrupt every player's saved world. Every ed
 ## Never
 
 - Never use `BinaryFormatter`, `JSON`, `XmlSerializer`, or any ad-hoc serializer for terrain data.
-- Never edit an already-shipped migration step. Write a new one.
+- Never change what an already-shipped migration step *produces* — its byte transform must stay bit-identical for every input it previously handled. Semantic changes go in a NEW step. Non-semantic hardening of a shipped step (error handling, per-chunk fault isolation, logging, retries) is allowed, provided every input that previously migrated successfully still yields identical bytes.
 - Never change chunk layout without bumping `TargetChunkFormatVersion`.
 
 ## Reference
