@@ -10,6 +10,7 @@ using Editor.Validation.LightScheduler;
 using Editor.Validation.Meshing;
 using Editor.Validation.MeshQueue;
 using Editor.Validation.Placement;
+using Editor.Validation.PipelineBackpressure;
 using Editor.Validation.PoolPrune;
 using Editor.Validation.SaveDurability;
 
@@ -51,7 +52,7 @@ namespace Editor.Validation.Framework
     public static class ValidationSuiteRegistry
     {
         /// <summary>The number of standard suites expected on the list — a floor the aggregate runner asserts against.</summary>
-        public const int ExpectedSuiteCount = 15;
+        public const int ExpectedSuiteCount = 16;
 
         /// <summary>The registered suites, in run/report order.</summary>
         public static readonly IReadOnlyList<RegisteredSuite> Suites = new[]
@@ -65,6 +66,7 @@ namespace Editor.Validation.Framework
             new RegisteredSuite("Chunk Math", ChunkMathValidationSuite.Execute),
             new RegisteredSuite("Chunk Unload Decision", ChunkUnloadDecisionValidationSuite.Execute),
             new RegisteredSuite("Pool Prune Decision", PoolPruneDecisionValidationSuite.Execute),
+            new RegisteredSuite("Pipeline Backpressure", PipelineBackpressureValidationSuite.Execute),
             new RegisteredSuite("Save Durability", SaveDurabilityValidationSuite.Execute),
             new RegisteredSuite("Deserialization Robustness", DeserializationRobustnessValidationSuite.Execute),
             new RegisteredSuite("Spawn", SpawnValidationSuite.Execute),

@@ -440,6 +440,14 @@ public class Settings
     public int maxInFlightGenerationJobs = 32;
 
     /// <summary>
+    /// Maximum lighting jobs allowed in flight before the ready-set scan stops scheduling for the
+    /// frame (memory bound — each job rents ~11 pooled full-volume buffers, so this ceiling keeps a
+    /// hitch-scaled §3.4 quota from blowing past the pool retention into a Persistent alloc storm).
+    /// Inert under the legacy count cap; not device-calibrated (2× the desktop per-frame cap).
+    /// </summary>
+    public int maxInFlightLightingJobs = 64;
+
+    /// <summary>
     /// Buffers retained per type in the chunk job array pool — the native-memory retention ceiling
     /// (OM-1). Calibrated from system RAM; default reproduces the historical constant (≈96 MB worst case).
     /// </summary>
@@ -451,6 +459,109 @@ public class Settings
     /// never calibrated (pre-OM-1 file or fresh defaults awaiting first-launch calibration).
     /// </summary>
     public int calibrationVersion = 0;
+
+    // ── P-4 §3.4/§3.5 pipeline backpressure knobs ────────────────────────
+    // The five ms ceilings are Performance-tab sliders (smoothness ↔ chunk-fill-speed trade is a
+    // player-facing preference); the rollback flags and panic thresholds stay OM-1-style non-UI
+    // fields (persisted + user-editable, but not everyday options). The ms ceilings are deliberately
+    // NOT device-calibrated — frame-time targets are device-independent, and device scaling already
+    // flows in through the calibrated per-frame count caps that anchor each pass's rate quota
+    // (see Helpers.PipelinePassBudget).
+
+    /// <summary>
+    /// Master switch for the §3.4 time-based pass budgets (rate quota + ms ceiling). Off restores the
+    /// exact legacy fixed per-frame count caps — kept as a rollback / A-B lever (TG-4 precedent).
+    /// </summary>
+    public bool enablePipelineTimeBudgets = true;
+
+    /// <summary>
+    /// Time ceiling (ms) for processing completed generation jobs in one frame
+    /// (<see cref="maxStructureModsPerFrame"/> still bounds structure expansion inside the pass).
+    /// Un-processed completed jobs stay enrolled for the next frame. ≤ 0 disables the ceiling.
+    /// </summary>
+    [Header("Pipeline Time Budgets")]
+    [SettingField(SettingsTab.Performance, Label = "Generation Process Budget (ms)", Format = "f1", Order = 5)]
+    [Range(0.5f, 20f)]
+    [Tooltip("Per-frame time ceiling for processing completed terrain-generation jobs.\n" +
+             "Lower = smoother frames while chunks stream in; higher = faster chunk fill.\n" +
+             "(Setting 0 in the settings file disables the ceiling entirely.)\n\n" +
+             TooltipTags.Performance + "Bounds the main-thread cost of generation results per frame.\n" +
+             TooltipTags.DefaultColorStart + "6" + TooltipTags.DefaultColorEnd)]
+    public float genProcessBudgetMs = 6f;
+
+    /// <summary>
+    /// Time ceiling (ms) for scheduling lighting jobs from the ready set in one frame. The rate quota
+    /// (<see cref="maxLightJobsPerFrame"/> × frame duration × 60) drives throughput; this bounds the
+    /// frame cost when scheduling is expensive. ≤ 0 disables the ceiling (quota only).
+    /// </summary>
+    [SettingField(SettingsTab.Performance, Label = "Light Schedule Budget (ms)", Format = "f1", Order = 6)]
+    [Range(0.5f, 20f)]
+    [Tooltip("Per-frame time ceiling for scheduling lighting jobs.\n" +
+             "Lower = smoother frames while chunks stream in; higher = faster chunk fill.\n" +
+             "(Setting 0 in the settings file disables the ceiling — rate quota only.)\n\n" +
+             TooltipTags.Performance + "Bounds the main-thread cost of lighting scheduling per frame.\n" +
+             TooltipTags.DefaultColorStart + "8" + TooltipTags.DefaultColorEnd)]
+    public float lightScheduleBudgetMs = 8f;
+
+    /// <summary>
+    /// Time ceiling (ms) for scheduling mesh jobs in one frame (rate quota anchored on
+    /// <see cref="maxMeshRebuildsPerFrame"/>). ≤ 0 disables the ceiling (quota only).
+    /// </summary>
+    [SettingField(SettingsTab.Performance, Label = "Mesh Schedule Budget (ms)", Format = "f1", Order = 7)]
+    [Range(0.5f, 20f)]
+    [Tooltip("Per-frame time ceiling for scheduling mesh-build jobs.\n" +
+             "Lower = smoother frames while chunks stream in; higher = faster chunk fill.\n" +
+             "(Setting 0 in the settings file disables the ceiling — rate quota only.)\n\n" +
+             TooltipTags.Performance + "Bounds the main-thread cost of mesh scheduling per frame.\n" +
+             TooltipTags.DefaultColorStart + "6" + TooltipTags.DefaultColorEnd)]
+    public float meshScheduleBudgetMs = 6f;
+
+    /// <summary>
+    /// Time ceiling (ms) for applying completed mesh jobs (the buffer-upload pass) in one frame.
+    /// Deferred completions stay enrolled — buffers are held one extra frame, bounded by the
+    /// in-flight cap. ≤ 0 disables the ceiling (legacy: apply everything completed).
+    /// </summary>
+    [SettingField(SettingsTab.Performance, Label = "Mesh Apply Budget (ms)", Format = "f1", Order = 8)]
+    [Range(0.5f, 20f)]
+    [Tooltip("Per-frame time ceiling for uploading finished chunk meshes.\n" +
+             "Lower = smoother frames while chunks stream in; higher = faster chunk fill.\n" +
+             "(Setting 0 in the settings file disables the ceiling — apply everything completed.)\n\n" +
+             TooltipTags.Performance + "Bounds the main-thread cost of mesh uploads per frame.\n" +
+             TooltipTags.DefaultColorStart + "4" + TooltipTags.DefaultColorEnd)]
+    public float meshApplyBudgetMs = 4f;
+
+    /// <summary>
+    /// Time ceiling (ms) for the ChunksToDraw drain (§5.3) — how long one frame may spend applying
+    /// finished meshes to the GPU. At least one chunk is always drawn per frame; ≤ 0 drains without
+    /// a time bound (the legacy one-per-frame trickle is the budgets master flag's off state).
+    /// </summary>
+    [SettingField(SettingsTab.Performance, Label = "Chunk Draw Budget (ms)", Format = "f1", Order = 9)]
+    [Range(0.5f, 10f)]
+    [Tooltip("Per-frame time ceiling for activating finished chunk meshes (the pop-in stagger).\n" +
+             "Lower = more gradual chunk appearance; higher = chunks appear sooner after meshing.\n" +
+             "At least one chunk is always drawn per frame.\n" +
+             "(Setting 0 in the settings file disables the ceiling — drain everything each frame.)\n\n" +
+             TooltipTags.Performance + "Bounds the main-thread cost of chunk activation per frame.\n" +
+             TooltipTags.DefaultColorStart + "2" + TooltipTags.DefaultColorEnd)]
+    public float drawApplyBudgetMs = 2f;
+
+    /// <summary>
+    /// Master switch for the §3.5 generation panic gate (pause admissions while the lighting backlog
+    /// is saturated). Kept as a rollback lever alongside <see cref="enablePipelineTimeBudgets"/>.
+    /// </summary>
+    public bool enableGenerationPanicGate = true;
+
+    /// <summary>
+    /// Lighting ready-set size at which the panic gate closes (stops admitting generation requests).
+    /// Provisional default pending in-game calibration; must exceed the reopen threshold.
+    /// </summary>
+    public int panicGateCloseThreshold = 256;
+
+    /// <summary>
+    /// Lighting ready-set size at or below which a closed panic gate reopens. The gap below
+    /// <see cref="panicGateCloseThreshold"/> is the hysteresis band that prevents oscillation.
+    /// </summary>
+    public int panicGateReopenThreshold = 128;
 
     #endregion
 

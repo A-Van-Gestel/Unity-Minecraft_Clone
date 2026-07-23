@@ -318,6 +318,38 @@ public class World : MonoBehaviour
     private readonly Queue<ChunkCoord> _generationRequestQueue = new Queue<ChunkCoord>();
     private readonly HashSet<ChunkCoord> _pendingGenerationRequests = new HashSet<ChunkCoord>();
 
+    // --- Generation panic gate (P-4 §3.5) ---
+    // When the schedulable lighting backlog (_lightWork.ReadyCount) saturates, DrainGenerationRequests
+    // stops ADMITTING new generation until it drains (hysteresis band in GenerationPanicGate). The
+    // request queue is untouched by a closed gate — admissions resume from it on reopen, so no holes.
+    private bool _generationGateOpen = true;
+    private long _generationGateClosedFrames;
+    private long _generationGateCloseCount;
+
+    // The gate's backlog signal: ReadyCount sampled at the END of the previous frame's lighting scan,
+    // after transient promotions were re-parked. Reading the live count here instead would see the
+    // ~1s fail-safe PromoteAll spike (the whole parked frontier ring dumped into ready for one scan)
+    // and phantom-close the gate at ~1 Hz on large load distances.
+    private int _readyCountAfterScan;
+
+    /// <summary>Whether the §3.5 panic gate currently admits generation requests (HUD probe).</summary>
+    public bool GenerationGateOpen => _generationGateOpen;
+
+    /// <summary>Cumulative frames spent with the panic gate closed (HUD probe).</summary>
+    public long GenerationGateClosedFrames => _generationGateClosedFrames;
+
+    /// <summary>Cumulative open→closed transitions of the panic gate (HUD probe).</summary>
+    public long GenerationGateCloseCount => _generationGateCloseCount;
+
+    /// <summary>Generation requests awaiting admission (HUD probe; rebuilt each boundary crossing).</summary>
+    public int GenerationRequestQueueCount => _generationRequestQueue.Count;
+
+    /// <summary>Schedulable lighting backlog — the panic gate's signal (HUD probe; MT-2 ready set).</summary>
+    public int LightWorkReadyCount => _lightWork.ReadyCount;
+
+    /// <summary>Parked lighting backlog awaiting a promotion event (HUD probe; MT-2 waiting set).</summary>
+    public int LightWorkWaitingCount => _lightWork.WaitingCount;
+
     // --- CP-1 lifecycle observability probes ---
     // Always-on tallies (unload deferral reasons, per-pass unload count) surfaced on the debug HUD.
     // The load-arm fault counter and stuck-IsLoading detector are dev/editor-only (see CountLoadFault / the
@@ -2041,7 +2073,12 @@ public class World : MonoBehaviour
         // --- Process Job System ---
         // 1. Process any jobs that have finished generating chunk data.
         //    This might add new chunks to the chunksToBuildMesh list.
-        JobManager.ProcessGenerationJobs();
+        //    P-4 §3.4: time-budgeted — un-processed completed jobs stay enrolled for next frame (the
+        //    same retry contract as the pass's structure-mods budget). The startup coroutine calls the
+        //    pass without a window and stays unbudgeted.
+        JobManager.ProcessGenerationJobs(settings.enablePipelineTimeBudgets
+            ? PipelinePassBudget.StartWindow(settings.genProcessBudgetMs)
+            : default);
 
         // 1b. Admit queued generation requests under the in-flight cap (P-4 §3.1). Runs after the drain
         //     above so completions this frame free headroom for new admissions immediately.
@@ -2110,6 +2147,29 @@ public class World : MonoBehaviour
                     Debug.Log($"[LIGHTING] Fail-safe promoted {failSafePromoted.ToString()} parked chunk(s) to the ready set.");
             }
 
+            // P-4 §3.4: the throttle is a rate quota (cap × frame duration × 60 — constant jobs/sec
+            // instead of constant jobs/frame, so throughput no longer collapses with FPS) bounded by a
+            // Stopwatch ms ceiling (hitch guard). Flag off → quota == cap and the window never expires,
+            // which is exactly the legacy fixed count cap. The window starts HERE — after the ~1s
+            // fail-safe full scan above — so a scan frame's walk cost cannot eat the scheduling budget
+            // (review finding: starting it earlier produced a recurring 1 Hz throughput dip).
+            int lightQuota = settings.enablePipelineTimeBudgets
+                ? PipelinePassBudget.ComputeQuota(settings.maxLightJobsPerFrame, Time.unscaledDeltaTime)
+                : settings.maxLightJobsPerFrame;
+            PipelinePassBudget.Window lightWindow = settings.enablePipelineTimeBudgets
+                ? PipelinePassBudget.StartWindow(settings.lightScheduleBudgetMs)
+                : default;
+
+            // In-flight memory bound: a hitch-scaled quota may admit up to 8× the per-frame cap, and
+            // each lighting job rents ~11 pooled full-volume buffers — without this ceiling one long
+            // frame could blow past the pool retention into a Persistent alloc storm (the §1.1
+            // incident class). Budgets-on only: worker saturation can accumulate in-flight jobs past
+            // any fixed value even under the legacy count cap, so applying it unconditionally would
+            // make the flag-off rollback leg diverge from true legacy behavior.
+            int inFlightLightCap = settings.enablePipelineTimeBudgets
+                ? Mathf.Max(1, settings.maxInFlightLightingJobs)
+                : int.MaxValue;
+
             // Snapshot the ready set into a pooled list to allow safe modification during iteration.
             List<Vector2Int> readySnapshot = ListPool<Vector2Int>.Get();
             try
@@ -2118,7 +2178,12 @@ public class World : MonoBehaviour
 
                 foreach (Vector2Int pos in readySnapshot)
                 {
-                    if (lightJobsScheduled >= settings.maxLightJobsPerFrame) break; // Respect the throttle
+                    // Respect the throttle (quota, ms ceiling, or in-flight cap — §3.4). The break leaves
+                    // the un-served remainder in the READY set, exactly like the legacy count break
+                    // (§9.1 semantics). The in-flight count is re-checked every iteration because each
+                    // successful schedule grows LightingJobs (the mesh loop's OM-1 pattern).
+                    if (lightJobsScheduled >= lightQuota || lightWindow.Expired
+                                                         || JobManager.LightingJobs.Count >= inFlightLightCap) break;
 
                     // If the chunk was unloaded, clean up the stale entry
                     if (!worldData.TryGetChunk(pos, out ChunkData chunkData))
@@ -2198,13 +2263,23 @@ public class World : MonoBehaviour
             {
                 ListPool<Vector2Int>.Release(readySnapshot);
             }
+
+            // Panic-gate signal sample (§3.5): taken AFTER the scan so this frame's transient
+            // promotions (notably the ~1s PromoteAll of the parked frontier ring) have been re-parked
+            // and only genuinely un-served schedulable work is counted. Read by next frame's
+            // DrainGenerationRequests.
+            _readyCountAfterScan = _lightWork.ReadyCount;
         }
 
         WorldFrameProfiler.Add(WorldFrameProfiler.Phase.Light, lightStart);
 
         // 5. Process completed mesh jobs from the PREVIOUS frame.
+        //    P-4 §3.4: time-budgeted — deferred completions stay enrolled (buffers held one more frame,
+        //    bounded by the in-flight cap).
         long meshStart = WorldFrameProfiler.Begin();
-        JobManager.ProcessMeshJobs();
+        JobManager.ProcessMeshJobs(settings.enablePipelineTimeBudgets
+            ? PipelinePassBudget.StartWindow(settings.meshApplyBudgetMs)
+            : default);
 
         // 6. Schedule NEW mesh jobs for chunks that now need them.
         //    NOTE: If too many mesh jobs are already in flight, pause scheduling new ones to let the
@@ -2213,12 +2288,23 @@ public class World : MonoBehaviour
         if (_meshBuildQueue.Count > 0 && JobManager.MeshJobs.Count < inFlightMeshCap)
         {
             int meshJobsScheduled = 0;
+
+            // P-4 §3.4: rate quota + ms ceiling, same shape as the lighting throttle above. The break
+            // leaves un-served chunks queued in place — legacy semantics. The RAM-scaled in-flight cap
+            // below is untouched (OM-1 memory bound, not a throughput budget).
+            int meshQuota = settings.enablePipelineTimeBudgets
+                ? PipelinePassBudget.ComputeQuota(settings.maxMeshRebuildsPerFrame, Time.unscaledDeltaTime)
+                : settings.maxMeshRebuildsPerFrame;
+            PipelinePassBudget.Window meshWindow = settings.enablePipelineTimeBudgets
+                ? PipelinePassBudget.StartWindow(settings.meshScheduleBudgetMs)
+                : default;
+
             // Walk in priority order (head = highest priority). The enumerator removes the current node in
             // O(1) and keeps iterating from the successor it captured before the body ran.
             MeshBuildQueue.Enumerator it = _meshBuildQueue.GetEnumerator();
             while (it.MoveNext())
             {
-                if (meshJobsScheduled >= settings.maxMeshRebuildsPerFrame) break;
+                if (meshJobsScheduled >= meshQuota || meshWindow.Expired) break;
 
                 // Re-check the in-flight cap every iteration, not just on entry: each successful schedule
                 // grows JobManager.MeshJobs, and a single frame must not push its whole per-frame mesh
@@ -2246,16 +2332,37 @@ public class World : MonoBehaviour
             }
         }
 
-        // The chunksToDraw queue is populated by ApplyMeshData in Chunk.cs
+        // The chunksToDraw queue is populated by ApplyMeshData in Chunk.cs.
+        // P-4 §5.3: time-budgeted drain — at least one chunk per frame (the legacy trickle, which also
+        // staggers the load animation), then as many more as fit in the ms ceiling so the queue can't
+        // back up at low FPS. Ceiling ≤ 0 drains without a time bound (consistent "0 = ceiling off"
+        // semantics with the other budget sliders); budgets off → exactly the legacy one-per-frame
+        // dequeue. Stale entries (destroyed while queued) don't count as the guaranteed draw.
         if (ChunksToDraw.Count > 0)
         {
-            Chunk chunkToDraw = ChunksToDraw.Dequeue();
+            PipelinePassBudget.Window drawWindow = settings.enablePipelineTimeBudgets
+                ? PipelinePassBudget.StartWindow(settings.drawApplyBudgetMs)
+                : default;
+            bool drainMany = settings.enablePipelineTimeBudgets;
+            int chunksDrawn = 0;
+            int dequeued = 0;
 
-            // Guard: The chunk's GameObject may have been destroyed by the pool
-            // while it was waiting in the draw queue (e.g., due to deferred unload timing).
-            if (chunkToDraw != null && chunkToDraw.ChunkGameObject != null)
+            // Flag off = exactly one dequeue (stale or not) — byte-exact legacy for the A/B legs.
+            // Flag on = guarantee one REAL draw, then drain while the window allows (never-expiring
+            // when the ceiling is disabled); stale dequeues are cheap and don't consume the guarantee.
+            while (ChunksToDraw.Count > 0 &&
+                   (drainMany ? chunksDrawn == 0 || !drawWindow.Expired : dequeued == 0))
             {
-                chunkToDraw.CreateMesh();
+                Chunk chunkToDraw = ChunksToDraw.Dequeue();
+                dequeued++;
+
+                // Guard: The chunk's GameObject may have been destroyed by the pool
+                // while it was waiting in the draw queue (e.g., due to deferred unload timing).
+                if (chunkToDraw != null && chunkToDraw.ChunkGameObject != null)
+                {
+                    chunkToDraw.CreateMesh();
+                    chunksDrawn++;
+                }
             }
         }
 
@@ -3111,7 +3218,9 @@ public class World : MonoBehaviour
     /// <summary>
     /// Drains queued generation requests (built by <see cref="CheckViewDistance"/>) in nearest-first order,
     /// admitting new ones only while the in-flight generation-job count stays below
-    /// <see cref="Settings.maxInFlightGenerationJobs"/> (P-4 §3.1 backpressure). Called once per frame.
+    /// <see cref="Settings.maxInFlightGenerationJobs"/> (P-4 §3.1 backpressure) and the §3.5 panic gate is
+    /// open (admissions pause entirely while the lighting backlog is saturated — see
+    /// <see cref="Helpers.GenerationPanicGate"/>). Called once per frame.
     /// </summary>
     /// <remarks>
     /// Soft cap with two independent bounds (both use the same <c>cap</c>):
@@ -3135,6 +3244,58 @@ public class World : MonoBehaviour
     /// </remarks>
     private void DrainGenerationRequests()
     {
+        // P-4 §3.5 panic gate: when the schedulable lighting backlog saturates, stop ADMITTING new
+        // generation until it drains — never touch the request queue or the CheckViewDistance spiral
+        // (the §3.1 permanent-holes lesson): admissions simply resume from the queue on reopen.
+        // Signal is the READY set only — parked frontier chunks (WaitingCount) sit indefinitely at the
+        // load-square edge by design and would poison an absolute threshold. Gated on enableLighting:
+        // without the lighting engine the signal never accumulates and the gate must stay open.
+        if (settings.enableGenerationPanicGate && settings.enableLighting)
+        {
+            int backlog = _readyCountAfterScan;
+
+            // Sanitize the persisted, user-editable thresholds: closeAt ≥ 1 and reopenAt in
+            // [0, closeAt). A degenerate band (reopen ≥ close) would flip the gate every frame —
+            // halving admissions and spamming two interpolated log strings per flip inside Update —
+            // and a negative reopenAt could never be reached by a non-negative backlog, wedging a
+            // closed gate shut forever.
+            int closeAt = Mathf.Max(1, settings.panicGateCloseThreshold);
+            int reopenAt = Mathf.Clamp(settings.panicGateReopenThreshold, 0, closeAt - 1);
+
+            GenerationPanicGate.Decision decision = GenerationPanicGate.Evaluate(
+                _generationGateOpen, backlog, closeAt, reopenAt);
+
+            // Transitions are rare (hysteresis band) — log them unconditionally as the §3.5 witness.
+            if (decision == GenerationPanicGate.Decision.Close)
+            {
+                _generationGateCloseCount++;
+                Debug.Log($"[GENERATION] Panic gate CLOSED — lighting backlog {backlog.ToString()} >= " +
+                          $"{closeAt.ToString()}; pausing generation admissions " +
+                          $"({_generationRequestQueue.Count.ToString()} queued).");
+            }
+            else if (decision == GenerationPanicGate.Decision.Reopen)
+            {
+                Debug.Log($"[GENERATION] Panic gate reopened — lighting backlog {backlog.ToString()} <= " +
+                          $"{reopenAt.ToString()}; resuming admissions " +
+                          $"({_generationRequestQueue.Count.ToString()} queued, closed for " +
+                          $"{_generationGateClosedFrames.ToString()} frames total).");
+            }
+
+            _generationGateOpen = GenerationPanicGate.IsOpenAfter(decision);
+            if (!_generationGateOpen)
+            {
+                _generationGateClosedFrames++;
+                return;
+            }
+        }
+        else if (!_generationGateOpen)
+        {
+            // Gate feature (or lighting) was toggled off while the gate was closed: admissions resume
+            // below regardless, so reset the probe state — otherwise the HUD's "Gen gate" row reports
+            // a stale CLOSED forever, corrupting the calibration workflow it exists for.
+            _generationGateOpen = true;
+        }
+
         int cap = Mathf.Max(1, settings.maxInFlightGenerationJobs);
         int admittedThisFrame = 0;
 

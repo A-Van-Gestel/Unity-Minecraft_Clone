@@ -496,6 +496,15 @@ public class DebugScreen : MonoBehaviour
         _middleLeftBuilder.Append("Pool destroys — chunk: ").Append(_world.ChunkPool.DestroyedChunks)
             .Append(" | data: ").Append(_world.ChunkPool.DestroyedData)
             .Append(" | sect: ").Append(_world.ChunkPool.DestroyedSections).AppendLine();
+
+        // --- P-4 §3.5 panic gate + backlog signals (threshold calibration + close/drain/reopen witness) ---
+        _middleLeftBuilder.Append("Gen gate: ").Append(_world.GenerationGateOpen ? "OPEN" : "CLOSED")
+            .Append(" | closes: ").Append(_world.GenerationGateCloseCount)
+            .Append(" | closed frames: ").Append(_world.GenerationGateClosedFrames).AppendLine();
+        _middleLeftBuilder.Append("Light backlog — ready: ").Append(_world.LightWorkReadyCount)
+            .Append(" | waiting: ").Append(_world.LightWorkWaitingCount).AppendLine();
+        _middleLeftBuilder.Append("Gen queue: ").Append(_world.GenerationRequestQueueCount)
+            .Append(" | in-flight: ").Append(_world.JobManager.GenerationJobs.Count).AppendLine();
     }
 
     private void PopulateBottomLeftBuilder()

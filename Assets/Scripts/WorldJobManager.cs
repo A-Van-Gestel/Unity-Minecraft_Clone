@@ -138,6 +138,16 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     private readonly List<ChunkCoord> _completedMeshJobs = new List<ChunkCoord>();
     private readonly List<ChunkCoord> _completedLightJobs = new List<ChunkCoord>();
 
+    // P-4 §3.4 fairness: the budgeted passes iterate a key snapshot from a rotating start index
+    // instead of raw Dictionary order. Dictionary free-slot reuse places NEW jobs at early entry
+    // indices, so a plain foreach + budget break under sustained window expiry would serve fresh
+    // jobs every frame and starve an old completed job at a high index indefinitely — the rotation
+    // bounds any entry's wait to at most (job count) frames.
+    private readonly List<ChunkCoord> _genScanKeys = new List<ChunkCoord>();
+    private int _genScanCursor;
+    private readonly List<ChunkCoord> _meshScanKeys = new List<ChunkCoord>();
+    private int _meshScanCursor;
+
     // Reused snapshot of LightingJobs.Keys for one completion pass — the shared LightingCompletionPass
     // iterates a stable candidate list rather than the live dictionary (removal is after-loop anyway).
     private readonly List<ChunkCoord> _lightCompletionCandidates = new List<ChunkCoord>();
@@ -773,13 +783,39 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     /// one error, the job is released and removed (unless it faulted before release), and the pass
     /// continues — budget-retry paths keep their un-released jobs for next frame as before.
     /// </summary>
-    public void ProcessGenerationJobs()
+    /// <param name="window">Optional time ceiling (P-4 §3.4): when it expires the pass breaks before
+    /// starting the next job, leaving the remaining completed jobs enrolled for next frame — the same
+    /// retry contract as the structure-mods budget. <c>default</c> (startup coroutine) is unbudgeted.</param>
+    public void ProcessGenerationJobs(PipelinePassBudget.Window window = default)
     {
         _completedGenJobs.Clear();
         int modsBudget = _world.settings.maxStructureModsPerFrame;
 
-        foreach (KeyValuePair<ChunkCoord, GenerationJobData> jobEntry in GenerationJobs)
+        // Rotating-start snapshot iteration (see _genScanKeys) so a budget break cannot starve the
+        // same high-index entry every frame. The pass never adds to GenerationJobs mid-loop and
+        // removals happen after it, so the snapshot stays valid.
+        _genScanKeys.Clear();
+        foreach (ChunkCoord key in GenerationJobs.Keys) _genScanKeys.Add(key);
+        int genKeyCount = _genScanKeys.Count;
+
+        // Rotate the start slot only when a ceiling can actually break the pass (window.HasBudget) —
+        // the unbudgeted legs (rollback flag off, startup coroutine) keep legacy dictionary order
+        // byte-exact, including which job defers when the structure-mods budget exhausts. The cursor
+        // is reduced modulo the key count so the index sum below can never overflow int.
+        int genScanStart = 0;
+        if (window.HasBudget && genKeyCount > 0)
+            genScanStart = _genScanCursor = (_genScanCursor + 1) % genKeyCount;
+
+        for (int scanIndex = 0; scanIndex < genKeyCount; scanIndex++)
         {
+            // §3.4 time ceiling — checked between jobs, never mid-job (a job's Complete()+process is
+            // atomic within the pass), so one oversized job can overshoot the ceiling once.
+            if (window.Expired) break;
+
+            ChunkCoord scanCoord = _genScanKeys[(genScanStart + scanIndex) % genKeyCount];
+            KeyValuePair<ChunkCoord, GenerationJobData> jobEntry =
+                new KeyValuePair<ChunkCoord, GenerationJobData>(scanCoord, GenerationJobs[scanCoord]);
+
             if (!jobEntry.Value.Handle.IsCompleted) continue;
 
             // Fault isolation, stage 1 (HF-2): a failed Complete() means the job may still own its
@@ -1013,11 +1049,35 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     /// Each job is fault-isolated: an exception logs one error, the buffers are still returned and the
     /// job removed (the chunk keeps its previous mesh), and the pass continues.
     /// </summary>
-    public void ProcessMeshJobs()
+    /// <param name="window">Optional time ceiling (P-4 §3.4): when it expires the pass breaks before
+    /// the next apply, leaving remaining completed jobs enrolled — the rotating scan start bounds any
+    /// job's wait to at most the in-flight count in frames. <c>default</c> is unbudgeted.</param>
+    public void ProcessMeshJobs(PipelinePassBudget.Window window = default)
     {
         _completedMeshJobs.Clear();
-        foreach (KeyValuePair<ChunkCoord, MeshingJobData> jobEntry in MeshJobs)
+
+        // Rotating-start snapshot iteration (see _meshScanKeys) — same starvation guard as the
+        // generation pass: a budget break must not serve fresh low-index jobs every frame while an
+        // old completed job waits at a high index holding pooled buffers.
+        _meshScanKeys.Clear();
+        foreach (ChunkCoord key in MeshJobs.Keys) _meshScanKeys.Add(key);
+        int meshKeyCount = _meshScanKeys.Count;
+
+        // Rotation gated on window.HasBudget + cursor reduced modulo the count — same fairness and
+        // overflow rationale as the generation pass above.
+        int meshScanStart = 0;
+        if (window.HasBudget && meshKeyCount > 0)
+            meshScanStart = _meshScanCursor = (_meshScanCursor + 1) % meshKeyCount;
+
+        for (int scanIndex = 0; scanIndex < meshKeyCount; scanIndex++)
         {
+            // §3.4 time ceiling — checked between jobs (one oversized upload can overshoot once).
+            if (window.Expired) break;
+
+            ChunkCoord scanCoord = _meshScanKeys[(meshScanStart + scanIndex) % meshKeyCount];
+            KeyValuePair<ChunkCoord, MeshingJobData> jobEntry =
+                new KeyValuePair<ChunkCoord, MeshingJobData>(scanCoord, MeshJobs[scanCoord]);
+
             if (!jobEntry.Value.Handle.IsCompleted) continue;
 
             // Fault isolation, stage 1 (HF-2): a failed Complete() means the job may still own its
