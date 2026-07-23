@@ -20,6 +20,15 @@ namespace Helpers
         /// <summary>The frame rate at which a quota equals its per-frame cap exactly (the caps' historical tuning anchor).</summary>
         public const float ReferenceFps = 60f;
 
+        /// <summary>
+        /// The smallest positive window budget honored. A hand-edited settings file with a tiny
+        /// positive value (e.g. 0.001 ms — the UI sliders floor at 0.5 but files are free-form) would
+        /// otherwise expire the window before a pass's first between-jobs check on some frames,
+        /// starving the pass of all progress (a budgeted completion pass that never applies anything
+        /// pins its in-flight cap and wedges the pipeline). 0 and below still mean "no ceiling".
+        /// </summary>
+        public const float MinBudgetMs = 0.5f;
+
         // Guards the ceil against float noise at the reference point: 32 × (1/60f) × 60f lands a hair
         // above 32.0 in float math and would ceil to 33 on a perfect 60 FPS frame without it.
         private const float QUOTA_EPSILON = 1e-3f;
@@ -40,6 +49,10 @@ namespace Helpers
         public static int ComputeQuota(int capPerFrameAt60, float unscaledDeltaTime)
         {
             if (capPerFrameAt60 < 1) capPerFrameAt60 = 1;
+            // Upper clamp keeps the ×MAX_QUOTA_SCALE ceiling below int overflow — an absurd persisted
+            // cap would otherwise flip the clamp maximum negative and halt scheduling entirely.
+            else if (capPerFrameAt60 > int.MaxValue / MAX_QUOTA_SCALE) capPerFrameAt60 = int.MaxValue / MAX_QUOTA_SCALE;
+
             if (unscaledDeltaTime <= 0f) return capPerFrameAt60; // No frame duration yet — legacy per-frame behavior.
 
             int quota = Mathf.CeilToInt(capPerFrameAt60 * unscaledDeltaTime * ReferenceFps - QUOTA_EPSILON);
@@ -68,13 +81,25 @@ namespace Helpers
             return budgetTicks > 0 && elapsedTicks >= budgetTicks;
         }
 
-        /// <summary>Starts a budget window ending <paramref name="budgetMs"/> from now (≤ 0 ms → an unbudgeted window).</summary>
+        /// <summary>
+        /// Floors a positive budget to <see cref="MinBudgetMs"/> (progress guarantee); non-positive
+        /// budgets pass through unchanged (no ceiling).
+        /// </summary>
+        /// <param name="budgetMs">The raw budget in milliseconds.</param>
+        /// <returns>The sanitized budget.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float SanitizeBudgetMs(float budgetMs)
+        {
+            return budgetMs > 0f && budgetMs < MinBudgetMs ? MinBudgetMs : budgetMs;
+        }
+
+        /// <summary>Starts a budget window ending <paramref name="budgetMs"/> from now (≤ 0 ms → an unbudgeted window; tiny positive budgets floored via <see cref="SanitizeBudgetMs"/>).</summary>
         /// <param name="budgetMs">The time ceiling in milliseconds.</param>
         /// <returns>The running window.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Window StartWindow(float budgetMs)
         {
-            return new Window(Stopwatch.GetTimestamp(), TicksForMs(budgetMs));
+            return new Window(Stopwatch.GetTimestamp(), TicksForMs(SanitizeBudgetMs(budgetMs)));
         }
 
         /// <summary>

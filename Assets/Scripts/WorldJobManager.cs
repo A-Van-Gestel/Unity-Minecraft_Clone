@@ -141,8 +141,10 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     // P-4 §3.4 fairness: the budgeted passes iterate a key snapshot from a rotating start index
     // instead of raw Dictionary order. Dictionary free-slot reuse places NEW jobs at early entry
     // indices, so a plain foreach + budget break under sustained window expiry would serve fresh
-    // jobs every frame and starve an old completed job at a high index indefinitely — the rotation
-    // bounds any entry's wait to at most (job count) frames.
+    // jobs every frame and DETERMINISTICALLY starve an old completed job at a high index. The
+    // rotation makes that systematic starvation vanishingly unlikely — probabilistic fairness, not
+    // a hard bound: key churn between passes can reshuffle indices against the cursor (a strict
+    // worst-case bound would need FIFO service order — deliberately not built).
     private readonly List<ChunkCoord> _genScanKeys = new List<ChunkCoord>();
     private int _genScanCursor;
     private readonly List<ChunkCoord> _meshScanKeys = new List<ChunkCoord>();
@@ -791,9 +793,9 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
         _completedGenJobs.Clear();
         int modsBudget = _world.settings.maxStructureModsPerFrame;
 
-        // Rotating-start snapshot iteration (see _genScanKeys) so a budget break cannot starve the
-        // same high-index entry every frame. The pass never adds to GenerationJobs mid-loop and
-        // removals happen after it, so the snapshot stays valid.
+        // Rotating-start snapshot iteration (see _genScanKeys) so a budget break cannot systematically
+        // starve the same high-index entry every frame (probabilistic fairness). The pass never adds
+        // to GenerationJobs mid-loop and removals happen after it, so the snapshot stays valid.
         _genScanKeys.Clear();
         foreach (ChunkCoord key in GenerationJobs.Keys) _genScanKeys.Add(key);
         int genKeyCount = _genScanKeys.Count;
@@ -1050,15 +1052,15 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     /// job removed (the chunk keeps its previous mesh), and the pass continues.
     /// </summary>
     /// <param name="window">Optional time ceiling (P-4 §3.4): when it expires the pass breaks before
-    /// the next apply, leaving remaining completed jobs enrolled — the rotating scan start bounds any
-    /// job's wait to at most the in-flight count in frames. <c>default</c> is unbudgeted.</param>
+    /// the next apply, leaving remaining completed jobs enrolled — the rotating scan start makes
+    /// systematic starvation of a deferred job vanishingly unlikely. <c>default</c> is unbudgeted.</param>
     public void ProcessMeshJobs(PipelinePassBudget.Window window = default)
     {
         _completedMeshJobs.Clear();
 
-        // Rotating-start snapshot iteration (see _meshScanKeys) — same starvation guard as the
-        // generation pass: a budget break must not serve fresh low-index jobs every frame while an
-        // old completed job waits at a high index holding pooled buffers.
+        // Rotating-start snapshot iteration (see _meshScanKeys) — same probabilistic starvation guard
+        // as the generation pass: a budget break must not systematically serve fresh low-index jobs
+        // every frame while an old completed job waits at a high index holding pooled buffers.
         _meshScanKeys.Clear();
         foreach (ChunkCoord key in MeshJobs.Keys) _meshScanKeys.Add(key);
         int meshKeyCount = _meshScanKeys.Count;

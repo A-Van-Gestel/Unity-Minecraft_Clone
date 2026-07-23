@@ -329,8 +329,15 @@ public class World : MonoBehaviour
     // The gate's backlog signal: ReadyCount sampled at the END of the previous frame's lighting scan,
     // after transient promotions were re-parked. Reading the live count here instead would see the
     // ~1s fail-safe PromoteAll spike (the whole parked frontier ring dumped into ready for one scan)
-    // and phantom-close the gate at ~1 Hz on large load distances.
+    // and phantom-close the gate at ~1 Hz on large load distances. A §3.4 budget break can still end
+    // a scan before the promoted ring is re-parked, so the close arm additionally requires the sample
+    // to stay high for PANIC_CLOSE_DEBOUNCE_FRAMES consecutive frames — a 1–2 frame spike never
+    // closes; sustained-high means genuine saturation, where closing is correct.
     private int _readyCountAfterScan;
+    private int _backlogHighFrames;
+
+    /// <summary>Consecutive high-sample frames required before the panic gate may close.</summary>
+    private const int PANIC_CLOSE_DEBOUNCE_FRAMES = 3;
 
     /// <summary>Whether the §3.5 panic gate currently admits generation requests (HUD probe).</summary>
     public bool GenerationGateOpen => _generationGateOpen;
@@ -3262,8 +3269,19 @@ public class World : MonoBehaviour
             int closeAt = Mathf.Max(1, settings.panicGateCloseThreshold);
             int reopenAt = Mathf.Clamp(settings.panicGateReopenThreshold, 0, closeAt - 1);
 
+            // Close debounce (see the field comment): the close arm only sees a "high" backlog after
+            // it has been high for PANIC_CLOSE_DEBOUNCE_FRAMES consecutive samples — implemented by
+            // capping the value below closeAt until then, which leaves the pure Evaluate contract and
+            // the reopen/remain-closed arms untouched (a capped value is still above reopenAt).
+            if (backlog >= closeAt) _backlogHighFrames++;
+            else _backlogHighFrames = 0;
+
+            int effectiveBacklog = _backlogHighFrames >= PANIC_CLOSE_DEBOUNCE_FRAMES
+                ? backlog
+                : Mathf.Min(backlog, closeAt - 1);
+
             GenerationPanicGate.Decision decision = GenerationPanicGate.Evaluate(
-                _generationGateOpen, backlog, closeAt, reopenAt);
+                _generationGateOpen, effectiveBacklog, closeAt, reopenAt);
 
             // Transitions are rare (hysteresis band) — log them unconditionally as the §3.5 witness.
             if (decision == GenerationPanicGate.Decision.Close)

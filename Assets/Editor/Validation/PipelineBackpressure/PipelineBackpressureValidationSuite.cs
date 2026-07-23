@@ -109,6 +109,11 @@ namespace Editor.Validation.PipelineBackpressure
                 PipelinePassBudget.ComputeQuota(32, -0.1f) == 32);
             ok &= Check("cap 0 is normalized to 1 before scaling",
                 PipelinePassBudget.ComputeQuota(0, 1f / 60f) == 1);
+
+            // Overflow guard: an absurd persisted cap must clamp before ×8, never flip the clamp
+            // ceiling negative (which would halt scheduling by returning a negative quota forever).
+            ok &= Check("cap int.MaxValue at a 1s hitch frame still yields a positive quota",
+                PipelinePassBudget.ComputeQuota(int.MaxValue, 1f) >= 1);
             return ok;
         }
 
@@ -141,6 +146,20 @@ namespace Editor.Validation.PipelineBackpressure
                 !PipelinePassBudget.StartWindow(0f).HasBudget);
             ok &= Check("StartWindow(positive ms) carries a budget and starts unexpired",
                 PipelinePassBudget.StartWindow(1000f).HasBudget && !PipelinePassBudget.StartWindow(1000f).Expired);
+
+            // Progress guarantee: tiny positive budgets floor to MinBudgetMs (a 0.001 ms file value
+            // could otherwise expire the window before a pass's first between-jobs check); zero and
+            // negative stay "no ceiling", at-and-above the floor pass through untouched.
+            ok &= Check("tiny positive budget floors to MinBudgetMs",
+                Mathf.Approximately(PipelinePassBudget.SanitizeBudgetMs(0.001f), PipelinePassBudget.MinBudgetMs));
+            ok &= Check("zero budget passes through (no ceiling)",
+                PipelinePassBudget.SanitizeBudgetMs(0f) == 0f);
+            ok &= Check("negative budget passes through (no ceiling)",
+                PipelinePassBudget.SanitizeBudgetMs(-3f) == -3f);
+            ok &= Check("exactly MinBudgetMs passes through untouched",
+                PipelinePassBudget.SanitizeBudgetMs(PipelinePassBudget.MinBudgetMs) == PipelinePassBudget.MinBudgetMs);
+            ok &= Check("budgets above the floor pass through untouched",
+                PipelinePassBudget.SanitizeBudgetMs(8f) == 8f);
             return ok;
         }
 
