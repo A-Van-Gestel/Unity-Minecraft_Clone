@@ -81,6 +81,7 @@ MonoBehaviour:
     chunkJobArrayPoolRetention: 512
     calibrationVersion: 0
     enablePipelineTimeBudgets: 1
+    scaleBudgetCeilingsWithFpsCap: 1
     genProcessBudgetMs: 6
     lightScheduleBudgetMs: 8
     meshScheduleBudgetMs: 6

@@ -2029,6 +2029,28 @@ public class World : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// The player's <i>intended</i> seconds-per-frame from the active FPS cap, feeding the P-4 §3.4
+    /// ceiling scaling (see <see cref="PipelinePassBudget.ScaleCeilingMs"/>). Reads live engine state
+    /// (not <c>settings</c>) so a benchmark-imposed cap is honored. vSync wins when active — Unity
+    /// ignores <see cref="Application.targetFrameRate"/> then; an unknown display rate or no cap at all
+    /// returns 0 (→ no scaling). Deliberately keyed off the cap, never measured <c>deltaTime</c>, so an
+    /// overloaded uncapped machine is not handed a wider ceiling.
+    /// </summary>
+    /// <returns>Intended seconds per frame, or 0 when no FPS cap is active.</returns>
+    private static float ComputeIntendedFrameIntervalSeconds()
+    {
+        int vSyncCount = QualitySettings.vSyncCount;
+        if (vSyncCount >= 1)
+        {
+            double refreshHz = Screen.currentResolution.refreshRateRatio.value;
+            return refreshHz > 0.0 ? (float)(vSyncCount / refreshHz) : 0f;
+        }
+
+        int targetFps = Application.targetFrameRate;
+        return targetFps > 0 ? 1f / targetFps : 0f;
+    }
+
     private void Update()
     {
         // Prevent normal generation logic from interfering with the startup coroutine
@@ -2078,13 +2100,22 @@ public class World : MonoBehaviour
         _playerLastChunkCoord = PlayerChunkCoord;
 
         // --- Process Job System ---
+        // P-4 §3.4 ceiling scaling: the ms ceilings below are widened in proportion to a voluntarily
+        // lowered FPS cap (an AFK/battery/mobile 30/15-cap frame is mostly idle sleep, so it can afford
+        // a bigger pipeline slice). Computed once per frame from the intended cap interval; 0 = no cap
+        // → ScaleCeilingMs returns each ceiling unchanged (byte-identical to the un-scaled feature-off
+        // path). Gated on both flags so flag-off is the exact recorded legacy config.
+        float ceilingScaleInterval = settings.enablePipelineTimeBudgets && settings.scaleBudgetCeilingsWithFpsCap
+            ? ComputeIntendedFrameIntervalSeconds()
+            : 0f;
+
         // 1. Process any jobs that have finished generating chunk data.
         //    This might add new chunks to the chunksToBuildMesh list.
         //    P-4 §3.4: time-budgeted — un-processed completed jobs stay enrolled for next frame (the
         //    same retry contract as the pass's structure-mods budget). The startup coroutine calls the
         //    pass without a window and stays unbudgeted.
         JobManager.ProcessGenerationJobs(settings.enablePipelineTimeBudgets
-            ? PipelinePassBudget.StartWindow(settings.genProcessBudgetMs)
+            ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.genProcessBudgetMs, ceilingScaleInterval))
             : default);
 
         // 1b. Admit queued generation requests under the in-flight cap (P-4 §3.1). Runs after the drain
@@ -2164,7 +2195,7 @@ public class World : MonoBehaviour
                 ? PipelinePassBudget.ComputeQuota(settings.maxLightJobsPerFrame, Time.unscaledDeltaTime)
                 : settings.maxLightJobsPerFrame;
             PipelinePassBudget.Window lightWindow = settings.enablePipelineTimeBudgets
-                ? PipelinePassBudget.StartWindow(settings.lightScheduleBudgetMs)
+                ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.lightScheduleBudgetMs, ceilingScaleInterval))
                 : default;
 
             // In-flight memory bound: a hitch-scaled quota may admit up to 8× the per-frame cap, and
@@ -2285,7 +2316,7 @@ public class World : MonoBehaviour
         //    bounded by the in-flight cap).
         long meshStart = WorldFrameProfiler.Begin();
         JobManager.ProcessMeshJobs(settings.enablePipelineTimeBudgets
-            ? PipelinePassBudget.StartWindow(settings.meshApplyBudgetMs)
+            ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.meshApplyBudgetMs, ceilingScaleInterval))
             : default);
 
         // 6. Schedule NEW mesh jobs for chunks that now need them.
@@ -2303,7 +2334,7 @@ public class World : MonoBehaviour
                 ? PipelinePassBudget.ComputeQuota(settings.maxMeshRebuildsPerFrame, Time.unscaledDeltaTime)
                 : settings.maxMeshRebuildsPerFrame;
             PipelinePassBudget.Window meshWindow = settings.enablePipelineTimeBudgets
-                ? PipelinePassBudget.StartWindow(settings.meshScheduleBudgetMs)
+                ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.meshScheduleBudgetMs, ceilingScaleInterval))
                 : default;
 
             // Walk in priority order (head = highest priority). The enumerator removes the current node in
@@ -2348,7 +2379,7 @@ public class World : MonoBehaviour
         if (ChunksToDraw.Count > 0)
         {
             PipelinePassBudget.Window drawWindow = settings.enablePipelineTimeBudgets
-                ? PipelinePassBudget.StartWindow(settings.drawApplyBudgetMs)
+                ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.drawApplyBudgetMs, ceilingScaleInterval))
                 : default;
             bool drainMany = settings.enablePipelineTimeBudgets;
             int chunksDrawn = 0;
@@ -3310,8 +3341,11 @@ public class World : MonoBehaviour
         {
             // Gate feature (or lighting) was toggled off while the gate was closed: admissions resume
             // below regardless, so reset the probe state — otherwise the HUD's "Gen gate" row reports
-            // a stale CLOSED forever, corrupting the calibration workflow it exists for.
+            // a stale CLOSED forever, corrupting the calibration workflow it exists for. The close
+            // debounce counter is reset too: a stale-high value would let a re-enable close the gate on
+            // the first frame, defeating the 3-frame debounce that exists to ignore transient spikes.
             _generationGateOpen = true;
+            _backlogHighFrames = 0;
         }
 
         int cap = Mathf.Max(1, settings.maxInFlightGenerationJobs);

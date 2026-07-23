@@ -48,6 +48,7 @@ namespace Editor.Validation.PipelineBackpressure
                 new Scenario("B4 Window ticks + unbudgeted-default semantics", RunB4WindowSemantics),
                 new Scenario("B5 Panic gate truth table (all four arms + boundaries)", RunB5GateTruthTable),
                 new Scenario("B6 Panic gate hysteresis walk (band holds both ways)", RunB6HysteresisWalk),
+                new Scenario("B7 Ceiling scaling: FPS-cap intent, floor, clamp, disabled passthrough", RunB7CeilingScaling),
             };
             return ValidationSuiteRunner.Execute("Pipeline Backpressure", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -160,6 +161,45 @@ namespace Editor.Validation.PipelineBackpressure
                 PipelinePassBudget.SanitizeBudgetMs(PipelinePassBudget.MinBudgetMs) == PipelinePassBudget.MinBudgetMs);
             ok &= Check("budgets above the floor pass through untouched",
                 PipelinePassBudget.SanitizeBudgetMs(8f) == 8f);
+            return ok;
+        }
+
+        /// <summary>
+        /// P-4 §3.4 ceiling scaling: a lowered FPS cap widens the ms ceiling proportionally (anchored
+        /// at 60 FPS, clamped ×8, floored ×1), while a disabled ceiling and the no-cap case both pass
+        /// the input through untouched (the feature-off / uncapped byte-identity contract).
+        /// </summary>
+        private static bool RunB7CeilingScaling()
+        {
+            // No cap (interval <= 0): the ceiling is returned verbatim — this is the flag-off / uncapped
+            // path and MUST be byte-identical to the legacy fixed ceiling.
+            bool ok = Check("no cap (interval 0) returns the ceiling unchanged",
+                PipelinePassBudget.ScaleCeilingMs(6f, 0f) == 6f);
+            ok &= Check("negative interval returns the ceiling unchanged",
+                PipelinePassBudget.ScaleCeilingMs(6f, -1f) == 6f);
+
+            // A disabled ceiling (<= 0) is never resurrected into a positive budget, at any cap.
+            ok &= Check("disabled ceiling (0 ms) stays 0 even under a 15-cap",
+                PipelinePassBudget.ScaleCeilingMs(0f, 1f / 15f) == 0f);
+            ok &= Check("disabled ceiling (negative ms) passes through under a cap",
+                PipelinePassBudget.ScaleCeilingMs(-3f, 1f / 30f) == -3f);
+
+            // 60 FPS intent is the anchor: scale exactly 1.
+            ok &= Check("60 FPS cap leaves the ceiling at 1x",
+                Mathf.Approximately(PipelinePassBudget.ScaleCeilingMs(6f, 1f / 60f), 6f));
+            // 30-cap doubles, 15-cap quadruples (the AFK / battery target regime).
+            ok &= Check("30 FPS cap doubles the ceiling",
+                Mathf.Approximately(PipelinePassBudget.ScaleCeilingMs(6f, 1f / 30f), 12f));
+            ok &= Check("15 FPS cap quadruples the ceiling",
+                Mathf.Approximately(PipelinePassBudget.ScaleCeilingMs(4f, 1f / 15f), 16f));
+
+            // A >60 Hz cap must never SHRINK the ceiling (floor at 1x).
+            ok &= Check("144 FPS cap does not shrink the ceiling (1x floor)",
+                Mathf.Approximately(PipelinePassBudget.ScaleCeilingMs(6f, 1f / 144f), 6f));
+
+            // An extreme low cap clamps at MAX_QUOTA_SCALE (x8): a 4 FPS intent would be x15 unclamped.
+            ok &= Check("4 FPS cap clamps at x8 (48 ms from a 6 ms ceiling)",
+                Mathf.Approximately(PipelinePassBudget.ScaleCeilingMs(6f, 1f / 4f), 48f));
             return ok;
         }
 

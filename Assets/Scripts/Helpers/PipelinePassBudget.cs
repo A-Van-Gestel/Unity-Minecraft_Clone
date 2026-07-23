@@ -93,6 +93,32 @@ namespace Helpers
             return budgetMs > 0f && budgetMs < MinBudgetMs ? MinBudgetMs : budgetMs;
         }
 
+        /// <summary>
+        /// Scales a per-frame ms ceiling by the player's <i>intended</i> frame interval so a
+        /// voluntarily-capped session (30/15 FPS for AFK, battery, mobile) gets proportionally more
+        /// pipeline budget per frame instead of throttling as hard as an overloaded machine at the same
+        /// FPS. Anchored at <see cref="ReferenceFps"/> exactly like <see cref="ComputeQuota"/>: a 60 FPS
+        /// intent returns the ceiling unchanged, a 30-cap doubles it, a 15-cap quadruples it, clamped at
+        /// <see cref="MAX_QUOTA_SCALE"/>×. The scale keys off <b>intent</b> (the configured cap), never
+        /// measured frame time — an uncapped machine merely running slow gets no boost, so this can
+        /// never widen the ceiling into the §3 death spiral it exists to bound.
+        /// </summary>
+        /// <param name="configuredMs">The base ms ceiling (a Settings budget field). ≤ 0 (ceiling disabled) passes through untouched — never scaled into a positive value.</param>
+        /// <param name="intendedFrameIntervalSeconds">The intended seconds-per-frame from the active FPS cap (target rate or vSync interval); ≤ 0 means "no cap" and returns the ceiling unchanged.</param>
+        /// <returns>The frame-interval-scaled ceiling in milliseconds.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float ScaleCeilingMs(float configuredMs, float intendedFrameIntervalSeconds)
+        {
+            // A disabled ceiling (≤ 0 = "no bound") and the no-cap case both return the input verbatim,
+            // so the feature-off path is byte-identical to the legacy fixed ceilings (no ×1.0f rounding).
+            if (configuredMs <= 0f || intendedFrameIntervalSeconds <= 0f) return configuredMs;
+
+            // Floor at 1× (a >60 Hz cap must never SHRINK a ceiling); ceil at MAX_QUOTA_SCALE (an extreme
+            // low cap must not yield an unbounded per-frame slice — the quota's guard, same rationale).
+            float scale = Mathf.Clamp(intendedFrameIntervalSeconds * ReferenceFps, 1f, MAX_QUOTA_SCALE);
+            return configuredMs * scale;
+        }
+
         /// <summary>Starts a budget window ending <paramref name="budgetMs"/> from now (≤ 0 ms → an unbudgeted window; tiny positive budgets floored via <see cref="SanitizeBudgetMs"/>).</summary>
         /// <param name="budgetMs">The time ceiling in milliseconds.</param>
         /// <returns>The running window.</returns>

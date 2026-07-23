@@ -475,6 +475,16 @@ public class Settings
     public bool enablePipelineTimeBudgets = true;
 
     /// <summary>
+    /// When true, the five time ceilings scale with a voluntarily lowered FPS cap (a 30/15-FPS AFK /
+    /// battery / mobile frame is mostly idle sleep and can afford a bigger pipeline slice) — anchored at
+    /// 60 FPS, clamped ×8, keyed off the cap's intent and never measured frame time (see
+    /// <see cref="Helpers.PipelinePassBudget.ScaleCeilingMs"/>). Off restores the fixed absolute-ms
+    /// ceilings — kept as a rollback / A-B lever alongside <see cref="enablePipelineTimeBudgets"/>.
+    /// No effect when budgets are off or no FPS cap is active.
+    /// </summary>
+    public bool scaleBudgetCeilingsWithFpsCap = true;
+
+    /// <summary>
     /// Time ceiling (ms) for processing completed generation jobs in one frame
     /// (<see cref="maxStructureModsPerFrame"/> still bounds structure expansion inside the pass).
     /// Un-processed completed jobs stay enrolled for the next frame. ≤ 0 disables the ceiling.
