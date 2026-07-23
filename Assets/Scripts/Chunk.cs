@@ -275,53 +275,6 @@ public class Chunk
     #region Block Behavior Methods
 
     /// <summary>
-    /// Processes the block behavior for all active voxels currently registered in this chunk's <see cref="ChunkData"/>.
-    /// Removes voxels from the active buckets if they no longer meet their activation conditions. The active-voxel
-    /// storage lives on <see cref="ChunkData"/> (TG-4 Phase 1); this method is the tick orchestration that drives it.
-    /// </summary>
-    public void TickUpdate()
-    {
-        if (ChunkData == null) return;
-
-        NativeHashSet<int> grass = ChunkData.ActiveGrassBucket;
-        NativeHashSet<int> fluids = ChunkData.ActiveFluidsBucket;
-
-        int grassCount = grass.IsCreated ? grass.Count : 0;
-        int fluidCount = fluids.IsCreated ? fluids.Count : 0;
-        if (grassCount == 0 && fluidCount == 0) return;
-
-        // Marker opened AFTER the no-op early-outs so a chunk with nothing to tick pays nothing.
-        using (s_tickUpdateMarker.Auto())
-        {
-            // Iterate each behavior family in a fixed order (grass, then fluids) — the TG-4 Phase 1 split. This changes
-            // the order mods are emitted vs the old single set; BH-D1 proves the change is §4.3-equivalent (independent
-            // mods canonicalize, same-voxel writes stay ordered). The apply path stays serial/unchanged in
-            // World.ApplyModifications. A single pooled scratch list is reused across both families.
-            List<int> toRemove = ListPool<int>.Get();
-            if (grassCount > 0)
-            {
-                using (s_tickGrassMarker.Auto())
-                    TickFamily(grass, toRemove);
-            }
-
-            if (fluidCount > 0)
-            {
-                using (s_tickFluidMarker.Auto())
-                {
-                    // TG-4 Phase 3: tick Tier-1 interior fluids via the Burst job (border fluids stay managed),
-                    // feature-flagged so the fully-managed legacy path is a one-toggle revert.
-                    if (World.Instance.EnableFluidBurstTick)
-                        TickFluidsHybrid(fluids, toRemove);
-                    else
-                        TickFamily(fluids, toRemove);
-                }
-            }
-
-            ListPool<int>.Release(toRemove);
-        }
-    }
-
-    /// <summary>
     /// Ticks one behavior-family bucket: evaluates <see cref="BlockBehavior.Behave"/>/<see cref="BlockBehavior.Active"/>
     /// for every registered voxel (unpacking its flat index to a local position), enqueues emitted mods to the world,
     /// and drops voxels that are no longer active. Removals are deferred until after enumeration (a
@@ -364,83 +317,36 @@ public class Chunk
     }
 
     /// <summary>
-    /// TG-4 Phase 3 — ticks the fluids family as a <b>hybrid</b>: Tier-1 interior voxels are evaluated by the Burst
-    /// <see cref="FluidTickJob"/> (via <see cref="World.FluidBurstTicker"/>), Tier-2 border voxels stay on the
-    /// managed <see cref="BlockBehavior.Behave"/>/<see cref="BlockBehavior.Active"/> path. The job runs first (over
-    /// a pre-tick snapshot), then this method <b>replays the emitted mods in the original bucket-enumeration
-    /// order</b>, interleaved with the managed border evaluations — so the emitted <see cref="VoxelMod"/> stream is
-    /// byte-identical to the legacy single loop (zero drift; preserves same-target ordering for BH-D1). Removals
-    /// (interior from the job, border from <see cref="BlockBehavior.Active"/>) are order-independent and applied
-    /// after the loop, exactly as <see cref="TickFamily"/> does.
+    /// Drains a chunk's fluid tick from an <b>already prepared</b> <paramref name="ticker"/> (its
+    /// <see cref="FluidTickJob"/> already run/completed): replays every source's precomputed mods in the captured
+    /// bucket-enumeration order, then applies the now-inactive removals. Every fluid (interior AND border) is
+    /// job-ticked via the Y-band neighbor halo, so replay is a single ordered walk of the job output — the emitted
+    /// <see cref="VoxelMod"/> stream is byte-identical to a single serial loop even with cross-chunk targets
+    /// (emission order is fixed by the emitting voxel's bucket order, never the target).
     /// </summary>
+    /// <param name="ticker">The chunk's prepared fluid runner (job already complete).</param>
     /// <param name="fluids">The active-fluids bucket (flat chunk indices) owned by <see cref="ChunkData"/>.</param>
     /// <param name="removeScratch">A reusable scratch list for now-inactive indices; cleared on entry.</param>
-    private void TickFluidsHybrid(NativeHashSet<int> fluids, List<int> removeScratch)
-    {
-        World world = World.Instance;
-        FluidBurstTicker ticker = world.FluidBurstTicker;
-
-        // Pass 1: snapshot + single partition + run the fluid job (serial .Run). The runner captures the bucket's
-        // enumeration order (interior/border tagged) in ReplayOrder so the replay walks it in one pass. Phase 4b:
-        // when border-burst is on, ALL fluids tick in-job via the neighbor halo (ReplayOrder all-job); else the
-        // Phase-3 interior-only hybrid (border tagged 0 → managed in the replay).
-        if (world.EnableFluidBorderBurst)
-            ticker.RunFluids(ChunkData, world.TickCounter, world.JobDataManager.BlockTypesJobData, world.worldData, world.EnableFluidBandGather);
-        else
-            ticker.RunInteriorFluids(ChunkData, world.TickCounter, world.JobDataManager.BlockTypesJobData);
-
-        // Pass 2: replay the prepared+completed ticker (shared with the TG-4 Phase 4a parallel drain path).
-        ReplayHybridFluids(ticker, fluids, removeScratch);
-    }
-
-    /// <summary>
-    /// Drains a chunk's fluid tick from an <b>already prepared</b> <paramref name="ticker"/> (its interior
-    /// <see cref="FluidTickJob"/> already run/completed): replays the captured bucket order, interleaving the
-    /// interior job's precomputed mods with managed border <see cref="BlockBehavior.Behave"/>/<see cref="BlockBehavior.Active"/>
-    /// evaluations, then applies the now-inactive removals. Shared by the serial <see cref="TickFluidsHybrid"/> and
-    /// the Phase-4a parallel <see cref="DrainTick"/> so both produce the identical emission stream.
-    /// </summary>
-    /// <param name="ticker">The chunk's prepared fluid runner (interior job already complete).</param>
-    /// <param name="fluids">The active-fluids bucket (flat chunk indices) owned by <see cref="ChunkData"/>.</param>
-    /// <param name="removeScratch">A reusable scratch list for now-inactive indices; cleared on entry.</param>
-    private void ReplayHybridFluids(FluidBurstTicker ticker, NativeHashSet<int> fluids, List<int> removeScratch)
+    private void ReplayFluids(FluidBurstTicker ticker, NativeHashSet<int> fluids, List<int> removeScratch)
     {
         removeScratch.Clear();
 
         World world = World.Instance;
-        NativeList<int2> replay = ticker.ReplayOrder;
         NativeList<VoxelMod> jobMods = ticker.Mods;
         NativeList<int> modsPerSource = ticker.ModsPerSource;
 
-        // Replay in the runner's captured bucket order. Interior voxels emit their precomputed job-mod run (cursor
-        // stays in lockstep with ModsPerSource by construction — both come from the same single partition); border
-        // voxels run the managed path. This interleaves emission exactly as the legacy single loop would.
-        int interiorCursor = 0;
+        // Replay every source's precomputed job-mod run in bucket order (the mod cursor stays in lockstep with
+        // ModsPerSource by construction — both come from the same single partition pass).
         int modCursor = 0;
-        for (int e = 0; e < replay.Length; e++)
+        for (int e = 0; e < modsPerSource.Length; e++)
         {
-            int idx = replay[e].x;
-            if (replay[e].y == 1)
-            {
-                int count = modsPerSource[interiorCursor];
-                interiorCursor++;
-                for (int k = 0; k < count; k++)
-                    world.EnqueueVoxelModification(jobMods[modCursor + k]);
-                modCursor += count;
-            }
-            else
-            {
-                ChunkMath.GetLocalPositionFromFlattenedIndex(idx, out int x, out int y, out int z);
-                Vector3Int pos = new Vector3Int(x, y, z);
-                List<VoxelMod> mods = BlockBehavior.Behave(ChunkData, pos);
-                if (!BlockBehavior.Active(ChunkData, pos))
-                    removeScratch.Add(idx);
-                if (mods != null)
-                    world.EnqueueVoxelModifications(mods);
-            }
+            int count = modsPerSource[e];
+            for (int k = 0; k < count; k++)
+                world.EnqueueVoxelModification(jobMods[modCursor + k]);
+            modCursor += count;
         }
 
-        // Interior now-inactive indices come from the job (order-independent set removal, like the border path).
+        // Now-inactive indices come from the job (order-independent set removal).
         NativeList<int> inactive = ticker.InactiveInterior;
         foreach (int k in inactive)
             removeScratch.Add(k);
@@ -450,12 +356,12 @@ public class Chunk
     }
 
     /// <summary>
-    /// TG-4 Phase 4a — drains one chunk's tick in the parallel path: grass on the managed path, and fluids replayed
-    /// from the supplied pre-completed <paramref name="ticker"/> (or the managed <see cref="TickFamily"/> when
-    /// <paramref name="ticker"/> is null — a grass-only chunk). Mirrors <see cref="TickUpdate"/>, except the interior
-    /// fluid job was already scheduled+completed in parallel by <see cref="World.ProcessTickUpdatesParallel"/>.
+    /// TG-4 — drains one chunk's tick in the parallel path: grass on the managed path, and fluids replayed from the
+    /// supplied pre-completed <paramref name="ticker"/> (or the managed <see cref="TickFamily"/> when
+    /// <paramref name="ticker"/> is null — a grass-only chunk). The fluid job was already scheduled+completed in
+    /// parallel by <see cref="World.TickChunksParallel"/>.
     /// </summary>
-    /// <param name="ticker">The chunk's prepared fluid runner (interior job complete), or null if none was scheduled.</param>
+    /// <param name="ticker">The chunk's prepared fluid runner (job complete), or null if none was scheduled.</param>
     public void DrainTick(FluidBurstTicker ticker)
     {
         if (ChunkData == null) return;
@@ -483,7 +389,7 @@ public class Chunk
                     // ticker is non-null for every chunk with active fluids (scheduled in Phase 1); the managed
                     // fallback only runs in the defensive null case.
                     if (ticker != null)
-                        ReplayHybridFluids(ticker, fluids, toRemove);
+                        ReplayFluids(ticker, fluids, toRemove);
                     else
                         TickFamily(fluids, toRemove);
                 }
@@ -500,7 +406,7 @@ public class Chunk
     /// <param name="pos">The local position of the voxel within this chunk.</param>
     public void AddActiveVoxel(Vector3Int pos)
     {
-        // Null-guarded like the sibling delegations (TickUpdate/GetActiveVoxelCount/IsVoxelActive/ActiveVoxels):
+        // Null-guarded like the sibling delegations (DrainTick/GetActiveVoxelCount/IsVoxelActive/ActiveVoxels):
         // World's cross-chunk re-activation reaches here holding only the neighbor Chunk, whose ChunkData may be
         // unlinked mid-recycle. The old local-HashSet add could never NRE; preserve that.
         ChunkData?.AddActiveVoxel(pos);

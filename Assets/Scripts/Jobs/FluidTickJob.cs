@@ -26,13 +26,12 @@ namespace Jobs
     /// <c>ApplyModifications</c> path + bucket removal).
     /// </para>
     /// <para>
-    /// <b>TG-4 Phase 4b — halo-padded reads.</b> The job gathers the center + its 8 horizontal neighbors into
+    /// <b>TG-4 — halo-padded reads.</b> The job gathers the center + its 8 horizontal neighbors into
     /// <see cref="PaddedVoxels"/> (the <see cref="ChunkMath.FLUID_HALO"/>-wide volume) at the top of
     /// <see cref="Execute"/>, so <see cref="GetStateLocal"/> resolves reads up to 4 cells past a seam — letting
-    /// <b>Tier-2 (border)</b> voxels tick in-job too. The caller decides which indices to feed via
-    /// <see cref="InteriorFluidIndices"/>: pass only interior indices for the Phase-3 hybrid (neighbors empty), or
-    /// every active fluid index for the full Phase-4b path (real neighbor snapshots). A missing neighbor reads back
-    /// as void, exactly as the managed cross-chunk query returns null.
+    /// <b>border</b> voxels tick in-job too. The caller feeds every active fluid index via
+    /// <see cref="InteriorFluidIndices"/> with the real neighbor snapshots gathered into the halo. A missing neighbor
+    /// reads back as void, exactly as the managed cross-chunk query returns null.
     /// </para>
     /// </summary>
     [BurstCompile]
@@ -46,7 +45,7 @@ namespace Jobs
         public NativeArray<uint> CenterVoxels;
 
         // TG-4 Phase 4b: the 8 horizontal neighbor snapshots (section-contiguous full-chunk maps; compass directions
-        // match ChunkMath.GatherPaddedFluidVoxels / WorldJobManager.AcquireNeighborMaps). The in-job gather scatters
+        // match ChunkMath.GatherPaddedFluidVoxelsBand / WorldJobManager.AcquireNeighborMaps). The in-job gather scatters
         // center + these into PaddedVoxels so BORDER voxels can resolve cross-chunk reads. A missing/ungenerated
         // neighbor is passed as a created zero-length array (NOT default — job safety requires constructed
         // containers), which the gather sentinel-fills with uint.MaxValue → read back as void (Has == false).

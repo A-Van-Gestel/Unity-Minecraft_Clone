@@ -240,13 +240,13 @@ namespace Helpers
         /// Y (<c>gy = bandMinY + by</c>); destination rows are written at the <b>band-local</b> Y (<c>by</c>), so the
         /// padded buffer holds only <paramref name="bandCount"/> rows (a band-sized prefix of a full-height
         /// allocation). The full-height gather is just the special case <c>bandMinY = 0, bandCount = CHUNK_HEIGHT</c>
-        /// (see <see cref="GatherPaddedFull{T}"/>); the TG-4 Phase-4b Y-band gather passes the tight active-fluid band
+        /// (the lighting gathers pass their LI-2 band); the TG-4 Y-band fluid gather passes the tight active-fluid band
         /// (see <see cref="GatherPaddedFluidVoxelsBand"/>). A missing neighbor (uncreated/empty array) fills its
         /// region with <paramref name="sentinel"/>, reproducing the per-neighbor missing-source sentinel. Writes
         /// EVERY padded cell <b>in the band</b>; rows outside the band are never touched (callers reading band-local
         /// Y must guard their own bounds). Parameterized by <paramref name="halo"/> + <paramref name="paddedWidth"/>
         /// so the same body serves the lighting halo (2, width 20) and the wider fluid halo (4, width 24) — see the
-        /// <see cref="GatherPaddedVoxels"/>/<see cref="GatherPaddedLight"/>/<see cref="GatherPaddedFluidVoxels"/> wrappers.
+        /// <see cref="GatherPaddedVoxels"/>/<see cref="GatherPaddedLight"/>/<see cref="GatherPaddedFluidVoxelsBand"/> wrappers.
         /// <para>
         /// Each padded horizontal row (fixed <c>by</c>, pz — <paramref name="paddedWidth"/> cells of X) is built as
         /// three contiguous runs: the <paramref name="halo"/>-wide West halo, the 16-wide center span, and the
@@ -311,20 +311,6 @@ namespace Helpers
         }
 
         /// <summary>
-        /// Scatters the center chunk + its 8 horizontal neighbors into the <b>full-height</b> halo-padded volume —
-        /// the <c>bandMinY = 0, bandCount = CHUNK_HEIGHT</c> case of <see cref="GatherPaddedRange{T}"/> (which holds
-        /// the drift-critical body). Used by the full-height fluid gather (the lighting gathers pass their
-        /// LI-2 band height straight to <see cref="GatherPaddedRange{T}"/>).
-        /// </summary>
-        private static void GatherPaddedFull<T>(NativeArray<T> padded,
-            NativeArray<T> center, NativeArray<T> w, NativeArray<T> e, NativeArray<T> s, NativeArray<T> n,
-            NativeArray<T> sw, NativeArray<T> nw, NativeArray<T> se, NativeArray<T> ne, int halo, int paddedWidth, T sentinel)
-            where T : unmanaged
-        {
-            GatherPaddedRange(padded, center, w, e, s, n, sw, nw, se, ne, 0, CHUNK_HEIGHT, halo, paddedWidth, sentinel);
-        }
-
-        /// <summary>
         /// Lighting voxel gather: fills the Y-band <c>[<paramref name="bandMinY"/>, <paramref name="bandHeight"/>)</c>
         /// of the padded voxel volume from the center + 8 neighbor voxel buffers, missing sources stamped
         /// <c>uint.MaxValue</c>. The band is a prefix of a full-height allocation (LI-2): destination rows are
@@ -344,20 +330,7 @@ namespace Helpers
         }
 
         /// <summary>
-        /// Fluid voxel gather (TG-4 Phase 4b): fills the full-height <see cref="PADDED_FLUID_WIDTH"/>-wide padded
-        /// voxel volume from the center + 8 neighbor voxel buffers, missing sources stamped <c>uint.MaxValue</c>.
-        /// Thin typed wrapper over <see cref="GatherPaddedFull{T}"/> bound to the wider <see cref="FLUID_HALO"/>
-        /// geometry — the <c>FluidTickJob</c> border voxels read this in place of the per-chunk snapshot.
-        /// </summary>
-        public static void GatherPaddedFluidVoxels(NativeArray<uint> padded,
-            NativeArray<uint> center, NativeArray<uint> w, NativeArray<uint> e, NativeArray<uint> s, NativeArray<uint> n,
-            NativeArray<uint> sw, NativeArray<uint> nw, NativeArray<uint> se, NativeArray<uint> ne)
-        {
-            GatherPaddedFull(padded, center, w, e, s, n, sw, nw, se, ne, FLUID_HALO, PADDED_FLUID_WIDTH, uint.MaxValue);
-        }
-
-        /// <summary>
-        /// Fluid voxel gather (TG-4 Phase 4b Y-band): fills only the Y-band <c>[<paramref name="bandMinY"/>,
+        /// Fluid voxel gather (TG-4 Y-band): fills only the Y-band <c>[<paramref name="bandMinY"/>,
         /// <paramref name="bandMinY"/> + <paramref name="bandCount"/>)</c> of the <see cref="PADDED_FLUID_WIDTH"/>-wide
         /// padded volume — a band-sized prefix of a full-height <see cref="PADDED_FLUID_VOLUME"/> allocation. Since
         /// every fluid read is within <see cref="FLUID_VERTICAL_REACH"/> of an active source in Y, sizing the gather

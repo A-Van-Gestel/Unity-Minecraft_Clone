@@ -25,7 +25,6 @@ using Spawn;
 using UI;
 using Unity.Collections;
 using Unity.Jobs;
-using Unity.Jobs.LowLevel.Unsafe;
 using Unity.Mathematics;
 using Unity.Profiling;
 using UnityEngine;
@@ -227,32 +226,8 @@ public class World : MonoBehaviour
     [NonSerialized]
     public JobDataManager JobDataManager;
 
-    // --- TG-4 Phase 3: interior-fluid Burst tick ---
-    [SerializeField]
-    [Tooltip("TG-4 Phase 3: tick Tier-1 interior fluids via the Burst FluidTickJob (border fluids stay managed). " +
-             "Off = legacy fully-managed fluid tick. On by default — validated (BH-D1 + in-game).")]
-    private bool _enableFluidBurstTick = true;
-
-    private FluidBurstTicker _fluidBurstTicker;
-
-    /// <summary>When true, Tier-1 interior fluids tick via the Burst <c>FluidTickJob</c>; otherwise the legacy managed path runs.</summary>
-    public bool EnableFluidBurstTick => _enableFluidBurstTick;
-
-    /// <summary>Lazily-created reusable runner for the interior fluid Burst tick. Disposed in <c>OnDestroy</c>.</summary>
-    internal FluidBurstTicker FluidBurstTicker => _fluidBurstTicker ??= new FluidBurstTicker();
-
-    // --- TG-4 Phase 4a: parallel interior-fluid tick across chunks ---
-    [SerializeField]
-    [Tooltip("TG-4 Phase 4a: schedule the Tier-1 interior fluid jobs across chunks in parallel (requires Enable " +
-             "Fluid Burst Tick). Off = the Phase-3 serial per-chunk path. On by default — validated " +
-             "(parallel-vs-serial determinism gate + 8-run IL2CPP stress); auto-falls back to serial on <2-worker hosts.")]
-    private bool _enableParallelFluidTick = true;
-
-    // Minimum Job worker threads required to take the parallel path (else fall back to the serial tick). A host
-    // with <2 workers (≤2 cores) gains nothing from scheduling — the jobs can't overlap — and only pays the
-    // Schedule/Complete overhead. Real targets (8-core phones and up) clear this trivially.
-    private const int MIN_PARALLEL_WORKER_THREADS = 2;
-
+    // --- TG-4: parallel fluid Burst tick across chunks (unconditional; every fluid — interior AND border — ticks
+    //     through FluidTickJob, border voxels reading a per-tick Y-band neighbor halo). See FluidBurstTicker. ---
     private DynamicPool<FluidBurstTicker> _fluidTickerPool;
 
     // Reusable per-tick scratch for the parallel schedule→complete→drain phases (cleared each tick, never re-alloc).
@@ -260,34 +235,9 @@ public class World : MonoBehaviour
     private readonly List<FluidBurstTicker> _parallelFluidTickers = new List<FluidBurstTicker>();
     private readonly List<JobHandle> _parallelFluidHandles = new List<JobHandle>();
 
-    /// <summary>When true (and <see cref="EnableFluidBurstTick"/>), interior fluid jobs schedule in parallel across chunks (TG-4 Phase 4a).</summary>
-    public bool EnableParallelFluidTick => _enableParallelFluidTick;
-
     /// <summary>Lazily-created pool of per-chunk fluid runners for the parallel tick (one in-flight per scheduled chunk). Cleared in <c>OnDestroy</c>.</summary>
     private DynamicPool<FluidBurstTicker> FluidTickerPool =>
         _fluidTickerPool ??= new DynamicPool<FluidBurstTicker>(() => new FluidBurstTicker(), t => t.Dispose());
-
-    // --- TG-4 Phase 4b: full halo fluid tick (border voxels Bursted via a per-tick neighbor halo) ---
-    [SerializeField]
-    [Tooltip("TG-4 Phase 4b: tick ALL fluids (interior AND border) through the Burst job, with border voxels reading " +
-             "a per-tick gathered neighbor halo (requires Enable Fluid Burst Tick). Off = the Phase-3/4a hybrid " +
-             "(border stays managed). On by default (validated 2026-06-24: BH-D1[L|H] + cross-chunk determinism + " +
-             "in-game; the A/B found it 1.70-2.15x faster than the managed border). Off = rollback to the hybrid.")]
-    private bool _enableFluidBorderBurst = true;
-
-    /// <summary>When true (and <see cref="EnableFluidBurstTick"/>), border fluids tick in-job via the §4.2(b) neighbor halo (TG-4 Phase 4b); else the border stays managed.</summary>
-    public bool EnableFluidBorderBurst => _enableFluidBorderBurst;
-
-    [SerializeField]
-    [Tooltip("TG-4 Phase 4b Y-band: restrict the per-tick fluid gather + reads to the tight active-fluid Y-band " +
-             "(minActiveY-1 .. maxActiveY+1) instead of full chunk height, making the per-tick copy independent of " +
-             "world height (requires Enable Fluid Border Burst). Byte-identical by the FLUID_VERTICAL_REACH invariant. " +
-             "On by default (validated 2026-06-27: BH-D1[H|HB]/[L|HB] + prove-red + cross-chunk determinism + in-game; " +
-             "the A/B cut the large-flood worst-tick tail 24-46%). Off = rollback to the full-height halo.")]
-    private bool _enableFluidBandGather = true;
-
-    /// <summary>When true (and <see cref="EnableFluidBorderBurst"/>), the fluid halo gather/read window is sized to the active-fluid Y-band instead of full chunk height (TG-4 Phase 4b Y-band); byte-identical, height-independent copy.</summary>
-    public bool EnableFluidBandGather => _enableFluidBandGather;
 
     // --- LI-2: banded lighting gather (Y-band) ---
     [SerializeField]
@@ -603,7 +553,6 @@ public class World : MonoBehaviour
 
         // 2. Dispose of the persistent global data.
         JobDataManager?.Dispose();
-        _fluidBurstTicker?.Dispose();
         _fluidTickerPool?.Clear(); // disposes every pooled per-chunk fluid ticker (all returned between ticks)
 
         // 3. Dispose of fluid vertex templates.
@@ -1907,59 +1856,42 @@ public class World : MonoBehaviour
         _tickTimer -= VoxelData.TickLength;
         _tickCounter++;
 
-        // Snapshot _activeChunks to prevent InvalidOperationException if
-        // CheckViewDistance modifies the set during iteration.
-        using HashSet<ChunkCoord>.Enumerator enumerator = _activeChunks.GetEnumerator();
-        List<ChunkCoord> snapshot = ListPool<ChunkCoord>.Get();
+        // Resolve the active chunks into a snapshot list FIRST (no side effects), then tick from the list — so a
+        // CheckViewDistance that mutates _activeChunks mid-tick can never invalidate this enumeration. The fluid
+        // jobs schedule across all chunks in parallel and drain serially in this same order, keeping the emitted mod
+        // stream deterministic (byte-identical to a single serial loop).
+        List<Chunk> snapshot = ListPool<Chunk>.Get();
         try
         {
-            while (enumerator.MoveNext())
-                snapshot.Add(enumerator.Current);
+            foreach (ChunkCoord chunkCoord in _activeChunks)
+                if (_chunkMap.TryGetValue(chunkCoord, out Chunk chunk))
+                    snapshot.Add(chunk);
 
-            // TG-4 Phase 4a: when enabled, schedule the interior fluid jobs across all chunks in parallel, then drain
-            // serially in the SAME chunk order (so the emitted mod stream stays byte-identical to the serial path).
-            // The worker-count guard falls back to the serial tick on genuinely core-starved hosts (≤2 cores → <2 Job
-            // workers), where the Schedule + blocking-Complete overhead would exceed the win; every real target —
-            // even a 2021 midrange 8-core phone — clears it. (Temporary: retires with the serial path once
-            // parallel-only ships.) Otherwise, run the unchanged Phase-3 serial per-chunk tick.
-            if (_enableFluidBurstTick && _enableParallelFluidTick
-                                      && JobsUtility.JobWorkerCount >= MIN_PARALLEL_WORKER_THREADS)
-            {
-                ProcessTickUpdatesParallel(snapshot);
-            }
-            else
-            {
-                foreach (ChunkCoord chunkCoord in snapshot)
-                {
-                    if (_chunkMap.TryGetValue(chunkCoord, out Chunk chunk))
-                    {
-                        chunk.TickUpdate();
-                    }
-                }
-            }
+            TickChunksParallel(snapshot);
         }
         finally
         {
-            ListPool<ChunkCoord>.Release(snapshot);
+            ListPool<Chunk>.Release(snapshot);
         }
     }
 
     /// <summary>
-    /// TG-4 Phase 4a — ticks all active chunks with the interior fluid jobs <b>parallelized across chunks</b>:
+    /// TG-4 — ticks all active chunks with the fluid jobs <b>parallelized across chunks</b>:
     /// <list type="number">
     /// <item><b>Schedule</b> — for every chunk with active fluids, acquire a pooled <see cref="FluidBurstTicker"/>
-    /// and schedule its interior <see cref="FluidTickJob"/> on a worker (each chunk gets its own ticker, so the
-    /// in-flight jobs never share scratch).</item>
+    /// and schedule its <see cref="FluidTickJob"/> on a worker (each chunk gets its own ticker, so the in-flight
+    /// jobs never share scratch). Every fluid — interior AND border — ticks in-job via the Y-band neighbor halo.</item>
     /// <item><b>Complete</b> — flush + complete all scheduled handles.</item>
     /// <item><b>Drain</b> — walk the chunks in the <b>same snapshot order</b> and run each chunk's managed work
     /// (grass + the fluid replay using its pre-computed ticker results), then return the ticker to the pool.</item>
     /// </list>
-    /// Interior fluid emissions are chunk-local (an interior voxel never targets another chunk), and the drain is
-    /// serial in the deterministic chunk-iteration order, so the emitted <see cref="VoxelMod"/> stream is identical
-    /// to the Phase-3 serial path — only the compute moves off the main thread.
+    /// Fluid emission <i>order</i> is fixed by the emitting voxel's (chunk-order, bucket-order) — never the target —
+    /// and the drain is serial in the deterministic chunk-iteration order, so the emitted <see cref="VoxelMod"/>
+    /// stream is byte-identical to a single serial loop even with cross-chunk targets; only the compute moves off
+    /// the main thread. Also the benchmark entry point (<c>FluidTickBenchmark</c>) drives this exact path.
     /// </summary>
-    /// <param name="snapshot">The active-chunk coordinates to tick, in deterministic iteration order.</param>
-    private void ProcessTickUpdatesParallel(List<ChunkCoord> snapshot)
+    /// <param name="snapshot">The active chunks to tick, in deterministic iteration order.</param>
+    internal void TickChunksParallel(List<Chunk> snapshot)
     {
         _parallelFluidChunks.Clear();
         _parallelFluidTickers.Clear();
@@ -1967,10 +1899,10 @@ public class World : MonoBehaviour
 
         try
         {
-            // Phase 1: schedule the interior fluid job for every chunk that has active fluids.
-            foreach (ChunkCoord chunkCoord in snapshot)
+            // Phase 1: schedule the fluid job for every chunk that has active fluids.
+            foreach (Chunk chunk in snapshot)
             {
-                if (!_chunkMap.TryGetValue(chunkCoord, out Chunk chunk) || chunk.ChunkData == null)
+                if (chunk.ChunkData == null)
                     continue;
 
                 NativeHashSet<int> fluids = chunk.ChunkData.ActiveFluidsBucket;
@@ -1982,11 +1914,8 @@ public class World : MonoBehaviour
                 FluidBurstTicker ticker = FluidTickerPool.Get();
                 _parallelFluidChunks.Add(chunk);
                 _parallelFluidTickers.Add(ticker);
-                // Phase 4b: when border-burst is on, tick ALL fluids via the neighbor halo; else the Phase-3/4a
-                // interior-only path (border drained on the managed branch in DrainTick).
-                JobHandle handle = _enableFluidBorderBurst
-                    ? ticker.ScheduleFluids(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData, worldData, _enableFluidBandGather)
-                    : ticker.ScheduleInteriorFluids(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData);
+                // Tick ALL fluids (interior AND border) in-job, border voxels reading the per-tick Y-band neighbor halo.
+                JobHandle handle = ticker.ScheduleFluids(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData, worldData);
                 _parallelFluidHandles.Add(handle);
             }
 
@@ -2000,9 +1929,9 @@ public class World : MonoBehaviour
             // Phase 3: drain serially in the same snapshot order. A cursor pairs each fluid chunk with its ticker
             // (Phase 1 added chunks in this same order, so the cursor stays aligned without a lookup).
             int fluidCursor = 0;
-            foreach (ChunkCoord chunkCoord in snapshot)
+            foreach (Chunk chunk in snapshot)
             {
-                if (!_chunkMap.TryGetValue(chunkCoord, out Chunk chunk) || chunk.ChunkData == null)
+                if (chunk.ChunkData == null)
                     continue;
 
                 FluidBurstTicker ticker = null;
@@ -2883,7 +2812,7 @@ public class World : MonoBehaviour
     /// Registers a pre-populated, synthetic <see cref="Chunk"/> directly into the live chunk map, active-chunk set,
     /// and <see cref="worldData"/>, bypassing the generation/loading/meshing pipeline entirely. This is the substrate
     /// the fluid-tick benchmark (and future fluid stress / menu-driven harnesses) use to drive the <b>production</b>
-    /// <see cref="Chunk.TickUpdate"/> + <see cref="ApplyModifications"/> path over hand-seeded chunks, so the measured
+    /// <see cref="TickChunksParallel"/> + <see cref="ApplyModifications"/> path over hand-seeded chunks, so the measured
     /// cost is the real tick code rather than a model.
     /// </summary>
     /// <param name="chunk">A chunk whose <see cref="Chunk.ChunkData"/> is already populated and seeded.</param>
