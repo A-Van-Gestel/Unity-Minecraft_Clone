@@ -216,6 +216,10 @@ The final two items of the §3 backpressure family. Both ship default-ON behind 
   legacy's 729-chunk teleport fill runs at 13.3 FPS with 67% hitch frames (its passes ARE the frame); budgets hold 29.1 FPS / 11% hitch frames for the same fill at a ×1.69 fill-latency cost (knob-tunable). Externally-imposed ÷1.94 FPS slows a budgeted fill only ×1.53 (quota compensating) vs legacy's fully proportional collapse; at deep caps (5 FPS) the absolute-ms ceilings bind before the quota and scaling reverts to proportional — known limitation, a frame-fraction ceiling is the natural refinement if that regime ever matters. Panic gate:
   16 close/drain/reopen cycles witnessed across startup + teleport spam, zero overhead when open, and a 729/729 no-holes audit on returning to a previously gated area. Verdict: **GO (screening)**
   — IL2CPP capture recommended before the rollback flags are retired.
+- **Measured (IL2CPP player A/B, TEMP harness, 2209-chunk square;** see
+  [`Performance/CHUNK_PIPELINE_P4_BACKPRESSURE_IL2CPP_2026-07-23_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_P4_BACKPRESSURE_IL2CPP_2026-07-23_BENCHMARK.md)**):**
+  the screening's headline inverted under the tail-inclusive drain predicate — **every legacy leg timed out at 300 s without ever reaching a drained pipeline** (the fill hitch-storm leaves an unfinished lighting backlog that the ~1 s fail-safe keeps re-promoting for the out-of-range previous area indefinitely — the MP-arc out-of-range-discard item's strongest evidence), while budgets-ON drains fully in 15.5 s (80.4 FPS, 2.2% hitch frames, 78 ms worst frame vs legacy's 481.8 ms) / 38.3 s at 15 FPS / 132.5 s at 5 FPS. Mid-band quota constancy and the
+  deep-cap ceiling limitation both reproduced. Verdict: **GO (final)** — rollback-flag retirement unblocked (future cleanup pass, TG-4 soak precedent).
 
 ---
 
