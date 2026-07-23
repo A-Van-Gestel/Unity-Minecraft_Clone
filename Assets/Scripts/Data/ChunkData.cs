@@ -224,7 +224,7 @@ namespace Data
 
         private void InitializeSections()
         {
-            const int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
+            const int sectionCount = ChunkMath.SECTIONS_PER_CHUNK;
             sections = new ChunkSection[sectionCount];
             SectionUniformSkyLevel = new byte[sectionCount];
             Array.Fill(SectionUniformSkyLevel, UNIFORM_SKY_NONE);

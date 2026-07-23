@@ -78,7 +78,7 @@ public class Chunk
         }
 
         // Initialize Section Renderers
-        const int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
+        const int sectionCount = ChunkMath.SECTIONS_PER_CHUNK;
         _sectionRenderers = new SectionRenderer[sectionCount];
         for (int i = 0; i < sectionCount; i++)
         {

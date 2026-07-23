@@ -41,7 +41,7 @@ namespace Benchmarks
             // SectionData is required by MeshGenerationJob.Execute (one entry per 16-block section).
             // Left at default (IsEmpty=false, IsFullySolid=false) so every section runs the per-voxel
             // standard path — the representative hot path the throughput probe should measure.
-            const int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
+            const int sectionCount = ChunkMath.SECTIONS_PER_CHUNK;
             NativeArray<SectionJobData> sectionData = new NativeArray<SectionJobData>(sectionCount, Allocator.TempJob);
 
             // In cardinals-only mode the diagonal neighbor fields take a temporary empty array.

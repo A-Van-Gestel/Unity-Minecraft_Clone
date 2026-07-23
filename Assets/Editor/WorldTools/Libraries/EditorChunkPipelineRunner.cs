@@ -255,7 +255,7 @@ namespace Editor.WorldTools.Libraries
             }
 
             // Compute SectionJobData from the raw map
-            const int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
+            const int sectionCount = ChunkMath.SECTIONS_PER_CHUNK;
             NativeArray<SectionJobData> sectionData = new NativeArray<SectionJobData>(sectionCount, Allocator.Persistent);
             ComputeSectionData(centerMap, _jobDataManager.BlockTypesJobData, sectionData, sectionCount);
 

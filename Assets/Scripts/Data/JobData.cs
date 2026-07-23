@@ -549,8 +549,7 @@ namespace Data
             LightData = new NativeList<Color32>(DefaultVertexCapacity, allocator);
             InterleavedStream3 = new NativeList<NormalLightVertex>(DefaultVertexCapacity, allocator);
 
-            // 8 Sections per chunk (128 / 16).
-            SectionStats = new NativeArray<MeshSectionStats>(VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE, allocator);
+            SectionStats = new NativeArray<MeshSectionStats>(ChunkMath.SECTIONS_PER_CHUNK, allocator);
         }
 
         /// <summary>

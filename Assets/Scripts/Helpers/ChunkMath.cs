@@ -8,12 +8,19 @@ namespace Helpers
 {
     public static class ChunkMath
     {
-        // Constants from VoxelData, duplicated here to be self-contained for Burst
-        public const int CHUNK_WIDTH = 16;
-        public const int CHUNK_HEIGHT = 128;
+        // Aliases of the authoritative VoxelData world-dimension constants (CP-7/F8 unification —
+        // one declaration site). A const-to-const reference compiles to an IL literal, so these
+        // remain Burst-safe compile-time values; change the value in VoxelData only and every
+        // derived constant below (shifts, masks, volumes, padded sizes) follows.
+        public const int CHUNK_WIDTH = VoxelData.ChunkWidth;
+        public const int CHUNK_HEIGHT = VoxelData.ChunkHeight;
         public const int SECTION_SIZE = 16;
         public const int SECTION_VOLUME = SECTION_SIZE * SECTION_SIZE * SECTION_SIZE; // 4096 for 16 section width & 16 section size
-        public const int CHUNK_VOLUME = SECTION_VOLUME * (CHUNK_HEIGHT / SECTION_SIZE); // 32768 (8 sections × 4096)
+
+        /// <summary>Vertical sections per chunk column — the single derivation site (CP-7); alias this instead of re-deriving <c>ChunkHeight / 16</c>.</summary>
+        public const int SECTIONS_PER_CHUNK = CHUNK_HEIGHT / SECTION_SIZE; // 8
+
+        public const int CHUNK_VOLUME = SECTION_VOLUME * SECTIONS_PER_CHUNK; // 32768 (8 sections × 4096)
 
         // --- Chunk / region coordinate conversion (WS-1) ------------------------------------------
         // Voxel↔chunk↔region math via power-of-two shift/mask instead of float-roundtrip floors or

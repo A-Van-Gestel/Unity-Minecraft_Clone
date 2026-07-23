@@ -24,6 +24,7 @@ namespace Editor.Validation
         static partial void AddShiftMaskScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario("ChunkMath Power-Of-Two Guard", RunChunkMathPow2Guard));
+            scenarios.Add(new Scenario("Section/Height Coupling Guard", RunSectionHeightCouplingGuard));
             scenarios.Add(new Scenario("VoxelToChunk == Floor Div (sweep)", RunVoxelToChunkSweep));
             scenarios.Add(new Scenario("VoxelToChunk == Legacy FloorToInt (positives)", RunVoxelToChunkLegacyParity));
             scenarios.Add(new Scenario("VoxelToLocal Reconstructs Voxel (sweep)", RunVoxelToLocalSweep));
@@ -60,6 +61,30 @@ namespace Editor.Validation
 
             Debug.LogError($"[FAIL] ChunkMath Power-Of-Two Guard — CHUNK_WIDTH={ChunkMath.CHUNK_WIDTH} " +
                            $"CHUNKS_PER_REGION_SIDE={ChunkMath.CHUNKS_PER_REGION_SIDE} (both must be powers of two).");
+            return false;
+        }
+
+        /// <summary>
+        /// <see cref="ChunkMath.SECTIONS_PER_CHUNK"/> is an integer division that silently truncates if
+        /// <see cref="ChunkMath.CHUNK_HEIGHT"/> ever stops being an exact multiple of
+        /// <see cref="ChunkMath.SECTION_SIZE"/> (a Tier A height change is exactly the edit that could do
+        /// it) — section arrays would then under-cover the column with no error raised. This guard fails
+        /// loudly instead, and pins <see cref="ChunkMath.CHUNK_VOLUME"/> to the same coupling.
+        /// </summary>
+        private static bool RunSectionHeightCouplingGuard()
+        {
+            const bool divides = ChunkMath.CHUNK_HEIGHT % ChunkMath.SECTION_SIZE == 0;
+            const bool reconstructs = ChunkMath.SECTIONS_PER_CHUNK * ChunkMath.SECTION_SIZE == ChunkMath.CHUNK_HEIGHT;
+            const bool volumeOk = ChunkMath.CHUNK_VOLUME == ChunkMath.SECTIONS_PER_CHUNK * ChunkMath.SECTION_VOLUME;
+            if (divides && reconstructs && volumeOk)
+            {
+                Debug.Log("[PASS] Section/Height Coupling Guard");
+                return true;
+            }
+
+            Debug.LogError($"[FAIL] Section/Height Coupling Guard — CHUNK_HEIGHT={ChunkMath.CHUNK_HEIGHT} must be an " +
+                           $"exact multiple of SECTION_SIZE={ChunkMath.SECTION_SIZE} " +
+                           $"(SECTIONS_PER_CHUNK={ChunkMath.SECTIONS_PER_CHUNK}, CHUNK_VOLUME={ChunkMath.CHUNK_VOLUME}).");
             return false;
         }
 
