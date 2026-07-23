@@ -973,17 +973,20 @@ in the grass-spread tick path. `ChunkLoadAnimation.cs` / `Toolbar.cs` also use i
 > phased plan (BH-D1 infra → per-family storage split → grass Burst → fluid Burst → parallelize + Tier-2),
 > with the BH-D1 old-vs-new differential slotted into each phase gate.
 >
-> **Status (2026-06-27): FULLY IMPLEMENTED — Phases 0–1 + 3 + 4a + 4b + Y-band SHIPPED (all default on); Phase 2
-> skipped. Only the flag-gated-fallback cleanup pass remains.** Phase 0 (BH-D1 differential infra) + Phase 1
+> **Status (2026-07-23): FULLY IMPLEMENTED + CLEANED UP — Phases 0–1 + 3 + 4a + 4b + Y-band SHIPPED; Phase 2
+> skipped; the flag-gated-fallback cleanup pass is DONE (2026-07-23) — the parallel Y-band halo tick is now
+> unconditional (no rollback flags), harness pruned to the surviving `BH-D1[L|HB]` + Y-band determinism gates,
+> Validate All 333/16 green.** Phase 0 (BH-D1 differential infra) + Phase 1
 > (per-family `NativeHashSet<int>` active-voxel buckets — landed on **`ChunkData`**, not `Chunk`; tick orchestration
 > stays on `Chunk`) are in-game confirmed. **Phase 3** Burst-ticks Tier-1 interior fluids (`FluidTickJob`, border
 > managed) gated by `BH-D1[L|F]`; **Phase 4a** parallelizes those interior jobs across chunks
 > (`World.ProcessTickUpdatesParallel`, worker-count guarded) gated by a parallel-vs-serial determinism suite + an
 > 8-run IL2CPP A/B; **Phase 4b** closes the Tier-2 border — **every** fluid (interior AND border) is Burst-ticked,
 > border voxels reading a per-tick **9-snapshot neighbor halo** via the **§4.2 option (b) per-tick local gather**
-> (`ChunkMath.GatherPaddedFluidVoxels`), gated by `BH-D1[L|H]` + a cross-chunk determinism stress + in-game; and the
-> **Y-band** (2026-06-27) sizes that gather to the active-fluid Y-extent (height-independent copy), gated by
-> `BH-D1[H|HB]`/`[L|HB]` + the Y-band determinism stress + in-game. **Phase 2 (grass) skipped** (negligible cost). The
+> (`ChunkMath.GatherPaddedFluidVoxelsBand`), gated by `BH-D1[L|HB]` + a cross-chunk determinism stress + in-game; and the
+> **Y-band** (2026-06-27) sizes that gather to the active-fluid Y-extent (height-independent copy,
+> `ChunkMath.GatherPaddedFluidVoxelsBand`), gated by `BH-D1[H|HB]`/`[L|HB]` + the Y-band determinism stress +
+> in-game. **Phase 2 (grass) skipped** (negligible cost). The
 > new runtime buckets are pool-retained (no per-recycle churn — **TG-6-aligned**; TG-6's own target, the
 > `GenerationJobData.ActiveVoxels` hand-off list, is now pooled too — shipped 2026-06-27).
 >
