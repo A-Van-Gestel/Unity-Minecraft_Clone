@@ -41,6 +41,12 @@ namespace Helpers
         /// <summary>Cumulative count of instances permanently destroyed by pruning/clear (CP-1 pool-churn probe).</summary>
         public long TotalDestroyed => Interlocked.Read(ref _totalDestroyed);
 
+        // Incremented inside the lock (Get runs on background serialization threads too); read lock-free.
+        private long _totalGets;
+
+        /// <summary>Cumulative count of <see cref="Get"/> calls — the exact demand signal the CP-7 linger pruning reads.</summary>
+        public long TotalGets => Interlocked.Read(ref _totalGets);
+
         // Pruning State
         private float _cleanupTimer = 0f;
         private const float CLEANUP_INTERVAL = 0.05f; // 20 checks/sec
@@ -63,6 +69,7 @@ namespace Helpers
             lock (_lock)
             {
                 ActiveCount++;
+                _totalGets++;
                 if (_pool.Count > 0)
                 {
                     return _pool.Pop();

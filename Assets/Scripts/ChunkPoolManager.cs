@@ -41,7 +41,24 @@ public class ChunkPoolManager
 
     // --- Cleanup Settings ---
     private int _targetViewDistance;
-    private const float POOL_BUFFER_PERCENTAGE = 1.25f; // Keep 25% extra as buffer
+
+    // CP-7 (F4): idle-pool caps are ROW budgets, not active-set areas — an idle pool only absorbs
+    // the return->reuse imbalance (visual pools recycle same-pass, data pools wait on async
+    // generation, hence the different spare sizes). Measured 2026-07-23 (CP-7 sessions).
+    private const int SPARE_ROWS_VISUAL = 2; // chunk/border/visualizer pools: view-distance rows
+    private const int SPARE_ROWS_DATA = 4; // data/section pools: unload-boundary rows
+
+    // A surplus above the soft (row) cap is reclaimed only after this long with NO pool demand
+    // (any demand retains the whole surplus — deliberate: bounded by the hard cap). Scaled game
+    // time: the window freezes together with the pools' prune timers while the game is paused.
+    private const float LINGER_SECONDS = 90f;
+
+    // Per-pool linger bookkeeping for PoolPruneDecision.Evaluate (the pure, suite-tested policy).
+    private PoolPruneDecision.State _chunkPrune;
+    private PoolPruneDecision.State _dataPrune;
+    private PoolPruneDecision.State _sectionPrune;
+    private PoolPruneDecision.State _borderPrune;
+    private PoolPruneDecision.State _visualizerPrune;
 
     public int TargetViewDistance => _targetViewDistance;
 
@@ -109,31 +126,43 @@ public class ChunkPoolManager
 
     /// <summary>
     /// Processes the "Drip Feed" cleanup. Call this from World.Update().
+    /// Derives per-pool idle caps (row-sized soft caps, service-area hard caps, linger window —
+    /// CP-7/F4) and delegates the amortized pruning to the generic pools.
     /// </summary>
     public void Update()
     {
-        // Calculate Target Pool Size
-        // Area = (Dist * 2 + 1)^2.
-        // We multiply by Buffer to prevent thrashing (destroying then immediately creating).
-        int chunksNeeded = _targetViewDistance * 2 + 1;
-        int maxPoolSize = Mathf.CeilToInt(chunksNeeded * POOL_BUFFER_PERCENTAGE);
+        // Row widths of the two service radii: the visual pools cover the view distance; the data
+        // pools cover everything loaded, i.e. out to the unload boundary (Settings.LoadDistance
+        // is the single source of the load radius — do not re-compose it from its ingredients).
+        int viewRow = _targetViewDistance * 2 + 1;
+        int unloadRow = 2 * (World.Instance.settings.LoadDistance + World.UnloadDistanceBuffer) + 1;
+        int visualSoftCap = SPARE_ROWS_VISUAL * viewRow;
+        int visualHardCap = viewRow * viewRow;
+        int dataSoftCap = SPARE_ROWS_DATA * unloadRow;
+        int dataHardCap = unloadRow * unloadRow;
+        float now = Time.time;
 
-        // Delegate cleanup to the generic pools
-        _chunkPool.UpdatePruning(maxPoolSize);
+        _chunkPool.UpdatePruning(PoolPruneDecision.Evaluate(visualSoftCap, visualHardCap,
+            _chunkPool.TotalGets, LINGER_SECONDS, now, ref _chunkPrune));
 
-        // Data pools can grow larger, maybe 2x chunks for buffer
-        _dataPool.UpdatePruning(maxPoolSize * 2);
+        _dataPool.UpdatePruning(PoolPruneDecision.Evaluate(dataSoftCap, dataHardCap,
+            _dataPool.TotalGets, LINGER_SECONDS, now, ref _dataPrune));
 
-        // Sections: 8 per chunk (max).
-        _sectionPool.UpdatePruning(maxPoolSize * 8);
+        _sectionPool.UpdatePruning(PoolPruneDecision.Evaluate(
+            dataSoftCap * ChunkMath.SECTIONS_PER_CHUNK, dataHardCap * ChunkMath.SECTIONS_PER_CHUNK,
+            _sectionPool.TotalGets, LINGER_SECONDS, now, ref _sectionPrune));
 
-        // Fully cleanup ChunkBorder pool if disabled to free memory allocation
-        int chunkBorderPoolSize = World.Instance.ShowChunkBorders ? maxPoolSize : 0;
-        _borderPool.UpdatePruning(chunkBorderPoolSize);
+        // Fully cleanup ChunkBorder pool if disabled to free memory allocation.
+        // Evaluate always runs so the demand bookkeeping never goes stale across a disable window.
+        int chunkBorderPoolSize = PoolPruneDecision.Evaluate(visualSoftCap, visualHardCap,
+            _borderPool.TotalGets, LINGER_SECONDS, now, ref _borderPrune);
+        _borderPool.UpdatePruning(World.Instance.ShowChunkBorders ? chunkBorderPoolSize : 0);
 
-        // Fully cleanup visualizer pool if disabled to free memory allocation
-        int voxelVisualizerPoolSize = World.Instance.visualizationMode != DebugVisualizationMode.None ? maxPoolSize : 0;
-        _visualizerPool.UpdatePruning(voxelVisualizerPoolSize);
+        // Fully cleanup visualizer pool if disabled to free memory allocation (same always-run rule).
+        int voxelVisualizerPoolSize = PoolPruneDecision.Evaluate(visualSoftCap, visualHardCap,
+            _visualizerPool.TotalGets, LINGER_SECONDS, now, ref _visualizerPrune);
+        _visualizerPool.UpdatePruning(
+            World.Instance.visualizationMode != DebugVisualizationMode.None ? voxelVisualizerPoolSize : 0);
     }
 
     #region Chunk Logic
