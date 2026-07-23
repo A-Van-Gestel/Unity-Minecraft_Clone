@@ -221,6 +221,17 @@ The final two items of the §3 backpressure family. Both ship default-ON behind 
   the screening's headline inverted under the tail-inclusive drain predicate — **every legacy leg timed out at 300 s without ever reaching a drained pipeline** (the fill hitch-storm leaves an unfinished lighting backlog that the ~1 s fail-safe keeps re-promoting for the out-of-range previous area indefinitely — the MP-arc out-of-range-discard item's strongest evidence), while budgets-ON drains fully in 15.5 s (80.4 FPS, 2.2% hitch frames, 78 ms worst frame vs legacy's 481.8 ms) / 38.3 s at 15 FPS / 132.5 s at 5 FPS. Mid-band quota constancy and the
   deep-cap ceiling limitation both reproduced. Verdict: **GO (final)** — rollback-flag retirement unblocked (future cleanup pass, TG-4 soak precedent).
 
+#### ✅ Implemented refinement — FPS-cap-proportional ceilings (the "frame-fraction ceiling")
+
+The deep-cap limitation above (absolute-ms ceilings collapse per-second pipeline time ∝ FPS, so a *voluntarily* low cap — AFK, battery, mobile — throttles as hard as an overloaded machine) is now addressed. `PipelinePassBudget.ScaleCeilingMs(configuredMs, intendedFrameIntervalSeconds)` scales each ms ceiling by the intended frame interval, anchored at 60 FPS exactly like the quota (30-cap → ×2, 15-cap → ×4, clamped ×8, floored ×1 so a >60 Hz cap never shrinks a ceiling). Behind `Settings.scaleBudgetCeilingsWithFpsCap` (default-ON, rollback lever;
+flag-off is byte-identical to the fixed ceilings above).
+
+- **Intent, not measurement — the death-spiral discriminator.** The scale keys off the *configured* cap (`World.ComputeIntendedFrameIntervalSeconds`: vSync interval when active, else `Application.targetFrameRate`, else no scaling), never measured `deltaTime`. An uncapped machine merely running slow gets **no** boost, so this can never widen the ceiling into the §3 spiral the ceilings exist to bound — the whole reason a pure frame-fraction-of-`dt` ceiling was unsafe.
+- **No cross-ceiling governor** (deliberate): the ×8 clamp is the only bound; the five scaled ceilings can transiently sum above the intended frame at a deep cap under heavy fill (a bounded sub-cap FPS dip that converges), accepted over coupling the five ceilings into a shared failure surface.
+- **Guard:** Validate Pipeline Backpressure **B7** (ceiling scaling truth table — cap intent, ×1 floor, ×8 clamp, disabled/no-cap passthrough; prove-red by temporary floor mutation). Registry 16 suites / Validate All 336.
+- **Measured (IL2CPP player A/B, standing `P4BackpressureBenchmark`, 2209-chunk square;** see [`Performance/CHUNK_PIPELINE_P4_CEILING_SCALING_IL2CPP_2026-07-23_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_P4_CEILING_SCALING_IL2CPP_2026-07-23_BENCHMARK.md)**):** fixed ceilings throttle capped FPS worse-than-proportionally (÷4 FPS → ×6.9 fill); scaling ON cuts that — **30-cap ×1.82 (79.8 s → 43.8 s), 15-cap ×1.32 (117.0 s → 88.6 s)** — with **no frame-health cost** (worst frame ON ≈ OFF at both caps, hitch counts identical). Diminishing returns at deep
+  caps (compute-bound floor); the no-governor limitation did not bind in practice (avg FPS held at the cap). Verdict: **GO (final)** — ships default-ON, flag retires with the P-4 family after soak.
+
 ---
 
 ## 4. Slow initial world *load* (Symptom 2) — edge-check cascade
