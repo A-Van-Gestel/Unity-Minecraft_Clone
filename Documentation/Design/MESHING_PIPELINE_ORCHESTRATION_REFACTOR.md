@@ -37,8 +37,9 @@ L1351–1361), `WorldJobManager.cs` (`ScheduleMeshing` L297–420, `ProcessMeshJ
 > phase, as already mandated. The substantive per-phase deltas:
 > - **Drain (§2.1 stage 3 / MP-2):** now runs P-4 time budgets — a rate quota (`ComputeQuota`) plus
 >   an ms ceiling (`meshWindow.Expired` / `ScaleCeilingMs`), gated on `enablePipelineTimeBudgets`,
->   *on top of* the OM-1 in-flight cap. **MP-2's B23 drain scenario must model the quota/ceiling
-    > stops AND the budgets-off legacy leg**, not just the original budget/cap.
+>   *on top of* the OM-1 in-flight cap. **MP-2's drain scenario must model the quota/ceiling
+    > stops AND the budgets-off legacy leg**, not just the original budget/cap. *(Landed as B25 — see the
+    > MP-2 §Amended note; B22/B23 were already FL sway baselines.)*
 > - **Completion (§2.1 stage 6 / MP-4):** `ProcessMeshJobs` gained a `PipelinePassBudget.Window`
 >   parameter and **rotating-start snapshot iteration** (`_meshScanKeys` / `_meshScanCursor`,
 >   P-4 §3.4 fairness). The shared `LightingCompletionPass` skeleton predates both, so MP-4 is no
@@ -347,24 +348,43 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 >   misses reused-at-new-coord, so F4 is not fully retired; MP-6 still proceeds for the drop-stagger
 >   decision).
 
-### MP-2 — `MeshingScheduleDecision` + scheduling baselines (🟡)
+### MP-2 — `MeshingScheduleDecision` + scheduling baselines (🟡) · **IMPLEMENTED 2026-07-24 (uncommitted)**
 
 - **Scope:** new `Assets/Scripts/Helpers/MeshingScheduleDecision.cs` (§4.1; runtime assembly,
   `LightingScheduleDecision` precedent); `ScheduleMeshing` routes its three gates through it (behavior-identical, including today's `AlreadyInFlight → true` — MP-3 changes that separately); new editor suite partial `MeshingValidationSuite.Scheduling.cs`:
-    - **B22** — decision census: every `Evaluate` input combination maps to the documented result (oracle-free truth-table baseline, the LP transition-census style), including the
+    - **B24** — decision census: every `Evaluate` input combination maps to the documented result (oracle-free truth-table baseline, the LP transition-census style), including the
       `lightingEnabled=false` bypass.
-    - **B23** — drain-policy scenario: a real `MeshBuildQueue` + scripted per-coord decision facts replaying the drain's rules (budget stop, cap stop, **P-4 rate-quota + ms-ceiling stops, and the budgets-off legacy leg** — see the 2026-07-24 drift update, null/inactive purge, remove-on-schedule, leave-on-decline, immediate-ahead-of-normal order). Drive the queue directly; the drain body itself stays in `World.Update` — the scenario pins the *policy* via the same primitives it uses. (If extracting the drain body into a testable helper turns out cheap
+    - **B25** — drain-policy scenario: a real `MeshBuildQueue` + scripted per-coord decision facts replaying the drain's rules (budget stop, cap stop, **P-4 rate-quota + ms-ceiling stops, and the budgets-off legacy leg** — see the 2026-07-24 drift update, null/inactive purge, remove-on-schedule, leave-on-decline, immediate-ahead-of-normal order). Drive the queue directly; the drain body itself stays in `World.Update` — the scenario pins the *policy* via the same primitives it uses. (If extracting the drain body into a testable helper turns out cheap
       during implementation, prefer that; do not force it.)
-- **Prove-red:** invert the center-gate term inside `Evaluate` → B22 reds (and only the new baselines red — job baselines unaffected); restore → green.
+- **Prove-red:** invert the center-gate term inside `Evaluate` → B24 reds (and only the new baselines red — job baselines unaffected); restore → green.
 - **Acceptance:** universal gate + in-game smoke (streaming + edit responsiveness unchanged).
 - **Doc-sync:** `CHUNK_LIFECYCLE_PIPELINE.md` §5.3 (shared-decision pointer, mirroring §4's lighting note); meshing fidelity doc gains an "orchestration coverage" entry (new §; tag CLOSED for the decision layer). **Serialization:** none.
+
+> **Amended (2026-07-24) — MP-2 implemented (uncommitted).**
+> - **B-number drift corrected.** The plan said "tip B21, new baselines B22+", but FL-1/FL-2 sway had already
+>   taken **B22/B23** (2026-07-19). MP-2's baselines therefore landed as **B24** (census) + **B25** (drain
+>   policy); MP-3's prove-red becomes **B26**. `Validate Meshing` 23 → **25**.
+> - **Drain-body extraction chosen (the "prefer it if cheap" branch, user sign-off).** The drain loop was
+>   extracted into a pure `Helpers/MeshDrainPolicy.Drain(queue, quota, window, cap, IMeshDrainHost)` called by
+>   BOTH `World.Update` and B25 — zero loop duplication, no oracle divergence. `World` implements
+>   `IMeshDrainHost` on `this` (cached, zero per-frame alloc; the `ILightingCompletionDriver` pattern). The
+>   in-flight-cap re-check reads the LIVE `host.InFlightCount` each iteration (a computed proxy would diverge
+>   pre-MP-3, where an `AlreadyInFlight → true` doesn't grow `MeshJobs`). Budget *math* stays in `World.Update`
+>   (owned by the Pipeline Backpressure suite); `MeshDrainPolicy` owns only the loop.
+> - **B25 legs** (all deterministic): budgets-off drain, quota stop, in-flight-cap re-check, expired-window
+>   stop (public `Window` ctor, no sleep), inactive purge, leave-on-decline (prove-red anchor), immediate-ahead
+>   order. Both gate-eager reads (`AreNeighborsMeshReady` evaluated even when an earlier gate declines) verified
+>   side-effect-free, matching the `LightingScheduleDecision` caller.
+> - **Gates:** `dotnet build` both assemblies clean; `Validate Meshing` **25/25**, `Validate Mesh Build Queue`
+>   9/9, `Validate All` **335/335** (Lighting 88/88 — shared `WorldJobManager` surface intact); prove-red fires
+>   B24 + B25 (only those two), green after revert.
 
 ### MP-3 — In-flight request policy fix (🟡, behavior change — the F1 fix)
 
 - **Precondition:** MP-1's counter shows the window fires in practice (any nonzero count justifies; a zero count across long soaks including lighting-disabled would instead demote this phase to a doc-note — record either way).
 - **Scope:** `ScheduleMeshing`'s in-flight arm returns `false` (decision result `AlreadyInFlight`
   → leave queued), one line + the decision mapping in MP-2's helper. The drain then naturally retries after the flight completes.
-- **Prove-red first (B24):** scheduling scenario — request chunk X; schedule it (in flight); request X again; assert the second request survives in the queue and schedules after the flight completes. Red under today's drop, green after. Plus an end-to-end in-game repro:
+- **Prove-red first (B26):** scheduling scenario — request chunk X; schedule it (in flight); request X again; assert the second request survives in the queue and schedules after the flight completes. Red under today's drop, green after. Plus an end-to-end in-game repro:
   `enableLighting=false`, place a block, immediately place a second in the same chunk within the flight window — pre-fix the second edit's mesh update can be lost until an unrelated trigger; post-fix it appears.
 - **Watch:** MP-1's in-flight counter becomes a *retry* counter — confirm no runaway re-meshing (fluid-stress session: rebuild counts should rise only marginally; if they spike, the v2 dirty-flag option in §3.2/§8 is the escape hatch — stop and record, don't improvise).
 - **Doc-sync:** `CHUNK_LIFECYCLE_PIPELINE.md` §5.3 mesh-scheduling flowchart + §9 (new resolved entry referencing this doc); `SUB_CHUNK_MESHING_ARCHITECTURE.md` §4.4 (modification workflow)
@@ -445,9 +465,11 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 
 ## Document History
 
+* **v1.3** - MP-2 implemented (2026-07-24, uncommitted): `MeshingScheduleDecision` (B24) + `MeshDrainPolicy` drain-body extraction (B25, the "prefer it if cheap" branch — user sign-off), `World : IMeshDrainHost`. B-number drift corrected (B22/B23 were FL sway → MP-2 = B24/B25, MP-3 prove-red = B26); `Validate Meshing` 25/25, `Validate All` 335/335. Doc-synced `CHUNK_LIFECYCLE_PIPELINE.md` §5.3 + meshing fidelity §4.
+* **v1.2** - MP-1 implemented (2026-07-24, uncommitted): four `[Conditional]` probes + soak evidence (see §MP-1 Amended).
 * **v1.1** - Pre-MP-1 drift update (2026-07-24): folded the P-4 backpressure interactions into MP-2/MP-4/MP-6 scope (drain time budgets, `ProcessMeshJobs` window + rotating cursor, §5.3 draw-tail rewrite), resolved §9 Q2 (drop the stagger, user sign-off) + annotated Q3, added the MP-1 out-of-range-discard rider. F1–F8 re-verified intact against HEAD; line anchors deferred to per-phase re-verification.
 * **v1.0** - Initial design (orchestration census + F1–F8 findings + MP-1…MP-7 phased plan at `72ad121`)
 
 ---
 
-**Last Updated:** 2026-07-24 **Next Review:** when MP-1 starts (re-verify §2 line anchors against HEAD), or when GS-5 Phase 1 is scheduled (re-check §5 contract)
+**Last Updated:** 2026-07-24 (MP-1 + MP-2 implemented) **Next Review:** when MP-3 starts (re-verify the in-flight arm + B26 prove-red; MP-1's evidence already arms it), or when GS-5 Phase 1 is scheduled (re-check §5 contract)
