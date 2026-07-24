@@ -661,7 +661,9 @@ These remain fully documented in the pipeline analysis — the table is reproduc
 ### LI-2. Halo gather/extract copies the full column height regardless of content
 
 > **✅ IMPLEMENTED 2026-07-11** (`feat/async-lighting-validation-suite`) — shipped default-on behind
-> `World.EnableLightingBandGather` (rollback flag; TempJob startup sweep stays full-height by design). The lighting job
+> `World.EnableLightingBandGather` (rollback flag, **retired 2026-07-24** after IL2CPP GO-final + soak: the band
+> gather is now unconditional on the pooled steady-state path; the harness keeps its own `FullHeight` mode as the
+> differential oracle; TempJob startup sweep stays full-height by design). The lighting job
 > now gathers/scans/extracts only the derived bottom-anchored Y-band `[0, bandHeight)`; reads above answer virtually
 > from a per-chunk uniform-region summary. **Bit-identical** by the `LightingBandDecision` rules (coverage + one
 > headroom section, column-recalc, cross-seam consistency), proven by the **B75–B78** banded-vs-full differential

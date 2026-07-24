@@ -239,19 +239,6 @@ public class World : MonoBehaviour
     private DynamicPool<FluidBurstTicker> FluidTickerPool =>
         _fluidTickerPool ??= new DynamicPool<FluidBurstTicker>(() => new FluidBurstTicker(), t => t.Dispose());
 
-    // --- LI-2: banded lighting gather (Y-band) ---
-    [SerializeField]
-    [Tooltip("LI-2 Y-band: restrict each lighting job's halo gather, scans, and extract to the derived " +
-             "bottom-anchored Y-band (non-uniform ceiling + queued BFS nodes + one headroom section) instead " +
-             "of the full chunk height; reads above the band are answered from the uniform-region summary. " +
-             "Bit-identical by the LightingBandDecision rules (guarded by lighting baselines B71-B78 incl. " +
-             "the banded-vs-full differential and its prove-red). Off = rollback to full-height gathers.")]
-    private bool _enableLightingBandGather = true;
-
-    /// <summary>When true, lighting jobs gather/scan/extract only the derived LI-2 Y-band instead of the
-    /// full chunk height (bit-identical by construction; see <see cref="LightingBandDecision"/>).</summary>
-    public bool EnableLightingBandGather => _enableLightingBandGather;
-
     // --- Chunk Border Visualization ---
     private readonly Dictionary<ChunkCoord, GameObject> _chunkBorders = new Dictionary<ChunkCoord, GameObject>();
     private Transform _chunkBorderParent;

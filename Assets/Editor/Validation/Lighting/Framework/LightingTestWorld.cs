@@ -72,9 +72,10 @@ namespace Editor.Validation.Lighting.Framework
 
         /// <summary>
         /// LI-2 band selection for every job this world schedules. Defaults to <see
-        /// cref="LightingBandGatherMode.Derived"/>, mirroring production's default-on
-        /// <c>World.EnableLightingBandGather</c> — so the ENTIRE baseline fleet exercises the banded
-        /// path. The band differential scenarios (B75–B78) set the mode explicitly per run.
+        /// cref="LightingBandGatherMode.Derived"/>, mirroring production's now-unconditional banded
+        /// gather (the <c>EnableLightingBandGather</c> rollback flag has since been retired) — so the
+        /// ENTIRE baseline fleet exercises the banded path. The band differential scenarios (B75–B78)
+        /// set the mode explicitly per run.
         /// </summary>
         public LightingBandGatherMode BandGatherMode = LightingBandGatherMode.Derived;
 

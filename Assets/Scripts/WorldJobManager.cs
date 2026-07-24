@@ -638,7 +638,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
                 HashSetPool<Vector2Int>.Release(columns);
             }
 
-            // LI-2: derive the job's Y-band (EnableLightingBandGather; full height = banding off).
+            // LI-2: derive the job's Y-band (full height = the fall-through default below).
             // Restricted to the pooled steady-state path: the TempJob startup sweep is initial lighting
             // (the derivation's column-recalc rule would force full height anyway), and only the pooled
             // fills' missing-neighbor semantics (zero-FILLED maps) match NeighborBandTop's summary.
@@ -646,7 +646,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
             uint3x3 bandBottomLight = default;
             jobData.BandHeight = ChunkMath.CHUNK_HEIGHT;
             jobData.BandMinY = 0;
-            if (_world.EnableLightingBandGather && usePooledBuffers)
+            if (usePooledBuffers)
             {
                 LightingBandChunkTop centerTop = chunkData.GetLightingBandTop();
                 LightingBandChunkTop w = NeighborBandTop(chunkCoord, -1, 0);
