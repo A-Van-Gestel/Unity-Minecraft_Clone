@@ -38,7 +38,7 @@ L1351–1361), `WorldJobManager.cs` (`ScheduleMeshing` L297–420, `ProcessMeshJ
 > - **Drain (§2.1 stage 3 / MP-2):** now runs P-4 time budgets — a rate quota (`ComputeQuota`) plus
 >   an ms ceiling (`meshWindow.Expired` / `ScaleCeilingMs`), gated on `enablePipelineTimeBudgets`,
 >   *on top of* the OM-1 in-flight cap. **MP-2's B23 drain scenario must model the quota/ceiling
->   stops AND the budgets-off legacy leg**, not just the original budget/cap.
+    > stops AND the budgets-off legacy leg**, not just the original budget/cap.
 > - **Completion (§2.1 stage 6 / MP-4):** `ProcessMeshJobs` gained a `PipelinePassBudget.Window`
 >   parameter and **rotating-start snapshot iteration** (`_meshScanKeys` / `_meshScanCursor`,
 >   P-4 §3.4 fairness). The shared `LightingCompletionPass` skeleton predates both, so MP-4 is no
@@ -51,7 +51,7 @@ L1351–1361), `WorldJobManager.cs` (`ScheduleMeshing` L297–420, `ProcessMeshJ
 >   dequeues already "don't consume the guaranteed draw." F4's recycled-lifecycle hole still
 >   persists (the guard checks *destroyed*, not *recycled*). MP-6 now layers onto that P-4 logic,
 >   not the old code. Decision (2026-07-24, user sign-off on the §9-Q2 visual change): **drop the
->   load-animation stagger at apply time** AND fix the recycled-ref hole + clear-on-unload.
+    > load-animation stagger at apply time** AND fix the recycled-ref hole + clear-on-unload.
 > - **MP-1 rider (2026-07-23 backlog):** add an **out-of-range / gone-chunk mesh-discard counter**
 >   to the probe set. The P-4 IL2CPP capture proved the lighting fail-safe re-promotes dead-area
 >   work forever (OFF legs never drained); the mesh merge already discards gone chunks
@@ -311,6 +311,41 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
        `_chunkMap` entry for that chunk instance (F4's recycled-ref evidence).
 - **Acceptance:** universal gate + an in-game soak (streaming, edits, a fluid flood, one lighting-disabled session); record counter results here as an Amended line. MP-3 and MP-6 read this evidence.
 - **Doc-sync:** none (no behavior). **Serialization:** none.
+
+> **Amended (2026-07-24) — MP-1 implemented (uncommitted); soak evidence, both legs.**
+> Landed as four `[Conditional("UNITY_EDITOR")]`+`[Conditional("DEVELOPMENT_BUILD")]` instance
+> counters with denominators — F1 in-flight-consume + gone-chunk-discard on `WorldJobManager`, F8
+> request-drop (warn-once) + F4 recycled-draw-ref on `World` — surfaced via
+> `World.BuildMeshOrchestrationDiagnostics` and the `Minecraft Clone/Dev/Dump Mesh Orchestration
+> Diagnostics` menu item. Gates: `dotnet build` clean; `Validate Meshing` 23/23 + `Validate Mesh
+> Build Queue` 9/9 unchanged-green; Rider inspections 0 items. Two soaks:
+>
+> | Probe | Lighting ENABLED (stream + edits + flood) | Lighting DISABLED (stress-fly, speed 353) |
+> |---|---|---|
+> | F1 in-flight consumed | 449 / 148,181 (0.30 %) | **0** / 7,800 (0 %) |
+> | gone-chunk merge discards | 43 / 27,356 (0.16 %) | **1,634 / 7,763 (21 %)** |
+> | F8 request drops (null / inactive) | 0 / 531,774 | 0 / 3,658,062 |
+> | F4 recycled draw-refs | 0 / 27,313 | 0 / 6,129 |
+>
+> **Verdicts:**
+> - **F1 → MP-3 GO, and §2.4 F1's exposure model is corrected.** F1 fired 449× with lighting
+>   *enabled* and 0× *disabled* — the reverse of the doc's "enableLighting=false exposes F1." Cause:
+>   the in-flight window needs *repeated* rebuild requests to one chunk during its flight, and the
+>   dominant generator of those is the lighting/neighbor re-request cascade (`WJM:1074`) — which a
+>   lighting-disabled *fly* soak has none of (each chunk schedules ~once; note 7.8 k attempts vs
+>   148 k). A fly/streaming soak therefore cannot exercise F1; the discriminating test is
+>   lighting-disabled **+ rapid same-chunk edits**, i.e. exactly MP-3's own B24 + in-game repro. MP-3
+>   stays GO: the 449 are real drops (upper bound — also counts redundant no-new-data re-requests),
+>   and with lighting disabled there is *no* re-request recovery, so any drop is permanent. **The MP-3
+    > executor must NOT expect a fly soak to show F1.**
+> - **gone-chunk discards → strong MP-4 signal.** 21 % of completed mesh jobs discarded under
+>   stress-fly (chunks unloaded before their mesh merged) decisively validates the 2026-07-23
+>   out-of-range-discard rider and MP-4's merge driver; also wasted mesh compute (P-4-adjacent).
+> - **F8 = 0 over 4.2 M combined requests → empirically a non-issue** (latent risk remains; warn-once
+>   never fired even under extreme stress).
+> - **F4 = 0 even under speed-353 pool churn → MP-6's lifecycle-hole fix is low urgency** (the probe
+>   misses reused-at-new-coord, so F4 is not fully retired; MP-6 still proceeds for the drop-stagger
+>   decision).
 
 ### MP-2 — `MeshingScheduleDecision` + scheduling baselines (🟡)
 
