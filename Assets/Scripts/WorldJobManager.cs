@@ -404,8 +404,13 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
             case MeshingScheduleDecision.Result.AlreadyInFlight:
                 CountMeshInFlightConsume(); // MP-1/F1: request consumed against an in-flight job
                 return true; // MP-2 keeps the legacy "already scheduled" answer; MP-3 changes this arm.
+            case MeshingScheduleDecision.Result.Schedule:
+                break; // all gates passed — fall through to the snapshot/schedule body below.
             case MeshingScheduleDecision.Result.CenterNotLightReady:
             case MeshingScheduleDecision.Result.NeighborsNotReady:
+            default:
+                // Any decline result — and, defensively, any future Result value not handled above —
+                // leaves the chunk queued (the drain retries next frame). Only an explicit Schedule builds.
                 return false;
         }
 

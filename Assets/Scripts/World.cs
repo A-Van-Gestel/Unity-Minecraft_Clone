@@ -2514,14 +2514,6 @@ public class World : MonoBehaviour, IMeshDrainHost
     /// </summary>
     /// <param name="chunkCoord">The coordinate of the central chunk whose neighbors are to be checked.</param>
     /// <returns>True if all neighbors have at minimum completed their initial lighting pass and are populated.</returns>
-    /// <summary><see cref="IMeshDrainHost.InFlightCount"/>: live mesh-job count for the drain's per-iteration
-    /// cap re-check. Implemented on <c>this</c> so <see cref="MeshDrainPolicy.Drain"/> allocates no delegate.</summary>
-    int IMeshDrainHost.InFlightCount => JobManager.MeshJobs.Count;
-
-    /// <summary><see cref="IMeshDrainHost.TrySchedule"/>: forwards to <see cref="WorldJobManager.ScheduleMeshing"/>
-    /// (true → dequeue; false → leave queued for a later frame).</summary>
-    bool IMeshDrainHost.TrySchedule(Chunk chunk) => JobManager.ScheduleMeshing(chunk);
-
     public bool AreNeighborsMeshReady(ChunkCoord chunkCoord)
     {
         foreach (Vector3Int offset in VoxelData.AllNeighborOffsets)
@@ -2546,6 +2538,14 @@ public class World : MonoBehaviour, IMeshDrainHost
 
         return true;
     }
+
+    /// <summary><see cref="IMeshDrainHost.InFlightCount"/>: live mesh-job count for the drain's per-iteration
+    /// cap re-check. Implemented on <c>this</c> so <see cref="MeshDrainPolicy.Drain"/> allocates no delegate.</summary>
+    int IMeshDrainHost.InFlightCount => JobManager.MeshJobs.Count;
+
+    /// <summary><see cref="IMeshDrainHost.TrySchedule"/>: forwards to <see cref="WorldJobManager.ScheduleMeshing"/>
+    /// (true → dequeue; false → leave queued for a later frame).</summary>
+    bool IMeshDrainHost.TrySchedule(Chunk chunk) => JobManager.ScheduleMeshing(chunk);
 
     /// <summary>
     /// Verifies that all 8 horizontal neighbors (cardinal + diagonal) of a chunk exist,
