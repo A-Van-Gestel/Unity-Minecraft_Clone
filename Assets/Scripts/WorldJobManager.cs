@@ -126,14 +126,13 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     // probe compiles out of release builds. Surfaced via World.BuildMeshOrchestrationDiagnostics.
     // See Documentation/Design/MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md §MP-1.
 
-    /// <summary>MP-1/F1: rebuild requests consumed against an existing <see cref="MeshJobs"/> entry for
-    /// that chunk (a job scheduled and not yet drained — genuinely in flight, plus the short
-    /// completed-but-undrained tail before <see cref="ProcessMeshJobs"/> removes it; both apply the
-    /// stale schedule-time snapshot, so a drop in either is a real lost update). An <b>upper bound</b>
-    /// on the lost-update frequency gating MP-3 — it also counts redundant re-requests that carried no
-    /// new data, so read a near-zero value as "no lost updates" and a high value as "arm MP-3 and
-    /// confirm the genuine cases with its prove-red." Read against <see cref="MeshScheduleAttempts"/>.</summary>
-    public int MeshInFlightConsumed { get; private set; }
+    /// <summary>MP-1/F1: rebuild requests that hit an existing <see cref="MeshJobs"/> entry for that chunk (a
+    /// job in flight, plus the short completed-but-undrained tail before <see cref="ProcessMeshJobs"/> removes
+    /// it). Post-MP-3 these are <b>retries</b>, not lost updates: the request is left queued and re-probed each
+    /// frame until the flight completes, then rescheduled — so this now fires once per in-flight frame per queued
+    /// chunk and is NOT comparable to MP-1's pre-fix drop count. Watch it under a fluid-stress session for runaway
+    /// re-meshing (the §3.2 Option C dirty-flag escape hatch). Read against <see cref="MeshScheduleAttempts"/>.</summary>
+    public int MeshInFlightRetried { get; private set; }
 
     /// <summary>MP-1/F1 denominator: total <see cref="ScheduleMeshing"/> invocations this session.</summary>
     public int MeshScheduleAttempts { get; private set; }
@@ -148,10 +147,10 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     /// passed <c>Handle.Complete()</c>).</summary>
     public int MeshMergeAttempts { get; private set; }
 
-    /// <summary>MP-1/F1 probe: count a rebuild request consumed against an in-flight mesh job.</summary>
+    /// <summary>MP-1/F1 probe: count a rebuild request left queued to retry against an in-flight mesh job (MP-3).</summary>
     [Conditional("UNITY_EDITOR")]
     [Conditional("DEVELOPMENT_BUILD")]
-    private void CountMeshInFlightConsume() => MeshInFlightConsumed++;
+    private void CountMeshInFlightRetry() => MeshInFlightRetried++;
 
     /// <summary>MP-1/F1 denominator probe: count one <see cref="ScheduleMeshing"/> invocation.</summary>
     [Conditional("UNITY_EDITOR")]
@@ -376,7 +375,9 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     /// Checks dependencies (neighbor data existence and lighting stability) before scheduling.
     /// </summary>
     /// <param name="chunk">The chunk to generate a mesh for.</param>
-    /// <returns>True if the job was scheduled or was already running; false if dependencies were not met (e.g., waiting for lighting).</returns>
+    /// <returns>True only when a mesh job was actually scheduled (the drain dequeues it); false when the
+    /// chunk is left queued to retry — either a job is already in flight (MP-3) or a dependency (center
+    /// lighting / neighbor data) was not met.</returns>
     public bool ScheduleMeshing(Chunk chunk)
     {
         ChunkCoord chunkCoord = chunk.Coord;
@@ -399,20 +400,16 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
             centerNeedsInitialLighting: chunk.ChunkData.NeedsInitialLighting,
             neighborsMeshReady: _world.AreNeighborsMeshReady(chunkCoord));
 
-        switch (decision)
-        {
-            case MeshingScheduleDecision.Result.AlreadyInFlight:
-                CountMeshInFlightConsume(); // MP-1/F1: request consumed against an in-flight job
-                return true; // MP-2 keeps the legacy "already scheduled" answer; MP-3 changes this arm.
-            case MeshingScheduleDecision.Result.Schedule:
-                break; // all gates passed — fall through to the snapshot/schedule body below.
-            case MeshingScheduleDecision.Result.CenterNotLightReady:
-            case MeshingScheduleDecision.Result.NeighborsNotReady:
-            default:
-                // Any decline result — and, defensively, any future Result value not handled above —
-                // leaves the chunk queued (the drain retries next frame). Only an explicit Schedule builds.
-                return false;
-        }
+        // MP-3: an in-flight job now leaves the request queued (a retry), not dropped — count it before the
+        // dequeue mapping so the retry frequency stays observable.
+        if (decision == MeshingScheduleDecision.Result.AlreadyInFlight)
+            CountMeshInFlightRetry();
+
+        // Only Result.Schedule dequeues (builds); in-flight and both decline results leave the chunk queued
+        // for the drain to retry next frame. Routed through the shared DequeuesChunk mapping so this policy and
+        // the B26 baseline can never disagree (defensively covers any future Result value — non-Schedule stays queued).
+        if (!MeshingScheduleDecision.DequeuesChunk(decision))
+            return false;
 
         // 1. Prepare Section Data for CENTER chunk
         int sectionCount = chunk.ChunkData.sections.Length;

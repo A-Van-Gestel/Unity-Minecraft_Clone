@@ -38,6 +38,7 @@ namespace Editor.Validation.Meshing
         {
             scenarios.Add(new Scenario("B24: MeshingScheduleDecision census — all 32 input combinations map to the documented result (MP-2 gate composition)", B24_ScheduleDecisionCensus));
             scenarios.Add(new Scenario("B25: MeshDrainPolicy replays the drain's quota/cap/window stops, purge, remove-vs-leave, and priority order (MP-2 drain policy)", B25_DrainPolicy));
+            scenarios.Add(new Scenario("B26: an in-flight request stays queued (MP-3 F1 fix) — DequeuesChunk leaves AlreadyInFlight queued, and the drain reschedules it after the flight completes", B26_InFlightRequestStaysQueued));
         }
 
         /// <summary>
@@ -190,6 +191,55 @@ namespace Editor.Validation.Meshing
             return ok;
         }
 
+        /// <summary>
+        /// B26 — the MP-3 F1 fix: a rebuild request arriving while a chunk's mesh job is in flight must stay
+        /// queued (rescheduled after the flight completes), not be dropped against the job's stale schedule-time
+        /// snapshot. Two parts, both over the exact production code paths:
+        /// <list type="bullet">
+        /// <item>the pure <see cref="MeshingScheduleDecision.DequeuesChunk"/> mapping — <c>AlreadyInFlight</c>
+        /// leaves the chunk queued (false); only <c>Schedule</c> dequeues (true). <b>The revert guard:</b>
+        /// restoring the pre-MP-3 mapping (in-flight also dequeues) reds this immediately, and because
+        /// <c>ScheduleMeshing</c> reads the same function it regresses in lockstep.</item>
+        /// <item>an end-to-end drain scenario driving the real <see cref="MeshDrainPolicy.Drain"/> through a host
+        /// whose verdict is <c>DequeuesChunk(Evaluate(...))</c>: while in flight the chunk survives the drain;
+        /// once the flight completes the same chunk drains and is removed.</item>
+        /// </list>
+        /// </summary>
+        private static bool B26_InFlightRequestStaysQueued()
+        {
+            bool ok = true;
+
+            // Part 1 — the shared dequeue mapping (production ScheduleMeshing reads the SAME function).
+            ok &= MeshAssert.IsTrue("B26.1 in-flight decision leaves the chunk queued (not dequeued) — the MP-3 fix",
+                !MeshingScheduleDecision.DequeuesChunk(MeshingScheduleDecision.Result.AlreadyInFlight),
+                "DequeuesChunk(AlreadyInFlight) must be false so the drain leaves the request queued to retry");
+            ok &= MeshAssert.IsTrue("B26.2 only a Schedule decision dequeues; every non-Schedule result leaves the chunk queued",
+                MeshingScheduleDecision.DequeuesChunk(MeshingScheduleDecision.Result.Schedule)
+                && !MeshingScheduleDecision.DequeuesChunk(MeshingScheduleDecision.Result.CenterNotLightReady)
+                && !MeshingScheduleDecision.DequeuesChunk(MeshingScheduleDecision.Result.NeighborsNotReady),
+                "Schedule must dequeue; in-flight + both decline results must leave the chunk queued");
+
+            // Part 2 — end-to-end: the drain leaves an in-flight chunk queued this frame, schedules it the next.
+            ChunkCoord x = new ChunkCoord(0, 0);
+            MeshBuildQueue q = BuildQueue((x, true));
+            InFlightDrainHost host = new InFlightDrainHost { InFlight = true };
+
+            // Frame 1 — X's mesh job is in flight: the request must survive the drain (F1 pre-fix would drop it).
+            int f1 = MeshDrainPolicy.Drain(q, 10, default, 10, host);
+            ok &= MeshAssert.IsTrue("B26.3 request during flight stays queued (drain schedules nothing, chunk retained)",
+                f1 == 0 && q.Count == 1 && q.Contains(x),
+                $"frame 1 scheduled {f1} (want 0), queue left {q.Count} (want 1: X retained for retry)");
+
+            // Frame 2 — the flight completed: the retained request now schedules and is dequeued.
+            host.InFlight = false;
+            int f2 = MeshDrainPolicy.Drain(q, 10, default, 10, host);
+            ok &= MeshAssert.IsTrue("B26.4 after the flight completes the retained request schedules and is dequeued",
+                f2 == 1 && q.Count == 0 && host.Scheduled.Contains(x),
+                $"frame 2 scheduled {f2} (want 1), queue left {q.Count} (want 0), X scheduled? {host.Scheduled.Contains(x)}");
+
+            return ok;
+        }
+
         /// <summary>Builds a queue from <c>(coord, active)</c> pairs, enqueued as normal requests in order.</summary>
         private static MeshBuildQueue BuildQueue(params (ChunkCoord coord, bool active)[] entries)
         {
@@ -252,6 +302,39 @@ namespace Editor.Validation.Meshing
 
                 Scheduled.Add(chunk.Coord);
                 InFlightCount++; // a real schedule grows the in-flight set (production: MeshJobs gains an entry)
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// A B26 host modeling a single chunk with a toggleable in-flight state, deciding via the SAME
+        /// production functions <c>ScheduleMeshing</c> uses — <c>DequeuesChunk(Evaluate(jobInFlight: InFlight, …))</c>
+        /// with lighting disabled and neighbors ready, so only the in-flight gate is in play. While in flight it
+        /// declines (the drain leaves the chunk queued — the MP-3 retry); once the flight completes it schedules.
+        /// </summary>
+        private sealed class InFlightDrainHost : IMeshDrainHost
+        {
+            /// <summary>Whether the chunk's mesh job is currently in flight.</summary>
+            public bool InFlight;
+
+            /// <summary>Coords this host scheduled, in order.</summary>
+            public readonly List<ChunkCoord> Scheduled = new List<ChunkCoord>();
+
+            /// <summary>Grows on each real schedule so the drain's per-iteration cap check sees a live count.</summary>
+            public int InFlightCount { get; private set; }
+
+            public bool TrySchedule(Chunk chunk)
+            {
+                MeshingScheduleDecision.Result decision = MeshingScheduleDecision.Evaluate(
+                    jobInFlight: InFlight, lightingEnabled: false,
+                    centerHasLightWork: false, centerNeedsInitialLighting: false,
+                    neighborsMeshReady: true);
+
+                if (!MeshingScheduleDecision.DequeuesChunk(decision))
+                    return false; // in-flight (or unmet dep) — leave queued, the MP-3 retry
+
+                Scheduled.Add(chunk.Coord);
+                InFlightCount++;
                 return true;
             }
         }

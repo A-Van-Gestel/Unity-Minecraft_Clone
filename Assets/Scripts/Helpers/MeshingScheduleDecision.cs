@@ -9,13 +9,16 @@ namespace Helpers
     /// </summary>
     public static class MeshingScheduleDecision
     {
+        /// <summary>The outcome of the mesh-scheduling gates, in precedence order — consumed by
+        /// <see cref="DequeuesChunk"/> to decide whether the caller builds the job or leaves the chunk queued.</summary>
         public enum Result : byte
         {
             /// <summary>All gates pass — build the job.</summary>
             Schedule,
 
-            /// <summary>A mesh job is already running for this chunk (today the caller returns true; MP-3
-            /// changes it to leave the chunk queued).</summary>
+            /// <summary>A mesh job is already running for this chunk. The caller leaves the chunk queued
+            /// (MP-3: <see cref="DequeuesChunk"/> returns false), so the rebuild reschedules the frame after
+            /// the flight completes instead of being dropped against the stale schedule-time snapshot.</summary>
             AlreadyInFlight,
 
             /// <summary>The center chunk has unscheduled light work (gate skipped when lighting is disabled).</summary>
@@ -50,5 +53,18 @@ namespace Helpers
             if (!neighborsMeshReady) return Result.NeighborsNotReady;
             return Result.Schedule;
         }
+
+        /// <summary>
+        /// Maps a decision to the boolean <c>ScheduleMeshing</c> returns to the drain: true means "handled —
+        /// dequeue the chunk", false means "leave it queued to retry next frame". Only <see cref="Result.Schedule"/>
+        /// dequeues (the caller builds the job, then returns true); every other result leaves the chunk queued.
+        /// This is the single definition <c>ScheduleMeshing</c> and the B26 baseline share, so the MP-3 in-flight
+        /// policy can never diverge between production and its test. MP-3 fix: <see cref="Result.AlreadyInFlight"/>
+        /// leaves the chunk queued — before MP-3 it dequeued, dropping a rebuild requested during the flight
+        /// against the job's stale schedule-time snapshot (the F1 lost update).
+        /// </summary>
+        /// <param name="result">The scheduling decision from <see cref="Evaluate"/>.</param>
+        /// <returns>True to dequeue the chunk (only <see cref="Result.Schedule"/>); false to leave it queued.</returns>
+        public static bool DequeuesChunk(Result result) => result == Result.Schedule;
     }
 }

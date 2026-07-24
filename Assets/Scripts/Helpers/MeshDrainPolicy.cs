@@ -14,8 +14,8 @@ namespace Helpers
         /// <summary>Attempts to schedule a mesh job for the chunk, returning true when the caller
         /// should dequeue it (production: <c>WorldJobManager.ScheduleMeshing</c>).</summary>
         /// <param name="chunk">The queued chunk to attempt.</param>
-        /// <returns>True when the chunk was scheduled (or, pre-MP-3, was already in flight) and should
-        /// be removed from the queue; false to leave it queued for a later frame.</returns>
+        /// <returns>True when the chunk was scheduled and should be removed from the queue; false to leave it
+        /// queued for a later frame (dependencies not ready, or a job is already in flight — the MP-3 retry).</returns>
         bool TrySchedule(Chunk chunk);
     }
 

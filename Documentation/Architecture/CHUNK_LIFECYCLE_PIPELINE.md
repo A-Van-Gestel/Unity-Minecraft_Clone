@@ -409,6 +409,14 @@ flowchart TD
 > Both are shared verbatim by production (`ScheduleMeshing` / `World.Update`) and the `Validate Meshing`
 > suite (baselines **B24** decision census, **B25** drain policy), so the gate composition and drain
 > policy can never silently diverge from their tests — the meshing sibling of `LightingScheduleDecision`.
+>
+> **In-flight request policy (MP-3).** When the in-flight gate fires (a mesh job is already running for the
+> chunk), `ScheduleMeshing` now returns `false` — the shared `MeshingScheduleDecision.DequeuesChunk` maps
+> only `Schedule` to a dequeue, so the request is **left queued** and reschedules the frame after the flight
+> completes. Previously it returned `true`, so the drain dequeued and dropped the rebuild against the job's
+> stale schedule-time snapshot (the F1 lost update — a stale on-screen mesh until an unrelated trigger, and
+> the case a lighting-disabled world could never self-correct). Baseline **B26** guards it: the pure mapping
+> plus a two-frame drain scenario (survives while in flight, schedules after).
 
 ---
 
@@ -591,6 +599,13 @@ This creates a **starvation cascade** where interior chunks are perpetually bloc
 If the chunk is not added to `_meshBuildQueue` (e.g., because `chunk.isActive` was false at the time, or the chunk wasn't in the `_chunkMap` yet), and no subsequent code path re-adds it, the chunk is **permanently orphaned** from the mesh queue.
 
 **Risk Level:** Medium. The guards in `RequestChunkMeshRebuild` (`chunk == null || !chunk.IsActive`, plus `MeshBuildQueue.TryEnqueue`'s by-coordinate duplicate rejection) can filter out valid requests if timing is unfortunate.
+
+> **MP-3 (2026-07-24) — one drop vector closed.** A distinct drop existed at the *drain*, not the request:
+> a rebuild requested while the chunk's mesh job was in flight was dequeued and dropped against the job's
+> stale snapshot (F1). `ScheduleMeshing` now leaves an in-flight request queued (see §5.3), so it survives to
+> a post-completion rebuild instead of being lost. This does not resolve the §9.5 *population* race above
+> (a request that never reaches the queue) — only the in-flight-drop vector. See
+> [MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md](../Design/MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md) MP-3.
 
 ### 9.6 Unload Stranding — Confirmed Deadlock Vector ⚠️
 

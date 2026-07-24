@@ -2901,7 +2901,7 @@ public class World : MonoBehaviour, IMeshDrainHost
         StringBuilder sb = new StringBuilder();
         sb.AppendLine("[MP-1] Mesh-orchestration diagnostics (session cumulative):");
         sb.AppendLine($"  F8 request drops : null={MeshRequestNullDrops}, inactive={MeshRequestInactiveDrops}  / total requests={MeshRequestTotal}");
-        sb.AppendLine($"  F1 in-flight     : consumed={jm?.MeshInFlightConsumed ?? 0}  / schedule attempts={jm?.MeshScheduleAttempts ?? 0}");
+        sb.AppendLine($"  F1 in-flight     : retries={jm?.MeshInFlightRetried ?? 0}  / schedule attempts={jm?.MeshScheduleAttempts ?? 0}");
         sb.AppendLine($"  gone-chunk merge : discards={jm?.MeshGoneChunkDiscards ?? 0}  / merge attempts={jm?.MeshMergeAttempts ?? 0}");
         sb.AppendLine($"  F4 draw-queue    : recycled-refs={DrawQueueRecycledRefs}  / dequeues={DrawQueueDequeues}");
         return sb.ToString();
