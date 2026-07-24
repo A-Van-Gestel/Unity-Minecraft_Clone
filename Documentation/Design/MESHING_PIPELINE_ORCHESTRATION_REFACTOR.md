@@ -390,6 +390,32 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 - **Doc-sync:** `CHUNK_LIFECYCLE_PIPELINE.md` §5.3 mesh-scheduling flowchart + §9 (new resolved entry referencing this doc); `SUB_CHUNK_MESHING_ARCHITECTURE.md` §4.4 (modification workflow)
   if it describes the old behavior. **Serialization:** none.
 
+> **Amended (2026-07-24) — MP-3 implemented (uncommitted); suite-verified, in-game repro pending.**
+> - **The fix landed as the shared-mapping option (Option A, user sign-off).** Rather than a bare one-line switch
+>   flip, the `ScheduleMeshing` return decision is now the pure `MeshingScheduleDecision.DequeuesChunk(Result)`
+>   (`result == Result.Schedule`), read by BOTH production and B26 — so a revert edits one shared function and
+>   reds the baseline in lockstep (the MP-2 anti-divergence rationale; the bare one-liner left the switch edit
+>   un-reddable by the world-free suite). The `ScheduleMeshing` switch collapsed to `if AlreadyInFlight → count;
+>   if !DequeuesChunk → return false; build`. The MP-1 in-flight counter was **relabeled consumed → retried**
+>   (`MeshInFlightRetried` + the diagnostics line): same firing site, but post-fix it fires once per in-flight
+>   frame per queued chunk (a retry), so the raw number is NOT comparable to MP-1's 449 drops.
+> - **B26** (`Validate Meshing` 25 → **26**): part 1 the pure mapping (`DequeuesChunk(AlreadyInFlight)==false`, the
+>   revert guard); part 2 a two-frame `MeshDrainPolicy` scenario driven through `DequeuesChunk(Evaluate(…))` — the
+>   in-flight chunk survives the drain frame 1, schedules frame 2 after the flight completes.
+> - **Prove-red confirmed:** temporarily restoring the pre-MP-3 mapping (`Schedule || AlreadyInFlight`) reds
+>   **exactly B26** (`1 OF 26 FAILED`) — B26.1 `DequeuesChunk(AlreadyInFlight)` true and B26.3 "frame 1 scheduled 1,
+>   queue left 0" (the in-flight request dequeued/dropped — the F1 signature); every other baseline green. Restored → green.
+> - **Gates:** `dotnet build` both assemblies clean; `Validate Meshing` **26/26**, `Validate All` **336/336**
+>   (Lighting 88/88 — shared `WorldJobManager` surface intact). `SUB_CHUNK_MESHING_ARCHITECTURE.md` doc-sync was a
+>   **no-op** (verified: it does not describe the in-flight/dequeue behavior). Doc-synced `CHUNK_LIFECYCLE_PIPELINE.md`
+>   §5.3 + §9.5 and this fidelity doc's §4.
+> - **PENDING (user):** the end-to-end in-game repro — `enableLighting = false`, place a block then immediately a
+>   second in the same chunk within the flight window; pre-fix the second edit's mesh could be lost, post-fix it
+>   appears. Per validation-driven-bugfix, B26 is trusted as a standing baseline only after this confirms. **Note
+    > (from MP-1's soak):** F1 needs lighting-disabled + rapid *same-chunk edits* — a fly/streaming soak shows F1=0
+>   and proves nothing. Also watch `MeshInFlightRetried` under a fluid-stress session for runaway re-meshing (the
+>   §3.2 Option C dirty-flag escape hatch).
+
 ### MP-4 — Completion-pass unification (🟡, likely larger — see P-4 reconcile below)
 
 - **P-4 reconcile (2026-07-24, see the drift update):** `ProcessMeshJobs` now takes a
@@ -465,6 +491,7 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 
 ## Document History
 
+* **v1.4** - MP-3 implemented (2026-07-24, uncommitted; in-game repro pending): the F1 in-flight lost-update fix as the shared `MeshingScheduleDecision.DequeuesChunk` mapping (Option A — production + B26 share it), `ScheduleMeshing` switch collapsed, MP-1 counter relabeled consumed → retried. **B26** (pure mapping + two-frame drain scenario); prove-red reds exactly B26; `Validate Meshing` 26/26, `Validate All` 336/336. Doc-synced `CHUNK_LIFECYCLE_PIPELINE.md` §5.3 + §9.5 + meshing fidelity §4 (`SUB_CHUNK_MESHING_ARCHITECTURE.md` verified no-op).
 * **v1.3** - MP-2 implemented (2026-07-24, uncommitted): `MeshingScheduleDecision` (B24) + `MeshDrainPolicy` drain-body extraction (B25, the "prefer it if cheap" branch — user sign-off), `World : IMeshDrainHost`. B-number drift corrected (B22/B23 were FL sway → MP-2 = B24/B25, MP-3 prove-red = B26); `Validate Meshing` 25/25, `Validate All` 335/335. Doc-synced `CHUNK_LIFECYCLE_PIPELINE.md` §5.3 + meshing fidelity §4.
 * **v1.2** - MP-1 implemented (2026-07-24, uncommitted): four `[Conditional]` probes + soak evidence (see §MP-1 Amended).
 * **v1.1** - Pre-MP-1 drift update (2026-07-24): folded the P-4 backpressure interactions into MP-2/MP-4/MP-6 scope (drain time budgets, `ProcessMeshJobs` window + rotating cursor, §5.3 draw-tail rewrite), resolved §9 Q2 (drop the stagger, user sign-off) + annotated Q3, added the MP-1 out-of-range-discard rider. F1–F8 re-verified intact against HEAD; line anchors deferred to per-phase re-verification.
@@ -472,4 +499,4 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 
 ---
 
-**Last Updated:** 2026-07-24 (MP-1 + MP-2 implemented) **Next Review:** when MP-3 starts (re-verify the in-flight arm + B26 prove-red; MP-1's evidence already arms it), or when GS-5 Phase 1 is scheduled (re-check §5 contract)
+**Last Updated:** 2026-07-24 (MP-1 + MP-2 + MP-3 implemented; MP-3 in-game repro pending) **Next Review:** when MP-4 starts (P-4 window + rotating-cursor reconcile into the shared completion-pass skeleton — likely exceeds 🟡), or when GS-5 Phase 1 is scheduled (re-check §5 contract)
