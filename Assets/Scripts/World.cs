@@ -2309,6 +2309,7 @@ public class World : MonoBehaviour
             {
                 Chunk chunkToDraw = ChunksToDraw.Dequeue();
                 dequeued++;
+                CountDrawQueueDequeue(chunkToDraw); // MP-1/F4: recycled-ref evidence (editor/dev-only)
 
                 // Guard: The chunk's GameObject may have been destroyed by the pool
                 // while it was waiting in the draw queue (e.g., due to deferred unload timing).
@@ -2843,6 +2844,93 @@ public class World : MonoBehaviour
 
     #endregion
 
+    #region Mesh Orchestration Diagnostics (MP-1)
+
+    // Editor/dev-only observability for the meshing orchestration loop (MP-1). Both probes here are
+    // read-only and main-thread (RequestChunkMeshRebuild and the ChunksToDraw drain both touch the
+    // non-thread-safe _meshBuildQueue / ChunksToDraw, so they are already main-thread by invariant).
+    // Counters accumulate over a play session as INSTANCE fields — a fresh World is created on each
+    // play-mode scene load, so no domain-reload reset is needed (the CP-1 static counter needs one
+    // only because it is written from worker threads). Increment sites are [Conditional]-gated, so
+    // the probes compile out of release builds. Surfaced via BuildMeshOrchestrationDiagnostics (the
+    // Minecraft Clone/Dev dump menu item). See Documentation/Design/MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md §MP-1.
+
+    /// <summary>MP-1/F8: rebuild requests silently dropped because the chunk was null.</summary>
+    public int MeshRequestNullDrops { get; private set; }
+
+    /// <summary>MP-1/F8: rebuild requests silently dropped because the chunk was inactive.</summary>
+    public int MeshRequestInactiveDrops { get; private set; }
+
+    /// <summary>MP-1/F8 denominator: total <see cref="RequestChunkMeshRebuild"/> calls this session.</summary>
+    public int MeshRequestTotal { get; private set; }
+
+    /// <summary>MP-1/F4: draw-queue entries dequeued whose chunk instance is no longer the live
+    /// occupant of its own coord (a recycled/unloaded reference). Read against
+    /// <see cref="DrawQueueDequeues"/>. Misses a chunk recycled and re-registered at a NEW coord —
+    /// detecting that needs MP-6's enqueue-time-coord capture, so a zero here does not prove F4
+    /// never fires.</summary>
+    public int DrawQueueRecycledRefs { get; private set; }
+
+    /// <summary>MP-1/F4 denominator: total draw-queue entries dequeued this session.</summary>
+    public int DrawQueueDequeues { get; private set; }
+
+    // Latch: the first F8 drop logs once (with coord where available); later drops count silently.
+    private bool _warnedMeshRequestDrop;
+
+    /// <summary>MP-1/F8 probe: tally a mesh-rebuild request and, when it is a dropped one, its
+    /// null/inactive bucket — warning once so pipeline-doc §9.5's silent-drop risk is observable.</summary>
+    /// <param name="chunk">The requested chunk (may be null or inactive — the drop cases).</param>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private void CountMeshRequest([CanBeNull] Chunk chunk)
+    {
+        MeshRequestTotal++;
+        bool nullChunk = chunk == null;
+        if (!nullChunk && chunk.IsActive) return; // not a drop
+
+        if (nullChunk) MeshRequestNullDrops++;
+        else MeshRequestInactiveDrops++;
+
+        if (_warnedMeshRequestDrop) return;
+        _warnedMeshRequestDrop = true;
+        string coordDesc = nullChunk ? "null" : chunk.Coord.ToString();
+        Debug.LogWarning($"[MP-1/F8] RequestChunkMeshRebuild dropped a request (chunk {coordDesc}); " +
+                         "further drops counted silently. See MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md §MP-1/F8.");
+    }
+
+    /// <summary>MP-1/F4 probe: tally a draw-queue dequeue and flag a recycled/stale chunk reference
+    /// (the dequeued instance is no longer what the chunk map maps its coord to).</summary>
+    /// <param name="chunkToDraw">The chunk just dequeued from <see cref="ChunksToDraw"/>.</param>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private void CountDrawQueueDequeue([CanBeNull] Chunk chunkToDraw)
+    {
+        DrawQueueDequeues++;
+        if (chunkToDraw != null && GetChunkFromChunkCoord(chunkToDraw.Coord) != chunkToDraw)
+            DrawQueueRecycledRefs++;
+    }
+
+    /// <summary>
+    /// Formats the MP-1 mesh-orchestration diagnostic counters (this World plus its
+    /// <see cref="WorldJobManager"/>) for the dev dump menu item.
+    /// </summary>
+    /// <remarks>Editor/dev-only meaning: every counter is incremented behind a [Conditional] gate, so
+    /// all values read 0 in a non-development release build.</remarks>
+    /// <returns>A multi-line, human-readable summary of the four MP-1 probe families with denominators.</returns>
+    public string BuildMeshOrchestrationDiagnostics()
+    {
+        WorldJobManager jm = JobManager;
+        StringBuilder sb = new StringBuilder();
+        sb.AppendLine("[MP-1] Mesh-orchestration diagnostics (session cumulative):");
+        sb.AppendLine($"  F8 request drops : null={MeshRequestNullDrops}, inactive={MeshRequestInactiveDrops}  / total requests={MeshRequestTotal}");
+        sb.AppendLine($"  F1 in-flight     : consumed={jm?.MeshInFlightConsumed ?? 0}  / schedule attempts={jm?.MeshScheduleAttempts ?? 0}");
+        sb.AppendLine($"  gone-chunk merge : discards={jm?.MeshGoneChunkDiscards ?? 0}  / merge attempts={jm?.MeshMergeAttempts ?? 0}");
+        sb.AppendLine($"  F4 draw-queue    : recycled-refs={DrawQueueRecycledRefs}  / dequeues={DrawQueueDequeues}");
+        return sb.ToString();
+    }
+
+    #endregion
+
     /// <summary>
     /// Adds a chunk to the queue to have its mesh rebuilt.
     /// For priority, immediate requests are placed at the front of the queue; an immediate re-request of a
@@ -2852,6 +2940,8 @@ public class World : MonoBehaviour
     /// <param name="immediate">If true, rebuild the chunk as soon as possible</param>
     public void RequestChunkMeshRebuild([CanBeNull] Chunk chunk, bool immediate = false)
     {
+        CountMeshRequest(chunk); // MP-1/F8 (editor/dev-only, compiled out of release)
+
         // Validate chunk state before queuing.
         // 1. Don't queue null chunks.
         // 2. Don't queue inactive chunks (they are out of view or being destroyed).

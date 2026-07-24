@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using Data;
 using Data.JobData;
 using Data.WorldTypes;
@@ -15,6 +16,7 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Pool;
+using Debug = UnityEngine.Debug;
 
 /// <summary>
 /// Manages the lifecycle of all background jobs (generation, meshing, lighting).
@@ -112,6 +114,59 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     public Vector3Int LastEffSampleGlobalPos { get; private set; }
     public ushort LastEffSampleOldLight { get; private set; }
     public ushort LastEffSampleNewLight { get; private set; }
+
+    #endregion
+
+    #region Mesh Orchestration Diagnostics (MP-1)
+
+    // Editor/dev-only observability for the meshing orchestration loop (MP-1). Both sites here are
+    // read-only and main-thread; counters accumulate over a play session as INSTANCE fields (fresh
+    // per session via World's `new WorldJobManager` — no domain-reload reset needed, unlike the
+    // worker-thread CP-1 static). The increment call sites are [Conditional]-gated, so the whole
+    // probe compiles out of release builds. Surfaced via World.BuildMeshOrchestrationDiagnostics.
+    // See Documentation/Design/MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md §MP-1.
+
+    /// <summary>MP-1/F1: rebuild requests consumed against an existing <see cref="MeshJobs"/> entry for
+    /// that chunk (a job scheduled and not yet drained — genuinely in flight, plus the short
+    /// completed-but-undrained tail before <see cref="ProcessMeshJobs"/> removes it; both apply the
+    /// stale schedule-time snapshot, so a drop in either is a real lost update). An <b>upper bound</b>
+    /// on the lost-update frequency gating MP-3 — it also counts redundant re-requests that carried no
+    /// new data, so read a near-zero value as "no lost updates" and a high value as "arm MP-3 and
+    /// confirm the genuine cases with its prove-red." Read against <see cref="MeshScheduleAttempts"/>.</summary>
+    public int MeshInFlightConsumed { get; private set; }
+
+    /// <summary>MP-1/F1 denominator: total <see cref="ScheduleMeshing"/> invocations this session.</summary>
+    public int MeshScheduleAttempts { get; private set; }
+
+    /// <summary>MP-1 rider (2026-07-23): completed mesh jobs discarded because the target chunk was
+    /// gone from the chunk map at merge time (out-of-range / unloaded). Read against
+    /// <see cref="MeshMergeAttempts"/>. Under-counts stale-instance discards (a live chunk that is a
+    /// different instance than the job targeted) — that needs a Chunk ref in MeshingJobData (MP-4).</summary>
+    public int MeshGoneChunkDiscards { get; private set; }
+
+    /// <summary>MP-1 denominator: completed mesh jobs that reached the merge step this session (i.e.
+    /// passed <c>Handle.Complete()</c>).</summary>
+    public int MeshMergeAttempts { get; private set; }
+
+    /// <summary>MP-1/F1 probe: count a rebuild request consumed against an in-flight mesh job.</summary>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private void CountMeshInFlightConsume() => MeshInFlightConsumed++;
+
+    /// <summary>MP-1/F1 denominator probe: count one <see cref="ScheduleMeshing"/> invocation.</summary>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private void CountMeshScheduleAttempt() => MeshScheduleAttempts++;
+
+    /// <summary>MP-1 probe: count one completed-mesh merge attempt, flagging the gone-chunk discard.</summary>
+    /// <param name="chunkGone">True when the target chunk was absent from the chunk map at merge time.</param>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private void CountMeshMerge(bool chunkGone)
+    {
+        MeshMergeAttempts++;
+        if (chunkGone) MeshGoneChunkDiscards++;
+    }
 
     #endregion
 
@@ -325,9 +380,13 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     public bool ScheduleMeshing(Chunk chunk)
     {
         ChunkCoord chunkCoord = chunk.Coord;
+        CountMeshScheduleAttempt(); // MP-1/F1 denominator (editor/dev-only, compiled out of release)
 
         if (MeshJobs.ContainsKey(chunkCoord))
+        {
+            CountMeshInFlightConsume(); // MP-1/F1: request consumed against an in-flight job
             return true;
+        }
 
         // Gate 1: Center chunk must have completed at least one lighting pass and have
         // no unscheduled light changes. We intentionally do NOT block on a running lighting
@@ -1100,6 +1159,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
             try
             {
                 Chunk chunk = _world.GetChunkFromChunkCoord(jobEntry.Key);
+                CountMeshMerge(chunkGone: chunk == null); // MP-1 rider: gone-chunk discard evidence
                 if (chunk != null)
                 {
                     // ApplyMeshData uploads the buffers synchronously (SetVertex/IndexBufferData copy);
