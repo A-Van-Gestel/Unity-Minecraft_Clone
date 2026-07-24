@@ -40,6 +40,7 @@ namespace Editor.Validation.Meshing
             List<Scenario> scenarios = new List<Scenario>();
             AddBaselineScenarios(scenarios);
             AddRendererScenarios(scenarios);
+            AddSchedulingScenarios(scenarios);
             AddKnownBugScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Meshing", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
@@ -53,6 +54,13 @@ namespace Editor.Validation.Meshing
         /// meshing-job <see cref="Framework.MeshingTestWorld"/>; they count as baselines (must stay green).
         /// </summary>
         static partial void AddRendererScenarios(List<Scenario> scenarios);
+
+        /// <summary>
+        /// Registers the MP-2 orchestration baselines (B24 decision census + B25 drain policy, implemented in
+        /// MeshingValidationSuite.Scheduling.cs). Pure decision + queue logic, no world coupling; count as
+        /// baselines (must stay green).
+        /// </summary>
+        static partial void AddSchedulingScenarios(List<Scenario> scenarios);
 
         /// <summary>Registers the known-bug reproduction scenarios (none yet).</summary>
         static partial void AddKnownBugScenarios(List<Scenario> scenarios);

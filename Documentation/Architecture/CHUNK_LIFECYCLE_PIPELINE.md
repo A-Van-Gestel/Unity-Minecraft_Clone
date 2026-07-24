@@ -402,6 +402,14 @@ flowchart TD
     style M_DONE fill: #ffa07a, color: #fff
 ```
 
+> **Shared decision & drain policy (MP-2).** The three scheduling gates (M3–M5) are the pure function
+> `MeshingScheduleDecision.Evaluate` (in-flight → center-light → neighbor precedence, with the
+> lighting-disabled bypass), and the per-frame drain loop (M1–M7 walk plus the quota/window/in-flight-cap
+> stops, null/inactive purge, and remove-on-schedule vs leave-on-decline) is `MeshDrainPolicy.Drain`.
+> Both are shared verbatim by production (`ScheduleMeshing` / `World.Update`) and the `Validate Meshing`
+> suite (baselines **B24** decision census, **B25** drain policy), so the gate composition and drain
+> policy can never silently diverge from their tests — the meshing sibling of `LightingScheduleDecision`.
+
 ---
 
 ## 6. Cross-Chunk Modification Flow

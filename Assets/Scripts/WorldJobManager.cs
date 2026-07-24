@@ -382,30 +382,31 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
         ChunkCoord chunkCoord = chunk.Coord;
         CountMeshScheduleAttempt(); // MP-1/F1 denominator (editor/dev-only, compiled out of release)
 
-        if (MeshJobs.ContainsKey(chunkCoord))
-        {
-            CountMeshInFlightConsume(); // MP-1/F1: request consumed against an in-flight job
-            return true;
-        }
+        // The three scheduling gates, routed through the pure MeshingScheduleDecision so this and the
+        // validation suite can never disagree (the LightingScheduleDecision precedent). Gate order and
+        // rationale (MP-2 preserves them exactly): (1) in-flight — do NOT block on a running LIGHTING
+        // job; the mesh job reads an independent voxel snapshot and gets re-requested when lighting
+        // completes, which avoids cross-chunk BFS ping-pong deadlocks. (2) center light-readiness,
+        // skipped when lighting is disabled (the sunlight fill maxes brightness, so no lighting job
+        // ever runs to clear these flags). (3) neighbor mesh-readiness. AreNeighborsMeshReady is a pure
+        // read, so evaluating it eagerly here (rather than short-circuited behind the earlier gates) is
+        // free of side effects — it costs only a few extra neighbor lookups when an earlier gate would
+        // already decline, matching the LightingScheduleDecision caller.
+        MeshingScheduleDecision.Result decision = MeshingScheduleDecision.Evaluate(
+            jobInFlight: MeshJobs.ContainsKey(chunkCoord),
+            lightingEnabled: _world.settings.enableLighting,
+            centerHasLightWork: chunk.ChunkData.HasLightChangesToProcess,
+            centerNeedsInitialLighting: chunk.ChunkData.NeedsInitialLighting,
+            neighborsMeshReady: _world.AreNeighborsMeshReady(chunkCoord));
 
-        // Gate 1: Center chunk must have completed at least one lighting pass and have
-        // no unscheduled light changes. We intentionally do NOT block on a running lighting
-        // job (lightingJobs.ContainsKey) — the meshing job reads an independent snapshot of
-        // the voxel data. If lighting is in-flight, the mesh uses valid data from the previous
-        // pass and gets rebuilt when the lighting job completes and triggers RequestChunkMeshRebuild.
-        // This prevents perpetual deadlocks from cross-chunk BFS ping-pong.
-        // When lighting is disabled, skip this gate entirely — no lighting job will ever run
-        // to clear these flags, and the sunlight fill ensures all voxels are at max brightness.
-        if (_world.settings.enableLighting &&
-            (chunk.ChunkData.HasLightChangesToProcess ||
-             chunk.ChunkData.NeedsInitialLighting))
+        switch (decision)
         {
-            return false;
-        }
-
-        if (!_world.AreNeighborsMeshReady(chunkCoord))
-        {
-            return false;
+            case MeshingScheduleDecision.Result.AlreadyInFlight:
+                CountMeshInFlightConsume(); // MP-1/F1: request consumed against an in-flight job
+                return true; // MP-2 keeps the legacy "already scheduled" answer; MP-3 changes this arm.
+            case MeshingScheduleDecision.Result.CenterNotLightReady:
+            case MeshingScheduleDecision.Result.NeighborsNotReady:
+                return false;
         }
 
         // 1. Prepare Section Data for CENTER chunk

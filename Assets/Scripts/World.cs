@@ -32,7 +32,7 @@ using UnityEngine.Pool;
 using Debug = UnityEngine.Debug;
 using Random = UnityEngine.Random;
 
-public class World : MonoBehaviour
+public class World : MonoBehaviour, IMeshDrainHost
 {
     public Settings settings;
 
@@ -2241,11 +2241,11 @@ public class World : MonoBehaviour
         int inFlightMeshCap = Mathf.Max(1, settings.maxInFlightMeshJobs);
         if (_meshBuildQueue.Count > 0 && JobManager.MeshJobs.Count < inFlightMeshCap)
         {
-            int meshJobsScheduled = 0;
-
             // P-4 §3.4: rate quota + ms ceiling, same shape as the lighting throttle above. The break
-            // leaves un-served chunks queued in place — legacy semantics. The RAM-scaled in-flight cap
-            // below is untouched (OM-1 memory bound, not a throughput budget).
+            // (inside MeshDrainPolicy) leaves un-served chunks queued in place — legacy semantics. The
+            // RAM-scaled in-flight cap is untouched (OM-1 memory bound, not a throughput budget). The
+            // drain loop itself lives in MeshDrainPolicy so the meshing suite can replay this exact
+            // policy (MP-2); the budget math stays here and is derived per frame.
             int meshQuota = settings.enablePipelineTimeBudgets
                 ? PipelinePassBudget.ComputeQuota(settings.maxMeshRebuildsPerFrame, Time.unscaledDeltaTime)
                 : settings.maxMeshRebuildsPerFrame;
@@ -2253,37 +2253,7 @@ public class World : MonoBehaviour
                 ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.meshScheduleBudgetMs, ceilingScaleInterval))
                 : default;
 
-            // Walk in priority order (head = highest priority). The enumerator removes the current node in
-            // O(1) and keeps iterating from the successor it captured before the body ran.
-            MeshBuildQueue.Enumerator it = _meshBuildQueue.GetEnumerator();
-            while (it.MoveNext())
-            {
-                if (meshJobsScheduled >= meshQuota || meshWindow.Expired) break;
-
-                // Re-check the in-flight cap every iteration, not just on entry: each successful schedule
-                // grows JobManager.MeshJobs, and a single frame must not push its whole per-frame mesh
-                // budget past the cap. On a fast-CPU / low-RAM device the per-frame budget (CPU-scaled)
-                // can far exceed the in-flight cap (RAM-scaled), so the entry gate alone would let one
-                // frame overshoot the native-memory ceiling the cap exists to enforce (OM-1).
-                if (JobManager.MeshJobs.Count >= inFlightMeshCap) break;
-
-                Chunk chunk = it.Current;
-
-                // Validate chunk state before attempting to mesh.
-                if (chunk == null || !chunk.IsActive)
-                {
-                    it.RemoveCurrent();
-                    continue;
-                }
-
-                // JobManager.ScheduleMeshing will return false if deps (neighbors/lighting) aren't ready.
-                // In that case, we leave the chunk queued (in place) to try again next frame.
-                if (JobManager.ScheduleMeshing(chunk))
-                {
-                    it.RemoveCurrent();
-                    meshJobsScheduled++;
-                }
-            }
+            MeshDrainPolicy.Drain(_meshBuildQueue, meshQuota, meshWindow, inFlightMeshCap, this);
         }
 
         // The chunksToDraw queue is populated by ApplyMeshData in Chunk.cs.
@@ -2544,6 +2514,14 @@ public class World : MonoBehaviour
     /// </summary>
     /// <param name="chunkCoord">The coordinate of the central chunk whose neighbors are to be checked.</param>
     /// <returns>True if all neighbors have at minimum completed their initial lighting pass and are populated.</returns>
+    /// <summary><see cref="IMeshDrainHost.InFlightCount"/>: live mesh-job count for the drain's per-iteration
+    /// cap re-check. Implemented on <c>this</c> so <see cref="MeshDrainPolicy.Drain"/> allocates no delegate.</summary>
+    int IMeshDrainHost.InFlightCount => JobManager.MeshJobs.Count;
+
+    /// <summary><see cref="IMeshDrainHost.TrySchedule"/>: forwards to <see cref="WorldJobManager.ScheduleMeshing"/>
+    /// (true → dequeue; false → leave queued for a later frame).</summary>
+    bool IMeshDrainHost.TrySchedule(Chunk chunk) => JobManager.ScheduleMeshing(chunk);
+
     public bool AreNeighborsMeshReady(ChunkCoord chunkCoord)
     {
         foreach (Vector3Int offset in VoxelData.AllNeighborOffsets)

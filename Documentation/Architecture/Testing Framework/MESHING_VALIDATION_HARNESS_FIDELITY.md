@@ -357,6 +357,13 @@ assert cross-chunk fields against a borderless oracle. The meshing suite now clo
 - **True concurrency / Burst scheduling races.** Synchronous `job.Run()` only — mirrors the lighting suite's
   B3 **WONTFIX (structural)**. MR-5's value (off-main-thread scheduling) is about *where* work runs; the
   harness verifies output equivalence (MH-5), not the threading itself.
+- **Scheduling / drain orchestration (the decision layer).** ~~This is a *job* harness — it starts at the
+  mesh job's inputs; the `ScheduleMeshing` gate composition and the per-frame drain policy are production-only.~~
+  **CLOSED for the decision layer (MP-2, 2026-07-24), baselines B24/B25 in this same suite** — the gates are the
+  pure `MeshingScheduleDecision` (B24 decision census) and the drain loop is `MeshDrainPolicy.Drain` (B25 drain
+  policy: quota/window/cap stops, purge, remove-vs-leave, priority order). Owned by
+  [MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md](../../Design/MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md), not this
+  job-fidelity doc. The completion-pass and draw-tail stages remain uncovered here (MP-4/MP-6).
 
 ---
 
