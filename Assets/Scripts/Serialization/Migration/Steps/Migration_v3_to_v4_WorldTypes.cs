@@ -19,8 +19,11 @@ namespace Serialization.Migration.Steps
         public override string MigrateLevelDat(string oldJson)
         {
             // Parse the existing JSON, inject worldType: Legacy (0), bump version to 4.
-            WorldSaveData data = JsonUtility.FromJson<WorldSaveData>(oldJson);
-            data.worldType = WorldTypeID.Legacy;
+            // Reads the frozen LegacyLevelDat, never the live WorldSaveData: this step round-trips the whole
+            // document, so a live type it does not know about would silently rewrite fields it never meant to
+            // touch (see LegacyLevelDat's header — WS-4c's v13 position re-type is exactly that case).
+            LegacyLevelDat data = JsonUtility.FromJson<LegacyLevelDat>(oldJson);
+            data.worldType = (int)WorldTypeID.Legacy;
             data.version = TargetWorldVersion;
             return JsonUtility.ToJson(data, true);
         }

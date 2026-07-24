@@ -22,6 +22,12 @@ namespace Helpers
         public int PooledCount => _pool.Count;
         public int ActiveCount { get; private set; }
 
+        /// <summary>Cumulative count of instances permanently destroyed by pruning/clear (CP-1 pool-churn probe).</summary>
+        public long TotalDestroyed { get; private set; }
+
+        /// <summary>Cumulative count of <see cref="Get"/> calls — the exact demand signal the CP-7 linger pruning reads.</summary>
+        public long TotalGets { get; private set; }
+
         // Pruning State
         private float _cleanupTimer = 0f;
         private const float CLEANUP_INTERVAL = 0.05f; // 20 checks/sec
@@ -42,6 +48,7 @@ namespace Helpers
         public T Get()
         {
             ActiveCount++;
+            TotalGets++;
             if (_pool.Count > 0)
             {
                 return _pool.Pop();
@@ -64,6 +71,7 @@ namespace Helpers
             while (_pool.Count > 0)
             {
                 _destroyAction(_pool.Pop());
+                TotalDestroyed++;
             }
 
             ActiveCount = 0;
@@ -84,6 +92,7 @@ namespace Helpers
                 // Pop and destroy ONE item to spread GC cost
                 T item = _pool.Pop();
                 _destroyAction(item);
+                TotalDestroyed++;
             }
         }
     }

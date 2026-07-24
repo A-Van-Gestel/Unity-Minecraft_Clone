@@ -42,6 +42,13 @@ namespace Data
         [Tooltip("Indicates whether the neighboring faces should still be rendered when this block is placed.")]
         public bool renderNeighborFaces;
 
+        [Tooltip("Foliage wind-sway strength in [0, 1] (FL-2). 0 = rigid. Non-zero makes every vertex of this " +
+                 "block shimmer in the wind, scaled by the global sway amplitude. Only affects blocks rendered " +
+                 "in the transparent cutout pass (Render Neighbor Faces) — the opaque shader ignores the channel. " +
+                 "Cross-mesh flora ignores this field: FL-1 bakes its own root-anchored weights.")]
+        [Range(0f, 1f)]
+        public float swayStrength;
+
         [Header("Fluid Properties")]
         [Tooltip("The type of fluid this block represents. 'None' for solid blocks.")]
         public FluidType fluidType = FluidType.None;

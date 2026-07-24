@@ -1,7 +1,6 @@
 # Design Document: Infinite World Storage & Serialization Architecture
 
-**Version:** 1.7
-**Date:** 2026-06-13  
+**Version:** 1.7 **Date:** 2026-06-13  
 **Status:** Implemented (Stable)  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
@@ -466,8 +465,11 @@ Main Thread                            Background Thread (ThreadPool)
                                     6. Lock region file (_fileLock)
                                     7. Write sector-aligned record to disk
                                     8. Update location table entry
-9. Return buffer + snapshot
-   to their pools (finally)
+9. Return buffer to its pool
+   (finally); snapshot → pool on
+   Written/FailedPermanent, →
+   failed-save retry registry on
+   Failed/Canceled (CP-6)
 ```
 
 **Memory Management:**  
@@ -475,6 +477,20 @@ Uses `SerializationBufferPool` to recycle byte arrays, and `ChunkStorageManager.
 
 **Cancellation:**  
 `SaveChunkAsync` takes a `CancellationToken` (the world's shutdown token) so in-flight async saves abort cleanly on quit instead of racing the synchronous shutdown flush.
+
+**Failure Handling (CP-6 durability contract):**  
+`SaveChunkAsync` returns `Task<ChunkSaveResult>` (`Written` / `Canceled` / `Failed` / `FailedPermanent`) instead of swallowing exceptions. On `Failed` **or `Canceled`**, the serialization snapshot — the edits' only surviving copy once the live `ChunkData` is pool-recycled by `UnloadChunks` (or cleared from `ModifiedChunks` by a manual save) — transfers to the storage manager's **failed-save retry registry** (coord-keyed; a newer entry for the same coord supersedes the older snapshot) rather than returning to the pool. Staging `Canceled` matters because
+cancellation only comes from the quit token: without it, a save canceled mid-quit after its chunk left `ModifiedChunks` would lose the edits silently. `FailedPermanent` (zero-length serialization, or a chunk exceeding the 255-sector region record limit — `RegionFile.SaveChunkData` throws the typed `ChunkTooLargeException` so no path can report a false `Written` — deterministic, retrying can never succeed) releases the snapshot with a loud per-chunk error instead of entering the retry loop. The registry is drained three ways:
+
+1. **Per-frame retry** — `World.Update` calls `DrainFailedSaveRetries()` (one due entry per frame, exponential backoff 1→30 s, loud error per failed attempt; retryable entries are never dropped mid-session, deterministic ones are dropped loudly).
+2. **Reload guard** — `LoadChunkAsync` synchronously flushes a pending retry for its coord before reading disk, so a returning player never loads pre-edit bytes. (Known window: a save still *in flight* for that coord is invisible to the guard — closing it would need per-coord in-flight tracking.)
+3. **Quit flush** — the synchronous `SaveAllModifiedChunks` path calls `FlushFailedSavesSync()` **first — before the per-chunk live saves and regardless of whether `ModifiedChunks` is empty** (the registry can hold edits for chunks long gone from the set, and snapshots are never fresher than live data, so flushing first means the newest bytes always land last); recovered and deterministic entries are removed, **retryably-failing entries are retained** (moot at real quit; preserves recoverability when the same path runs from a live-session force-unload).
+   `StorageManager.Dispose` additionally makes one final write attempt per remaining entry before closing the regions, so a manager teardown (world switch) can never silently discard retained edits.
+
+**Supersede rule:** every save is stamped with a monotonic **data-freshness sequence at capture time** (snapshot creation / sync serialize). Every *successful* write (sync or async) stages a supersede op for its coord into the shared staging queue; when drained, it drops a pending registry entry only if that entry's sequence is **older** — a stale snapshot must never be replayed over newer bytes — while a newer failure survives regardless of the order completions arrive in (overlapping same-coord saves with inverted completion order resolve correctly;
+baseline B10). The **sync** `SaveChunk` path shares the durability contract: a failed sync save snapshots the still-live data and stages it for retry (baseline B12).
+
+All three save paths (sync, async, retry) share one write core (`WriteToRegion`), which also hosts the dev-only fault seams. The contract is guarded by `Minecraft Clone/Dev/Validate Save Durability` (B1–B13) with dev-only injection seams (`ChunkStorageManager.InjectSaveFaults`, `InjectZeroLengthSerializes`, `InjectTooLargeSaves`).
 
 **Thread Safety:**  
 Each region file takes an exclusive private `_fileLock` for both reads and writes (`FileStream` position is not thread-safe). Multiple chunks in different regions can save concurrently.
@@ -569,6 +585,20 @@ if (LightingStateManager.TryGetAndRemove(coord, out HashSet<Vector2Int> localCol
 }
 ```
 
+**Failure Handling (CP-3 load-boundary contract):**  
+The load pipeline distinguishes three outcomes, and the distinction is load-bearing — collapsing a fault into the null result would regenerate terrain over the player's saved data:
+
+1. **Not on disk / corrupt payload → null.** `RegionFile.LoadChunkData` returns null for its explicit corrupt-shape branches (missing entry, invalid length, truncated record, unknown compression byte), and `ChunkSerializer.Deserialize` catches any parse failure (truncated / garbage / wrong-version payload), **returns the pooled shell and its already-attached sections to the concurrent pools** (no leak — the mid-parse acquisition is unwound), and returns null. The caller regenerates the chunk — the deliberate corrupt-file escape hatch.
+2. **Transient I/O fault → throw.** Unexpected exceptions in `LoadChunkData` rethrow, and a faulted `Lazy<RegionFile>` in `GetRegion` is evicted before the rethrow (a `Lazy` caches its factory exception forever — without eviction one transient open fault would poison the whole region for the session). The fault crosses the `Task` boundary and lands in
+   `World.LoadOrGenerateChunk`'s CP-3 contract: one error log → `IsLoading` cleared (identity-guarded) → natural retry on the next boundary crossing.
+3. **Success → hydrate.** Unchanged (§ Step 9 below).
+
+The write side shares the loud-failure rule: `RegionFile.SaveChunkData` rethrows unexpected write faults instead of swallowing them, so `SaveChunkAsync` reports `Failed` (→ CP-6 retry registry)
+rather than a false `Written`; its deterministic "chunk too big" arm throws the typed
+`ChunkTooLargeException`, which every save path maps to `FailedPermanent` (B13). A partially initialized `RegionFile` disposes its `FileStream` before rethrowing, so a transient open fault never leaks the exclusive handle (which would turn every eviction-retry re-open into a sharing violation). Migration reads (`MigrationManager`) wrap `LoadChunkData` in a small bounded retry so a transient fault doesn't drop a healthy chunk from the migrated world as "corrupted". The CP-6 reload guard (`FlushPendingRetryFor`) stays in `LoadChunkAsync`'s synchronous
+prefix, ahead of everything above. Guarded by `Minecraft Clone/Dev/Validate Deserialization
+Robustness` (NS-1 seed, B1–B7) with the dev-only `ChunkStorageManager.InjectLoadFaults` seam.
+
 **Performance Target:**  
 < 5ms from disk read to chunk ready for meshing (measured: ~3ms typical)
 
@@ -626,7 +656,7 @@ public Dictionary<Vector2Int, HashSet<Vector2Int>> SunlightRecalculationQueue;
 
 ### 6.3. Unload Safety Protocol
 
-**In World.UnloadChunks():**
+**In World.UnloadChunks ():**
 
 ```csharp
 // Step 1: Check for active work
@@ -672,7 +702,7 @@ if (worldData.ModifiedChunks.Contains(data))
 
 ### 6.4. Load Restoration Protocol
 
-**In World.LoadOrGenerateChunk():**
+**In World.LoadOrGenerateChunk ():**
 
 ```csharp
 ChunkData loaded = await StorageManager.LoadChunkAsync(pos);
@@ -729,7 +759,7 @@ During lighting job execution, neighbor chunks may unload. Light updates targeti
 
 **Solution - Batched Deferred Updates (per channel):**
 
-**In WorldJobManager.ProcessLightingJobs():**
+**In WorldJobManager.ProcessLightingJobs ():**
 
 ```csharp
 foreach (LightModification mod in jobData.Mods)
@@ -887,11 +917,11 @@ An edge chunk at (0, 50) only waits for its in-world neighbors. Out-of-bounds ne
 
 | Operation                      | Target  | Measured | Status |
 |--------------------------------|---------|----------|--------|
-| Chunk Save (Main Thread)       | < 1ms   | ~0.3ms   | ✅      |
-| Chunk Load (Async)             | < 5ms   | ~3ms     | ✅      |
-| Lighting Restoration           | < 2ms   | ~1ms     | ✅      |
-| Memory (Active Chunks)         | < 1000  | ~500-800 | ✅      |
-| File Size (Per Chunk, Deflate) | < 100KB | ~50KB    | ✅      |
+| Chunk Save (Main Thread)       | < 1ms   | ~0.3ms   | ✅     |
+| Chunk Load (Async)             | < 5ms   | ~3ms     | ✅     |
+| Lighting Restoration           | < 2ms   | ~1ms     | ✅     |
+| Memory (Active Chunks)         | < 1000  | ~500-800 | ✅     |
+| File Size (Per Chunk, Deflate) | < 100KB | ~50KB    | ✅     |
 
 ### 9.2. Bottleneck Analysis
 
@@ -940,10 +970,10 @@ Extensive testing with circular flying patterns (worst-case scenario). No black 
 
 **Files Modified:**
 
-* `ChunkData.cs` - PopulateFromSave()
+* `ChunkData.cs` - PopulateFromSave ()
 * `LightingStateManager.cs` - New file
-* `World.cs` - UnloadChunks(), LoadOrGenerateChunk()
-* `WorldJobManager.cs` - ProcessLightingJobs()
+* `World.cs` - UnloadChunks (), LoadOrGenerateChunk ()
+* `WorldJobManager.cs` - ProcessLightingJobs ()
 
 ### 10.2. Logging Spam ✅ RESOLVED
 
@@ -976,12 +1006,11 @@ Load a world, fly to edge (0,0) or (99,99), verify no permanent dark strips.
 **Root Cause:**
 
 1. **Race Condition:** `EnsureChunkExists` in `WorldData` was implicitly scheduling a Generation Job. In `StartWorld`, this job raced against the async `LoadChunk` task. Often, the Generation Job would finish *after* the disk load, overwriting the saved data with fresh terrain.
-2. **Flush Failure:** `OnApplicationQuit` was writing chunk bytes to the `FileStream` but not explicitly Disposing/Flushing the `StorageManager`. This meant the Region File's **Header Table (Offsets)** was not updated on disk. On reload, the game read the old offsets (0), assumed
-   the chunk didn't exist, and regenerated it.
+2. **Flush Failure:** `OnApplicationQuit` was writing chunk bytes to the `FileStream` but not explicitly Disposing/Flushing the `StorageManager`. This meant the Region File's **Header Table (Offsets)** was not updated on disk. On reload, the game read the old offsets (0), assumed the chunk didn't exist, and regenerated it.
 
 **Resolution:**
 
-1. Refactored `EnsureChunkExists` to only create the data placeholder, moving the responsibility of scheduling generation to `LoadOrGenerateChunk`.
+1. Refactored `EnsureChunkExists` to only create the data placeholder, moving the responsibility of scheduling generation to `LoadOrGenerateChunk`. *(`EnsureChunkExists` has since been retired — CP-4 consolidated the placeholder-only behavior into `WorldData.GetOrCreatePlaceholder`.)*
 2. Added explicit `StorageManager.Dispose()` in `OnApplicationQuit` to force-flush file buffers to physical disk.
 
 ### 10.4. Seed Mismatch ✅ RESOLVED
@@ -1177,8 +1206,14 @@ Pre-migration backups are created as sibling world folders named `{WorldName}_Ba
 * **v1.6** - Added LZ4 Compression implementation details and documented resolution of Chunk Regeneration bugs
 * **v1.7** - Synced with codebase: sector-based region file layout, versioned region addressing (`RegionAddressCodec` V1/V2), chunk format v7 (flag-based sections, uniform-sky optimization, RGB light queues), v5+ pending mods Meta byte, `pending_lighting.bin` rename + `pending_blocklight.bin` format, save snapshotting/cancellation, 8-neighbor data-ready gate, completed player state & AOT migration checklist items
 * **v1.8** - Renamed `CompressionAlgorithm.GZip` → `Deflate` for accuracy (value 1 has always been raw headerless DEFLATE, not GZip). On-disk value 1 unchanged, so existing saves stay byte-compatible — source-only rename, no format bump/migration (MT-6)
+* **v1.9** - CP-6 save-boundary durability: `SaveChunkAsync` surfaces `ChunkSaveResult`, failed saves route their snapshot to the failed-save retry registry (per-frame drain + reload guard + quit flush) instead of silently losing session edits (F5). Review hardening in the same change: quit-canceled saves stage their snapshot too (closes the manual-save-then-quit hole), zero-length serialization is `FailedPermanent` (no retry loop), flush retains retryable entries, single shared write core. No format change — failure-path bookkeeping only
+* **v1.10** - CP-6 second review round: quit flush moved BEFORE the live sync saves and outside the ModifiedChunks-empty early return (empty set no longer skips pending registry entries; stale snapshots can no longer overwrite just-synced newer bytes); successful writes stage supersede ops that drop older pending entries (B10); `Dispose` makes a final attempt on remaining entries (B11)
+* **v1.11** - CP-6 third review round: supersede decisions moved from queue order to a **data-freshness sequence** stamped at capture time (closes the overlapping-saves completion-order inversion); sync `SaveChunk` failures now snapshot-and-stage (B12); Dispose flush is bounded multi-pass for late-staging stragglers. Suite B1–B12
+* **v1.12** - CP-3 load-boundary failure contract: corrupt payload → null + pooled-shell return (no leak) → regenerate; transient I/O fault → throw (+ faulted-`Lazy` region eviction) → load-arm retry; `SaveChunkData` write faults rethrow instead of reporting a false `Written`; latent `Serialize`-with-`None` dispose bug fixed. New `Validate Deserialization Robustness` suite (NS-1 seed, B1–B7). No format change — read-path behavior on invalid data only
+* **v1.13** - CP-3 review hardening: too-large chunk writes are the typed `ChunkTooLargeException` → `FailedPermanent` on every save path (closes the last false-`Written` hole; `InjectTooLargeSaves` seam + Save Durability B13); `RegionFile` disposes its `FileStream` on partial-init throw (no leaked handle poisoning retries); `ChunkData.LifecycleEpoch` closes the load-arm fault path's pool-ABA window (round 2: the mid-await unload guard too); migration reads gain a bounded transient retry and the v1→v2 repack per-chunk fault isolation (skip-one-chunk, not
+  abort); shared `StorageValidationFixture` + one `TryConsumeInjection` core for all four seams
 
 ---
 
-**Last Updated:** 2026-07-01  
+**Last Updated:** 2026-07-22  
 **Next Review:** Chunk prioritization or Defragmentation

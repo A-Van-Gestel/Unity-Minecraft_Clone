@@ -49,6 +49,15 @@ namespace Serialization
         /// </summary>
         public ChunkRelativePosition spawnPosition;
 
+        /// <summary>
+        /// Half-extent (in voxels) of the optional per-world gameplay border, a square AABB
+        /// centered on the world origin. <c>0</c> means disabled — the world stays fully
+        /// unbounded (the WS-2/WS-3 default). Purely a player fence: terrain generation,
+        /// lighting, meshing, and storage are border-blind. Absent in pre-v12 saves, where
+        /// JSON deserialization defaults it to 0 (disabled).
+        /// </summary>
+        public int borderRadius;
+
         public long creationDate; // Ticks
         public long lastPlayed; // Ticks
 
@@ -66,7 +75,12 @@ namespace Serialization
     [Serializable]
     public class PlayerSaveData
     {
-        public Vector3 position;
+        /// <summary>
+        /// The player's position in voxel world space, stored chunk-relative so it stays exact at any distance
+        /// (v13; an absolute <see cref="Vector3"/> before that, which lost sub-voxel precision past ±2²⁴).
+        /// </summary>
+        public ChunkRelativePosition position;
+
         public Vector3 rotation;
         public PlayerCapabilityData capabilities = new PlayerCapabilityData();
         public List<InventoryItemData> inventory = new List<InventoryItemData>();

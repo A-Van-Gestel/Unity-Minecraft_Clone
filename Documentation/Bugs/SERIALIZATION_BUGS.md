@@ -39,7 +39,8 @@ The `_fileLock` works correctly to prevent save data corruption but adds massive
 **Confidence:** High (mechanism verified by code inspection; likelihood in normal play is low–medium)
 **Files:** `SerializationBufferPool.cs` (BUFFER_SIZE), `ChunkSerializer.cs` — `Serialize`, `WriteChunkInternal`, `WriteLightQueue`, `ChunkStorageManager.cs` — `SaveChunk` / `SaveChunkAsync`
 
-`ChunkSerializer.Serialize` writes into a **non-expandable** `MemoryStream(outputBuffer)` over a pooled fixed 256 KB buffer. The worst-case uncompressed chunk payload is ~197 KB (8 sections × flag 0x01 = voxels 16 KB + LightData 8 KB each, plus header/heightmap/bitmask), leaving only ~65 KB of headroom. The pending BFS light queues are serialized **without any count cap** at 16 bytes per node — roughly **4,000 queued nodes across both queues exhaust the buffer**. When that happens, `MemoryStream` throws `NotSupportedException`, the exception is caught and logged in `SaveChunk`/`SaveChunkAsync`, and the chunk is **silently not saved** (reverts to its last saved state, or regenerates, on next load).
+`ChunkSerializer.Serialize` writes into a **non-expandable** `MemoryStream(outputBuffer)` over a pooled fixed 256 KB buffer. The worst-case uncompressed chunk payload is ~197 KB (8 sections × flag 0x01 = voxels 16 KB + LightData 8 KB each, plus header/heightmap/bitmask), leaving only ~65 KB of headroom. The pending BFS light queues are serialized **without any count cap** at 16 bytes per node — roughly **4,000 queued nodes across both queues exhaust the buffer**. When that happens, `MemoryStream` throws `NotSupportedException`, the exception is caught
+and logged in `SaveChunk`/`SaveChunkAsync`, and the chunk is **silently not saved** (reverts to its last saved state, or regenerates, on next load).
 
 Most realistic trigger: chunks at the edge of the load area accumulate queue entries via `ModifyVoxel` (each edit enqueues ~7 nodes) while their lighting job can't run (`AreNeighborsDataReady` false), then an autosave fires. `CompressionAlgorithm.None` removes the compression safety margin entirely.
 
@@ -55,7 +56,8 @@ Most realistic trigger: chunks at the edge of the load area accumulate queue ent
 **Confidence:** Medium (race window verified, but current call patterns avoid it)
 **Files:** `ChunkSerializer.cs` — `WriteChunkInternal` (line ~135), `ChunkStorageManager.cs` — `SaveChunk`, `WorldJobManager.cs` — `TryCompactSectionLight`
 
-`WriteChunkInternal` contains `byte[] skyLevels = data.SectionUniformSkyLevel;` with a comment claiming a *"value copy is safe for the background thread"* — but this copies the **array reference**, not the values. If the main thread mutates `SectionUniformSkyLevel` (e.g. `TryCompactSectionLight` after a lighting job, or `PromoteCompactSection` on a block edit) while a background thread serializes the **live** `ChunkData`, the bitmask phase and the section-write phase can observe different values. Worst case: a slot is included in the bitmask as a compact light-only section (`safeSections[i] == null`, sky set), then the sky level flips to `UNIFORM_SKY_NONE` before the write loop → **neither branch writes anything** → all subsequent sections shift → corrupt chunk payload (caught on load → chunk regenerates).
+`WriteChunkInternal` contains `byte[] skyLevels = data.SectionUniformSkyLevel;` with a comment claiming a *"value copy is safe for the background thread"* — but this copies the **array reference**, not the values. If the main thread mutates `SectionUniformSkyLevel` (e.g. `TryCompactSectionLight` after a lighting job, or `PromoteCompactSection` on a block edit) while a background thread serializes the **live** `ChunkData`, the bitmask phase and the section-write phase can observe different values. Worst case: a slot is included in the bitmask as a compact
+light-only section (`safeSections[i] == null`, sky set), then the sky level flips to `UNIFORM_SKY_NONE` before the write loop → **neither branch writes anything** → all subsequent sections shift → corrupt chunk payload (caught on load → chunk regenerates).
 
 **Why it doesn't currently fire:** `SaveChunkAsync` serializes an isolated snapshot created on the main thread (`CreateSerializationSnapshot`), and the synchronous `SaveChunk` path is only called from the main thread. The bug becomes live the moment anyone passes a **live** `ChunkData` to a background `Serialize` call.
 
@@ -95,3 +97,32 @@ When `ReadChunkInternal` throws mid-read (corrupt/truncated chunk), the `ChunkDa
 **Files:** `LightingStateManager.cs` — `AddPending` (lines ~38–57)
 
 The validation loop only `Debug.LogError`s out-of-range local columns; the subsequent add loop inserts **all** columns including invalid ones. On `Save()` they are byte-truncated (`(byte)col.x`), and on `Load()` the truncated values may pass validation and queue sunlight recalcs for the wrong columns. Fix: `continue`/skip invalid columns in the add loop (or validate-and-skip in one pass).
+
+---
+
+## 09. Loading a world with an unreadable `level.dat` has no failure contract — the player spawns unplaced
+
+**Severity:** Minor (edge case) / Missing failure contract
+**Confidence:** High (found by static reading during the SP-1 refactor; not observed in-game)
+**Files:** `World.cs` — `StartWorld` load block; `Spawn/SpawnResolution.cs` — `Classify`
+
+`StartWorld` guards the metadata read (`if (metadata != null)`) but the spawn classification does not: a world opened
+from the menu (`!isNewGame`) with persistence enabled classifies as `LoadedSave` **regardless of whether
+`SaveSystem.LoadWorldMetadata` actually returned anything**. When it returns null (missing or corrupt `level.dat`),
+nothing supplies a saved position, so the player is placed at whatever position the Player prefab carries — with no
+surface height probe, since `LoadedSave` deliberately probes only the spawn point. Inventory, rotation, time of day,
+and the border radius are likewise silently skipped.
+
+Reachability is low but not zero: the world-select menu lists saves by reading `level.dat`, so the file must become
+unreadable *between* the menu listing and world load (external deletion, corruption, a permissions/IO failure).
+
+**Preserved deliberately, not introduced, by SP-1.** This is pre-SP-1 behavior, kept byte-for-byte because that
+refactor's contract was "change nothing"; SP-1 only made it visible in one place. It is documented in
+`SpawnResolution.Classify`'s `<remarks>` and pinned by the *"Spawn Classify Pins All Flag Combinations"* baseline in
+the **Validate Spawn** suite — so a fix is a deliberate, visible edit (that baseline must be updated to go green,
+which is the intended signal).
+
+**Status:** Open, unscheduled. The fix is one condition — `Classify` consults `hasExistingMetadata` on the
+`LoadedSave` arm and falls through to `Fresh` — but it is a behavior change in the save-loading path and wants its
+own decision: silently spawning fresh discards a possibly-recoverable world, so surfacing the failure to the player
+(rather than treating a corrupt save as a new world) is likely the better contract.

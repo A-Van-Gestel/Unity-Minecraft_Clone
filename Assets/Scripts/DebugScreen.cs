@@ -6,7 +6,7 @@ using Helpers;
 using Helpers.UI;
 using JetBrains.Annotations;
 using Jobs.BurstData;
-using MyBox;
+using Serialization;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Profiling;
@@ -261,17 +261,27 @@ public class DebugScreen : MonoBehaviour
     /// </summary>
     private void UpdateInfrequentData()
     {
+        // Unity space (a transform); the voxel-space values below are what the world queries and the readout use.
         Vector3 playerPos = _player.transform.position;
-        // Update Ground Voxel State
-        Vector3 groundVoxelPosVector3 = playerPos + Vector3.down;
-        _groundVoxelState = _world.GetVoxelState(groundVoxelPosVector3);
-        _groundVoxelPos = groundVoxelPosVector3.ToVector3Int();
+
+        // Update Ground Voxel State. Floor in Unity space, then integer-add the origin (WorldOrigin's precision
+        // rule) — a float add of the origin would lose sub-voxel precision past ±2²⁴ and query the wrong cell.
+        // The displayed cell is the queried cell, exactly.
+        Vector3Int groundVoxelPos = WorldOrigin.UnityToVoxelCell(playerPos) + Vector3Int.down;
+        _groundVoxelState = _world.TryGetVoxel(groundVoxelPos.x, groundVoxelPos.y, groundVoxelPos.z,
+            out VoxelState groundState)
+            ? groundState
+            : null;
+        _groundVoxelPos = groundVoxelPos;
 
         // Update Target Voxel State (for Inspector)
         UpdateTargetVoxel();
 
-        // Update Current Chunk
-        _currentChunk = _world.worldData.IsVoxelInWorld(playerPos) ? _world.GetChunkFromVector3(playerPos) : null;
+        // Update Current Chunk. The Y gate reads the Unity-space position directly — the origin never shifts
+        // vertically, so its Y IS the voxel-space Y; XZ converts through the integer origin path.
+        _currentChunk = _world.worldData.IsVoxelInWorld(playerPos)
+            ? _world.GetChunkFromChunkCoord(WorldOrigin.UnityToChunk(playerPos))
+            : null;
     }
 
     /// <summary>
@@ -283,8 +293,10 @@ public class DebugScreen : MonoBehaviour
 
         if (result.DidHit)
         {
-            _targetVoxelPos = result.HitPosition;
-            _targetVoxelState = _world.GetVoxelState(result.HitPosition);
+            // The raycast reports Unity-space cells; the readout and the state query are both voxel space.
+            Vector3Int targetVoxel = result.HitPosition + WorldOrigin.OriginVoxel;
+            _targetVoxelPos = targetVoxel;
+            _targetVoxelState = _world.GetVoxelState(targetVoxel);
         }
         else
         {
@@ -340,95 +352,159 @@ public class DebugScreen : MonoBehaviour
 
     private void PopulateTopLeftBuilder()
     {
+        // Unity space (where the player is rendered) and voxel space (where the player IS) differ by the floating
+        // origin the moment the world re-anchors. The readout leads with voxel space — that is what the save, the
+        // world queries, and every coordinate the player reasons about use — and shows the render-space pair below.
         Vector3 playerPosition = _player.transform.position;
+
+        // Voxel-space cell via floor-then-integer-add (WorldOrigin's precision rule) — a float add of the origin
+        // would drift the readout past ±2²⁴. Y passes through: the origin never shifts vertically.
+        Vector3Int playerVoxelCell = WorldOrigin.UnityToVoxelCell(playerPosition);
         Vector2 lookingDirection = GetLookingAngles();
+
+        // Per-entry visibility toggles (settings-driven; each gates one logical block below).
+        var settings = _world.settings;
 
         // --- General Info (Always Show) ---
         _topLeftBuilder.AppendLine("Minecraft Clone in Unity");
-        if (CurrentMode != DebugMode.FPSOnly)
+        if (CurrentMode != DebugMode.FPSOnly && settings.debugHudShowGraphicsApi)
         {
             _topLeftBuilder.Append("Graphics API: ").AppendLine(_graphicsApiName);
         }
 
-        PerformanceMonitor perf = PerformanceMonitor.Instance;
-        int wallFps = perf != null ? Mathf.RoundToInt(perf.WallFPS) : 0;
-        _topLeftBuilder.Append(wallFps).AppendLine(" fps");
+        // FPS is forced on in FPS-Only mode (the mode's whole purpose); elsewhere it honors the toggle.
+        if (CurrentMode == DebugMode.FPSOnly || settings.debugHudShowFps)
+        {
+            PerformanceMonitor perf = PerformanceMonitor.Instance;
+            int wallFps = perf != null ? Mathf.RoundToInt(perf.WallFPS) : 0;
+            _topLeftBuilder.Append(wallFps).AppendLine(" fps");
+        }
 
         // Skip building the rest of the top-left panel for non-Full modes
         if (CurrentMode != DebugMode.Full) return;
         _topLeftBuilder.AppendLine();
 
         // --- World & Orientation Info ---
-        _topLeftBuilder.AppendLine("WORLD:");
-        _topLeftBuilder.Append("XYZ: ").Append(Mathf.FloorToInt(playerPosition.x))
-            .Append(" / ").Append(Mathf.FloorToInt(playerPosition.y))
-            .Append(" / ").Append(Mathf.FloorToInt(playerPosition.z));
-        _topLeftBuilder.Append(" | Eye Level: ");
-        _topLeftBuilder.AppendFixed(playerPosition.y + _player.VoxelRigidbody.collisionHeight * 0.9f, 2);
-        _topLeftBuilder.AppendLine();
-        _topLeftBuilder.Append("Looking Angle H / V: ");
-        _topLeftBuilder.AppendFixed(lookingDirection.x, 2);
-        _topLeftBuilder.Append(" / ");
-        _topLeftBuilder.AppendFixed(lookingDirection.y, 2);
-        _topLeftBuilder.Append(" | Direction: ").AppendLine(GetHorizontalDirection(lookingDirection.x));
-        _topLeftBuilder.Append("Chunk: ").Append(_world.PlayerChunkCoord.X).Append(" / ").Append(_world.PlayerChunkCoord.Z).AppendLine();
-        _topLeftBuilder.Append("Seed: ").Append(_world.worldData.seed).AppendLine();
-        _topLeftBuilder.AppendLine();
+        if (settings.debugHudShowWorldInfo)
+        {
+            _topLeftBuilder.AppendLine("WORLD:");
+            _topLeftBuilder.Append("XYZ: ").Append(playerVoxelCell.x)
+                .Append(" / ").Append(playerVoxelCell.y)
+                .Append(" / ").Append(playerVoxelCell.z);
+            _topLeftBuilder.Append(" | Eye Level: ");
+            _topLeftBuilder.AppendFixed(playerPosition.y + _player.VoxelRigidbody.collisionHeight * 0.9f, 2);
+            _topLeftBuilder.AppendLine();
+            _topLeftBuilder.Append("Render XYZ: ").Append(Mathf.FloorToInt(playerPosition.x))
+                .Append(" / ").Append(Mathf.FloorToInt(playerPosition.y))
+                .Append(" / ").Append(Mathf.FloorToInt(playerPosition.z));
+            _topLeftBuilder.Append(" | Origin Chunk: ").Append(WorldOrigin.OriginChunk.X)
+                .Append(" / ").Append(WorldOrigin.OriginChunk.Z);
+            _topLeftBuilder.AppendLine();
+            _topLeftBuilder.Append("Looking Angle H / V: ");
+            _topLeftBuilder.AppendFixed(lookingDirection.x, 2);
+            _topLeftBuilder.Append(" / ");
+            _topLeftBuilder.AppendFixed(lookingDirection.y, 2);
+            _topLeftBuilder.Append(" | Direction: ").AppendLine(GetHorizontalDirection(lookingDirection.x));
+            _topLeftBuilder.Append("Chunk: ").Append(_world.PlayerChunkCoord.X).Append(" / ").Append(_world.PlayerChunkCoord.Z).AppendLine();
+            _topLeftBuilder.Append("Seed: ").Append(_world.worldData.seed).AppendLine();
+            _topLeftBuilder.AppendLine();
+        }
 
         // --- Player & Speed Info ---
-        _topLeftBuilder.AppendLine("PLAYER:");
-        _topLeftBuilder.Append("isGrounded: ").Append(_player.IsGrounded)
-            .Append(" | isFlying (").Append(_input.GetBindingDisplayString(GameAction.ToggleFlying)).Append("): ").Append(_player.IsFlying)
-            .Append(" | isNoclipping (").Append(_input.GetBindingDisplayString(GameAction.ToggleNoclip)).Append("): ").Append(_player.IsNoclipping)
-            .Append(" | showHighlight (").Append(_input.GetBindingDisplayString(GameAction.ToggleBlockHighlight)).Append("): ").Append(_player.PlayerInteraction.showHighlightBlocks).AppendLine();
-        _topLeftBuilder.Append("SPEED: Current: ");
-        _topLeftBuilder.AppendFixed(_player.MoveSpeed, 1);
-        _topLeftBuilder.Append(" | Flying: ");
-        _topLeftBuilder.AppendFixed(_player.VoxelRigidbody.flyingSpeed, 1);
-        _topLeftBuilder.AppendLine();
-        _topLeftBuilder.Append("Velocity XYZ: ");
-        _topLeftBuilder.AppendFixed(_player.Velocity.x, 4);
-        _topLeftBuilder.Append(" / ");
-        _topLeftBuilder.AppendFixed(_player.Velocity.y, 4);
-        _topLeftBuilder.Append(" / ");
-        _topLeftBuilder.AppendFixed(_player.Velocity.z, 4);
-        _topLeftBuilder.AppendLine();
-        _topLeftBuilder.AppendLine();
+        if (settings.debugHudShowPlayerInfo)
+        {
+            _topLeftBuilder.AppendLine("PLAYER:");
+            _topLeftBuilder.Append("isGrounded: ").Append(_player.IsGrounded)
+                .Append(" | isFlying (").Append(_input.GetBindingDisplayString(GameAction.ToggleFlying)).Append("): ").Append(_player.IsFlying)
+                .Append(" | isNoclipping (").Append(_input.GetBindingDisplayString(GameAction.ToggleNoclip)).Append("): ").Append(_player.IsNoclipping)
+                .Append(" | showHighlight (").Append(_input.GetBindingDisplayString(GameAction.ToggleBlockHighlight)).Append("): ").Append(_player.PlayerInteraction.showHighlightBlocks).AppendLine();
+            _topLeftBuilder.Append("SPEED: Current: ");
+            _topLeftBuilder.AppendFixed(_player.MoveSpeed, 1);
+            _topLeftBuilder.Append(" | Flying: ");
+            _topLeftBuilder.AppendFixed(_player.VoxelRigidbody.flyingSpeed, 1);
+            _topLeftBuilder.AppendLine();
+            _topLeftBuilder.Append("Velocity XYZ: ");
+            _topLeftBuilder.AppendFixed(_player.Velocity.x, 4);
+            _topLeftBuilder.Append(" / ");
+            _topLeftBuilder.AppendFixed(_player.Velocity.y, 4);
+            _topLeftBuilder.Append(" / ");
+            _topLeftBuilder.AppendFixed(_player.Velocity.z, 4);
+            _topLeftBuilder.AppendLine();
+            _topLeftBuilder.AppendLine();
+        }
 
         // --- Chunk Info ---
-        _topLeftBuilder.AppendLine("CHUNK:");
-        _topLeftBuilder.Append("Active Voxels in Chunk: ");
-        if (_currentChunk != null)
-            _topLeftBuilder.Append(_currentChunk.GetActiveVoxelCount());
-        else
-            _topLeftBuilder.Append("NULL");
-        _topLeftBuilder.AppendLine();
-        _topLeftBuilder.Append("Total Active Voxels in World: ").Append(_world.GetTotalActiveVoxelsInWorld()).AppendLine();
-        _topLeftBuilder.Append("Total Active Chunks: ").Append(_world.ChunkPool.ActiveChunks).AppendLine();
-        _topLeftBuilder.Append(" ├ Chunks unused in Pool: ").Append(_world.ChunkPool.PooledChunks)
-            .Append(" | Borders unused in Pool: ").Append(_world.ChunkPool.PooledBorders).AppendLine();
-        _topLeftBuilder.Append(" └ Data unused in Pool: ").Append(_world.ChunkPool.PooledData)
-            .Append(" | Sections unused in Pool: ").Append(_world.ChunkPool.PooledSections).AppendLine();
-        _topLeftBuilder.Append("Total Chunks to Build Mesh: ");
-        _world.AppendMeshQueueDebugInfo(_topLeftBuilder);
-        _topLeftBuilder.AppendLine();
-        _topLeftBuilder.Append("Total Voxel Modifications: ").Append(_world.GetVoxelModificationsCount()).AppendLine();
+        if (settings.debugHudShowChunkStats)
+        {
+            _topLeftBuilder.AppendLine("CHUNK:");
+            _topLeftBuilder.Append("Active Voxels in Chunk: ");
+            if (_currentChunk != null)
+                _topLeftBuilder.Append(_currentChunk.GetActiveVoxelCount());
+            else
+                _topLeftBuilder.Append("NULL");
+            _topLeftBuilder.AppendLine();
+            _topLeftBuilder.Append("Total Active Voxels in World: ").Append(_world.GetTotalActiveVoxelsInWorld()).AppendLine();
+            _topLeftBuilder.Append("Total Active Chunks: ").Append(_world.ChunkPool.ActiveChunks).AppendLine();
+            _topLeftBuilder.Append(" ├ Chunks unused in Pool: ").Append(_world.ChunkPool.PooledChunks)
+                .Append(" | Borders unused in Pool: ").Append(_world.ChunkPool.PooledBorders).AppendLine();
+            _topLeftBuilder.Append(" └ Data unused in Pool: ").Append(_world.ChunkPool.PooledData)
+                .Append(" | Sections unused in Pool: ").Append(_world.ChunkPool.PooledSections).AppendLine();
+            _topLeftBuilder.Append("Total Chunks to Build Mesh: ");
+            _world.AppendMeshQueueDebugInfo(_topLeftBuilder);
+            _topLeftBuilder.AppendLine();
+            _topLeftBuilder.Append("Total Voxel Modifications: ").Append(_world.GetVoxelModificationsCount()).AppendLine();
+        }
 
         // --- Section Info ---
-        AppendSectionInfo(playerPosition);
+        if (settings.debugHudShowSectionInfo)
+            AppendSectionInfo(playerPosition);
 
         // --- Voxel Info ---
-        _topLeftBuilder.AppendLine();
-        _topLeftBuilder.AppendLine("GROUND VOXEL:");
-        AppendVoxelInspectorInfo(_groundVoxelState, _groundVoxelPos, _topLeftBuilder);
+        if (settings.debugHudShowGroundVoxel)
+        {
+            _topLeftBuilder.AppendLine();
+            _topLeftBuilder.AppendLine("GROUND VOXEL:");
+            AppendVoxelInspectorInfo(_groundVoxelState, _groundVoxelPos, _topLeftBuilder);
+        }
 
-        _topLeftBuilder.AppendLine();
-        _topLeftBuilder.AppendLine("TARGET VOXEL:");
-        AppendVoxelInspectorInfo(_targetVoxelState, _targetVoxelPos, _topLeftBuilder);
+        if (settings.debugHudShowTargetVoxel)
+        {
+            _topLeftBuilder.AppendLine();
+            _topLeftBuilder.AppendLine("TARGET VOXEL:");
+            AppendVoxelInspectorInfo(_targetVoxelState, _targetVoxelPos, _topLeftBuilder);
+        }
     }
 
     private void PopulateMiddleLeftBuilder()
     {
+        // --- CP-1 lifecycle observability probes (opt-in diagnostic block) ---
+        if (!_world.settings.debugHudShowChunkLifecycle) return;
+
+        _middleLeftBuilder.AppendLine("CHUNK LIFECYCLE (CP-1):");
+        _middleLeftBuilder.Append("Unloaded last pass: ").Append(_world.UnloadedLastPass)
+            .Append(" (light-persisted: ").Append(_world.UnloadedLightPersisted).Append(')').AppendLine();
+        _middleLeftBuilder.Append(" └ Deferred — job: ").Append(_world.UnloadDeferJobRunning)
+            .Append(" | light: ").Append(_world.UnloadDeferLightPending)
+            .Append(" | strand: ").Append(_world.UnloadDeferWouldStrand).AppendLine();
+        _middleLeftBuilder.Append("Saves — fired: ").Append(ChunkStorageManager.SavesFired)
+            .Append(" | ok: ").Append(ChunkStorageManager.SavesCompleted)
+            .Append(" | failed: ").Append(ChunkStorageManager.SavesFailed)
+            .Append(" | retry-pending: ").Append(_world.StorageManager?.PendingFailedSaves ?? 0).AppendLine();
+        _middleLeftBuilder.Append("Deserialize failures: ").Append(ChunkSerializer.DeserializeFailures).AppendLine();
+        _middleLeftBuilder.Append("Load-arm faults (dev): ").Append(World.LoadArmFaults).AppendLine();
+        _middleLeftBuilder.Append("Stuck loading (dev): ").Append(_world.StuckLoadingChunks).AppendLine();
+        _middleLeftBuilder.Append("Pool destroys — chunk: ").Append(_world.ChunkPool.DestroyedChunks)
+            .Append(" | data: ").Append(_world.ChunkPool.DestroyedData)
+            .Append(" | sect: ").Append(_world.ChunkPool.DestroyedSections).AppendLine();
+
+        // --- P-4 §3.5 panic gate + backlog signals (threshold calibration + close/drain/reopen witness) ---
+        _middleLeftBuilder.Append("Gen gate: ").Append(_world.GenerationGateOpen ? "OPEN" : "CLOSED")
+            .Append(" | closes: ").Append(_world.GenerationGateCloseCount)
+            .Append(" | closed frames: ").Append(_world.GenerationGateClosedFrames).AppendLine();
+        _middleLeftBuilder.Append("Light backlog — ready: ").Append(_world.LightWorkReadyCount)
+            .Append(" | waiting: ").Append(_world.LightWorkWaitingCount).AppendLine();
+        _middleLeftBuilder.Append("Gen queue: ").Append(_world.GenerationRequestQueueCount)
+            .Append(" | in-flight: ").Append(_world.JobManager.GenerationJobs.Count).AppendLine();
     }
 
     private void PopulateBottomLeftBuilder()
@@ -437,67 +513,75 @@ public class DebugScreen : MonoBehaviour
 
     private void PopulateTopRightBuilder()
     {
-        PerformanceMonitor perf = PerformanceMonitor.Instance;
+        var settings = _world.settings;
 
         // --- Performance Info ---
-        _topRightBuilder.AppendLine("PERFORMANCE:");
-
-        if (perf == null)
+        if (settings.debugHudShowPerformance)
         {
-            _topRightBuilder.AppendLine("PerformanceMonitor not found.");
-        }
-        else
-        {
-            // --- FPS & Frame Time ---
-            _topRightBuilder.Append("CPU FPS:  ").Append(Mathf.RoundToInt(perf.CpuFPS)).AppendLine();
-            _topRightBuilder.Append("Wall FPS: ").Append(Mathf.RoundToInt(perf.WallFPS)).AppendLine();
-            _topRightBuilder.Append("CPU Time:   ").AppendMs(perf.CpuFrameTime.GetAverage()).AppendLine();
-            _topRightBuilder.Append("Wall Time:  ").AppendMs(perf.WallFrameTime.GetAverage()).AppendLine();
-            _topRightBuilder.Append("Idle/Other: ").AppendFixed(perf.IdleTimeMs, 2).Append(" ms").AppendLine();
-            _topRightBuilder.AppendLine();
+            PerformanceMonitor perf = PerformanceMonitor.Instance;
 
-            // --- Phase Breakdown ---
-            _topRightBuilder.AppendLine("--- CPU Phases ---");
-            _topRightBuilder.Append("FixedUpdate: ").AppendMs(perf.FixedUpdateTime.GetAverage()).AppendLine();
-            _topRightBuilder.Append("Update:      ").AppendMs(perf.UpdatePhaseTime.GetAverage()).AppendLine();
-            _topRightBuilder.Append("Coroutine:   ").AppendMs(perf.CoroutinePhaseTime.GetAverage()).AppendLine();
-            _topRightBuilder.Append("LateUpdate:  ").AppendMs(perf.LateUpdateTime.GetAverage()).AppendLine();
-            _topRightBuilder.Append("Render/GUI:  ").AppendMs(perf.RenderTime.GetAverage()).AppendLine();
-            _topRightBuilder.AppendLine();
+            _topRightBuilder.AppendLine("PERFORMANCE:");
 
-            // --- Memory ---
-            _topRightBuilder.AppendLine("--- Memory ---");
-
-            // Unity Native Memory
-            long totalAllocated = Profiler.GetTotalAllocatedMemoryLong();
-            long totalReserved = Profiler.GetTotalReservedMemoryLong();
-            _topRightBuilder.Append("Native Alloc: ").AppendBytes(totalAllocated).AppendLine();
-            _topRightBuilder.Append("Native Rsvd:  ").AppendBytes(totalReserved).AppendLine();
-
-            // Managed GC Memory
-            long gcMemory = GC.GetTotalMemory(false);
-            _topRightBuilder.Append("Managed GC:   ").AppendBytes(gcMemory).AppendLine();
-
-            // GC Allocation per frame: directly shows how much managed garbage each frame produces.
-            // A high value here indicates excessive allocations that will trigger frequent GC collections.
-            _topRightBuilder.Append("GC Alloc/frame: ").AppendBytes(perf.GcAllocationPerFrame.GetAverage()).AppendLine();
-
-            // Read generational collections directly, offset by the session baseline.
-            for (int g = 0; g <= GC.MaxGeneration; g++)
+            if (perf == null)
             {
-                int sessionHits = GC.CollectionCount(g) - perf.BaselineGcCounts[g];
-                _topRightBuilder.Append("GC Gen").Append(g).Append(" Hits: ").Append(sessionHits).AppendLine();
+                _topRightBuilder.AppendLine("PerformanceMonitor not found.");
             }
-        }
+            else
+            {
+                // --- FPS & Frame Time ---
+                _topRightBuilder.Append("CPU FPS:  ").Append(Mathf.RoundToInt(perf.CpuFPS)).AppendLine();
+                _topRightBuilder.Append("Wall FPS: ").Append(Mathf.RoundToInt(perf.WallFPS)).AppendLine();
+                _topRightBuilder.Append("CPU Time:   ").AppendMs(perf.CpuFrameTime.GetAverage()).AppendLine();
+                _topRightBuilder.Append("Wall Time:  ").AppendMs(perf.WallFrameTime.GetAverage()).AppendLine();
+                _topRightBuilder.Append("Idle/Other: ").AppendFixed(perf.IdleTimeMs, 2).Append(" ms").AppendLine();
+                _topRightBuilder.AppendLine();
 
-        _topRightBuilder.AppendLine();
+                // --- Phase Breakdown ---
+                _topRightBuilder.AppendLine("--- CPU Phases ---");
+                _topRightBuilder.Append("FixedUpdate: ").AppendMs(perf.FixedUpdateTime.GetAverage()).AppendLine();
+                _topRightBuilder.Append("Update:      ").AppendMs(perf.UpdatePhaseTime.GetAverage()).AppendLine();
+                _topRightBuilder.Append("Coroutine:   ").AppendMs(perf.CoroutinePhaseTime.GetAverage()).AppendLine();
+                _topRightBuilder.Append("LateUpdate:  ").AppendMs(perf.LateUpdateTime.GetAverage()).AppendLine();
+                _topRightBuilder.Append("Render/GUI:  ").AppendMs(perf.RenderTime.GetAverage()).AppendLine();
+                _topRightBuilder.AppendLine();
+
+                // --- Memory ---
+                _topRightBuilder.AppendLine("--- Memory ---");
+
+                // Unity Native Memory
+                long totalAllocated = Profiler.GetTotalAllocatedMemoryLong();
+                long totalReserved = Profiler.GetTotalReservedMemoryLong();
+                _topRightBuilder.Append("Native Alloc: ").AppendBytes(totalAllocated).AppendLine();
+                _topRightBuilder.Append("Native Rsvd:  ").AppendBytes(totalReserved).AppendLine();
+
+                // Managed GC Memory
+                long gcMemory = GC.GetTotalMemory(false);
+                _topRightBuilder.Append("Managed GC:   ").AppendBytes(gcMemory).AppendLine();
+
+                // GC Allocation per frame: directly shows how much managed garbage each frame produces.
+                // A high value here indicates excessive allocations that will trigger frequent GC collections.
+                _topRightBuilder.Append("GC Alloc/frame: ").AppendBytes(perf.GcAllocationPerFrame.GetAverage()).AppendLine();
+
+                // Read generational collections directly, offset by the session baseline.
+                for (int g = 0; g <= GC.MaxGeneration; g++)
+                {
+                    int sessionHits = GC.CollectionCount(g) - perf.BaselineGcCounts[g];
+                    _topRightBuilder.Append("GC Gen").Append(g).Append(" Hits: ").Append(sessionHits).AppendLine();
+                }
+            }
+
+            _topRightBuilder.AppendLine();
+        }
 
         // --- Display Current Visualization Mode ---
-        _topRightBuilder.AppendLine("DEBUG VISUALIZATION:");
-        _topRightBuilder.Append("Mode (").Append(_input.GetBindingDisplayString(GameAction.CycleVisMode)).Append(" to cycle): ").AppendLine(VisualizationModeToString(_world.visualizationMode));
-        _topRightBuilder.AppendLine(" └ Unused in Pool: ").Append(_world.ChunkPool.PooledVisualizers);
+        if (settings.debugHudShowVisualization)
+        {
+            _topRightBuilder.AppendLine("DEBUG VISUALIZATION:");
+            _topRightBuilder.Append("Mode (").Append(_input.GetBindingDisplayString(GameAction.CycleVisMode)).Append(" to cycle): ").AppendLine(VisualizationModeToString(_world.visualizationMode));
+            _topRightBuilder.AppendLine(" └ Unused in Pool: ").Append(_world.ChunkPool.PooledVisualizers);
 
-        _topRightBuilder.AppendLine();
+            _topRightBuilder.AppendLine();
+        }
     }
 
     private void PopulateMiddleRightBuilder()

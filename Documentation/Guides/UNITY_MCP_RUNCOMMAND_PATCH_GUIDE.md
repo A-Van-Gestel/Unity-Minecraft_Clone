@@ -95,16 +95,75 @@ pointing back to this guide.
    Definitive `ApiNoLongerSupported` results now return without console logging; all other account
    errors still log as before.
 
+6. **Backport A — `get_components` deep-graph / non-TRS Matrix4x4 crash guard**
+   (`Modules/Unity.AI.MCP.Runtime/Serialization/UnityTypeConverters.cs`,
+   `Modules/Unity.AI.MCP.Editor/Helpers/GameObjectSerializer.cs`,
+   `Modules/Unity.AI.MCP.Editor/Tools/ManageGameObject.cs`) — backported from upstream
+   **2.13.0-pre.1** (UUM-144888). `Unity_ManageGameObject` `get_components` serializes public
+   members via reflection; a member exposing a deep non-`UnityEngine.Object` reference graph
+   overflowed the C stack inside `mono_gc_alloc_obj` and **crashed the Editor** (Newtonsoft's
+   `MaxDepth` guards only the read path). A `DepthLimitedJTokenWriter` now caps write depth at 64 —
+   the existing `JsonSerializationException` catch turns the overflow into a skipped field — and a
+   `Matrix4x4Converter` (registered on both the output and input serializers) emits the 16 elements
+   directly instead of reflecting a non-TRS matrix. Minimal port: `CreateTokenFromValue` keeps its
+   signature (no `SerializationResult`/sentinel machinery). Verified in-editor: a probe component
+   with a 300-deep property returned without crashing (`"Maximum depth 64 exceeded"` warning, field
+   skipped) and a `Matrix4x4` property serialized to `m00..m33`.
+
+7. **Backport B — keep MCP responsive while the Editor is unfocused**
+   (`Modules/Unity.AI.MCP.Editor/Bridge.cs`) — backported from upstream **2.13.0-pre.2** (MCP half
+   only; the chat/relay-account connection-recovery half is deliberately omitted). The command
+   queue drained off `EditorApplication.update`, which Unity **throttles when the Editor is
+   unfocused**, so tool calls stalled. A focus-independent `MainThreadCommandPump` (a background
+   `System.Threading.Timer`, inlined as a nested class in `Bridge.cs`) now ticks at 100 ms; when
+   work is pending it marshals the drain back to the main thread via the captured
+   `SynchronizationContext` and calls `EditorApplication.QueuePlayerLoopUpdate()` to wake the
+   throttled loop. `ProcessCommands` is reentrancy-guarded, so dual-driving it (pump + the retained
+   `update` hook) is safe; `isRunning` is now `volatile`. The relay binary is unchanged — this only
+   fixes the Editor-side drain throttle.
+
+8. **Backport C — keep the chat-Assistant runtime out of player builds**
+   (`Runtime/Unity.AI.Assistant.Runtime.asmdef`) — backported from upstream **2.13.0-pre.1**. The
+   assembly had empty `defineConstraints` with `includePlatforms: []`, so it compiled into IL2CPP
+   player builds even though it is editor-only in practice. Adding the constraint
+   `"UNITY_EDITOR || UNITY_AI_ASSISTANT_RUNTIME"` drops it from shipped builds; all 8 assemblies that
+   reference it are `*.Editor` asmdefs, so nothing in a player build breaks, and in-editor
+   compilation is unchanged (the `UNITY_EDITOR` arm). `Unity.AI.MCP.Runtime` and `Unity.AI.Tracing`
+   also build for all platforms but were left unconstrained upstream, so they are left as-is. The
+   player-build exclusion is only observable in an actual IL2CPP build; verified here only that the
+   editor still compiles clean.
+
+9. **MCP-1 (local improvement, not an upstream backport) — omit `localFixedCode` from RunCommand
+   success responses** (`Modules/Unity.AI.MCP.Editor/Tools/RunCommand.cs`). Every successful
+   `Unity_RunCommand` echoed the full namespace-wrapped rewrite of the script back in the response —
+   pure token waste for the calling agent, on every call. It is now dropped from the success
+   response and kept only on the `COMPILATION_FAILED` response, where it aids debugging. Verified:
+   success responses no longer carry `localFixedCode`; a deliberate compile error still returns it.
+
+10. **MCP-2 (local improvement, not an upstream backport) — a Warning must not fail the whole
+    RunCommand** (`Modules/Unity.AI.Assistant.Tools/Scripting/RunCommandTool.cs`). `ExecuteCommand`
+    treated any `LogType.Warning` in the execution logs as a failure (alongside Error/Exception) and
+    threw, so the MCP layer surfaced `UNEXPECTED_ERROR: Command was executed partially...` even though
+    the command ran fully — a constant false-failure for agents, since Unity code legitimately logs
+    warnings (deprecations, validation notes). The predicate now checks only `Error`/`Exception`,
+    matching the read-only sibling `RunReadOnlyCommandTool`; warnings still surface in `ExecutionLogs`.
+    **Verify (repro doubles as the regression check):** a command calling `result.LogWarning(...)`
+    returns success with the warning in the logs; a command calling `result.LogError(...)` still fails.
+
 ## Embed details / constraints
 
 - The package must stay pinned to **2.6.0-pre.1** (external constraint). The embedded copy is the
   same version; `Packages/manifest.json` is unchanged and `packages-lock.json` flips the source to
   `embedded` automatically.
-- `RelayApp~/` (520 MB of relay binaries) is **not** copied — only its `relay.json`, so the
-  package's `ServerInstaller` version check reports "up to date" against the relay already
-  installed at `~/.unity/relay/`. If `~/.unity/relay` is ever wiped, restore the binaries from a
-  registry copy of the package (delete the embed, let Unity re-resolve, reinstall, re-run the
-  script).
+- `RelayApp~/`: the embed keeps `relay.json` **and** the Windows binary `relay_win.exe` (~124 MB);
+  the ~400 MB of mac/linux binaries are skipped (Windows dev only). `relay_win.exe` must be present
+  because `ServerInstaller.InstallOrUpdateRelay` copies the bundled relay from the package to
+  `~/.unity/relay/` whenever the bundled version is newer than the installed one — i.e. on first use
+  and after any package/relay upgrade (the smart part: an upgrade would auto-propagate the new relay
+  if the pin were ever lifted). With only `relay.json`, the version check still reads fine but the
+  copy then fails (`CopyToTargetDir` → "original file does not exist") and the relay never
+  (re)installs — so if `~/.unity/relay` is wiped, the embedded `relay_win.exe` reinstalls it on the
+  next editor load.
 - MCP `Unity_RunCommand` calls that trip the package's unsafe-code classifier (e.g.
   `AssetDatabase.DeleteAsset`) fail with *"User interactions are not supported for MCP tool
   calls"* — by design (the approval UI only exists in the Assistant window). Use a menu item or

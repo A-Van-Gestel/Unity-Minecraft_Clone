@@ -22,6 +22,12 @@ namespace Jobs
     [BurstCompile]
     public struct StandardChunkGenerationJob : IJobFor
     {
+        /// <summary>Wrap period mask (2¹⁸ − 1 blocks) for float-only snoise inputs on the Precise64 path.</summary>
+        private const int DITHER_WRAP_MASK = (1 << 18) - 1;
+
+        /// <summary>Half the dither wrap period — offsets the wrap seams away from the spawn region.</summary>
+        private const int DITHER_WRAP_HALF = 1 << 17;
+
         #region Input Data
 
         [ReadOnly]
@@ -235,10 +241,16 @@ namespace Jobs
             // Calculate a secondary biome index for surface/strata block types to organically dither boundaries
             // We use Simplex noise (snoise) with an irrational scale (0.23f) and distinct offsets
             // to avoid grid-aligned repeating artifacts commonly seen with Perlin (cnoise).
-            float ditherNoiseX = noise.snoise(new float2(globalX * 0.23f + 1337f, globalZ * 0.23f + BaseSeed));
-            float ditherNoiseZ = noise.snoise(new float2(globalX * 0.23f - 42f, globalZ * 0.23f - BaseSeed));
-            float ditherX = globalX + ditherNoiseX * biome.SurfaceBlockDitheringWidth * 30f;
-            float ditherZ = globalZ + ditherNoiseZ * biome.SurfaceBlockDitheringWidth * 30f;
+            // Precise64: snoise is float-only, so its inputs wrap to a 2^18-block period (half-period
+            // offset keeps the wrap seams away from spawn) — the dither pattern repeats invisibly
+            // instead of collapsing into far-distance banding.
+            bool preciseNoise = BiomeSelectionNoise.GetCoordinatePrecision() == FastNoiseLite.CoordinatePrecision.Precise64;
+            int dgx = preciseNoise ? ((globalX + DITHER_WRAP_HALF) & DITHER_WRAP_MASK) - DITHER_WRAP_HALF : globalX;
+            int dgz = preciseNoise ? ((globalZ + DITHER_WRAP_HALF) & DITHER_WRAP_MASK) - DITHER_WRAP_HALF : globalZ;
+            float ditherNoiseX = noise.snoise(new float2(dgx * 0.23f + 1337f, dgz * 0.23f + BaseSeed));
+            float ditherNoiseZ = noise.snoise(new float2(dgx * 0.23f - 42f, dgz * 0.23f - BaseSeed));
+            double ditherX = globalX + ditherNoiseX * biome.SurfaceBlockDitheringWidth * 30f;
+            double ditherZ = globalZ + ditherNoiseZ * biome.SurfaceBlockDitheringWidth * 30f;
 
             int surfaceBiomeIndex;
             if (IsSingleBiomeMode)
@@ -298,7 +310,8 @@ namespace Jobs
                 // ----- 3D DENSITY BAND & DOMAIN WARPING -----
                 if (biome.Enable3DDensity && y >= bandLow && y <= bandHigh)
                 {
-                    float dx = globalX, dy = y, dz = globalZ;
+                    // double: exact world coords into the warp/noise chain (Precise64 path).
+                    double dx = globalX, dy = y, dz = globalZ;
 
                     if (biome.EnableDensityWarp)
                     {
@@ -426,7 +439,7 @@ namespace Jobs
                         if (caveLayer.Mode == CaveMode.Cheese)
                         {
                             if (!FeatureFlags.EnableCheese) continue;
-                            float cx = globalX, cy = y, cz = globalZ;
+                            double cx = globalX, cy = y, cz = globalZ;
                             if (caveLayer.EnableWarp)
                                 CaveWarpNoises[caveIdx].DomainWarp(ref cx, ref cy, ref cz);
 
@@ -445,7 +458,9 @@ namespace Jobs
                         {
                             if (!FeatureFlags.EnableSpaghetti) continue;
 
-                            float bound = caveNoise.GetNoise(globalX * 0.25f, y * 0.25f, globalZ * 0.25f);
+                            // 0.25 in double: exact int scaling for the Precise64 path (power-of-two
+                            // scale — bit-identical to the old float multiply on the Classic32 path).
+                            float bound = caveNoise.GetNoise(globalX * 0.25, y * 0.25, globalZ * 0.25);
                             if (bound < effectiveThreshold - 0.2f) continue;
 
                             float noiseVal = (caveNoise.GetNoise(globalX, y) + caveNoise.GetNoise(y, globalZ) +
@@ -466,7 +481,7 @@ namespace Jobs
                         {
                             if (!FeatureFlags.EnableNoodle) continue;
 
-                            float cx = globalX, cy = y, cz = globalZ;
+                            double cx = globalX, cy = y, cz = globalZ;
                             if (caveLayer.EnableWarp)
                                 CaveWarpNoises[caveIdx].DomainWarp(ref cx, ref cy, ref cz);
 
@@ -487,7 +502,7 @@ namespace Jobs
                         {
                             if (!FeatureFlags.EnableSpaghetti) continue;
 
-                            float cx = globalX, cy = y, cz = globalZ;
+                            double cx = globalX, cy = y, cz = globalZ;
                             if (caveLayer.EnableWarp)
                                 CaveWarpNoises[caveIdx].DomainWarp(ref cx, ref cy, ref cz);
 
@@ -568,10 +583,11 @@ namespace Jobs
                             }
                         }
 
-                        // Grid-cell election with this entry's spacing
+                        // Grid-cell election with this entry's spacing. Integer floor-div: exact to the
+                        // ±2³¹ edge, both signs (a float division here caps exactness at ±2²⁴).
                         int spacing = math.max(1, entry.Spacing);
-                        int cellX = (int)math.floor((float)globalX / spacing);
-                        int cellZ = (int)math.floor((float)globalZ / spacing);
+                        int cellX = ChunkMath.FloorDiv(globalX, spacing);
+                        int cellZ = ChunkMath.FloorDiv(globalZ, spacing);
 
                         // Seed includes the entry index for independence between entries
                         uint cellHash = math.hash(new int4(cellX, cellZ, BaseSeed, entryIndex));

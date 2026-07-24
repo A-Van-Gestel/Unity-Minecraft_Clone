@@ -1,4 +1,5 @@
 using System;
+using Helpers;
 using UnityEngine;
 
 namespace Data
@@ -12,14 +13,14 @@ namespace Data
     //
     // ── SCALE 1: Chunk Index ────────────────────────────────────
     //   Type:  ChunkCoord  (preferred)  or  Vector2Int (legacy)
-    //   Range: 0 – (WorldSizeInChunks-1)   →   e.g. 0–99 for a 100-chunk world
+    //   Range: fully unbounded, both signs (WS-3: XZ has no floor and no upper bound; negatives are in-world)
     //   Usage: Loop indices, region math, dictionary KEYS for worldData.Chunks
     //   How:   ChunkCoord.X / ChunkCoord.Z
     //          ChunkCoord.ToChunkIndex()
     //
     // ── SCALE 2: Voxel World Origin ─────────────────────────────
     //   Type:  Vector2Int  (always)
-    //   Range: 0 – (WorldSizeInVoxels-1)  →   e.g. 0–1599 for a 100-chunk world
+    //   Range: fully unbounded, both signs (WS-3: no floor, no upper bound)
     //   Usage: ChunkData.position, world-space queries, job inputs
     //   How:   ChunkCoord.ToVoxelOrigin()
     //          ChunkCoord.FromVoxelOrigin(Vector2Int)
@@ -34,17 +35,17 @@ namespace Data
     //   Chunk index  → Voxel origin:  chunkCoord.ToVoxelOrigin()
     //   Voxel origin → Chunk index:   ChunkCoord.FromVoxelOrigin(voxelPos)   or   new ChunkCoord(voxelPos)
     //   Chunk index  → World pos:     chunkCoord.ToWorldPosition()           →  Vector3(x*16, 0, z*16)
-    //   World pos    → Chunk index:   ChunkCoord.FromWorldPosition(pos)      →  floors then divides
+    //   Voxel pos    → Chunk index:   ChunkCoord.FromVoxelPosition(pos)      →  floors then divides
     //   Neighbor:                      chunkCoord.Neighbor(dx, dz)            →  offset by chunk indices
     //   ChunkCoord   → region math:   use chunkCoord.X / chunkCoord.Z directly
     // ============================================================
 
     public readonly struct ChunkCoord : IEquatable<ChunkCoord>
     {
-        /// <summary>Chunk index on the X axis. Range: 0 – (WorldSizeInChunks-1).</summary>
+        /// <summary>Chunk index on the X axis. Range: fully unbounded, both signs (WS-3: no floor, no upper bound).</summary>
         public readonly int X;
 
-        /// <summary>Chunk index on the Z axis. Range: 0 – (WorldSizeInChunks-1).</summary>
+        /// <summary>Chunk index on the Z axis. Range: fully unbounded, both signs (WS-3: no floor, no upper bound).</summary>
         public readonly int Z;
 
         #region Constructors
@@ -85,7 +86,7 @@ namespace Data
 
         /// <summary>
         /// Returns the Unity world-space position of this chunk's origin as a Vector3 (Y = 0).
-        /// Use this for <c>Transform.position</c>, <c>EnsureChunkExists</c>, and similar APIs.
+        /// Use this for <c>Transform.position</c> and similar Vector3-taking APIs.
         /// <para>Formula: <c>(X * ChunkWidth, 0, Z * ChunkWidth)</c></para>
         /// </summary>
         /// <returns>A <see cref="Vector3"/> representing the Unity world position of the chunk's origin.</returns>
@@ -100,7 +101,7 @@ namespace Data
         /// <example><c>WorldPos (800, 800)</c> -> <c>ChunkCoord (50, 50)</c></example>
         public static ChunkCoord FromVoxelOrigin(Vector2Int chunkVoxelPos)
         {
-            return new ChunkCoord(Mathf.FloorToInt((float)chunkVoxelPos.x / VoxelData.ChunkWidth), Mathf.FloorToInt((float)chunkVoxelPos.y / VoxelData.ChunkWidth));
+            return new ChunkCoord(ChunkMath.VoxelToChunk(chunkVoxelPos.x), ChunkMath.VoxelToChunk(chunkVoxelPos.y));
         }
 
         /// <summary>
@@ -111,31 +112,31 @@ namespace Data
         /// <example><c>WorldPos (800, 75, 800)</c> -> <c>ChunkCoord (50, 50)</c></example>
         public static ChunkCoord FromVoxelOrigin(Vector3Int voxelPos)
         {
-            return new ChunkCoord(Mathf.FloorToInt((float)voxelPos.x / VoxelData.ChunkWidth), Mathf.FloorToInt((float)voxelPos.z / VoxelData.ChunkWidth));
+            return new ChunkCoord(ChunkMath.VoxelToChunk(voxelPos.x), ChunkMath.VoxelToChunk(voxelPos.z));
         }
 
         /// <summary>
-        /// Creates a ChunkCoord from a Unity world-space position (e.g. <c>Transform.position</c>).
+        /// Creates a ChunkCoord from a fractional <b>voxel-space</b> position.
+        /// <para>⚠ NOT for a Unity transform — since WS-4 the two spaces differ by the floating origin. Convert a
+        /// transform with <c>WorldOrigin.UnityToChunk</c> instead; this is its voxel-space twin.</para>
         /// </summary>
-        /// <param name="worldPos">The floating-point world position in Unity space.</param>
+        /// <param name="voxelPos">The floating-point position in voxel world space.</param>
         /// <returns>The calculated <see cref="ChunkCoord"/>.</returns>
-        /// <example><c>WorldPos (800.5f, 75f, 800.5f)</c> -> <c>ChunkCoord (50, 50)</c></example>
-        public static ChunkCoord FromWorldPosition(Vector3 worldPos)
+        /// <example><c>VoxelPos (800.5f, 75f, 800.5f)</c> -> <c>ChunkCoord (50, 50)</c></example>
+        public static ChunkCoord FromVoxelPosition(Vector3 voxelPos)
         {
-            return new ChunkCoord(Mathf.FloorToInt(worldPos.x / VoxelData.ChunkWidth),
-                Mathf.FloorToInt(worldPos.z / VoxelData.ChunkWidth));
+            return new ChunkCoord(ChunkMath.WorldToChunk(voxelPos.x), ChunkMath.WorldToChunk(voxelPos.z));
         }
 
         /// <summary>
-        /// Creates a ChunkCoord from a 2D Unity world-space position.
+        /// Integer-exact overload: the chunk containing the given voxel cell. Pure shift math — exact
+        /// to the ±2³¹ edge (the float overload's precision caps at ±2²⁴ — Bug 19 class).
         /// </summary>
-        /// <param name="worldPos">The 2D floating-point world position (X and Z axes) in Unity space.</param>
-        /// <returns>The calculated <see cref="ChunkCoord"/>.</returns>
-        /// <example><c>WorldPos (800.5f, 800.5f)</c> -> <c>ChunkCoord (50, 50)</c></example>
-        public static ChunkCoord FromWorldPosition(Vector2 worldPos)
+        /// <param name="voxelCell">The global voxel cell.</param>
+        /// <returns>The containing chunk's coordinate.</returns>
+        public static ChunkCoord FromVoxelPosition(Vector3Int voxelCell)
         {
-            return new ChunkCoord(Mathf.FloorToInt(worldPos.x / VoxelData.ChunkWidth),
-                Mathf.FloorToInt(worldPos.y / VoxelData.ChunkWidth));
+            return new ChunkCoord(ChunkMath.VoxelToChunk(voxelCell.x), ChunkMath.VoxelToChunk(voxelCell.z));
         }
 
         #endregion

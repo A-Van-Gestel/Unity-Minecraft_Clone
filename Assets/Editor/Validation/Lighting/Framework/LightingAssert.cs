@@ -313,6 +313,7 @@ namespace Editor.Validation.Lighting.Framework
                 }
 
                 // --- Recycle through the REAL production Reset() ---
+                int epochBefore = subject.LifecycleEpoch;
                 subject.Reset(pos);
 
                 // --- Verify no stale state remains ---
@@ -327,6 +328,8 @@ namespace Editor.Validation.Lighting.Framework
                 if (subject.IsAwaitingMainThreadProcess) stale.Add("IsAwaitingMainThreadProcess");
                 if (subject.RemainingEdgeCheckRounds != 2)
                     stale.Add($"RemainingEdgeCheckRounds={subject.RemainingEdgeCheckRounds} (expected 2)");
+                if (subject.LifecycleEpoch != epochBefore + 1)
+                    stale.Add($"LifecycleEpoch={subject.LifecycleEpoch} (expected {epochBefore + 1} — Reset must bump the recycle counter, CP-3 ABA guard)");
                 if (subject.SunLightQueueCount != 0) stale.Add("SunlightBfsQueue");
                 if (subject.BlockLightQueueCount != 0) stale.Add("BlocklightBfsQueue");
                 if (subject.GetLightData(2, 5, 3) != 0) stale.Add("light @ (2,5,3)");
@@ -442,6 +445,12 @@ namespace Editor.Validation.Lighting.Framework
         /// <see cref="ChunkData.Reset"/> is responsible for clearing. Filtering to <c>[NonSerialized]</c>
         /// excludes on-disk save fields (whose reset is not Reset()'s job), avoiding false positives.
         /// </summary>
+        /// <summary>Transient fields whose CONTRACT is monotonic across recycles — their "reset" is an
+        /// increment, not a return-to-default — so the fresh-instance comparison must exempt them.
+        /// Every entry here MUST have an explicit assertion in <see cref="AssertResetClearsTransientState"/>
+        /// (silence is never accidental): <c>_lifecycleEpoch</c> is asserted to BUMP on Reset (CP-3 ABA guard).</summary>
+        private static readonly HashSet<string> s_monotonicTransientFields = new HashSet<string> { "_lifecycleEpoch" };
+
         private static List<FieldInfo> NonSerializedPrimitiveFields()
         {
             List<FieldInfo> result = new List<FieldInfo>();
@@ -451,6 +460,7 @@ namespace Editor.Validation.Lighting.Framework
                 if (!f.IsDefined(typeof(NonSerializedAttribute), false)) continue;
                 if (f.IsInitOnly) continue; // readonly (e.g. the BFS queues) — checked explicitly, not settable
                 if (!f.FieldType.IsPrimitive || f.FieldType == typeof(char)) continue;
+                if (s_monotonicTransientFields.Contains(f.Name)) continue; // asserted explicitly, not by equality
                 result.Add(f);
             }
 

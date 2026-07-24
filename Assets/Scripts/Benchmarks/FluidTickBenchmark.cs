@@ -3,7 +3,6 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Reflection;
 using System.Text;
 using Data;
 using Helpers;
@@ -15,13 +14,12 @@ using Debug = UnityEngine.Debug;
 namespace Benchmarks
 {
     /// <summary>
-    /// Isolated micro-benchmark for the <b>block-behavior tick</b> (grass + fluid), the workload TG-4 re-architects.
-    /// It drives the <b>production</b> path — <see cref="Chunk.TickUpdate"/> → <see cref="BlockBehavior.Behave"/>/
-    /// <see cref="BlockBehavior.Active"/> over the real per-family <see cref="ChunkData"/> buckets, then
-    /// <c>World.ApplyModifications</c> — over hand-seeded interior chunks (see <see cref="FluidBenchmarkScenarios"/>),
-    /// with no rendering, meshing, or lighting noise. Its purpose is the <b>TG-4 vs TG-5 profile gate</b>: quantify the
-    /// main-thread cost per active voxel and how it scales, so the choice to jobify (Phase 2+) or take the lighter
-    /// TG-5 finisher rests on data.
+    /// Isolated micro-benchmark for the <b>block-behavior tick</b> (grass + fluid). It drives the <b>production</b>
+    /// parallel path — <see cref="World.TickChunksParallel"/> → the Burst <see cref="FluidTickJob"/> per chunk (every
+    /// fluid job-ticked via the Y-band neighbor halo) with grass on <see cref="BlockBehavior.Behave"/>/
+    /// <see cref="BlockBehavior.Active"/>, then <c>World.ApplyModifications</c> — over hand-seeded interior chunks
+    /// (see <see cref="FluidBenchmarkScenarios"/>), with no rendering, meshing, or lighting noise. It is the standing
+    /// regression benchmark for the shipped TG-4 fluid tick: quantify the per-active-voxel cost and how it scales.
     /// <para>
     /// <b>World seam:</b> the benchmark owns its world — it creates its own inert <see cref="World"/> (see
     /// <see cref="CreateInertWorld"/>) and <b>refuses to run if a live <c>World.Instance</c> already exists</b>, so it
@@ -60,18 +58,6 @@ namespace Benchmarks
         [Min(0)]
         private int _warmupTicks = 2;
 
-        [Tooltip("TG-4 Phase 4b A/B: add the managed-border leg (Enable Fluid Border Burst OFF = the Phase-3/4a " +
-                 "hybrid) alongside the halo leg(s), to measure the serial main-thread gather cost vs the managed " +
-                 "border. Requires Enable Fluid Burst Tick. Off = halo leg(s) only.")]
-        [SerializeField]
-        private bool _sweepBorderBurst = true;
-
-        [Tooltip("TG-4 Phase 4b Y-band A/B: split the halo leg into full-height vs Y-band (Enable Fluid Band Gather " +
-                 "OFF then ON) to measure the band's per-tick copy reduction. On = the band's primary A/B (halo-full " +
-                 "vs halo-band); Off = a single halo leg at the world's current band flag.")]
-        [SerializeField]
-        private bool _sweepBandGather = true;
-
         [Header("Execution Settings")]
         [Tooltip("If checked, the benchmark runs automatically when the scene starts.")]
         [SerializeField]
@@ -93,16 +79,6 @@ namespace Benchmarks
 
         private bool _isBenchmarking;
         private World _ownWorld;
-
-        // TG-4 Phase 4b A/B: World._enableFluidBorderBurst / _enableFluidBandGather are private [SerializeField]s; the
-        // benchmark flips them per leg to compare the managed-border hybrid vs the full halo vs the Y-band halo.
-        // Reflection (not a public setter) keeps these flags dev-only — this file is already gated to
-        // UNITY_EDITOR || DEVELOPMENT_BUILD.
-        private static readonly FieldInfo s_borderBurstField =
-            typeof(World).GetField("_enableFluidBorderBurst", BindingFlags.Instance | BindingFlags.NonPublic);
-
-        private static readonly FieldInfo s_bandGatherField =
-            typeof(World).GetField("_enableFluidBandGather", BindingFlags.Instance | BindingFlags.NonPublic);
 
         #endregion
 
@@ -159,7 +135,7 @@ namespace Benchmarks
 
         private void Update()
         {
-            if (Keyboard.current != null && Keyboard.current[_triggerKey].wasPressedThisFrame)
+            if (InputManager.Instance != null && InputManager.Instance.DebugKeyPressed(_triggerKey))
                 TriggerBenchmark();
         }
 
@@ -223,27 +199,14 @@ namespace Benchmarks
             Stopwatch totalStopwatch = Stopwatch.StartNew();
             List<ScenarioResult> results = new List<ScenarioResult>();
 
-            // Build the A/B leg list once (managed-border hybrid, full halo, Y-band halo) per the sweep flags, so the
-            // rows for each scenario sit adjacent for an at-a-glance delta. Flags are restored after the whole suite.
-            bool originalBorderBurst = World.Instance.EnableFluidBorderBurst;
-            bool originalBandGather = World.Instance.EnableFluidBandGather;
-            List<BenchLeg> legs = BuildLegs();
-
             foreach (FluidScenario scenario in FluidBenchmarkScenarios.All())
             {
-                foreach (BenchLeg leg in legs)
-                {
-                    ScenarioResult result = default;
-                    yield return RunScenario(scenario, leg, r => result = r);
-                    results.Add(result);
-                }
+                ScenarioResult result = default;
+                yield return RunScenario(scenario, r => result = r);
+                results.Add(result);
 
                 yield return null; // let a frame breathe between scenarios
             }
-
-            // Restore both world flags after the sweep.
-            SetBorderBurst(originalBorderBurst);
-            SetBandGather(originalBandGather);
 
             totalStopwatch.Stop();
             Debug.Log("--- All Fluid Tick Runs Complete. Generating Report... ---");
@@ -258,16 +221,10 @@ namespace Benchmarks
         /// the fluid spreads then settles — so the run, not the tick, is the iid unit the statistics aggregate over).
         /// </summary>
         /// <param name="scenario">The scenario to measure.</param>
-        /// <param name="leg">
-        /// The A/B leg to measure under (its border-burst + band-gather flags + label). Set on <c>World</c> before the
-        /// runs so the production <c>Chunk.TickUpdate</c> fluid path takes that exact configuration.
-        /// </param>
         /// <param name="onComplete">Callback receiving the aggregated result.</param>
-        private IEnumerator RunScenario(FluidScenario scenario, BenchLeg leg, Action<ScenarioResult> onComplete)
+        private IEnumerator RunScenario(FluidScenario scenario, Action<ScenarioResult> onComplete)
         {
-            SetBorderBurst(leg.BorderBurst);
-            SetBandGather(leg.BandGather);
-            Debug.Log($"--- Running: {scenario.Name} [{leg.Label}] ({scenario.ChunkCount} chunk(s), {scenario.Ticks} ticks × {_benchmarkRuns} runs) ---");
+            Debug.Log($"--- Running: {scenario.Name} ({scenario.ChunkCount} chunk(s), {scenario.Ticks} ticks × {_benchmarkRuns} runs) ---");
 
             // Discarded warm-up run (absorbs JIT/first-touch; not measured). Runs the configurable _warmupTicks.
             {
@@ -314,74 +271,17 @@ namespace Benchmarks
             // clean CPU cost, not inflated by GC/OS-scheduler spikes (whose magnitude is shown separately by stddev/peak).
             double usPerVoxel = peakActive > 0 ? stats.Min * 1000.0 / peakActive : 0;
 
-            onComplete(new ScenarioResult(scenario.Name, leg.Label, scenario.ChunkCount, peakActive, stats, maxMsPerTick, usPerVoxel));
-        }
-
-        /// <summary>One A/B leg: the World fluid-flag configuration to measure under, plus its report label.</summary>
-        private readonly struct BenchLeg
-        {
-            public readonly bool BorderBurst;
-            public readonly bool BandGather;
-            public readonly string Label;
-
-            public BenchLeg(bool borderBurst, bool bandGather, string label)
-            {
-                BorderBurst = borderBurst;
-                BandGather = bandGather;
-                Label = label;
-            }
+            onComplete(new ScenarioResult(scenario.Name, scenario.ChunkCount, peakActive, stats, maxMsPerTick, usPerVoxel));
         }
 
         /// <summary>
-        /// Builds the A/B leg list from the sweep flags. With both binds available: an optional managed-border leg
-        /// (<see cref="_sweepBorderBurst"/>), then either the full-vs-band halo pair (<see cref="_sweepBandGather"/>)
-        /// or a single halo leg at the world's current band flag. If neither sweep is on — or reflection couldn't bind
-        /// the private flags — it degrades to a single leg at the world's current state (measured, never mutated).
+        /// One behavior step over all chunks: run the production parallel fluid tick (<see cref="World.TickChunksParallel"/>
+        /// — schedule every chunk's <see cref="FluidTickJob"/>, complete, drain grass + the fluid replay), then apply
+        /// the emitted mods. The exact path the shipped tick pump takes each <c>TickLength</c>.
         /// </summary>
-        private List<BenchLeg> BuildLegs()
-        {
-            bool currentBorder = World.Instance.EnableFluidBorderBurst;
-            bool currentBand = World.Instance.EnableFluidBandGather;
-
-            // Degrade to measuring (never mutating) the world's current state when reflection can't bind the private
-            // flags, or when no sweep is requested.
-            bool canSweep = s_borderBurstField != null && s_bandGatherField != null;
-            if (!canSweep)
-                Debug.LogWarning("FluidTickBenchmark: could not bind World._enableFluidBorderBurst/_enableFluidBandGather " +
-                                 "by reflection — measuring only the current flag state (a field may have been renamed).");
-
-            if (!canSweep || (!_sweepBorderBurst && !_sweepBandGather))
-                return new List<BenchLeg> { new BenchLeg(currentBorder, currentBand, "current") };
-
-            List<BenchLeg> legs = new List<BenchLeg>(3);
-            if (_sweepBorderBurst)
-                legs.Add(new BenchLeg(false, false, "managed"));
-
-            if (_sweepBandGather)
-            {
-                legs.Add(new BenchLeg(true, false, "halo-full"));
-                legs.Add(new BenchLeg(true, true, "halo-band"));
-            }
-            else
-            {
-                legs.Add(new BenchLeg(true, currentBand, "halo"));
-            }
-
-            return legs;
-        }
-
-        /// <summary>Sets <c>World._enableFluidBorderBurst</c> by reflection (no-op if the field couldn't bind).</summary>
-        private static void SetBorderBurst(bool value) => s_borderBurstField?.SetValue(World.Instance, value);
-
-        /// <summary>Sets <c>World._enableFluidBandGather</c> by reflection (no-op if the field couldn't bind).</summary>
-        private static void SetBandGather(bool value) => s_bandGatherField?.SetValue(World.Instance, value);
-
-        /// <summary>One behavior step over all chunks: tick each (production path), then drain the mod queue.</summary>
         private static void StepAll(List<Chunk> chunks)
         {
-            foreach (Chunk chunk in chunks)
-                chunk.TickUpdate();
-
+            World.Instance.TickChunksParallel(chunks);
             World.Instance.ApplyModifications();
         }
 
@@ -406,13 +306,11 @@ namespace Benchmarks
                 scenario.Seed(data);
                 data.IsPopulated = true;
 
+                // Reset is bypassed on purpose (it would re-fetch ChunkData from worldData instead of using our seeded
+                // data). Nothing here needs the chunk's Unity-space position: this substrate never renders, and the
+                // global→local conversion ApplyModifications performs derives the local cell from the voxel
+                // coordinate alone.
                 Chunk chunk = new Chunk(coord);
-                // Chunk.Reset normally sets ChunkPosition, but we bypass Reset (it would re-fetch ChunkData from
-                // worldData instead of using our seeded data). Set it explicitly: ApplyModifications' six-neighbor
-                // re-activation converts global→local via Chunk.GetVoxelPositionInChunkFromGlobalVector3, which
-                // subtracts ChunkPosition — without it, chunks at a non-zero origin (the multi-chunk scenarios)
-                // read the wrong cell and mis-register neighbors.
-                chunk.ChunkPosition = coord.ToWorldPosition();
                 chunk.ChunkData = data;
                 data.Chunk = chunk;
 
@@ -518,18 +416,16 @@ namespace Benchmarks
         private readonly struct ScenarioResult
         {
             public readonly string Name;
-            public readonly string Leg; // "managed" / "halo-full" / "halo-band" (or "halo"/"current") — the A/B leg this row measures
             public readonly int ChunkCount;
             public readonly int PeakActive;
             public readonly DistributionStats Stats;
             public readonly double PeakMsPerTick;
             public readonly double UsPerVoxel;
 
-            public ScenarioResult(string name, string leg, int chunkCount, int peakActive,
+            public ScenarioResult(string name, int chunkCount, int peakActive,
                 DistributionStats stats, double peakMsPerTick, double usPerVoxel)
             {
                 Name = name;
-                Leg = leg;
                 ChunkCount = chunkCount;
                 PeakActive = peakActive;
                 Stats = stats;
@@ -546,17 +442,12 @@ namespace Benchmarks
             StringBuilder report = new StringBuilder();
             report.AppendLine("<color=cyan><b>--- FLUID / BEHAVIOR TICK BENCHMARK REPORT ---</b></color>");
             report.AppendLine($"Measured over {_benchmarkRuns} run(s) per scenario, {_warmupTicks} warm-up tick(s) discarded.");
-            report.AppendLine("Path: production Chunk.TickUpdate (per-family buckets) + World.ApplyModifications. " +
-                              "Isolated — no render/mesh/light.");
+            report.AppendLine("Path: production World.TickChunksParallel (schedule every chunk's FluidTickJob → complete → " +
+                              "drain grass + fluid replay) + World.ApplyModifications. Every fluid ticks in-job via the " +
+                              "Y-band neighbor halo. Isolated — no render/mesh/light.");
             report.AppendLine("ms/tick columns are over per-run avg-ms/tick samples (one per run). min = clean floor; " +
-                              "mean includes GC/scheduler cost; stddev = spread (mostly per-voxel mod-list GC); peak = worst single tick.");
+                              "mean includes GC/scheduler cost; stddev = spread; peak = worst single tick.");
             report.AppendLine("µs/voxel = MIN ms/tick × 1000 ÷ peak active voxels (clean per-voxel cost, GC-spike-free).");
-            report.AppendLine("Leg = the A/B config: 'managed' = Phase-3/4a hybrid (border fluids on the managed path); " +
-                              "'halo-full' = Phase-4b full Burst halo (every fluid Bursted, border voxels reading the " +
-                              "per-tick 9-snapshot neighbor halo, gathered full chunk height); 'halo-band' = the same " +
-                              "halo with the gather/read window sized to the active-fluid Y-band. Serial cost — the " +
-                              "benchmark drives Chunk.TickUpdate per chunk (not the parallel pass), so halo-full→managed " +
-                              "is the added gather cost and halo-band→halo-full is the band's per-tick copy reduction.");
             report.AppendLine($"Total wall-clock runtime: {BenchmarkEnvironment.FormatDuration(totalElapsed)}");
             report.AppendLine();
             report.Append(BenchmarkEnvironment.DescribeSystem());
@@ -564,13 +455,12 @@ namespace Benchmarks
             report.AppendLine();
 
             ReportTable table = new ReportTable(
-                "Scenario", "Leg", "Chunks", "PeakActive", "mean", "min", "median", "stddev", "peak", "µs/voxel");
+                "Scenario", "Chunks", "PeakActive", "mean", "min", "median", "stddev", "peak", "µs/voxel");
 
             foreach (ScenarioResult r in results)
             {
                 table.AddRow(
                     r.Name,
-                    r.Leg,
                     r.ChunkCount.ToString(),
                     r.PeakActive.ToString(),
                     r.Stats.Mean.ToString("F3"),

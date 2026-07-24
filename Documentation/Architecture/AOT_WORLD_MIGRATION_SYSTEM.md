@@ -1,8 +1,17 @@
 # Design Document: AOT World Migration System
 
-**Version:** 1.1  
-**Date:** 2026-02-24  
-**Status:** Implemented (Stable)  
+**Version:** 1.2  
+**Date:** 2026-07-17  
+**Status:** Implemented (Stable)
+
+> **Reading the code listings below:** they are illustrative of the *design*, not a mirror of the source, and they
+> have drifted in three places (noted 2026-07-17, when the v12→v13 migration was written against them).
+> `WorldMigrationStep` also has an **abstract `ChangeSummary`** (a player-facing one-liner shown in the migration
+> prompt) that §2's listing omits — a new step will not compile without it. The naming convention is
+> `Migration_v{S}_to_v{T}_{Desc}.**cs**` for the *file* but `MigrationV{S}ToV{T}{Desc}` for the *class*, not the
+> underscored class name §5's example shows. And §6's "do not set the version field inside `MigrateLevelDat`" is
+> sound advice that **every shipped step violates** — harmlessly, since the manager re-stamps it afterwards, but do
+> not be surprised by it. `MigrationManager._steps` (§3) is the real registration list.
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)  
 **Context:** Infinite Voxel Engine Serialization (Region-Based)
 
@@ -528,6 +537,28 @@ namespace UI
 }
 ```
 
+### 4.1. Version-tolerant reads: `LevelDatCodec` (2026-07-17)
+
+Disk migration runs only when a world is **played** — but `level.dat` is *read* earlier and more often:
+the world list, the selection details panel (minimap player marker, border radius), and `World.StartWorld`'s
+editor-replay path all parse it through `SaveSystem.LoadWorldMetadata`. Parsing an old document directly with
+the live `WorldSaveData` was only ever accidentally safe (additive changes default missing fields); the v13
+`player.position` re-type broke it — JsonUtility silently blanks the field (§6), which put every unmigrated
+world's minimap marker at chunk (0, 0).
+
+`Assets/Scripts/Serialization/LevelDatCodec.cs` closes this class of bug by reusing the migration steps as a
+**read codec**: `ReadNormalized(json)` probes the version and, for old documents, folds the pending steps'
+`MigrateLevelDat` transforms over the JSON **in memory** before the live-type parse. The frozen DTOs inside
+the steps are the codec tables, so a future format change extends the read path automatically when its step
+is registered. Three invariants:
+
+- **Read-only.** The codec never writes to disk; on-disk migration (backup, rollback, chunks) remains
+  exclusively `MigrationManager`'s job at Play time.
+- **`version` stays the on-disk value.** Only the *contents* are normalized — `RequiresMigration` and the
+  menu's version UI still key off the real disk version.
+- **Fails open.** A broken step chain degrades to the raw live-type parse (the pre-codec behavior) with an
+  error log, never a blocked world list.
+
 ---
 
 ## 5. The "True DTO" Migration Example (`Migration_v1_to_v2_RemoveNeedsLight.cs`)
@@ -660,6 +691,26 @@ namespace Serialization.Migration.Steps
 ## 6. Authoring Guidelines for Future Migrations
 
 These rules apply to every new `WorldMigrationStep` written against this system.
+
+**Frozen DTOs are not optional for `level.dat` either — and an additive change will not tell you.** *(Added
+2026-07-17, learned the expensive way during WS-4c.)* Four shipped steps — v3→v4, v6→v7, v10→v11, v11→v12 — read
+the **live** `WorldSaveData`, mutated one field, and wrote it back. That is fine for an *additive* change, because
+`JsonUtility` fills an absent field with a default, and every `level.dat` change up to v12 was additive. So the rule
+in §1.2 went unenforced for nine versions with no symptom.
+The v12→v13 **re-type** (`player.position`: `Vector3` → `ChunkRelativePosition`) is what it cannot survive: an old
+document's `"position":{"x":..,"y":..,"z":..}` has none of the members the new type looks for, so the field is
+**silently defaulted and written away** — no exception, no log, the player's position simply gone in every save
+below v13 (there were ~200 of them on disk at the time, spanning v1–v12). The backup is the only recourse, and the
+player has to know to use it.
+The fix is `Steps/LegacyLevelDat.cs`: one frozen DTO for the whole v1–v12 `level.dat` shape, which those four steps
+now read. **Why one shape covers all four:** a step migrating vN→vN+1 only ever sees vN-shaped JSON, and additive
+history means the v12 shape is a superset of anything they can receive — so it can never *drop* a field (a v3
+document has no v11 fields to lose), and fields the source lacks are written at their defaults and then set
+correctly by the later step that owns them. **Never extend a frozen DTO.** A future re-type writes its own for its
+own era; that is the entire point.
+The general rule, stated so the next person does not have to rediscover it: **if a step round-trips the whole
+document through a live type, it is a landmine waiting for the first non-additive change.** Freeze it when you
+write it, not when it breaks.
 
 **Always fully parse every field.** The `remainder` pattern — reading everything after a known point as an opaque blob — is forbidden. It is only safe for changes to the last field in a struct. Any change anywhere other than the final field will silently misalign all subsequent
 bytes in every affected chunk. Read every field explicitly and write them in the new order.

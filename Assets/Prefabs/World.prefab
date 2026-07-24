@@ -11,6 +11,7 @@ GameObject:
   - component: {fileID: 927538490966982780}
   - component: {fileID: 3602352557729800983}
   - component: {fileID: 715589282694584058}
+  - component: {fileID: 2845961039914578517}
   m_Layer: 0
   m_Name: World
   m_TagString: Untagged
@@ -58,6 +59,7 @@ MonoBehaviour:
     fluidRefraction: 100
     smoothLighting: 1
     clouds: 2
+    enableFoliageSway: 1
     vSync: 1
     unlimitedFps: 0
     maxFps: 120
@@ -67,20 +69,44 @@ MonoBehaviour:
     enableWater: 1
     enableMajorFloraPass: 1
     enableMinorFloraPass: 1
+    enableFarLands: 0
     saveCompression: 2
     maxInitialLoadRadius: 10
     maxMeshRebuildsPerFrame: 10
     maxLightJobsPerFrame: 32
     maxStructureModsPerFrame: 5000
     maxInFlightMeshJobs: 20
+    maxInFlightGenerationJobs: 32
+    maxInFlightLightingJobs: 64
     chunkJobArrayPoolRetention: 512
     calibrationVersion: 0
+    enablePipelineTimeBudgets: 1
+    scaleBudgetCeilingsWithFpsCap: 1
+    genProcessBudgetMs: 6
+    lightScheduleBudgetMs: 8
+    meshScheduleBudgetMs: 6
+    meshApplyBudgetMs: 4
+    drawApplyBudgetMs: 2
+    enableGenerationPanicGate: 1
+    panicGateCloseThreshold: 256
+    panicGateReopenThreshold: 128
     benchmarkRegionSize: 64
     benchmarkGenerationSpeeds: 10; 20; 50; 100; 200
     benchmarkLoadingSpeeds: 50; 100; 200
     enableDiagnosticLogs: 0
     enableWaterDiagnosticLogs: 0
     enableSaveSystemDiagnosticLogs: 0
+    debugHudShowFps: 1
+    debugHudShowGraphicsApi: 1
+    debugHudShowWorldInfo: 1
+    debugHudShowPlayerInfo: 1
+    debugHudShowChunkStats: 1
+    debugHudShowSectionInfo: 1
+    debugHudShowGroundVoxel: 1
+    debugHudShowTargetVoxel: 1
+    debugHudShowChunkLifecycle: 0
+    debugHudShowPerformance: 1
+    debugHudShowVisualization: 1
     enableVolatileSaveData: 1
   _worldTypeRegistry: {fileID: 11400000, guid: 3038e8b8e1ab9ae44802528aa73aa06a, type: 2}
   globalLightLevel: 1
@@ -117,10 +143,15 @@ MonoBehaviour:
     m_NumColorKeys: 2
     m_NumAlphaKeys: 2
   player: {fileID: 0}
-  spawnPosition: {x: 0, y: 0, z: 0}
+  spawnPosition:
+    _chunkX: 0
+    _chunkZ: 0
+    localPosition: {x: 0, y: 0, z: 0}
   spawnPositionOffset: {x: 0.5, y: 1.1, z: 0.5}
   debugScreen: {fileID: 0}
   clouds: {fileID: 0}
+  _windBlocksPerSecond: {x: -0.6, y: 0}
+  _borderWall: {fileID: 0}
   worldData:
     worldName: Prototype
     seed: 0
@@ -129,11 +160,6 @@ MonoBehaviour:
   chunkBorderPrefab: {fileID: 2348571843614231521, guid: 0c5d03a94304a4b4bbf7153e8f2675e4, type: 3}
   voxelVisualizer: {fileID: 0}
   visualizationMode: 0
-  _enableFluidBurstTick: 1
-  _enableParallelFluidTick: 1
-  _enableFluidBorderBurst: 1
-  _enableFluidBandGather: 1
-  _enableLightingBandGather: 1
 --- !u!114 &715589282694584058
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -149,3 +175,25 @@ MonoBehaviour:
   creativeInventoryWindow: {fileID: 0}
   cursorSlot: {fileID: 0}
   pauseMenuController: {fileID: 0}
+--- !u!114 &2845961039914578517
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2574360936984693049}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fc7c222c6d1932646a2d07ca58c8b060, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::FoliageSway
+  _world: {fileID: 3602352557729800983}
+  _amplitudeBlocks: 0.08
+  _frequency: 1.8
+  _gustFraction: 0.35
+  _gustFrequency: 0.6
+  _referenceWindSpeed: 0.6
+  _wavelengthBlocks: 14
+  _phaseJitter: 0.2
+  _verticalBobFraction: 0.3
+  _gustSpatialMultiplier: 0.35

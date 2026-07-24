@@ -1,6 +1,6 @@
 using Data;
+using Helpers;
 using Jobs.BurstData;
-using MyBox;
 using Physics;
 using Placement;
 using Unity.Mathematics;
@@ -29,6 +29,13 @@ public class PlayerInteraction : MonoBehaviour
 
     private PlacementController _placement;
     private PlacementProbe _lastProbe;
+
+    /// <summary>
+    /// The floating origin <see cref="_lastProbe"/> was resolved under. Kept beside the probe so a block
+    /// modification is addressed in the same coordinate frame its cells were found in, rather than re-reading a
+    /// global that may have re-anchored since.
+    /// </summary>
+    private Vector3Int _lastProbeOrigin;
 
     [Tooltip("Distance between each ray-cast check, lower value means better accuracy")]
     public float checkIncrement = 0.05f;
@@ -72,10 +79,20 @@ public class PlayerInteraction : MonoBehaviour
             // Destroy block.
             if (_input.AttackPressed)
             {
-                _world.AddModification(new VoxelMod(highlightBlock.position.ToVector3Int(), blockId: BlockIDs.Air)
+                // VoxelMod.GlobalPosition is voxel space (it is persisted), so the probe's Unity-space cell converts.
+                // Read from the probe rather than the highlight transform: the cell is already exact there, with no
+                // float round-trip to re-derive it from.
+                Vector3Int breakVoxel = ToVoxelMod(_lastProbe.HitCell);
+
+                // TF-14: the fence gates edits, not aiming — a block reached through the wall highlights but
+                // cannot be broken. (Placement is gated inside the probe via PlacementController.CanPlaceAt.)
+                if (_world.IsVoxelInsideBorder(breakVoxel))
                 {
-                    ImmediateUpdate = true,
-                });
+                    _world.AddModification(new VoxelMod(breakVoxel, blockId: BlockIDs.Air)
+                    {
+                        ImmediateUpdate = true,
+                    });
+                }
             }
 
             // Place block.
@@ -90,7 +107,7 @@ public class PlayerInteraction : MonoBehaviour
 
                 byte meta = ComputePlacementMeta(placedBlockType, _lastProbe.HitNormal);
 
-                _world.AddModification(new VoxelMod(placeBlock.position.ToVector3Int(), placedBlockId)
+                _world.AddModification(new VoxelMod(ToVoxelMod(_lastProbe.PlaceCell), placedBlockId)
                 {
                     Meta = meta,
                     ImmediateUpdate = true,
@@ -100,6 +117,17 @@ public class PlayerInteraction : MonoBehaviour
         }
     }
 
+
+    /// <summary>
+    /// Converts a Unity-space cell from the placement probe into the absolute voxel cell a
+    /// <see cref="VoxelMod"/> is addressed in — <c>VoxelMod.GlobalPosition</c> is persisted, so it must never
+    /// carry a Unity-space value.
+    /// </summary>
+    /// <param name="unityCell">The Unity-space cell resolved by the probe.</param>
+    /// <returns>The absolute voxel cell to modify.</returns>
+    // Uses the probe's own origin, not a fresh global read: the cell and the offset must come from the same frame,
+    // or a re-anchor between the probe and the click would address the edit to the wrong voxel.
+    private Vector3Int ToVoxelMod(Vector3Int unityCell) => unityCell + _lastProbeOrigin;
 
     /// <summary>
     /// Computes the metadata byte for a freshly-placed block based on its
@@ -178,7 +206,9 @@ public class PlayerInteraction : MonoBehaviour
         // Use the override if provided, otherwise fall back to the player's current setting.
         bool checkFluids = overrideInteractWithFluids ?? interactWithFluids;
 
-        if (_placement.MarchRay(_playerCamera.position, _playerCamera.forward, checkFluids, skipTags, reach, checkIncrement,
+        // Read the origin fresh — never cached — so a re-anchor takes effect on the very next raycast.
+        if (_placement.MarchRay(_playerCamera.position, _playerCamera.forward, checkFluids, skipTags, reach,
+                checkIncrement, WorldOrigin.OriginVoxel,
                 out Vector3Int hitCell, out int3 hitNormal, out Vector3Int adjacentCell))
         {
             return new VoxelRaycastResult
@@ -204,7 +234,10 @@ public class PlayerInteraction : MonoBehaviour
             ? _world.BlockTypes[heldSlot.ItemSlot.Stack.ID]
             : null;
 
-        PlacementProbe probe = _placement.Probe(_playerCamera.position, _playerCamera.forward, heldBlock, interactWithFluids, reach, checkIncrement);
+        // Read the origin fresh each frame — never cached at construction — so a re-anchor takes effect immediately.
+        _lastProbeOrigin = WorldOrigin.OriginVoxel;
+        PlacementProbe probe = _placement.Probe(_playerCamera.position, _playerCamera.forward, heldBlock,
+            interactWithFluids, reach, checkIncrement, _lastProbeOrigin);
         _lastProbe = probe;
 
         if (!probe.DidHit)

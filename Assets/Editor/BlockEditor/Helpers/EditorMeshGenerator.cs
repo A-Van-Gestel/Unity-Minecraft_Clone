@@ -117,7 +117,8 @@ namespace Editor.BlockEditor.Helpers
                     TopL0 = fullBright, TopL1 = fullBright, TopL2 = fullBright, TopL3 = fullBright,
                     BotL0 = fullBright, BotL1 = fullBright, BotL2 = fullBright, BotL3 = fullBright,
                 };
-                VoxelMeshHelper.GenerateCrossMesh(textureID, in crossLights, Vector3Int.zero,
+                // swayPhase 0: editor preview icons are static — no wind phase needed.
+                VoxelMeshHelper.GenerateCrossMesh(textureID, in crossLights, Vector3Int.zero, swayPhase: 0f,
                     ref vertexIndex, ref nativeVertices, ref nativeTransparentTris, ref nativeUvs, ref nativeColors, ref nativeNormals,
                     ref nativeLightData);
             }

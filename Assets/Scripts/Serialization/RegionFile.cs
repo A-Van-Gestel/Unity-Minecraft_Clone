@@ -38,45 +38,65 @@ namespace Serialization
             // Lock during initialization to be safe, though usually called once.
             lock (_fileLock)
             {
-                bool exists = File.Exists(_filePath);
-                _fileStream = new FileStream(_filePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
-
-                if (!exists || _fileStream.Length < SECTOR_SIZE * 2)
+                try
                 {
-                    _fileStream.SetLength(SECTOR_SIZE * 2);
-                    _sectorUsage.Add(true); // Header 1
-                    _sectorUsage.Add(true); // Header 2
+                    InitializeCore();
                 }
-                else
+                catch
                 {
-                    int totalSectors = (int)(_fileStream.Length / SECTOR_SIZE);
-                    for (int i = 0; i < totalSectors; i++) _sectorUsage.Add(false);
-                    _sectorUsage[0] = true;
-                    _sectorUsage[1] = true;
+                    // CP-3: a partial init (open succeeded, header read/SetLength threw) must not leak
+                    // the exclusive FileStream — the leaked handle would make every eviction-retry
+                    // re-open fail with a sharing violation until the finalizer runs, converting a
+                    // transient fault into a persistent one.
+                    _fileStream?.Dispose();
+                    _fileStream = null;
+                    throw;
+                }
+            }
+        }
 
-                    // Read Header
-                    _fileStream.Seek(0, SeekOrigin.Begin);
-                    using BinaryReader reader = new BinaryReader(_fileStream, Encoding.Default, true);
+        /// <summary>Opens the region file and reads its location table (body of <see cref="Initialize"/>;
+        /// the caller owns the lock and the dispose-on-throw guard).</summary>
+        private void InitializeCore()
+        {
+            bool exists = File.Exists(_filePath);
+            _fileStream = new FileStream(_filePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
 
-                    // Read Offsets
-                    for (int i = 0; i < TOTAL_CHUNKS; i++)
+            if (!exists || _fileStream.Length < SECTOR_SIZE * 2)
+            {
+                _fileStream.SetLength(SECTOR_SIZE * 2);
+                _sectorUsage.Add(true); // Header 1
+                _sectorUsage.Add(true); // Header 2
+            }
+            else
+            {
+                int totalSectors = (int)(_fileStream.Length / SECTOR_SIZE);
+                for (int i = 0; i < totalSectors; i++) _sectorUsage.Add(false);
+                _sectorUsage[0] = true;
+                _sectorUsage[1] = true;
+
+                // Read Header
+                _fileStream.Seek(0, SeekOrigin.Begin);
+                using BinaryReader reader = new BinaryReader(_fileStream, Encoding.Default, true);
+
+                // Read Offsets
+                for (int i = 0; i < TOTAL_CHUNKS; i++)
+                {
+                    int offset = reader.ReadInt32();
+                    _offsets[i] = offset;
+
+                    // Mark used sectors
+                    if (offset != 0)
                     {
-                        int offset = reader.ReadInt32();
-                        _offsets[i] = offset;
+                        int sectorStart = (offset >> 8) & 0xFFFFFF;
+                        int sectorCount = offset & 0xFF;
 
-                        // Mark used sectors
-                        if (offset != 0)
-                        {
-                            int sectorStart = (offset >> 8) & 0xFFFFFF;
-                            int sectorCount = offset & 0xFF;
+                        // Robustness: ensure we don't crash on corrupted offsets table
+                        while (_sectorUsage.Count <= sectorStart + sectorCount) _sectorUsage.Add(false);
 
-                            // Robustness: ensure we don't crash on corrupted offsets table
-                            while (_sectorUsage.Count <= sectorStart + sectorCount) _sectorUsage.Add(false);
-
-                            for (int k = 0; k < sectorCount; k++)
-                                if (sectorStart + k < _sectorUsage.Count)
-                                    _sectorUsage[sectorStart + k] = true;
-                        }
+                        for (int k = 0; k < sectorCount; k++)
+                            if (sectorStart + k < _sectorUsage.Count)
+                                _sectorUsage[sectorStart + k] = true;
                     }
                 }
             }
@@ -153,8 +173,12 @@ namespace Serialization
                 }
                 catch (Exception e)
                 {
+                    // CP-3 load contract: the explicit corrupt-shape branches above return null (→ the
+                    // caller's deliberate regenerate arm); an UNEXPECTED fault here is I/O — possibly
+                    // transient — and must THROW so the load arm retries instead of regenerating over
+                    // the player's saved data.
                     Debug.LogError($"RegionFile IO Error: {e.Message}");
-                    return (null, CompressionAlgorithm.Deflate);
+                    throw;
                 }
             }
         }
@@ -180,8 +204,10 @@ namespace Serialization
 
                     if (sectorsNeeded > 255)
                     {
-                        Debug.LogError($"Chunk {localX.ToString()}, {localZ.ToString()} is too big to save ({totalLength.ToString()} bytes)");
-                        return;
+                        // Deterministic failure — surfaced as a typed throw so the save paths map it to
+                        // FailedPermanent instead of reporting a false Written (CP-3 review F3).
+                        throw new ChunkTooLargeException(
+                            $"Chunk {localX.ToString()}, {localZ.ToString()} is too big to save ({totalLength.ToString()} bytes, needs {sectorsNeeded.ToString()} sectors > 255)");
                     }
 
                     int oldOffsetData = _offsets[index];
@@ -239,9 +265,17 @@ namespace Serialization
                     _fileStream.Seek(index * 4, SeekOrigin.Begin);
                     _fileStream.Write(BitConverter.GetBytes(newOffsetData), 0, 4);
                 }
+                catch (ChunkTooLargeException)
+                {
+                    throw; // already descriptive; the save paths map it to FailedPermanent
+                }
                 catch (Exception e)
                 {
+                    // CP-3 rider: swallowing here made a failed disk write report success to the CP-6
+                    // save contract (ChunkSaveResult.Written with nothing on disk). Rethrow so the save
+                    // paths map it to Failed and the retry registry recovers the edits.
                     Debug.LogError($"RegionFile Write Error: {e.Message}");
+                    throw;
                 }
             }
         }

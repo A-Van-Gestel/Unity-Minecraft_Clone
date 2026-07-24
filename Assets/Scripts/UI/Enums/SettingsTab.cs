@@ -15,5 +15,6 @@ namespace UI.Enums
         Performance,
         Benchmark,
         Dev,
+        DebugScreen,
     }
 }

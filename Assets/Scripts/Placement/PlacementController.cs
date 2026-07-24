@@ -17,7 +17,22 @@ namespace Placement
     /// "exercise the real subsystem" philosophy: the placement suite drives this controller against a real stub
     /// <see cref="World"/>, not a handwritten fake.
     /// </para>
+    /// <para>
+    /// <b>Spaces (WS-4):</b> everything crossing this class's boundary — the ray, and the cells on
+    /// <see cref="PlacementProbe"/> — is <b>Unity space</b>, so callers can feed it the camera and drive transforms
+    /// from the result directly. Every <see cref="World"/> query inside converts to voxel space first, using the
+    /// <c>originVoxel</c> the caller supplies <i>per probe</i>.
+    /// </para>
     /// </summary>
+    /// <remarks>
+    /// The floating origin is a per-call parameter rather than constructor state so that a single probe is
+    /// <b>atomic</b> in one coordinate frame: a ray march makes one world query per step (hundreds per call), and
+    /// all of them must resolve against the same origin — a march torn across a re-anchor would silently target a
+    /// mix of two frames. Holding the origin would also make it go stale the moment the world re-anchors, with
+    /// nothing but a convention obliging callers to rebuild the controller. Passing it in makes both impossible by
+    /// construction, and keeps this class free of the <c>WorldOrigin</c> global so the placement suite can drive it
+    /// at any origin without global state to set or restore.
+    /// </remarks>
     public sealed class PlacementController
     {
         private readonly World _world;
@@ -25,7 +40,7 @@ namespace Placement
         /// <summary>
         /// Creates a controller bound to a world. Ray-march reach and resolution are supplied <i>per probe</i>
         /// (not captured here), so live tweaks to the player's <c>reach</c> / <c>checkIncrement</c> take effect the
-        /// next frame.
+        /// next frame. The floating origin is supplied per probe for a stronger reason — see the class remarks.
         /// </summary>
         /// <param name="world">The world whose voxel-data primitives the decision reads.</param>
         public PlacementController(World world)
@@ -44,25 +59,28 @@ namespace Placement
         /// <param name="includeFluids">Whether the ray treats fluids as hittable surfaces.</param>
         /// <param name="reach">Maximum ray distance (in blocks) the player can target.</param>
         /// <param name="checkIncrement">Ray-march step size; smaller is more accurate.</param>
+        /// <param name="originVoxel">The floating-origin offset separating Unity space from voxel space, pinned for
+        /// the whole probe (see the class remarks).</param>
         /// <returns>The resolved <see cref="PlacementProbe"/>, or <see cref="PlacementProbe.Miss"/> when nothing is in reach.</returns>
         public PlacementProbe Probe(Vector3 rayOrigin, Vector3 rayDir, BlockType heldBlock, bool includeFluids,
-            float reach, float checkIncrement)
+            float reach, float checkIncrement, Vector3Int originVoxel)
         {
             BlockTags skipTags = PlacementResolver.GetRaycastSkipTags(heldBlock);
 
-            if (!MarchRay(rayOrigin, rayDir, includeFluids, skipTags, reach, checkIncrement,
+            if (!MarchRay(rayOrigin, rayDir, includeFluids, skipTags, reach, checkIncrement, originVoxel,
                     out Vector3Int hitCell, out int3 normal, out Vector3Int adjacentCell))
             {
                 return PlacementProbe.Miss;
             }
 
-            VoxelState? hit = _world.GetVoxelState(hitCell);
-            bool replaces = hit.HasValue && PlacementResolver.ResolvesToReplace(heldBlock, hit.Value.Properties);
+            Vector3Int hitVoxel = hitCell + originVoxel;
+            bool replaces = _world.TryGetVoxel(hitVoxel.x, hitVoxel.y, hitVoxel.z, out VoxelState hit)
+                            && PlacementResolver.ResolvesToReplace(heldBlock, hit.Properties);
             Vector3Int placeCell = replaces ? hitCell : adjacentCell;
 
             return new PlacementProbe(
                 didHit: true, hitCell, normal, placeCell, replaces,
-                worldPlaceable: CanPlaceAt(placeCell, heldBlock));
+                worldPlaceable: CanPlaceAt(placeCell, heldBlock, originVoxel));
         }
 
         /// <summary>
@@ -77,22 +95,30 @@ namespace Placement
         /// <param name="skipTags">Block tags the ray passes through (e.g. the held block's replaceable set).</param>
         /// <param name="reach">Maximum ray distance (in blocks) the player can target.</param>
         /// <param name="checkIncrement">Ray-march step size; smaller is more accurate.</param>
+        /// <param name="originVoxel">The floating-origin offset separating Unity space from voxel space, pinned for
+        /// the whole march so every step resolves in one coordinate frame (see the class remarks).</param>
         /// <param name="hitCell">The cell the ray stopped on (valid only when the method returns true).</param>
         /// <param name="hitNormal">The entered face normal (valid only when the method returns true).</param>
         /// <param name="adjacentCell">The cell adjacent to the hit face — where a non-replacing block lands.</param>
         /// <returns>True if a voxel was hit within reach.</returns>
         public bool MarchRay(Vector3 rayOrigin, Vector3 rayDir, bool includeFluids, BlockTags skipTags,
-            float reach, float checkIncrement,
+            float reach, float checkIncrement, Vector3Int originVoxel,
             out Vector3Int hitCell, out int3 hitNormal, out Vector3Int adjacentCell)
         {
             for (float step = checkIncrement; step < reach; step += checkIncrement)
             {
+                // The march itself stays in Unity space (small floats near the render origin); only the cell the
+                // step lands on converts, so the query never adds a large float to a small one.
                 Vector3 pos = rayOrigin + rayDir * step;
-                if (!_world.CheckForVoxel(pos, includeFluids, includeNonSolid: true, skipTags: skipTags))
+                Vector3Int cell = new Vector3Int(
+                    Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
+                Vector3Int voxel = cell + originVoxel;
+
+                if (!_world.CheckForVoxel(voxel.x, voxel.y, voxel.z, includeFluids, includeNonSolid: true,
+                        skipTags: skipTags))
                     continue;
 
-                hitCell = new Vector3Int(
-                    Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
+                hitCell = cell;
                 hitNormal = FaceNormal(pos);
                 adjacentCell = hitCell + new Vector3Int(hitNormal.x, hitNormal.y, hitNormal.z);
                 return true;
@@ -110,12 +136,19 @@ namespace Placement
         /// support-providing block directly beneath it (so it cannot float on water or air). Excludes the player-AABB
         /// overlap, which <c>PlayerInteraction</c> applies separately.
         /// </summary>
-        /// <param name="placeCell">The world voxel cell the block would occupy.</param>
+        /// <param name="placeCell">The <b>Unity-space</b> cell the block would occupy.</param>
         /// <param name="placedBlock">The block type being placed, or <c>null</c> when nothing is held.</param>
+        /// <param name="originVoxel">The floating-origin offset separating Unity space from voxel space (see the
+        /// class remarks).</param>
         /// <returns>True if placement into the cell is world-valid.</returns>
-        public bool CanPlaceAt(Vector3Int placeCell, BlockType placedBlock)
+        public bool CanPlaceAt(Vector3Int placeCell, BlockType placedBlock, Vector3Int originVoxel)
         {
-            if (!_world.worldData.IsVoxelInWorld(placeCell) || _world.IsCellOccupiedForPlacement(placeCell))
+            Vector3Int placeVoxel = placeCell + originVoxel;
+
+            // TF-14: the per-world border gates player edits (the pipeline stays border-blind, so the voxel may
+            // exist and render out there — it just cannot be edited).
+            if (!_world.worldData.IsVoxelInWorld(placeVoxel) || !_world.IsVoxelInsideBorder(placeVoxel) ||
+                _world.IsCellOccupiedForPlacement(placeVoxel))
                 return false;
 
             // A REQUIRES_SUPPORT block (e.g. grass blades) needs a support-providing block directly beneath it,
@@ -123,8 +156,10 @@ namespace Placement
             // skip the extra voxel lookup.
             if (placedBlock != null && (placedBlock.tags & BlockTags.REQUIRES_SUPPORT) != 0)
             {
-                VoxelState? below = _world.worldData.GetVoxelState(placeCell + Vector3Int.down);
-                BlockType belowProps = below.HasValue ? _world.BlockTypes[below.Value.ID] : null;
+                Vector3Int belowCell = placeVoxel + Vector3Int.down;
+                BlockType belowProps = _world.TryGetVoxel(belowCell.x, belowCell.y, belowCell.z, out VoxelState below)
+                    ? _world.BlockTypes[below.ID]
+                    : null;
                 if (!PlacementResolver.HasRequiredSupport(placedBlock, belowProps))
                     return false;
             }

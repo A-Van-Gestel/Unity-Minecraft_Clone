@@ -98,6 +98,23 @@ CBUFFER_START(UnityPerMaterial)
 CBUFFER_END
 
 // =============================================================================
+// Floating Origin (WS-4)
+// =============================================================================
+// Set as a shader global from World.cs (outside UnityPerMaterial, like GlobalLightLevel). Unity render space is
+// offset from voxel world space by an exact multiple of the chunk width; this is that offset. Unset — the editor
+// preview, and any frame before World sets it — leaves it 0, which is the identity.
+
+float3 _WorldOriginOffset;
+
+// Voxel-space position for sampling world-anchored noise fields: without it the whole liquid pattern would slide
+// the moment the origin re-anchors. Deliberately NOT used by the frac(worldPos) shore/wall math, which is already
+// invariant under a multiple-of-16 shift.
+float3 LiquidNoisePos(float3 worldPos)
+{
+    return worldPos + _WorldOriginOffset;
+}
+
+// =============================================================================
 // Vertex Function
 // =============================================================================
 
@@ -300,8 +317,9 @@ void EvaluateLava(LiquidV2F i, float phaseTime, out float3 lavaCol, out float2 h
     float3 flow3D = RouteFlowTo3D(flow, i.worldNormal);
 
     // Apply the routed 3D flow to the noise coordinates
-    float3 p1 = i.worldPos * _NoiseScale + flow3D + float3(0, t_boil, 0);
-    float3 p2 = i.worldPos * _NoiseScale - flow3D * 0.8 + float3(0, -t_boil * 0.8, 0);
+    float3 noisePos = LiquidNoisePos(i.worldPos);
+    float3 p1 = noisePos * _NoiseScale + flow3D + float3(0, t_boil, 0);
+    float3 p2 = noisePos * _NoiseScale - flow3D * 0.8 + float3(0, -t_boil * 0.8, 0);
 
     float base_fbm = fbm(p1, LAVA_FBM_OCTAVES);
     float base_noise = (base_fbm + 1.0) * 0.5;
@@ -320,7 +338,7 @@ void EvaluateLava(LiquidV2F i, float phaseTime, out float3 lavaCol, out float2 h
     float idle = 1.0 - smoothstep(0.1, 0.8, rawSpeed);
 
     // 1. Cooling Crust (Idle Shorelines)
-    float3 crust_p = i.worldPos * _NoiseScale * 2.0 - flow3D + float3(0, t_boil * 0.5, 0);
+    float3 crust_p = noisePos * _NoiseScale * 2.0 - flow3D + float3(0, t_boil * 0.5, 0);
     float crust_noise = (fbm(crust_p, max(LAVA_FBM_OCTAVES - 2, 2)) + 1.0) * 0.5;
 
     // Multiply by 'idle' so fast-flowing lava rivers don't crust over, even at the shores!
@@ -332,7 +350,7 @@ void EvaluateLava(LiquidV2F i, float phaseTime, out float3 lavaCol, out float2 h
     float turbulence = smoothstep(0.1, 0.8, length(totalFlow));
 
     // 2. Bright Sparks where flow is strong (Turbulence)
-    float3 flow_mask_p = i.worldPos * _NoiseScale * 2.5 + flow3D * 2.0;
+    float3 flow_mask_p = noisePos * _NoiseScale * 2.5 + flow3D * 2.0;
 
     float flow_mask = (fbm(flow_mask_p, LAVA_FBM_OCTAVES - 1) + 1.0) * 0.5;
     lavaCol += _BrightColor.rgb * smoothstep(0.5, 0.7, flow_mask) * turbulence * _FlowHighlight;
@@ -377,8 +395,9 @@ void EvaluateWater(LiquidV2F i, float phaseTime, out float3 waterCol, out float 
     float3 flow3D = RouteFlowTo3D(flow, i.worldNormal);
 
     // Apply the routed 3D flow to the noise coordinates
-    float3 wave_p = i.worldPos * _WaveScale + flow3D + float3(0, _Time.y * _WaveSpeed, 0);
-    float3 ripple_p = i.worldPos * _RippleScale - flow3D + float3(0, _Time.y * _RippleSpeed, 0);
+    float3 noisePos = LiquidNoisePos(i.worldPos);
+    float3 wave_p = noisePos * _WaveScale + flow3D + float3(0, _Time.y * _WaveSpeed, 0);
+    float3 ripple_p = noisePos * _RippleScale - flow3D + float3(0, _Time.y * _RippleSpeed, 0);
 
     float wave_fbm = fbm(wave_p, FLUID_FBM_OCTAVES);
     float ripple_noise = fbm(ripple_p, FLUID_FBM_OCTAVES);
@@ -396,7 +415,7 @@ void EvaluateWater(LiquidV2F i, float phaseTime, out float3 waterCol, out float 
     // Combined guard: both features share the stream_noise FBM. The || is intentional so that
     // a future tier enabling stream foam without shore foam still compiles the shared setup.
     #if FLUID_ENABLE_SHORE_FOAM || FLUID_ENABLE_STREAM_FOAM
-    float3 stream_p = i.worldPos * _WaveScale * 2.0 + flow3D * 3.0;
+    float3 stream_p = noisePos * _WaveScale * 2.0 + flow3D * 3.0;
     float stream_noise = (fbm(stream_p, max(FLUID_FBM_OCTAVES - 1, 2)) + 1.0) * 0.5;
     #endif
 

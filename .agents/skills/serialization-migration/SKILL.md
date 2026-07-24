@@ -51,7 +51,7 @@ For every on-disk change, the following must all land in the same change:
 ### Step 4 — Never
 
 - Never use `BinaryFormatter`, `JSON`, `XmlSerializer`, or any other ad-hoc serializer for terrain data. Region files use LZ4/GZip-compressed custom binary.
-- Never edit an already-shipped migration step after release. Write a new one.
+- Never change what an already-shipped migration step *produces* — its byte transform must stay bit-identical for every input it previously handled. Semantic changes go in a NEW step. Non-semantic hardening of a shipped step (error handling, per-chunk fault isolation, logging, retries) is allowed, provided every input that previously migrated successfully still yields identical bytes.
 - Never change chunk layout without bumping `TargetChunkFormatVersion` — the first-byte check will throw `InvalidDataException` in production otherwise.
 
 ## Cross-reference

@@ -9,6 +9,7 @@ using Jobs.BurstData;
 using Jobs.Data;
 using Jobs.Generators;
 using Legacy;
+using Libraries;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
@@ -137,6 +138,18 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     private readonly List<ChunkCoord> _completedMeshJobs = new List<ChunkCoord>();
     private readonly List<ChunkCoord> _completedLightJobs = new List<ChunkCoord>();
 
+    // P-4 §3.4 fairness: the budgeted passes iterate a key snapshot from a rotating start index
+    // instead of raw Dictionary order. Dictionary free-slot reuse places NEW jobs at early entry
+    // indices, so a plain foreach + budget break under sustained window expiry would serve fresh
+    // jobs every frame and DETERMINISTICALLY starve an old completed job at a high index. The
+    // rotation makes that systematic starvation vanishingly unlikely — probabilistic fairness, not
+    // a hard bound: key churn between passes can reshuffle indices against the cursor (a strict
+    // worst-case bound would need FIFO service order — deliberately not built).
+    private readonly List<ChunkCoord> _genScanKeys = new List<ChunkCoord>();
+    private int _genScanCursor;
+    private readonly List<ChunkCoord> _meshScanKeys = new List<ChunkCoord>();
+    private int _meshScanCursor;
+
     // Reused snapshot of LightingJobs.Keys for one completion pass — the shared LightingCompletionPass
     // iterates a stable candidate list rather than the live dictionary (removal is after-loop anyway).
     private readonly List<ChunkCoord> _lightCompletionCandidates = new List<ChunkCoord>();
@@ -220,9 +233,15 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
                 "Ensure all unimplemented types are remapped to a supported type before constructing WorldJobManager."),
         };
 
-        _chunkGenerator.Initialize(VoxelData.Seed, activeWorldType, globalJobData);
-
         Settings settings = SettingsManager.LoadSettings();
+
+        // Must precede generator initialization — the factory stamps the precision onto every
+        // noise instance it creates during Initialize.
+        FastNoiseFactory.GlobalCoordinatePrecision = settings.enableFarLands
+            ? FastNoiseLite.CoordinatePrecision.Classic32
+            : FastNoiseLite.CoordinatePrecision.Precise64;
+
+        _chunkGenerator.Initialize(VoxelData.Seed, activeWorldType, globalJobData);
 
         // OM-1: size the native buffer pool's retention cap to the device (calibrated; default 512 on desktop).
         _jobArrayPool = new ChunkJobArrayPool(settings.chunkJobArrayPoolRetention);
@@ -275,7 +294,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
 
         Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
 
-        if (_world.worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData data) && data.IsPopulated)
+        if (_world.worldData.TryGetChunk(chunkVoxelPos, out ChunkData data) && data.IsPopulated)
             return;
 
         GenerationJobData jobData = _chunkGenerator.ScheduleGeneration(chunkCoord, _activeVoxelListPool);
@@ -360,7 +379,9 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
                 Map = jobData.Map,
                 SectionData = sectionData,
                 BlockTypes = _world.JobDataManager.BlockTypesJobData,
-                ChunkPosition = chunk.ChunkPosition,
+                // Voxel space, from the coord — never the chunk's Unity-space transform position: jobs live in voxel
+                // space exclusively and must not see the floating origin.
+                ChunkPosition = chunkCoord.ToWorldPosition(),
                 NeighborBack = jobData.Neighbors.NeighborS,
                 NeighborFront = jobData.Neighbors.NeighborN,
                 NeighborLeft = jobData.Neighbors.NeighborW,
@@ -610,14 +631,14 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
             {
                 foreach (Vector2Int col in columns)
                 {
-                    jobData.SunLightRecalcQueue.Enqueue(new Vector2Int(col.x - chunkData.Position.x, col.y - chunkData.Position.y));
+                    jobData.SunLightRecalcQueue.Enqueue(SunlightColumnRouting.ToLocalColumn(col, chunkData.Position));
                 }
 
                 _world.worldData.SunlightRecalculationQueue.Remove(chunkData.Position);
                 HashSetPool<Vector2Int>.Release(columns);
             }
 
-            // LI-2: derive the job's Y-band (EnableLightingBandGather; full height = banding off).
+            // LI-2: derive the job's Y-band (full height = the fall-through default below).
             // Restricted to the pooled steady-state path: the TempJob startup sweep is initial lighting
             // (the derivation's column-recalc rule would force full height anyway), and only the pooled
             // fills' missing-neighbor semantics (zero-FILLED maps) match NeighborBandTop's summary.
@@ -625,7 +646,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
             uint3x3 bandBottomLight = default;
             jobData.BandHeight = ChunkMath.CHUNK_HEIGHT;
             jobData.BandMinY = 0;
-            if (_world.EnableLightingBandGather && usePooledBuffers)
+            if (usePooledBuffers)
             {
                 LightingBandChunkTop centerTop = chunkData.GetLightingBandTop();
                 LightingBandChunkTop w = NeighborBandTop(chunkCoord, -1, 0);
@@ -764,13 +785,39 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     /// one error, the job is released and removed (unless it faulted before release), and the pass
     /// continues — budget-retry paths keep their un-released jobs for next frame as before.
     /// </summary>
-    public void ProcessGenerationJobs()
+    /// <param name="window">Optional time ceiling (P-4 §3.4): when it expires the pass breaks before
+    /// starting the next job, leaving the remaining completed jobs enrolled for next frame — the same
+    /// retry contract as the structure-mods budget. <c>default</c> (startup coroutine) is unbudgeted.</param>
+    public void ProcessGenerationJobs(PipelinePassBudget.Window window = default)
     {
         _completedGenJobs.Clear();
         int modsBudget = _world.settings.maxStructureModsPerFrame;
 
-        foreach (KeyValuePair<ChunkCoord, GenerationJobData> jobEntry in GenerationJobs)
+        // Rotating-start snapshot iteration (see _genScanKeys) so a budget break cannot systematically
+        // starve the same high-index entry every frame (probabilistic fairness). The pass never adds
+        // to GenerationJobs mid-loop and removals happen after it, so the snapshot stays valid.
+        _genScanKeys.Clear();
+        foreach (ChunkCoord key in GenerationJobs.Keys) _genScanKeys.Add(key);
+        int genKeyCount = _genScanKeys.Count;
+
+        // Rotate the start slot only when a ceiling can actually break the pass (window.HasBudget) —
+        // the unbudgeted legs (rollback flag off, startup coroutine) keep legacy dictionary order
+        // byte-exact, including which job defers when the structure-mods budget exhausts. The cursor
+        // is reduced modulo the key count so the index sum below can never overflow int.
+        int genScanStart = 0;
+        if (window.HasBudget && genKeyCount > 0)
+            genScanStart = _genScanCursor = (_genScanCursor + 1) % genKeyCount;
+
+        for (int scanIndex = 0; scanIndex < genKeyCount; scanIndex++)
         {
+            // §3.4 time ceiling — checked between jobs, never mid-job (a job's Complete()+process is
+            // atomic within the pass), so one oversized job can overshoot the ceiling once.
+            if (window.Expired) break;
+
+            ChunkCoord scanCoord = _genScanKeys[(genScanStart + scanIndex) % genKeyCount];
+            KeyValuePair<ChunkCoord, GenerationJobData> jobEntry =
+                new KeyValuePair<ChunkCoord, GenerationJobData>(scanCoord, GenerationJobs[scanCoord]);
+
             if (!jobEntry.Value.Handle.IsCompleted) continue;
 
             // Fault isolation, stage 1 (HF-2): a failed Complete() means the job may still own its
@@ -793,6 +840,34 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
             bool released = false;
             try
             {
+                // §3.2 Out-of-range discard: if the player moved so far during this job's flight that the
+                // chunk is now beyond the unload boundary, populating + lighting + meshing it is wasted work
+                // for a chunk World.UnloadChunks is about to reclaim (the memory-spiral relief in
+                // CHUNK_PIPELINE_PERFORMANCE_ANALYSIS §3.2). Dispose the result instead — the unmodified
+                // generation output is fully seed-regenerable, so there is nothing to save. The boundary is
+                // World.IsBeyondUnloadDistance (the same predicate UnloadChunks reclaims by, so the discard
+                // boundary can never drift inside the unload boundary). Gated on EnablePersistence: when
+                // unloading is disabled (keepChunksInMemory) UnloadChunks never reclaims the placeholder, so
+                // discarding there would strand a permanent hole — populate normally instead. IsLoading is
+                // cleared so that if the player returns to range before UnloadChunks reclaims the placeholder,
+                // CheckViewDistance's !IsLoading guard re-enqueues it (otherwise the chunk is stuck unpopulated
+                // + unloadable forever). Runs inside the fault-isolation try so a release fault can't abort the pass.
+                if (_world.settings.EnablePersistence && _world.IsBeyondUnloadDistance(jobEntry.Key))
+                {
+                    if (_world.worldData.TryGetChunk(jobEntry.Key.ToVoxelOrigin(), out ChunkData staleData))
+                        staleData.IsLoading = false;
+                    ReleaseGenerationJobData(jobEntry.Value);
+                    _completedGenJobs.Add(jobEntry.Key);
+                    released = true;
+                    continue;
+                }
+
+#if UNITY_EDITOR
+                // CP-4: a tracked generation job pins its placeholder against unload (ChunkUnloadDecision
+                // job arm), so the create-true below can never actually create — assert that stays structural.
+                Debug.Assert(_world.worldData.TryGetChunk(jobEntry.Key.ToVoxelOrigin(), out _),
+                    "ProcessGenerationJobs: placeholder missing for a tracked generation job — job-pinning broken?");
+#endif
                 ChunkData chunkData = _world.worldData.RequestChunk(jobEntry.Key.ToVoxelOrigin(), true);
 
                 // --- STAGE 1: Populate with base terrain (Once per chunk) ---
@@ -976,11 +1051,35 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     /// Each job is fault-isolated: an exception logs one error, the buffers are still returned and the
     /// job removed (the chunk keeps its previous mesh), and the pass continues.
     /// </summary>
-    public void ProcessMeshJobs()
+    /// <param name="window">Optional time ceiling (P-4 §3.4): when it expires the pass breaks before
+    /// the next apply, leaving remaining completed jobs enrolled — the rotating scan start makes
+    /// systematic starvation of a deferred job vanishingly unlikely. <c>default</c> is unbudgeted.</param>
+    public void ProcessMeshJobs(PipelinePassBudget.Window window = default)
     {
         _completedMeshJobs.Clear();
-        foreach (KeyValuePair<ChunkCoord, MeshingJobData> jobEntry in MeshJobs)
+
+        // Rotating-start snapshot iteration (see _meshScanKeys) — same probabilistic starvation guard
+        // as the generation pass: a budget break must not systematically serve fresh low-index jobs
+        // every frame while an old completed job waits at a high index holding pooled buffers.
+        _meshScanKeys.Clear();
+        foreach (ChunkCoord key in MeshJobs.Keys) _meshScanKeys.Add(key);
+        int meshKeyCount = _meshScanKeys.Count;
+
+        // Rotation gated on window.HasBudget + cursor reduced modulo the count — same fairness and
+        // overflow rationale as the generation pass above.
+        int meshScanStart = 0;
+        if (window.HasBudget && meshKeyCount > 0)
+            meshScanStart = _meshScanCursor = (_meshScanCursor + 1) % meshKeyCount;
+
+        for (int scanIndex = 0; scanIndex < meshKeyCount; scanIndex++)
         {
+            // §3.4 time ceiling — checked between jobs (one oversized upload can overshoot once).
+            if (window.Expired) break;
+
+            ChunkCoord scanCoord = _meshScanKeys[(meshScanStart + scanIndex) % meshKeyCount];
+            KeyValuePair<ChunkCoord, MeshingJobData> jobEntry =
+                new KeyValuePair<ChunkCoord, MeshingJobData>(scanCoord, MeshJobs[scanCoord]);
+
             if (!jobEntry.Value.Handle.IsCompleted) continue;
 
             // Fault isolation, stage 1 (HF-2): a failed Complete() means the job may still own its
@@ -1043,7 +1142,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     /// Must only be called after <c>Handle.Complete()</c>.
     /// </summary>
     /// <param name="jobData">The completed generation job data.</param>
-    private void ReleaseGenerationJobData(in GenerationJobData jobData)
+    private void ReleaseGenerationJobData(GenerationJobData jobData)
     {
         // Return the pooled list BEFORE Dispose (which skips it via the ActiveVoxelsFromPool guard).
         if (jobData.ActiveVoxelsFromPool)
@@ -1060,7 +1159,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     /// <c>Chunk.ApplyMeshData</c> has uploaded it).
     /// </summary>
     /// <param name="jobData">The completed meshing job data.</param>
-    private void ReleaseMeshingJobInputs(in MeshingJobData jobData)
+    private void ReleaseMeshingJobInputs(MeshingJobData jobData)
     {
         _jobArrayPool.Return(jobData.Map);
         _jobArrayPool.Return(jobData.LightMap);
@@ -1075,7 +1174,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     /// Non-pooled jobs are fully disposed instead. Must only be called after <c>Handle.Complete()</c>.
     /// </summary>
     /// <param name="jobData">The completed lighting job data.</param>
-    private void ReleaseLightingJobData(in LightingJobData jobData)
+    private void ReleaseLightingJobData(LightingJobData jobData)
     {
         // Non-pooled jobs (startup coroutine's TempJob path) own all their buffers — dispose them.
         if (!jobData.UsesPooledBuffers)
@@ -1693,7 +1792,10 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     {
         foreach (GenerationJobData job in GenerationJobs.Values)
         {
-            job.Handle.Complete();
+            // Hoist off the readonly iteration variable so Complete() runs without a hidden defensive copy
+            // (same pattern in the two loops below).
+            JobHandle handle = job.Handle;
+            handle.Complete();
             // Releases an enrolled (not-yet-terminally-completed) job — returns its pooled list to the pool
             // (freed by _activeVoxelListPool.Dispose() below) and disposes the rest. These jobs never reached
             // the terminal ReleaseGenerationJobData in ProcessGenerationJobs, so this is their only release.
@@ -1702,14 +1804,16 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
 
         foreach (MeshingJobData job in MeshJobs.Values)
         {
-            job.Handle.Complete();
+            JobHandle handle = job.Handle;
+            handle.Complete();
             _meshOutputPool.Return(job.Output); // returned then freed by _meshOutputPool.Dispose() below
             ReleaseMeshingJobInputs(job);
         }
 
         foreach (LightingJobData job in LightingJobs.Values)
         {
-            job.Handle.Complete();
+            JobHandle handle = job.Handle;
+            handle.Complete();
             ReleaseLightingJobData(job);
         }
 

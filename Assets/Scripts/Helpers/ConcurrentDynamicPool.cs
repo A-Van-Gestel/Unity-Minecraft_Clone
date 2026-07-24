@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using UnityEngine;
 
 namespace Helpers
@@ -34,6 +35,18 @@ namespace Helpers
 
         public int ActiveCount { get; private set; } // Atomic update recommended if strict accuracy needed, but volatile int is okay for debug stats
 
+        // Interlocked: destroys can run on the main thread (prune) while the pool is touched by background serialization.
+        private long _totalDestroyed;
+
+        /// <summary>Cumulative count of instances permanently destroyed by pruning/clear (CP-1 pool-churn probe).</summary>
+        public long TotalDestroyed => Interlocked.Read(ref _totalDestroyed);
+
+        // Incremented inside the lock (Get runs on background serialization threads too); read lock-free.
+        private long _totalGets;
+
+        /// <summary>Cumulative count of <see cref="Get"/> calls — the exact demand signal the CP-7 linger pruning reads.</summary>
+        public long TotalGets => Interlocked.Read(ref _totalGets);
+
         // Pruning State
         private float _cleanupTimer = 0f;
         private const float CLEANUP_INTERVAL = 0.05f; // 20 checks/sec
@@ -56,6 +69,7 @@ namespace Helpers
             lock (_lock)
             {
                 ActiveCount++;
+                _totalGets++;
                 if (_pool.Count > 0)
                 {
                     return _pool.Pop();
@@ -88,6 +102,7 @@ namespace Helpers
                 while (_pool.Count > 0)
                 {
                     _destroyAction(_pool.Pop());
+                    Interlocked.Increment(ref _totalDestroyed);
                 }
 
                 ActiveCount = 0;
@@ -119,7 +134,11 @@ namespace Helpers
                 }
 
                 // Destroy OUTSIDE lock
-                if (item != null) _destroyAction(item);
+                if (item != null)
+                {
+                    _destroyAction(item);
+                    Interlocked.Increment(ref _totalDestroyed);
+                }
             }
         }
     }

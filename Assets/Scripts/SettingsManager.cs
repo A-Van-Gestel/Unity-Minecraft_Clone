@@ -229,10 +229,19 @@ public class Settings
     public CloudStyle clouds = CloudStyle.Fancy;
 
     /// <summary>
+    /// If true, flora (grass blades and future foliage) sways in the wind via shader vertex animation.
+    /// </summary>
+    [SettingField(SettingsTab.Graphics, Label = "Foliage Sway", Order = 6)]
+    [Tooltip("Animates flora (grass blades) swaying in the wind.\n\n" +
+             TooltipTags.Performance + "A small amount of extra vertex shader work; negligible on desktop.\n" +
+             TooltipTags.DefaultColorStart + "On" + TooltipTags.DefaultColorEnd)]
+    public bool enableFoliageSway = true;
+
+    /// <summary>
     /// Vertical synchronization mode. Maps directly to <see cref="QualitySettings.vSyncCount"/>.
     /// </summary>
     [Header("Frame Rate")]
-    [SettingField(SettingsTab.Graphics, Label = "VSync", Order = 6)]
+    [SettingField(SettingsTab.Graphics, Label = "VSync", Order = 7)]
     [Tooltip("Controls vertical synchronization.\n\n" +
              TooltipTags.BulletOptionStart + "Off" + TooltipTags.BulletOptionEnd + "No VSync. Lowest input latency.\n" +
              TooltipTags.BulletOptionStart + "On" + TooltipTags.BulletOptionEnd + "Eliminates tearing. +1 frame latency. FPS halves if GPU can't keep up.\n" +
@@ -244,7 +253,7 @@ public class Settings
     /// If true, the frame rate is uncapped (renders as fast as possible) when VSync is off.
     /// Overrides <see cref="maxFps"/> when enabled.
     /// </summary>
-    [SettingField(SettingsTab.Graphics, Label = "Unlimited FPS", Order = 7)]
+    [SettingField(SettingsTab.Graphics, Label = "Unlimited FPS", Order = 8)]
     [DisabledWhen(nameof(vSync), ComparisonOp.NotEqual, VSyncMode.Off)]
     [Tooltip("Removes the frame rate cap entirely when VSync is off.\n" +
              "The application renders as fast as possible.\n\n" +
@@ -334,6 +343,19 @@ public class Settings
              TooltipTags.Note + "Requires a new world or unexplored chunks to take effect.")]
     public bool enableMinorFloraPass = true;
 
+    /// <summary>
+    /// If true, world generation uses the classic 32-bit float noise pipeline, whose precision
+    /// artifacts progressively corrupt terrain past ~±16.7 million blocks ("Far Lands").
+    /// When false, a 64-bit coordinate pipeline keeps generation artifact-free to the world edge.
+    /// </summary>
+    [SettingField(SettingsTab.World, Label = "Far Lands (Classic Noise)", Order = 6)]
+    [InitializationField]
+    [Tooltip("Uses the classic 32-bit float noise pipeline for world generation.\n\n" +
+             "Terrain progressively corrupts past ~16.7 million blocks from the origin — the mythical \"Far Lands\".\n" +
+             "When disabled, generation uses a 64-bit precision pipeline that stays artifact-free out to the world edge (±2.1 billion blocks).\n\n" +
+             TooltipTags.Note + "Applies to chunks generated after the next world load. Chunks generated under a different mode may not match at their borders far from spawn.")]
+    public bool enableFarLands = false;
+
     #endregion
 
     #region Performance Tab
@@ -410,6 +432,22 @@ public class Settings
     public int maxInFlightMeshJobs = 20;
 
     /// <summary>
+    /// Maximum generation jobs allowed in flight before <c>World</c> pauses scheduling new ones to let
+    /// <c>ProcessGenerationJobs</c> drain (memory cap + backpressure; P-4 §3.1). Calibrated from system
+    /// RAM; the default is the desktop ceiling (generation was previously uncapped, so there is no older
+    /// literal to reproduce).
+    /// </summary>
+    public int maxInFlightGenerationJobs = 32;
+
+    /// <summary>
+    /// Maximum lighting jobs allowed in flight before the ready-set scan stops scheduling for the
+    /// frame (memory bound — each job rents ~11 pooled full-volume buffers, so this ceiling keeps a
+    /// hitch-scaled §3.4 quota from blowing past the pool retention into a Persistent alloc storm).
+    /// Inert under the legacy count cap; not device-calibrated (2× the desktop per-frame cap).
+    /// </summary>
+    public int maxInFlightLightingJobs = 64;
+
+    /// <summary>
     /// Buffers retained per type in the chunk job array pool — the native-memory retention ceiling
     /// (OM-1). Calibrated from system RAM; default reproduces the historical constant (≈96 MB worst case).
     /// </summary>
@@ -421,6 +459,119 @@ public class Settings
     /// never calibrated (pre-OM-1 file or fresh defaults awaiting first-launch calibration).
     /// </summary>
     public int calibrationVersion = 0;
+
+    // ── P-4 §3.4/§3.5 pipeline backpressure knobs ────────────────────────
+    // The five ms ceilings are Performance-tab sliders (smoothness ↔ chunk-fill-speed trade is a
+    // player-facing preference); the rollback flags and panic thresholds stay OM-1-style non-UI
+    // fields (persisted + user-editable, but not everyday options). The ms ceilings are deliberately
+    // NOT device-calibrated — frame-time targets are device-independent, and device scaling already
+    // flows in through the calibrated per-frame count caps that anchor each pass's rate quota
+    // (see Helpers.PipelinePassBudget).
+
+    /// <summary>
+    /// Master switch for the §3.4 time-based pass budgets (rate quota + ms ceiling). Off restores the
+    /// exact legacy fixed per-frame count caps — kept as a rollback / A-B lever (TG-4 precedent).
+    /// </summary>
+    public bool enablePipelineTimeBudgets = true;
+
+    /// <summary>
+    /// When true, the five time ceilings scale with a voluntarily lowered FPS cap (a 30/15-FPS AFK /
+    /// battery / mobile frame is mostly idle sleep and can afford a bigger pipeline slice) — anchored at
+    /// 60 FPS, clamped ×8, keyed off the cap's intent and never measured frame time (see
+    /// <see cref="Helpers.PipelinePassBudget.ScaleCeilingMs"/>). Off restores the fixed absolute-ms
+    /// ceilings — kept as a rollback / A-B lever alongside <see cref="enablePipelineTimeBudgets"/>.
+    /// No effect when budgets are off or no FPS cap is active.
+    /// </summary>
+    public bool scaleBudgetCeilingsWithFpsCap = true;
+
+    /// <summary>
+    /// Time ceiling (ms) for processing completed generation jobs in one frame
+    /// (<see cref="maxStructureModsPerFrame"/> still bounds structure expansion inside the pass).
+    /// Un-processed completed jobs stay enrolled for the next frame. ≤ 0 disables the ceiling.
+    /// </summary>
+    [Header("Pipeline Time Budgets")]
+    [SettingField(SettingsTab.Performance, Label = "Generation Process Budget (ms)", Format = "f1", Order = 5)]
+    [Range(0.5f, 20f)]
+    [Tooltip("Per-frame time ceiling for processing completed terrain-generation jobs.\n" +
+             "Lower = smoother frames while chunks stream in; higher = faster chunk fill.\n" +
+             "(Setting 0 in the settings file disables the ceiling entirely.)\n\n" +
+             TooltipTags.Performance + "Bounds the main-thread cost of generation results per frame.\n" +
+             TooltipTags.DefaultColorStart + "6" + TooltipTags.DefaultColorEnd)]
+    public float genProcessBudgetMs = 6f;
+
+    /// <summary>
+    /// Time ceiling (ms) for scheduling lighting jobs from the ready set in one frame. The rate quota
+    /// (<see cref="maxLightJobsPerFrame"/> × frame duration × 60) drives throughput; this bounds the
+    /// frame cost when scheduling is expensive. ≤ 0 disables the ceiling (quota only).
+    /// </summary>
+    [SettingField(SettingsTab.Performance, Label = "Light Schedule Budget (ms)", Format = "f1", Order = 6)]
+    [Range(0.5f, 20f)]
+    [Tooltip("Per-frame time ceiling for scheduling lighting jobs.\n" +
+             "Lower = smoother frames while chunks stream in; higher = faster chunk fill.\n" +
+             "(Setting 0 in the settings file disables the ceiling — rate quota only.)\n\n" +
+             TooltipTags.Performance + "Bounds the main-thread cost of lighting scheduling per frame.\n" +
+             TooltipTags.DefaultColorStart + "8" + TooltipTags.DefaultColorEnd)]
+    public float lightScheduleBudgetMs = 8f;
+
+    /// <summary>
+    /// Time ceiling (ms) for scheduling mesh jobs in one frame (rate quota anchored on
+    /// <see cref="maxMeshRebuildsPerFrame"/>). ≤ 0 disables the ceiling (quota only).
+    /// </summary>
+    [SettingField(SettingsTab.Performance, Label = "Mesh Schedule Budget (ms)", Format = "f1", Order = 7)]
+    [Range(0.5f, 20f)]
+    [Tooltip("Per-frame time ceiling for scheduling mesh-build jobs.\n" +
+             "Lower = smoother frames while chunks stream in; higher = faster chunk fill.\n" +
+             "(Setting 0 in the settings file disables the ceiling — rate quota only.)\n\n" +
+             TooltipTags.Performance + "Bounds the main-thread cost of mesh scheduling per frame.\n" +
+             TooltipTags.DefaultColorStart + "6" + TooltipTags.DefaultColorEnd)]
+    public float meshScheduleBudgetMs = 6f;
+
+    /// <summary>
+    /// Time ceiling (ms) for applying completed mesh jobs (the buffer-upload pass) in one frame.
+    /// Deferred completions stay enrolled — buffers are held one extra frame, bounded by the
+    /// in-flight cap. ≤ 0 disables the ceiling (legacy: apply everything completed).
+    /// </summary>
+    [SettingField(SettingsTab.Performance, Label = "Mesh Apply Budget (ms)", Format = "f1", Order = 8)]
+    [Range(0.5f, 20f)]
+    [Tooltip("Per-frame time ceiling for uploading finished chunk meshes.\n" +
+             "Lower = smoother frames while chunks stream in; higher = faster chunk fill.\n" +
+             "(Setting 0 in the settings file disables the ceiling — apply everything completed.)\n\n" +
+             TooltipTags.Performance + "Bounds the main-thread cost of mesh uploads per frame.\n" +
+             TooltipTags.DefaultColorStart + "4" + TooltipTags.DefaultColorEnd)]
+    public float meshApplyBudgetMs = 4f;
+
+    /// <summary>
+    /// Time ceiling (ms) for the ChunksToDraw drain (§5.3) — how long one frame may spend applying
+    /// finished meshes to the GPU. At least one chunk is always drawn per frame; ≤ 0 drains without
+    /// a time bound (the legacy one-per-frame trickle is the budgets master flag's off state).
+    /// </summary>
+    [SettingField(SettingsTab.Performance, Label = "Chunk Draw Budget (ms)", Format = "f1", Order = 9)]
+    [Range(0.5f, 10f)]
+    [Tooltip("Per-frame time ceiling for activating finished chunk meshes (the pop-in stagger).\n" +
+             "Lower = more gradual chunk appearance; higher = chunks appear sooner after meshing.\n" +
+             "At least one chunk is always drawn per frame.\n" +
+             "(Setting 0 in the settings file disables the ceiling — drain everything each frame.)\n\n" +
+             TooltipTags.Performance + "Bounds the main-thread cost of chunk activation per frame.\n" +
+             TooltipTags.DefaultColorStart + "2" + TooltipTags.DefaultColorEnd)]
+    public float drawApplyBudgetMs = 2f;
+
+    /// <summary>
+    /// Master switch for the §3.5 generation panic gate (pause admissions while the lighting backlog
+    /// is saturated). Kept as a rollback lever alongside <see cref="enablePipelineTimeBudgets"/>.
+    /// </summary>
+    public bool enableGenerationPanicGate = true;
+
+    /// <summary>
+    /// Lighting ready-set size at which the panic gate closes (stops admitting generation requests).
+    /// Provisional default pending in-game calibration; must exceed the reopen threshold.
+    /// </summary>
+    public int panicGateCloseThreshold = 256;
+
+    /// <summary>
+    /// Lighting ready-set size at or below which a closed panic gate reopens. The gap below
+    /// <see cref="panicGateCloseThreshold"/> is the hysteresis band that prevents oscillation.
+    /// </summary>
+    public int panicGateReopenThreshold = 128;
 
     #endregion
 
@@ -502,6 +653,63 @@ public class Settings
     [Tooltip("Enables diagnostic console logs for the save system (chunk loading, saving, region I/O).\n\n" +
              TooltipTags.Warning + "High log spam during chunk loading. Will severely impact performance.")]
     public bool enableSaveSystemDiagnosticLogs = false;
+
+    #endregion
+
+    #region Debug Screen Tab
+
+    // ═══════════════════════════════════════════════════════════════════
+    // DEBUG SCREEN TAB — per-entry visibility toggles for the in-game debug HUD (DebugScreen).
+    // Each gates one logical block in its Populate*Builder; the DebugMode (FPSOnly/Performance/Full)
+    // still decides which panels are active. All default ON to preserve the pre-toggle HUD, except the
+    // CP-1 lifecycle block which is opt-in. Not DebugOnly — this is a player-facing tab (MC F3 parity).
+    // ═══════════════════════════════════════════════════════════════════
+
+    [SettingField(SettingsTab.DebugScreen, Label = "FPS", Order = 0)]
+    [Tooltip("Shows the FPS line on the debug screen. Always shown in FPS-Only mode regardless of this toggle.")]
+    public bool debugHudShowFps = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Graphics API", Order = 1)]
+    [Tooltip("Shows the active graphics API line on the debug screen.")]
+    public bool debugHudShowGraphicsApi = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "World Info", Order = 2)]
+    [Tooltip("Shows the WORLD block: position, render position, origin chunk, looking angle, chunk coord and seed.")]
+    public bool debugHudShowWorldInfo = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Player Info", Order = 3)]
+    [Tooltip("Shows the PLAYER block: grounded/flying/noclip state, speed and velocity.")]
+    public bool debugHudShowPlayerInfo = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Chunk & Pool Stats", Order = 4)]
+    [Tooltip("Shows the CHUNK block: active voxel/chunk counts, pool sizes, mesh queue and voxel-modification totals.")]
+    public bool debugHudShowChunkStats = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Section Info", Order = 5)]
+    [Tooltip("Shows the SECTION block for the section the player currently occupies.")]
+    public bool debugHudShowSectionInfo = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Ground Voxel", Order = 6)]
+    [Tooltip("Shows the GROUND VOXEL inspector (the voxel directly under the player).")]
+    public bool debugHudShowGroundVoxel = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Target Voxel", Order = 7)]
+    [Tooltip("Shows the TARGET VOXEL inspector (the voxel the player is looking at).")]
+    public bool debugHudShowTargetVoxel = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Chunk Lifecycle (CP-1)", Order = 8)]
+    [Tooltip("Shows the CP-1 lifecycle observability block: unload deferrals, save/deserialize counts, load-arm " +
+             "faults, stuck-loading detector and pool churn.\n\n" +
+             TooltipTags.Note + "Off by default — a diagnostic block for chunk-pipeline debugging.")]
+    public bool debugHudShowChunkLifecycle = false;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Performance Panel", Order = 9)]
+    [Tooltip("Shows the performance panel (frame time, CPU phases, memory, GC). Also the panel shown in Performance mode.")]
+    public bool debugHudShowPerformance = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Visualization Info", Order = 10)]
+    [Tooltip("Shows the debug-visualization mode line and visualizer pool count.")]
+    public bool debugHudShowVisualization = true;
 
     #endregion
 
@@ -699,6 +907,7 @@ public static class SettingsManager
             settings.maxMeshRebuildsPerFrame = result.MaxMeshRebuildsPerFrame;
             settings.maxLightJobsPerFrame = result.MaxLightJobsPerFrame;
             settings.maxInFlightMeshJobs = result.MaxInFlightMeshJobs;
+            settings.maxInFlightGenerationJobs = result.MaxInFlightGenerationJobs;
             settings.chunkJobArrayPoolRetention = result.JobArrayPoolRetention;
             settings.calibrationVersion = DeviceCalibration.CalibrationVersion;
             Debug.Log($"[SettingsManager] Device-calibrated budgets (OM-1): {result}");

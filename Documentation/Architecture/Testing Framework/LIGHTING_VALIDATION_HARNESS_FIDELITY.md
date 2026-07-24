@@ -157,6 +157,26 @@ there is invisible.
   guards were restored. Pairs with **HF-3** (border heightmap fuzz, the C9 lesson — shipped 2026-07-05,
   see C9's follow-through note), which widens how many positions scenarios sample.
 
+### A6 — Global sunlight-column routing seam was bypassed (local-column seeding) ·  **CLOSED (2026-07-19, Bug 19)**
+
+The harness seeded column recalcs directly in chunk-local space (`QueueFullSunlightRecalc`), on the
+stated assumption that production's local→global→local round-trip through the world-level
+`SunlightRecalculationQueue` was "semantically identical". **Bug 19 disproved that assumption**: the
+production round-trip went through `GetChunkCoordFor(Vector3)`'s int→float conversion, which
+mis-chunks border columns past ±2²⁴ — a whole defect class the harness structurally could not see,
+because every harness world sat at the origin AND the seam was never crossed. Closed on both axes:
+the seam is now the shared `Helpers.SunlightColumnRouting` unit (production `QueueSunlightRecalculation`,
+the `WorldJobManager` job-build drain, and orphan-column persistence all route through it), the harness
+crosses it via `QueueFullSunlightRecalcViaGlobalRouting`, and `LightingTestWorld` accepts a far
+`anchorChunk` (integer-exact plumbing; the frame simulator remains identity-anchor-only by guard).
+Baselines **B95** (routing integrity at identity/±2²⁴-boundary/±2×10⁷ anchors; prove-red 95 lost +
+184 out-of-range columns per far anchor) and **B96** (far-anchor differential twin) pin it.
+**Remaining sliver (LOW):** the production cross-chunk *mod* delivery path
+(`ApplyCrossChunkLightMod`) converts via the `WorldData` float/int overloads, while the harness mirror
+has always used its own exact int subtraction — a future re-introduction of a float conversion on the
+production mod path would not be caught in-harness (guarded instead by the `Vector3Int` overloads
+capturing integer callers at compile time + the latched dev-build ±2²⁴ tripwire on the float paths).
+
 ---
 
 ## 3. Missing harness features (whole bug classes unreachable)

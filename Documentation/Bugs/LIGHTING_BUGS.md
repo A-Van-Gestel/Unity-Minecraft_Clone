@@ -11,7 +11,7 @@ This document outlines **open** bugs related to the current lighting implementat
 
 ---
 
-> All previously listed lighting bugs (01–08, 10–18) have been fixed. See [`_FIXED_BUGS.md`](./_FIXED_BUGS.md) for details.
+> All previously listed lighting bugs (01–08, 10–19) have been fixed. See [`_FIXED_BUGS.md`](./_FIXED_BUGS.md) for details.
 
 ## Bug 09: Cross-Chunk Blocklight Lost on Rapid Place/Break at Chunk Border
 

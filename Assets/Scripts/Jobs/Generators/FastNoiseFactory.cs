@@ -10,6 +10,15 @@ namespace Jobs.Generators
     public static class FastNoiseFactory
     {
         /// <summary>
+        /// Coordinate-pipeline precision applied to every instance this factory creates.
+        /// Main-thread only. Defaults to <see cref="FastNoiseLite.CoordinatePrecision.Precise64"/>;
+        /// <see cref="WorldJobManager"/> overrides it from the "Far Lands" world setting before
+        /// generator initialization (editor preview tools inherit the default).
+        /// </summary>
+        public static FastNoiseLite.CoordinatePrecision GlobalCoordinatePrecision { get; set; }
+            = FastNoiseLite.CoordinatePrecision.Precise64;
+
+        /// <summary>
         /// Creates and configures a <see cref="FastNoiseLite"/> instance from a configuration struct.
         /// </summary>
         /// <param name="config">The noise configuration.</param>
@@ -18,6 +27,7 @@ namespace Jobs.Generators
         public static FastNoiseLite CreateNoiseFromConfig(FastNoiseConfig config, int baseSeed)
         {
             FastNoiseLite noise = FastNoiseLite.Create(baseSeed + config.seedOffset);
+            noise.SetCoordinatePrecision(GlobalCoordinatePrecision);
             noise.SetFrequency(config.frequency);
             noise.SetNoiseType(config.noiseType);
             noise.SetRotationType3D(config.rotationType3D);

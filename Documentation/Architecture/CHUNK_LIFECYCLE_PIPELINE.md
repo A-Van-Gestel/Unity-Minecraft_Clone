@@ -1,22 +1,20 @@
 # Chunk Lifecycle Pipeline: Generation → Lighting → Meshing
 
 **Status:** Living Document  
-**Last Updated:** June 2026  
+**Last Updated:** July 2026  
 **Purpose:** Comprehensive reference for how a chunk transitions from empty placeholder to rendered mesh, with all state flags, readiness gates, and inter-system dependencies fully mapped.
 
 ---
 
 ## 1. Executive Summary
 
-The chunk lifecycle is a multi-stage, asynchronous pipeline orchestrated by **`World.Update()`** on the main thread. Each stage hands off work to the Unity Job System (Burst-compiled background threads) and processes results in subsequent frames.
-The pipeline has three primary stages:
+The chunk lifecycle is a multi-stage, asynchronous pipeline orchestrated by **`World.Update()`** on the main thread. Each stage hands off work to the Unity Job System (Burst-compiled background threads) and processes results in subsequent frames. The pipeline has three primary stages:
 
 1. **Generation** — Produces terrain voxel data (block IDs, heightmap).
 2. **Lighting** — Calculates sunlight and blocklight via BFS flood-fill.
 3. **Meshing** — Builds renderable mesh geometry from lit voxel data.
 
-Each stage is gated by **readiness checks** on the chunk and its neighbors. A chunk cannot advance to the next stage until all prerequisites are met. The system is designed to converge — light values are bounded (0–15),
-BFS is deterministic — but edge cases in scheduling order, throttling, and cross-chunk dependencies can delay convergence under load.
+Each stage is gated by **readiness checks** on the chunk and its neighbors. A chunk cannot advance to the next stage until all prerequisites are met. The system is designed to converge — light values are bounded (0–15), BFS is deterministic — but edge cases in scheduling order, throttling, and cross-chunk dependencies can delay convergence under load.
 
 ---
 
@@ -24,15 +22,16 @@ BFS is deterministic — but edge cases in scheduling order, throttling, and cro
 
 Each `ChunkData` instance carries the following transient flags that control pipeline progression:
 
-| Flag                          | Type | Set By                                                                                                                              | Cleared By                                                | Purpose                                                                                                               |
-|-------------------------------|------|-------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------|
-| `IsPopulated`                 | bool | `Populate()` / `PopulateFromSave()`                                                                                                 | `Reset()` (pool recycle)                                  | Voxel data exists and is valid                                                                                        |
-| `IsLoading`                   | bool | `CheckViewDistance()`                                                                                                               | Never explicitly cleared (reset on pool recycle)          | Prevents duplicate disk load requests                                                                                 |
-| `NeedsInitialLighting`        | bool | `ProcessGenerationJobs()` / `PopulateFromSave()`                                                                                    | `Update()` lighting scan after scheduling initial pass    | Chunk has terrain but no lighting yet                                                                                 |
-| `HasLightChangesToProcess`    | bool | `AddToSunLightQueue()`, `AddToBlockLightQueue()`, cross-chunk mods, edge check scheduling                                           | `ScheduleLightingUpdate()`                                | Pending light changes in managed queues                                                                               |
-| `NeedsEdgeCheck`              | bool | Post-stabilization re-arm (`ProcessLightingJobs`), neighbor propagation, or disk load                                               | `ScheduleLightingUpdate()`                                | Border voxels need validation against neighbors                                                                       |
-| `IsAwaitingMainThreadProcess` | bool | Per-job merge start (`MergeCompletedLightingJob`)                                                                                   | `ProcessLightingJobs()` per-job `finally` (even on fault) | Lighting job completed, cross-chunk mods being applied                                                                |
-| `RemainingEdgeCheckRounds`    | int  | Initialized to 2 on `ChunkData`; reset to 2 by `Reset()`; re-granted to 1 by `ModifyVoxel` on a border-column opacity edit (Bug 05) | Decremented in `ProcessLightingJobs()` per stable pass    | Iterative edge-check rounds still to re-arm after a stable lighting pass (cross-seam convergence). `[NonSerialized]`. |
+| Flag                          | Type | Set By                                                                                                                                                                      | Cleared By                                                                                                                                                                                                                                                                          | Purpose                                                                                                                        |
+|-------------------------------|------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
+| `IsPopulated`                 | bool | `Populate()` / `PopulateFromSave()`                                                                                                                                         | `Reset()` (pool recycle)                                                                                                                                                                                                                                                            | Voxel data exists and is valid                                                                                                 |
+| `IsLoading`                   | bool | `DrainGenerationRequests()` (at admission; `CheckViewDistance()` only *enqueues*, P-4 §3.1)                                                                                 | `ChunkData.Reset()` (pool recycle); **§3.2 out-of-range discard** in `ProcessGenerationJobs`; **CP-3 load-arm fault path** in `LoadOrGenerateChunk`'s catch (identity-guarded) so a faulted placeholder re-enqueues on the next boundary crossing instead of stranding forever (F1) | Prevents duplicate disk load requests                                                                                          |
+| `NeedsInitialLighting`        | bool | `ProcessGenerationJobs()` / `PopulateFromSave()`; **`UnloadChunks()` persist-and-unload arm** (P-4 rec 3 — forces a full re-light on reload, captured by the save snapshot) | `Update()` lighting scan after scheduling initial pass                                                                                                                                                                                                                              | Chunk has terrain but no lighting yet                                                                                          |
+| `HasLightChangesToProcess`    | bool | `AddToSunLightQueue()`, `AddToBlockLightQueue()`, cross-chunk mods, edge check scheduling                                                                                   | `ScheduleLightingUpdate()`                                                                                                                                                                                                                                                          | Pending light changes in managed queues                                                                                        |
+| `NeedsEdgeCheck`              | bool | Post-stabilization re-arm (`ProcessLightingJobs`), neighbor propagation, or disk load                                                                                       | `ScheduleLightingUpdate()`                                                                                                                                                                                                                                                          | Border voxels need validation against neighbors                                                                                |
+| `IsAwaitingMainThreadProcess` | bool | Per-job merge start (`MergeCompletedLightingJob`)                                                                                                                           | `ProcessLightingJobs()` per-job `finally` (even on fault)                                                                                                                                                                                                                           | Lighting job completed, cross-chunk mods being applied                                                                         |
+| `RemainingEdgeCheckRounds`    | int  | Initialized to 2 on `ChunkData`; reset to 2 by `Reset()`; re-granted to 1 by `ModifyVoxel` on a border-column opacity edit (Bug 05)                                         | Decremented in `ProcessLightingJobs()` per stable pass                                                                                                                                                                                                                              | Iterative edge-check rounds still to re-arm after a stable lighting pass (cross-seam convergence). `[NonSerialized]`.          |
+| `LifecycleEpoch`              | int  | **Bumped** (never zeroed) by every `Reset()` — its reset IS the increment; monotonic across recycles                                                                        | Never — deliberately monotonic (B34 exempts it from the fresh-instance sweep and asserts the bump instead)                                                                                                                                                                          | Pool-ABA detection: async code captures instance + epoch and re-checks both after an await (CP-3 load arm). `[NonSerialized]`. |
 
 ### Flag Lifecycle Diagram
 
@@ -71,12 +70,12 @@ Two critical gate functions control when work can proceed. Understanding the dif
 
 Checks all **8 horizontal neighbors** (cardinal + diagonal):
 
-| Check          | Condition                              | Rationale                             |
-|----------------|----------------------------------------|---------------------------------------|
-| World bounds   | `IsChunkInWorld()` → skip if false     | Edge-of-world chunks treated as ready |
-| Generation job | `generationJobs.ContainsKey()` → false | Neighbor terrain must be complete     |
-| Data exists    | `Chunks.TryGetValue()` → exists        | Neighbor must have a ChunkData        |
-| Populated      | `IsPopulated` → true                   | Voxel data must be filled             |
+| Check          | Condition                              | Rationale                                                                                                                                                                                                                    |
+|----------------|----------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| World bounds   | `IsChunkInWorld()` → skip if false     | WS-3: `IsChunkInWorld` is now always true (XZ fully unbounded, both signs), so this skip branch never fires — every neighbor is an ordinary frontier chunk that parks until populated. "Out-of-world" no longer exists in XZ |
+| Generation job | `generationJobs.ContainsKey()` → false | Neighbor terrain must be complete                                                                                                                                                                                            |
+| Data exists    | `Chunks.TryGetValue()` → exists        | Neighbor must have a ChunkData                                                                                                                                                                                               |
+| Populated      | `IsPopulated` → true                   | Voxel data must be filled                                                                                                                                                                                                    |
 
 **Summary:** "Do all neighbors have terrain data I can read?"
 
@@ -102,12 +101,12 @@ Checks all **8 horizontal neighbors** (cardinal + diagonal) with stricter requir
 
 Checks all **8 horizontal neighbors** (cardinal + diagonal) with relaxed requirements:
 
-| Check                   | Condition                              | Rationale                                         |
-|-------------------------|----------------------------------------|---------------------------------------------------|
-| World bounds            | `IsChunkInWorld()` → skip if false     | Edge-of-world chunks treated as ready             |
-| Generation job          | `generationJobs.ContainsKey()` → false | Neighbor terrain must be complete                 |
-| Data exists + populated | `Chunks.TryGetValue()` + `IsPopulated` | Neighbor must have voxel data                     |
-| Initial lighting done   | `NeedsInitialLighting` → false         | Neighbor must have had at least one lighting pass |
+| Check                   | Condition                              | Rationale                                                                                                                                   |
+|-------------------------|----------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
+| World bounds            | `IsChunkInWorld()` → skip if false     | WS-3: `IsChunkInWorld` is now always true (XZ fully unbounded) — this skip branch never fires; every neighbor is an ordinary frontier chunk |
+| Generation job          | `generationJobs.ContainsKey()` → false | Neighbor terrain must be complete                                                                                                           |
+| Data exists + populated | `Chunks.TryGetValue()` + `IsPopulated` | Neighbor must have voxel data                                                                                                               |
+| Initial lighting done   | `NeedsInitialLighting` → false         | Neighbor must have had at least one lighting pass                                                                                           |
 
 **Does NOT check:** `lightingJobs`, `HasLightChangesToProcess`, `IsAwaitingMainThreadProcess`.
 
@@ -133,13 +132,14 @@ Every frame, `Update()` executes the following steps in order. Understanding thi
 
 ```mermaid
 flowchart TD
-    A["1. CheckViewDistance()"] --> B["2. ProcessGenerationJobs()"]
-    B --> C["3. ApplyModifications()"]
+    A["1. CheckViewDistance()<br/>(enqueues gen requests, on crossing)"] --> B["2. ProcessGenerationJobs()"]
+    B --> B1b["1b. DrainGenerationRequests()<br/>(admit under in-flight cap, P-4 §3.1;<br/>§3.5 panic gate pauses admissions<br/>while the lighting ready-set is saturated)"]
+    B1b --> C["3. ApplyModifications()"]
     C --> D["4. ProcessLightingJobs()<br/>(from PREVIOUS frame)"]
     D --> E["5. Lighting Ready-Set Scan<br/>(iterates LightWorkScheduler's ready set)"]
     E --> F["6. ProcessMeshJobs()<br/>(from PREVIOUS frame)"]
     F --> G["7. Schedule New Mesh Jobs<br/>(from _meshBuildQueue)"]
-    G --> H["8. ChunksToDraw.Dequeue()<br/>(apply to GPU)"]
+    G --> H["8. ChunksToDraw drain<br/>(≥1/frame, ms-budgeted, P-4 §5.3)"]
     style E fill: #ff6b6b, color: #fff
     style G fill: #ffa07a, color: #fff
 ```
@@ -148,39 +148,27 @@ flowchart TD
 
 All three completed-job sweeps (`ProcessGenerationJobs`, `ProcessLightingJobs`, `ProcessMeshJobs`)
 release each job's containers *inside* the loop and remove the dictionary entries only *after* it.
-Before HF-2, one exception mid-pass aborted the sweep and stranded already-released jobs in the
-dictionary — every later frame re-touched their disposed containers, spamming
+`ProcessGenerationJobs` and `ProcessMeshJobs` additionally take an optional
+`PipelinePassBudget.Window` ms ceiling (P-4 §3.4, checked between jobs): on expiry the sweep breaks and the remaining completed jobs stay enrolled for next frame — the same retry contract as the generation pass's structure-mods budget. `default` = unbudgeted (the startup coroutine's path);
+`ProcessLightingJobs` is deliberately not budgeted (its merge cost is §2/P-3 territory). Before HF-2, one exception mid-pass aborted the sweep and stranded already-released jobs in the dictionary — every later frame re-touched their disposed containers, spamming
 `ObjectDisposedException` and burying the original thrower. Each pass now isolates faults per job:
 
-- **`Handle.Complete()` throws** → the job may still own its buffers, so nothing is released; the
-  entry stays enrolled and is retried (isolated again) next pass.
-- **Post-`Complete()` processing throws** → one `Debug.LogError` (errors are the regression signal),
-  the job's containers are still released and the entry enrolled for removal, and the pass continues.
-  Per pass: lighting re-flags the chunk (`HasLightChangesToProcess = true`, stability unknown → a
-  corrective pass runs) and counts the fault in `WorldJobManager.LastFaultedLightJobs`; generation
-  releases only if the happy path had not (its budget-retry `continue` paths intentionally keep jobs
-  un-released across frames); meshing returns the buffers in a `finally` and the chunk keeps its
-  previous mesh.
-- **Flag pairing holds on fault:** the lighting pass clears `IsAwaitingMainThreadProcess` in a
-  per-job `finally`, so a faulted merge cannot park its chunk forever.
+- **`Handle.Complete()` throws** → the job may still own its buffers, so nothing is released; the entry stays enrolled and is retried (isolated again) next pass.
+- **Post-`Complete()` processing throws** → one `Debug.LogError` (errors are the regression signal), the job's containers are still released and the entry enrolled for removal, and the pass continues. Per pass: lighting re-flags the chunk (`HasLightChangesToProcess = true`, stability unknown → a corrective pass runs) and counts the fault in `WorldJobManager.LastFaultedLightJobs`; generation releases only if the happy path had not (its budget-retry `continue` paths intentionally keep jobs un-released across frames); meshing returns the buffers in a
+  `finally` and the chunk keeps its previous mesh.
+- **Flag pairing holds on fault:** the lighting pass clears `IsAwaitingMainThreadProcess` in a per-job `finally`, so a faulted merge cannot park its chunk forever.
 
-Recovery is deliberately *not* promised (a faulted generation job can leave its chunk unpopulated,
-loudly) — the isolation exists to keep one fault from cascading into the whole pass, not to hide it.
+Recovery is deliberately *not* promised (a faulted generation job can leave its chunk unpopulated, loudly) — the isolation exists to keep one fault from cascading into the whole pass, not to hide it.
 
-The **lighting** pass's loop structure — iterate → complete → merge → release-inside-loop → enroll →
-remove-after-loop → promote-after, with the two-stage fault isolation above — is extracted into the
-shared `Helpers/LightingCompletionPass.cs` (`RunMergeLoop` + `RunRemoveAndPromote`, driven through
-`ILightingCompletionDriver<TKey>`). `ProcessLightingJobs` implements the driver on `this`; the editor
-frame simulator implements it too, so the harness replays the exact same pass bookkeeping and can inject
-a merge fault to prove the isolation mechanically (baseline B65). This is the completion-pass twin of the
-scheduling-side `LightingScanDecision` (§ shared arm decision) — HF-4.
+The **lighting** pass's loop structure — iterate → complete → merge → release-inside-loop → enroll → remove-after-loop → promote-after, with the two-stage fault isolation above — is extracted into the shared `Helpers/LightingCompletionPass.cs` (`RunMergeLoop` + `RunRemoveAndPromote`, driven through
+`ILightingCompletionDriver<TKey>`). `ProcessLightingJobs` implements the driver on `this`; the editor frame simulator implements it too, so the harness replays the exact same pass bookkeeping and can inject a merge fault to prove the isolation mechanically (baseline B65). This is the completion-pass twin of the scheduling-side `LightingScanDecision` (§ shared arm decision) — HF-4.
 
 ### Step 5: Lighting Ready-Set Scan (The Critical Section)
 
 This is where most pipeline stalls originate. The dirty set lives in `LightWorkScheduler` (`Assets/Scripts/Helpers/LightWorkScheduler.cs`, MT-2), split into two `HashSet<Vector2Int>`s of chunks whose lighting flags (`NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`) have been set to `true`:
 
 - **Ready** — visited by the per-frame scan.
-- **Waiting** — parked chunks whose readiness gate failed (or whose lighting job is in-flight); invisible to the scan until a promotion event moves them back. This keeps the per-frame cost at O(schedulable) instead of O(dirty) — under a backlog, blocked chunks no longer pay 8-neighbor gate evaluations every frame.
+- **Waiting** — parked chunks whose readiness gate failed (or whose lighting job is in-flight); invisible to the scan until a promotion event moves them back. This keeps the per-frame cost at O (schedulable) instead of O (dirty) — under a backlog, blocked chunks no longer pay 8-neighbor gate evaluations every frame.
 
 **Registration:** The three lighting flags on `ChunkData` are properties with setters. When any flag transitions to `true`, a static callback (`ChunkData.OnLightWorkFlagged` → `LightWorkScheduler.Flag`) enqueues the chunk's position into a `ConcurrentQueue<Vector2Int>` — this is thread-safe and supports flag-setting from background deserialization threads (`ChunkSerializer.ReadChunkInternal` via `Task.Run`). The main thread drains this queue into the ready set at the start of the scan (promoting parked entries).
 
@@ -212,8 +200,15 @@ _lightWork.PromoteAll()                                       ← waiting → re
 
 // Ready-set iteration (waiting set is NOT visited):
 snapshot = ListPool.Get(_lightWork ready set)
+quota  = PipelinePassBudget.ComputeQuota(maxLightJobsPerFrame, unscaledDeltaTime)  ← cap × dt × 60 (P-4 §3.4;
+window = StartWindow(lightScheduleBudgetMs)                                          flag off → quota == cap, no window;
+                                                                                     window starts AFTER the fail-safe scan)
 foreach pos in snapshot:
-    if lightJobsScheduled >= maxLightJobsPerFrame (32): BREAK  ← throttle (rest stays ready)
+    if lightJobsScheduled >= quota OR window.Expired
+       OR lightingJobs.Count >= maxInFlightLightingJobs: BREAK ← throttle (rest stays ready);
+                                                                 in-flight cap = pooled-buffer memory
+                                                                 bound, budgets-on only (flag off =
+                                                                 byte-exact legacy leg)
     if !worldData.Chunks.TryGetValue(pos): REMOVE, SKIP        ← self-clean (both sets)
     if !chunkData.IsPopulated: PARK, SKIP                      ← promoted on population
     if lightingJobs.ContainsKey(coord): PARK, SKIP             ← promoted on job completion
@@ -257,11 +252,19 @@ foreach pos in snapshot:
 
 ```mermaid
 flowchart TD
-    subgraph "CheckViewDistance (Main Thread)"
+    subgraph "CheckViewDistance (Main Thread, on crossing)"
         A1["Player moves to new chunk coord"] --> A2["Spiral loop identifies missing chunks"]
-        A2 --> A3["Create placeholder ChunkData<br/>worldData.Chunks.Add()"]
-        A3 --> A4["Set IsLoading = true"]
-        A4 --> A5["LoadOrGenerateChunk()"]
+        A2 --> A3["Get-or-create placeholder<br/>WorldData.GetOrCreatePlaceholder()<br/>(the single creation site, CP-4)"]
+        A3 --> A3b["Enqueue nearest-first<br/>(_generationRequestQueue, P-4 §3.1)"]
+    end
+
+    subgraph "DrainGenerationRequests (Main Thread, each frame)"
+        A3b --> A4g{"Panic gate open?<br/>(GenerationPanicGate over lighting<br/>ReadyCount, close ≥256 / reopen ≤128,<br/>P-4 §3.5)"}
+        A4g -- No --> AWAIT
+        A4g -- Yes --> A4{"GenerationJobs.Count + admitted<br/>&lt; maxInFlightGenerationJobs?"}
+        A4 -- No --> AWAIT["Leave queued for a later frame"]
+        A4 -- Yes --> A4b["Set IsLoading = true"]
+        A4b --> A5["LoadOrGenerateChunk()"]
     end
 
     subgraph "LoadOrGenerateChunk (Async)"
@@ -279,7 +282,9 @@ flowchart TD
 
     subgraph "ProcessGenerationJobs (Main Thread, next frame)"
         C1 --> D1["job.Handle.Complete()"]
-        D1 --> D2["chunkData.Populate(map, heightMap)"]
+        D1 --> DDISC{"Persistence on AND chunk now<br/>beyond unload boundary? (P-4 §3.2)"}
+        DDISC -- Yes --> DDISC2["Clear IsLoading + ReleaseGenerationJobData()<br/>discard, no populate/save<br/>(UnloadChunks reclaims; return-to-range re-enqueues)"]
+        DDISC -- No --> D2["chunkData.Populate(map, heightMap)"]
         D2 --> D3["Apply flora mods (trees)"]
         D3 --> D4["Apply pending mods from disk"]
         D4 --> D5["Restore pending lighting columns"]
@@ -291,6 +296,14 @@ flowchart TD
     style D6 fill: #ff6b6b, color: #fff
     style D7 fill: #4ecdc4, color: #fff
 ```
+
+#### Load-arm failure contract (CP-3)
+
+The async load arm is no longer a fire-and-forget without a failure contract (the F1 silent-stall class): `LoadOrGenerateChunk` wraps its body and, on any fault, logs **one** `Debug.LogError`, clears the placeholder's `IsLoading` (identity-guarded — only if the placeholder is still the same instance AND pool lifecycle it admitted, via `ChunkData.LifecycleEpoch`, so a late fault can never clear the flag on a successor load even when the pool re-issues the same object for the same coord), and returns. The mid-await unload guard inside the load body uses
+the same instance + epoch check. The placeholder stays in `worldData.Chunks`; the next `CheckViewDistance` boundary crossing re-enqueues it and `DrainGenerationRequests` re-admits it — natural retry for transient I/O faults. A *persistently* faulting file surfaces as a repeating error log (loud), and a *corrupt* payload keeps its own deliberate arm: `ChunkSerializer.Deserialize` catches the parse failure, **returns the pooled shell and its attached sections to the concurrent pools** (no leak), and yields null →
+"not on disk" → regenerate. The storage boundary keeps the two outcomes distinct: a thrown I/O fault must **never** surface as the null "not on disk" result, or the load arm would regenerate terrain over the player's saved data — `RegionFile.LoadChunkData` returns null only for its explicit corrupt-shape branches and rethrows unexpected faults, and `ChunkStorageManager.GetRegion`
+evicts a faulted `Lazy<RegionFile>` so one transient open fault cannot poison the region for the session. Teardown cancellation (`OperationCanceledException`) stays a rethrow — not a fault. Guarded by `Minecraft Clone/Dev/Validate Deserialization Robustness` (NS-1 seed, B1–B7; dev-only
+`ChunkStorageManager.InjectLoadFaults` seam); see the CP doc §3.3/§7 CP-3.
 
 ### 5.2 Lighting Pipeline
 
@@ -357,7 +370,7 @@ flowchart TD
 flowchart TD
     subgraph "Mesh Scheduling (Step 7 of Update)"
         M1["Walk _meshBuildQueue head→tail<br/>(MeshBuildQueue: head = highest priority)"]
-        M1 --> M2{"meshJobsScheduled >= maxMeshRebuildsPerFrame (10)?"}
+        M1 --> M2{"meshJobsScheduled >= quota<br/>OR ms window expired?<br/>(quota = maxMeshRebuildsPerFrame × dt × 60, P-4 §3.4)"}
         M2 -- Yes --> M_DONE["Stop scheduling this frame"]
         M2 -- No --> M3["ScheduleMeshing(chunk)"]
         M3 --> M4{"chunk.HasLightChangesToProcess<br/>OR NeedsInitialLighting?"}
@@ -381,7 +394,7 @@ flowchart TD
     end
 
     subgraph "Final Draw (Step 8 of Update)"
-        MP3 --> FD1["ChunksToDraw.Dequeue()"]
+        MP3 --> FD1["ChunksToDraw drain<br/>(≥1/frame, ms-budgeted — P-4 §5.3)"]
         FD1 --> FD2["chunk.CreateMesh()<br/>(trigger load animation)"]
     end
 
@@ -506,7 +519,8 @@ When `IsStable = false`:
 - The chunk re-enters the lighting scan next frame.
 
 > [!NOTE]
-> The stability test itself is computed only from the BFS queues + raw `CrossChunkLightMods.Length` inside the job. On the main thread, `LightingJobProcessor.IsEffectivelyStable` then overrides it to `true` when the only outstanding mods target out-of-world positions (which can never be consumed) — otherwise world-boundary chunks would reschedule lighting indefinitely.
+> The stability test itself is computed only from the BFS queues + raw `CrossChunkLightMods.Length` inside the job. On the main thread, `LightingJobProcessor.IsEffectivelyStable` then overrides it to `true` when the only outstanding mods target out-of-world positions (which can never be consumed) — otherwise world-boundary chunks would reschedule lighting indefinitely. *(WS-3 note: with XZ fully unbounded, cross-chunk light mods — always horizontal, same Y — can no longer be out-of-world, so this override is effectively dead for XZ; undeliverable
+frontier mods take the `PersistUndeliverable` route instead, which lets a frontier chunk settle exactly like any interior frontier.)*
 
 ---
 
@@ -514,18 +528,18 @@ When `IsStable = false`:
 
 ### 9.1 Dictionary Iteration + Throttle Starvation
 
-**Mechanism:** The lighting scan previously iterated `worldData.Chunks.Values` (a `Dictionary<Vector2Int, ChunkData>`). Dictionary iteration order is **non-deterministic** and may change when entries are added/removed.
-Combined with the `maxLightJobsPerFrame = 32` throttle and the `break`, certain chunks could be consistently visited late in the iteration and starved if the throttle was exhausted by chunks visited earlier.
+**Mechanism:** The lighting scan previously iterated `worldData.Chunks.Values` (a `Dictionary<Vector2Int, ChunkData>`). Dictionary iteration order is **non-deterministic** and may change when entries are added/removed. Combined with the `maxLightJobsPerFrame = 32` throttle and the `break`, certain chunks could be consistently visited late in the iteration and starved if the throttle was exhausted by chunks visited earlier.
 
 **Risk Level:** Low. ~~Medium~~.
 
 **Status:** ✅ **MITIGATED** — The lighting scan now iterates a dirty set containing only chunks with pending work, instead of all loaded chunks. This drastically reduces iteration count during steady state (0–5 entries vs 625+). The `HashSet` iteration order is still non-deterministic, but with far fewer entries, throttle starvation is effectively eliminated. MT-2 further split the dirty set into ready/waiting subsets (`LightWorkScheduler`), so under a backlog the scan visits only schedulable chunks — gate-blocked chunks are parked and re-enter via
 event-driven promotion (see Step 5).
 
+*P-4 §3.4 note:* the throttle itself is now a rate quota (`maxLightJobsPerFrame × unscaledDeltaTime × 60`) plus a Stopwatch ms ceiling instead of the fixed count — but the **break semantics this section depends on are unchanged**: a budget break leaves the un-served remainder in the READY set (never parked), exactly like the old count break, so no new promotion event is needed.
+
 ### 9.2 Cross-Chunk Mod Ping-Pong
 
-**Mechanism:** When chunk A's lighting job produces cross-chunk mods for neighbor B, B gets `HasLightChangesToProcess = true`. B then runs its lighting job, potentially producing mods back for A. This sets A's `HasLightChangesToProcess = true` again, preventing A from being
-meshed (because `ScheduleMeshing` checks this flag on the center chunk).
+**Mechanism:** When chunk A's lighting job produces cross-chunk mods for neighbor B, B gets `HasLightChangesToProcess = true`. B then runs its lighting job, potentially producing mods back for A. This sets A's `HasLightChangesToProcess = true` again, preventing A from being meshed (because `ScheduleMeshing` checks this flag on the center chunk).
 
 **Convergence:** Light values are bounded 0-15 and the BFS is monotonic within a pass. The cross-chunk sunlight guard (only INCREASE allowed for non-zero mods) further constrains oscillation. This should converge in 2-3 rounds.
 
@@ -553,8 +567,7 @@ This creates a **starvation cascade** where interior chunks are perpetually bloc
 
 ### 9.4 Edge Check Gate Strictness
 
-**Mechanism:** `NeedsEdgeCheck` requires `AreNeighborsReadyAndLit` to fire via the primary path. If neighbors are perpetually cycling through lighting passes (due to 9.3), the edge check never gets the strict gate satisfied. However, the fallback path (section 7) means the edge
-check eventually fires with the weaker gate.
+**Mechanism:** `NeedsEdgeCheck` requires `AreNeighborsReadyAndLit` to fire via the primary path. If neighbors are perpetually cycling through lighting passes (due to 9.3), the edge check never gets the strict gate satisfied. However, the fallback path (section 7) means the edge check eventually fires with the weaker gate.
 
 **Risk Level:** Low for correctness (fallback exists). But the fallback might run edge checks against stale data, producing suboptimal corrections.
 
@@ -619,42 +632,57 @@ if (isJobRunning || isProcessingLight) continue; // Skip unload
 
 1. **"Large swathes of chunks not being meshed"** — Interior chunks whose edge-neighbors were unloaded are stuck with `HasLightChangesToProcess = true`.
 2. **"Semi-reproducible when loading chunks from the same direction"** — Directional movement creates a leading edge that generates cross-chunk mods for interior chunks, then the trailing edge unloads, stranding them.
-3. **"Fully unloading and reloading fixes the issue"** — When the stuck chunk is finally unloaded (e.g., player moves far away and eventually `HasLightChangesToProcess` is cleared via some path), or when returning to the area reloads the missing neighbor,
-   the lighting can finally proceed.
+3. **"Fully unloading and reloading fixes the issue"** — When the stuck chunk is finally unloaded (e.g., player moves far away and eventually `HasLightChangesToProcess` is cleared via some path), or when returning to the area reloads the missing neighbor, the lighting can finally proceed.
 
 **Risk Level:** **CRITICAL** — Creates a permanent, non-self-resolving deadlock under normal gameplay conditions.
 
-**Status:** ✅ **FIXED** — `UnloadChunks()` now checks all 8 neighbors before unloading. If any neighbor has `HasLightChangesToProcess = true` or `NeedsInitialLighting = true`, the unload is deferred.
+**Status:** ✅ **FIXED**, then refined by CP-5 + P-4 rec 3. The unload policy is now the pure, truth-table-baselined function `Helpers/ChunkUnloadDecision.Evaluate` (suite `Minecraft Clone/Dev/Validate Chunk Unload Decision`; the §9.6 guard is witnessed by baselines B4/B5/B7). `UnloadChunks()` gathers facts and switches on the result:
+
+- **Strand guard (unchanged intent, narrowed trigger).** Unloading is still deferred (`DeferWouldStrand`) when a populated neighbor with `HasLightChangesToProcess`/`NeedsInitialLighting` would be stranded — **but only if that neighbor is itself within the unload distance** (`!IsBeyondUnloadDistance`). An in-range neighbor genuinely needs this chunk's data and can still make progress, so the deadlock this section describes stays guarded.
+- **P-4 rec 3 — persist-and-unload the pinned trail.** A neighbor that is *itself* beyond the unload distance no longer defers the unload: it is being reclaimed on this or a later pass, so stranding it is harmless. Consequently an out-of-range chunk pinned *only* by its own pending/initial lighting — whose lighting can never complete because a further-out neighbor was never generated (the missing-neighbor gate) — takes the `UnloadPersistLightPending` arm: it forces `NeedsInitialLighting = true` (a full re-light on reload, captured by the synchronous save
+  snapshot; fresh regeneration for an unmodified chunk), persists its pending sunlight columns via `LightingStateManager.AddPending`/`PersistOrphanedSunlightColumns`, and unloads. This drains the "pinned trail" (perf analysis §3.3) that previously climbed unbounded behind a moving player.
+
+Precedence is `job → in-range-strand → persist-light → unload`: the strand check sits **above** the light-persist arm so a chunk an in-range neighbor needs always defers rather than shedding its lighting. The only residual is a bounded boundary shell — out-of-range chunks whose *buffer-band* (kept, in-range) neighbor is stuck light-pending — which self-resolves the moment the player moves it past the boundary. Verified in-game (soak: beyond-unload-unreclaimable 743 → ~0–2, `Deferred — light` 308 → 0; durability: edit → unload → reload preserves the edit
+and its lighting).
+
+**Unload save failure contract (CP-6).** The modified-chunk save the teardown fires is no longer fire-and-forget-with-swallowed-failure (the F5 silent-data-loss hole): `ChunkStorageManager.SaveChunkAsync` returns `ChunkSaveResult` (`Written`/`Canceled`/`Failed`/`FailedPermanent`), and a `Failed` **or `Canceled`** save hands its serialization snapshot — the edits' only surviving copy once the `ChunkData` is pool-recycled a few lines later — to the storage manager's coord-keyed **failed-save retry registry**. `ModifiedChunks.Remove` deliberately stays at
+fire time: durability responsibility transfers with the snapshot, and the recycled `ChunkData` ref must never linger in (or re-enter) `ModifiedChunks`, where the pool would hand it to a different chunk. The registry is drained per frame (`World.Update` → `DrainFailedSaveRetries`, backoff 1→30 s), flushed synchronously for a coord about to be loaded (`LoadChunkAsync` reload guard — a returning player never reads pre-edit bytes), and flushed one final time in the synchronous `SaveAllModifiedChunks` path at quit/force-unload — **before** the per-chunk live
+saves and regardless of whether
+`ModifiedChunks` is empty, so pending entries are never skipped and a stale snapshot can never overwrite newer just-synced bytes (retryably-failing entries are retained there, so a live-session force-unload keeps them recoverable; `StorageManager.Dispose` makes one last attempt per remaining entry). Every successful write also stages a **supersede** op that drops a pending entry only when the entry's **data-freshness sequence** (stamped at capture time) is older — newer failures survive regardless of completion order (B10), and failed *sync* saves stage
+a snapshot too (B12). Staging `Canceled` saves matters because cancellation only comes from the quit token, and a canceled save's chunk may already be gone from `ModifiedChunks` — the quit flush writes the staged snapshot synchronously. Deterministic failures (zero-length serialization, or a chunk exceeding the region record limit — `ChunkTooLargeException`) are `FailedPermanent`: released loudly, never retried. Guarded by `Minecraft Clone/Dev/Validate Save Durability` (B1–B13, dev-only `InjectSaveFaults`/`InjectZeroLengthSerializes`/
+`InjectTooLargeSaves` seams); see the CP doc §4.3/§7 CP-6 and the storage doc §5.1.
 
 ---
 
 ## 10. Key File Reference
 
-| File                                                                                                                                                                                    | Role in Pipeline                                                                                                               |
-|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
-| [World.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/World.cs)                                          | Main orchestrator: Update loop, CheckViewDistance, readiness gates, mesh queue                                                 |
-| [WorldJobManager.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/WorldJobManager.cs)                      | Job scheduling & result processing for generation, lighting, meshing                                                           |
-| [ChunkData.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/Data/ChunkData.cs)                             | State flags, light queues, voxel storage                                                                                       |
-| [Chunk.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/Chunk.cs)                                          | Visual representation, mesh application, pool lifecycle                                                                        |
-| [NeighborhoodLightingJob.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/Jobs/NeighborhoodLightingJob.cs) | BFS flood-fill, edge checking, IsStable computation                                                                            |
-| `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs`                                                                                                                                   | Per-voxel cross-chunk mod decision (sunlight guards, Bug 11 veto, wake-up nodes); shared with the validation suite             |
-| `Assets/Scripts/Helpers/LightingJobProcessor.cs`                                                                                                                                        | Cross-chunk mod routing (drop/persist/defer/apply) + effective-stability override                                              |
-| `Assets/Scripts/Helpers/LightingScheduleDecision.cs`                                                                                                                                    | Extracted `ScheduleLightingUpdate` guard logic (shared with frame-simulator tests)                                             |
-| `Assets/Scripts/Helpers/LightingScanDecision.cs`                                                                                                                                        | Extracted ready-set scan arm decision (initial/edge/regular/remove/park; shared with frame-simulator tests)                    |
-| `Assets/Scripts/Helpers/LightingCompletionPass.cs`                                                                                                                                      | Extracted completion-pass skeleton (merge loop + remove/promote, two-stage fault isolation; shared with frame-simulator tests) |
-| `Assets/Scripts/Helpers/LightWorkScheduler.cs`                                                                                                                                          | MT-2 dirty-set bookkeeping: ready/waiting split, staging queue, event-driven promotion (own validation suite)                  |
-| [SettingsManager.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/SettingsManager.cs)                      | `maxLightJobsPerFrame` (32), `maxMeshRebuildsPerFrame` (10)                                                                    |
+| File                                                                                                                                                                                    | Role in Pipeline                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [World.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/World.cs)                                          | Main orchestrator: Update loop, CheckViewDistance, readiness gates, mesh queue                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| [WorldJobManager.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/WorldJobManager.cs)                      | Job scheduling & result processing for generation, lighting, meshing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| [ChunkData.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/Data/ChunkData.cs)                             | State flags, light queues, voxel storage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| [Chunk.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/Chunk.cs)                                          | Visual representation, mesh application, pool lifecycle                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| [NeighborhoodLightingJob.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/Jobs/NeighborhoodLightingJob.cs) | BFS flood-fill, edge checking, IsStable computation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs`                                                                                                                                   | Per-voxel cross-chunk mod decision (sunlight guards, Bug 11 veto, wake-up nodes); shared with the validation suite                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `Assets/Scripts/Helpers/LightingJobProcessor.cs`                                                                                                                                        | Cross-chunk mod routing (drop/persist/defer/apply) + effective-stability override                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `Assets/Scripts/Helpers/LightingScheduleDecision.cs`                                                                                                                                    | Extracted `ScheduleLightingUpdate` guard logic (shared with frame-simulator tests)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `Assets/Scripts/Helpers/LightingScanDecision.cs`                                                                                                                                        | Extracted ready-set scan arm decision (initial/edge/regular/remove/park; shared with frame-simulator tests)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `Assets/Scripts/Helpers/LightingCompletionPass.cs`                                                                                                                                      | Extracted completion-pass skeleton (merge loop + remove/promote, two-stage fault isolation; shared with frame-simulator tests)                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `Assets/Scripts/Helpers/LightWorkScheduler.cs`                                                                                                                                          | MT-2 dirty-set bookkeeping: ready/waiting split, staging queue, event-driven promotion (own validation suite)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| [SettingsManager.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/SettingsManager.cs)                      | `maxLightJobsPerFrame` (32), `maxMeshRebuildsPerFrame` (10) — quota anchors since P-4 §3.4; plus the P-4 knobs: `enablePipelineTimeBudgets`/`enableGenerationPanicGate` (rollback flags), `scaleBudgetCeilingsWithFpsCap` (default-ON: ms ceilings scale with a voluntarily lowered FPS cap), per-pass ms ceilings (8/6/6/4/2 — Performance-tab sliders floored at 0.5; 0 = ceiling off is settings-file-only), panic thresholds (256/128, sanitized `0 ≤ reopen < close`; signal = post-scan ReadyCount sample + 3-frame close debounce), `maxInFlightLightingJobs` (64, budgets-on memory bound) |
+| `Assets/Scripts/Helpers/PipelinePassBudget.cs`                                                                                                                                          | P-4 §3.4 budget math: rate quota (cap × dt × 60, clamped) + Stopwatch window ceiling + `ScaleCeilingMs` (FPS-cap-proportional ceiling, anchored 60 FPS, clamped ×8); pure, suite-pinned ("Pipeline Backpressure")                                                                                                                                                                                                                                                                                                                                                                                  |
+| `Assets/Scripts/Helpers/GenerationPanicGate.cs`                                                                                                                                         | P-4 §3.5 hysteresis gate over `LightWorkScheduler.ReadyCount`; pauses admissions in `DrainGenerationRequests`; pure, suite-pinned                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 ---
 
 ## 11. Glossary
 
-| Term                | Definition                                                                                                                                  |
-|---------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
-| **BFS**             | Breadth-First Search flood-fill for light propagation                                                                                       |
-| **Cross-chunk mod** | A `LightModification` struct produced when a lighting job needs to change a voxel in a neighbor chunk's data                                |
-| **Edge check**      | Validation of light values at the 4 horizontal chunk borders against neighbor data                                                          |
-| **Readiness gate**  | A boolean function that must return true before a pipeline stage can proceed                                                                |
-| **Throttle**        | Per-frame limit on how many jobs can be scheduled (`maxLightJobsPerFrame`, `maxMeshRebuildsPerFrame`)                                       |
-| **Starvation**      | When a chunk is perpetually blocked from advancing because other chunks consume all available job slots or keep destabilizing its neighbors |
-| **Wave-front**      | The leading edge of newly loaded chunks as the player moves in one direction                                                                |
+| Term                | Definition                                                                                                                                                                                                   |
+|---------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **BFS**             | Breadth-First Search flood-fill for light propagation                                                                                                                                                        |
+| **Cross-chunk mod** | A `LightModification` struct produced when a lighting job needs to change a voxel in a neighbor chunk's data                                                                                                 |
+| **Edge check**      | Validation of light values at the 4 horizontal chunk borders against neighbor data                                                                                                                           |
+| **Readiness gate**  | A boolean function that must return true before a pipeline stage can proceed                                                                                                                                 |
+| **Throttle**        | Per-frame limit on how many jobs can be scheduled — since P-4 §3.4 a rate quota (`cap × dt × 60`) bounded by a Stopwatch ms ceiling; `maxLightJobsPerFrame`/`maxMeshRebuildsPerFrame` are the 60 FPS anchors |
+| **Starvation**      | When a chunk is perpetually blocked from advancing because other chunks consume all available job slots or keep destabilizing its neighbors                                                                  |
+| **Wave-front**      | The leading edge of newly loaded chunks as the player moves in one direction                                                                                                                                 |

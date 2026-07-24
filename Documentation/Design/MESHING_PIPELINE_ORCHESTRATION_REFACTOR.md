@@ -32,6 +32,11 @@ MR-2/3/4 state), and `Data/WorldData.cs:223`. Verified: **no `forceRenderingOff`
 codebase** (the culling doc's Phase 0.5 is still open, re-confirming its 2026-07-02 note). Line
 numbers are anchors for the executor, not contracts — re-verify before editing.
 
+> **Drift note (2026-07-22):** `CompleteAndProcessMeshJobs` (censused above) was deleted as dead
+> code out of band — Rider `safe_delete` confirmed zero usages. Runtime mesh completion lives in
+> the per-frame `ProcessMeshJobs` drain; shutdown completion in `WorldJobManager.Dispose()`. No
+> MP phase is affected; the method appears in no phase's scope.
+
 **Relationship to other documents:**
 
 - [`VISIBILITY_CULLING_ARCHITECTURE.md`](VISIBILITY_CULLING_ARCHITECTURE.md) — the future GS-5

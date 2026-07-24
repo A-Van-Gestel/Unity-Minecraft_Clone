@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using Data;
 using Editor.Validation.Behavior.Framework;
@@ -13,33 +12,23 @@ using UnityEngine;
 namespace Editor.Validation.Behavior
 {
     /// <summary>
-    /// TG-4 Phase 4a/4b fluid-tick parallel determinism gates. Both prove that <b>parallel</b> fluid scheduling
-    /// (<c>.Schedule()</c>) produces <b>byte-identical</b> output to the <b>serial</b> path (<c>.Run()</c>) and is
-    /// identical <b>run-to-run</b> (no data race): capture serial baselines, then schedule the work concurrently on
-    /// pooled tickers — each with its own snapshot + output scratch, exactly as <c>World.ProcessTickUpdatesParallel</c>
-    /// does — and assert every concurrent result equals its baseline, over <see cref="ROUNDS"/> rounds. A divergence
-    /// means scratch bled between concurrent jobs, the schedule path differs from run, or a handle was read before
-    /// completion.
-    /// <list type="bullet">
-    /// <item><b>Phase 4a — <see cref="Run"/>:</b> the interior path
-    /// (<see cref="FluidBurstTicker.ScheduleInteriorFluids"/> vs <see cref="FluidBurstTicker.RunInteriorFluids"/>),
-    /// scheduling one chunk through <see cref="CONCURRENT_TICKERS"/> concurrent tickers. Gates the
-    /// <c>EnableParallelFluidTick</c> flag.</item>
-    /// <item><b>Phase 4b — <see cref="RunHalo"/>:</b> the full halo path
-    /// (<see cref="FluidBurstTicker.ScheduleFluids"/> vs <see cref="FluidBurstTicker.RunFluids"/>) over a 3×3 grid of
-    /// <b>distinct</b> chunks scheduled concurrently — each ticker fills its own 8 neighbor-snapshot buffers
-    /// (<c>FluidBurstTicker._neighborBuffers</c>) from <b>different</b> neighbor data, the additional race surface the
-    /// interior gate can't reach. Gates the <c>EnableFluidBorderBurst</c> flag.</item>
-    /// </list>
+    /// TG-4 fluid-tick parallel determinism gate. Proves that <b>parallel</b> fluid scheduling (<c>.Schedule()</c>)
+    /// produces <b>byte-identical</b> output to the <b>serial</b> path (<c>.Run()</c>) and is identical
+    /// <b>run-to-run</b> (no data race): capture serial baselines, then schedule the work concurrently on pooled
+    /// tickers — each with its own snapshot + neighbor-halo scratch, exactly as <c>World.TickChunksParallel</c> does —
+    /// and assert every concurrent result equals its baseline, over <see cref="ROUNDS"/> rounds. A divergence means
+    /// scratch bled between concurrent jobs, the schedule path differs from run, or a handle was read before completion.
     /// <para>
-    /// The behavior suite (BH-D1[L|F]/[L|H]) guards the serial path + the job's per-voxel parity; these guard the
-    /// parallel scheduling correctness on top. (The World-level drain orchestration + grass interleaving are
-    /// exercised in-game.)
+    /// <b><see cref="RunHaloBand"/>:</b> the shipped Y-band halo path (<see cref="FluidBurstTicker.ScheduleFluids"/> vs
+    /// <see cref="FluidBurstTicker.RunFluids"/>) over a 3×3 grid of <b>distinct</b> chunks scheduled concurrently —
+    /// each ticker fills its own 8 neighbor-snapshot buffers (<c>FluidBurstTicker._neighborBuffers</c>) from
+    /// <b>different</b> neighbor data, the cross-job race surface. The behavior suite (BH-D1[L|HB]) guards the serial
+    /// path + the job's per-voxel parity; this guards the parallel scheduling correctness on top. (The World-level
+    /// drain orchestration + grass interleaving are exercised in-game.)
     /// </para>
     /// </summary>
     public static class FluidParallelDeterminismValidation
     {
-        private const int CONCURRENT_TICKERS = 8; // jobs in flight at once — the cross-job isolation surface
         private const int ROUNDS = 6; // repeated rounds — run-to-run identity (race detection)
         private const int FIXED_TICK = 1; // fixed tick salt so the viscosity RNG is deterministic
         private const int FLOOR_Y = 63;
@@ -49,77 +38,27 @@ namespace Editor.Validation.Behavior
         // IsVoxelInWorld bound SetNeighborBlock requires) and can be seeded. Chunk coord (8,8).
         private static readonly Vector2Int s_haloCenterOrigin = new Vector2Int(128, 128);
 
-        [MenuItem("Minecraft Clone/Dev/Validate Fluid Parallel Determinism")]
-        public static void Run()
-        {
-            using BehaviorTestWorld rig = new BehaviorTestWorld();
-            SeedInteriorFluids(rig.ChunkData);
-
-            // Serial baseline — the path the behavior differential already guards (RunInteriorFluids = .Run()).
-            FluidBurstTicker serial = new FluidBurstTicker();
-            serial.RunInteriorFluids(rig.ChunkData, FIXED_TICK, rig.BlockTypesJob);
-            TickerOutput baseline = Capture(serial);
-            serial.Dispose();
-
-            if (baseline.Interior.Length == 0)
-            {
-                Debug.LogError("[FAIL] Fluid parallel determinism: seed produced no interior fluids — the test is vacuous.");
-                return;
-            }
-
-            // Hoist the captured members into locals so the schedule lambda doesn't close over the using-scoped rig
-            // (the capture is safe — StressAgainstBaseline runs synchronously before rig disposes — but this silences
-            // the "captured variable disposed in outer scope" inspection).
-            ChunkData cd = rig.ChunkData;
-            NativeArray<BlockTypeJobData> blockTypes = rig.BlockTypesJob;
-            int failures = StressAgainstBaseline(baseline,
-                t => t.ScheduleInteriorFluids(cd, FIXED_TICK, blockTypes));
-
-            if (failures == 0)
-            {
-                Debug.Log($"<color=green>[PASS] Fluid parallel determinism (interior): {CONCURRENT_TICKERS}×{ROUNDS} " +
-                          $"concurrent runs byte-identical to the serial baseline ({baseline.Mods.Length} mods, " +
-                          $"{baseline.Interior.Length} interior voxels).</color>");
-            }
-            else
-            {
-                Debug.LogError($"<color=red>[FAIL] Fluid parallel determinism (interior): {failures} divergence(s) — see above.</color>");
-            }
-        }
-
         /// <summary>
-        /// TG-4 Phase 4b determinism gate: the <b>full halo</b> path (<see cref="FluidBurstTicker.ScheduleFluids"/> vs
-        /// <see cref="FluidBurstTicker.RunFluids"/>) over a <b>multi-chunk</b> cross-seam flood. Unlike the interior
-        /// gate (<see cref="Run"/>), which replays one chunk N times, this floods a 3×3 grid of <b>distinct</b> chunks
-        /// — each registered in the shared <see cref="WorldData"/> so it is its neighbors' neighbor, each with
-        /// <b>different</b> content — and schedules all 9 concurrently, exactly as <c>World.ProcessTickUpdatesParallel</c>
-        /// does. This is the only configuration that exercises the unique Phase-4b race surface: the per-ticker
+        /// TG-4 determinism gate: the shipped <b>Y-band halo</b> path (<see cref="FluidBurstTicker.ScheduleFluids"/> vs
+        /// <see cref="FluidBurstTicker.RunFluids"/>) over a <b>multi-chunk</b> cross-seam flood.
+        /// Floods a 3×3 grid of <b>distinct</b> chunks — each registered in the shared <see cref="WorldData"/> so it is
+        /// its neighbors' neighbor, each with <b>different</b> content — and schedules all 9 concurrently, exactly as
+        /// <c>World.TickChunksParallel</c> does. This exercises the Phase-4b race surface: the per-ticker
         /// neighbor-snapshot buffers. <see cref="FluidBurstTicker.PrepareNeighbors"/> fills them on the main thread at
         /// schedule time, but the job reads them later (after completion), so each in-flight job needs its <b>own</b>
         /// buffers that a subsequent chunk's prepare can't overwrite — a shared/bled buffer would feed a job the wrong
-        /// neighbor and diverge. Each chunk's parallel output must equal its own serial <see cref="RunFluids"/>
-        /// baseline, over <see cref="ROUNDS"/> rounds (run-to-run identity). Guards flipping
-        /// <c>EnableFluidBorderBurst</c> on.
-        /// </summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Fluid Parallel Determinism (Cross-Chunk Halo)")]
-        public static void RunHalo() => RunHaloInternal(useBand: false);
-
-        /// <summary>
-        /// TG-4 Phase 4b Y-band variant of <see cref="RunHalo"/>: the same 3×3 distinct-chunk concurrent flood, but
-        /// every <see cref="FluidBurstTicker.RunFluids"/>/<see cref="FluidBurstTicker.ScheduleFluids"/> runs with the
-        /// Y-band gather (<c>useBand: true</c>). Because the band extent is computed per-ticker from each chunk's own
-        /// active fluids, this guards that band sizing is deterministic across the serial baseline, the concurrent
-        /// schedule, and run-to-run — the determinism surface the band adds on top of <c>BH-D1[H|HB]</c> (which proves
-        /// band == full). Guards flipping <c>EnableFluidBandGather</c> on with <c>EnableFluidBorderBurst</c>.
+        /// neighbor and diverge. Each chunk's parallel output must equal its own serial <see cref="FluidBurstTicker.RunFluids"/>
+        /// baseline, over <see cref="ROUNDS"/> rounds (run-to-run identity). The band extent is computed per-ticker
+        /// from each chunk's own active fluids, so this also guards that band sizing is deterministic across the serial
+        /// baseline, the concurrent schedule, and run-to-run.
         /// </summary>
         [MenuItem("Minecraft Clone/Dev/Validate Fluid Parallel Determinism (Cross-Chunk Halo, Y-band)")]
-        public static void RunHaloBand() => RunHaloInternal(useBand: true);
+        public static void RunHaloBand() => RunHaloInternal();
 
-        private static void RunHaloInternal(bool useBand)
+        private static void RunHaloInternal()
         {
             using BehaviorTestWorld rig = new BehaviorTestWorld(s_haloCenterOrigin);
             WorldData wd = rig.WorldData;
-            string mode = useBand ? "Y-band" : "full-height";
 
             // Build a 3×3 grid of distinct flooded chunks around the center, each registered in the shared WorldData so
             // every chunk is a real neighbor of the others. The center (index 4) reads all 8 distinct neighbors; edge
@@ -145,34 +84,34 @@ namespace Editor.Validation.Behavior
                 }
 
                 SeedChunkFlood(c, dx, dz); // distinct per-chunk content so neighbor buffers differ
-                wd.Chunks[origin] = c;
+                wd.SetChunk(origin, c);
                 chunks.Add(c);
             }
 
             try
             {
-                // Serial baselines, one per chunk (RunFluids = .Run(), the BH-D1[L|H]-guarded path). RunFluids reads a
+                // Serial baselines, one per chunk (RunFluids = .Run(), the BH-D1[L|HB]-guarded path). RunFluids reads a
                 // pre-tick snapshot and never mutates, so computing every baseline leaves all 9 chunks at their seeded
                 // state — exactly what the concurrent pass reads.
                 TickerOutput[] baselines = new TickerOutput[chunks.Count];
                 for (int i = 0; i < chunks.Count; i++)
                 {
                     FluidBurstTicker serial = new FluidBurstTicker();
-                    serial.RunFluids(chunks[i], FIXED_TICK, rig.BlockTypesJob, wd, useBand);
+                    serial.RunFluids(chunks[i], FIXED_TICK, rig.BlockTypesJob, wd);
                     baselines[i] = Capture(serial);
                     serial.Dispose();
                 }
 
                 // Non-vacuity: the center chunk must actually have border voxels reading its 8 distinct neighbors,
-                // else we'd be exercising nothing the interior gate doesn't already cover.
+                // else the neighbor-halo scratch is never exercised.
                 if (baselines[4].Interior.Length == 0 || !HasBorderVoxel(baselines[4].Interior))
                 {
-                    Debug.LogError($"[FAIL] Fluid parallel determinism (halo {mode}): center chunk has no Tier-2 border " +
+                    Debug.LogError("[FAIL] Fluid parallel determinism (Y-band halo): center chunk has no border " +
                                    "fluids — the neighbor-halo scratch is never exercised, so the test is vacuous.");
                     return;
                 }
 
-                int failures = StressMultiChunk(chunks, baselines, wd, rig.BlockTypesJob, useBand);
+                int failures = StressMultiChunk(chunks, baselines, wd, rig.BlockTypesJob);
 
                 int totalMods = 0, totalFluids = 0;
                 foreach (TickerOutput b in baselines)
@@ -183,13 +122,13 @@ namespace Editor.Validation.Behavior
 
                 if (failures == 0)
                 {
-                    Debug.Log($"<color=green>[PASS] Fluid parallel determinism (cross-chunk halo, {mode}): {chunks.Count} distinct " +
+                    Debug.Log($"<color=green>[PASS] Fluid parallel determinism (cross-chunk halo, Y-band): {chunks.Count} distinct " +
                               $"chunks × {ROUNDS} concurrent rounds byte-identical to per-chunk serial baselines " +
                               $"({totalFluids} fluids, {totalMods} mods; center reads 8 distinct neighbors).</color>");
                 }
                 else
                 {
-                    Debug.LogError($"<color=red>[FAIL] Fluid parallel determinism (cross-chunk halo, {mode}): {failures} divergence(s) — see above.</color>");
+                    Debug.LogError($"<color=red>[FAIL] Fluid parallel determinism (cross-chunk halo, Y-band): {failures} divergence(s) — see above.</color>");
                 }
             }
             finally
@@ -200,63 +139,14 @@ namespace Editor.Validation.Behavior
         }
 
         /// <summary>
-        /// Schedules <see cref="CONCURRENT_TICKERS"/> concurrent jobs (via <paramref name="schedule"/>, each on its own
-        /// pooled ticker) over <see cref="ROUNDS"/> rounds and asserts every concurrent result is byte-identical to
-        /// <paramref name="baseline"/>. Shared by the interior (<see cref="Run"/>) and halo (<see cref="RunHalo"/>)
-        /// gates — only the schedule call differs. Returns the number of divergences (0 = pass); each is logged.
-        /// </summary>
-        /// <param name="baseline">The serial baseline every concurrent run must match.</param>
-        /// <param name="schedule">Schedules one job on the supplied pooled ticker and returns its handle.</param>
-        private static int StressAgainstBaseline(TickerOutput baseline, Func<FluidBurstTicker, JobHandle> schedule)
-        {
-            DynamicPool<FluidBurstTicker> pool =
-                new DynamicPool<FluidBurstTicker>(() => new FluidBurstTicker(), t => t.Dispose());
-
-            int failures = 0;
-            for (int round = 0; round < ROUNDS; round++)
-            {
-                List<FluidBurstTicker> tickers = new List<FluidBurstTicker>(CONCURRENT_TICKERS);
-                NativeArray<JobHandle> handles = new NativeArray<JobHandle>(CONCURRENT_TICKERS, Allocator.Temp);
-
-                // Schedule CONCURRENT_TICKERS jobs over the same chunk, each on its own pooled ticker.
-                for (int k = 0; k < CONCURRENT_TICKERS; k++)
-                {
-                    FluidBurstTicker t = pool.Get();
-                    tickers.Add(t);
-                    handles[k] = schedule(t);
-                }
-
-                JobHandle.ScheduleBatchedJobs();
-                JobHandle.CompleteAll(handles);
-                handles.Dispose();
-
-                // Every concurrent result must equal the serial baseline (Schedule == Run, no cross-job bleed).
-                for (int k = 0; k < CONCURRENT_TICKERS; k++)
-                {
-                    if (!Equal(baseline, Capture(tickers[k]), out string why))
-                    {
-                        Debug.LogError($"[FAIL] parallel ticker {k} (round {round}) diverged from serial baseline: {why}");
-                        failures++;
-                    }
-                }
-
-                for (int k = 0; k < CONCURRENT_TICKERS; k++)
-                    pool.Return(tickers[k]);
-            }
-
-            pool.Clear(); // disposes every pooled ticker
-            return failures;
-        }
-
-        /// <summary>
         /// Phase 4b: schedules all <paramref name="chunks"/> (distinct chunks) concurrently — each on its own pooled
         /// ticker via <see cref="FluidBurstTicker.ScheduleFluids"/> — and asserts each chunk's parallel output is
         /// byte-identical to its own serial <paramref name="baselines"/> entry, over <see cref="ROUNDS"/> rounds. This
-        /// is the real <c>ProcessTickUpdatesParallel</c> shape: N in-flight jobs, each reading its own neighbor halo
+        /// is the real <c>World.TickChunksParallel</c> shape: N in-flight jobs, each reading its own neighbor halo
         /// gathered from a different region of the shared <paramref name="wd"/>. Returns the divergence count (0 = pass).
         /// </summary>
         private static int StressMultiChunk(List<ChunkData> chunks, TickerOutput[] baselines, WorldData wd,
-            NativeArray<BlockTypeJobData> blockTypes, bool useBand)
+            NativeArray<BlockTypeJobData> blockTypes)
         {
             DynamicPool<FluidBurstTicker> pool =
                 new DynamicPool<FluidBurstTicker>(() => new FluidBurstTicker(), t => t.Dispose());
@@ -275,7 +165,7 @@ namespace Editor.Validation.Behavior
                 {
                     FluidBurstTicker t = pool.Get();
                     tickers.Add(t);
-                    handles[i] = t.ScheduleFluids(chunks[i], FIXED_TICK, blockTypes, wd, useBand);
+                    handles[i] = t.ScheduleFluids(chunks[i], FIXED_TICK, blockTypes, wd);
                 }
 
                 JobHandle.ScheduleBatchedJobs();
@@ -297,34 +187,6 @@ namespace Editor.Validation.Behavior
 
             pool.Clear(); // disposes every pooled ticker
             return failures;
-        }
-
-        /// <summary>
-        /// Seeds <paramref name="cd"/> with a margin-4 interior fluid pool over a stone floor — enough active
-        /// interior fluids to exercise decay, vertical flow, horizontal spread, and the drop-search BFS (the
-        /// threaded per-Execute scratch). One floor cell is left open so the BFS finds a real drop path.
-        /// </summary>
-        private static void SeedInteriorFluids(ChunkData cd)
-        {
-            // Solid floor beneath the fluids, spanning the interior + 2 cells of margin so neighbor/below reads
-            // resolve to a real block. One interior hole gives the drop-search BFS an actual drop to find.
-            for (int x = 2; x <= 13; x++)
-            for (int z = 2; z <= 13; z++)
-            {
-                if (x == 8 && z == 8) continue; // drop hole
-                cd.SetVoxel(x, FLOOR_Y, z, BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, 0));
-            }
-
-            // Interior water pool (x,z in [4,11] = margin-4 interior) with a deterministic level gradient so a mix
-            // of sources (level 0) and flowing levels emit decay/spread/vertical mods. All registered active.
-            for (int x = 4; x <= 11; x++)
-            for (int z = 4; z <= 11; z++)
-            {
-                byte level = (byte)((x + z) % 8); // 0 = source
-                byte meta = BurstVoxelDataBitMapping.BuildMetaLegacy(0, level, true);
-                cd.SetVoxel(x, FLUID_Y, z, BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Water, meta));
-                cd.AddActiveVoxel(new Vector3Int(x, FLUID_Y, z), BlockIDs.Water);
-            }
         }
 
         /// <summary>
@@ -350,16 +212,19 @@ namespace Editor.Validation.Behavior
         }
 
         /// <summary>
-        /// True if any flat index in <paramref name="fluidFlatIndices"/> is a Tier-2 <b>border</b> voxel (outside the
-        /// margin-4 interior) — i.e. a voxel that reads the gathered neighbor halo. Used to assert the halo gate is
+        /// True if any flat index in <paramref name="fluidFlatIndices"/> is a <b>border</b> voxel — within
+        /// <see cref="FluidTierClassifier.MaxFlowSearchDepth"/> (the max horizontal read reach) of an X/Z chunk edge,
+        /// so its flow BFS can read across the seam into the gathered neighbor halo. Used to assert the halo gate is
         /// non-vacuous (the neighbor-buffer scratch is actually exercised).
         /// </summary>
         private static bool HasBorderVoxel(int[] fluidFlatIndices)
         {
+            const int margin = FluidTierClassifier.MaxFlowSearchDepth;
             foreach (int flat in fluidFlatIndices)
             {
-                ChunkMath.GetLocalPositionFromFlattenedIndex(flat, out int x, out int y, out int z);
-                if (!FluidTierClassifier.IsTier1Interior(x, y, z))
+                ChunkMath.GetLocalPositionFromFlattenedIndex(flat, out int x, out int _, out int z);
+                if (x < margin || x >= VoxelData.ChunkWidth - margin ||
+                    z < margin || z >= VoxelData.ChunkWidth - margin)
                     return true;
             }
 

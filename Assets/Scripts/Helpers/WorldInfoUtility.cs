@@ -53,7 +53,9 @@ namespace Helpers
                     MinX = int.MaxValue, MaxX = int.MinValue,
                     MinZ = int.MaxValue, MaxZ = int.MinValue,
                     TotalSizeBytes = 0,
-                    CenterChunkCoord = new Vector2Int(VoxelData.WorldSizeInChunks / 2, VoxelData.WorldSizeInChunks / 2),
+                    CenterChunkCoord = new Vector2Int(
+                        VoxelData.DefaultSpawnPosition / VoxelData.ChunkWidth,
+                        VoxelData.DefaultSpawnPosition / VoxelData.ChunkWidth),
                     CompressionStats = new Dictionary<CompressionAlgorithm, int>(),
                 };
 
@@ -140,7 +142,11 @@ namespace Helpers
         /// <param name="info">The data parsed by FetchWorldInfoAsync.</param>
         /// <param name="playerChunkCoord">The players chunk coordinates</param>
         /// <param name="maxTextureSize">The maximum allowed width/height of the texture.</param>
-        public static MinimapData GenerateMinimapTexture(ParsedWorldInfo info, Vector2Int playerChunkCoord, int maxTextureSize = 256)
+        /// <param name="borderRadius">
+        /// Per-world gameplay border half-extent in voxels (<c>0</c> = disabled). When set, an origin-centered
+        /// square outline is drawn and the border extent is folded into the map bounds so the fence stays visible.
+        /// </param>
+        public static MinimapData GenerateMinimapTexture(ParsedWorldInfo info, Vector2Int playerChunkCoord, int maxTextureSize = 256, int borderRadius = 0)
         {
             if (info.ChunkCount == 0)
             {
@@ -157,15 +163,25 @@ namespace Helpers
             Debug.Log($"[WorldInfoUtility] Generating Minimap. Target Max Size: {maxTextureSize}px");
 
             // 1. Calculate Bounds & Scale
-            // Include the world center in bounds so it's always visible
-            const int centerChunkX = VoxelData.WorldSizeInChunks / 2;
-            const int centerChunkZ = VoxelData.WorldSizeInChunks / 2;
+            // Include the default-spawn chunk in bounds so it's always visible (WS-2: no finite world center).
+            const int spawnChunkX = VoxelData.DefaultSpawnPosition / VoxelData.ChunkWidth;
+            const int spawnChunkZ = VoxelData.DefaultSpawnPosition / VoxelData.ChunkWidth;
 
             // Include player in bounds so they never walk off the map
-            int minX = Mathf.Min(info.MinX, centerChunkX, playerChunkCoord.x);
-            int maxX = Mathf.Max(info.MaxX, centerChunkX, playerChunkCoord.x);
-            int minZ = Mathf.Min(info.MinZ, centerChunkZ, playerChunkCoord.y);
-            int maxZ = Mathf.Max(info.MaxZ, centerChunkZ, playerChunkCoord.y);
+            int minX = Mathf.Min(info.MinX, spawnChunkX, playerChunkCoord.x);
+            int maxX = Mathf.Max(info.MaxX, spawnChunkX, playerChunkCoord.x);
+            int minZ = Mathf.Min(info.MinZ, spawnChunkZ, playerChunkCoord.y);
+            int maxZ = Mathf.Max(info.MaxZ, spawnChunkZ, playerChunkCoord.y);
+
+            // Include the gameplay border extent so the whole fence stays on the map (TF-14).
+            int borderChunks = borderRadius > 0 ? Mathf.CeilToInt((float)borderRadius / VoxelData.ChunkWidth) : 0;
+            if (borderChunks > 0)
+            {
+                minX = Mathf.Min(minX, -borderChunks);
+                maxX = Mathf.Max(maxX, borderChunks);
+                minZ = Mathf.Min(minZ, -borderChunks);
+                maxZ = Mathf.Max(maxZ, borderChunks);
+            }
 
             int worldWidth = maxX - minX + 1;
             int worldHeight = maxZ - minZ + 1;
@@ -231,21 +247,25 @@ namespace Helpers
                 }
             }
 
-            // 1. Draw Valid World Border (Orange/Yellow Box)
-            int borderStartX = (0 - minX) / scale + padding;
-            int borderStartZ = (0 - minZ) / scale + padding;
-            int borderEndX = (VoxelData.WorldSizeInChunks - 1 - minX) / scale + padding;
-            int borderEndZ = (VoxelData.WorldSizeInChunks - 1 - minZ) / scale + padding;
+            // TF-14: the world is unbounded by default (WS-3), so a border is drawn only when the per-world
+            // gameplay fence is configured — an origin-centered square at the border half-extent. Drawn before
+            // the spawn/player markers so those render on top.
+            if (borderRadius > 0)
+            {
+                float halfChunks = (float)borderRadius / VoxelData.ChunkWidth;
+                int left = Mathf.RoundToInt((-halfChunks - minX) / scale) + padding;
+                int right = Mathf.RoundToInt((halfChunks - minX) / scale) + padding;
+                int bottom = Mathf.RoundToInt((-halfChunks - minZ) / scale) + padding;
+                int top = Mathf.RoundToInt((halfChunks - minZ) / scale) + padding;
+                DrawRect(left, bottom, right, top, new Color32(255, 200, 40, 255));
+            }
 
-            Color32 borderColor = new Color32(255, 165, 0, 255); // Orange
-            DrawHollowRect(borderStartX, borderStartZ, borderEndX, borderEndZ, borderColor);
-
-            // 2. Draw World Center (Red Crosshair)
-            int wCx = (centerChunkX - minX) / scale + padding;
-            int wCz = (centerChunkZ - minZ) / scale + padding;
+            // 1. Draw Default Spawn (Red Crosshair) at the origin
+            int wCx = (spawnChunkX - minX) / scale + padding;
+            int wCz = (spawnChunkZ - minZ) / scale + padding;
             DrawDot(wCx, wCz, new Color32(255, 50, 50, 255), true);
 
-            // 3. Draw Player Position (Green Square)
+            // 2. Draw Player Position (Green Square)
             int pCx = (playerChunkCoord.x - minX) / scale + padding;
             int pCz = (playerChunkCoord.y - minZ) / scale + padding;
             DrawDot(pCx, pCz, new Color32(50, 255, 50, 255), false);
@@ -256,6 +276,27 @@ namespace Helpers
             return new MinimapData { Texture = tex, ScaleFactor = scale };
 
             // --- DRAWING HELPERS ---
+
+            void SetPixelSafe(int x, int z, Color32 color)
+            {
+                if (x >= 0 && x < texWidth && z >= 0 && z < texHeight)
+                    pixels[z * texWidth + x] = color;
+            }
+
+            void DrawRect(int x0, int z0, int x1, int z1, Color32 color)
+            {
+                for (int x = x0; x <= x1; x++)
+                {
+                    SetPixelSafe(x, z0, color);
+                    SetPixelSafe(x, z1, color);
+                }
+
+                for (int z = z0; z <= z1; z++)
+                {
+                    SetPixelSafe(x0, z, color);
+                    SetPixelSafe(x1, z, color);
+                }
+            }
 
             void DrawDot(int cx, int cz, Color32 color, bool isCross)
             {
@@ -272,23 +313,6 @@ namespace Helpers
                     if (cx < texWidth - 1 && cz > 0) pixels[(cz - 1) * texWidth + cx + 1] = color;
                     if (cx > 0 && cz < texHeight - 1) pixels[(cz + 1) * texWidth + (cx - 1)] = color;
                     if (cx < texWidth - 1 && cz < texHeight - 1) pixels[(cz + 1) * texWidth + cx + 1] = color;
-                }
-            }
-
-            void DrawHollowRect(int startX, int startZ, int endX, int endZ, Color32 color)
-            {
-                // Horizontal lines (Bottom and Top)
-                for (int x = startX; x <= endX; x++)
-                {
-                    if (x >= 0 && x < texWidth && startZ >= 0 && startZ < texHeight) pixels[startZ * texWidth + x] = color;
-                    if (x >= 0 && x < texWidth && endZ >= 0 && endZ < texHeight) pixels[endZ * texWidth + x] = color;
-                }
-
-                // Vertical lines (Left and Right)
-                for (int z = startZ; z <= endZ; z++)
-                {
-                    if (startX >= 0 && startX < texWidth && z >= 0 && z < texHeight) pixels[z * texWidth + startX] = color;
-                    if (endX >= 0 && endX < texWidth && z >= 0 && z < texHeight) pixels[z * texWidth + endX] = color;
                 }
             }
         }

@@ -557,7 +557,8 @@ namespace Editor.WorldTools
         {
             foreach (GenerationJobData data in _generationJobs.Values)
             {
-                data.Handle.Complete();
+                JobHandle handle = data.Handle;
+                handle.Complete();
                 data.Dispose();
             }
 
@@ -565,7 +566,8 @@ namespace Editor.WorldTools
 
             foreach (LightingJobData data in _lightingJobs.Values)
             {
-                data.Handle.Complete();
+                JobHandle handle = data.Handle;
+                handle.Complete();
                 data.Dispose();
             }
 

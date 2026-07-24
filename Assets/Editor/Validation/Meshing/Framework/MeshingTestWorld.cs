@@ -46,7 +46,7 @@ namespace Editor.Validation.Meshing.Framework
     /// </summary>
     public sealed class MeshingTestWorld : IDisposable
     {
-        private const int SECTION_COUNT = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
+        private const int SECTION_COUNT = ChunkMath.SECTIONS_PER_CHUNK;
         private const int MAP_SIZE = VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth;
 
         private NativeArray<uint> _map;

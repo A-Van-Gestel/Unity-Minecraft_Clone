@@ -3,33 +3,18 @@ using Data;
 using Data.WorldTypes;
 using Editor.Validation.Framework;
 using Serialization;
-using UnityEditor;
 using UnityEngine;
 
 namespace Editor.Validation
 {
     /// <summary>
-    /// Validation suite for <see cref="ChunkRelativePosition"/> — serialization round-trips, normalization
-    /// wrap/unwrap, absolute conversion, and the arithmetic/equality operators. Runs through the shared
-    /// <see cref="ValidationSuiteRunner"/>; every scenario is a baseline (must stay green).
+    /// <see cref="ChunkMathValidationSuite"/> — <see cref="ChunkRelativePosition"/> scenarios: serialization
+    /// round-trips, normalization wrap/unwrap, absolute conversion, and the arithmetic/equality operators.
     /// </summary>
-    public static class ChunkRelativePositionTests
+    public static partial class ChunkMathValidationSuite
     {
-        /// <summary>Menu entry — runs the suite and logs the categorized summary.</summary>
-        [MenuItem("Minecraft Clone/Dev/Validate ChunkRelativePosition")]
-        public static void RunTests() => Execute();
-
-        /// <summary>
-        /// Builds and runs the ChunkRelativePosition scenarios, returning the categorized result (the
-        /// headless/CI entry point).
-        /// </summary>
-        /// <param name="logToConsole">When false, runs silently and only returns the result (for headless/CI use).</param>
-        /// <param name="showProgress">When false, suppresses this suite's own progress bar (the aggregate runner drives one).</param>
-        /// <returns>The categorized, timed result of the run.</returns>
-        public static ValidationRunResult Execute(bool logToConsole = true, bool showProgress = true)
+        static partial void AddChunkRelativePositionScenarios(List<Scenario> scenarios)
         {
-            List<Scenario> scenarios = new List<Scenario>();
-
             // --- Serialization Round-Trip Tests ---
             scenarios.Add(new Scenario("Serialization Round-Trip (Non-Zero Chunk)", () => RunSerializationRoundTrip(
                 "Serialization Round-Trip (Non-Zero Chunk)",
@@ -80,8 +65,6 @@ namespace Editor.Validation
             scenarios.Add(new Scenario("Operator - (With Unwrap)", RunOperatorSubtractWithUnwrap));
             scenarios.Add(new Scenario("Operator - (Distance)", RunOperatorDistance));
             scenarios.Add(new Scenario("Operator == / !=", RunOperatorEquality));
-
-            return ValidationSuiteRunner.Execute("Chunk Math", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
 
         /// <summary>

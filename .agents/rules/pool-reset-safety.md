@@ -47,6 +47,7 @@ This project uses custom object pools (`DynamicPool<T>`, `ConcurrentDynamicPool<
 
 - **Flags and booleans:** reset to their "not yet started" default (usually `false`).
 - **Counters with a non-zero default** (e.g., `RemainingEdgeCheckRounds = 2`): reset to the same value used in the constructor or initial assignment — not `0`.
+- **Monotonic lifecycle counters** (e.g., `ChunkData.LifecycleEpoch`): their "reset" is an **increment**, never a return-to-default — the whole point is distinguishing recycles. Document this on the field, add the field name to B34's `MonotonicTransientFields` exemption list (`LightingAssert`), and give it an explicit must-change assertion there — an exempted field with no explicit assertion is a silent coverage hole.
 - **Collections** (queues, hashsets, lists): call `.Clear()` to retain allocated capacity.
 - **Arrays** (voxel data, heightmaps): use `Array.Clear()` to zero out while retaining the allocation.
 - **Object references** (e.g., `ChunkData.Chunk`): set to `null` to unlink.

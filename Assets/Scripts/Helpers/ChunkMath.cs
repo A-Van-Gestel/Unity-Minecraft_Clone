@@ -8,12 +8,109 @@ namespace Helpers
 {
     public static class ChunkMath
     {
-        // Constants from VoxelData, duplicated here to be self-contained for Burst
-        public const int CHUNK_WIDTH = 16;
-        public const int CHUNK_HEIGHT = 128;
+        // Aliases of the authoritative VoxelData world-dimension constants (CP-7/F8 unification —
+        // one declaration site). A const-to-const reference compiles to an IL literal, so these
+        // remain Burst-safe compile-time values; change the value in VoxelData only and every
+        // derived constant below (shifts, masks, volumes, padded sizes) follows.
+        public const int CHUNK_WIDTH = VoxelData.ChunkWidth;
+        public const int CHUNK_HEIGHT = VoxelData.ChunkHeight;
         public const int SECTION_SIZE = 16;
         public const int SECTION_VOLUME = SECTION_SIZE * SECTION_SIZE * SECTION_SIZE; // 4096 for 16 section width & 16 section size
-        public const int CHUNK_VOLUME = SECTION_VOLUME * (CHUNK_HEIGHT / SECTION_SIZE); // 32768 (8 sections × 4096)
+
+        /// <summary>Vertical sections per chunk column — the single derivation site (CP-7); alias this instead of re-deriving <c>ChunkHeight / 16</c>.</summary>
+        public const int SECTIONS_PER_CHUNK = CHUNK_HEIGHT / SECTION_SIZE; // 8
+
+        public const int CHUNK_VOLUME = SECTION_VOLUME * SECTIONS_PER_CHUNK; // 32768 (8 sections × 4096)
+
+        // --- Chunk / region coordinate conversion (WS-1) ------------------------------------------
+        // Voxel↔chunk↔region math via power-of-two shift/mask instead of float-roundtrip floors or
+        // truncating integer `/`/`%`. Shift/mask is simultaneously the fastest AND the only always-correct
+        // option: `>>` is floor division and `&` is positive modulo for BOTH signs, whereas C# integer `/`
+        // truncates toward zero (wrong for negative coordinates) and `Mathf.FloorToInt((float)v / 16)` also
+        // loses integer precision past ±2^24. All-positive coordinates hide these differences today; every
+        // helper below is byte-identical to the old idioms for v >= 0 and stays correct into the negative
+        // quadrants (the Tier B prerequisite — WORLD_SCALING_ANALYSIS.md §3.2). The shift/mask amounts are
+        // derived from CHUNK_WIDTH (16 = 1<<4) and the 32-chunk region side (1<<5); both power-of-two
+        // couplings are asserted by the "Chunk Math" validation suite, so a future non-pow2 CHUNK_WIDTH
+        // fails loudly instead of silently corrupting addressing.
+        private const int CHUNK_WIDTH_SHIFT = 4; // log2(CHUNK_WIDTH) — floor-divide a voxel coord by 16
+        private const int CHUNK_WIDTH_MASK = CHUNK_WIDTH - 1; // 15 — positive modulo 16 (local voxel coord)
+        public const int CHUNKS_PER_REGION_SIDE = 32;
+        private const int REGION_SHIFT = 5; // log2(CHUNKS_PER_REGION_SIDE) — floor-divide a chunk index by 32
+        private const int REGION_MASK = CHUNKS_PER_REGION_SIDE - 1; // 31 — positive modulo 32 (local region slot)
+
+        /// <summary>
+        /// Floor-divides an integer voxel coordinate by <see cref="CHUNK_WIDTH"/> to get its chunk index,
+        /// correct for negative coordinates (unlike truncating <c>/</c>). Burst-safe.
+        /// </summary>
+        /// <param name="voxel">A voxel coordinate on one axis (X or Z).</param>
+        /// <returns>The chunk index containing that voxel.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int VoxelToChunk(int voxel) => voxel >> CHUNK_WIDTH_SHIFT;
+
+        /// <summary>
+        /// Returns the voxel's position local to its chunk (positive modulo <see cref="CHUNK_WIDTH"/>),
+        /// correct for negative coordinates (unlike truncating <c>%</c>). Burst-safe.
+        /// </summary>
+        /// <param name="voxel">A voxel coordinate on one axis (X or Z).</param>
+        /// <returns>The chunk-local coordinate in <c>[0, CHUNK_WIDTH)</c>.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int VoxelToLocal(int voxel) => voxel & CHUNK_WIDTH_MASK;
+
+        /// <summary>
+        /// Floor-divides a chunk index by <see cref="CHUNKS_PER_REGION_SIDE"/> to get its region coordinate,
+        /// correct for negative indices. Burst-safe.
+        /// </summary>
+        /// <param name="chunk">A chunk index on one axis (X or Z).</param>
+        /// <returns>The region coordinate containing that chunk.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int ChunkToRegion(int chunk) => chunk >> REGION_SHIFT;
+
+        /// <summary>
+        /// Returns the chunk's local slot within its region file (positive modulo
+        /// <see cref="CHUNKS_PER_REGION_SIDE"/>), correct for negative indices. Burst-safe.
+        /// </summary>
+        /// <param name="chunk">A chunk index on one axis (X or Z).</param>
+        /// <returns>The region-local slot in <c>[0, CHUNKS_PER_REGION_SIDE)</c>.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int ChunkToRegionLocal(int chunk) => chunk & REGION_MASK;
+
+        /// <summary>
+        /// True when the voxel coordinate is an exact chunk origin (a multiple of <see cref="CHUNK_WIDTH"/>),
+        /// correct for negative coordinates. The sanctioned alignment test — use this instead of inline
+        /// <c>% CHUNK_WIDTH == 0</c> (equivalent for the ==0 case, but keeps chunk math on the helpers). Burst-safe.
+        /// </summary>
+        /// <param name="voxel">A voxel coordinate on one axis (X or Z).</param>
+        /// <returns>True when the coordinate lies on a chunk origin.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsChunkAligned(int voxel) => (voxel & CHUNK_WIDTH_MASK) == 0;
+
+        /// <summary>
+        /// Floor-divides a floating-point world coordinate to its chunk index: floors to the integer voxel
+        /// coordinate first (full float precision), then shifts. Equivalent to
+        /// <c>Mathf.FloorToInt(world / CHUNK_WIDTH)</c> for the reachable range but Burst-safe
+        /// (<see cref="math.floor"/>, not <c>Mathf</c>) and negative-correct.
+        /// </summary>
+        /// <param name="world">A world-space coordinate on one axis (X or Z).</param>
+        /// <returns>The chunk index containing that world position.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int WorldToChunk(float world) => (int)math.floor(world) >> CHUNK_WIDTH_SHIFT;
+
+        /// <summary>
+        /// General integer floor division for divisors that are not powers of two (those use the
+        /// shift helpers above). Exact for any <paramref name="value"/> to the ±2³¹ edge, correct for
+        /// negative values (unlike truncating <c>/</c>) and free of the ±2²⁴ precision cap of the
+        /// <c>(int)math.floor((float)v / d)</c> idiom. Burst-safe.
+        /// </summary>
+        /// <param name="value">The dividend (any sign).</param>
+        /// <param name="divisor">The divisor; must be ≥ 1 (callers clamp — not asserted, Burst code).</param>
+        /// <returns>The floor of <c>value / divisor</c>.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int FloorDiv(int value, int divisor)
+        {
+            int quotient = value / divisor;
+            return (value % divisor != 0 && (value ^ divisor) < 0) ? quotient - 1 : quotient;
+        }
 
         // --- Halo-padded lighting volume (LI-1) ---------------------------------------------------
         // The NeighborhoodLightingJob reads/writes a single padded volume instead of 9 separate neighbor
@@ -143,13 +240,13 @@ namespace Helpers
         /// Y (<c>gy = bandMinY + by</c>); destination rows are written at the <b>band-local</b> Y (<c>by</c>), so the
         /// padded buffer holds only <paramref name="bandCount"/> rows (a band-sized prefix of a full-height
         /// allocation). The full-height gather is just the special case <c>bandMinY = 0, bandCount = CHUNK_HEIGHT</c>
-        /// (see <see cref="GatherPaddedFull{T}"/>); the TG-4 Phase-4b Y-band gather passes the tight active-fluid band
+        /// (the lighting gathers pass their LI-2 band); the TG-4 Y-band fluid gather passes the tight active-fluid band
         /// (see <see cref="GatherPaddedFluidVoxelsBand"/>). A missing neighbor (uncreated/empty array) fills its
         /// region with <paramref name="sentinel"/>, reproducing the per-neighbor missing-source sentinel. Writes
         /// EVERY padded cell <b>in the band</b>; rows outside the band are never touched (callers reading band-local
         /// Y must guard their own bounds). Parameterized by <paramref name="halo"/> + <paramref name="paddedWidth"/>
         /// so the same body serves the lighting halo (2, width 20) and the wider fluid halo (4, width 24) — see the
-        /// <see cref="GatherPaddedVoxels"/>/<see cref="GatherPaddedLight"/>/<see cref="GatherPaddedFluidVoxels"/> wrappers.
+        /// <see cref="GatherPaddedVoxels"/>/<see cref="GatherPaddedLight"/>/<see cref="GatherPaddedFluidVoxelsBand"/> wrappers.
         /// <para>
         /// Each padded horizontal row (fixed <c>by</c>, pz — <paramref name="paddedWidth"/> cells of X) is built as
         /// three contiguous runs: the <paramref name="halo"/>-wide West halo, the 16-wide center span, and the
@@ -214,20 +311,6 @@ namespace Helpers
         }
 
         /// <summary>
-        /// Scatters the center chunk + its 8 horizontal neighbors into the <b>full-height</b> halo-padded volume —
-        /// the <c>bandMinY = 0, bandCount = CHUNK_HEIGHT</c> case of <see cref="GatherPaddedRange{T}"/> (which holds
-        /// the drift-critical body). Used by the full-height fluid gather (the lighting gathers pass their
-        /// LI-2 band height straight to <see cref="GatherPaddedRange{T}"/>).
-        /// </summary>
-        private static void GatherPaddedFull<T>(NativeArray<T> padded,
-            NativeArray<T> center, NativeArray<T> w, NativeArray<T> e, NativeArray<T> s, NativeArray<T> n,
-            NativeArray<T> sw, NativeArray<T> nw, NativeArray<T> se, NativeArray<T> ne, int halo, int paddedWidth, T sentinel)
-            where T : unmanaged
-        {
-            GatherPaddedRange(padded, center, w, e, s, n, sw, nw, se, ne, 0, CHUNK_HEIGHT, halo, paddedWidth, sentinel);
-        }
-
-        /// <summary>
         /// Lighting voxel gather: fills the Y-band <c>[<paramref name="bandMinY"/>, <paramref name="bandHeight"/>)</c>
         /// of the padded voxel volume from the center + 8 neighbor voxel buffers, missing sources stamped
         /// <c>uint.MaxValue</c>. The band is a prefix of a full-height allocation (LI-2): destination rows are
@@ -247,20 +330,7 @@ namespace Helpers
         }
 
         /// <summary>
-        /// Fluid voxel gather (TG-4 Phase 4b): fills the full-height <see cref="PADDED_FLUID_WIDTH"/>-wide padded
-        /// voxel volume from the center + 8 neighbor voxel buffers, missing sources stamped <c>uint.MaxValue</c>.
-        /// Thin typed wrapper over <see cref="GatherPaddedFull{T}"/> bound to the wider <see cref="FLUID_HALO"/>
-        /// geometry — the <c>FluidTickJob</c> border voxels read this in place of the per-chunk snapshot.
-        /// </summary>
-        public static void GatherPaddedFluidVoxels(NativeArray<uint> padded,
-            NativeArray<uint> center, NativeArray<uint> w, NativeArray<uint> e, NativeArray<uint> s, NativeArray<uint> n,
-            NativeArray<uint> sw, NativeArray<uint> nw, NativeArray<uint> se, NativeArray<uint> ne)
-        {
-            GatherPaddedFull(padded, center, w, e, s, n, sw, nw, se, ne, FLUID_HALO, PADDED_FLUID_WIDTH, uint.MaxValue);
-        }
-
-        /// <summary>
-        /// Fluid voxel gather (TG-4 Phase 4b Y-band): fills only the Y-band <c>[<paramref name="bandMinY"/>,
+        /// Fluid voxel gather (TG-4 Y-band): fills only the Y-band <c>[<paramref name="bandMinY"/>,
         /// <paramref name="bandMinY"/> + <paramref name="bandCount"/>)</c> of the <see cref="PADDED_FLUID_WIDTH"/>-wide
         /// padded volume — a band-sized prefix of a full-height <see cref="PADDED_FLUID_VOLUME"/> allocation. Since
         /// every fluid read is within <see cref="FLUID_VERTICAL_REACH"/> of an active source in Y, sizing the gather

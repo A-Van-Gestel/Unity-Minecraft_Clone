@@ -89,6 +89,10 @@ namespace UI
         [SerializeField]
         private TMP_InputField _seedInput;
 
+        [Tooltip("Optional per-world gameplay border half-extent, in voxels. Blank or 0 = no border (unbounded).")]
+        [SerializeField]
+        private TMP_InputField _borderRadiusInput;
+
         [Tooltip("Dropdown for selecting the world generation type (Legacy, Standard, etc.).")]
         [SerializeField]
         private TMP_Dropdown _worldTypeDropdown;
@@ -459,10 +463,20 @@ namespace UI
             // Calculate Seed
             int seed = VoxelData.CalculateSeed(_seedInput.text);
 
+            // Parse optional gameplay border half-extent (blank / invalid / negative => no border).
+            int borderRadius = 0;
+            if (_borderRadiusInput != null
+                && int.TryParse(_borderRadiusInput.text, out int parsedRadius)
+                && parsedRadius > 0)
+            {
+                borderRadius = parsedRadius;
+            }
+
             // Setup Launch State
             WorldLaunchState.WorldName = worldName;
             WorldLaunchState.Seed = seed;
             WorldLaunchState.IsNewGame = true;
+            WorldLaunchState.BorderRadius = borderRadius;
 
             // Map dropdown selection to WorldTypeID using a safe lookup list
             if (_worldTypeDropdown != null && _worldTypeDropdown.value < _dropdownMapping.Count)
@@ -524,9 +538,9 @@ namespace UI
                 // 1. Fetch data on background thread
                 ParsedWorldInfo info = await WorldInfoUtility.FetchWorldInfoAsync(savePath, saveVersion);
 
-                // 2. Extract Player Chunk Coordinate
-                Vector3 playerPos = _selectedWorld.player.position;
-                Vector2Int playerChunkIndex = ChunkCoord.FromWorldPosition(playerPos).ToChunkIndex();
+                // 2. Extract Player Chunk Coordinate — the saved position is chunk-relative (v13), so its chunk is
+                // already the answer: no coordinate math, and exact no matter how far out the world was left.
+                Vector2Int playerChunkIndex = _selectedWorld.player.position.Chunk.ToChunkIndex();
 
                 // 3. Generate texture on main thread
                 int maxTextureSize = 256; // Default fallback
@@ -542,7 +556,7 @@ namespace UI
                 }
 
                 // ALWAYS call this now, so we get the dark fallback texture for empty worlds
-                MinimapData mapData = WorldInfoUtility.GenerateMinimapTexture(info, playerChunkIndex, maxTextureSize);
+                MinimapData mapData = WorldInfoUtility.GenerateMinimapTexture(info, playerChunkIndex, maxTextureSize, _selectedWorld.borderRadius);
 
                 // 4. Format string data
                 string scaleText = info.ChunkCount == 0
@@ -617,8 +631,7 @@ namespace UI
                         migrationText + "\n\n" +
                         "<b>Map Legend:</b>\n" +
                         "<color=#32FF32>■</color> Player Location\n" +
-                        $"<color=#FF3232>■</color> World Center ({info.CenterChunkCoord.x},{info.CenterChunkCoord.y})\n" +
-                        "<color=#FFA500>□</color> Valid World Borders\n" +
+                        $"<color=#FF3232>■</color> Default Spawn ({info.CenterChunkCoord.x},{info.CenterChunkCoord.y})\n" +
                         "<color=#50B4FF>■</color> Generated Terrain";
                 }
 

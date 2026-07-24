@@ -248,6 +248,9 @@ namespace Data
         [MarshalAs(UnmanagedType.U1)]
         public readonly bool RenderNeighborFaces;
 
+        /// <summary>Foliage wind-sway strength in [0, 1] (FL-2); 0 = rigid. Written to the emitted verts' UV Z by the meshing job's sway post-pass.</summary>
+        public readonly float SwayStrength;
+
         public readonly RenderShape RenderShape;
         public readonly int CustomMeshIndex; // -1 if not a custom mesh
 
@@ -305,6 +308,7 @@ namespace Data
             // Block properties
             IsSolid = blockType.isSolid;
             RenderNeighborFaces = blockType.renderNeighborFaces;
+            SwayStrength = blockType.swayStrength;
             RenderShape = blockType.renderShape;
             CustomMeshIndex = customMeshIdx;
 
@@ -545,8 +549,7 @@ namespace Data
             LightData = new NativeList<Color32>(DefaultVertexCapacity, allocator);
             InterleavedStream3 = new NativeList<NormalLightVertex>(DefaultVertexCapacity, allocator);
 
-            // 8 Sections per chunk (128 / 16).
-            SectionStats = new NativeArray<MeshSectionStats>(VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE, allocator);
+            SectionStats = new NativeArray<MeshSectionStats>(ChunkMath.SECTIONS_PER_CHUNK, allocator);
         }
 
         /// <summary>

@@ -126,7 +126,7 @@ namespace Benchmarks
 
         private void Update()
         {
-            if (Keyboard.current != null && Keyboard.current[_triggerKey].wasPressedThisFrame)
+            if (InputManager.Instance != null && InputManager.Instance.DebugKeyPressed(_triggerKey))
                 TriggerBenchmark();
         }
 
@@ -339,7 +339,7 @@ namespace Benchmarks
         /// a pooled active-voxel list is returned to the pool (and skipped by <c>Dispose</c> via
         /// <see cref="GenerationJobData.ActiveVoxelsFromPool"/>); everything else is disposed.
         /// </summary>
-        private static void ReleaseJob(in GenerationJobData jobData, ActiveVoxelListPool legPool)
+        private static void ReleaseJob(GenerationJobData jobData, ActiveVoxelListPool legPool)
         {
             if (legPool != null && jobData.ActiveVoxelsFromPool)
                 legPool.Return(jobData.ActiveVoxels);

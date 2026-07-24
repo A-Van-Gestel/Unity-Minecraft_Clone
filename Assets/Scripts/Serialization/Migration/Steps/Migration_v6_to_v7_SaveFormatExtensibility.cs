@@ -34,7 +34,8 @@ namespace Serialization.Migration.Steps
             // Parse the existing JSON, inject the legacy hardcoded values, and bump version to 7.
             // By injecting 128/16/100, we guarantee that old worlds will remain physically
             // identical to when they were first generated, even if the engine's constants change.
-            WorldSaveData data = JsonUtility.FromJson<WorldSaveData>(oldJson);
+            // Frozen DTO, not the live WorldSaveData — see LegacyLevelDat's header.
+            LegacyLevelDat data = JsonUtility.FromJson<LegacyLevelDat>(oldJson);
 
             data.chunkHeight = 128;
             data.chunkWidth = 16;

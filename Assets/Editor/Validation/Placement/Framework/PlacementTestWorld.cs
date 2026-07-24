@@ -80,6 +80,7 @@ namespace Editor.Validation.Placement.Framework
         private readonly World _world;
         private readonly World _previousInstance;
         private readonly PlacementController _controller;
+        private readonly Vector3Int _originVoxel;
         private bool _disposed;
 
         /// <summary>Reach for the harness probe — generous enough to march the full 0-127 column from any start Y.</summary>
@@ -97,7 +98,11 @@ namespace Editor.Validation.Placement.Framework
         /// <param name="palette">The block palette assigned to the stub <see cref="BlockDatabase.blockTypes"/>; indices
         /// are the block ids the scenario places and queries (the real <see cref="BlockDatabase"/> for the data-audit
         /// and known-bug repros, or a controlled synthetic palette for the baselines).</param>
-        public PlacementTestWorld(BlockType[] palette)
+        /// <param name="originChunk">The WS-4 floating-origin anchor to drive the controller at. Defaults to the
+        /// identity (0, 0), where Unity space and voxel space coincide — every pre-WS-4 scenario keeps its meaning.
+        /// A non-zero value moves the world's voxel coordinates far out while the harness keeps addressing the same
+        /// small Unity-space cells, which is what proves the controller actually converts.</param>
+        public PlacementTestWorld(BlockType[] palette, ChunkCoord originChunk = default)
         {
             _previousInstance = World.Instance;
             try
@@ -117,10 +122,16 @@ namespace Editor.Validation.Placement.Framework
                 ValidationReflection.SetInstanceProperty(_world, nameof(World.ChunkPool),
                     new ChunkPoolManager(_worldGo.transform));
 
-                // Single center chunk at the world origin (0,0): with this origin every local (0-15) cell maps
-                // 1:1 to a world voxel inside IsVoxelInWorld, so seeding/querying uses plain small coordinates.
-                ChunkData = new ChunkData(new Vector2Int(0, 0));
-                _world.worldData.Chunks[new Vector2Int(0, 0)] = ChunkData;
+                // Single center chunk, seeded at the floating origin's chunk. Scenarios always address small
+                // Unity-space cells (0-15); the controller offsets them onto this chunk's voxel coordinates, so the
+                // whole model shifts with the origin and every existing scenario keeps its meaning at the identity.
+                Vector2Int chunkVoxelPos = originChunk.ToVoxelOrigin();
+                ChunkData = new ChunkData(chunkVoxelPos);
+                _world.worldData.SetChunk(chunkVoxelPos, ChunkData);
+
+                // The origin this harness drives every probe with. Supplied per call (like production), so the suite
+                // never touches the WorldOrigin global — there is no leak to restore.
+                _originVoxel = new Vector3Int(chunkVoxelPos.x, 0, chunkVoxelPos.y);
 
                 // The REAL production decision object the scenarios drive (no reimplementation in the harness).
                 _controller = new PlacementController(_world);
@@ -131,6 +142,13 @@ namespace Editor.Validation.Placement.Framework
                 throw;
             }
         }
+
+        /// <summary>
+        /// Sets the stub world's TF-14 gameplay border half-extent through the real production write chokepoint
+        /// (<see cref="World.SetBorderRadius"/>), so border scenarios exercise the same state the game uses.
+        /// </summary>
+        /// <param name="radius">Border half-extent in voxels, or 0 to disable (the default for every scenario).</param>
+        public void SetBorderRadius(int radius) => _world.SetBorderRadius(radius);
 
         /// <summary>Writes a block at a chunk-local / world position (origin chunk, so local == world for 0-15).</summary>
         /// <param name="x">Cell X (0-15).</param>
@@ -169,7 +187,8 @@ namespace Editor.Validation.Placement.Framework
 
             // "Player looking straight down the column" — feed the real production probe a downward ray.
             Vector3 origin = new Vector3(x + 0.5f, startY + 0.5f, z + 0.5f);
-            PlacementProbe probe = _controller.Probe(origin, Vector3.down, held, includeFluids: false, PROBE_REACH, PROBE_INCREMENT);
+            PlacementProbe probe = _controller.Probe(origin, Vector3.down, held, includeFluids: false, PROBE_REACH,
+                PROBE_INCREMENT, _originVoxel);
 
             return new PlacementOutcome(probe.DidHit, probe.HitCell, probe.Replaces, probe.PlaceCell, probe.WorldPlaceable);
         }
@@ -187,7 +206,7 @@ namespace Editor.Validation.Placement.Framework
         public bool EvaluatePlacementAt(ushort? heldId, Vector3Int placeCell)
         {
             BlockType held = heldId.HasValue ? _palette[heldId.Value] : null;
-            return _controller.CanPlaceAt(placeCell, held);
+            return _controller.CanPlaceAt(placeCell, held, _originVoxel);
         }
 
         /// <summary>Restores the previous <c>World.Instance</c> and destroys every object the harness created.</summary>

@@ -2,6 +2,7 @@ using Benchmarks;
 using Data;
 using Data.Enums;
 using DebugVisualizations;
+using Helpers;
 using Physics;
 using Serialization;
 using UnityEngine;
@@ -232,7 +233,11 @@ public class Player : MonoBehaviour
 
         PlayerSaveData data = new PlayerSaveData
         {
-            position = transform.position,
+            // Voxel space, chunk-relative (v13): the transform is Unity space, which is only the same thing while
+            // the origin is the identity. Everything on disk is voxel space (World.StartWorld's spawn chokepoint
+            // converts back on load), so a save written after a re-anchor still names the position the player was
+            // actually standing at — and the chunk-relative form keeps it exact however far out that is.
+            position = WorldOrigin.UnityToRelative(transform.position),
             rotation = combinedRotation,
             capabilities = new PlayerCapabilityData
             {
@@ -250,10 +255,12 @@ public class Player : MonoBehaviour
 
     public void LoadSaveData(PlayerSaveData data)
     {
-        // 1. Position + small Y offset to prevent clipping trough world
-        transform.position = data.position + new Vector3(0, 0.1f, 0);
+        // NOTE: data.position is deliberately NOT applied here. World.StartWorld owns the player's placement through
+        // Spawn.SpawnResolution, which must settle the position before chunk loading begins; a write here would be a
+        // second, competing one from outside that chokepoint. The anti-clip Y offset moved there too
+        // (SpawnResolution.SavedPositionClipOffsetY).
 
-        // 2. Rotation
+        // 1. Rotation
         Vector3 savedRot = data.rotation;
 
         // Apply Yaw to Body (Y axis)
@@ -268,7 +275,7 @@ public class Player : MonoBehaviour
             _playerCamera.localEulerAngles = new Vector3(savedRot.x, 0, 0);
         }
 
-        // 3. Capabilities
+        // 2. Capabilities
         IsFlying = data.capabilities.isFlying;
         IsNoclipping = data.capabilities.isNoclipping;
     }

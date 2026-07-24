@@ -160,7 +160,17 @@ namespace Editor.Validation.Lighting
             // mod does not persistently over-clear an independently-sourced OTHER channel. Lives in
             // LightingValidationSuite.C13RgbMixedChannel.cs and self-registers here. ---
             AddC13RgbMixedChannelScenarios(scenarios);
+
+            // --- Bug 19 far-coordinate column routing (B95 routing integrity at four anchors, B96
+            // far-anchor differential twin): guards the integer SunlightColumnRouting seam against the
+            // pre-fix float round-trip that crashed sunlight recalcs past ±2²⁴. Lives in
+            // Baselines/LightingValidationSuite.Baseline.Bug19FarColumns.cs and self-registers here. ---
+            AddBug19FarColumnsBaselineScenarios(scenarios);
         }
+
+        /// <summary>Hook for the Bug-19 far-coordinate column-routing baselines B95-B96 (implemented in Baselines/LightingValidationSuite.Baseline.Bug19FarColumns.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBug19FarColumnsBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the C13 mixed-channel cross-seam removal baseline B94 (implemented in LightingValidationSuite.C13RgbMixedChannel.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>

@@ -43,10 +43,10 @@ it. Before trusting any suite run after an edit:
 The authoritative list of suites the aggregate runs is `ValidationSuiteRegistry.Suites`; the
 `Validate All` menu runs exactly those. Current standard inventory (menu path prefix
 `Minecraft Clone/Dev/`): **Validate Lighting Engine, Validate Meshing, Validate Behavior, Validate
-Placement, Validate Mesh Build Queue, Validate Light Work Scheduler, Validate ChunkRelativePosition,
-Validate Validation Framework**, and the aggregate **Validate All**. Not in the aggregate (run
+Placement, Validate Mesh Build Queue, Validate Light Work Scheduler, Validate Chunk Math, Validate
+Spawn, Validate Validation Framework**, and the aggregate **Validate All**. Not in the aggregate (run
 individually): the nightly fuzz deep-runs (`Validate Lighting Engine (Border Height Fuzz)`,
-`(Bug 09 Geometry Fuzz)`, `(Bug 05 Canopy Fuzz)`), the fluid determinism variants
+`(Bug 09 Geometry Fuzz)`, `(Bug 05 Canopy Fuzz)`, `(Interrupted Reconciliation Fuzz)`), the fluid determinism variants
 (`Validate Fluid Parallel Determinism [ (Cross-Chunk Halo) | (Cross-Chunk Halo, Y-band) ]`), and the
 standalone `Validate Voxel Metadata Utility` / `Validate FastNoiseLite`.
 

@@ -1,3 +1,4 @@
+using Commands;
 using UnityEngine;
 
 namespace UI
@@ -70,6 +71,41 @@ namespace UI
 
         private bool _isPauseMenuOpen;
 
+        /// <summary>The runtime-spawned console view (CMD-1). Built in <see cref="Awake"/> — no scene object involved.</summary>
+        private ConsoleUI _console;
+
+        /// <summary>
+        /// Gets or sets whether the command console is open. Opening disables the Gameplay action
+        /// map (so typing cannot trigger hotbar/toggles) and leaves the UI map driving Esc/↑/↓;
+        /// closing restores both maps. Cursor/InUI follow via <see cref="UpdateUIState"/>.
+        /// </summary>
+        public bool IsConsoleOpen
+        {
+            get => _console != null && _console.IsOpen;
+            set
+            {
+                if (_console == null || value == _console.IsOpen)
+                    return;
+
+                if (value)
+                {
+                    // If the console can't open (its panel was destroyed — UI_BUGS #04), leave InUI and
+                    // the action maps unchanged; disabling Gameplay for a console that never opened would
+                    // soft-lock input (no gameplay, no console).
+                    if (!_console.Open())
+                        return;
+                    InputManager.Instance.EnableUI();
+                }
+                else
+                {
+                    _console.Close();
+                    InputManager.Instance.EnableAll();
+                }
+
+                UpdateUIState();
+            }
+        }
+
         #endregion
 
         #region Unity Lifecycle
@@ -85,6 +121,11 @@ namespace UI
                 if (creativeInventoryWindow == null) Debug.LogError("CreativeInventoryWindow is not assigned.");
                 if (cursorSlot == null) Debug.LogError("CursorSlot is not assigned.");
                 if (pauseMenuController == null) Debug.LogError("PauseMenuController is not assigned.");
+
+                // Spawn the command console view (runtime-built UI — TouchControls precedent, no scene edit).
+                GameObject consoleObj = new GameObject("Console");
+                consoleObj.transform.SetParent(transform, false);
+                _console = consoleObj.AddComponent<ConsoleUI>();
             }
             else
             {
@@ -92,13 +133,64 @@ namespace UI
             }
         }
 
+        private void Start()
+        {
+            // Attach the console's world facade (§4.1 CMD-2). This cannot happen in Awake: the engine
+            // is built when the console spawns above, and World.Instance is only reliably assigned
+            // once every scene Awake has run. Start is the earliest guaranteed-safe point. Skipped
+            // when no world exists (e.g. UI-only scenes) — world-touching commands then fail
+            // gracefully with their no-world error.
+            if (World.Instance != null)
+            {
+                _console.Engine.Context.AttachWorld(World.Instance, World.Instance.player);
+                World.Instance.TeleportHoldEnded += OnTeleportHoldEnded;
+            }
+
+            // Registered even without a world: /help stays consistent, and world-touching commands
+            // report "No world is loaded." through their null-facade guard (§4.1). The installer is
+            // the shared production/suite registration list (§8.1.1).
+            ConsoleCommandInstaller.RegisterAll(_console.Engine.Registry);
+        }
+
         private void OnDestroy()
         {
             if (Instance == this) Instance = null;
+            if (World.Instance != null)
+                World.Instance.TeleportHoldEnded -= OnTeleportHoldEnded;
+        }
+
+        /// <summary>Surfaces the teleport arrival-hold outcome (§3.3 CMD-2) in the console.</summary>
+        /// <param name="timedOut">True when the fail-safe timeout released the hold.</param>
+        private void OnTeleportHoldEnded(bool timedOut)
+        {
+            if (timedOut)
+                _console.Engine.PostLine(ConsoleLineSeverity.Warning,
+                    "Teleport hold timed out — the destination never became ready; you may fall.");
+            else
+                _console.Engine.PostLine(ConsoleLineSeverity.Info, "Arrived.");
         }
 
         private void Update()
         {
+            // Recovery (UI_BUGS #04): if a tracked UI (observed: the console's ConsolePanel) is destroyed
+            // out from under us while open, InUI latches true with the Gameplay map disabled and no way to
+            // re-toggle (T lives on that map) — a soft-lock. Restore the ground state; the next open self-heals.
+            if (InUI && !IsConsoleOpen && !IsCreativeInventoryOpen && !IsPauseMenuOpen)
+            {
+                Debug.LogWarning($"InUI latched with no UI open (a tracked UI was destroyed); restoring input (UI_BUGS #04). frame={Time.frameCount}");
+                InputManager.Instance.EnableAll();
+                UpdateUIState();
+            }
+
+            // Console-open state: the Gameplay map is disabled, so only the UI map's Cancel (Esc)
+            // is live — it closes the console and nothing else runs (Esc chain head, §4.2 CMD-1).
+            if (IsConsoleOpen)
+            {
+                if (InputManager.Instance.ConsoleCancelPressed)
+                    IsConsoleOpen = false;
+                return;
+            }
+
             // Handle Escape key logic
             if (InputManager.Instance.EscapePressed)
             {
@@ -109,6 +201,12 @@ namespace UI
             if (InputManager.Instance.ToggleInventoryPressed && !IsPauseMenuOpen)
             {
                 IsCreativeInventoryOpen = !IsCreativeInventoryOpen;
+            }
+
+            // Handle Console open logic (T). Open-only: while open, T types into the field.
+            if (InputManager.Instance.ToggleConsolePressed && !InUI)
+            {
+                IsConsoleOpen = true;
             }
         }
 
@@ -146,7 +244,7 @@ namespace UI
 
         private void UpdateUIState()
         {
-            InUI = IsCreativeInventoryOpen || IsPauseMenuOpen;
+            InUI = IsCreativeInventoryOpen || IsPauseMenuOpen || IsConsoleOpen;
 
             Cursor.lockState = InUI
                 ? CursorLockMode.None // Makes cursor visible

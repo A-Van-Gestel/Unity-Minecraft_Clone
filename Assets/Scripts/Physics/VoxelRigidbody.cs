@@ -1,3 +1,5 @@
+using System;
+using Helpers;
 using UnityEngine;
 
 namespace Physics
@@ -39,6 +41,10 @@ namespace Physics
         public float CollisionHalfWidthX => collisionWidthX * 0.5f;
         public float CollisionHalfDepthZ => collisionDepthZ * 0.5f;
 
+        // TF-14: extra gap (in voxels) kept between the player collider and the world border,
+        // so the body doesn't visually clip through the border wall. Added to the collision half-extent.
+        private const float BORDER_MARGIN = 0.5f;
+
         [Header("Movement Settings")]
         [Tooltip("Jump velocity applied when jumping.")]
         public float jumpForce = 5.7f;
@@ -60,6 +66,14 @@ namespace Physics
 
         public bool isNoclipping = false;
         public bool isSprinting = false;
+
+        /// <summary>
+        /// True while a teleport arrival hold suspends this body (CMD-2 §3.3): gravity and movement
+        /// freeze until the destination chunk is ready. Set/cleared exclusively by
+        /// <see cref="World.TeleportPlayer"/> and its hold poll.
+        /// </summary>
+        [NonSerialized]
+        public bool IsTeleportHeld;
 
         public bool IsGrounded { get; private set; }
         public Vector3 Velocity { get; private set; }
@@ -120,8 +134,9 @@ namespace Physics
 
         private void FixedUpdate()
         {
-            // Wait for world to finish initial load and meshing to prevent falling through terrain
-            if (!_world.IsWorldLoaded) return;
+            // Wait for world to finish initial load and meshing to prevent falling through terrain,
+            // and freeze while a teleport arrival hold waits for its destination chunk (CMD-2 §3.3).
+            if (!_world.IsWorldLoaded || IsTeleportHeld) return;
 
             CalculateVelocity();
 
@@ -133,6 +148,43 @@ namespace Physics
             }
 
             transform.Translate(Velocity, Space.World);
+
+            ClampToWorldBorder();
+        }
+
+        /// <summary>
+        /// Hard-clamps the player's horizontal position inside the per-world gameplay border —
+        /// a square AABB centered on the world origin. No-op when the border is disabled
+        /// (<see cref="World.BorderRadius"/> is 0). Player-only: the voxel pipeline (generation,
+        /// lighting, meshing, storage) is deliberately border-blind, so terrain still exists past
+        /// the fence; only the player is stopped.
+        /// </summary>
+        private void ClampToWorldBorder()
+        {
+            int radius = _world.BorderRadius;
+            if (radius <= 0) return;
+
+            // The border is a voxel-space AABB centered on the WORLD origin while the transform is Unity space, so
+            // the limits shift by the origin instead of staying symmetric about the render origin. The border edge
+            // and origin resolve in integer math FIRST (both can be huge; near the border they cancel to a small
+            // number), and only then does the small fractional collider inset apply in float — subtracting two large
+            // floats instead would round the bound off the true border line past ±2²⁴.
+            Vector3Int ov = WorldOrigin.OriginVoxel;
+            float minX = (-(long)radius - ov.x) + CollisionHalfWidthX + BORDER_MARGIN;
+            float maxX = ((long)radius - ov.x) - CollisionHalfWidthX - BORDER_MARGIN;
+            float minZ = (-(long)radius - ov.z) + CollisionHalfDepthZ + BORDER_MARGIN;
+            float maxZ = ((long)radius - ov.z) - CollisionHalfDepthZ - BORDER_MARGIN;
+
+            // Guard tiny radii from inverting the bounds: pin the player to the border's center line instead.
+            if (maxX < minX) minX = maxX = (minX + maxX) * 0.5f;
+            if (maxZ < minZ) minZ = maxZ = (minZ + maxZ) * 0.5f;
+
+            Vector3 pos = transform.position;
+            float clampedX = Mathf.Clamp(pos.x, minX, maxX);
+            float clampedZ = Mathf.Clamp(pos.z, minZ, maxZ);
+
+            if (clampedX != pos.x || clampedZ != pos.z)
+                transform.position = new Vector3(clampedX, pos.y, clampedZ);
         }
 
         private void CalculateVelocity()
@@ -181,7 +233,7 @@ namespace Physics
             if (!isNoclipping)
             {
                 const float MIN_COLLISION_THICKNESS = 0.25f; // Quarter-slab
-                float maxStep = MIN_COLLISION_THICKNESS * 0.5f; // 0.125m
+                const float maxStep = MIN_COLLISION_THICKNESS * 0.5f; // 0.125m
 
                 // Velocity here is actually the intended displacement for this frame
                 float displacementMag = Velocity.magnitude;

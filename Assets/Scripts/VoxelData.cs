@@ -32,7 +32,10 @@ public static class VoxelData
 
     public const int WorldSizeInVoxels = WorldSizeInChunks * ChunkWidth;
 
-    public const int WorldCentre = WorldSizeInVoxels / 2;
+    // WS-3: fresh worlds spawn at the origin (0,0). With negative quadrants now in-world, the origin is a
+    // central point rather than a corner. Existing worlds restore the player's saved position, so this only
+    // affects brand-new worlds. (Decoupled from the defunct world size since WS-2.)
+    public const int DefaultSpawnPosition = 0;
 
     public const int TextureAtlasSizeInBlocks = 16;
 

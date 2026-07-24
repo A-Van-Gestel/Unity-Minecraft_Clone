@@ -83,6 +83,19 @@ namespace Libraries
             DefaultOpenSimplex2,
         }
 
+        /// <summary>
+        /// Coordinate precision for the sampling pipeline (frequency multiply, fractal octave
+        /// chain, lattice floor). Gradient/hash math is float in both modes.
+        /// </summary>
+        public enum CoordinatePrecision : byte
+        {
+            /// <summary>Float32 coordinate pipeline — degrades past ~±2²⁴ input ("Far Lands").</summary>
+            Classic32,
+
+            /// <summary>Float64 coordinate pipeline until the lattice floor — exact to ±2³¹ and beyond.</summary>
+            Precise64,
+        }
+
         #endregion
 
         #region Fields and Constants
@@ -111,6 +124,8 @@ namespace Libraries
         /// Useful for matching legacy Mathf.PerlinNoise range expectations.
         /// </summary>
         private bool mNormalizeToZeroOne;
+
+        private CoordinatePrecision mCoordinatePrecision;
 
         private const int PrimeX = 501125321;
         private const int PrimeY = 1136930381;
@@ -144,6 +159,7 @@ namespace Libraries
             fnl.mDomainWarpType = DomainWarpType.OpenSimplex2;
             fnl.mWarpTransformType3D = TransformType3D.DefaultOpenSimplex2;
             fnl.mDomainWarpAmp = 1.0f;
+            fnl.mCoordinatePrecision = CoordinatePrecision.Classic32;
             return fnl;
         }
 
@@ -276,12 +292,75 @@ namespace Libraries
             mNormalizeToZeroOne = normalize;
         }
 
+        /// <summary>
+        /// Selects the coordinate-pipeline precision. <see cref="CoordinatePrecision.Classic32"/>
+        /// (the default) is bit-identical to the historical float pipeline, including its
+        /// far-coordinate degradation ("Far Lands"); <see cref="CoordinatePrecision.Precise64"/>
+        /// keeps coordinates in double until the lattice floor, staying artifact-free to ±2³¹.
+        /// </summary>
+        public void SetCoordinatePrecision(CoordinatePrecision precision)
+        {
+            mCoordinatePrecision = precision;
+        }
+
+        /// <summary>
+        /// The active coordinate-pipeline precision. Callers with adjacent world-space float
+        /// math (e.g. dither inputs) branch on this so their handling matches the pipeline.
+        /// </summary>
+        public CoordinatePrecision GetCoordinatePrecision()
+        {
+            return mCoordinatePrecision;
+        }
+
         #endregion
 
         #region Public Noise API
 
+        /// <summary>
+        /// Samples 2D noise. Coordinates are taken as <see cref="double"/> so integer world
+        /// coordinates arrive exactly at any magnitude; how much of that precision survives is
+        /// governed by <see cref="SetCoordinatePrecision"/> (Classic32 narrows here, preserving
+        /// the historical float pipeline bit-for-bit).
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public float GetNoise(float x, float y)
+        public float GetNoise(double x, double y)
+        {
+            if (mCoordinatePrecision == CoordinatePrecision.Classic32)
+                return GetNoiseClassic((float)x, (float)y);
+
+            TransformNoiseCoordinate(ref x, ref y);
+            float result = mFractalType switch
+            {
+                FractalType.FBm => GenFractalFBm(x, y),
+                FractalType.Ridged => GenFractalRidged(x, y),
+                FractalType.PingPong => GenFractalPingPong(x, y),
+                _ => GenNoiseSingle(mSeed, x, y),
+            };
+            return mNormalizeToZeroOne ? (result + 1f) * 0.5f : result;
+        }
+
+        /// <summary>
+        /// Samples 3D noise. See <see cref="GetNoise(double,double)"/> for precision semantics.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public float GetNoise(double x, double y, double z)
+        {
+            if (mCoordinatePrecision == CoordinatePrecision.Classic32)
+                return GetNoiseClassic((float)x, (float)y, (float)z);
+
+            TransformNoiseCoordinate(ref x, ref y, ref z);
+            float result = mFractalType switch
+            {
+                FractalType.FBm => GenFractalFBm(x, y, z),
+                FractalType.Ridged => GenFractalRidged(x, y, z),
+                FractalType.PingPong => GenFractalPingPong(x, y, z),
+                _ => GenNoiseSingle(mSeed, x, y, z),
+            };
+            return mNormalizeToZeroOne ? (result + 1f) * 0.5f : result;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private float GetNoiseClassic(float x, float y)
         {
             TransformNoiseCoordinate(ref x, ref y);
             float result = mFractalType switch
@@ -295,7 +374,7 @@ namespace Libraries
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public float GetNoise(float x, float y, float z)
+        private float GetNoiseClassic(float x, float y, float z)
         {
             TransformNoiseCoordinate(ref x, ref y, ref z);
             float result = mFractalType switch
@@ -308,8 +387,57 @@ namespace Libraries
             return mNormalizeToZeroOne ? (result + 1f) * 0.5f : result;
         }
 
+        /// <summary>
+        /// Applies domain warp to the coordinate. Double-based for the same reason as
+        /// <see cref="GetNoise(double,double)"/>; Classic32 narrows at entry (bit-identical
+        /// to the historical float pipeline).
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void DomainWarp(ref float x, ref float y)
+        public void DomainWarp(ref double x, ref double y)
+        {
+            if (mCoordinatePrecision == CoordinatePrecision.Classic32)
+            {
+                float fx = (float)x, fy = (float)y;
+                DomainWarpClassic(ref fx, ref fy);
+                x = fx;
+                y = fy;
+                return;
+            }
+
+            switch (mFractalType)
+            {
+                default: DomainWarpSingle(ref x, ref y); break;
+                case FractalType.DomainWarpProgressive: DomainWarpFractalProgressive(ref x, ref y); break;
+                case FractalType.DomainWarpIndependent: DomainWarpFractalIndependent(ref x, ref y); break;
+            }
+        }
+
+        /// <summary>
+        /// Applies 3D domain warp. See <see cref="DomainWarp(ref double,ref double)"/>.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void DomainWarp(ref double x, ref double y, ref double z)
+        {
+            if (mCoordinatePrecision == CoordinatePrecision.Classic32)
+            {
+                float fx = (float)x, fy = (float)y, fz = (float)z;
+                DomainWarpClassic(ref fx, ref fy, ref fz);
+                x = fx;
+                y = fy;
+                z = fz;
+                return;
+            }
+
+            switch (mFractalType)
+            {
+                default: DomainWarpSingle(ref x, ref y, ref z); break;
+                case FractalType.DomainWarpProgressive: DomainWarpFractalProgressive(ref x, ref y, ref z); break;
+                case FractalType.DomainWarpIndependent: DomainWarpFractalIndependent(ref x, ref y, ref z); break;
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void DomainWarpClassic(ref float x, ref float y)
         {
             switch (mFractalType)
             {
@@ -320,7 +448,7 @@ namespace Libraries
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void DomainWarp(ref float x, ref float y, ref float z)
+        private void DomainWarpClassic(ref float x, ref float y, ref float z)
         {
             switch (mFractalType)
             {
@@ -346,6 +474,15 @@ namespace Libraries
         public void GetNoiseGrid(int startX, int startY, int countX, int countY, NativeArray<float> output)
         {
             int idx = 0;
+
+            if (mCoordinatePrecision == CoordinatePrecision.Precise64)
+            {
+                // GetNoise applies the fractal dispatch and normalization per sample.
+                for (int iy = 0; iy < countY; iy++)
+                for (int ix = 0; ix < countX; ix++)
+                    output[idx++] = GetNoise(startX + ix, startY + iy);
+                return;
+            }
 
             switch (mFractalType)
             {
@@ -419,6 +556,16 @@ namespace Libraries
             int countX, int countY, int countZ, NativeArray<float> output)
         {
             int idx = 0;
+
+            if (mCoordinatePrecision == CoordinatePrecision.Precise64)
+            {
+                // GetNoise applies the fractal dispatch and normalization per sample.
+                for (int iz = 0; iz < countZ; iz++)
+                for (int iy = 0; iy < countY; iy++)
+                for (int ix = 0; ix < countX; ix++)
+                    output[idx++] = GetNoise(startX + ix, startY + iy, startZ + iz);
+                return;
+            }
 
             switch (mFractalType)
             {
@@ -701,6 +848,36 @@ namespace Libraries
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private float GenNoiseSingle(int seed, double x, double y)
+        {
+            return mNoiseType switch
+            {
+                NoiseType.OpenSimplex2 => SingleSimplex(seed, x, y),
+                NoiseType.OpenSimplex2S => SingleOpenSimplex2S(seed, x, y),
+                NoiseType.Cellular => SingleCellular(seed, x, y),
+                NoiseType.Perlin => SinglePerlin(seed, x, y),
+                NoiseType.ValueCubic => SingleValueCubic(seed, x, y),
+                NoiseType.Value => SingleValue(seed, x, y),
+                _ => 0,
+            };
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private float GenNoiseSingle(int seed, double x, double y, double z)
+        {
+            return mNoiseType switch
+            {
+                NoiseType.OpenSimplex2 => SingleOpenSimplex2(seed, x, y, z),
+                NoiseType.OpenSimplex2S => SingleOpenSimplex2S(seed, x, y, z),
+                NoiseType.Cellular => SingleCellular(seed, x, y, z),
+                NoiseType.Perlin => SinglePerlin(seed, x, y, z),
+                NoiseType.ValueCubic => SingleValueCubic(seed, x, y, z),
+                NoiseType.Value => SingleValue(seed, x, y, z),
+                _ => 0,
+            };
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void TransformNoiseCoordinate(ref float x, ref float y)
         {
             x *= mFrequency;
@@ -750,6 +927,64 @@ namespace Libraries
                 {
                     const float R3 = 2.0f / 3.0f;
                     float r = (x + y + z) * R3;
+                    x = r - x;
+                    y = r - y;
+                    z = r - z;
+                }
+                    break;
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void TransformNoiseCoordinate(ref double x, ref double y)
+        {
+            x *= mFrequency;
+            y *= mFrequency;
+            switch (mNoiseType)
+            {
+                case NoiseType.OpenSimplex2:
+                case NoiseType.OpenSimplex2S:
+                    const double SQRT3 = 1.7320508075688772935274463415059;
+                    const double F2 = 0.5 * (SQRT3 - 1);
+                    double t = (x + y) * F2;
+                    x += t;
+                    y += t;
+                    break;
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void TransformNoiseCoordinate(ref double x, ref double y, ref double z)
+        {
+            x *= mFrequency;
+            y *= mFrequency;
+            z *= mFrequency;
+            switch (mTransformType3D)
+            {
+                case TransformType3D.ImproveXYPlanes:
+                {
+                    double xy = x + y;
+                    double s2 = xy * -0.211324865405187;
+                    z *= 0.577350269189626;
+                    x += s2 - z;
+                    y = y + s2 - z;
+                    z += xy * 0.577350269189626;
+                }
+                    break;
+                case TransformType3D.ImproveXZPlanes:
+                {
+                    double xz = x + z;
+                    double s2 = xz * -0.211324865405187;
+                    y *= 0.577350269189626;
+                    x += s2 - y;
+                    z += s2 - y;
+                    y += xz * 0.577350269189626;
+                }
+                    break;
+                case TransformType3D.DefaultOpenSimplex2:
+                {
+                    const double R3 = 2.0 / 3.0;
+                    double r = (x + y + z) * R3;
                     x = r - x;
                     y = r - y;
                     z = r - z;
@@ -825,6 +1060,59 @@ namespace Libraries
             }
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void TransformDomainWarpCoordinate(ref double x, ref double y)
+        {
+            switch (mDomainWarpType)
+            {
+                case DomainWarpType.OpenSimplex2:
+                case DomainWarpType.OpenSimplex2Reduced:
+                    const double SQRT3 = 1.7320508075688772935274463415059;
+                    const double F2 = 0.5 * (SQRT3 - 1);
+                    double t = (x + y) * F2;
+                    x += t;
+                    y += t;
+                    break;
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void TransformDomainWarpCoordinate(ref double x, ref double y, ref double z)
+        {
+            switch (mWarpTransformType3D)
+            {
+                case TransformType3D.ImproveXYPlanes:
+                {
+                    double xy = x + y;
+                    double s2 = xy * -0.211324865405187;
+                    z *= 0.577350269189626;
+                    x += s2 - z;
+                    y = y + s2 - z;
+                    z += xy * 0.577350269189626;
+                }
+                    break;
+                case TransformType3D.ImproveXZPlanes:
+                {
+                    double xz = x + z;
+                    double s2 = xz * -0.211324865405187;
+                    y *= 0.577350269189626;
+                    x += s2 - y;
+                    z += s2 - y;
+                    y += xz * 0.577350269189626;
+                }
+                    break;
+                case TransformType3D.DefaultOpenSimplex2:
+                {
+                    const double R3 = 2.0 / 3.0;
+                    double r = (x + y + z) * R3;
+                    x = r - x;
+                    y = r - y;
+                    z = r - z;
+                }
+                    break;
+            }
+        }
+
         private void UpdateWarpTransformType3D()
         {
             mWarpTransformType3D = mRotationType3D switch
@@ -853,6 +1141,21 @@ namespace Libraries
         private static int FastRound(float f)
         {
             return f >= 0 ? (int)(f + 0.5f) : (int)(f - 0.5f);
+        }
+
+        // Double variants back the Precise64 pipeline. Lattice indices still land in int:
+        // |coord × frequency| stays far below int range for every game-realistic frequency,
+        // and at the ±2³¹ voxel edge int wrap matches the engine's documented ring semantics.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int FastFloor(double f)
+        {
+            return f >= 0 ? (int)f : (int)f - 1;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int FastRound(double f)
+        {
+            return f >= 0 ? (int)(f + 0.5) : (int)(f - 0.5);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -992,18 +1295,147 @@ namespace Libraries
             return sum;
         }
 
+        // Precise64 fractal variants: only the coordinate chain (per-octave lacunarity
+        // multiplies) is carried in double — sums/amplitudes are value math and stay float.
+
+        private float GenFractalFBm(double x, double y)
+        {
+            int seed = mSeed;
+            float sum = 0;
+            float amp = mFractalBounding;
+            for (int i = 0; i < mOctaves; i++)
+            {
+                float noise = GenNoiseSingle(seed++, x, y);
+                sum += noise * amp;
+                amp *= math.lerp(1.0f, math.min(noise + 1, 2) * 0.5f, mWeightedStrength);
+                x *= mLacunarity;
+                y *= mLacunarity;
+                amp *= mGain;
+            }
+
+            return sum;
+        }
+
+        private float GenFractalFBm(double x, double y, double z)
+        {
+            int seed = mSeed;
+            float sum = 0;
+            float amp = mFractalBounding;
+            for (int i = 0; i < mOctaves; i++)
+            {
+                float noise = GenNoiseSingle(seed++, x, y, z);
+                sum += noise * amp;
+                amp *= math.lerp(1.0f, (noise + 1) * 0.5f, mWeightedStrength);
+                x *= mLacunarity;
+                y *= mLacunarity;
+                z *= mLacunarity;
+                amp *= mGain;
+            }
+
+            return sum;
+        }
+
+        private float GenFractalRidged(double x, double y)
+        {
+            int seed = mSeed;
+            float sum = 0;
+            float amp = mFractalBounding;
+            for (int i = 0; i < mOctaves; i++)
+            {
+                float noise = math.abs(GenNoiseSingle(seed++, x, y));
+                sum += (noise * -2 + 1) * amp;
+                amp *= math.lerp(1.0f, 1 - noise, mWeightedStrength);
+                x *= mLacunarity;
+                y *= mLacunarity;
+                amp *= mGain;
+            }
+
+            return sum;
+        }
+
+        private float GenFractalRidged(double x, double y, double z)
+        {
+            int seed = mSeed;
+            float sum = 0;
+            float amp = mFractalBounding;
+            for (int i = 0; i < mOctaves; i++)
+            {
+                float noise = math.abs(GenNoiseSingle(seed++, x, y, z));
+                sum += (noise * -2 + 1) * amp;
+                amp *= math.lerp(1.0f, 1 - noise, mWeightedStrength);
+                x *= mLacunarity;
+                y *= mLacunarity;
+                z *= mLacunarity;
+                amp *= mGain;
+            }
+
+            return sum;
+        }
+
+        private float GenFractalPingPong(double x, double y)
+        {
+            int seed = mSeed;
+            float sum = 0;
+            float amp = mFractalBounding;
+            for (int i = 0; i < mOctaves; i++)
+            {
+                float noise = PingPong((GenNoiseSingle(seed++, x, y) + 1) * mPingPongStrength);
+                sum += (noise - 0.5f) * 2 * amp;
+                amp *= math.lerp(1.0f, noise, mWeightedStrength);
+                x *= mLacunarity;
+                y *= mLacunarity;
+                amp *= mGain;
+            }
+
+            return sum;
+        }
+
+        private float GenFractalPingPong(double x, double y, double z)
+        {
+            int seed = mSeed;
+            float sum = 0;
+            float amp = mFractalBounding;
+            for (int i = 0; i < mOctaves; i++)
+            {
+                float noise = PingPong((GenNoiseSingle(seed++, x, y, z) + 1) * mPingPongStrength);
+                sum += (noise - 0.5f) * 2 * amp;
+                amp *= math.lerp(1.0f, noise, mWeightedStrength);
+                x *= mLacunarity;
+                y *= mLacunarity;
+                z *= mLacunarity;
+                amp *= mGain;
+            }
+
+            return sum;
+        }
+
         #endregion
 
         #region Noise Algorithms
 
+        // Generator bodies are split into a precision-sensitive head (lattice floor/round +
+        // fractional delta — float and double variants) and a shared float core. The double
+        // heads narrow their deltas after the exact double subtraction, so the core sees full
+        // 24-bit-mantissa fractions at any coordinate magnitude.
+
         private static float SingleSimplex(int seed, float x, float y)
+        {
+            int i = FastFloor(x);
+            int j = FastFloor(y);
+            return SingleSimplexCore(seed, i, j, x - i, y - j);
+        }
+
+        private static float SingleSimplex(int seed, double x, double y)
+        {
+            int i = FastFloor(x);
+            int j = FastFloor(y);
+            return SingleSimplexCore(seed, i, j, (float)(x - i), (float)(y - j));
+        }
+
+        private static float SingleSimplexCore(int seed, int i, int j, float xi, float yi)
         {
             const float SQRT3 = 1.7320508075688772935274463415059f;
             const float G2 = (3 - SQRT3) / 6;
-            int i = FastFloor(x);
-            int j = FastFloor(y);
-            float xi = x - i;
-            float yi = y - j;
             float t = (xi + yi) * G2;
             float x0 = xi - t;
             float y0 = yi - t;
@@ -1047,9 +1479,19 @@ namespace Libraries
             int i = FastRound(x);
             int j = FastRound(y);
             int k = FastRound(z);
-            float x0 = x - i;
-            float y0 = y - j;
-            float z0 = z - k;
+            return SingleOpenSimplex2Core(seed, i, j, k, x - i, y - j, z - k);
+        }
+
+        private static float SingleOpenSimplex2(int seed, double x, double y, double z)
+        {
+            int i = FastRound(x);
+            int j = FastRound(y);
+            int k = FastRound(z);
+            return SingleOpenSimplex2Core(seed, i, j, k, (float)(x - i), (float)(y - j), (float)(z - k));
+        }
+
+        private static float SingleOpenSimplex2Core(int seed, int i, int j, int k, float x0, float y0, float z0)
+        {
             int xNSign = (int)(-1.0f - x0) | 1;
             int yNSign = (int)(-1.0f - y0) | 1;
             int zNSign = (int)(-1.0f - z0) | 1;
@@ -1114,12 +1556,22 @@ namespace Libraries
 
         private static float SingleOpenSimplex2S(int seed, float x, float y)
         {
-            const float SQRT3 = 1.7320508075688772935274463415059f;
-            const float G2 = (3 - SQRT3) / 6;
             int i = FastFloor(x);
             int j = FastFloor(y);
-            float xi = x - i;
-            float yi = y - j;
+            return SingleOpenSimplex2SCore(seed, i, j, x - i, y - j);
+        }
+
+        private static float SingleOpenSimplex2S(int seed, double x, double y)
+        {
+            int i = FastFloor(x);
+            int j = FastFloor(y);
+            return SingleOpenSimplex2SCore(seed, i, j, (float)(x - i), (float)(y - j));
+        }
+
+        private static float SingleOpenSimplex2SCore(int seed, int i, int j, float xi, float yi)
+        {
+            const float SQRT3 = 1.7320508075688772935274463415059f;
+            const float G2 = (3 - SQRT3) / 6;
             i *= PrimeX;
             j *= PrimeY;
             int i1 = i + PrimeX;
@@ -1207,9 +1659,19 @@ namespace Libraries
             int i = FastFloor(x);
             int j = FastFloor(y);
             int k = FastFloor(z);
-            float xi = x - i;
-            float yi = y - j;
-            float zi = z - k;
+            return SingleOpenSimplex2SCore(seed, i, j, k, x - i, y - j, z - k);
+        }
+
+        private static float SingleOpenSimplex2S(int seed, double x, double y, double z)
+        {
+            int i = FastFloor(x);
+            int j = FastFloor(y);
+            int k = FastFloor(z);
+            return SingleOpenSimplex2SCore(seed, i, j, k, (float)(x - i), (float)(y - j), (float)(z - k));
+        }
+
+        private static float SingleOpenSimplex2SCore(int seed, int i, int j, int k, float xi, float yi, float zi)
+        {
             i *= PrimeX;
             j *= PrimeY;
             k *= PrimeZ;
@@ -1374,8 +1836,17 @@ namespace Libraries
             public fixed float Distances[MaxCells];
         }
 
-        public void GetCellularEdgeData(float x, float y, out CellularEdgeData edgeData)
+        public void GetCellularEdgeData(double x, double y, out CellularEdgeData edgeData)
         {
+            if (mCoordinatePrecision == CoordinatePrecision.Classic32)
+            {
+                float fx = (float)x;
+                float fy = (float)y;
+                TransformNoiseCoordinate(ref fx, ref fy);
+                SingleCellularEdgeData(mSeed, fx, fy, out edgeData);
+                return;
+            }
+
             TransformNoiseCoordinate(ref x, ref y);
             SingleCellularEdgeData(mSeed, x, y, out edgeData);
         }
@@ -1413,6 +1884,83 @@ namespace Libraries
 
                         float vecX = xi - x + Lookup.Data.RandVecs2D[idx] * cellularJitter;
                         float vecY = yi - y + Lookup.Data.RandVecs2D[idx | 1] * cellularJitter;
+
+                        float newDistance;
+                        if (mCellularDistanceFunction == CellularDistanceFunction.Euclidean || mCellularDistanceFunction == CellularDistanceFunction.EuclideanSq)
+                            newDistance = vecX * vecX + vecY * vecY;
+                        else if (mCellularDistanceFunction == CellularDistanceFunction.Manhattan)
+                            newDistance = math.abs(vecX) + math.abs(vecY);
+                        else
+                            newDistance = math.abs(vecX) + math.abs(vecY) + (vecX * vecX + vecY * vecY);
+
+                        for (int i = 0; i < N; i++)
+                        {
+                            if (newDistance < edgeData.Distances[i])
+                            {
+                                for (int j = N - 1; j > i; j--)
+                                {
+                                    edgeData.Distances[j] = edgeData.Distances[j - 1];
+                                    edgeData.Hashes[j] = edgeData.Hashes[j - 1];
+                                }
+
+                                edgeData.Distances[i] = newDistance;
+                                edgeData.Hashes[i] = hash;
+                                break;
+                            }
+                        }
+
+                        yPrimed += PrimeY;
+                    }
+
+                    xPrimed += PrimeX;
+                }
+            }
+
+            if (mCellularDistanceFunction == CellularDistanceFunction.Euclidean || mCellularDistanceFunction == CellularDistanceFunction.EuclideanSq)
+            {
+                unsafe
+                {
+                    for (int i = 0; i < N; i++)
+                    {
+                        edgeData.Distances[i] = math.sqrt(edgeData.Distances[i]);
+                    }
+                }
+            }
+        }
+
+        private void SingleCellularEdgeData(int seed, double x, double y, out CellularEdgeData edgeData)
+        {
+            int xr = FastRound(x);
+            int yr = FastRound(y);
+            float xLocal = (float)(x - xr);
+            float yLocal = (float)(y - yr);
+
+            edgeData = default;
+            const int N = CellularEdgeData.MaxCells;
+            unsafe
+            {
+                for (int i = 0; i < N; i++)
+                {
+                    edgeData.Distances[i] = float.MaxValue;
+                    edgeData.Hashes[i] = 0;
+                }
+            }
+
+            float cellularJitter = 0.43701595f * mCellularJitterModifier;
+            int xPrimed = (xr - 2) * PrimeX;
+            int yPrimedBase = (yr - 2) * PrimeY;
+            unsafe
+            {
+                for (int dxi = -2; dxi <= 2; dxi++)
+                {
+                    int yPrimed = yPrimedBase;
+                    for (int dyi = -2; dyi <= 2; dyi++)
+                    {
+                        int hash = Hash(seed, xPrimed, yPrimed);
+                        int idx = hash & (255 << 1);
+
+                        float vecX = dxi - xLocal + Lookup.Data.RandVecs2D[idx] * cellularJitter;
+                        float vecY = dyi - yLocal + Lookup.Data.RandVecs2D[idx | 1] * cellularJitter;
 
                         float newDistance;
                         if (mCellularDistanceFunction == CellularDistanceFunction.Euclidean || mCellularDistanceFunction == CellularDistanceFunction.EuclideanSq)
@@ -1704,12 +2252,167 @@ namespace Libraries
             };
         }
 
+        // Cellular gets dedicated Precise64 bodies rather than a shared core: its neighbor
+        // loops consume the absolute coordinate (xi - x), so the double variants rebase to the
+        // rounded cell center (dxi - local) — exact after the double subtraction — while the
+        // float bodies above stay byte-for-byte untouched.
+
+        private float SingleCellular(int seed, double x, double y)
+        {
+            int xr = FastRound(x);
+            int yr = FastRound(y);
+            float xLocal = (float)(x - xr);
+            float yLocal = (float)(y - yr);
+            float distance0 = float.MaxValue;
+            float distance1 = float.MaxValue;
+            int closestHash = 0;
+            float cellularJitter = 0.43701595f * mCellularJitterModifier;
+            int xPrimed = (xr - 1) * PrimeX;
+            int yPrimedBase = (yr - 1) * PrimeY;
+            unsafe
+            {
+                for (int dxi = -1; dxi <= 1; dxi++)
+                {
+                    int yPrimed = yPrimedBase;
+                    for (int dyi = -1; dyi <= 1; dyi++)
+                    {
+                        int hash = Hash(seed, xPrimed, yPrimed);
+                        int idx = hash & (255 << 1);
+                        float vecX = dxi - xLocal + Lookup.Data.RandVecs2D[idx] * cellularJitter;
+                        float vecY = dyi - yLocal + Lookup.Data.RandVecs2D[idx | 1] * cellularJitter;
+
+                        float newDistance;
+                        if (mCellularDistanceFunction == CellularDistanceFunction.Euclidean || mCellularDistanceFunction == CellularDistanceFunction.EuclideanSq)
+                            newDistance = vecX * vecX + vecY * vecY;
+                        else if (mCellularDistanceFunction == CellularDistanceFunction.Manhattan)
+                            newDistance = math.abs(vecX) + math.abs(vecY);
+                        else
+                            newDistance = math.abs(vecX) + math.abs(vecY) + (vecX * vecX + vecY * vecY);
+
+                        distance1 = math.max(math.min(distance1, newDistance), distance0);
+                        if (newDistance < distance0)
+                        {
+                            distance0 = newDistance;
+                            closestHash = hash;
+                        }
+
+                        yPrimed += PrimeY;
+                    }
+
+                    xPrimed += PrimeX;
+                }
+            }
+
+            if (mCellularDistanceFunction == CellularDistanceFunction.Euclidean && mCellularReturnType >= CellularReturnType.Distance)
+            {
+                distance0 = math.sqrt(distance0);
+                if (mCellularReturnType >= CellularReturnType.Distance2) distance1 = math.sqrt(distance1);
+            }
+
+            return mCellularReturnType switch
+            {
+                CellularReturnType.CellValue => closestHash * (1.0f / 2147483648.0f),
+                CellularReturnType.Distance => distance0 - 1,
+                CellularReturnType.Distance2 => distance1 - 1,
+                CellularReturnType.Distance2Add => (distance1 + distance0) * 0.5f - 1,
+                CellularReturnType.Distance2Sub => distance1 - distance0 - 1,
+                CellularReturnType.Distance2Mul => distance1 * distance0 * 0.5f - 1,
+                CellularReturnType.Distance2Div => distance0 / distance1 - 1,
+                _ => 0,
+            };
+        }
+
+        private float SingleCellular(int seed, double x, double y, double z)
+        {
+            int xr = FastRound(x);
+            int yr = FastRound(y);
+            int zr = FastRound(z);
+            float xLocal = (float)(x - xr);
+            float yLocal = (float)(y - yr);
+            float zLocal = (float)(z - zr);
+            float distance0 = float.MaxValue;
+            float distance1 = float.MaxValue;
+            int closestHash = 0;
+            float cellularJitter = 0.39614353f * mCellularJitterModifier;
+            int xPrimed = (xr - 1) * PrimeX;
+            int yPrimedBase = (yr - 1) * PrimeY;
+            int zPrimedBase = (zr - 1) * PrimeZ;
+            unsafe
+            {
+                for (int dxi = -1; dxi <= 1; dxi++)
+                {
+                    int yPrimed = yPrimedBase;
+                    for (int dyi = -1; dyi <= 1; dyi++)
+                    {
+                        int zPrimed = zPrimedBase;
+                        for (int dzi = -1; dzi <= 1; dzi++)
+                        {
+                            int hash = Hash(seed, xPrimed, yPrimed, zPrimed);
+                            int idx = hash & (255 << 2);
+                            float vecX = dxi - xLocal + Lookup.Data.RandVecs3D[idx] * cellularJitter;
+                            float vecY = dyi - yLocal + Lookup.Data.RandVecs3D[idx | 1] * cellularJitter;
+                            float vecZ = dzi - zLocal + Lookup.Data.RandVecs3D[idx | 2] * cellularJitter;
+
+                            float newDistance;
+                            if (mCellularDistanceFunction == CellularDistanceFunction.Euclidean || mCellularDistanceFunction == CellularDistanceFunction.EuclideanSq)
+                                newDistance = vecX * vecX + vecY * vecY + vecZ * vecZ;
+                            else if (mCellularDistanceFunction == CellularDistanceFunction.Manhattan)
+                                newDistance = math.abs(vecX) + math.abs(vecY) + math.abs(vecZ);
+                            else
+                                newDistance = math.abs(vecX) + math.abs(vecY) + math.abs(vecZ) + (vecX * vecX + vecY * vecY + vecZ * vecZ);
+
+                            distance1 = math.max(math.min(distance1, newDistance), distance0);
+                            if (newDistance < distance0)
+                            {
+                                distance0 = newDistance;
+                                closestHash = hash;
+                            }
+
+                            zPrimed += PrimeZ;
+                        }
+
+                        yPrimed += PrimeY;
+                    }
+
+                    xPrimed += PrimeX;
+                }
+            }
+
+            if (mCellularDistanceFunction == CellularDistanceFunction.Euclidean && mCellularReturnType >= CellularReturnType.Distance)
+            {
+                distance0 = math.sqrt(distance0);
+                if (mCellularReturnType >= CellularReturnType.Distance2) distance1 = math.sqrt(distance1);
+            }
+
+            return mCellularReturnType switch
+            {
+                CellularReturnType.CellValue => closestHash * (1.0f / 2147483648.0f),
+                CellularReturnType.Distance => distance0 - 1,
+                CellularReturnType.Distance2 => distance1 - 1,
+                CellularReturnType.Distance2Add => (distance1 + distance0) * 0.5f - 1,
+                CellularReturnType.Distance2Sub => distance1 - distance0 - 1,
+                CellularReturnType.Distance2Mul => distance1 * distance0 * 0.5f - 1,
+                CellularReturnType.Distance2Div => distance0 / distance1 - 1,
+                _ => 0,
+            };
+        }
+
         private static float SinglePerlin(int seed, float x, float y)
         {
             int x0 = FastFloor(x);
             int y0 = FastFloor(y);
-            float xd0 = x - x0;
-            float yd0 = y - y0;
+            return SinglePerlinCore(seed, x0, y0, x - x0, y - y0);
+        }
+
+        private static float SinglePerlin(int seed, double x, double y)
+        {
+            int x0 = FastFloor(x);
+            int y0 = FastFloor(y);
+            return SinglePerlinCore(seed, x0, y0, (float)(x - x0), (float)(y - y0));
+        }
+
+        private static float SinglePerlinCore(int seed, int x0, int y0, float xd0, float yd0)
+        {
             float xd1 = xd0 - 1;
             float yd1 = yd0 - 1;
             float xs = InterpQuintic(xd0);
@@ -1728,9 +2431,19 @@ namespace Libraries
             int x0 = FastFloor(x);
             int y0 = FastFloor(y);
             int z0 = FastFloor(z);
-            float xd0 = x - x0;
-            float yd0 = y - y0;
-            float zd0 = z - z0;
+            return SinglePerlinCore(seed, x0, y0, z0, x - x0, y - y0, z - z0);
+        }
+
+        private static float SinglePerlin(int seed, double x, double y, double z)
+        {
+            int x0 = FastFloor(x);
+            int y0 = FastFloor(y);
+            int z0 = FastFloor(z);
+            return SinglePerlinCore(seed, x0, y0, z0, (float)(x - x0), (float)(y - y0), (float)(z - z0));
+        }
+
+        private static float SinglePerlinCore(int seed, int x0, int y0, int z0, float xd0, float yd0, float zd0)
+        {
             float xd1 = xd0 - 1;
             float yd1 = yd0 - 1;
             float zd1 = zd0 - 1;
@@ -1756,8 +2469,18 @@ namespace Libraries
         {
             int x1 = FastFloor(x);
             int y1 = FastFloor(y);
-            float xs = x - x1;
-            float ys = y - y1;
+            return SingleValueCubicCore(seed, x1, y1, x - x1, y - y1);
+        }
+
+        private static float SingleValueCubic(int seed, double x, double y)
+        {
+            int x1 = FastFloor(x);
+            int y1 = FastFloor(y);
+            return SingleValueCubicCore(seed, x1, y1, (float)(x - x1), (float)(y - y1));
+        }
+
+        private static float SingleValueCubicCore(int seed, int x1, int y1, float xs, float ys)
+        {
             x1 *= PrimeX;
             y1 *= PrimeY;
             int x0 = x1 - PrimeX;
@@ -1779,9 +2502,19 @@ namespace Libraries
             int x1 = FastFloor(x);
             int y1 = FastFloor(y);
             int z1 = FastFloor(z);
-            float xs = x - x1;
-            float ys = y - y1;
-            float zs = z - z1;
+            return SingleValueCubicCore(seed, x1, y1, z1, x - x1, y - y1, z - z1);
+        }
+
+        private static float SingleValueCubic(int seed, double x, double y, double z)
+        {
+            int x1 = FastFloor(x);
+            int y1 = FastFloor(y);
+            int z1 = FastFloor(z);
+            return SingleValueCubicCore(seed, x1, y1, z1, (float)(x - x1), (float)(y - y1), (float)(z - z1));
+        }
+
+        private static float SingleValueCubicCore(int seed, int x1, int y1, int z1, float xs, float ys, float zs)
+        {
             x1 *= PrimeX;
             y1 *= PrimeY;
             z1 *= PrimeZ;
@@ -1826,8 +2559,20 @@ namespace Libraries
         {
             int x0 = FastFloor(x);
             int y0 = FastFloor(y);
-            float xs = InterpHermite(x - x0);
-            float ys = InterpHermite(y - y0);
+            return SingleValueCore(seed, x0, y0, x - x0, y - y0);
+        }
+
+        private static float SingleValue(int seed, double x, double y)
+        {
+            int x0 = FastFloor(x);
+            int y0 = FastFloor(y);
+            return SingleValueCore(seed, x0, y0, (float)(x - x0), (float)(y - y0));
+        }
+
+        private static float SingleValueCore(int seed, int x0, int y0, float xd, float yd)
+        {
+            float xs = InterpHermite(xd);
+            float ys = InterpHermite(yd);
             x0 *= PrimeX;
             y0 *= PrimeY;
             int x1 = x0 + PrimeX;
@@ -1842,9 +2587,22 @@ namespace Libraries
             int x0 = FastFloor(x);
             int y0 = FastFloor(y);
             int z0 = FastFloor(z);
-            float xs = InterpHermite(x - x0);
-            float ys = InterpHermite(y - y0);
-            float zs = InterpHermite(z - z0);
+            return SingleValueCore(seed, x0, y0, z0, x - x0, y - y0, z - z0);
+        }
+
+        private static float SingleValue(int seed, double x, double y, double z)
+        {
+            int x0 = FastFloor(x);
+            int y0 = FastFloor(y);
+            int z0 = FastFloor(z);
+            return SingleValueCore(seed, x0, y0, z0, (float)(x - x0), (float)(y - y0), (float)(z - z0));
+        }
+
+        private static float SingleValueCore(int seed, int x0, int y0, int z0, float xd, float yd, float zd)
+        {
+            float xs = InterpHermite(xd);
+            float ys = InterpHermite(yd);
+            float zs = InterpHermite(zd);
             x0 *= PrimeX;
             y0 *= PrimeY;
             z0 *= PrimeZ;
@@ -1875,6 +2633,26 @@ namespace Libraries
         }
 
         private void DoSingleDomainWarp(int seed, float amp, float freq, float x, float y, float z, ref float xr, ref float yr, ref float zr)
+        {
+            switch (mDomainWarpType)
+            {
+                case DomainWarpType.OpenSimplex2: SingleDomainWarpOpenSimplex2Gradient(seed, amp * 32.69428253173828125f, freq, x, y, z, ref xr, ref yr, ref zr, false); break;
+                case DomainWarpType.OpenSimplex2Reduced: SingleDomainWarpOpenSimplex2Gradient(seed, amp * 7.71604938271605f, freq, x, y, z, ref xr, ref yr, ref zr, true); break;
+                case DomainWarpType.BasicGrid: SingleDomainWarpBasicGrid(seed, amp, freq, x, y, z, ref xr, ref yr, ref zr); break;
+            }
+        }
+
+        private void DoSingleDomainWarp(int seed, float amp, float freq, double x, double y, ref double xr, ref double yr)
+        {
+            switch (mDomainWarpType)
+            {
+                case DomainWarpType.OpenSimplex2: SingleDomainWarpSimplexGradient(seed, amp * 38.283687591552734375f, freq, x, y, ref xr, ref yr, false); break;
+                case DomainWarpType.OpenSimplex2Reduced: SingleDomainWarpSimplexGradient(seed, amp * 16.0f, freq, x, y, ref xr, ref yr, true); break;
+                case DomainWarpType.BasicGrid: SingleDomainWarpBasicGrid(seed, amp, freq, x, y, ref xr, ref yr); break;
+            }
+        }
+
+        private void DoSingleDomainWarp(int seed, float amp, float freq, double x, double y, double z, ref double xr, ref double yr, ref double zr)
         {
             switch (mDomainWarpType)
             {
@@ -1977,14 +2755,125 @@ namespace Libraries
             }
         }
 
+        private void DomainWarpSingle(ref double x, ref double y)
+        {
+            int seed = mSeed;
+            float amp = mDomainWarpAmp * mFractalBounding;
+            float freq = mFrequency;
+            double xs = x;
+            double ys = y;
+            TransformDomainWarpCoordinate(ref xs, ref ys);
+            DoSingleDomainWarp(seed, amp, freq, xs, ys, ref x, ref y);
+        }
+
+        private void DomainWarpSingle(ref double x, ref double y, ref double z)
+        {
+            int seed = mSeed;
+            float amp = mDomainWarpAmp * mFractalBounding;
+            float freq = mFrequency;
+            double xs = x;
+            double ys = y;
+            double zs = z;
+            TransformDomainWarpCoordinate(ref xs, ref ys, ref zs);
+            DoSingleDomainWarp(seed, amp, freq, xs, ys, zs, ref x, ref y, ref z);
+        }
+
+        private void DomainWarpFractalProgressive(ref double x, ref double y)
+        {
+            int seed = mSeed;
+            float amp = mDomainWarpAmp * mFractalBounding;
+            float freq = mFrequency;
+            for (int i = 0; i < mOctaves; i++)
+            {
+                double xs = x;
+                double ys = y;
+                TransformDomainWarpCoordinate(ref xs, ref ys);
+                DoSingleDomainWarp(seed, amp, freq, xs, ys, ref x, ref y);
+                seed++;
+                amp *= mGain;
+                freq *= mLacunarity;
+            }
+        }
+
+        private void DomainWarpFractalProgressive(ref double x, ref double y, ref double z)
+        {
+            int seed = mSeed;
+            float amp = mDomainWarpAmp * mFractalBounding;
+            float freq = mFrequency;
+            for (int i = 0; i < mOctaves; i++)
+            {
+                double xs = x;
+                double ys = y;
+                double zs = z;
+                TransformDomainWarpCoordinate(ref xs, ref ys, ref zs);
+                DoSingleDomainWarp(seed, amp, freq, xs, ys, zs, ref x, ref y, ref z);
+                seed++;
+                amp *= mGain;
+                freq *= mLacunarity;
+            }
+        }
+
+        private void DomainWarpFractalIndependent(ref double x, ref double y)
+        {
+            double xs = x;
+            double ys = y;
+            TransformDomainWarpCoordinate(ref xs, ref ys);
+            int seed = mSeed;
+            float amp = mDomainWarpAmp * mFractalBounding;
+            float freq = mFrequency;
+            for (int i = 0; i < mOctaves; i++)
+            {
+                DoSingleDomainWarp(seed, amp, freq, xs, ys, ref x, ref y);
+                seed++;
+                amp *= mGain;
+                freq *= mLacunarity;
+            }
+        }
+
+        private void DomainWarpFractalIndependent(ref double x, ref double y, ref double z)
+        {
+            double xs = x;
+            double ys = y;
+            double zs = z;
+            TransformDomainWarpCoordinate(ref xs, ref ys, ref zs);
+            int seed = mSeed;
+            float amp = mDomainWarpAmp * mFractalBounding;
+            float freq = mFrequency;
+            for (int i = 0; i < mOctaves; i++)
+            {
+                DoSingleDomainWarp(seed, amp, freq, xs, ys, zs, ref x, ref y, ref z);
+                seed++;
+                amp *= mGain;
+                freq *= mLacunarity;
+            }
+        }
+
         private static void SingleDomainWarpBasicGrid(int seed, float warpAmp, float frequency, float x, float y, ref float xr, ref float yr)
         {
             float xf = x * frequency;
             float yf = y * frequency;
             int x0 = FastFloor(xf);
             int y0 = FastFloor(yf);
-            float xs = InterpHermite(xf - x0);
-            float ys = InterpHermite(yf - y0);
+            SingleDomainWarpBasicGridCore(seed, warpAmp, x0, y0, xf - x0, yf - y0, out float wx, out float wy);
+            xr += wx;
+            yr += wy;
+        }
+
+        private static void SingleDomainWarpBasicGrid(int seed, float warpAmp, float frequency, double x, double y, ref double xr, ref double yr)
+        {
+            double xf = x * frequency;
+            double yf = y * frequency;
+            int x0 = FastFloor(xf);
+            int y0 = FastFloor(yf);
+            SingleDomainWarpBasicGridCore(seed, warpAmp, x0, y0, (float)(xf - x0), (float)(yf - y0), out float wx, out float wy);
+            xr += wx;
+            yr += wy;
+        }
+
+        private static void SingleDomainWarpBasicGridCore(int seed, float warpAmp, int x0, int y0, float xd, float yd, out float wx, out float wy)
+        {
+            float xs = InterpHermite(xd);
+            float ys = InterpHermite(yd);
             x0 *= PrimeX;
             y0 *= PrimeY;
             int x1 = x0 + PrimeX;
@@ -1999,8 +2888,8 @@ namespace Libraries
                 hash1 = Hash(seed, x1, y1) & (255 << 1);
                 float lx1x = math.lerp(Lookup.Data.RandVecs2D[hash0], Lookup.Data.RandVecs2D[hash1], xs);
                 float ly1x = math.lerp(Lookup.Data.RandVecs2D[hash0 | 1], Lookup.Data.RandVecs2D[hash1 | 1], xs);
-                xr += math.lerp(lx0x, lx1x, ys) * warpAmp;
-                yr += math.lerp(ly0x, ly1x, ys) * warpAmp;
+                wx = math.lerp(lx0x, lx1x, ys) * warpAmp;
+                wy = math.lerp(ly0x, ly1x, ys) * warpAmp;
             }
         }
 
@@ -2012,9 +2901,31 @@ namespace Libraries
             int x0 = FastFloor(xf);
             int y0 = FastFloor(yf);
             int z0 = FastFloor(zf);
-            float xs = InterpHermite(xf - x0);
-            float ys = InterpHermite(yf - y0);
-            float zs = InterpHermite(zf - z0);
+            SingleDomainWarpBasicGridCore(seed, warpAmp, x0, y0, z0, xf - x0, yf - y0, zf - z0, out float wx, out float wy, out float wz);
+            xr += wx;
+            yr += wy;
+            zr += wz;
+        }
+
+        private static void SingleDomainWarpBasicGrid(int seed, float warpAmp, float frequency, double x, double y, double z, ref double xr, ref double yr, ref double zr)
+        {
+            double xf = x * frequency;
+            double yf = y * frequency;
+            double zf = z * frequency;
+            int x0 = FastFloor(xf);
+            int y0 = FastFloor(yf);
+            int z0 = FastFloor(zf);
+            SingleDomainWarpBasicGridCore(seed, warpAmp, x0, y0, z0, (float)(xf - x0), (float)(yf - y0), (float)(zf - z0), out float wx, out float wy, out float wz);
+            xr += wx;
+            yr += wy;
+            zr += wz;
+        }
+
+        private static void SingleDomainWarpBasicGridCore(int seed, float warpAmp, int x0, int y0, int z0, float xd, float yd, float zd, out float wx, out float wy, out float wz)
+        {
+            float xs = InterpHermite(xd);
+            float ys = InterpHermite(yd);
+            float zs = InterpHermite(zd);
             x0 *= PrimeX;
             y0 *= PrimeY;
             z0 *= PrimeZ;
@@ -2046,22 +2957,38 @@ namespace Libraries
                 lx1x = math.lerp(Lookup.Data.RandVecs3D[hash0], Lookup.Data.RandVecs3D[hash1], xs);
                 ly1x = math.lerp(Lookup.Data.RandVecs3D[hash0 | 1], Lookup.Data.RandVecs3D[hash1 | 1], xs);
                 lz1x = math.lerp(Lookup.Data.RandVecs3D[hash0 | 2], Lookup.Data.RandVecs3D[hash1 | 2], xs);
-                xr += math.lerp(lx0y, math.lerp(lx0x, lx1x, ys), zs) * warpAmp;
-                yr += math.lerp(ly0y, math.lerp(ly0x, ly1x, ys), zs) * warpAmp;
-                zr += math.lerp(lz0y, math.lerp(lz0x, lz1x, ys), zs) * warpAmp;
+                wx = math.lerp(lx0y, math.lerp(lx0x, lx1x, ys), zs) * warpAmp;
+                wy = math.lerp(ly0y, math.lerp(ly0x, ly1x, ys), zs) * warpAmp;
+                wz = math.lerp(lz0y, math.lerp(lz0x, lz1x, ys), zs) * warpAmp;
             }
         }
 
         private static void SingleDomainWarpSimplexGradient(int seed, float warpAmp, float frequency, float x, float y, ref float xr, ref float yr, bool outGradOnly)
         {
-            const float SQRT3 = 1.7320508075688772935274463415059f;
-            const float G2 = (3 - SQRT3) / 6;
             x *= frequency;
             y *= frequency;
             int i = FastFloor(x);
             int j = FastFloor(y);
-            float xi = x - i;
-            float yi = y - j;
+            SingleDomainWarpSimplexGradientCore(seed, warpAmp, i, j, x - i, y - j, outGradOnly, out float wx, out float wy);
+            xr += wx;
+            yr += wy;
+        }
+
+        private static void SingleDomainWarpSimplexGradient(int seed, float warpAmp, float frequency, double x, double y, ref double xr, ref double yr, bool outGradOnly)
+        {
+            x *= frequency;
+            y *= frequency;
+            int i = FastFloor(x);
+            int j = FastFloor(y);
+            SingleDomainWarpSimplexGradientCore(seed, warpAmp, i, j, (float)(x - i), (float)(y - j), outGradOnly, out float wx, out float wy);
+            xr += wx;
+            yr += wy;
+        }
+
+        private static void SingleDomainWarpSimplexGradientCore(int seed, float warpAmp, int i, int j, float xi, float yi, bool outGradOnly, out float wx, out float wy)
+        {
+            const float SQRT3 = 1.7320508075688772935274463415059f;
+            const float G2 = (3 - SQRT3) / 6;
             float t = (xi + yi) * G2;
             float x0 = xi - t;
             float y0 = yi - t;
@@ -2123,8 +3050,8 @@ namespace Libraries
                 }
             }
 
-            xr += vx * warpAmp;
-            yr += vy * warpAmp;
+            wx = vx * warpAmp;
+            wy = vy * warpAmp;
         }
 
         private static void SingleDomainWarpOpenSimplex2Gradient(int seed, float warpAmp, float frequency, float x, float y, float z, ref float xr, ref float yr, ref float zr, bool outGradOnly)
@@ -2135,9 +3062,28 @@ namespace Libraries
             int i = FastRound(x);
             int j = FastRound(y);
             int k = FastRound(z);
-            float x0 = x - i;
-            float y0 = y - j;
-            float z0 = z - k;
+            SingleDomainWarpOpenSimplex2GradientCore(seed, warpAmp, i, j, k, x - i, y - j, z - k, outGradOnly, out float wx, out float wy, out float wz);
+            xr += wx;
+            yr += wy;
+            zr += wz;
+        }
+
+        private static void SingleDomainWarpOpenSimplex2Gradient(int seed, float warpAmp, float frequency, double x, double y, double z, ref double xr, ref double yr, ref double zr, bool outGradOnly)
+        {
+            x *= frequency;
+            y *= frequency;
+            z *= frequency;
+            int i = FastRound(x);
+            int j = FastRound(y);
+            int k = FastRound(z);
+            SingleDomainWarpOpenSimplex2GradientCore(seed, warpAmp, i, j, k, (float)(x - i), (float)(y - j), (float)(z - k), outGradOnly, out float wx, out float wy, out float wz);
+            xr += wx;
+            yr += wy;
+            zr += wz;
+        }
+
+        private static void SingleDomainWarpOpenSimplex2GradientCore(int seed, float warpAmp, int i, int j, int k, float x0, float y0, float z0, bool outGradOnly, out float wx, out float wy, out float wz)
+        {
             int xNSign = (int)(-x0 - 1.0f) | 1;
             int yNSign = (int)(-y0 - 1.0f) | 1;
             int zNSign = (int)(-z0 - 1.0f) | 1;
@@ -2216,9 +3162,9 @@ namespace Libraries
                 seed += 1293373;
             }
 
-            xr += vx * warpAmp;
-            yr += vy * warpAmp;
-            zr += vz * warpAmp;
+            wx = vx * warpAmp;
+            wy = vy * warpAmp;
+            wz = vz * warpAmp;
         }
 
         #endregion

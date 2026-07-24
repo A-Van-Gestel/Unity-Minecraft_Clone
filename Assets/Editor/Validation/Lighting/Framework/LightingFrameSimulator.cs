@@ -149,6 +149,12 @@ namespace Editor.Validation.Lighting.Framework
         public LightingFrameSimulator(LightingTestWorld world, int? seed = null, bool schedulerMode = false)
         {
             _world = world ?? throw new ArgumentNullException(nameof(world));
+
+            // The simulator's static grid↔origin conversions (ToVoxelOrigin/ToGridCoord) assume the
+            // identity anchor; far-anchored worlds are direct-harness-only until a scenario needs more.
+            if (world.AnchorChunk != Vector2Int.zero)
+                throw new NotSupportedException("LightingFrameSimulator does not support far-anchored worlds (AnchorChunk must be zero).");
+
             _rng = seed.HasValue ? new Random(seed.Value) : null;
             _schedulerMode = schedulerMode;
 

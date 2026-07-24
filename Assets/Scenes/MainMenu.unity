@@ -3678,6 +3678,10 @@ PrefabInstance:
       propertyPath: m_AnchoredPosition.y
       value: 40
       objectReference: {fileID: 0}
+    - target: {fileID: 6988563824818292579, guid: d96d992dc6901034296120f4cb1b9ba8, type: 3}
+      propertyPath: _borderRadiusInput
+      value: 
+      objectReference: {fileID: 5222104658959289654}
     - target: {fileID: 7222593068844254938, guid: d96d992dc6901034296120f4cb1b9ba8, type: 3}
       propertyPath: m_AnchorMax.y
       value: 1
@@ -3819,6 +3823,17 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: d96d992dc6901034296120f4cb1b9ba8, type: 3}
+--- !u!114 &5222104658959289654 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 447685093482255262, guid: d96d992dc6901034296120f4cb1b9ba8, type: 3}
+  m_PrefabInstance: {fileID: 5222104658959289653}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2da0c512f12947e489f739169773d7ca, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1001 &8686301488667023948
 PrefabInstance:
   m_ObjectHideFlags: 0

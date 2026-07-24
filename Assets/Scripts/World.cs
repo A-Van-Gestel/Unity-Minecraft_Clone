@@ -21,10 +21,10 @@ using Libraries;
 using MyBox;
 using Physics;
 using Serialization;
+using Spawn;
 using UI;
 using Unity.Collections;
 using Unity.Jobs;
-using Unity.Jobs.LowLevel.Unsafe;
 using Unity.Mathematics;
 using Unity.Profiling;
 using UnityEngine;
@@ -65,8 +65,13 @@ public class World : MonoBehaviour
     private Transform _playerTransform;
     private Camera _playerCamera;
 
+    /// <summary>
+    /// Where the player started this session, in voxel space. Chunk-relative (WS-4c) so it stays exact however far
+    /// from the origin the world is resumed at; <see cref="WorldOrigin.VoxelToUnity(ChunkRelativePosition)"/>
+    /// converts it at the transform write.
+    /// </summary>
     [InitializationField]
-    public Vector3 spawnPosition;
+    public ChunkRelativePosition spawnPosition;
 
     [InitializationField]
     public Vector3 spawnPositionOffset = new Vector3(0.5f, 1.1f, 0.5f);
@@ -140,6 +145,21 @@ public class World : MonoBehaviour
     [Header("Clouds")]
     public Clouds clouds;
 
+    [Tooltip("Wind drift velocity in voxel-space XZ blocks per second, shared by clouds (per-layer scale/veer) and foliage sway (FL-1). Zero freezes both. Owned by the inspector for now; a future weather system (RF-7) takes over this value.")]
+    [SerializeField]
+    private Vector2 _windBlocksPerSecond = new Vector2(-0.6f, 0f);
+
+    /// <summary>
+    /// The shared wind vector, in voxel-space XZ blocks per second. Single source of truth for
+    /// every wind consumer (cloud drift, foliage sway); a future weather system (RF-7) drives it.
+    /// </summary>
+    public Vector2 WindBlocksPerSecond => _windBlocksPerSecond;
+
+    [Header("World Border")]
+    [Tooltip("Renders the per-world gameplay border wall. Inactive when the world has no border.")]
+    [SerializeField]
+    private BorderWallRenderer _borderWall;
+
     [Header("World Data")]
     public WorldData worldData;
 
@@ -164,6 +184,18 @@ public class World : MonoBehaviour
     private readonly HashSet<ChunkCoord> _chunksToUpdateVisualization = new HashSet<ChunkCoord>();
     private Vector3 _lastVisualizerPlayerPos;
 
+    // --- Floating origin (WS-4b) ---
+    // Slack past the shift threshold before the bounded-position assertion trips: the player crosses the threshold
+    // mid-chunk and keeps moving until the next Update re-anchors, and a chunk-aligned margin keeps the bound a whole
+    // number of chunks like everything else in WS-4. Wide enough never to false-positive, tight enough that a missed
+    // shift (which grows without bound) trips it almost immediately.
+    private const int PLAYER_BOUND_MARGIN_CHUNKS = 4;
+
+    private const int MAX_PLAYER_UNITY_DISTANCE =
+        (WorldOrigin.ShiftThresholdChunks + PLAYER_BOUND_MARGIN_CHUNKS) * ChunkMath.CHUNK_WIDTH;
+
+    private bool _hasReportedUnboundedPlayer;
+
     // --- Storage & Serialization ---
     [NonSerialized]
     public ChunkStorageManager StorageManager;
@@ -184,6 +216,7 @@ public class World : MonoBehaviour
     private static readonly int s_shaderMinGlobalLightLevel = Shader.PropertyToID("minGlobalLightLevel");
     private static readonly int s_shaderMaxGlobalLightLevel = Shader.PropertyToID("maxGlobalLightLevel");
     private static readonly int s_shaderSkyLightColor = Shader.PropertyToID("SkyLightColor");
+    private static readonly int s_shaderWorldOriginOffset = Shader.PropertyToID("_WorldOriginOffset");
 
     // --- Fluid Vertex Data ---
     [NonSerialized]
@@ -193,32 +226,8 @@ public class World : MonoBehaviour
     [NonSerialized]
     public JobDataManager JobDataManager;
 
-    // --- TG-4 Phase 3: interior-fluid Burst tick ---
-    [SerializeField]
-    [Tooltip("TG-4 Phase 3: tick Tier-1 interior fluids via the Burst FluidTickJob (border fluids stay managed). " +
-             "Off = legacy fully-managed fluid tick. On by default — validated (BH-D1 + in-game).")]
-    private bool _enableFluidBurstTick = true;
-
-    private FluidBurstTicker _fluidBurstTicker;
-
-    /// <summary>When true, Tier-1 interior fluids tick via the Burst <c>FluidTickJob</c>; otherwise the legacy managed path runs.</summary>
-    public bool EnableFluidBurstTick => _enableFluidBurstTick;
-
-    /// <summary>Lazily-created reusable runner for the interior fluid Burst tick. Disposed in <c>OnDestroy</c>.</summary>
-    internal FluidBurstTicker FluidBurstTicker => _fluidBurstTicker ??= new FluidBurstTicker();
-
-    // --- TG-4 Phase 4a: parallel interior-fluid tick across chunks ---
-    [SerializeField]
-    [Tooltip("TG-4 Phase 4a: schedule the Tier-1 interior fluid jobs across chunks in parallel (requires Enable " +
-             "Fluid Burst Tick). Off = the Phase-3 serial per-chunk path. On by default — validated " +
-             "(parallel-vs-serial determinism gate + 8-run IL2CPP stress); auto-falls back to serial on <2-worker hosts.")]
-    private bool _enableParallelFluidTick = true;
-
-    // Minimum Job worker threads required to take the parallel path (else fall back to the serial tick). A host
-    // with <2 workers (≤2 cores) gains nothing from scheduling — the jobs can't overlap — and only pays the
-    // Schedule/Complete overhead. Real targets (8-core phones and up) clear this trivially.
-    private const int MIN_PARALLEL_WORKER_THREADS = 2;
-
+    // --- TG-4: parallel fluid Burst tick across chunks (unconditional; every fluid — interior AND border — ticks
+    //     through FluidTickJob, border voxels reading a per-tick Y-band neighbor halo). See FluidBurstTicker. ---
     private DynamicPool<FluidBurstTicker> _fluidTickerPool;
 
     // Reusable per-tick scratch for the parallel schedule→complete→drain phases (cleared each tick, never re-alloc).
@@ -226,47 +235,9 @@ public class World : MonoBehaviour
     private readonly List<FluidBurstTicker> _parallelFluidTickers = new List<FluidBurstTicker>();
     private readonly List<JobHandle> _parallelFluidHandles = new List<JobHandle>();
 
-    /// <summary>When true (and <see cref="EnableFluidBurstTick"/>), interior fluid jobs schedule in parallel across chunks (TG-4 Phase 4a).</summary>
-    public bool EnableParallelFluidTick => _enableParallelFluidTick;
-
     /// <summary>Lazily-created pool of per-chunk fluid runners for the parallel tick (one in-flight per scheduled chunk). Cleared in <c>OnDestroy</c>.</summary>
     private DynamicPool<FluidBurstTicker> FluidTickerPool =>
         _fluidTickerPool ??= new DynamicPool<FluidBurstTicker>(() => new FluidBurstTicker(), t => t.Dispose());
-
-    // --- TG-4 Phase 4b: full halo fluid tick (border voxels Bursted via a per-tick neighbor halo) ---
-    [SerializeField]
-    [Tooltip("TG-4 Phase 4b: tick ALL fluids (interior AND border) through the Burst job, with border voxels reading " +
-             "a per-tick gathered neighbor halo (requires Enable Fluid Burst Tick). Off = the Phase-3/4a hybrid " +
-             "(border stays managed). On by default (validated 2026-06-24: BH-D1[L|H] + cross-chunk determinism + " +
-             "in-game; the A/B found it 1.70-2.15x faster than the managed border). Off = rollback to the hybrid.")]
-    private bool _enableFluidBorderBurst = true;
-
-    /// <summary>When true (and <see cref="EnableFluidBurstTick"/>), border fluids tick in-job via the §4.2(b) neighbor halo (TG-4 Phase 4b); else the border stays managed.</summary>
-    public bool EnableFluidBorderBurst => _enableFluidBorderBurst;
-
-    [SerializeField]
-    [Tooltip("TG-4 Phase 4b Y-band: restrict the per-tick fluid gather + reads to the tight active-fluid Y-band " +
-             "(minActiveY-1 .. maxActiveY+1) instead of full chunk height, making the per-tick copy independent of " +
-             "world height (requires Enable Fluid Border Burst). Byte-identical by the FLUID_VERTICAL_REACH invariant. " +
-             "On by default (validated 2026-06-27: BH-D1[H|HB]/[L|HB] + prove-red + cross-chunk determinism + in-game; " +
-             "the A/B cut the large-flood worst-tick tail 24-46%). Off = rollback to the full-height halo.")]
-    private bool _enableFluidBandGather = true;
-
-    /// <summary>When true (and <see cref="EnableFluidBorderBurst"/>), the fluid halo gather/read window is sized to the active-fluid Y-band instead of full chunk height (TG-4 Phase 4b Y-band); byte-identical, height-independent copy.</summary>
-    public bool EnableFluidBandGather => _enableFluidBandGather;
-
-    // --- LI-2: banded lighting gather (Y-band) ---
-    [SerializeField]
-    [Tooltip("LI-2 Y-band: restrict each lighting job's halo gather, scans, and extract to the derived " +
-             "bottom-anchored Y-band (non-uniform ceiling + queued BFS nodes + one headroom section) instead " +
-             "of the full chunk height; reads above the band are answered from the uniform-region summary. " +
-             "Bit-identical by the LightingBandDecision rules (guarded by lighting baselines B71-B78 incl. " +
-             "the banded-vs-full differential and its prove-red). Off = rollback to full-height gathers.")]
-    private bool _enableLightingBandGather = true;
-
-    /// <summary>When true, lighting jobs gather/scan/extract only the derived LI-2 Y-band instead of the
-    /// full chunk height (bit-identical by construction; see <see cref="LightingBandDecision"/>).</summary>
-    public bool EnableLightingBandGather => _enableLightingBandGather;
 
     // --- Chunk Border Visualization ---
     private readonly Dictionary<ChunkCoord, GameObject> _chunkBorders = new Dictionary<ChunkCoord, GameObject>();
@@ -276,6 +247,94 @@ public class World : MonoBehaviour
     // --- Cached Collections for GC Optimization ---
     private readonly HashSet<ChunkCoord> _currentViewChunks = new HashSet<ChunkCoord>();
     private readonly List<ChunkCoord> _chunksToRemove = new List<ChunkCoord>();
+
+    // --- Generation request backpressure (P-4 §3.1) ---
+    // CheckViewDistance enqueues missing chunks nearest-first (rebuilt each boundary crossing) instead of
+    // firing generation immediately; DrainGenerationRequests admits them each frame while the in-flight
+    // generation-job count stays under settings.maxInFlightGenerationJobs. The set dedups queue entries.
+    private readonly Queue<ChunkCoord> _generationRequestQueue = new Queue<ChunkCoord>();
+    private readonly HashSet<ChunkCoord> _pendingGenerationRequests = new HashSet<ChunkCoord>();
+
+    // --- Generation panic gate (P-4 §3.5) ---
+    // When the schedulable lighting backlog (_lightWork.ReadyCount) saturates, DrainGenerationRequests
+    // stops ADMITTING new generation until it drains (hysteresis band in GenerationPanicGate). The
+    // request queue is untouched by a closed gate — admissions resume from it on reopen, so no holes.
+    private bool _generationGateOpen = true;
+    private long _generationGateClosedFrames;
+    private long _generationGateCloseCount;
+
+    // The gate's backlog signal: ReadyCount sampled at the END of the previous frame's lighting scan,
+    // after transient promotions were re-parked. Reading the live count here instead would see the
+    // ~1s fail-safe PromoteAll spike (the whole parked frontier ring dumped into ready for one scan)
+    // and phantom-close the gate at ~1 Hz on large load distances. A §3.4 budget break can still end
+    // a scan before the promoted ring is re-parked, so the close arm additionally requires the sample
+    // to stay high for PANIC_CLOSE_DEBOUNCE_FRAMES consecutive frames — a 1–2 frame spike never
+    // closes; sustained-high means genuine saturation, where closing is correct.
+    private int _readyCountAfterScan;
+    private int _backlogHighFrames;
+
+    /// <summary>Consecutive high-sample frames required before the panic gate may close.</summary>
+    private const int PANIC_CLOSE_DEBOUNCE_FRAMES = 3;
+
+    /// <summary>Whether the §3.5 panic gate currently admits generation requests (HUD probe).</summary>
+    public bool GenerationGateOpen => _generationGateOpen;
+
+    /// <summary>Cumulative frames spent with the panic gate closed (HUD probe).</summary>
+    public long GenerationGateClosedFrames => _generationGateClosedFrames;
+
+    /// <summary>Cumulative open→closed transitions of the panic gate (HUD probe).</summary>
+    public long GenerationGateCloseCount => _generationGateCloseCount;
+
+    /// <summary>Generation requests awaiting admission (HUD probe; rebuilt each boundary crossing).</summary>
+    public int GenerationRequestQueueCount => _generationRequestQueue.Count;
+
+    /// <summary>Schedulable lighting backlog — the panic gate's signal (HUD probe; MT-2 ready set).</summary>
+    public int LightWorkReadyCount => _lightWork.ReadyCount;
+
+    /// <summary>Parked lighting backlog awaiting a promotion event (HUD probe; MT-2 waiting set).</summary>
+    public int LightWorkWaitingCount => _lightWork.WaitingCount;
+
+    // --- CP-1 lifecycle observability probes ---
+    // Always-on tallies (unload deferral reasons, per-pass unload count) surfaced on the debug HUD.
+    // The load-arm fault counter and stuck-IsLoading detector are dev/editor-only (see CountLoadFault / the
+    // fail-safe scan). None of these change behavior — they instrument the silent-by-construction failure
+    // modes catalogued in CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md §2.4 (F1/F5/F6) so CP-3/6/7 land on data.
+    private long _unloadDeferJobRunning;
+    private long _unloadDeferLightPending;
+    private long _unloadDeferWouldStrand;
+    private long _unloadedLastPass;
+    private long _unloadedLightPersisted;
+
+    /// <summary>Deferred unloads because a generation/mesh/lighting job still owns the chunk (CP-1, F6).</summary>
+    public long UnloadDeferJobRunning => _unloadDeferJobRunning;
+
+    /// <summary>Deferred unloads because the chunk had pending light work (CP-1, F6).</summary>
+    public long UnloadDeferLightPending => _unloadDeferLightPending;
+
+    /// <summary>Deferred unloads because a populated neighbor still needed this chunk's data (CP-1, F6 §9.6 strand rule).</summary>
+    public long UnloadDeferWouldStrand => _unloadDeferWouldStrand;
+
+    /// <summary>Chunks actually unloaded in the most recent <c>UnloadChunks</c> pass (CP-1).</summary>
+    public long UnloadedLastPass => _unloadedLastPass;
+
+    /// <summary>Chunks unloaded via the P-4 rec 3 persist-and-unload arm in the most recent pass (subset of
+    /// <see cref="UnloadedLastPass"/> — the pinned-trail drain in action).</summary>
+    public long UnloadedLightPersisted => _unloadedLightPersisted;
+
+    // Load-arm fault counter (F1). Dev/editor-only: incremented via CountLoadFault, compiled out in release.
+    private static long s_loadArmFaults;
+
+    /// <summary>Cumulative faults escaping the load arm (dev/editor builds only; F1 — today's silent loss, until CP-3).</summary>
+    public static long LoadArmFaults => Interlocked.Read(ref s_loadArmFaults);
+
+    // Stuck-IsLoading detector state (F1): coords seen IsLoading && !IsPopulated in the previous fail-safe scan,
+    // and the count that persisted across two consecutive scans (i.e. stuck >= ~1s). Dev/editor-only.
+    private readonly HashSet<Vector2Int> _prevScanLoadingChunks = new HashSet<Vector2Int>();
+    private readonly HashSet<Vector2Int> _scanLoadingChunks = new HashSet<Vector2Int>();
+    private int _stuckLoadingChunks;
+
+    /// <summary>Chunks stuck <c>IsLoading &amp;&amp; !IsPopulated</c> across two consecutive ~1s scans (dev/editor only; F1).</summary>
+    public int StuckLoadingChunks => _stuckLoadingChunks;
 
     // --- Transient flags ---
     /// <summary>
@@ -309,6 +368,58 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
+    /// Half-extent (in voxels) of the optional per-world gameplay border — a square AABB
+    /// centered on the world origin. <c>0</c> means disabled (fully unbounded, the default).
+    /// A player-only fence: the pipeline (generation, lighting, meshing, storage) is border-blind,
+    /// and this value is deliberately NOT consulted by <see cref="IsChunkInWorld(ChunkCoord)"/> or
+    /// <see cref="WorldData.IsVoxelInWorld"/>. It gates player movement (<c>VoxelRigidbody</c>'s clamp) and
+    /// player edits (<see cref="IsVoxelInsideBorder"/>). Persisted in level.dat and restored on load.
+    /// </summary>
+    public int BorderRadius { get; private set; }
+
+    /// <summary>
+    /// Sets the world's gameplay border half-extent. The change is persisted to level.dat
+    /// on the next save.
+    /// </summary>
+    /// <param name="radius">Border half-extent in voxels, or 0 to disable.</param>
+    public void SetBorderRadius(int radius)
+    {
+        BorderRadius = radius;
+    }
+
+    /// <summary>
+    /// Whether a voxel cell lies inside the per-world gameplay border (TF-14) — always true when the border is
+    /// disabled. The fence gates <b>player edits</b> (place/break); it is deliberately NOT part of
+    /// <see cref="IsChunkInWorld"/> / <see cref="WorldData.IsVoxelInWorld"/>, which gate reads and streaming —
+    /// terrain beyond the fence still loads, renders, and simulates.
+    /// </summary>
+    /// <param name="voxelPos">The absolute <b>voxel-space</b> cell (Unity-space callers convert first).</param>
+    /// <returns>True when the cell may be edited by the player.</returns>
+    // [-radius, radius) cell semantics: a cell spans [x, x+1), so the last inside cell on +X is radius-1 —
+    // flush against the rendered wall at +radius — mirroring the -X side's cell at -radius.
+    public bool IsVoxelInsideBorder(Vector3Int voxelPos)
+    {
+        return IsVoxelInsideBorder(voxelPos.x, voxelPos.z);
+    }
+
+    /// <summary>
+    /// Integer-coordinate overload of <see cref="IsVoxelInsideBorder(Vector3Int)"/> — the same rule
+    /// for callers without a <c>Vector3Int</c> in hand (the command console's teleport fence-warn,
+    /// which keeps the <c>Commands</c> namespace free of UnityEngine types).
+    /// </summary>
+    /// <param name="voxelX">The cell's absolute voxel-space X.</param>
+    /// <param name="voxelZ">The cell's absolute voxel-space Z.</param>
+    /// <returns>True when the cell may be edited by the player.</returns>
+    public bool IsVoxelInsideBorder(int voxelX, int voxelZ)
+    {
+        int radius = BorderRadius;
+        if (radius <= 0) return true;
+
+        return voxelX >= -radius && voxelX < radius &&
+               voxelZ >= -radius && voxelZ < radius;
+    }
+
+    /// <summary>
     /// Runtime toggle for chunk border visualization. Toggled by the player input action;
     /// not persisted to settings because it is transient debug state.
     /// </summary>
@@ -325,6 +436,7 @@ public class World : MonoBehaviour
     private static void DomainReset()
     {
         Instance = null;
+        s_loadArmFaults = 0; // CP-1 probe: reset here, not via a 2nd RuntimeInitializeOnLoadMethod (UDR0005 — one per class).
     }
 
     private void Awake()
@@ -383,11 +495,11 @@ public class World : MonoBehaviour
             _shutdownTokenSource?.Cancel();
 
             // 2. Brief delay to let cancellation propagate (Fixes Race Condition)
-            //    This allows background threads to hit the "if (cancelled) return" check
+            //    This allows background threads to hit the "if (canceled) return" check
             //    before we start locking files on the main thread.
             Thread.Sleep(100);
 
-            Debug.Log($"[OnApplicationQuit] Total chunks in world: {worldData.Chunks.Count}");
+            Debug.Log($"[OnApplicationQuit] Total chunks in world: {worldData.ChunkCount}");
             Debug.Log($"[OnApplicationQuit] Chunks marked as modified: {worldData.ModifiedChunks.Count}");
 
             // 3. Save all active/modified chunks SYNCHRONOUSLY.
@@ -428,7 +540,6 @@ public class World : MonoBehaviour
 
         // 2. Dispose of the persistent global data.
         JobDataManager?.Dispose();
-        _fluidBurstTicker?.Dispose();
         _fluidTickerPool?.Clear(); // disposes every pooled per-chunk fluid ticker (all returned between ticks)
 
         // 3. Dispose of fluid vertex templates.
@@ -454,13 +565,13 @@ public class World : MonoBehaviour
         // Cleanup world data
         if (worldData != null)
         {
-            foreach (ChunkData data in worldData.Chunks.Values)
+            foreach (ChunkData data in worldData.ChunkValues)
             {
                 // POOLING: Return data to pool
                 ChunkPool.ReturnChunkData(data);
             }
 
-            worldData.Chunks.Clear();
+            worldData.ClearChunks();
             worldData.ModifiedChunks.Clear();
         }
 
@@ -510,6 +621,14 @@ public class World : MonoBehaviour
         // --- Load Settings via Manager ---
         settings = SettingsManager.LoadSettings();
 
+        // --- ANCHOR THE FLOATING ORIGIN (WS-4) ---
+        // The pre-load default only. The real anchor cannot be chosen yet: it comes from the starting player
+        // position, which does not exist until the save is parsed — so it happens at the SpawnResolution chokepoint
+        // in STEP 1, before anything converts through the origin. Pinning the identity here keeps the code between
+        // this line and STEP 1 (which reads no origin) in the pre-WS-4 space, and re-anchors a re-entered world
+        // rather than inheriting the previous session's origin.
+        AnchorOrigin(new ChunkCoord(0, 0));
+
         // --- Initialize World settings (from save data / create new world) ---
         // 1. Determine Mode
         IsVolatileMode = Application.isEditor && settings.enableVolatileSaveData;
@@ -544,6 +663,15 @@ public class World : MonoBehaviour
         // Only load if it's NOT a new game AND Persistence is actually enabled.
         WorldTypeID loadedWorldType = WorldTypeID.Legacy; // Default for old saves / new legacy games
         bool isEditorReplay = false;
+        bool hasExistingMetadata = false;
+
+        // The persisted player position travels to STEP 1 rather than being applied here: SpawnResolution owns the
+        // player's placement, and it must settle before chunk loading (the position selects which chunks load).
+        // Seeded from the player's current (prefab) position, not zero, so the metadata-null hole documented on
+        // SpawnResolution.Classify still resumes where it always did — a save that classifies as LoadedSave but has
+        // no readable level.dat to override this.
+        ChunkRelativePosition savedPlayerVoxelPosition = WorldOrigin.UnityToRelative(_playerTransform.position);
+
         if (!isNewGame && settings.EnablePersistence)
         {
             // Load Pending Mods
@@ -555,6 +683,8 @@ public class World : MonoBehaviour
 
             if (metadata != null)
             {
+                hasExistingMetadata = true;
+                savedPlayerVoxelPosition = metadata.player.position;
                 SaveSystem.LoadWorldGameState(this, metadata);
                 VoxelData.Seed = metadata.seed; // Re-affirm seed from save just in case
                 worldData.seed = metadata.seed;
@@ -570,9 +700,11 @@ public class World : MonoBehaviour
             WorldSaveData existingMeta = SaveSystem.LoadWorldMetadata(worldName, IsVolatileMode);
             if (existingMeta != null)
             {
+                hasExistingMetadata = true;
                 isEditorReplay = true;
                 loadedWorldType = existingMeta.worldType;
-                WorldSpawnPoint = existingMeta.spawnPosition;
+                SetSpawnPoint(existingMeta.spawnPosition);
+                SetBorderRadius(existingMeta.borderRadius);
                 Debug.Log($"[World] Editor re-play detected — restoring persisted spawn point: {WorldSpawnPoint}");
             }
         }
@@ -584,6 +716,11 @@ public class World : MonoBehaviour
         WorldTypeID typeToLoad = isNewGame && !isEditorReplay
             ? WorldLaunchState.SelectedWorldType
             : loadedWorldType;
+
+        // Fresh new worlds take their gameplay border from the create-menu selection; loaded and
+        // editor-replay worlds keep the value restored from level.dat above (TF-14).
+        if (isNewGame && !isEditorReplay)
+            SetBorderRadius(WorldLaunchState.BorderRadius);
 
         // Safe fallback for unimplemented types
         if (typeToLoad == WorldTypeID.Amplified)
@@ -610,33 +747,25 @@ public class World : MonoBehaviour
         _lastChunkBordersState = ShowChunkBorders;
 
         // --- STEP 1: DETERMINE INITIAL PLAYER POSITION ---
-        // If we loaded a save, the player position is already set by LoadWorldGameState.
-        // If not, we use the default spawn logic.
-        bool wasSaveLoaded = !isNewGame && settings.EnablePersistence;
-        Vector3 savedPlayerPosition = new Vector3();
-        if (!wasSaveLoaded)
-        {
-            if (isEditorReplay)
-            {
-                // Spawn point was already restored from the save in step 3.
-                spawnPosition = WorldSpawnPoint.ToAbsoluteWorldPosition();
-                _playerTransform.position = spawnPosition;
-            }
-            else
-            {
-                // Set initial spawnPosition to the center of the world for X & Z, and an unresolved Y value.
-                spawnPosition = new Vector3(VoxelData.WorldCentre, ChunkRelativePosition.UNRESOLVED_HEIGHT, VoxelData.WorldCentre);
-                _playerTransform.position = spawnPosition;
-            }
-        }
-        else
-        {
-            // If we loaded a save, update our local 'spawnPosition' to match where the player actually is.
-            spawnPosition = _playerTransform.position;
-            savedPlayerPosition = _playerTransform.position;
-        }
+        // The single place a starting player position is decided (SP-1). Whichever source this world came from, the
+        // position must be settled before STEP 2: it is what PlayerChunkCoord — and hence the set of chunks that
+        // load — is derived from. Its Y may still be the unresolved sentinel; STEP 4 probes the surface once the
+        // chunk data it selects exists.
+        SpawnSource spawnSource = SpawnResolution.Classify(isNewGame, settings.EnablePersistence, hasExistingMetadata);
+        spawnPosition = SpawnResolution.ResolveInitial(
+            spawnSource, savedPlayerVoxelPosition, WorldSpawnPoint, VoxelData.DefaultSpawnPosition);
 
-        PlayerChunkCoord = GetChunkCoordFromVector3(_playerTransform.position);
+        // WS-4b: anchor the floating origin on wherever we are about to start, BEFORE the transform write below and
+        // before STEP 2 creates any chunk — both convert through the origin and would otherwise bake in the stale
+        // one. This is the only re-anchor outside the Update shift, and the reason it lives here: the anchor must
+        // come from the starting player position, and SP-1 made this the one place that position exists.
+        // WS-4c: the position is chunk-relative, so its chunk IS the anchor — no coordinate math, and exact however
+        // far out the save is. Y is ignored (the origin is XZ-only), so the unresolved-height sentinel is harmless.
+        AnchorOrigin(spawnPosition.Chunk);
+
+        _playerTransform.position = WorldOrigin.VoxelToUnity(spawnPosition);
+
+        PlayerChunkCoord = WorldOrigin.UnityToChunk(_playerTransform.position);
 
         // --- STEP 2: LOAD INITIAL CHUNKS (Async -> Sync Wait) ---
         Debug.Log("--- Loading/Generating initial chunks ---");
@@ -671,8 +800,9 @@ public class World : MonoBehaviour
         List<Awaitable> loadTasks = new List<Awaitable>();
         foreach (ChunkCoord chunkCoord in allChunksToGenerate)
         {
-            // Create placeholder if missing
-            worldData.EnsureChunkExists(chunkCoord.ToWorldPosition());
+            // Create placeholder if missing (integer origin — exact past ±2²⁴, Bug 19 class)
+            Vector2Int placeholderOrigin = chunkCoord.ToVoxelOrigin();
+            worldData.GetOrCreatePlaceholder(placeholderOrigin);
 
             // Start the Load/Gen process
             loadTasks.Add(LoadOrGenerateChunk(chunkCoord));
@@ -704,34 +834,24 @@ public class World : MonoBehaviour
         // 4. NOW it's safe to get the spawn height, as the data AND mesh colliders exist.
         Debug.Log("--- Finalizing startup ---");
         Debug.Log("Getting spawn position...");
-        if (!wasSaveLoaded)
-        {
-            spawnPosition = ResolveSpawnHeight(spawnPosition);
-            _playerTransform.position = spawnPosition;
 
-            if (!isEditorReplay)
-            {
-                // Set the canonical spawn point for new games to the resolved surface position.
-                SetSpawnPoint(new ChunkRelativePosition(spawnPosition));
-            }
-        }
-        else
-        {
-            Debug.Log($"Re-using last player location from loaded save. {savedPlayerPosition}");
-            _playerTransform.position = savedPlayerPosition;
+        // The chunk data the height probe needs now exists, so the same decision unit finishes the placement: it
+        // aims ResolveSpawnHeight at whichever position this source actually needs resolved (for a resumed save that
+        // is the spawn point, not the player), and decides whether the canonical spawn point is rewritten.
+        SpawnPlacement placement = SpawnResolution.ResolveFinal(
+            spawnSource, spawnPosition, WorldSpawnPoint, ResolveSpawnHeight);
 
-            // Ensure the canonical spawn point is fully resolved (e.g. from a v10->v11 migration).
-            Vector3 unresolvedSpawn = WorldSpawnPoint.ToAbsoluteWorldPosition();
-            Vector3 resolvedSpawn = ResolveSpawnHeight(unresolvedSpawn);
-            if (resolvedSpawn != unresolvedSpawn)
-            {
-                SetSpawnPoint(new ChunkRelativePosition(resolvedSpawn));
-                Debug.Log($"[World] Lazily resolved canonical spawn point to {WorldSpawnPoint}");
-            }
-        }
+        spawnPosition = placement.PlayerVoxelPosition;
+        _playerTransform.position = WorldOrigin.VoxelToUnity(spawnPosition);
+
+        if (placement.ShouldCanonicalizeSpawn)
+            SetSpawnPoint(placement.CanonicalSpawn);
 
         Debug.Log("Initializing clouds...");
         clouds?.Initialize();
+
+        // Border wall follows the same post-load init as clouds; it self-hides when BorderRadius is 0.
+        _borderWall?.Initialize();
 
         Debug.Log("Starting world tick...");
         _tickTimer = 0f;
@@ -772,12 +892,110 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
+    /// Load/generate entry point wearing the CP-3 load failure contract (F1, design doc §3.3 Option B):
+    /// any fault escaping <see cref="LoadOrGenerateChunkInner"/> is counted (CP-1 probe), logged once, and
+    /// the placeholder's <c>IsLoading</c> is cleared so the next <see cref="CheckViewDistance"/> boundary
+    /// crossing re-enqueues it — natural retry for transient I/O faults, while corrupt payloads keep their
+    /// own <c>Deserialize → null → regenerate</c> arm inside the Inner body. Benign teardown cancellation
+    /// stays a rethrow (a stuck flag on a dying world is moot).
+    /// </summary>
+    /// <param name="chunkCoord">The chunk to load from disk or schedule for generation.</param>
+    private async Awaitable LoadOrGenerateChunk(ChunkCoord chunkCoord)
+    {
+        // Captured before the async body so the fault path can verify the placeholder it clears is the
+        // SAME instance AND lifecycle it started with (mirrors the Inner mid-await unload guard) — a
+        // late fault must not clear IsLoading on a successor load admitted after an unload/recreate of
+        // this coord. The epoch closes the ABA hole where the pool re-issues the same object.
+        Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
+        worldData.TryGetChunk(chunkVoxelPos, out ChunkData admitted);
+        int admittedEpoch = admitted?.LifecycleEpoch ?? 0;
+
+        try
+        {
+            await LoadOrGenerateChunkInner(chunkCoord);
+        }
+        catch (OperationCanceledException)
+        {
+            // Benign teardown/shutdown cancellation of the discarded Awaitable — not an F1 fault. Rethrow uncounted.
+            throw;
+        }
+        catch (Exception e)
+        {
+            CountLoadFault();
+            Debug.LogError($"[LoadOrGenerateChunk] Load failed for chunk {chunkCoord}: {e.GetType().Name} - {e.Message}. " +
+                           "Placeholder released for retry on the next boundary crossing.");
+            if (admitted != null && worldData.TryGetChunk(chunkVoxelPos, out ChunkData current)
+                                 && current == admitted && admitted.LifecycleEpoch == admittedEpoch)
+                admitted.IsLoading = false;
+        }
+    }
+
+    /// <summary>Increments the CP-1 load-arm fault counter (dev/editor builds only; compiled out in release).</summary>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private static void CountLoadFault() => Interlocked.Increment(ref s_loadArmFaults);
+
+    /// <summary>
+    /// CP-1 stuck-<c>IsLoading</c> detector (F1), dev/editor only: records a chunk seen
+    /// <c>IsLoading &amp;&amp; !IsPopulated</c> during the current fail-safe scan. Called per chunk from the
+    /// scan walk; <see cref="FinalizeStuckLoadingScan"/> reconciles it against the previous scan.
+    /// </summary>
+    /// <param name="cd">The chunk being scanned.</param>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private void TrackStuckLoadingChunk(ChunkData cd)
+    {
+        if (cd.IsLoading && !cd.IsPopulated)
+            _scanLoadingChunks.Add(cd.Position);
+    }
+
+    /// <summary>
+    /// CP-1 (dev/editor only): finalizes a fail-safe scan. A chunk present in both this scan and the
+    /// previous one has been <c>IsLoading &amp;&amp; !IsPopulated</c> for ≥ ~1s (the F1 stuck signal); that
+    /// intersection count is reported via <see cref="StuckLoadingChunks"/>. The current set then becomes
+    /// the previous for the next scan.
+    /// </summary>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private void FinalizeStuckLoadingScan()
+    {
+        int stuck = 0;
+        foreach (Vector2Int pos in _scanLoadingChunks)
+            if (_prevScanLoadingChunks.Contains(pos))
+                stuck++;
+        _stuckLoadingChunks = stuck;
+
+        _prevScanLoadingChunks.Clear();
+        foreach (Vector2Int pos in _scanLoadingChunks) _prevScanLoadingChunks.Add(pos);
+        _scanLoadingChunks.Clear();
+    }
+
+    /// <summary>
+    /// CP-1 (dev/editor only): drives the stuck-<c>IsLoading</c> detector's ~1s walk when lighting is
+    /// disabled — the fail-safe lighting scan (its normal host) does not run in that config. Reuses
+    /// <see cref="FULL_LIGHT_SCAN_SECONDS"/> cadence and the same per-chunk/finalize helpers.
+    /// </summary>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private void ScanStuckLoadingChunksUnlit()
+    {
+        _fullLightScanTimer += Time.deltaTime;
+        if (_fullLightScanTimer < FULL_LIGHT_SCAN_SECONDS) return;
+        _fullLightScanTimer = 0f;
+
+        foreach (ChunkData cd in worldData.ChunkValues)
+            TrackStuckLoadingChunk(cd);
+        FinalizeStuckLoadingScan();
+    }
+
+    /// <summary>
     /// The core async pipeline:
     /// 1. Check Memory (Done by caller usually)
     /// 2. Check Disk (Async)
     /// 3. If missing, Schedule Gen (Job)
     /// </summary>
-    private async Awaitable LoadOrGenerateChunk(ChunkCoord chunkCoord)
+    /// <param name="chunkCoord">The chunk to load from disk or schedule for generation.</param>
+    private async Awaitable LoadOrGenerateChunkInner(ChunkCoord chunkCoord)
     {
         Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -789,13 +1007,19 @@ public class World : MonoBehaviour
 
         if (data.IsPopulated) return; // Already done
 
+        // Captured before the await so the unload guard below can detect a pool-ABA recycle (the pool
+        // re-issuing this same instance as a successor placeholder for this coord) — reference equality
+        // alone cannot (CP-3; same epoch guard as the LoadOrGenerateChunk fault path).
+        int epochAtEntry = data.LifecycleEpoch;
+
         // 1. Try Load from Disk if allowed
         if (settings.EnablePersistence)
         {
             ChunkData loaded = await StorageManager.LoadChunkAsync(chunkVoxelPos);
 
             // Ensure the chunk wasn't unloaded or recycled during the "await" above.
-            if (!worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData currentData) || currentData != data)
+            if (!worldData.TryGetChunk(chunkVoxelPos, out ChunkData currentData) || currentData != data
+                                                                                 || data.LifecycleEpoch != epochAtEntry)
             {
                 // The chunk was unloaded. Recycle the loaded data to prevent a memory leak.
                 if (loaded != null)
@@ -825,7 +1049,7 @@ public class World : MonoBehaviour
                 // flags fire the staging callback from PopulateFromSave, so this is for the neighbors.
                 _lightWork.PromoteNeighborhood(chunkVoxelPos);
 
-                // Apply Pending Mods (Trees, etc that spilled over)
+                // Apply Pending Mods (Trees, etc. that spilled over)
                 if (ModManager.TryGetModsForChunk(chunkCoord, out List<VoxelMod> pendingMods))
                 {
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -1024,7 +1248,7 @@ public class World : MonoBehaviour
         {
             // We can use the dictionary directly as we know they were requested
             Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
-            if (worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData cd)) chunksInLoadArea.Add(cd);
+            if (worldData.TryGetChunk(chunkVoxelPos, out ChunkData cd)) chunksInLoadArea.Add(cd);
         }
 
         int lightingLoopIterations = 0;
@@ -1358,29 +1582,251 @@ public class World : MonoBehaviour
         // Force complete all scheduled lighting jobs immediately.
         foreach (LightingJobData job in JobManager.LightingJobs.Values)
         {
-            job.Handle.Complete(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
+            // Hoist off the readonly iteration variable so Complete() runs without a hidden defensive copy.
+            JobHandle handle = job.Handle;
+            handle.Complete();
         }
 
         // Process their results.
         JobManager.ProcessLightingJobs();
     }
 
-    private void CompleteAndProcessMeshJobs()
+    /// <summary>
+    /// Re-anchors the floating origin and republishes it to the shaders that sample world-anchored fields
+    /// (LiquidCore's noise). The <b>only</b> place the origin may be set: the two operations are paired here so a
+    /// re-anchor cannot land without the shader global following it, which would slide the liquid pattern.
+    /// </summary>
+    /// <param name="originChunk">The chunk whose corner becomes the new Unity-space origin.</param>
+    private static void AnchorOrigin(ChunkCoord originChunk)
     {
-        // Force complete all scheduled mesh jobs immediately.
-        foreach (MeshingJobData job in JobManager.MeshJobs.Values)
+        WorldOrigin.SetOrigin(originChunk);
+        Shader.SetGlobalVector(s_shaderWorldOriginOffset, (Vector3)WorldOrigin.OriginVoxel);
+    }
+
+    /// <summary>
+    /// Re-anchors the floating origin onto the player's chunk and translates every Unity-space object to match, so
+    /// that however far the player travels, what is rendered and simulated stays near the Unity origin where float
+    /// precision is good (WS-4b, §4.3). One frame, main thread, no allocation.
+    /// <para>
+    /// Nothing in voxel space moves: chunk coords, voxel data, jobs, and everything persisted are origin-independent,
+    /// so this is invisible to the pipeline. Physics needs nothing either — the solver runs in FixedUpdate (no
+    /// mid-solve teleport is possible) and its velocity/momentum are deltas.
+    /// </para>
+    /// </summary>
+    /// <param name="newOriginChunk">The chunk to re-anchor on — the player's, so they land next to the Unity origin.</param>
+    private void ShiftOrigin(ChunkCoord newOriginChunk)
+    {
+        // The exact Unity-space distance every object moves. A whole number of chunks, so it is float-exact and
+        // leaves chunk-local and frac(worldPos) shader math untouched.
+        ChunkCoord delta = newOriginChunk - WorldOrigin.OriginChunk;
+        Vector3 unityDelta = new Vector3(delta.X * ChunkMath.CHUNK_WIDTH, 0f, delta.Z * ChunkMath.CHUNK_WIDTH);
+
+        // FIRST: everything below reads the new origin. (This also republishes the shader global, so the liquid
+        // pattern re-anchors in the same frame rather than sliding.)
+        AnchorOrigin(newOriginChunk);
+
+        // --- Re-derived from voxel space (never patched by the delta, so repeated shifts cannot drift) ---
+        foreach (Chunk chunk in _chunkMap.Values)
+            chunk.Reanchor();
+
+        foreach (KeyValuePair<ChunkCoord, GameObject> border in _chunkBorders)
         {
-            job.Handle.Complete(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
+            if (border.Value != null)
+                border.Value.transform.position = WorldOrigin.VoxelToUnity(border.Key.ToVoxelOrigin());
         }
 
-        // Process their results.
-        JobManager.ProcessMeshJobs();
+        if (voxelVisualizer != null) voxelVisualizer.Reanchor();
+        if (clouds != null) clouds.Reanchor();
+
+        // --- Patched by the delta: transient Unity-space state with no voxel-space source to re-derive from ---
+        // The player must keep its sub-voxel position exactly (re-deriving would quantize it to a cell); the camera
+        // is a child, so it follows.
+        _playerTransform.position -= unityDelta;
+
+        // Or the next visualizer check reads a 1000-unit jump as player movement and needlessly regenerates.
+        _lastVisualizerPlayerPos -= unityDelta;
+    }
+
+    #region CMD-2 teleport arrival hold
+
+    /// <summary>Seconds the arrival hold waits for the destination chunk before the fail-safe release (§3.3).</summary>
+    private const float TELEPORT_HOLD_TIMEOUT_SECONDS = 10f;
+
+    /// <summary>Horizontal offset placing a teleport destination at its voxel cell's center.</summary>
+    private const float TELEPORT_CELL_CENTER = 0.5f;
+
+    private bool _teleportHoldActive;
+    private ChunkCoord _teleportHoldChunk;
+    private Vector3Int _teleportHoldDestVoxel;
+    private bool _teleportHoldResolveSurfaceY;
+    private float _teleportHoldTimer;
+
+    /// <summary>
+    /// Raised when a teleport arrival hold ends. The argument is true when the fail-safe timeout
+    /// released it (the destination chunk never became ready — the player may fall).
+    /// </summary>
+    public event Action<bool> TeleportHoldEnded;
+
+    /// <summary>
+    /// Teleports the player to an absolute voxel-space destination (CMD-2, §4.3): re-anchors the
+    /// floating origin onto the destination chunk, places the transform near the Unity origin, and
+    /// begins the §3.3 arrival hold — the player's simulation stays suspended until the destination
+    /// chunk reports data + mesh ready (or the timeout fail-safe fires). Streaming loads the
+    /// surroundings by itself: <see cref="PlayerChunkCoord"/> changes, so the next
+    /// <see cref="Update"/> runs <see cref="CheckViewDistance"/>.
+    /// </summary>
+    /// <param name="voxelX">Destination voxel X (absolute voxel space).</param>
+    /// <param name="voxelY">Destination voxel Y — used verbatim; ignored when <paramref name="resolveSurfaceY"/>.</param>
+    /// <param name="voxelZ">Destination voxel Z (absolute voxel space).</param>
+    /// <param name="resolveSurfaceY">Resolve Y from the destination surface on arrival-release (the 2-arg /teleport form).</param>
+    public void TeleportPlayer(int voxelX, int voxelY, int voxelZ, bool resolveSurfaceY)
+    {
+        ChunkCoord destChunk = new ChunkCoord(ChunkMath.VoxelToChunk(voxelX), ChunkMath.VoxelToChunk(voxelZ));
+        ShiftOrigin(destChunk);
+
+        // Park at the top of the world while a surface Y resolves, so the release never starts inside terrain.
+        float parkY = resolveSurfaceY ? VoxelData.ChunkHeight - 1 : voxelY;
+        _playerTransform.position = WorldOrigin.VoxelToUnity(
+            new Vector3(voxelX + TELEPORT_CELL_CENTER, parkY, voxelZ + TELEPORT_CELL_CENTER));
+
+        _teleportHoldActive = true;
+        _teleportHoldChunk = destChunk;
+        _teleportHoldDestVoxel = new Vector3Int(voxelX, voxelY, voxelZ);
+        _teleportHoldResolveSurfaceY = resolveSurfaceY;
+        _teleportHoldTimer = 0f;
+        if (player != null && player.VoxelRigidbody != null)
+            player.VoxelRigidbody.IsTeleportHeld = true;
+    }
+
+    /// <summary>
+    /// Resolves the player's current absolute voxel cell (CMD-4 <c>~</c> relative-coordinate base).
+    /// Owning the transform→voxel conversion here keeps the <c>Commands</c> namespace free of
+    /// UnityEngine types (the <see cref="PlaceBlockCommand"/> precedent).
+    /// </summary>
+    /// <param name="voxelX">The player's voxel X on success.</param>
+    /// <param name="voxelY">The player's voxel Y on success.</param>
+    /// <param name="voxelZ">The player's voxel Z on success.</param>
+    /// <returns>True when a player transform exists to resolve; false otherwise (headless / pre-load).</returns>
+    public bool TryGetPlayerVoxelCell(out int voxelX, out int voxelY, out int voxelZ)
+    {
+        if (_playerTransform == null)
+        {
+            voxelX = voxelY = voxelZ = 0;
+            return false;
+        }
+
+        Vector3Int cell = WorldOrigin.UnityToVoxelCell(_playerTransform.position);
+        voxelX = cell.x;
+        voxelY = cell.y;
+        voxelZ = cell.z;
+        return true;
+    }
+
+    /// <summary>
+    /// Dev tool (CMD-3 <c>/origin force</c>): re-anchors the floating origin onto the player's
+    /// current chunk immediately, regardless of the <see cref="WorldOrigin.ShiftThresholdChunks"/>
+    /// threshold — the scriptable form of the WS-4b in-game shift gate.
+    /// </summary>
+    public void ForceOriginReanchor()
+    {
+        ShiftOrigin(WorldOrigin.UnityToChunk(_playerTransform.position));
+    }
+
+    /// <summary>
+    /// Dev tool (CMD-3 <c>/setblock</c>): enqueues a <see cref="ReplacementRule.ForcePlace"/>
+    /// modification at an absolute voxel cell (still refuses UNBREAKABLE targets — the rule's own
+    /// guard). Keeps the <c>Commands</c> namespace free of UnityEngine types by owning the
+    /// <see cref="VoxelMod"/> construction here.
+    /// </summary>
+    /// <param name="voxelX">Target voxel X (absolute voxel space).</param>
+    /// <param name="voxelY">Target voxel Y.</param>
+    /// <param name="voxelZ">Target voxel Z (absolute voxel space).</param>
+    /// <param name="blockId">The block to place.</param>
+    /// <returns>
+    /// True when the target chunk is loaded and populated (the mod applies on this frame's pass);
+    /// false when it will be routed to the persistent pending-mods queue and applied on chunk load.
+    /// </returns>
+    public bool PlaceBlockCommand(int voxelX, int voxelY, int voxelZ, ushort blockId)
+    {
+        AddModification(new VoxelMod(new Vector3Int(voxelX, voxelY, voxelZ), blockId)
+        {
+            Rule = ReplacementRule.ForcePlace,
+        });
+
+        ChunkCoord targetChunk = new ChunkCoord(ChunkMath.VoxelToChunk(voxelX), ChunkMath.VoxelToChunk(voxelZ));
+        return worldData.TryGetChunk(targetChunk.ToVoxelOrigin(), out ChunkData targetData) && targetData.IsPopulated;
+    }
+
+    /// <summary>
+    /// Polls an active arrival hold once per frame: releases when the destination chunk has populated
+    /// data AND an applied mesh, or when the timeout fail-safe fires. On a 2-arg-form release the
+    /// destination surface is resolved now — the earliest moment the terrain data exists.
+    /// </summary>
+    private void UpdateTeleportHold()
+    {
+        if (!_teleportHoldActive) return;
+
+        _teleportHoldTimer += Time.deltaTime;
+
+        bool ready = worldData.TryGetChunk(_teleportHoldChunk.ToVoxelOrigin(), out ChunkData destData) &&
+                     destData.IsPopulated &&
+                     destData.Chunk != null && destData.Chunk.HasMeshApplied;
+
+        if (!ready && _teleportHoldTimer < TELEPORT_HOLD_TIMEOUT_SECONDS) return;
+
+        if (ready && _teleportHoldResolveSurfaceY)
+        {
+            Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(_teleportHoldDestVoxel);
+            Vector3Int surface = destData.GetHighestVoxel(localPos);
+            _playerTransform.position = WorldOrigin.VoxelToUnity(new Vector3Int(
+                                            _teleportHoldDestVoxel.x, surface.y, _teleportHoldDestVoxel.z))
+                                        + spawnPositionOffset;
+        }
+
+        _teleportHoldActive = false;
+        if (player != null && player.VoxelRigidbody != null)
+            player.VoxelRigidbody.IsTeleportHeld = false;
+
+        TeleportHoldEnded?.Invoke(!ready);
+    }
+
+    #endregion
+
+    /// <summary>
+    /// Fails loudly if the player has drifted further from the Unity origin than a working floating origin ever
+    /// allows (§4.3 step 4). This is WS-4's false-green guard: the failures it catches — a re-anchor that silently
+    /// stopped firing, or a site holding a stale origin that pins the player out at the old anchor — otherwise show
+    /// up only as gradually worsening render jitter, which is easy to miss and hard to attribute. Editor/development
+    /// builds only, and latched, so a genuine breach reports once instead of every frame.
+    /// </summary>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private void AssertPlayerNearOrigin()
+    {
+        if (_hasReportedUnboundedPlayer) return;
+
+        Vector3 playerUnityPos = _playerTransform.position;
+        if (Mathf.Abs(playerUnityPos.x) <= MAX_PLAYER_UNITY_DISTANCE &&
+            Mathf.Abs(playerUnityPos.z) <= MAX_PLAYER_UNITY_DISTANCE)
+            return;
+
+        _hasReportedUnboundedPlayer = true;
+        Debug.LogError(
+            $"[WS-4] Player is at Unity {playerUnityPos}, further than {MAX_PLAYER_UNITY_DISTANCE} units from the " +
+            "render origin — which a working floating origin never allows. The re-anchor has either stopped firing " +
+            "or something is holding a stale origin. Voxel position: " +
+            $"{playerUnityPos + WorldOrigin.OriginVoxel}, origin chunk: " +
+            $"{WorldOrigin.OriginChunk.X},{WorldOrigin.OriginChunk.Z}. (Reported once per session.)");
     }
 
     public void SetGlobalLightValue()
     {
         Shader.SetGlobalFloat(s_shaderGlobalLightLevel, globalLightLevel);
-        _playerCamera.backgroundColor = Color.Lerp(night, day, globalLightLevel);
+
+        // Null before StartWorld binds it (and in headless/suite contexts, e.g. the /time command
+        // baseline) — the shader globals above still apply; only the camera tint is skipped.
+        if (_playerCamera != null)
+            _playerCamera.backgroundColor = Color.Lerp(night, day, globalLightLevel);
 
         Color skyColor = _skyLightGradient?.Evaluate(globalLightLevel) ?? Color.white;
         Shader.SetGlobalColor(s_shaderSkyLightColor, skyColor);
@@ -1397,59 +1843,42 @@ public class World : MonoBehaviour
         _tickTimer -= VoxelData.TickLength;
         _tickCounter++;
 
-        // Snapshot _activeChunks to prevent InvalidOperationException if
-        // CheckViewDistance modifies the set during iteration.
-        using HashSet<ChunkCoord>.Enumerator enumerator = _activeChunks.GetEnumerator();
-        List<ChunkCoord> snapshot = ListPool<ChunkCoord>.Get();
+        // Resolve the active chunks into a snapshot list FIRST (no side effects), then tick from the list — so a
+        // CheckViewDistance that mutates _activeChunks mid-tick can never invalidate this enumeration. The fluid
+        // jobs schedule across all chunks in parallel and drain serially in this same order, keeping the emitted mod
+        // stream deterministic (byte-identical to a single serial loop).
+        List<Chunk> snapshot = ListPool<Chunk>.Get();
         try
         {
-            while (enumerator.MoveNext())
-                snapshot.Add(enumerator.Current);
+            foreach (ChunkCoord chunkCoord in _activeChunks)
+                if (_chunkMap.TryGetValue(chunkCoord, out Chunk chunk))
+                    snapshot.Add(chunk);
 
-            // TG-4 Phase 4a: when enabled, schedule the interior fluid jobs across all chunks in parallel, then drain
-            // serially in the SAME chunk order (so the emitted mod stream stays byte-identical to the serial path).
-            // The worker-count guard falls back to the serial tick on genuinely core-starved hosts (≤2 cores → <2 Job
-            // workers), where the Schedule + blocking-Complete overhead would exceed the win; every real target —
-            // even a 2021 midrange 8-core phone — clears it. (Temporary: retires with the serial path once
-            // parallel-only ships.) Otherwise run the unchanged Phase-3 serial per-chunk tick.
-            if (_enableFluidBurstTick && _enableParallelFluidTick
-                                      && JobsUtility.JobWorkerCount >= MIN_PARALLEL_WORKER_THREADS)
-            {
-                ProcessTickUpdatesParallel(snapshot);
-            }
-            else
-            {
-                foreach (ChunkCoord chunkCoord in snapshot)
-                {
-                    if (_chunkMap.TryGetValue(chunkCoord, out Chunk chunk))
-                    {
-                        chunk.TickUpdate();
-                    }
-                }
-            }
+            TickChunksParallel(snapshot);
         }
         finally
         {
-            ListPool<ChunkCoord>.Release(snapshot);
+            ListPool<Chunk>.Release(snapshot);
         }
     }
 
     /// <summary>
-    /// TG-4 Phase 4a — ticks all active chunks with the interior fluid jobs <b>parallelized across chunks</b>:
+    /// TG-4 — ticks all active chunks with the fluid jobs <b>parallelized across chunks</b>:
     /// <list type="number">
     /// <item><b>Schedule</b> — for every chunk with active fluids, acquire a pooled <see cref="FluidBurstTicker"/>
-    /// and schedule its interior <see cref="FluidTickJob"/> on a worker (each chunk gets its own ticker, so the
-    /// in-flight jobs never share scratch).</item>
+    /// and schedule its <see cref="FluidTickJob"/> on a worker (each chunk gets its own ticker, so the in-flight
+    /// jobs never share scratch). Every fluid — interior AND border — ticks in-job via the Y-band neighbor halo.</item>
     /// <item><b>Complete</b> — flush + complete all scheduled handles.</item>
     /// <item><b>Drain</b> — walk the chunks in the <b>same snapshot order</b> and run each chunk's managed work
     /// (grass + the fluid replay using its pre-computed ticker results), then return the ticker to the pool.</item>
     /// </list>
-    /// Interior fluid emissions are chunk-local (an interior voxel never targets another chunk), and the drain is
-    /// serial in the deterministic chunk-iteration order, so the emitted <see cref="VoxelMod"/> stream is identical
-    /// to the Phase-3 serial path — only the compute moves off the main thread.
+    /// Fluid emission <i>order</i> is fixed by the emitting voxel's (chunk-order, bucket-order) — never the target —
+    /// and the drain is serial in the deterministic chunk-iteration order, so the emitted <see cref="VoxelMod"/>
+    /// stream is byte-identical to a single serial loop even with cross-chunk targets; only the compute moves off
+    /// the main thread. Also the benchmark entry point (<c>FluidTickBenchmark</c>) drives this exact path.
     /// </summary>
-    /// <param name="snapshot">The active-chunk coordinates to tick, in deterministic iteration order.</param>
-    private void ProcessTickUpdatesParallel(List<ChunkCoord> snapshot)
+    /// <param name="snapshot">The active chunks to tick, in deterministic iteration order.</param>
+    internal void TickChunksParallel(List<Chunk> snapshot)
     {
         _parallelFluidChunks.Clear();
         _parallelFluidTickers.Clear();
@@ -1457,10 +1886,10 @@ public class World : MonoBehaviour
 
         try
         {
-            // Phase 1: schedule the interior fluid job for every chunk that has active fluids.
-            foreach (ChunkCoord chunkCoord in snapshot)
+            // Phase 1: schedule the fluid job for every chunk that has active fluids.
+            foreach (Chunk chunk in snapshot)
             {
-                if (!_chunkMap.TryGetValue(chunkCoord, out Chunk chunk) || chunk.ChunkData == null)
+                if (chunk.ChunkData == null)
                     continue;
 
                 NativeHashSet<int> fluids = chunk.ChunkData.ActiveFluidsBucket;
@@ -1472,11 +1901,8 @@ public class World : MonoBehaviour
                 FluidBurstTicker ticker = FluidTickerPool.Get();
                 _parallelFluidChunks.Add(chunk);
                 _parallelFluidTickers.Add(ticker);
-                // Phase 4b: when border-burst is on, tick ALL fluids via the neighbor halo; else the Phase-3/4a
-                // interior-only path (border drained on the managed branch in DrainTick).
-                JobHandle handle = _enableFluidBorderBurst
-                    ? ticker.ScheduleFluids(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData, worldData, _enableFluidBandGather)
-                    : ticker.ScheduleInteriorFluids(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData);
+                // Tick ALL fluids (interior AND border) in-job, border voxels reading the per-tick Y-band neighbor halo.
+                JobHandle handle = ticker.ScheduleFluids(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData, worldData);
                 _parallelFluidHandles.Add(handle);
             }
 
@@ -1490,9 +1916,9 @@ public class World : MonoBehaviour
             // Phase 3: drain serially in the same snapshot order. A cursor pairs each fluid chunk with its ticker
             // (Phase 1 added chunks in this same order, so the cursor stays aligned without a lookup).
             int fluidCursor = 0;
-            foreach (ChunkCoord chunkCoord in snapshot)
+            foreach (Chunk chunk in snapshot)
             {
-                if (!_chunkMap.TryGetValue(chunkCoord, out Chunk chunk) || chunk.ChunkData == null)
+                if (chunk.ChunkData == null)
                     continue;
 
                 FluidBurstTicker ticker = null;
@@ -1519,6 +1945,28 @@ public class World : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// The player's <i>intended</i> seconds-per-frame from the active FPS cap, feeding the P-4 §3.4
+    /// ceiling scaling (see <see cref="PipelinePassBudget.ScaleCeilingMs"/>). Reads live engine state
+    /// (not <c>settings</c>) so a benchmark-imposed cap is honored. vSync wins when active — Unity
+    /// ignores <see cref="Application.targetFrameRate"/> then; an unknown display rate or no cap at all
+    /// returns 0 (→ no scaling). Deliberately keyed off the cap, never measured <c>deltaTime</c>, so an
+    /// overloaded uncapped machine is not handed a wider ceiling.
+    /// </summary>
+    /// <returns>Intended seconds per frame, or 0 when no FPS cap is active.</returns>
+    private static float ComputeIntendedFrameIntervalSeconds()
+    {
+        int vSyncCount = QualitySettings.vSyncCount;
+        if (vSyncCount >= 1)
+        {
+            double refreshHz = Screen.currentResolution.refreshRateRatio.value;
+            return refreshHz > 0.0 ? (float)(vSyncCount / refreshHz) : 0f;
+        }
+
+        int targetFps = Application.targetFrameRate;
+        return targetFps > 0 ? 1f / targetFps : 0f;
+    }
+
     private void Update()
     {
         // Prevent normal generation logic from interfering with the startup coroutine
@@ -1529,7 +1977,17 @@ public class World : MonoBehaviour
         // them at the bottom of Update for the stress-pass collector to read.
         WorldFrameProfiler.BeginFrame();
 
-        PlayerChunkCoord = GetChunkCoordFromVector3(_playerTransform.position);
+        PlayerChunkCoord = WorldOrigin.UnityToChunk(_playerTransform.position);
+
+        // WS-4b: re-anchor before anything consumes this frame's positions. PlayerChunkCoord is voxel-chunk space, so
+        // the shift cannot change it — every distance loop below is unaffected by construction.
+        if (WorldOrigin.ShouldReanchor(PlayerChunkCoord))
+            ShiftOrigin(PlayerChunkCoord);
+
+        AssertPlayerNearOrigin();
+
+        // CMD-2: release the teleport arrival hold once the destination chunk is ready (or times out).
+        UpdateTeleportHold();
 
         // Only update the chunks if the player has moved from the chunk they were previously on.
         if (!PlayerChunkCoord.Equals(_playerLastChunkCoord))
@@ -1558,9 +2016,32 @@ public class World : MonoBehaviour
         _playerLastChunkCoord = PlayerChunkCoord;
 
         // --- Process Job System ---
+        // P-4 §3.4 ceiling scaling: the ms ceilings below are widened in proportion to a voluntarily
+        // lowered FPS cap (an AFK/battery/mobile 30/15-cap frame is mostly idle sleep, so it can afford
+        // a bigger pipeline slice). Computed once per frame from the intended cap interval; 0 = no cap
+        // → ScaleCeilingMs returns each ceiling unchanged (byte-identical to the un-scaled feature-off
+        // path). Gated on both flags so flag-off is the exact recorded legacy config.
+        float ceilingScaleInterval = settings.enablePipelineTimeBudgets && settings.scaleBudgetCeilingsWithFpsCap
+            ? ComputeIntendedFrameIntervalSeconds()
+            : 0f;
+
         // 1. Process any jobs that have finished generating chunk data.
         //    This might add new chunks to the chunksToBuildMesh list.
-        JobManager.ProcessGenerationJobs();
+        //    P-4 §3.4: time-budgeted — un-processed completed jobs stay enrolled for next frame (the
+        //    same retry contract as the pass's structure-mods budget). The startup coroutine calls the
+        //    pass without a window and stays unbudgeted.
+        JobManager.ProcessGenerationJobs(settings.enablePipelineTimeBudgets
+            ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.genProcessBudgetMs, ceilingScaleInterval))
+            : default);
+
+        // 1b. Admit queued generation requests under the in-flight cap (P-4 §3.1). Runs after the drain
+        //     above so completions this frame free headroom for new admissions immediately.
+        DrainGenerationRequests();
+
+        // 1c. CP-6: retry at most one pending failed save (cheap no-op when the registry is empty).
+        //     Per-frame rather than per-UnloadChunks pass — UnloadChunks only runs on chunk-boundary
+        //     crossings, so a stationary player would otherwise never drain a failed save.
+        StorageManager?.DrainFailedSaveRetries();
 
         // 2. Apply all queued voxel modifications (from player and world gen).
         long applyStart = WorldFrameProfiler.Begin();
@@ -1574,6 +2055,13 @@ public class World : MonoBehaviour
 
         // 4. Schedule lighting jobs from the ready set (only chunks whose gates can plausibly pass —
         //    parked chunks re-enter via promotion events or the fail-safe scan; see LightWorkScheduler).
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        // CP-1: the stuck-IsLoading detector normally rides the fail-safe lighting scan below, which is
+        // gated on enableLighting. When lighting is disabled that scan never runs, so drive the detector's
+        // own ~1s walk here instead (dev/editor only; single walk either way).
+        if (!settings.enableLighting) ScanStuckLoadingChunksUnlit();
+#endif
+
         if (settings.enableLighting)
         {
             // Drain the thread-safe staging queue into the main-thread ready set.
@@ -1591,14 +2079,19 @@ public class World : MonoBehaviour
             if (_fullLightScanTimer >= FULL_LIGHT_SCAN_SECONDS)
             {
                 _fullLightScanTimer = 0f;
-                foreach (ChunkData cd in worldData.Chunks.Values)
+                foreach (ChunkData cd in worldData.ChunkValues)
                 {
                     if (cd.IsPopulated && (cd.NeedsInitialLighting ||
                                            cd.HasLightChangesToProcess || cd.NeedsEdgeCheck))
                     {
                         _lightWork.AddReady(cd.Position);
                     }
+
+                    // CP-1 stuck-IsLoading detector shares this ~1s full-chunk walk (dev/editor only).
+                    TrackStuckLoadingChunk(cd);
                 }
+
+                FinalizeStuckLoadingScan();
 
                 int failSafePromoted = _lightWork.PromoteAll();
 
@@ -1608,6 +2101,29 @@ public class World : MonoBehaviour
                     Debug.Log($"[LIGHTING] Fail-safe promoted {failSafePromoted.ToString()} parked chunk(s) to the ready set.");
             }
 
+            // P-4 §3.4: the throttle is a rate quota (cap × frame duration × 60 — constant jobs/sec
+            // instead of constant jobs/frame, so throughput no longer collapses with FPS) bounded by a
+            // Stopwatch ms ceiling (hitch guard). Flag off → quota == cap and the window never expires,
+            // which is exactly the legacy fixed count cap. The window starts HERE — after the ~1s
+            // fail-safe full scan above — so a scan frame's walk cost cannot eat the scheduling budget
+            // (review finding: starting it earlier produced a recurring 1 Hz throughput dip).
+            int lightQuota = settings.enablePipelineTimeBudgets
+                ? PipelinePassBudget.ComputeQuota(settings.maxLightJobsPerFrame, Time.unscaledDeltaTime)
+                : settings.maxLightJobsPerFrame;
+            PipelinePassBudget.Window lightWindow = settings.enablePipelineTimeBudgets
+                ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.lightScheduleBudgetMs, ceilingScaleInterval))
+                : default;
+
+            // In-flight memory bound: a hitch-scaled quota may admit up to 8× the per-frame cap, and
+            // each lighting job rents ~11 pooled full-volume buffers — without this ceiling one long
+            // frame could blow past the pool retention into a Persistent alloc storm (the §1.1
+            // incident class). Budgets-on only: worker saturation can accumulate in-flight jobs past
+            // any fixed value even under the legacy count cap, so applying it unconditionally would
+            // make the flag-off rollback leg diverge from true legacy behavior.
+            int inFlightLightCap = settings.enablePipelineTimeBudgets
+                ? Mathf.Max(1, settings.maxInFlightLightingJobs)
+                : int.MaxValue;
+
             // Snapshot the ready set into a pooled list to allow safe modification during iteration.
             List<Vector2Int> readySnapshot = ListPool<Vector2Int>.Get();
             try
@@ -1616,10 +2132,15 @@ public class World : MonoBehaviour
 
                 foreach (Vector2Int pos in readySnapshot)
                 {
-                    if (lightJobsScheduled >= settings.maxLightJobsPerFrame) break; // Respect the throttle
+                    // Respect the throttle (quota, ms ceiling, or in-flight cap — §3.4). The break leaves
+                    // the un-served remainder in the READY set, exactly like the legacy count break
+                    // (§9.1 semantics). The in-flight count is re-checked every iteration because each
+                    // successful schedule grows LightingJobs (the mesh loop's OM-1 pattern).
+                    if (lightJobsScheduled >= lightQuota || lightWindow.Expired
+                                                         || JobManager.LightingJobs.Count >= inFlightLightCap) break;
 
                     // If the chunk was unloaded, clean up the stale entry
-                    if (!worldData.Chunks.TryGetValue(pos, out ChunkData chunkData))
+                    if (!worldData.TryGetChunk(pos, out ChunkData chunkData))
                     {
                         _lightWork.Remove(pos);
                         continue;
@@ -1696,13 +2217,23 @@ public class World : MonoBehaviour
             {
                 ListPool<Vector2Int>.Release(readySnapshot);
             }
+
+            // Panic-gate signal sample (§3.5): taken AFTER the scan so this frame's transient
+            // promotions (notably the ~1s PromoteAll of the parked frontier ring) have been re-parked
+            // and only genuinely un-served schedulable work is counted. Read by next frame's
+            // DrainGenerationRequests.
+            _readyCountAfterScan = _lightWork.ReadyCount;
         }
 
         WorldFrameProfiler.Add(WorldFrameProfiler.Phase.Light, lightStart);
 
         // 5. Process completed mesh jobs from the PREVIOUS frame.
+        //    P-4 §3.4: time-budgeted — deferred completions stay enrolled (buffers held one more frame,
+        //    bounded by the in-flight cap).
         long meshStart = WorldFrameProfiler.Begin();
-        JobManager.ProcessMeshJobs();
+        JobManager.ProcessMeshJobs(settings.enablePipelineTimeBudgets
+            ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.meshApplyBudgetMs, ceilingScaleInterval))
+            : default);
 
         // 6. Schedule NEW mesh jobs for chunks that now need them.
         //    NOTE: If too many mesh jobs are already in flight, pause scheduling new ones to let the
@@ -1711,12 +2242,23 @@ public class World : MonoBehaviour
         if (_meshBuildQueue.Count > 0 && JobManager.MeshJobs.Count < inFlightMeshCap)
         {
             int meshJobsScheduled = 0;
+
+            // P-4 §3.4: rate quota + ms ceiling, same shape as the lighting throttle above. The break
+            // leaves un-served chunks queued in place — legacy semantics. The RAM-scaled in-flight cap
+            // below is untouched (OM-1 memory bound, not a throughput budget).
+            int meshQuota = settings.enablePipelineTimeBudgets
+                ? PipelinePassBudget.ComputeQuota(settings.maxMeshRebuildsPerFrame, Time.unscaledDeltaTime)
+                : settings.maxMeshRebuildsPerFrame;
+            PipelinePassBudget.Window meshWindow = settings.enablePipelineTimeBudgets
+                ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.meshScheduleBudgetMs, ceilingScaleInterval))
+                : default;
+
             // Walk in priority order (head = highest priority). The enumerator removes the current node in
             // O(1) and keeps iterating from the successor it captured before the body ran.
             MeshBuildQueue.Enumerator it = _meshBuildQueue.GetEnumerator();
             while (it.MoveNext())
             {
-                if (meshJobsScheduled >= settings.maxMeshRebuildsPerFrame) break;
+                if (meshJobsScheduled >= meshQuota || meshWindow.Expired) break;
 
                 // Re-check the in-flight cap every iteration, not just on entry: each successful schedule
                 // grows JobManager.MeshJobs, and a single frame must not push its whole per-frame mesh
@@ -1744,16 +2286,37 @@ public class World : MonoBehaviour
             }
         }
 
-        // The chunksToDraw queue is populated by ApplyMeshData in Chunk.cs
+        // The chunksToDraw queue is populated by ApplyMeshData in Chunk.cs.
+        // P-4 §5.3: time-budgeted drain — at least one chunk per frame (the legacy trickle, which also
+        // staggers the load animation), then as many more as fit in the ms ceiling so the queue can't
+        // back up at low FPS. Ceiling ≤ 0 drains without a time bound (consistent "0 = ceiling off"
+        // semantics with the other budget sliders); budgets off → exactly the legacy one-per-frame
+        // dequeue. Stale entries (destroyed while queued) don't count as the guaranteed draw.
         if (ChunksToDraw.Count > 0)
         {
-            Chunk chunkToDraw = ChunksToDraw.Dequeue();
+            PipelinePassBudget.Window drawWindow = settings.enablePipelineTimeBudgets
+                ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.drawApplyBudgetMs, ceilingScaleInterval))
+                : default;
+            bool drainMany = settings.enablePipelineTimeBudgets;
+            int chunksDrawn = 0;
+            int dequeued = 0;
 
-            // Guard: The chunk's GameObject may have been destroyed by the pool
-            // while it was waiting in the draw queue (e.g., due to deferred unload timing).
-            if (chunkToDraw != null && chunkToDraw.ChunkGameObject != null)
+            // Flag off = exactly one dequeue (stale or not) — byte-exact legacy for the A/B legs.
+            // Flag on = guarantee one REAL draw, then drain while the window allows (never-expiring
+            // when the ceiling is disabled); stale dequeues are cheap and don't consume the guarantee.
+            while (ChunksToDraw.Count > 0 &&
+                   (drainMany ? chunksDrawn == 0 || !drawWindow.Expired : dequeued == 0))
             {
-                chunkToDraw.CreateMesh();
+                Chunk chunkToDraw = ChunksToDraw.Dequeue();
+                dequeued++;
+
+                // Guard: The chunk's GameObject may have been destroyed by the pool
+                // while it was waiting in the draw queue (e.g., due to deferred unload timing).
+                if (chunkToDraw != null && chunkToDraw.ChunkGameObject != null)
+                {
+                    chunkToDraw.CreateMesh();
+                    chunksDrawn++;
+                }
             }
         }
 
@@ -1858,7 +2421,7 @@ public class World : MonoBehaviour
     private void QueueNeighborRebuild(ChunkCoord neighborCoord, bool immediate = false)
     {
         Vector2Int neighborVoxelPos = neighborCoord.ToVoxelOrigin();
-        if (worldData.Chunks.TryGetValue(neighborVoxelPos, out ChunkData neighborData) && neighborData.Chunk != null)
+        if (worldData.TryGetChunk(neighborVoxelPos, out ChunkData neighborData) && neighborData.Chunk != null)
         {
             RequestChunkMeshRebuild(neighborData.Chunk, immediate);
         }
@@ -1923,7 +2486,7 @@ public class World : MonoBehaviour
 
             // Only enforce lighting stability checks if the chunk is actually populated with data.
             // If it's an empty placeholder, it has no light to process anyway.
-            if (worldData.Chunks.TryGetValue(neighborV2Pos, out ChunkData neighborData) && neighborData.IsPopulated)
+            if (worldData.TryGetChunk(neighborV2Pos, out ChunkData neighborData) && neighborData.IsPopulated)
             {
                 // Does the neighbor have pending light changes that haven't even been scheduled yet,
                 // OR is waiting for first light is NOT ready to provide lighting data for meshing.
@@ -1954,7 +2517,7 @@ public class World : MonoBehaviour
             if (JobManager.LightingJobs.ContainsKey(neighborCoord)) return false;
 
             Vector2Int neighborV2Pos = neighborCoord.ToVoxelOrigin();
-            if (worldData.Chunks.TryGetValue(neighborV2Pos, out ChunkData diagData) && diagData.IsPopulated)
+            if (worldData.TryGetChunk(neighborV2Pos, out ChunkData diagData) && diagData.IsPopulated)
             {
                 if (diagData.HasLightChangesToProcess || diagData.NeedsInitialLighting) return false;
                 if (diagData.IsAwaitingMainThreadProcess) return false;
@@ -1991,7 +2554,7 @@ public class World : MonoBehaviour
             if (JobManager.GenerationJobs.ContainsKey(neighborCoord)) return false;
 
             Vector2Int neighborV2Pos = neighborCoord.ToVoxelOrigin();
-            if (!worldData.Chunks.TryGetValue(neighborV2Pos, out ChunkData neighborData) ||
+            if (!worldData.TryGetChunk(neighborV2Pos, out ChunkData neighborData) ||
                 !neighborData.IsPopulated)
                 return false;
 
@@ -2033,7 +2596,7 @@ public class World : MonoBehaviour
             }
 
             // Chunk hasn't been created yet, or exists but terrain isn't populated.
-            if (!worldData.Chunks.TryGetValue(neighborCoord.ToVoxelOrigin(), out ChunkData neighborData) ||
+            if (!worldData.TryGetChunk(neighborCoord.ToVoxelOrigin(), out ChunkData neighborData) ||
                 !neighborData.IsPopulated)
             {
                 return false;
@@ -2097,7 +2660,7 @@ public class World : MonoBehaviour
             // --- 1. Get Chunk Data ---
             // We check worldData directly to see if it is loaded/generating
             bool chunkIsReady = false;
-            if (worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData chunkData))
+            if (worldData.TryGetChunk(chunkVoxelPos, out ChunkData chunkData))
             {
                 chunkIsReady = chunkData.IsPopulated;
             }
@@ -2115,9 +2678,9 @@ public class World : MonoBehaviour
             // We should always allow this, unless the target is unbreakable.
             if (v.ID == BlockIDs.Air)
             {
-                VoxelState? stateToBreak = worldData.GetVoxelState(v.GlobalPosition);
-                if (stateToBreak.HasValue &&
-                    (BlockTypes[stateToBreak.Value.ID].tags & BlockTags.UNBREAKABLE) != 0)
+                Vector3Int breakPos = v.GlobalPosition;
+                if (worldData.TryGetVoxel(breakPos.x, breakPos.y, breakPos.z, out VoxelState stateToBreak) &&
+                    (BlockTypes[stateToBreak.ID].tags & BlockTags.UNBREAKABLE) != 0)
                 {
                     continue; // Cannot break an unbreakable block.
                 }
@@ -2125,21 +2688,21 @@ public class World : MonoBehaviour
             else // This is a "place" action, so run the full rule check.
             {
                 bool canPlace = true;
-                VoxelState? existingState = worldData.GetVoxelState(v.GlobalPosition);
+                Vector3Int placePos = v.GlobalPosition;
 
-                if (existingState.HasValue)
+                if (worldData.TryGetVoxel(placePos.x, placePos.y, placePos.z, out VoxelState existingState))
                 {
                     switch (v.Rule)
                     {
                         case ReplacementRule.ForcePlace:
                             // Force placement, but still respect Unbreakable blocks.
-                            if ((BlockTypes[existingState.Value.ID].tags & BlockTags.UNBREAKABLE) != 0)
+                            if ((BlockTypes[existingState.ID].tags & BlockTags.UNBREAKABLE) != 0)
                                 canPlace = false;
                             break;
 
                         case ReplacementRule.OnlyReplaceAir:
                             // Only allow placement if the existing block is Air (ID 0).
-                            if (existingState.Value.ID != BlockIDs.Air)
+                            if (existingState.ID != BlockIDs.Air)
                                 canPlace = false;
                             break;
 
@@ -2149,7 +2712,7 @@ public class World : MonoBehaviour
                             // World-gen and player edits consult different replacement masks: a structure may
                             // overwrite leaves while stacking, but the player holding that block must not.
                             BlockType incomingProps = BlockTypes[v.ID];
-                            BlockType existingProps = BlockTypes[existingState.Value.ID];
+                            BlockType existingProps = BlockTypes[existingState.ID];
 
                             bool canReplace = v.Source == VoxelModSource.WorldGen
                                 ? BlockTagUtility.CanReplaceForWorldGen(incomingProps, existingProps)
@@ -2174,8 +2737,9 @@ public class World : MonoBehaviour
             Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(v.GlobalPosition);
 
             // Capture old state BEFORE modification for support check
-            VoxelState? oldState = worldData.GetVoxelState(v.GlobalPosition);
-            bool oldProvidedSupport = oldState.HasValue && BlockTypes[oldState.Value.ID].ProvidesSupport;
+            bool oldProvidedSupport =
+                worldData.TryGetVoxel(v.GlobalPosition.x, v.GlobalPosition.y, v.GlobalPosition.z, out VoxelState oldState) &&
+                BlockTypes[oldState.ID].ProvidesSupport;
 
             chunkData.ModifyVoxel(localPos, v);
 
@@ -2187,9 +2751,8 @@ public class World : MonoBehaviour
                 if (!newModProps.ProvidesSupport)
                 {
                     Vector3Int abovePos = v.GlobalPosition + Vector3Int.up;
-                    VoxelState? aboveState = worldData.GetVoxelState(abovePos);
-                    if (aboveState.HasValue &&
-                        (BlockTypes[aboveState.Value.ID].tags & BlockTags.REQUIRES_SUPPORT) != 0)
+                    if (worldData.TryGetVoxel(abovePos.x, abovePos.y, abovePos.z, out VoxelState aboveState) &&
+                        (BlockTypes[aboveState.ID].tags & BlockTags.REQUIRES_SUPPORT) != 0)
                     {
                         _modifications.Enqueue(new VoxelMod(abovePos, blockId: BlockIDs.Air)
                         {
@@ -2205,10 +2768,10 @@ public class World : MonoBehaviour
             {
                 // Get the global position of the neighbor.
                 Vector3Int neighborPos = v.GlobalPosition + VoxelData.FaceChecks[i];
-                VoxelState? neighborState = worldData.GetVoxelState(neighborPos);
 
                 // If the neighbor exists and has behavior, ensure it's active.
-                if (neighborState.HasValue && neighborState.Value.Properties.isActive)
+                if (worldData.TryGetVoxel(neighborPos.x, neighborPos.y, neighborPos.z, out VoxelState neighborState) &&
+                    neighborState.Properties.isActive)
                 {
                     Chunk neighborChunk = GetChunkFromVector3(neighborPos);
                     if (neighborChunk != null)
@@ -2236,7 +2799,7 @@ public class World : MonoBehaviour
     /// Registers a pre-populated, synthetic <see cref="Chunk"/> directly into the live chunk map, active-chunk set,
     /// and <see cref="worldData"/>, bypassing the generation/loading/meshing pipeline entirely. This is the substrate
     /// the fluid-tick benchmark (and future fluid stress / menu-driven harnesses) use to drive the <b>production</b>
-    /// <see cref="Chunk.TickUpdate"/> + <see cref="ApplyModifications"/> path over hand-seeded chunks, so the measured
+    /// <see cref="TickChunksParallel"/> + <see cref="ApplyModifications"/> path over hand-seeded chunks, so the measured
     /// cost is the real tick code rather than a model.
     /// </summary>
     /// <param name="chunk">A chunk whose <see cref="Chunk.ChunkData"/> is already populated and seeded.</param>
@@ -2251,7 +2814,7 @@ public class World : MonoBehaviour
 
         _chunkMap[chunk.Coord] = chunk;
         _activeChunks.Add(chunk.Coord);
-        worldData.Chunks[chunk.Coord.ToVoxelOrigin()] = chunk.ChunkData;
+        worldData.SetChunk(chunk.Coord.ToVoxelOrigin(), chunk.ChunkData);
     }
 
     /// <summary>
@@ -2266,7 +2829,7 @@ public class World : MonoBehaviour
     {
         _chunkMap.Clear();
         _activeChunks.Clear();
-        worldData.Chunks.Clear();
+        worldData.ClearChunks();
         worldData.ModifiedChunks.Clear();
         _modifications.Clear();
 
@@ -2300,13 +2863,17 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
-    /// Returns the chunk coordinates for a given world position.
+    /// Returns the chunk coordinates for a given <b>voxel-space</b> cell.
     /// </summary>
-    /// <param name="worldPos">The world position</param>
-    /// <returns>The chunk coordinates for the given world position</returns>
-    private static ChunkCoord GetChunkCoordFromVector3(Vector3 worldPos)
+    /// <param name="voxelCell">The voxel-space cell.</param>
+    /// <returns>The chunk coordinates for the given voxel-space cell.</returns>
+    /// <remarks>Deliberately NOT origin-converting: it serves voxel-space callers (e.g. <c>VoxelMod.GlobalPosition</c>
+    /// routing in <c>ApplyModifications</c>). Unity-space callers convert at their own call site via
+    /// <see cref="WorldOrigin.UnityToChunk"/> — mixing both spaces into one helper is the silent-bug class WS-4 exists
+    /// to prevent. Integer-typed so the routing stays exact past ±2²⁴ (Bug 19 class).</remarks>
+    private static ChunkCoord GetChunkCoordFromVector3(Vector3Int voxelCell)
     {
-        return ChunkCoord.FromWorldPosition(worldPos);
+        return ChunkCoord.FromVoxelPosition(voxelCell);
     }
 
     /// <summary>
@@ -2334,17 +2901,37 @@ public class World : MonoBehaviour
     [CanBeNull]
     public Chunk GetChunkFromVector3(Vector3 pos)
     {
-        int x = Mathf.FloorToInt(pos.x / VoxelData.ChunkWidth);
-        int z = Mathf.FloorToInt(pos.z / VoxelData.ChunkWidth);
+        ChunkCoord coord = new ChunkCoord(ChunkMath.WorldToChunk(pos.x), ChunkMath.WorldToChunk(pos.z));
 
         // "Is in World" bounds check before accessing the array.
-        if (!IsChunkInWorld(x, z))
+        if (!IsChunkInWorld(coord))
         {
             return null; // Return null if the coordinate is outside the world.
         }
 
-        return _chunkMap.GetValueOrDefault(ChunkCoord.FromWorldPosition(pos));
+        return _chunkMap.GetValueOrDefault(coord);
     }
+
+    /// <summary>
+    /// Extra radius (in chunks) beyond <see cref="Settings.LoadDistance"/> at which a chunk is unloaded.
+    /// The gap between LoadDistance and this boundary is hysteresis that prevents unload/reload flickering
+    /// at the streaming edge. Consumed only via <see cref="IsBeyondUnloadDistance"/>.
+    /// </summary>
+    public const int UnloadDistanceBuffer = 2;
+
+    /// <summary>
+    /// Whether the given chunk lies beyond the unload boundary (<see cref="Settings.LoadDistance"/> +
+    /// <see cref="UnloadDistanceBuffer"/>) from the player's current chunk. Single source of truth for the
+    /// boundary shared by <see cref="UnloadChunks"/> (what it reclaims) and the §3.2 out-of-range generation
+    /// discard (<c>WorldJobManager.ProcessGenerationJobs</c>) — defining the comparison once ensures the
+    /// discard boundary can never drift inside the unload boundary, which would strand a permanent
+    /// unpopulated hole in the buffer band.
+    /// </summary>
+    /// <param name="coord">The chunk coordinate to test.</param>
+    /// <returns><c>true</c> if the chunk is outside the unload boundary and eligible for reclamation.</returns>
+    public bool IsBeyondUnloadDistance(ChunkCoord coord) =>
+        Mathf.Max(Mathf.Abs(coord.X - PlayerChunkCoord.X), Mathf.Abs(coord.Z - PlayerChunkCoord.Z))
+        > settings.LoadDistance + UnloadDistanceBuffer;
 
     /// <summary>
     /// Unloads chunks that are outside the load distance.
@@ -2354,20 +2941,26 @@ public class World : MonoBehaviour
     {
         // Guard Chunk Unloading
         // If Persistence is disabled, we intentionally keep ALL chunks in memory.
-        if (!settings.EnablePersistence) return;
+        if (!settings.EnablePersistence)
+        {
+            // No pass ran — publish zeroed CP-1 tallies so the HUD doesn't show stale counts in keep-in-memory mode.
+            _unloadDeferJobRunning = _unloadDeferLightPending = _unloadDeferWouldStrand = _unloadedLastPass = _unloadedLightPersisted = 0;
+            return;
+        }
 
         // OPTIMIZATION: Use ListPool to avoid allocations
         List<ChunkCoord> chunksToRemove = ListPool<ChunkCoord>.Get();
-        int unloadDistance = settings.LoadDistance + 2; // Buffer to prevent flickering
+
+        // CP-1: per-pass deferral/unload tallies (F6 — the §3.3-perf "pinned trail" made observable).
+        // lightPersisted counts the P-4 rec 3 persist-and-unload arm (a subset of unloaded).
+        int deferJob = 0, deferLight = 0, deferStrand = 0, unloaded = 0, lightPersisted = 0;
 
         // Step A: Identify candidates
-        foreach (KeyValuePair<Vector2Int, ChunkData> kvp in worldData.Chunks)
+        foreach (Vector2Int chunkVoxelKey in worldData.ChunkKeys)
         {
-            ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(kvp.Key);
+            ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkVoxelKey);
 
-            // Calculate distance check
-            if (Mathf.Abs(chunkCoord.X - PlayerChunkCoord.X) > unloadDistance ||
-                Mathf.Abs(chunkCoord.Z - PlayerChunkCoord.Z) > unloadDistance)
+            if (IsBeyondUnloadDistance(chunkCoord))
             {
                 chunksToRemove.Add(chunkCoord);
             }
@@ -2378,47 +2971,81 @@ public class World : MonoBehaviour
         {
             Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
 
-            if (!worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData data))
+            if (!worldData.TryGetChunk(chunkVoxelPos, out ChunkData data))
                 continue;
 
-            // Safety: Don't unload if a job is currently touching it
+            // CP-5: gather facts for the pure unload decision. Candidates are pre-filtered to
+            // beyond-unload in Step A, so BeyondUnloadDistance is true here.
+
+            // Safety: Don't unload if a job is currently touching it.
             bool isJobRunning = JobManager.GenerationJobs.ContainsKey(chunkCoord)
                                 || JobManager.MeshJobs.ContainsKey(chunkCoord)
                                 || JobManager.LightingJobs.ContainsKey(chunkCoord);
 
-            // Check data state logic to prevent unloading chunks that have lighting work in the pipeline but no active job.
+            // Pending main-thread lighting work with no active job.
             bool isProcessingLight = data.IsAwaitingMainThreadProcess ||
                                      data.HasLightChangesToProcess;
 
-            if (isJobRunning || isProcessingLight)
-            {
-                // Skip unload - chunk is still being processed
-                continue;
-            }
-
-            // Safety: Don't unload if doing so would strand a neighbor that needs this chunk's data
-            // for lighting. A stranded neighbor with HasLightChangesToProcess or NeedsInitialLighting
-            // would be unable to schedule its lighting job (AreNeighborsDataReady would fail),
-            // unable to mesh (HasLightChangesToProcess blocks), and unable to unload (same flag blocks).
-            bool wouldStrandNeighbor = false;
+            // Safety: Don't unload if doing so would strand an IN-RANGE neighbor that needs this chunk's
+            // data for lighting. Such a neighbor (HasLightChangesToProcess or NeedsInitialLighting) would
+            // be unable to schedule its lighting job (AreNeighborsDataReady would fail), unable to mesh
+            // (HasLightChangesToProcess blocks), and unable to unload (same flag blocks) — pipeline §9.6.
+            // An OUT-OF-RANGE strand neighbor is excluded (P-4 rec 3): it is itself being reclaimed on this
+            // or a later pass, so stranding it is harmless — this is what lets the pinned trail drain.
+            bool wouldStrandInRangeNeighbor = false;
             foreach (Vector3Int offset in VoxelData.AllNeighborOffsets)
             {
                 ChunkCoord neighborCoord = chunkCoord.Neighbor(offset.x, offset.z);
                 Vector2Int neighborV2 = neighborCoord.ToVoxelOrigin();
 
-                if (worldData.Chunks.TryGetValue(neighborV2, out ChunkData neighborData) &&
+                if (worldData.TryGetChunk(neighborV2, out ChunkData neighborData) &&
                     neighborData.IsPopulated &&
-                    (neighborData.HasLightChangesToProcess || neighborData.NeedsInitialLighting))
+                    (neighborData.HasLightChangesToProcess || neighborData.NeedsInitialLighting) &&
+                    !IsBeyondUnloadDistance(neighborCoord))
                 {
-                    wouldStrandNeighbor = true;
+                    wouldStrandInRangeNeighbor = true;
                     break;
                 }
             }
 
-            if (wouldStrandNeighbor)
+            ChunkUnloadDecision.Result decision = ChunkUnloadDecision.Evaluate(
+                new ChunkUnloadDecision.ChunkUnloadFacts(
+                    beyondUnloadDistance: true,
+                    jobRunning: isJobRunning,
+                    processingLight: isProcessingLight,
+                    wouldStrandInRangeNeighbor: wouldStrandInRangeNeighbor));
+
+            switch (decision)
             {
-                continue; // Defer unload — neighbor still needs us
+                case ChunkUnloadDecision.Result.DeferJobRunning:
+                    deferJob++;
+                    continue;
+                case ChunkUnloadDecision.Result.DeferLightPending:
+                    // Currently unreachable — Evaluate no longer returns this since P-4 rec 3 routes
+                    // light-pending out-of-range chunks to UnloadPersistLightPending. Retained as the
+                    // CP-1 tally slot / LP-3 coordination point (see the enum's docstring).
+                    deferLight++;
+                    continue;
+                case ChunkUnloadDecision.Result.DeferWouldStrand:
+                    deferStrand++;
+                    continue; // Defer unload — an in-range neighbor still needs us
+                case ChunkUnloadDecision.Result.KeepInRange:
+                    continue; // Unreachable: Step A pre-filters to beyond-unload candidates.
+                case ChunkUnloadDecision.Result.UnloadPersistLightPending:
+                    // P-4 rec 3: this out-of-range chunk is pinned only by its own pending lighting, which
+                    // can never complete (missing-neighbor gate). Persist/save/teardown as for Unload; if it
+                    // carries edits, the save block below also forces a full re-light on reload.
+                    lightPersisted++;
+                    break;
+                case ChunkUnloadDecision.Result.Unload:
+                    break; // Proceed to teardown.
+                default:
+                    // Defensive: a future arm must add its own case. Defer (never wrongly unload) and log loud.
+                    Debug.LogError($"[UnloadChunks] Unhandled unload decision {decision} for {chunkCoord} — deferring.");
+                    continue;
             }
+
+            // decision == Unload or UnloadPersistLightPending — proceed to persist / save / pool teardown.
 
             // 1. Persist Orphaned Lighting Queue
             if (worldData.SunlightRecalculationQueue.TryGetValue(chunkVoxelPos, out HashSet<Vector2Int> globalCols))
@@ -2438,14 +3065,30 @@ public class World : MonoBehaviour
             // 2. Save if modified
             if (worldData.ModifiedChunks.Contains(data))
             {
-                // Fire and forget (StorageManager handles the Snapshot lifecycle)
-                Task saveTask = StorageManager.SaveChunkAsync(data, _shutdownTokenSource.Token);
+                // P-4 rec 3: a persist-arm chunk that carries edits must re-light fully on reload (its
+                // in-flight lighting could never complete). Force it here — right before the snapshot, which
+                // SaveChunkAsync takes synchronously so the flag is captured. Unmodified persist-arm chunks
+                // are not saved and regenerate from seed (fresh lighting), so they need no flag — keeping this
+                // off their path avoids flagging a chunk we immediately delete (review finding #1).
+                if (decision == ChunkUnloadDecision.Result.UnloadPersistLightPending)
+                    data.NeedsInitialLighting = true;
+
+                // Fire and forget (StorageManager handles the Snapshot lifecycle). CP-6: a failed save is
+                // no longer silent — SaveChunkAsync hands the snapshot (the edits' only surviving copy once
+                // `data` is pool-recycled below) to the failed-save retry registry, which re-attempts until
+                // the write lands (drained per frame; flushed synchronously at quit).
+                Task<ChunkSaveResult> saveTask = StorageManager.SaveChunkAsync(data, _shutdownTokenSource.Token);
 
                 saveTask.ContinueWith(t =>
                 {
-                    if (t.IsFaulted) Debug.LogError($"[UnloadChunks] Save failed for {chunkCoord}: {t.Exception}");
+                    // Failures surface as ChunkSaveResult.Failed and route to the retry registry; a faulted
+                    // task here means SaveChunkAsync itself broke its contract — log loud.
+                    if (t.IsFaulted) Debug.LogError($"[UnloadChunks] Save task faulted for {chunkCoord}: {t.Exception}");
                 });
 
+                // Safe to unmark at fire time: durability responsibility transfers to the save (and, on
+                // failure, its retry registry). The recycled `data` ref must never linger in ModifiedChunks —
+                // the pool would hand it to another chunk, falsely marking it modified.
                 worldData.ModifiedChunks.Remove(data);
             }
 
@@ -2471,12 +3114,20 @@ public class World : MonoBehaviour
             }
 
             // 3. Remove Data Reference from World
-            worldData.Chunks.Remove(chunkVoxelPos);
+            worldData.RemoveChunk(chunkVoxelPos);
 
             // 4. Recycle Data
             // POOLING: Return data to pool
             ChunkPool.ReturnChunkData(data);
+            unloaded++;
         }
+
+        // CP-1: publish this pass's tallies for the debug HUD.
+        _unloadDeferJobRunning = deferJob;
+        _unloadDeferLightPending = deferLight;
+        _unloadDeferWouldStrand = deferStrand;
+        _unloadedLastPass = unloaded;
+        _unloadedLightPersisted = lightPersisted;
 
         // 5. Return temp pools back to pool list
         ListPool<ChunkCoord>.Release(chunksToRemove); // Free the ListPool
@@ -2496,7 +3147,7 @@ public class World : MonoBehaviour
         HashSet<Vector2Int> localCols = HashSetPool<Vector2Int>.Get();
         foreach (Vector2Int gCol in globalCols)
         {
-            localCols.Add(new Vector2Int(gCol.x - chunkVoxelPos.x, gCol.y - chunkVoxelPos.y));
+            localCols.Add(SunlightColumnRouting.ToLocalColumn(gCol, chunkVoxelPos));
         }
 
         LightingStateManager.AddPending(chunkCoord, localCols);
@@ -2519,13 +3170,133 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
+    /// Drains queued generation requests (built by <see cref="CheckViewDistance"/>) in nearest-first order,
+    /// admitting new ones only while the in-flight generation-job count stays below
+    /// <see cref="Settings.maxInFlightGenerationJobs"/> (P-4 §3.1 backpressure) and the §3.5 panic gate is
+    /// open (admissions pause entirely while the lighting backlog is saturated — see
+    /// <see cref="Helpers.GenerationPanicGate"/>). Called once per frame.
+    /// </summary>
+    /// <remarks>
+    /// Soft cap with two independent bounds (both use the same <c>cap</c>):
+    /// <list type="bullet">
+    /// <item><b>Memory bound</b> — <c>GenerationJobs.Count &lt; cap</c> bounds tracked generation-job buffers.</item>
+    /// <item><b>Flood bound</b> — <c>admittedThisFrame &lt; cap</c> caps per-frame admissions, since
+    /// <see cref="LoadOrGenerateChunk"/> is async (a chunk enters the disk-load phase before it becomes a
+    /// tracked job, unlike the synchronous mesh schedule whose count rises in-loop) — without it one frame
+    /// would flood the whole backlog into the async pipeline.</item>
+    /// </list>
+    /// The two are <b>separate</b> conditions, not a sum, so disk-<i>hit</i> chunks (which never become
+    /// generation jobs) flow at up to <c>cap</c>/frame without being starved behind generation. The cost of
+    /// decoupling: within a single frame the memory bound reads a not-yet-updated <c>GenerationJobs.Count</c>
+    /// (admitted disk-<i>miss</i> chunks call <c>ScheduleGeneration</c> only in a later-frame continuation), so
+    /// each frame can admit up to <c>cap</c> new requests regardless of how many prior admissions are still
+    /// resolving into jobs. Worst-case tracked jobs are therefore <b>disk-latency-dependent</b>: roughly
+    /// <c>cap × (disk-miss-probe latency in frames)</c> — about 2×<c>cap</c> on fast storage, higher on slow
+    /// flash (the OM-1 constrained-device case). This is the accepted trade for not throttling saved-region
+    /// disk loads behind new-terrain generation (finding #3 / overlaps SU-2); a <b>latency-independent</b> hard
+    /// ceiling would require a persistent in-flight counter, deliberately declined in favor of this soft cap.
+    /// </remarks>
+    private void DrainGenerationRequests()
+    {
+        // P-4 §3.5 panic gate: when the schedulable lighting backlog saturates, stop ADMITTING new
+        // generation until it drains — never touch the request queue or the CheckViewDistance spiral
+        // (the §3.1 permanent-holes lesson): admissions simply resume from the queue on reopen.
+        // Signal is the READY set only — parked frontier chunks (WaitingCount) sit indefinitely at the
+        // load-square edge by design and would poison an absolute threshold. Gated on enableLighting:
+        // without the lighting engine the signal never accumulates and the gate must stay open.
+        if (settings.enableGenerationPanicGate && settings.enableLighting)
+        {
+            int backlog = _readyCountAfterScan;
+
+            // Sanitize the persisted, user-editable thresholds: closeAt ≥ 1 and reopenAt in
+            // [0, closeAt). A degenerate band (reopen ≥ close) would flip the gate every frame —
+            // halving admissions and spamming two interpolated log strings per flip inside Update —
+            // and a negative reopenAt could never be reached by a non-negative backlog, wedging a
+            // closed gate shut forever.
+            int closeAt = Mathf.Max(1, settings.panicGateCloseThreshold);
+            int reopenAt = Mathf.Clamp(settings.panicGateReopenThreshold, 0, closeAt - 1);
+
+            // Close debounce (see the field comment): the close arm only sees a "high" backlog after
+            // it has been high for PANIC_CLOSE_DEBOUNCE_FRAMES consecutive samples — implemented by
+            // capping the value below closeAt until then, which leaves the pure Evaluate contract and
+            // the reopen/remain-closed arms untouched (a capped value is still above reopenAt).
+            if (backlog >= closeAt) _backlogHighFrames++;
+            else _backlogHighFrames = 0;
+
+            int effectiveBacklog = _backlogHighFrames >= PANIC_CLOSE_DEBOUNCE_FRAMES
+                ? backlog
+                : Mathf.Min(backlog, closeAt - 1);
+
+            GenerationPanicGate.Decision decision = GenerationPanicGate.Evaluate(
+                _generationGateOpen, effectiveBacklog, closeAt, reopenAt);
+
+            // Transitions are rare (hysteresis band) — log them unconditionally as the §3.5 witness.
+            if (decision == GenerationPanicGate.Decision.Close)
+            {
+                _generationGateCloseCount++;
+                Debug.Log($"[GENERATION] Panic gate CLOSED — lighting backlog {backlog.ToString()} >= " +
+                          $"{closeAt.ToString()}; pausing generation admissions " +
+                          $"({_generationRequestQueue.Count.ToString()} queued).");
+            }
+            else if (decision == GenerationPanicGate.Decision.Reopen)
+            {
+                Debug.Log($"[GENERATION] Panic gate reopened — lighting backlog {backlog.ToString()} <= " +
+                          $"{reopenAt.ToString()}; resuming admissions " +
+                          $"({_generationRequestQueue.Count.ToString()} queued, closed for " +
+                          $"{_generationGateClosedFrames.ToString()} frames total).");
+            }
+
+            _generationGateOpen = GenerationPanicGate.IsOpenAfter(decision);
+            if (!_generationGateOpen)
+            {
+                _generationGateClosedFrames++;
+                return;
+            }
+        }
+        else if (!_generationGateOpen)
+        {
+            // Gate feature (or lighting) was toggled off while the gate was closed: admissions resume
+            // below regardless, so reset the probe state — otherwise the HUD's "Gen gate" row reports
+            // a stale CLOSED forever, corrupting the calibration workflow it exists for. The close
+            // debounce counter is reset too: a stale-high value would let a re-enable close the gate on
+            // the first frame, defeating the 3-frame debounce that exists to ignore transient spikes.
+            _generationGateOpen = true;
+            _backlogHighFrames = 0;
+        }
+
+        int cap = Mathf.Max(1, settings.maxInFlightGenerationJobs);
+        int admittedThisFrame = 0;
+
+        // Two independent bounds (see remarks): GenerationJobs.Count < cap is the memory bound; admittedThisFrame
+        // < cap is the per-frame flood bound (LoadOrGenerateChunk is async, so admissions don't raise the count
+        // in-loop). Keeping them separate — not summed — lets disk-hit loads flow without eating gen headroom;
+        // the trade is a disk-latency-dependent overshoot (~cap × disk-miss-latency-in-frames), see remarks.
+        while (_generationRequestQueue.Count > 0
+               && JobManager.GenerationJobs.Count < cap
+               && admittedThisFrame < cap)
+        {
+            ChunkCoord chunkCoord = _generationRequestQueue.Dequeue();
+            _pendingGenerationRequests.Remove(chunkCoord);
+
+            // Re-validate: the chunk may have been populated, unloaded, started loading, or had its job
+            // scheduled between enqueue and now. Skips do not consume this frame's headroom.
+            if (!worldData.TryGetChunk(chunkCoord.ToVoxelOrigin(), out ChunkData data)) continue;
+            if (data.IsPopulated || data.IsLoading || JobManager.GenerationJobs.ContainsKey(chunkCoord)) continue;
+
+            data.IsLoading = true;
+            _ = LoadOrGenerateChunk(chunkCoord);
+            admittedThisFrame++;
+        }
+    }
+
+    /// <summary>
     /// Checks the view distance and updates the active chunks.
     /// </summary>
     private void CheckViewDistance()
     {
         clouds.UpdateClouds();
 
-        ChunkCoord playerCurrentChunkCoord = GetChunkCoordFromVector3(_playerTransform.position);
+        ChunkCoord playerCurrentChunkCoord = WorldOrigin.UnityToChunk(_playerTransform.position);
 
         // Return early if the player hasn't moved outside the last chunk.
         if (playerCurrentChunkCoord.Equals(_playerLastChunkCoord)) return;
@@ -2533,6 +3304,12 @@ public class World : MonoBehaviour
 
         // OPTIMIZATION: Clear cached sets instead of allocating new ones
         _currentViewChunks.Clear();
+
+        // Rebuild the generation request backlog nearest-first from the current position (P-4 §3.1).
+        // Requests not yet admitted by the per-frame drain are re-enqueued below if still needed; ones
+        // that have left the load square are correctly dropped by not being re-added.
+        _generationRequestQueue.Clear();
+        _pendingGenerationRequests.Clear();
 
         int viewDist = settings.viewDistance;
         int loadDist = settings.LoadDistance;
@@ -2552,20 +3329,17 @@ public class World : MonoBehaviour
             {
                 Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
 
-                // If chunk not in memory at all
-                if (!worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData data))
-                {
-                    // Create placeholder
-                    data = Instance.ChunkPool.GetChunkData(chunkVoxelPos);
-                    worldData.Chunks.Add(chunkVoxelPos, data);
-                }
+                // Get the chunk, creating its placeholder when not in memory (single creation site, CP-4).
+                ChunkData data = worldData.GetOrCreatePlaceholder(chunkVoxelPos);
 
-                // If it's empty, and not currently fetching from disk, and not currently generating... start the pipeline!
-                if (!data.IsPopulated && !data.IsLoading && !JobManager.GenerationJobs.ContainsKey(chunkCoord))
+                // If it's empty, and not currently fetching from disk, and not currently generating...
+                // queue it for the capped per-frame drain (P-4 §3.1) instead of starting the pipeline
+                // immediately. IsLoading is set when the request is actually admitted (DrainGenerationRequests),
+                // so the chunk stays eligible until then; the set dedups against this crossing's enqueues.
+                if (!data.IsPopulated && !data.IsLoading && !JobManager.GenerationJobs.ContainsKey(chunkCoord)
+                    && _pendingGenerationRequests.Add(chunkCoord))
                 {
-                    // Trigger Async Load
-                    data.IsLoading = true;
-                    _ = LoadOrGenerateChunk(chunkCoord);
+                    _generationRequestQueue.Enqueue(chunkCoord);
                 }
 
                 // If within view distance, it's a candidate for being active.
@@ -2683,8 +3457,8 @@ public class World : MonoBehaviour
         if (_chunkBorders.ContainsKey(chunkCoord)) return;
 
         // POOLING: Use ChunkPoolManager
-        Vector3 pos = chunkCoord.ToWorldPosition();
-        GameObject borderObject = ChunkPool.GetBorder(chunkBorderPrefab, pos, _chunkBorderParent);
+        Vector3 pos = WorldOrigin.VoxelToUnity(chunkCoord.ToVoxelOrigin());
+        GameObject borderObject = ChunkPool.GetBorder(chunkBorderPrefab, pos, _chunkBorderParent, chunkCoord);
 
         // Ensure state matches setting (Pool might return active object, but setting might be off)
         borderObject.SetActive(ShowChunkBorders);
@@ -2905,7 +3679,9 @@ public class World : MonoBehaviour
                 int globalY = startY + yOffset;
 
                 Vector3 localBlockOrigin = new Vector3(x, globalY, z);
-                Vector3 worldBlockOrigin = chunk.Coord.ToWorldPosition() + localBlockOrigin;
+
+                // Unity space: this is compared against the player transform below and fed to Debug.DrawLine.
+                Vector3 worldBlockOrigin = WorldOrigin.VoxelToUnity(chunk.Coord.ToVoxelOrigin()) + localBlockOrigin;
 
                 // --- RADIUS CULLING ---
                 const float COLLISION_BOUNDS_DRAW_RADIUS = 10f;
@@ -3221,7 +3997,7 @@ public class World : MonoBehaviour
 
 
         Vector3Int worldHeight = new Vector3Int(x, yMax, z);
-        ChunkCoord chunkCoord = ChunkCoord.FromWorldPosition(worldPos);
+        ChunkCoord chunkCoord = ChunkCoord.FromVoxelPosition(worldPos);
 
         // Voxel outside the world, highest voxel is world height.
         if (!worldData.IsVoxelInWorld(worldPos))
@@ -3271,9 +4047,9 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
-    /// Determines if a voxel at the given world position should stop a ray or count as a hit.
+    /// Determines if a voxel at the given <b>voxel-space</b> position should stop a ray or count as a hit.
     /// </summary>
-    /// <param name="worldPos">The world-space position.</param>
+    /// <param name="worldPos">The voxel-space position.</param>
     /// <param name="includeFluids">If true, fluids will also count as a hit.</param>
     /// <param name="includeNonSolid">If true, non-solid interactable blocks (excluding Air and
     /// blocks with <see cref="BlockTags.IGNORE_RAYCAST"/>) will also count as a hit.</param>
@@ -3282,12 +4058,39 @@ public class World : MonoBehaviour
         BlockTags skipTags = BlockTags.NONE)
     {
         VoxelState? voxel = worldData.GetVoxelState(worldPos);
-        if (!voxel.HasValue) return false;
+        return voxel.HasValue && IsRayHit(voxel.Value, includeFluids, includeNonSolid, skipTags);
+    }
 
-        BlockType props = BlockTypes[voxel.Value.ID];
+    /// <summary>
+    /// Integer-cell overload of <see cref="CheckForVoxel(Vector3,bool,bool,BlockTags)"/> — same voxel space, no
+    /// float round-trip. Preferred by callers that already hold a cell, notably the per-step ray march.
+    /// </summary>
+    /// <param name="x">Absolute voxel X.</param>
+    /// <param name="y">Absolute voxel Y.</param>
+    /// <param name="z">Absolute voxel Z.</param>
+    /// <param name="includeFluids">If true, fluids will also count as a hit.</param>
+    /// <param name="includeNonSolid">If true, non-solid interactable blocks (excluding Air and
+    /// blocks with <see cref="BlockTags.IGNORE_RAYCAST"/>) will also count as a hit.</param>
+    /// <param name="skipTags">Block tags the ray passes through.</param>
+    /// <returns>True if the voxel should be treated as a hit; otherwise, false.</returns>
+    public bool CheckForVoxel(int x, int y, int z, bool includeFluids = false, bool includeNonSolid = false,
+        BlockTags skipTags = BlockTags.NONE)
+    {
+        // VQ-1 integer fast path: no float decomposition, no nullable wrap.
+        return worldData.TryGetVoxel(x, y, z, out VoxelState voxel) &&
+               IsRayHit(voxel, includeFluids, includeNonSolid, skipTags);
+    }
+
+    /// <summary>
+    /// The shared hit classification behind both <c>CheckForVoxel</c> overloads: decides whether a resolved voxel
+    /// stops a ray, given the caller's fluid / non-solid / skip-tag policy.
+    /// </summary>
+    private bool IsRayHit(VoxelState voxel, bool includeFluids, bool includeNonSolid, BlockTags skipTags)
+    {
+        BlockType props = BlockTypes[voxel.ID];
 
         // Skip Air (ID 0) — never a hit
-        if (voxel.Value.ID == BlockIDs.Air) return false;
+        if (voxel.ID == BlockIDs.Air) return false;
 
         // Skip blocks whose tags overlap with the held block's canReplaceTags,
         // so the ray passes through them (e.g. fluids when holding a block that can replace fluids).
@@ -3313,7 +4116,7 @@ public class World : MonoBehaviour
     /// This is a coarse grid-level check used for placement previews.
     /// Does NOT evaluate <see cref="BlockTags.REPLACEABLE"/> or specific placement rules.
     /// </summary>
-    /// <param name="pos">The world-space position to check.</param>
+    /// <param name="pos">The <b>voxel-space</b> position to check.</param>
     /// <returns>True if the cell contains a solid block, false otherwise.</returns>
     public bool IsCellOccupiedForPlacement(Vector3 pos)
     {
@@ -3326,11 +4129,13 @@ public class World : MonoBehaviour
     /// specific movement axis and direction. Aggregates across all overlapping blocks
     /// and returns the correction that fully resolves ALL overlaps on this axis.
     /// </summary>
-    /// <param name="entityBounds">The entity's predicted world-space AABB.</param>
+    /// <param name="entityBounds">The entity's predicted <b>Unity-space</b> AABB.</param>
     /// <param name="axis">The movement axis to resolve (0=X, 1=Y, 2=Z).</param>
     /// <param name="directionSign">+1 for positive movement, -1 for negative.</param>
     /// <param name="contact">If overlap detected, contains axis-specific resolution.</param>
     /// <returns>True if there is any overlap on the specified axis.</returns>
+    /// <remarks>WS-4: the scan stays entirely in Unity space — only the voxel <i>lookup</i> offsets — so the block
+    /// bounds and the returned contact/correction remain directly comparable to the entity's AABB.</remarks>
     public bool CheckPhysicsCollision(Bounds entityBounds, int axis, int directionSign, out CollisionContact contact)
     {
         contact = new CollisionContact { Hit = false };
@@ -3347,19 +4152,23 @@ public class World : MonoBehaviour
             Mathf.FloorToInt(entityBounds.max.y),
             Mathf.FloorToInt(entityBounds.max.z));
 
+        // The scan indices are Unity-space cells; only the lookup below crosses into voxel space.
+        int originX = WorldOrigin.OriginVoxel.x;
+        int originZ = WorldOrigin.OriginVoxel.z;
+
         for (int x = minVoxel.x; x <= maxVoxel.x; x++)
         {
             for (int y = minVoxel.y; y <= maxVoxel.y; y++)
             {
                 for (int z = minVoxel.z; z <= maxVoxel.z; z++)
                 {
-                    Vector3Int voxelPos = new Vector3Int(x, y, z);
-                    VoxelState? voxel = worldData.GetVoxelState(voxelPos);
-
-                    if (!voxel.HasValue || !voxel.Value.Properties.isSolid || voxel.Value.Properties.fluidType != FluidType.None)
+                    // VQ-1 integer fast path: no float round-trip, no nullable wrap for this per-frame AABB scan.
+                    if (!worldData.TryGetVoxel(x + originX, y, z + originZ, out VoxelState voxel) ||
+                        !voxel.Properties.isSolid || voxel.Properties.fluidType != FluidType.None)
                         continue; // Empty, unloaded, or fluid
 
-                    BlockType blockType = voxel.Value.Properties;
+                    Vector3Int voxelPos = new Vector3Int(x, y, z);
+                    BlockType blockType = voxel.Properties;
                     Bounds blockBounds;
 
                     if (!blockType.collisionBounds.HasCustomBounds)
@@ -3371,7 +4180,7 @@ public class World : MonoBehaviour
                     {
                         // Slow path: Get rotated bounds
                         float3x3 rotMatrix = BurstCustomMeshRotationUtility.GetRotationMatrix(
-                            blockType.metadataSchema, voxel.Value.Meta, blockType.defaultMetadata);
+                            blockType.metadataSchema, voxel.Meta, blockType.defaultMetadata);
                         blockBounds = GetRotatedWorldBounds(voxelPos, blockType.collisionBounds, rotMatrix);
                     }
 
@@ -3491,6 +4300,20 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
+    /// Integer voxel-query fast path (VQ-1): forwards to <see cref="WorldData.TryGetVoxel"/>. Prefer this over
+    /// <see cref="GetVoxelState(Vector3)"/> when the caller already holds integer voxel coordinates.
+    /// </summary>
+    /// <param name="x">World voxel X.</param>
+    /// <param name="y">World voxel Y.</param>
+    /// <param name="z">World voxel Z.</param>
+    /// <param name="state">The resolved voxel state; <c>default</c> when the method returns false.</param>
+    /// <returns>True when the coordinate is in-world and its chunk is loaded; false otherwise.</returns>
+    public bool TryGetVoxel(int x, int y, int z, out VoxelState state)
+    {
+        return worldData.TryGetVoxel(x, y, z, out state);
+    }
+
+    /// <summary>
     /// Gets or sets whether the game is currently in a pause menu state.
     /// </summary>
     /// <summary>
@@ -3502,24 +4325,14 @@ public class World : MonoBehaviour
     /// <summary>
     /// Checks if the specified chunk coordinate is within the permitted world boundaries.
     /// </summary>
+    /// <remarks>WS-3: XZ is fully unbounded — the west/south floor is gone, so every XZ chunk coordinate is
+    /// in-world (chunks are full-height columns, so there is no chunk-granularity Y bound). Kept as the single
+    /// bounds chokepoint for the neighbor guards and streaming filters, and for WS-4/TF-14 to hook later.</remarks>
     /// <param name="chunkCoord">The chunk coordinate.</param>
-    /// <returns>True if the chunk is in the world; otherwise, false.</returns>
+    /// <returns>True — every chunk coordinate is in the (unbounded) world.</returns>
     internal static bool IsChunkInWorld(ChunkCoord chunkCoord)
     {
-        return chunkCoord.X is >= 0 and < VoxelData.WorldSizeInChunks &&
-               chunkCoord.Z is >= 0 and < VoxelData.WorldSizeInChunks;
-    }
-
-    /// <summary>
-    /// Checks if the specified X/Z coordinates are within the permitted world boundaries.
-    /// </summary>
-    /// <param name="x">The X coordinate.</param>
-    /// <param name="z">The Z coordinate.</param>
-    /// <returns>True if in world; otherwise, false.</returns>
-    private static bool IsChunkInWorld(int x, int z)
-    {
-        return x is >= 0 and < VoxelData.WorldSizeInChunks &&
-               z is >= 0 and < VoxelData.WorldSizeInChunks;
+        return true;
     }
 
     #region Public Interface Methods
@@ -3565,25 +4378,49 @@ public class World : MonoBehaviour
     /// </param>
     private void SaveAllModifiedChunks(bool synchronous)
     {
+        // CP-6: the synchronous arm is the last-chance path (quit / force-unload) — flush pending
+        // failed/canceled saves FIRST and regardless of whether any chunk is currently modified:
+        // (a) the registry can hold edits for chunks long gone from ModifiedChunks, so the empty-set
+        //     early return below must not skip them;
+        // (b) registry snapshots are never fresher than live data, so writing them BEFORE the live
+        //     saves means the newest bytes always land last (a flush after the loop could overwrite
+        //     a just-synced chunk with its older failed-save snapshot).
+        if (synchronous && StorageManager != null)
+        {
+            int recovered = StorageManager.FlushFailedSavesSync();
+            if (recovered > 0) Debug.Log($"[SaveAllModifiedChunks] Flush recovered {recovered.ToString()} failed save(s).");
+        }
+
         if (worldData.ModifiedChunks.Count == 0) return;
 
         // Snapshot the list to avoid collection modification errors
-        List<ChunkData> chunksToSave = new List<ChunkData>(worldData.ModifiedChunks);
-        worldData.ModifiedChunks.Clear();
-
-        Debug.Log($"Saving {chunksToSave.Count.ToString()} modified chunks (Sync: {synchronous.ToString()})...");
-
-        foreach (ChunkData data in chunksToSave)
+        List<ChunkData> chunksToSave = ListPool<ChunkData>.Get();
+        try
         {
-            if (synchronous)
+            chunksToSave.AddRange(worldData.ModifiedChunks);
+            worldData.ModifiedChunks.Clear();
+
+            Debug.Log($"Saving {chunksToSave.Count.ToString()} modified chunks (Sync: {synchronous.ToString()})...");
+
+            foreach (ChunkData data in chunksToSave)
             {
-                StorageManager.SaveChunk(data); // Sync method
+                if (synchronous)
+                {
+                    StorageManager.SaveChunk(data); // Sync method
+                }
+                else
+                {
+                    // Pass the token so manual saves don't keep running if we suddenly quit.
+                    // CP-6: a failure lands in the retry registry (drained per frame) and a quit-canceled
+                    // save stages its snapshot for the quit flush, so the up-front ModifiedChunks.Clear
+                    // above no longer silently loses the chunk's edits on either path.
+                    _ = StorageManager.SaveChunkAsync(data, _shutdownTokenSource.Token);
+                }
             }
-            else
-            {
-                // Pass the token so manual saves don't keep running if we suddenly quit
-                _ = StorageManager.SaveChunkAsync(data, _shutdownTokenSource.Token);
-            }
+        }
+        finally
+        {
+            ListPool<ChunkData>.Release(chunksToSave);
         }
     }
 
@@ -3655,12 +4492,12 @@ public class World : MonoBehaviour
         _meshBuildQueue.Clear();
 
         // 6. Return all ChunkData to pool and clear world data
-        foreach (ChunkData data in worldData.Chunks.Values)
+        foreach (ChunkData data in worldData.ChunkValues)
         {
             ChunkPool.ReturnChunkData(data);
         }
 
-        worldData.Chunks.Clear();
+        worldData.ClearChunks();
         worldData.ModifiedChunks.Clear();
 
         // 7. Clear lighting work sets and active chunk tracking

@@ -49,5 +49,17 @@ namespace Editor.Validation.Framework
                 throw new InvalidOperationException($"Could not locate the private field {target.GetType().Name}.{fieldName} via reflection.");
             field.SetValue(target, value);
         }
+
+        /// <summary>Reads a private instance field directly (the read mirror of <see cref="SetInstanceField"/>).</summary>
+        /// <param name="target">The instance whose field to read.</param>
+        /// <param name="fieldName">The private field name.</param>
+        /// <returns>The field's current value.</returns>
+        public static object GetInstanceField(object target, string fieldName)
+        {
+            FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field == null)
+                throw new InvalidOperationException($"Could not locate the private field {target.GetType().Name}.{fieldName} via reflection.");
+            return field.GetValue(target);
+        }
     }
 }
