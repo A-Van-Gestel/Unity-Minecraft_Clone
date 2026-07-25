@@ -298,15 +298,15 @@ What each named GS-5 requirement needs from this plan, and where it lands:
 `dotnet build "Assembly-CSharp.csproj"` AND `dotnet build "Assembly-CSharp-Editor.csproj"` clean. Workflow gotchas apply (new-file Unity import before `dotnet build`; menu suites can run stale code — confirm red/green flips after `RequestScriptCompilation` with a fresh `Unity_RunCommand`
 wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game confirmation before its baseline is trusted (validation-driven-bugfix discipline).
 
-| Phase                                                       | Scope (files)                                                                                                                      | Effort | Depends on            |
-|-------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------|:------:|-----------------------|
-| **MP-1 — Request/drop observability probes**                | `World.cs`, `WorldJobManager.cs` (editor-only diagnostics)                                                                         |   🟢   | —                     |
-| **MP-2 — `MeshingScheduleDecision` + scheduling baselines** | new `Helpers/MeshingScheduleDecision.cs`; `WorldJobManager.ScheduleMeshing`; new suite partial                                     |   🟡   | —                     |
-| **MP-3 — In-flight request policy fix**                     | `WorldJobManager.ScheduleMeshing` (one arm); prove-red baseline                                                                    |   🟡   | MP-1 (evidence), MP-2 |
-| **MP-4 — Completion-pass unification** ✅ **DONE**          | `Helpers/JobCompletionPass.cs` (generalized/renamed); `WorldJobManager.ProcessMeshJobs` + mesh driver; B27 skeleton-order baseline |   🟡   | —                     |
-| **MP-5 — GS-5 Phase 0.5 ownership split** ✅ **DONE**       | `SectionRenderer.cs`; renderer-fixture baselines B28–B30; culling-doc + perf-report checkbox flips                                 |   🟢   | —                     |
-| **MP-6 — Draw-tail re-home (`ChunksToDraw`)**               | `Chunk.cs`, `World.cs` step 8                                                                                                      |   🟢   | MP-1 (evidence)       |
-| **MP-7 — Naming & wiring hygiene**                          | `Jobs/MeshGenerationJob.cs` field rename; `WorldJobManager.cs` wiring; pipeline-doc §9.5 refresh                                   |   🟢   | —                     |
+| Phase                                                                   | Scope (files)                                                                                                                      | Effort | Depends on            |
+|-------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------|:------:|-----------------------|
+| **MP-1 — Request/drop observability probes** ✅ **DONE**                | `World.cs`, `WorldJobManager.cs` (editor-only diagnostics)                                                                         |   🟢   | —                     |
+| **MP-2 — `MeshingScheduleDecision` + scheduling baselines** ✅ **DONE** | new `Helpers/MeshingScheduleDecision.cs`; `WorldJobManager.ScheduleMeshing`; new suite partial                                     |   🟡   | —                     |
+| **MP-3 — In-flight request policy fix** ✅ **DONE**                     | `WorldJobManager.ScheduleMeshing` (one arm); prove-red baseline **B26**                                                            |   🟡   | MP-1 (evidence), MP-2 |
+| **MP-4 — Completion-pass unification** ✅ **DONE**                      | `Helpers/JobCompletionPass.cs` (generalized/renamed); `WorldJobManager.ProcessMeshJobs` + mesh driver; B27 skeleton-order baseline |   🟡   | —                     |
+| **MP-5 — GS-5 Phase 0.5 ownership split** ✅ **DONE**                   | `SectionRenderer.cs`; renderer-fixture baselines B28–B30; culling-doc + perf-report checkbox flips                                 |   🟢   | —                     |
+| **MP-6 — Draw-tail re-home (`ChunksToDraw`)**                           | `Chunk.cs`, `World.cs` step 8                                                                                                      |   🟢   | MP-1 (evidence)       |
+| **MP-7 — Naming & wiring hygiene**                                      | `Jobs/MeshGenerationJob.cs` field rename; `WorldJobManager.cs` wiring; pipeline-doc §9.5 refresh                                   |   🟢   | —                     |
 
 **Minimal standalone-value set:** MP-1 + MP-2 (coverage) or MP-5 alone (unblocks GS-5 — it has no dependency on the others and the performance report asks for it early). **Validation is built alongside, not after** — MP-2/3/4/5 each add their baselines in the same commit as the code.
 
@@ -356,7 +356,7 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 >   misses reused-at-new-coord, so F4 is not fully retired; MP-6 still proceeds for the drop-stagger
 >   decision).
 
-### MP-2 — `MeshingScheduleDecision` + scheduling baselines (🟡) · **IMPLEMENTED 2026-07-24 (uncommitted)**
+### MP-2 — `MeshingScheduleDecision` + scheduling baselines (🟡) · ✅ **IMPLEMENTED 2026-07-24 (committed)**
 
 - **Scope:** new `Assets/Scripts/Helpers/MeshingScheduleDecision.cs` (§4.1; runtime assembly,
   `LightingScheduleDecision` precedent); `ScheduleMeshing` routes its three gates through it (behavior-identical, including today's `AlreadyInFlight → true` — MP-3 changes that separately); new editor suite partial `MeshingValidationSuite.Scheduling.cs`:
@@ -398,7 +398,8 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 - **Doc-sync:** `CHUNK_LIFECYCLE_PIPELINE.md` §5.3 mesh-scheduling flowchart + §9 (new resolved entry referencing this doc); `SUB_CHUNK_MESHING_ARCHITECTURE.md` §4.4 (modification workflow)
   if it describes the old behavior. **Serialization:** none.
 
-> **Amended (2026-07-24) — MP-3 implemented (uncommitted); suite-verified, in-game repro pending.**
+> **Amended (2026-07-24) — MP-3 implemented; suite-verified. ✅ FULLY CLOSED 2026-07-25** (committed; the
+> in-game repro was retired as unreachable — see the closure note below).
 > - **The fix landed as the shared-mapping option (Option A, user sign-off).** Rather than a bare one-line switch
 >   flip, the `ScheduleMeshing` return decision is now the pure `MeshingScheduleDecision.DequeuesChunk(Result)`
 >   (`result == Result.Schedule`), read by BOTH production and B26 — so a revert edits one shared function and
@@ -419,6 +420,14 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 >   §5.3 + §9.5 and this fidelity doc's §4.
 > - ~~**PENDING (user):** the end-to-end in-game repro — `enableLighting = false`, place a block then immediately a
     > second in the same chunk within the flight window.~~
+>   **✅ RETIRED 2026-07-25 — MP-3 is FULLY CLOSED without it (user decision).** Three independent attempts failed
+>   to fire the in-flight arm, including MCP-driven ultra-high-speed edit sequences on top of the two scripted
+>   probes below. That is the *predicted* outcome, not a gap: per the CORRECTION, F1 is **load-driven**, so no
+>   edit-rate recipe can reach it — the arm needs many concurrent mesh jobs with deferred completions.
+>   **The evidence that closes MP-3 is B26's prove-red** (restoring `Schedule || AlreadyInFlight` reds exactly
+>   B26 with the F1 signature "frame 1 scheduled 1, queue left 0") **plus production telemetry** (`MeshInFlightRetried`
+>   fired 273 / 814,801 in the MP-4 smoke session — the arm demonstrably runs in real sessions, with no visual
+>   regression and no runaway). Do **not** spend further sessions on a repro rig for this.
 >
 > > **⚠️ CORRECTION (2026-07-25, measured — the recipe above does NOT work; do not retry it as written).**
 > > Three scripted probes (frame-accurate `EditorApplication.update` state machines, lighting-disabled world,
@@ -463,7 +472,7 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
     + in-game smoke.
 - **Doc-sync:** `CHUNK_LIFECYCLE_PIPELINE.md` §4 (the HF-2 fault-isolation section names the shared skeleton for lighting — extend to meshing); lighting fidelity doc B7 entry gains the mesh-side note. **Serialization:** none.
 
-> **Amended (2026-07-25) — MP-4 implemented (uncommitted); in-game smoke pending.**
+> **Amended (2026-07-25) — MP-4 implemented, in-game smoke confirmed, committed. ✅ CLOSED.**
 > - **§9 Q3 RESOLVED: hard rename (user sign-off).** `LightingCompletionPass` → `JobCompletionPass`,
 >   `ILightingCompletionDriver<TKey>` → `IJobCompletionDriver<TKey>`, file + `.cs.meta` moved together via
 >   `git mv` (GUID `958857f9…` preserved). No delegating alias. **The Rider MCP was not exposed in the
@@ -542,13 +551,13 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 >   updates, place/break all correct; no warnings observed. Objective, session-cumulative:
 >
 >   | Probe | Reading |
->         |---|---|
->         | merge attempts | **32,728** (routing demonstrably live — this is what a broken routing would flatline) |
->         | gone-chunk discards | 406 (1.2 %) |
->         | **stale-instance** | **0 / 32,728** |
->         | F1 in-flight retries | 273 / 814,801 (0.03 % — no runaway; §3.2 Option C stays deferred) |
->         | F8 request drops | 0 / 7,079,946 |
->         | F4 recycled draw-refs | 0 / 32,322 |
+>             |---|---|
+>             | merge attempts | **32,728** (routing demonstrably live — this is what a broken routing would flatline) |
+>             | gone-chunk discards | 406 (1.2 %) |
+>             | **stale-instance** | **0 / 32,728** |
+>             | F1 in-flight retries | 273 / 814,801 (0.03 % — no runaway; §3.2 Option C stays deferred) |
+>             | F8 request drops | 0 / 7,079,946 |
+>             | F4 recycled draw-refs | 0 / 32,322 |
 >
 >   Editor log for the whole session: **0 `[MESHING]` lines, 0 `ObjectDisposedException`, 0 NRE** — the
 >   fidelity-B7 cascade falsifier came back empty. Pipeline drained to **0 in-flight across all three job
@@ -565,8 +574,9 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 >   merely rare — it is closed by an existing invariant. The probe is retained as a **structural tripwire**:
 >   a non-zero reading means that pin was violated, which is an unload-path bug to investigate, not a cue to
 >   add a discard.
-> - **Still pending (unrelated to MP-4):** MP-3's own in-game repro (`enableLighting = false` + two rapid
->   same-chunk edits) — see the MP-3 Amended note.
+> - ~~**Still pending (unrelated to MP-4):** MP-3's own in-game repro.~~ **Retired 2026-07-25** — unreachable by
+>   any edit-rate recipe (F1 is load-driven); MP-3 is closed on B26's prove-red + production telemetry. See its
+>   Amended note.
 
 ### MP-5 — GS-5 Phase 0.5: renderer-ownership split (🟢, independently harmless)
 
@@ -588,7 +598,7 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 - **Doc-sync (same commit):** flip `VISIBILITY_CULLING_ARCHITECTURE.md` §5 Phase 0.5 checkbox + §7.3/§8 "still open" notes; update `PERFORMANCE_IMPROVEMENTS_REPORT.md`'s GS-5 prerequisite line (report edit is a status-line flip, not a re-audit); `SUB_CHUNK_MESHING_ARCHITECTURE.md`
   §3.2 rendering-strategy note. **Serialization:** none.
 
-> **Amended (2026-07-25) — MP-5 implemented (uncommitted); in-game smoke pending.**
+> **Amended (2026-07-25) — MP-5 implemented, in-game smoke confirmed, committed. ✅ CLOSED.**
 > - **Shipped exactly as scoped, in `SectionRenderer.cs` only.** `SetOcclusionCulled(bool)` writes
 >   `_meshRenderer.forceRenderingOff` and is the **only code that *sets* it** (pre-change re-verification:
 >   `Grep` over `Assets/` returned 0 pre-existing writers; the only other repo hit is a Unity package's
@@ -722,6 +732,8 @@ it needs play mode or a heavyweight edit-mode world builder, re-tests what B12�
 
 ## Document History
 
+* **v1.7** - **MP-3 declared FULLY CLOSED (2026-07-25, user decision) — the in-game repro is retired, not owed.** A third attempt (MCP-driven ultra-high-speed edit sequences, on top of the two scripted `EditorApplication.update` probes) again never fired the in-flight arm, exactly as the CORRECTION predicts: F1 is **load-driven**, so no edit-rate recipe can reach it. MP-3 stands on B26's prove-red plus production telemetry (273 / 814,801 retries in a real session). Also cleared the plan's stale status markers now that MP-1…MP-5 are all committed (phase
+  table ✅ for MP-1/MP-2/MP-3, "uncommitted"/"smoke pending" headers on MP-2/MP-4/MP-5). **No open items remain in the MP-1…MP-5 arc.**
 * **v1.6** - MP-5 implemented (2026-07-25, uncommitted; in-game smoke pending): the GS-5 Phase 0.5 renderer-ownership split (F3) — `SectionRenderer.SetOcclusionCulled(bool)` as the codebase's sole writer of `MeshRenderer.forceRenderingOff`, `Clear()` resetting it on pool recycle, and the two-axis ownership contract XML-documented on the class plus `UpdateMeshNative`/`Clear()`. Decisions: bare write (no cached mirror), setter only (no getter), class + per-member docs. **B28–B30** on the MH-6 renderer fixture (non-interference over both apply paths,
   recycle reset, setter round-trip vs `activeSelf`); prove-red at `UpdateMeshNative`'s entry reds exactly B28 with both legs reporting. `Validate Meshing` 30/30, `Validate All` **340/340**. Doc-synced the culling doc (§5 Phase 0.5 ✅, status line, §7.3, §8, Phase 3 renderer step), `PERFORMANCE_IMPROVEMENTS_REPORT.md` GS-5 prerequisite + recommendation, `SUB_CHUNK_MESHING_ARCHITECTURE.md` §3.2 (ownership table), meshing fidelity tip B27 → B30. **In-game smoke confirmed** (fly-over: 7,969 merge attempts, 0 stale-instance, no visual change). Includes a
   `/code-review high` round: MP-5's "sole writer" prose corrected to "only *setter*" (`Clear()` is reset-only — the culler consequence now stated in culling doc §7.3), plus two MP-4 fixes (probe machinery behind `[Conditional]`; released job scratch cleared in **both** completion drivers) and the new **§8.1** `IMeshCompletionHost` rider — the seam that would let baselines drive the real `MeshCompletionDriver`, scheduled as an optional MP-6 rider because neither review finding was reddable by any suite.
@@ -735,4 +747,4 @@ it needs play mode or a heavyweight edit-mode world builder, re-tests what B12�
 
 ---
 
-**Last Updated:** 2026-07-25 (MP-1…MP-5 implemented + in-game confirmed; only MP-3's in-game repro stays open, and §MP-3's CORRECTION explains why it is low-value) **Next Review:** when MP-6 starts (draw-tail re-home — the §9 Q2 stagger decision is already made), or when GS-5 Phase 1 is scheduled (re-check §5 contract — Phase 0.5 is now closed by MP-5)
+**Last Updated:** 2026-07-25 (**MP-1…MP-5 all shipped, committed and CLOSED** — no open items; MP-3's in-game repro was retired as structurally unreachable, see its Amended note) **Next Review:** when MP-6 starts (draw-tail re-home — the §9 Q2 stagger decision is already made), or when GS-5 Phase 1 is scheduled (re-check §5 contract — Phase 0.5 is now closed by MP-5)
