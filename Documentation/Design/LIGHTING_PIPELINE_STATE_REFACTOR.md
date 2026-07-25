@@ -37,7 +37,9 @@
   — the simulator both modes of which are the regression instrument for every phase here.
 - [`VALIDATION_SUITE_COVERAGE_ROADMAP.md`](VALIDATION_SUITE_COVERAGE_ROADMAP.md) — NS-3 (chunk lifecycle state-machine suite) names the flag-pairing assertion family; LP-1's invariant probes and LP-4's transition API are deliberate groundwork for NS-3.
 - [`MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md`](MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md) — the MP-* meshing sibling of this plan (same patterns: probes, pure-decision extraction, shared completion skeleton). Coordination points: **MP-4 SHIPPED first (2026-07-25)** — the skeleton is already renamed `LightingCompletionPass` → `Helpers/JobCompletionPass.cs` and `ILightingCompletionDriver<TKey>` →
-  `IJobCompletionDriver<TKey>`, and now carries optional `window`/`startIndex` parameters, so **LP-3 edits the lighting driver's `ReleaseJob` under the new names** (no rebase owed; the suites arbitrate). MP-2 can consume LP-2's `NeighborReadinessDecision` facts if LP-2 lands first, but has no hard dependency on it.
+  `IJobCompletionDriver<TKey>`, and now carries optional `window`/`startIndex` parameters, so **LP-3 edits the lighting driver's `ReleaseJob` under the new names** (no rebase owed; the suites arbitrate). A later MP-5 code-review round also added a
+  `_curLightJob = default;` line at the end of that same `ReleaseJob` (symmetry with the mesh driver — the per-job scratch must not outlive its release); it is unrelated to LP-3's
+  `IsAwaitingMainThreadProcess` clear and **stays** when that clear is deleted. MP-2 can consume LP-2's `NeighborReadinessDecision` facts if LP-2 lands first, but has no hard dependency on it.
 
 ---
 

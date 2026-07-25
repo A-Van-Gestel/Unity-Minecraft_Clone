@@ -37,6 +37,8 @@ namespace Jobs.Data
         /// (a successor instance starts at epoch 0 and would compare equal to a captured 0). The reference half
         /// lives in <c>WorldJobManager._meshJobTargets</c> and the two are always checked together — the CP-3
         /// pool-ABA pairing. Never compare this epoch on its own.</para>
+        /// <para>Captured unconditionally (an <c>int</c> store), but its only consumer — <c>CountMeshMerge</c>
+        /// — is <c>[Conditional]</c>-gated, so the comparison never runs in a release player.</para>
         /// </summary>
         public int TargetEpoch;
 

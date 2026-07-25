@@ -175,17 +175,55 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>
     private void CountMeshScheduleAttempt() => MeshScheduleAttempts++;
 
     /// <summary>MP-1 probe: count one completed-mesh merge attempt, flagging the gone-chunk discard and
-    /// (MP-4) the live-but-recycled target.</summary>
-    /// <param name="chunkGone">True when the target chunk was absent from the chunk map at merge time.</param>
-    /// <param name="staleInstance">True when the chunk is live but its data was pool-recycled mid-flight.</param>
+    /// (MP-4) the live-but-recycled target. The staleness test lives here rather than at the call site so
+    /// that a build without the probe pays nothing for it — <c>[Conditional]</c> elides the call
+    /// <i>and</i> its argument evaluation.</summary>
+    /// <param name="key">The completed job's chunk coord.</param>
+    /// <param name="chunk">The chunk resolved at merge time, or null when it left the chunk map.</param>
+    /// <param name="targetEpoch">The <see cref="MeshingJobData.TargetEpoch"/> captured at schedule time.</param>
     [Conditional("UNITY_EDITOR")]
     [Conditional("DEVELOPMENT_BUILD")]
-    private void CountMeshMerge(bool chunkGone, bool staleInstance)
+    private void CountMeshMerge(ChunkCoord key, Chunk chunk, int targetEpoch)
     {
         MeshMergeAttempts++;
-        if (chunkGone) MeshGoneChunkDiscards++;
+
+        if (chunk == null)
+        {
+            MeshGoneChunkDiscards++;
+            return;
+        }
+
+        // Identity AND epoch, the CP-3 pairing (World.cs: `current == admitted && epoch == admittedEpoch`).
+        // The epoch alone is NOT sufficient: LifecycleEpoch is a PER-INSTANCE counter, and the dominant
+        // recycle path swaps the instance rather than resetting it — Chunk.Release() nulls ChunkData and
+        // Chunk.Reset() re-links whatever RequestChunk hands back, so a freshly constructed successor starts
+        // at epoch 0 and would compare EQUAL to a captured 0. Reference equality is what makes the epoch
+        // meaningful; dropping it turns this probe into a silent under-count, and a spurious zero here would
+        // wrongly close the §D3 rider.
+        ChunkData live = chunk.ChunkData;
+        bool staleInstance = live == null
+                             || !_meshJobTargets.TryGetValue(key, out ChunkData captured)
+                             || !ReferenceEquals(live, captured)
+                             || live.LifecycleEpoch != targetEpoch;
+
         if (staleInstance) MeshStaleInstanceMerges++;
     }
+
+    /// <summary>MP-4 probe: record the <see cref="ChunkData"/> instance a scheduled mesh job snapshotted,
+    /// paired with the job's <see cref="MeshingJobData.TargetEpoch"/>. Probe-only bookkeeping, so it is gated
+    /// exactly like the counter that reads it — see <see cref="_meshJobTargets"/>.</summary>
+    /// <param name="key">The chunk coord the job is keyed on.</param>
+    /// <param name="target">The chunk data the job's inputs were filled from.</param>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private void TrackMeshJobTarget(ChunkCoord key, ChunkData target) => _meshJobTargets[key] = target;
+
+    /// <summary>MP-4 probe: drop a completed job's recorded target, keeping <see cref="_meshJobTargets"/> on
+    /// exactly the lifetime of the <see cref="MeshJobs"/> entry it describes.</summary>
+    /// <param name="key">The chunk coord whose job entry is being removed.</param>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private void UntrackMeshJobTarget(ChunkCoord key) => _meshJobTargets.Remove(key);
 
     #endregion
 
@@ -241,8 +279,13 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>
     // MP-4 stale-instance probe: the ChunkData instance each in-flight mesh job was snapshotted from, paired
     // with MeshingJobData.TargetEpoch. Lives here rather than in MeshingJobData because that struct sits under
     // Assets/Scripts/Jobs/, where the Burst rules ban managed fields. Reference identity is NOT optional — see
-    // the pairing rationale in MeshCompletionDriver.MergeJob. Entries share MeshJobs' lifetime exactly (added
-    // with it in ScheduleMeshing, removed in RemoveAndPromote, cleared in Dispose).
+    // the pairing rationale in CountMeshMerge. Entries share MeshJobs' lifetime exactly (added with it in
+    // ScheduleMeshing, removed in RemoveAndPromote, cleared in Dispose).
+    //
+    // POPULATED ONLY IN EDITOR / DEVELOPMENT BUILDS — its writers (TrackMeshJobTarget /
+    // UntrackMeshJobTarget) and its only reader (CountMeshMerge) are all [Conditional]-gated, so in a
+    // release player this stays permanently EMPTY. Never read it for behavior: it is diagnostics-only, and
+    // any logic built on it would silently take the "no entry" branch in shipping builds.
     private readonly Dictionary<ChunkCoord, ChunkData> _meshJobTargets = new Dictionary<ChunkCoord, ChunkData>();
 
     private readonly HashSet<ChunkCoord> _chunksToRebuildMesh = new HashSet<ChunkCoord>();
@@ -540,8 +583,8 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>
 
             // MP-4 probe: capture the snapshotted ChunkData INSTANCE alongside jobData.TargetEpoch. Inside the
             // same try as the Add, so the two registries can never disagree (the catch below rethrows without
-            // having added either).
-            _meshJobTargets[chunkCoord] = chunk.ChunkData;
+            // having added either). No-op in a build without the probe.
+            TrackMeshJobTarget(chunkCoord, chunk.ChunkData);
         }
         catch
         {
@@ -1229,26 +1272,12 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>
         public void MergeJob(ChunkCoord key)
         {
             Chunk chunk = _owner._world.GetChunkFromChunkCoord(key);
-            ChunkData live = chunk?.ChunkData;
 
             // MP-1 rider + MP-4 probe: a gone chunk discards the result (out-of-range work already left the
             // chunk map); a live chunk whose data was recycled mid-flight is merely COUNTED — the apply still
-            // happens, pending the evidence that gates the discard (MP-4 §D3).
-            //
-            // Identity AND epoch, the CP-3 pairing (World.cs: `current == admitted && epoch == admittedEpoch`).
-            // The epoch alone is NOT sufficient: LifecycleEpoch is a PER-INSTANCE counter, and the dominant
-            // recycle path swaps the instance rather than resetting it — Chunk.Release() nulls ChunkData and
-            // Chunk.Reset() re-links whatever RequestChunk hands back, so a freshly constructed successor starts
-            // at epoch 0 and would compare EQUAL to a captured 0. Reference equality is what makes the epoch
-            // meaningful; dropping it turns this probe into a silent under-count, and a spurious zero here would
-            // wrongly close the §D3 rider.
-            bool staleInstance = chunk != null
-                                 && (live == null
-                                     || !_owner._meshJobTargets.TryGetValue(key, out ChunkData captured)
-                                     || !ReferenceEquals(live, captured)
-                                     || live.LifecycleEpoch != _curJob.TargetEpoch);
-
-            _owner.CountMeshMerge(chunkGone: chunk == null, staleInstance: staleInstance);
+            // happens, pending the evidence that gates the discard (MP-4 §D3). The staleness test itself lives
+            // inside the [Conditional] counter, so a build without the probe evaluates none of it.
+            _owner.CountMeshMerge(key, chunk, _curJob.TargetEpoch);
 
             if (chunk != null)
             {
@@ -1274,6 +1303,12 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>
 
             // POOLING: Return the input buffers for reuse.
             _owner.ReleaseMeshingJobInputs(_curJob);
+
+            // Drop the now-recycled handles: the scratch is only valid inside one Complete → Merge →
+            // Release sequence, and holding released buffers is the fidelity-B7 stranded-container shape.
+            // Any future hook reading it out of sequence then fails loudly instead of silently operating
+            // on buffers another job already owns.
+            _curJob = default;
         }
 
         /// <inheritdoc />
@@ -1282,7 +1317,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>
             // Removal only: unlike lighting, the mesh pipeline has no promotion concept — a chunk that still
             // needs a rebuild is re-requested through the mesh build queue, which retries on its own.
             _owner.MeshJobs.Remove(key);
-            _owner._meshJobTargets.Remove(key); // MP-4 probe: same lifetime as the job entry.
+            _owner.UntrackMeshJobTarget(key); // MP-4 probe: same lifetime as the job entry.
         }
     }
 
@@ -1496,6 +1531,11 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>
 
         // POOLING: Return the full-volume buffers for reuse; dispose per-job containers.
         ReleaseLightingJobData(_curLightJob);
+
+        // Drop the now-recycled handles (symmetric with the mesh driver): the scratch is only valid
+        // inside one Complete → Merge → Release sequence, so a future out-of-sequence read fails loudly
+        // instead of touching containers another job already owns.
+        _curLightJob = default;
     }
 
     /// <inheritdoc />
