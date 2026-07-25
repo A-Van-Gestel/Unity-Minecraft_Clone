@@ -563,7 +563,8 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
        (a recycled section must never inherit a culled state — the pool-reset-safety rule; the conservative direction is "render", per culling doc §7.5).
     3. Confirm-and-document: `UpdateMeshNative` and `Clear()` keep owning **only** `SetActive`
        ("has geometry"); XML-doc the two-axis ownership contract on the class.
-- **New baselines (renderer fixture, next free B-number — B27+ / after MP-4's B27):** (a) `UpdateMeshNative` never writes
+- **New baselines (renderer fixture — MP-4 took B27, so MP-5's are **B28/B29/B30**; suite tip is B27 / 27 baselines,
+  `Validate All` 337 across 16 suites):** (a) `UpdateMeshNative` never writes
   `forceRenderingOff` (set it true externally, run a non-empty then an empty update, assert it survived both — the non-interference invariant); (b) `Clear()` resets it false; (c)
   `SetOcclusionCulled` round-trips and does not touch `activeSelf`. Prove-red: temporarily make
   `UpdateMeshNative` clear the flag → (a) reds.
