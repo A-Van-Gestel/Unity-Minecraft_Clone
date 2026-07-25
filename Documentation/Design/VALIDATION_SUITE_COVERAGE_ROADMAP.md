@@ -11,7 +11,8 @@
 > NS-5 is ✅ complete (CP-2 close-out, 2026-07-22) — see the per-item status lines; the rest are
 > proposals.
 
-**Existing coverage (for contrast):** Lighting (62 baselines), Meshing (B21), Behavior/fluid tick (8 + determinism gates), Placement (13), MeshBuildQueue (9), LightWorkScheduler (9), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` / `ChunkRelativePosition` tests.
+**Existing coverage (for contrast, counts verified 2026-07-25 against a `Validate All` run — 340 baselines / 16 suites):** Lighting (88), Meshing (30, tip B30 — now including the **MP-\* orchestration** baselines B24–B27, the meshing-side groundwork this roadmap's NS-3 convergence family names), Behavior/fluid tick (12 + determinism gates), Placement (17), MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (46), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (7), Save Durability (13), Deserialization Robustness (7), Spawn
+(10), Command Console (54), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` / `ChunkRelativePosition` tests.
 
 **Build protocol for every suite below:** the `validation-driven-bugfix` skill (deterministic repro first, prove-red before trusting green, promote repros to baselines). New suites should land on the shared `ValidationSuiteRunner` (`VS-1`, ✅ shipped 2026-07-08): register `Scenario`s and return its `ValidationRunResult` from a headless `Execute()`, with a thin `[MenuItem]` wrapper. All suites stay on the custom validation framework: migrating to the Unity Test Framework was evaluated 2026-07-02 and rejected (see the status header in
 [`UNITY_TEST_FRAMEWORK_MIGRATION.md`](UNITY_TEST_FRAMEWORK_MIGRATION.md)); the CI/coverage/XML gaps close via the VS-2 extensions instead.
