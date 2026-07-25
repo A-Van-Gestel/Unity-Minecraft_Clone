@@ -1,8 +1,8 @@
 # Lighting Pipeline State & Gate Refactor (LP-*)
 
-**Version:** 1.0
-**Date:** 2026-07-06
-**Status:** Proposed design — not implemented.
+**Version:** 1.0  
+**Date:** 2026-07-06  
+**Status:** Proposed design — not implemented.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > Clean-up / refactor plan for the async lighting engine's orchestration layer — the `ChunkData`
@@ -17,44 +17,27 @@
 > (one optional micro-phase). Zero on-disk change in every phase — no AOT migration is required
 > anywhere in this plan, by construction.
 
-**Audited:** 2026-07-06, at commit `4cb80e4` (branch `feat/async-lighting-validation-suite`).
-Findings are from static review of `Data/ChunkData.cs` (flag cluster L111–183, `Reset` L242–288,
-`ModifyVoxel` L470–569), `World.cs` (Update scan arm L1558–1682, startup coroutine L1024–1123,
-gates L1883–2028, `UnloadChunks` L2360–2404, `LoadOrGenerateChunk` L836–928),
+**Audited:** 2026-07-06, at commit `4cb80e4` (branch `feat/async-lighting-validation-suite`). Findings are from static review of `Data/ChunkData.cs` (flag cluster L111–183, `Reset` L242–288,
+`ModifyVoxel` L470–569), `World.cs` (Update scan arm L1558–1682, startup coroutine L1024–1123, gates L1883–2028, `UnloadChunks` L2360–2404, `LoadOrGenerateChunk` L836–928),
 `WorldJobManager.cs` (`ScheduleLightingUpdate` L550–643, `ProcessLightingJobs` + completion driver
 
 + `MergeCompletedLightingJob` L1008–1301, `TriggerNeighborEdgeChecks` L1617–1641),
   `Helpers/LightingScanDecision.cs`, `Helpers/LightingScheduleDecision.cs`,
-  `Helpers/LightingCompletionPass.cs`, `Helpers/LightWorkScheduler.cs`,
-  `Serialization/ChunkSerializer.cs` (L115–258), and the editor harness
-  (`LightingFrameSimulator.cs` structure, `LightingTestWorld.cs` gate analogs L379–410). Line
-  numbers are anchors for the executor, not contracts — re-verify before editing.
+  `Helpers/JobCompletionPass.cs`, `Helpers/LightWorkScheduler.cs`,
+  `Serialization/ChunkSerializer.cs` (L115–258), and the editor harness (`LightingFrameSimulator.cs` structure, `LightingTestWorld.cs` gate analogs L379–410). Line numbers are anchors for the executor, not contracts — re-verify before editing.
 
 **Relationship to other documents:**
 
-- [`../Architecture/CHUNK_LIFECYCLE_PIPELINE.md`](../Architecture/CHUNK_LIFECYCLE_PIPELINE.md) —
-  the authoritative flag/gate reference (§2/§3) this plan restructures; every phase doc-syncs it.
-- [`../Architecture/LIGHTING_SYSTEM_OVERVIEW.md`](../Architecture/LIGHTING_SYSTEM_OVERVIEW.md) —
-  the async BFS model; §3.2/§3.5/§3.6 describe the scheduling/gate behavior LP-2/LP-5 touch.
-- [`LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md`](LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) — AS-2 +
-  HF-4 delivered the shared scan arm (`LightingScanDecision`), schedule guard
-  (`LightingScheduleDecision`), and completion pass (`LightingCompletionPass`). **This plan builds
-  ON those extractions and must not redo them**; it extends the same shared-guard pattern to the
-  two surfaces HF-4 did not reach (neighbor gates, flag transitions). AS-3/AS-4/AS-5 are
-  orthogonal (scenario/fuzz work, not structure) and keep their own IDs.
+- [`../Architecture/CHUNK_LIFECYCLE_PIPELINE.md`](../Architecture/CHUNK_LIFECYCLE_PIPELINE.md) — the authoritative flag/gate reference (§2/§3) this plan restructures; every phase doc-syncs it.
+- [`../Architecture/LIGHTING_SYSTEM_OVERVIEW.md`](../Architecture/LIGHTING_SYSTEM_OVERVIEW.md) — the async BFS model; §3.2/§3.5/§3.6 describe the scheduling/gate behavior LP-2/LP-5 touch.
+- [`LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md`](LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) — AS-2 + HF-4 delivered the shared scan arm (`LightingScanDecision`), schedule guard (`LightingScheduleDecision`), and completion pass (`JobCompletionPass`). **This plan builds ON those extractions and must not redo them**; it extends the same shared-guard pattern to the two surfaces HF-4 did not reach (neighbor gates, flag transitions). AS-3/AS-4/AS-5 are orthogonal (scenario/fuzz work, not structure) and keep their own IDs.
 - [`../Architecture/Testing Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md`](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md)
-  — LP-2 closes the B2 remainder (readiness *computation* out of harness scope); LP-4 upgrades the
-  B4 surface (flag transitions become shared named methods).
+  — LP-2 closes the B2 remainder (readiness *computation* out of harness scope); LP-4 upgrades the B4 surface (flag transitions become shared named methods).
 - [`../Architecture/Testing Framework/LIGHTING_FRAME_SIMULATOR_DESIGN.md`](../Architecture/Testing%20Framework/LIGHTING_FRAME_SIMULATOR_DESIGN.md)
   — the simulator both modes of which are the regression instrument for every phase here.
-- [`VALIDATION_SUITE_COVERAGE_ROADMAP.md`](VALIDATION_SUITE_COVERAGE_ROADMAP.md) — NS-3 (chunk
-  lifecycle state-machine suite) names the flag-pairing assertion family; LP-1's invariant probes
-  and LP-4's transition API are deliberate groundwork for NS-3.
-- [`MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md`](MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md) —
-  the MP-* meshing sibling of this plan (same patterns: probes, pure-decision extraction, shared
-  completion skeleton). Coordination points: MP-4 renames `LightingCompletionPass` (order against
-  LP-3 freely — the suites arbitrate); MP-2 can consume LP-2's `NeighborReadinessDecision` facts
-  if LP-2 lands first, but has no hard dependency on it.
+- [`VALIDATION_SUITE_COVERAGE_ROADMAP.md`](VALIDATION_SUITE_COVERAGE_ROADMAP.md) — NS-3 (chunk lifecycle state-machine suite) names the flag-pairing assertion family; LP-1's invariant probes and LP-4's transition API are deliberate groundwork for NS-3.
+- [`MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md`](MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md) — the MP-* meshing sibling of this plan (same patterns: probes, pure-decision extraction, shared completion skeleton). Coordination points: **MP-4 SHIPPED first (2026-07-25)** — the skeleton is already renamed `LightingCompletionPass` → `Helpers/JobCompletionPass.cs` and `ILightingCompletionDriver<TKey>` →
+  `IJobCompletionDriver<TKey>`, and now carries optional `window`/`startIndex` parameters, so **LP-3 edits the lighting driver's `ReleaseJob` under the new names** (no rebase owed; the suites arbitrate). MP-2 can consume LP-2's `NeighborReadinessDecision` facts if LP-2 lands first, but has no hard dependency on it.
 
 ---
 
@@ -62,35 +45,22 @@ gates L1883–2028, `UnloadChunks` L2360–2404, `LoadOrGenerateChunk` L836–92
 
 ### Goals
 
-1. **Make the implicit per-chunk lighting state machine explicit and auditable** — every flag
-   transition a named method with a documented trigger, instead of ~20 scattered raw writes
-   across 4 files (§2.4 census).
-2. **Close the remaining production/harness drift surfaces** — the neighbor gates and the startup
-   coroutine still hand-mirror logic the harness cannot drive (the pattern HF-4 fixed for the
-   scan arm and completion pass).
-3. **Make illegal *partial transitions* unrepresentable** — atomic schedule-clear, atomic edge
-   re-arm (round decrement + both flags together), so the "flag set whose clear site is
-   unreachable" bug class (three historical deadlocks) loses its raw material.
-4. **Preserve behavior byte-for-byte at every phase boundary** — 62 lighting baselines + scheduler
-   mode + LightScheduler suite green, no on-disk change, MT-2 promotion contract intact.
-5. *(SECONDARY)* Trim redundant per-frame gate work in the ready-set scan (LP-6, optional,
-   measured before shipped).
+1. **Make the implicit per-chunk lighting state machine explicit and auditable** — every flag transition a named method with a documented trigger, instead of ~20 scattered raw writes across 4 files (§2.4 census).
+2. **Close the remaining production/harness drift surfaces** — the neighbor gates and the startup coroutine still hand-mirror logic the harness cannot drive (the pattern HF-4 fixed for the scan arm and completion pass).
+3. **Make illegal *partial transitions* unrepresentable** — atomic schedule-clear, atomic edge re-arm (round decrement + both flags together), so the "flag set whose clear site is unreachable" bug class (three historical deadlocks) loses its raw material.
+4. **Preserve behavior byte-for-byte at every phase boundary** — 62 lighting baselines + scheduler mode + LightScheduler suite green, no on-disk change, MT-2 promotion contract intact.
+5. *(SECONDARY)* Trim redundant per-frame gate work in the ready-set scan (LP-6, optional, measured before shipped).
 
 ### Non-goals (v1)
 
 - **Sun→Sky naming unification** (`SunlightBfsQueue`, `AddToSunLightQueue`,
   `SunlightRecalculationQueue`, …) — owned by the existing **Phase B legacy-light-removal plan**
-  (see `project_phase_b_legacy_light_removal` / DATA_STRUCTURES notes). LP-7 fixes only the
-  doubled-word typo `RecalculateSunLightLight`.
+  (see `project_phase_b_legacy_light_removal` / DATA_STRUCTURES notes). LP-7 fixes only the doubled-word typo `RecalculateSunLightLight`.
 - **Re-extracting the scan arm, schedule guard, or completion pass** — done (HF-4 #1/#2, AS-2).
 - **Changing MT-2 scheduling semantics** (ready/waiting split, promotion events, `PromoteAll`
-  fail-safe) — the split is intentional, guarded by its own suite, and out of scope. LP-4 only
-  funnels the *callback firing* through one site with identical observable semantics.
-- **Relaxing or tightening any readiness gate** — `AreNeighborsMeshReady` stays deliberately
-  relaxed (the §9.3 wave-front deadlock fix); `AreNeighborsReadyAndLit` stays the edge arm's
-  gate. LP-2 is a pure re-housing of the existing predicates.
-- **Persisting the new work byte** — the serialized surface stays exactly one bool
-  (`NeedsInitialLighting`). If a future feature ever persists more, that is a
+  fail-safe) — the split is intentional, guarded by its own suite, and out of scope. LP-4 only funnels the *callback firing* through one site with identical observable semantics.
+- **Relaxing or tightening any readiness gate** — `AreNeighborsMeshReady` stays deliberately relaxed (the §9.3 wave-front deadlock fix); `AreNeighborsReadyAndLit` stays the edge arm's gate. LP-2 is a pure re-housing of the existing predicates.
+- **Persisting the new work byte** — the serialized surface stays exactly one bool (`NeedsInitialLighting`). If a future feature ever persists more, that is a
   `serialization-migration` item outside this plan.
 - **Lighting→meshing handoff coverage** (fidelity B5) — unchanged boundary.
 
@@ -100,8 +70,7 @@ gates L1883–2028, `UnloadChunks` L2360–2404, `LoadOrGenerateChunk` L836–92
 
 ### 2.1 Per-chunk state inventory
 
-All mutation is main-thread-only (chunk-pipeline rule); jobs read snapshots. "Callback" = setter
-fires `ChunkData.OnLightWorkFlagged` → `LightWorkScheduler.Flag` on a false→true transition.
+All mutation is main-thread-only (chunk-pipeline rule); jobs read snapshots. "Callback" = setter fires `ChunkData.OnLightWorkFlagged` → `LightWorkScheduler.Flag` on a false→true transition.
 
 | State                         | Storage                                    | Serialized?                                                                                                          | Callback | Set by (sites)                                                                                                                                                                                                                                                                                                                                             | Cleared by                                                                                                              |
 |-------------------------------|--------------------------------------------|----------------------------------------------------------------------------------------------------------------------|:--------:|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
@@ -113,11 +82,8 @@ fires `ChunkData.OnLightWorkFlagged` → `LightWorkScheduler.Flag` on a false→
 | `IsAwaitingMainThreadProcess` | plain public bool, `[NonSerialized]`       | no                                                                                                                   |    no    | merge start (`MergeCompletedLightingJob`, `WJM:1169`)                                                                                                                                                                                                                                                                                                      | completion driver `ReleaseJob` finally (`WJM:1135`) — **same `ProcessLightingJobs` pass** (F1); `Reset()`               |
 | `RemainingEdgeCheckRounds`    | plain int, `[NonSerialized]`, default 2    | no                                                                                                                   |    no    | re-grant to ≥1 on border-column opacity edit (`ChunkData.cs:551–554`, Bug 05)                                                                                                                                                                                                                                                                              | decrement per stable pass (`WJM:1285`); `Reset()` → 2                                                                   |
 
-**Off-chunk state that co-encodes the machine** (an on-chunk representation can never be
-authoritative for these): `JobManager.GenerationJobs` / `LightingJobs` / `MeshJobs` membership
-(in-flight axes), `LightWorkScheduler` ready/waiting/staging membership,
-`worldData.SunlightRecalculationQueue` (per-chunk pending column sets — a fourth work store, F6),
-the managed BFS queues on `ChunkData`, `_meshBuildQueue` membership, `Chunk.IsActive`.
+**Off-chunk state that co-encodes the machine** (an on-chunk representation can never be authoritative for these): `JobManager.GenerationJobs` / `LightingJobs` / `MeshJobs` membership (in-flight axes), `LightWorkScheduler` ready/waiting/staging membership,
+`worldData.SunlightRecalculationQueue` (per-chunk pending column sets — a fourth work store, F6), the managed BFS queues on `ChunkData`, `_meshBuildQueue` membership, `Chunk.IsActive`.
 
 ### 2.2 The gates
 
@@ -136,13 +102,10 @@ Three semi-independent axes, not one chain:
   `GenerationJobs` membership. Reset by pool recycle.
 - **Lighting work axis (a SET, not a chain):** the bits `I` (`NeedsInitialLighting`),
   `C` (`HasLightChangesToProcess`), `E` (`NeedsEdgeCheck`), plus job-in-flight `J`
-  (`LightingJobs` membership), rounds counter `R ∈ {0,1,2}`, and scheduler membership
-  (ready / waiting / absent).
-- **Merge-transient axis:** `IsAwaitingMainThreadProcess` (`A`) — see F1: its true-window is
-  confined to one main-thread call stack.
+  (`LightingJobs` membership), rounds counter `R ∈ {0,1,2}`, and scheduler membership (ready / waiting / absent).
+- **Merge-transient axis:** `IsAwaitingMainThreadProcess` (`A`) — see F1: its true-window is confined to one main-thread call stack.
 
-**Legal bit combinations observed in code** (all 8 are reachable; an exclusive enum would need
-the full power set):
+**Legal bit combinations observed in code** (all 8 are reachable; an exclusive enum would need the full power set):
 
 | `I C E` | How it arises                                                                                                        |
 |:-------:|----------------------------------------------------------------------------------------------------------------------|
@@ -175,9 +138,7 @@ the full power set):
 | 14 | Pool recycle (`Reset()`, `ChunkData:242`)                                             | everything := defaults, `R:=2`                                                                             |
 | 15 | Startup coroutine sweeps (`World:1036–1075`)                                          | hand-mirrored copies of #6/#7/#8 with `Allocator.TempJob` (F2)                                             |
 
-Scheduler-membership transitions ride these: any bit 0→1 fires the callback → staging → ready;
-park on gate-fail / in-flight / unpopulated; promote on completion (`WJM:1149`), generation/load
-completion, own re-flag, or the ~1 s `PromoteAll` fail-safe.
+Scheduler-membership transitions ride these: any bit 0→1 fires the callback → staging → ready; park on gate-fail / in-flight / unpopulated; promote on completion (`WJM:1149`), generation/load completion, own re-flag, or the ~1 s `PromoteAll` fail-safe.
 
 ### 2.4 Findings (the clean-up backlog this plan executes)
 
@@ -202,42 +163,22 @@ The pivotal choice — everything else in the plan is either preparation for it 
 
 ### Option A — one exclusive lifecycle enum (`ChunkLightingState { Placeholder, …, Lit }`) (rejected)
 
-- ✅ The intuitive reading of "collapse the flag cluster into a state machine"; a single field to
-  inspect in the debugger; some illegal states genuinely unrepresentable.
-- ❌ **The work flags are a set, not a chain.** All 8 `I/C/E` combinations are reachable and
-  meaningful (§2.3 table) — an exclusive enum must enumerate the power set (× rounds counter),
-  and every "state" is really "which work kinds are pending", i.e. a bit-set wearing an enum
-  costume.
-- ❌ **The machine's other halves live off-chunk** (`LightingJobs`/`GenerationJobs` membership,
-  scheduler ready/waiting, mesh queue). An on-chunk enum claiming to be *the* state would be
-  authoritative for none of them and would need constant reconciliation — a new bug class, the
-  opposite of the goal.
-- ❌ Every consumer (gates, scan arms, serializer) reads individual bits; an enum forces
-  decode/re-encode at each site for zero information gain.
+- ✅ The intuitive reading of "collapse the flag cluster into a state machine"; a single field to inspect in the debugger; some illegal states genuinely unrepresentable.
+- ❌ **The work flags are a set, not a chain.** All 8 `I/C/E` combinations are reachable and meaningful (§2.3 table) — an exclusive enum must enumerate the power set (× rounds counter), and every "state" is really "which work kinds are pending", i.e. a bit-set wearing an enum costume.
+- ❌ **The machine's other halves live off-chunk** (`LightingJobs`/`GenerationJobs` membership, scheduler ready/waiting, mesh queue). An on-chunk enum claiming to be *the* state would be authoritative for none of them and would need constant reconciliation — a new bug class, the opposite of the goal.
+- ❌ Every consumer (gates, scan arms, serializer) reads individual bits; an enum forces decode/re-encode at each site for zero information gain.
 
 ### Option B — `[Flags]` work byte + named transition API + shared gate predicate ✅ **CHOSEN**
 
-Keep the three work bits as data (one `byte`), and make the **transitions** the structured,
-testable artifact: every mutation goes through a named `ChunkData` method mapping 1:1 to a §2.3
-census row, with the flag→scheduler callback fired from a single funnel. Pair it with extracting
-the per-neighbor gate predicate into shared pure code (the harness currently hand-mirrors it).
-This is the proven house pattern — it is exactly what `LightingScheduleDecision`,
-`LightingScanDecision`, `LightingJobProcessor`, and `LightingCompletionPass` did for their slices
-(A2/B2/HF-4 all CLOSED on the fidelity backlog), extended to the last two unshared surfaces.
+Keep the three work bits as data (one `byte`), and make the **transitions** the structured, testable artifact: every mutation goes through a named `ChunkData` method mapping 1:1 to a §2.3 census row, with the flag→scheduler callback fired from a single funnel. Pair it with extracting the per-neighbor gate predicate into shared pure code (the harness currently hand-mirrors it). This is the proven house pattern — it is exactly what `LightingScheduleDecision`,
+`LightingScanDecision`, `LightingJobProcessor`, and `JobCompletionPass` did for their slices (A2/B2/HF-4 all CLOSED on the fidelity backlog), extended to the last two unshared surfaces.
 
-What becomes unrepresentable is precisely what historically broke: **partial transitions**. The
-schedule-clear is one atomic method (can no longer clear `C` but strand `E`, or vice versa); the
-stable re-arm decrements `R` and sets `E`+`C` in one call (a recycled-counter or half-armed state
-can't be authored); `Reset()` clears through the same funnel `B34`'s reflection backstop guards.
-Editor-only assertions (`[Conditional]`, the HF-1 pattern) can then enforce transition
-preconditions at zero IL2CPP cost.
+What becomes unrepresentable is precisely what historically broke: **partial transitions**. The schedule-clear is one atomic method (can no longer clear `C` but strand `E`, or vice versa); the stable re-arm decrements `R` and sets `E`+`C` in one call (a recycled-counter or half-armed state can't be authored); `Reset()` clears through the same funnel `B34`'s reflection backstop guards. Editor-only assertions (`[Conditional]`, the HF-1 pattern) can then enforce transition preconditions at zero IL2CPP cost.
 
 ### Option C — status quo + naming/docs only (rejected)
 
 - ✅ Zero risk; the pipeline doc §2 already tabulates the flags well.
-- ❌ **Leaves every F-finding standing**: the gates and coroutine stay hand-mirrored drift
-  surfaces, transitions stay a 20-site scatter enforceable only by rule-following, and the NS-3
-  flag-pairing suite would have no structural hook to assert against.
+- ❌ **Leaves every F-finding standing**: the gates and coroutine stay hand-mirrored drift surfaces, transitions stay a 20-site scatter enforceable only by rule-following, and the NS-3 flag-pairing suite would have no structural hook to assert against.
 
 ---
 
@@ -258,10 +199,7 @@ public enum LightingWork : byte
 }
 ```
 
-On `ChunkData`: one `[NonSerialized] private LightingWork _lightingWork;` replaces the three
-backing bools. The three existing bool properties remain as thin bit adapters during migration
-(and possibly permanently — decided by call-site count at LP-4 execution, §8 Q2). All writes are
-replaced by transition methods (1:1 with the §2.3 census; names final at implementation):
+On `ChunkData`: one `[NonSerialized] private LightingWork _lightingWork;` replaces the three backing bools. The three existing bool properties remain as thin bit adapters during migration (and possibly permanently — decided by call-site count at LP-4 execution, §8 Q2). All writes are replaced by transition methods (1:1 with the §2.3 census; names final at implementation):
 
 | Method                                  | Census rows | Semantics                                                                                                         |
 |-----------------------------------------|:-----------:|-------------------------------------------------------------------------------------------------------------------|
@@ -275,25 +213,17 @@ replaced by transition methods (1:1 with the §2.3 census; names final at implem
 | `ClearAllLightingWork()`                |   13, 14    | disabled-lighting paths + `Reset()`                                                                               |
 
 **Callback funnel:** one private `SetWork(LightingWork next)` compares old/new masks and fires
-`OnLightWorkFlagged(Position)` when any bit transitions 0→1 — preserving today's per-property
-semantics with one accepted, verified-equivalent delta: sites that today set two properties
-back-to-back (e.g. the stable re-arm) fire the callback **once instead of twice**. Downstream is
-a `ConcurrentQueue` drained into a `HashSet` (`LightWorkScheduler.DrainStaging` → `AddReady`), so
-duplicate enqueues were already deduplicated — observable behavior is identical. The funnel keeps
-the thread-safety property the serializer path relies on (row 2 sets bits from a background
-thread; the callback is the thread-safe member).
+`OnLightWorkFlagged(Position)` when any bit transitions 0→1 — preserving today's per-property semantics with one accepted, verified-equivalent delta: sites that today set two properties back-to-back (e.g. the stable re-arm) fire the callback **once instead of twice**. Downstream is a `ConcurrentQueue` drained into a `HashSet` (`LightWorkScheduler.DrainStaging` → `AddReady`), so duplicate enqueues were already deduplicated — observable behavior is identical. The funnel keeps the thread-safety property the serializer path relies on (row 2 sets bits from a
+background thread; the callback is the thread-safe member).
 
-**Hot-path cost:** byte masks replace bool fields for main-thread readers (scan visits only the
-ready set, O(schedulable); gates read 8 neighbors per call). No Burst surface exists — jobs never
-read these flags (chunk-pipeline rule). No allocation anywhere (methods are plain instance
-methods; the funnel is a compare+branch, same as today's property setters).
+**Hot-path cost:** byte masks replace bool fields for main-thread readers (scan visits only the ready set, O (schedulable); gates read 8 neighbors per call). No Burst surface exists — jobs never read these flags (chunk-pipeline rule). No allocation anywhere (methods are plain instance methods; the funnel is a compare+branch, same as today's property setters).
 
 ### 4.2 Shared neighbor-gate predicate (LP-2)
 
 ```csharp
 /// <summary>Pure per-neighbor readiness predicate shared by World's three gates and the
 /// editor harness — the gate-side completion of the shared-guard pattern
-/// (LightingScheduleDecision / LightingScanDecision / LightingCompletionPass).</summary>
+/// (LightingScheduleDecision / LightingScanDecision / JobCompletionPass).</summary>
 public static class NeighborReadinessDecision
 {
     public enum Gate : byte { DataReady, ReadyAndLit, MeshReady }
@@ -307,39 +237,27 @@ public static class NeighborReadinessDecision
 }
 ```
 
-`World`'s three gates become one `AllNeighborOffsets` loop each (killing `AreNeighborsReadyAndLit`'s
-duplicated cardinal/diagonal loops), assembling `NeighborFacts` and calling the shared predicate.
-`LightingTestWorld.AreNeighborsReadyAndLit`/`AreNeighborsDataReady` assemble harness facts and call
-the *same* predicate — the readiness computation stops being a hand-mirrored fidelity gap (B2
-remainder). `in`-struct of bools: no allocation, trivially inlined.
+`World`'s three gates become one `AllNeighborOffsets` loop each (killing `AreNeighborsReadyAndLit`'s duplicated cardinal/diagonal loops), assembling `NeighborFacts` and calling the shared predicate.
+`LightingTestWorld.AreNeighborsReadyAndLit`/`AreNeighborsDataReady` assemble harness facts and call the *same* predicate — the readiness computation stops being a hand-mirrored fidelity gap (B2 remainder). `in`-struct of bools: no allocation, trivially inlined.
 
 ### 4.3 What deliberately does NOT change
 
 - `LightWorkScheduler` (MT-2): untouched. Promotion contract, fail-safe, staging — all as-is.
-- `LightingScanDecision` / `LightingScheduleDecision` / `LightingCompletionPass`: untouched in
-  LP-1..4 (LP-5 adds a caller; LP-6 may add an overload — both keep the shared-code property).
-- `RemainingEdgeCheckRounds` semantics incl. the Bug-05 border-edit re-grant: preserved verbatim
-  behind named methods.
-- The relaxed `AreNeighborsMeshReady` contract and the `NeedsEdgeCheck`-is-not-a-gate-input rule
-  (pipeline doc §3.3 note): preserved bit-for-bit by LP-2.
+- `LightingScanDecision` / `LightingScheduleDecision` / `JobCompletionPass`: untouched in LP-1..4 (LP-5 adds a caller; LP-6 may add an overload — both keep the shared-code property).
+- `RemainingEdgeCheckRounds` semantics incl. the Bug-05 border-edit re-grant: preserved verbatim behind named methods.
+- The relaxed `AreNeighborsMeshReady` contract and the `NeedsEdgeCheck`-is-not-a-gate-input rule (pipeline doc §3.3 note): preserved bit-for-bit by LP-2.
 - `RunReGrantedEdgeCheckRound` (harness legacy-mode backstop): untouched.
 
 ---
 
 ## 5. Serialization impact (all phases)
 
-The save boundary carries exactly **one** lighting flag today: `NeedsInitialLighting`, one bool in
-the chunk record (`ChunkSerializer.cs:123/206`; `Migration_v2_to_v3_RestoreLighting` force-writes
-it). `HasLightChangesToProcess` is *re-derived* on read from the persisted BFS queue counts
-(`:246`), and `NeedsEdgeCheck` is re-derived by `LoadOrGenerateChunk` (`World.cs:919`).
+The save boundary carries exactly **one** lighting flag today: `NeedsInitialLighting`, one bool in the chunk record (`ChunkSerializer.cs:123/206`; `Migration_v2_to_v3_RestoreLighting` force-writes it). `HasLightChangesToProcess` is *re-derived* on read from the persisted BFS queue counts (`:246`), and `NeedsEdgeCheck` is re-derived by `LoadOrGenerateChunk` (`World.cs:919`).
 `IsAwaitingMainThreadProcess` and `RemainingEdgeCheckRounds` are `[NonSerialized]`.
 
-Consequently: **no phase in this plan changes the on-disk byte layout.** LP-4's serializer edit is
-a mapping change only (write the `InitialLighting` bit as the same bool at the same offset; read
-it back through `FlagInitialLighting()`). No `SaveSystem.CURRENT_VERSION` bump, no migration step.
+Consequently: **no phase in this plan changes the on-disk byte layout.** LP-4's serializer edit is a mapping change only (write the `InitialLighting` bit as the same bool at the same offset; read it back through `FlagInitialLighting()`). No `SaveSystem.CURRENT_VERSION` bump, no migration step.
 
-**Tripwire for executors:** if any phase finds itself wanting to persist the work byte, additional
-flags, or the rounds counter — stop; that is an AOT-migration item (`serialization-migration`
+**Tripwire for executors:** if any phase finds itself wanting to persist the work byte, additional flags, or the rounds counter — stop; that is an AOT-migration item (`serialization-migration`
 skill: version bump + frozen-DTO migration step) and a scope change to bring back to the user.
 
 ---
@@ -359,15 +277,11 @@ skill: version bump + frozen-DTO migration step) and a scope change to bring bac
 
 ## 7. Phased implementation plan
 
-Ranked by value-vs-risk with PRIMARY = clarity/testability. Every phase is independently
-landable and leaves the repo green. **Universal regression gate for every phase** (stated once,
-applies to all): all 62 baselines of `Minecraft Clone/Dev/Validate Lighting Engine` green (legacy
+Ranked by value-vs-risk with PRIMARY = clarity/testability. Every phase is independently landable and leaves the repo green. **Universal regression gate for every phase** (stated once, applies to all): all 62 baselines of `Minecraft Clone/Dev/Validate Lighting Engine` green (legacy
 
 + scheduler mode), the LightScheduler suite (9 baselines) green,
-  `dotnet build "Assembly-CSharp.csproj"` AND `dotnet build "Assembly-CSharp-Editor.csproj"` clean
-  (harness files are editor-assembly), plus the per-phase extras below. Workflow gotchas apply:
-  newly created `.cs` files need a Unity import before `dotnet build` sees them; the menu suite can
-  run stale code after compilation — confirm red/green flips with a fresh
+  `dotnet build "Assembly-CSharp.csproj"` AND `dotnet build "Assembly-CSharp-Editor.csproj"` clean (harness files are editor-assembly), plus the per-phase extras below. Workflow gotchas apply:
+  newly created `.cs` files need a Unity import before `dotnet build` sees them; the menu suite can run stale code after compilation — confirm red/green flips with a fresh
   `RequestScriptCompilation` + `Unity_RunCommand` wave.
 
 | Phase                                               | Scope (files)                                                                                                                                     | Effort | Depends on                         |
@@ -380,206 +294,117 @@ applies to all): all 62 baselines of `Minecraft Clone/Dev/Validate Lighting Engi
 | **LP-6 — Lazy strict-gate evaluation** *(optional)* | `LightingScanDecision.cs` overload; `World.cs` scan; `LightingFrameSimulator.cs`                                                                  |   🟢   | LP-2                               |
 | **LP-7 — Naming & doc hygiene**                     | `RecalculateSunLightLight` rename; residual doc alignment                                                                                         |   🟢   | —                                  |
 
-**Minimal standalone-value set:** LP-1 + LP-2 (closes the fidelity B2 remainder and de-risks
-everything after). **Validation is built alongside, not after** — LP-4 and LP-5 each add
-baselines (B71+; check the suite tip before numbering — B62–B70 are taken, B17–B21/B23–B25
-retired) in the same commit as the code.
+**Minimal standalone-value set:** LP-1 + LP-2 (closes the fidelity B2 remainder and de-risks everything after). **Validation is built alongside, not after** — LP-4 and LP-5 each add baselines (B71+; check the suite tip before numbering — B62–B70 are taken, B17–B21/B23–B25 retired) in the same commit as the code.
 
 ---
 
 ### LP-1 — Invariant probes (🟢, no behavior change)
 
-**Delivers:** mechanical evidence for the two convention-only invariants (F1, F6) that later
-phases rely on — the same "instrument before you refactor" discipline as HF-1.
+**Delivers:** mechanical evidence for the two convention-only invariants (F1, F6) that later phases rely on — the same "instrument before you refactor" discipline as HF-1.
 
-- **Scope:** editor/dev-only (`[Conditional("UNITY_EDITOR")]` + `DEVELOPMENT_BUILD`, HF-1's dual
-  pattern; zero IL2CPP cost):
+- **Scope:** editor/dev-only (`[Conditional("UNITY_EDITOR")]` + `DEVELOPMENT_BUILD`, HF-1's dual pattern; zero IL2CPP cost):
     1. In `AreNeighborsReadyAndLit` and `UnloadChunks`, count observations of
-       `IsAwaitingMainThreadProcess == true` (a static counter + one `Debug.LogWarning` on first
-       hit, naming the chunk). Expected: **zero, ever** (F1's claim).
+       `IsAwaitingMainThreadProcess == true` (a static counter + one `Debug.LogWarning` on first hit, naming the chunk). Expected: **zero, ever** (F1's claim).
     2. In the ~1 s fail-safe scan (`World.cs:1574–1592`), assert per entry of
-       `worldData.SunlightRecalculationQueue` that the owning chunk has a work flag set; log an
-       error otherwise (F6's claim: never fires).
-- **Acceptance:** universal gate + an in-game soak (normal play: streaming, edits, a reload) with
-  both probes silent. Record the result in this doc (Amended line) — LP-3 is **blocked** until
-  probe 1 has a silent soak on record.
-- **Testability gain:** turns two "should hold" conventions into observable invariants; probe 2
-  is the first concrete member of NS-3's flag-pairing assertion family.
+       `worldData.SunlightRecalculationQueue` that the owning chunk has a work flag set; log an error otherwise (F6's claim: never fires).
+- **Acceptance:** universal gate + an in-game soak (normal play: streaming, edits, a reload) with both probes silent. Record the result in this doc (Amended line) — LP-3 is **blocked** until probe 1 has a silent soak on record.
+- **Testability gain:** turns two "should hold" conventions into observable invariants; probe 2 is the first concrete member of NS-3's flag-pairing assertion family.
 - **Doc-sync:** none (no behavior change). **Serialization:** none.
 
 ### LP-2 — Shared neighbor-gate predicate (🟡)
 
 **Delivers:** §4.2. One predicate, three thin gates, harness drives the same code.
 
-- **Scope:** new `Assets/Scripts/Helpers/NeighborReadinessDecision.cs` (runtime assembly — the
-  editor harness references runtime helpers already, per `LightingScanDecision` precedent);
-  `World.cs:1883–2028` (three gates → single-loop bodies; merge ReadyAndLit's two loops; delete
-  the orphaned docstring at W:1864–1870); `LightingTestWorld.cs:379+` (both gate analogs route
-  through the predicate; keep their grid-boundary skip documented as today).
+- **Scope:** new `Assets/Scripts/Helpers/NeighborReadinessDecision.cs` (runtime assembly — the editor harness references runtime helpers already, per `LightingScanDecision` precedent);
+  `World.cs:1883–2028` (three gates → single-loop bodies; merge ReadyAndLit's two loops; delete the orphaned docstring at W:1864–1870); `LightingTestWorld.cs:379+` (both gate analogs route through the predicate; keep their grid-boundary skip documented as today).
 - **Ordering:** independent; do before LP-4 (it shrinks LP-4's blast radius).
-- **Trap (gate ordering, chunk-lifecycle skill):** this is a *re-housing*, not a redesign. The
-  relaxed `AreNeighborsMeshReady` must stay relaxed (§9.3 wave-front deadlock); `enableLighting`
-  gating of the `NeedsInitialLighting` check in MeshReady must be preserved; out-of-world
-  neighbors stay "ready"; `IsChunkInWorld` and dictionary probes stay caller-side facts.
-- **Prove-red:** temporarily invert the `lightingInFlight` term inside the predicate → expect
-  scheduler-mode baselines (B66/B67/B70) and edge-check baselines to red; restore → green. This
-  proves the suite actually flows through the shared code.
-- **Acceptance / regression:** universal gate **+ the meshing suite** (`Validate Meshing`,
-  B1–B21 — `AreNeighborsMeshReady` feeds `ScheduleMeshing`) **+ in-game smoke**: fly a sustained
-  straight line (the wave-front pattern) and confirm no stuck-unmeshed swathes and zero recurring
-  fail-safe promotions (`enableDiagnosticLogs`).
-- **Testability gain:** fidelity **B2 remainder closes** — the readiness computation itself
-  becomes shared, unit-testable code; a future gate bug is a suite red, not an in-game mystery.
-- **Doc-sync (same commit):** `CHUNK_LIFECYCLE_PIPELINE.md` §3 (add the shared-predicate pointer
-  per gate table), `LIGHTING_SYSTEM_OVERVIEW.md` §3.5 (one line), fidelity doc B2 entry (flip the
-  remainder note). **Serialization:** none.
+- **Trap (gate ordering, chunk-lifecycle skill):** this is a *re-housing*, not a redesign. The relaxed `AreNeighborsMeshReady` must stay relaxed (§9.3 wave-front deadlock); `enableLighting`
+  gating of the `NeedsInitialLighting` check in MeshReady must be preserved; out-of-world neighbors stay "ready"; `IsChunkInWorld` and dictionary probes stay caller-side facts.
+- **Prove-red:** temporarily invert the `lightingInFlight` term inside the predicate → expect scheduler-mode baselines (B66/B67/B70) and edge-check baselines to red; restore → green. This proves the suite actually flows through the shared code.
+- **Acceptance / regression:** universal gate **+ the meshing suite** (`Validate Meshing`, B1–B21 — `AreNeighborsMeshReady` feeds `ScheduleMeshing`) **+ in-game smoke**: fly a sustained straight line (the wave-front pattern) and confirm no stuck-unmeshed swathes and zero recurring fail-safe promotions (`enableDiagnosticLogs`).
+- **Testability gain:** fidelity **B2 remainder closes** — the readiness computation itself becomes shared, unit-testable code; a future gate bug is a suite red, not an in-game mystery.
+- **Doc-sync (same commit):** `CHUNK_LIFECYCLE_PIPELINE.md` §3 (add the shared-predicate pointer per gate table), `LIGHTING_SYSTEM_OVERVIEW.md` §3.5 (one line), fidelity doc B2 entry (flip the remainder note). **Serialization:** none.
 
 ### LP-3 — Retire `IsAwaitingMainThreadProcess` (🟡, evidence-gated)
 
-**Delivers:** one dead axis removed from the state machine, gates and the completion driver
-simplified.
+**Delivers:** one dead axis removed from the state machine, gates and the completion driver simplified.
 
-- **Precondition (hard):** LP-1 probe 1 recorded silent over a real soak. If it ever fired, STOP
-  — the flag is load-bearing somewhere this analysis missed; file the finding and re-plan.
-- **Scope:** delete the field (`ChunkData.cs:163–167`) + `Reset()` line; delete set/clear
-  (`WJM:1169`, the `ReleaseJob` clear at `WJM:1135` — the container release stays); remove the
-  gate terms (`World.cs:1920/1943`, `UnloadChunks` W:2373) and the `NeighborFacts` member
-  (LP-2 landed first); harness: `LightingTestWorld` set/clear sites + gate analog + B34's
-  transient-surface list (the reflection backstop adapts automatically — field gone).
-- **Why safe:** the whole flight window is guarded by `LightingJobs.ContainsKey` in the same
-  gates; merge atomicity is main-thread-guaranteed; the per-job `finally` pairing (HF-2) becomes
-  vacuous for this flag while container release keeps its own `finally`.
+- **Precondition (hard):** LP-1 probe 1 recorded silent over a real soak. If it ever fired, STOP — the flag is load-bearing somewhere this analysis missed; file the finding and re-plan.
+- **Scope:** delete the field (`ChunkData.cs:163–167`) + `Reset()` line; delete set/clear (`WJM:1169`, the `ReleaseJob` clear at `WJM:1135` — the container release stays); remove the gate terms (`World.cs:1920/1943`, `UnloadChunks` W:2373) and the `NeighborFacts` member (LP-2 landed first); harness: `LightingTestWorld` set/clear sites + gate analog + B34's transient-surface list (the reflection backstop adapts automatically — field gone).
+- **Why safe:** the whole flight window is guarded by `LightingJobs.ContainsKey` in the same gates; merge atomicity is main-thread-guaranteed; the per-job `finally` pairing (HF-2) becomes vacuous for this flag while container release keeps its own `finally`.
 - **Prove-red:** n/a (a deletion has no red to prove). Regression carries the weight:
-  universal gate, **B65 specifically** (fault-isolation semantics of `ReleaseJob` change shape),
-  plus an in-game streaming soak with unload/reload cycles (UnloadChunks touched) watching for
-  stuck chunks and fail-safe promotion counts.
-- **Testability gain:** the state machine loses an axis no test could ever exercise (zero
-  observable window ⇒ untestable by construction); the §2.3 census shrinks.
-- **Doc-sync (same commit):** `CHUNK_LIFECYCLE_PIPELINE.md` §2 (row delete) + §3 gate tables +
-  §9.6 code excerpt, `LIGHTING_SYSTEM_OVERVIEW.md` (§3.4 mentions), fidelity doc (B4/B7 entries
-  mention the flag), `.agents/rules/chunk-pipeline.md` + `pool-reset-safety.md` flag lists, and
-  the `chunk-lifecycle` skill's flag enumeration. **Serialization:** none (`[NonSerialized]`).
+  universal gate, **B65 specifically** (fault-isolation semantics of `ReleaseJob` change shape), plus an in-game streaming soak with unload/reload cycles (UnloadChunks touched) watching for stuck chunks and fail-safe promotion counts.
+- **Testability gain:** the state machine loses an axis no test could ever exercise (zero observable window ⇒ untestable by construction); the §2.3 census shrinks.
+- **Doc-sync (same commit):** `CHUNK_LIFECYCLE_PIPELINE.md` §2 (row delete) + §3 gate tables + §9.6 code excerpt, `LIGHTING_SYSTEM_OVERVIEW.md` (§3.4 mentions), fidelity doc (B4/B7 entries mention the flag), `.agents/rules/chunk-pipeline.md` + `pool-reset-safety.md` flag lists, and the `chunk-lifecycle` skill's flag enumeration. **Serialization:** none (`[NonSerialized]`).
 
 ### LP-4 — `LightingWork` byte + transition API (🔴, the headline)
 
-**Delivers:** §4.1 in full. Every §2.3 census row becomes a named method; partial transitions
-become unrepresentable; transitions become directly baselinable.
+**Delivers:** §4.1 in full. Every §2.3 census row becomes a named method; partial transitions become unrepresentable; transitions become directly baselinable.
 
-- **Scope:** `ChunkData.cs` (bits + funnel + methods; three bool properties kept as thin
-  adapters *during* the migration); call-site migration —
+- **Scope:** `ChunkData.cs` (bits + funnel + methods; three bool properties kept as thin adapters *during* the migration); call-site migration —
   `WorldJobManager.cs` (`:563→FlagLightWork`, `:624–631→` read `NeedsEdgeCheck` then
-  `OnLightingJobScheduled()` after `job.Schedule()` succeeds (preserve the current
-  clear-after-schedule ordering — on a schedule throw the flags stay set, as today),
+  `OnLightingJobScheduled()` after `job.Schedule()` succeeds (preserve the current clear-after-schedule ordering — on a schedule throw the flags stay set, as today),
   `:817→FlagInitialLighting`, `:1126/1298→FlagLightWork`,
   `:1283–1293→ArmEdgeCheckRoundIfAvailable` (+ keep `LastEdgeRecycleJobCount`),
-  `:1640–1641→FlagEdgeCheck+FlagLightWork` — or a dedicated `FlagNeighborEdgeCheck()` setting
-  both, executor's call);
+  `:1640–1641→FlagEdgeCheck+FlagLightWork` — or a dedicated `FlagNeighborEdgeCheck()` setting both, executor's call);
   `World.cs` (`:847/805-equivalent→FlagLightWork`, `:905/1047/1652→ClearInitialLighting`,
-  `:919→FlagEdgeCheck`, `:1119–1121→ClearAllLightingWork`, `:1647→FlagLightWork` (edge-arm
-  pre-set — name the intent in a comment));
+  `:919→FlagEdgeCheck`, `:1119–1121→ClearAllLightingWork`, `:1647→FlagLightWork` (edge-arm pre-set — name the intent in a comment));
   `ChunkData.ModifyVoxel:554→RegrantBorderEditEdgeRound`;
   `ChunkSerializer.cs:123/206` (bit↔bool mapping), `:246→FlagLightWork`;
-  `ChunkStorageManager.cs:217` (snapshot reads the bit);
-  harness (`LightingTestWorld`/`TestChunk` route their real-`ChunkData` writes through the same
-  methods). `Migration_v2_to_v3` is untouched (it writes stream bytes, not `ChunkData`).
+  `ChunkStorageManager.cs:217` (snapshot reads the bit); harness (`LightingTestWorld`/`TestChunk` route their real-`ChunkData` writes through the same methods). `Migration_v2_to_v3` is untouched (it writes stream bytes, not `ChunkData`).
 - **Callback-delta check (the one behavioral micro-delta, §4.1):** combined transitions fire
   `OnLightWorkFlagged` once where two property writes fired twice. Verify equivalence explicitly:
-  the LightScheduler suite green + a scheduler-mode suite run + reasoning note in the commit
-  (staging dedupes at drain).
+  the LightScheduler suite green + a scheduler-mode suite run + reasoning note in the commit (staging dedupes at drain).
 - **Editor-only transition assertions** (HF-1 pattern, zero IL2CPP cost): e.g.
   `OnLightingJobScheduled` asserts a job was actually registered by the caller;
-  `ArmEdgeCheckRoundIfAvailable` asserts main-thread. Keep light — assertions document the
-  contract, they don't re-implement the scheduler.
-- **New baselines (B71+, same commit):** a transition-census baseline family in the lighting
-  suite (oracle-free, the B34/B47 style): for each transition method assert before-bits →
-  after-bits, rounds-counter effect, and callback fire-count (installable sink — the harness
-  already owns `OnLightWorkFlagged` save/restore). This is the NS-3 flag-pairing family's second
-  concrete member.
-- **Prove-red:** sabotage `ArmEdgeCheckRoundIfAvailable` to skip `C:=1` (arm E without C) → the
-  edge-round-dependent baselines (B8 initial-wave family / B70 border-fuzz reconcile) must red;
-  restore → green. Also run the B34 reflection backstop unmodified — it must still pass with the
-  byte field (it walks `[NonSerialized]` primitives; an enum-typed byte qualifies — verify, and
-  extend the backstop if enum fields are skipped).
-- **Acceptance / regression:** universal gate + full in-game session (streaming + edits +
-  border edits + reload — the Bug-05 re-grant path and the serializer path both need live
-  confirmation).
-- **Testability gain:** transitions unit-baselinable; illegal partial transitions
-  unrepresentable; the frame simulator and production share the *mutation* layer on top of the
-  already-shared decision/completion layers — the full scheduling stack is now one code path.
-- **Doc-sync (same commit):** `CHUNK_LIFECYCLE_PIPELINE.md` §2 (rewrite the flag table around
-  bits + transition methods; note F9's `IsLoading` status honestly), §4 pseudocode names the
-  transition methods; `LIGHTING_SYSTEM_OVERVIEW.md` §3.2/§3.4 mentions;
-  `pool-reset-safety.md` "property setter subtlety" section (funnel replaces per-property
-  setters); `chunk-lifecycle` skill flag list; fidelity doc B4 note.
-  **Serialization:** mapping-only; layout unchanged (§5 tripwire applies).
+  `ArmEdgeCheckRoundIfAvailable` asserts main-thread. Keep light — assertions document the contract, they don't re-implement the scheduler.
+- **New baselines (B71+, same commit):** a transition-census baseline family in the lighting suite (oracle-free, the B34/B47 style): for each transition method assert before-bits → after-bits, rounds-counter effect, and callback fire-count (installable sink — the harness already owns `OnLightWorkFlagged` save/restore). This is the NS-3 flag-pairing family's second concrete member.
+- **Prove-red:** sabotage `ArmEdgeCheckRoundIfAvailable` to skip `C:=1` (arm E without C) → the edge-round-dependent baselines (B8 initial-wave family / B70 border-fuzz reconcile) must red; restore → green. Also run the B34 reflection backstop unmodified — it must still pass with the byte field (it walks `[NonSerialized]` primitives; an enum-typed byte qualifies — verify, and extend the backstop if enum fields are skipped).
+- **Acceptance / regression:** universal gate + full in-game session (streaming + edits + border edits + reload — the Bug-05 re-grant path and the serializer path both need live confirmation).
+- **Testability gain:** transitions unit-baselinable; illegal partial transitions unrepresentable; the frame simulator and production share the *mutation* layer on top of the already-shared decision/completion layers — the full scheduling stack is now one code path.
+- **Doc-sync (same commit):** `CHUNK_LIFECYCLE_PIPELINE.md` §2 (rewrite the flag table around bits + transition methods; note F9's `IsLoading` status honestly), §4 pseudocode names the transition methods; `LIGHTING_SYSTEM_OVERVIEW.md` §3.2/§3.4 mentions;
+  `pool-reset-safety.md` "property setter subtlety" section (funnel replaces per-property setters); `chunk-lifecycle` skill flag list; fidelity doc B4 note. **Serialization:** mapping-only; layout unchanged (§5 tripwire applies).
 
 ### LP-5 — Explicit scheduling contract + startup-coroutine unification (🟡)
 
-**Delivers:** F2 + F4 closed — the silent `NeedsEdgeCheck` read/clear becomes an explicit,
-baselined contract, and the startup coroutine stops hand-mirroring the scan arms.
+**Delivers:** F2 + F4 closed — the silent `NeedsEdgeCheck` read/clear becomes an explicit, baselined contract, and the startup coroutine stops hand-mirroring the scan arms.
 
 - **Scope:**
-    1. `WorldJobManager.ScheduleLightingUpdate`: the job's `PerformEdgeCheck` is populated from an
-       explicit read (`chunkData.NeedsEdgeCheck` — unchanged) but the clear moves into
-       `OnLightingJobScheduled()` (done in LP-4); ADD an XML-doc'd statement of the weak-gate
-       fallback contract on the method (edge work rides ANY successful schedule) — the §7 pipeline
-       behavior, now visible at the signature.
+    1. `WorldJobManager.ScheduleLightingUpdate`: the job's `PerformEdgeCheck` is populated from an explicit read (`chunkData.NeedsEdgeCheck` — unchanged) but the clear moves into
+       `OnLightingJobScheduled()` (done in LP-4); ADD an XML-doc'd statement of the weak-gate fallback contract on the method (edge work rides ANY successful schedule) — the §7 pipeline behavior, now visible at the signature.
     2. `World.cs:1036–1075` (coroutine Steps 2a/2b): replace the hand-mirrored arms with
-       `LightingScanDecision.EvaluateReadyChunk` + the same switch the Update scan runs, preserving
-       the coroutine's specifics: `Allocator.TempJob`, sweep-until-quiescent structure,
-       `CompleteAndProcessLightingJobs()` between sweeps, safety-break diagnostics. The arm
-       *decision* becomes shared; the sweep *driver* stays coroutine-specific.
-- **New baseline (B7x, same commit — closes F4's coverage gap):** the §7 weak-gate fallback has
-  NO dedicated baseline today. Scheduler-mode scenario: chunk with `E=1, C=1`, neighbors
-  data-ready but NOT lit (in-flight neighbor) → assert the regular arm schedules with
-  `PerformEdgeCheck = true` and both flags clear. Prove-red: neuter the fallback (make the
-  regular-arm schedule drop `E` without passing it to the job) → new baseline reds; restore.
-- **Acceptance / regression:** universal gate + **world-load in-game checks** (the coroutine is
-  the startup path): load an existing world AND create a new one; confirm the
+       `LightingScanDecision.EvaluateReadyChunk` + the same switch the Update scan runs, preserving the coroutine's specifics: `Allocator.TempJob`, sweep-until-quiescent structure,
+       `CompleteAndProcessLightingJobs()` between sweeps, safety-break diagnostics. The arm *decision* becomes shared; the sweep *driver* stays coroutine-specific.
+- **New baseline (B7x, same commit — closes F4's coverage gap):** the §7 weak-gate fallback has NO dedicated baseline today. Scheduler-mode scenario: chunk with `E=1, C=1`, neighbors data-ready but NOT lit (in-flight neighbor) → assert the regular arm schedules with
+  `PerformEdgeCheck = true` and both flags clear. Prove-red: neuter the fallback (make the regular-arm schedule drop `E` without passing it to the job) → new baseline reds; restore.
+- **Acceptance / regression:** universal gate + **world-load in-game checks** (the coroutine is the startup path): load an existing world AND create a new one; confirm the
   "exceeded max iterations" safety-break never fires and load-time lighting converges as before.
-- **Testability gain:** the startup path's arm selection is now the same shared, sim-guarded
-  decision as the steady-state scan — a whole hand-mirrored surface deleted.
-- **Doc-sync (same commit):** `CHUNK_LIFECYCLE_PIPELINE.md` §4 "Critical Scheduling Detail" + §7
-  fallback section (rewrite as explicit contract + baseline pointer);
+- **Testability gain:** the startup path's arm selection is now the same shared, sim-guarded decision as the steady-state scan — a whole hand-mirrored surface deleted.
+- **Doc-sync (same commit):** `CHUNK_LIFECYCLE_PIPELINE.md` §4 "Critical Scheduling Detail" + §7 fallback section (rewrite as explicit contract + baseline pointer);
   `LIGHTING_SYSTEM_OVERVIEW.md` §3.6 step 3. **Serialization:** none.
 
 ### LP-6 — Lazy strict-gate evaluation (🟢, optional, SECONDARY perf)
 
 **Delivers:** F7 — the scan computes `AreNeighborsReadyAndLit` only when the edge arm needs it.
 
-- **Scope:** add an `EvaluateReadyChunk` overload taking a small gate-provider interface
-  (`INeighborGates { bool DataReady(); bool ReadyAndLit(); }`) implemented by a **cached** adapter
-  on `World` and on the sim (zero alloc, no per-call delegates); the laziness lives inside the
-  shared function so both callers stay identical. Delete the old always-eager call pattern at
-  `World.cs:1630–1631` and the sim's mirror in the same commit (both callers move atomically —
-  the shared-code invariant).
-- **Gate:** universal gate + a before/after measurement of the `WorldFrameProfiler` Light phase
-  under a streaming load. **Ship only on a measured win** (perf-benchmark discipline); otherwise
-  record NO-GO here and close the phase — the clarity value alone does not justify signature
-  churn.
+- **Scope:** add an `EvaluateReadyChunk` overload taking a small gate-provider interface (`INeighborGates { bool DataReady(); bool ReadyAndLit(); }`) implemented by a **cached** adapter on `World` and on the sim (zero alloc, no per-call delegates); the laziness lives inside the shared function so both callers stay identical. Delete the old always-eager call pattern at
+  `World.cs:1630–1631` and the sim's mirror in the same commit (both callers move atomically — the shared-code invariant).
+- **Gate:** universal gate + a before/after measurement of the `WorldFrameProfiler` Light phase under a streaming load. **Ship only on a measured win** (perf-benchmark discipline); otherwise record NO-GO here and close the phase — the clarity value alone does not justify signature churn.
 - **Doc-sync:** pipeline §4 pseudocode note. **Serialization:** none.
 
 ### LP-7 — Naming & doc hygiene (🟢)
 
 - **Scope:** `RecalculateSunLightLight()` → `RecalculateSunlight()` via the `refactor-safely`
-  skill (callers: `World.cs:1645`, `:899`, `:1044`, harness if referenced); verify no serialized
-  name is touched (method — safe). Residual doc alignment (anything §2 of the pipeline doc still
-  footnotes that LP-3/LP-4 made false). Explicitly does NOT start the Sun→Sky rename (Phase B).
-- **Gate:** universal gate. **Doc-sync:** pipeline/lighting docs mention the method by name in
-  pseudocode — update in the same commit. **Serialization:** none.
+  skill (callers: `World.cs:1645`, `:899`, `:1044`, harness if referenced); verify no serialized name is touched (method — safe). Residual doc alignment (anything §2 of the pipeline doc still footnotes that LP-3/LP-4 made false). Explicitly does NOT start the Sun→Sky rename (Phase B).
+- **Gate:** universal gate. **Doc-sync:** pipeline/lighting docs mention the method by name in pseudocode — update in the same commit. **Serialization:** none.
 
 ---
 
 ## 8. Open questions
 
-1. **LP-1 probe results** — does `IsAwaitingMainThreadProcess` ever read true at a gate in a real
-   soak? Resolves LP-3's go/no-go; the answer lands here as an Amended line + a checkbox in LP-3.
-2. **Keep or remove the three bool adapter properties after LP-4?** Decide by call-site count at
-   execution time: if ≤ a handful of readers remain (gates read via LP-2 facts, scan reads via
-   the decision inputs), remove them and read bits directly; otherwise keep the adapters
-   permanently as the read API. Either way, *writes* go through transition methods only.
-3. **LP-6 worth it?** Only a measurement answers it; the phase carries its own GO/NO-GO gate and
-   a NO-GO is a valid close-out.
+1. **LP-1 probe results** — does `IsAwaitingMainThreadProcess` ever read true at a gate in a real soak? Resolves LP-3's go/no-go; the answer lands here as an Amended line + a checkbox in LP-3.
+2. **Keep or remove the three bool adapter properties after LP-4?** Decide by call-site count at execution time: if ≤ a handful of readers remain (gates read via LP-2 facts, scan reads via the decision inputs), remove them and read bits directly; otherwise keep the adapters permanently as the read API. Either way, *writes* go through transition methods only.
+3. **LP-6 worth it?** Only a measurement answers it; the phase carries its own GO/NO-GO gate and a NO-GO is a valid close-out.
 
 ---
 
@@ -589,5 +414,4 @@ baselined contract, and the startup coroutine stops hand-mirroring the scan arms
 
 ---
 
-**Last Updated:** 2026-07-06
-**Next Review:** when LP-1 starts (re-verify §2 line anchors against HEAD before editing)
+**Last Updated:** 2026-07-06 **Next Review:** when LP-1 starts (re-verify §2 line anchors against HEAD before editing)
