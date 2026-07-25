@@ -70,7 +70,9 @@ public class Chunk
 #endif
         ChunkGameObject.transform.SetParent(World.Instance.transform);
 
-        // Pre-add the load animation component to avoid runtime AddComponent (which causes boxing/GC overhead)
+        // Pre-add the load animation component to avoid runtime AddComponent (which causes boxing/GC overhead).
+        // NOTE this is only the common path — a chunk built while the setting is off acquires its component
+        // on demand via EnsureLoadAnimation, so toggling the setting on mid-session still works.
         if (World.Instance.settings.enableChunkLoadAnimations)
         {
             _loadAnimation = ChunkGameObject.AddComponent<ChunkLoadAnimation>();
@@ -110,8 +112,9 @@ public class Chunk
         ChunkGameObject.name = $"Chunk {Coord.X.ToString()}, {Coord.Z.ToString()}";
 #endif
 
-        if (World.Instance.settings.enableChunkLoadAnimations && _loadAnimation != null)
+        if (World.Instance.settings.enableChunkLoadAnimations)
         {
+            EnsureLoadAnimation();
             _loadAnimation.enabled = true;
             _loadAnimation.ResetToUnderground(UnityPosition);
         }
@@ -573,12 +576,43 @@ public class Chunk
 
     #region Bonus Stuff
 
+    /// <summary>
+    /// Guarantees <see cref="_loadAnimation"/> exists before an animation is started, creating it on demand
+    /// for a chunk built while <c>enableChunkLoadAnimations</c> was off. Call only on paths that then start
+    /// or re-park the animation.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why on demand at all.</b> The component is normally pre-added in the constructor, but that is
+    /// gated on the setting — so a chunk built while animations were off would otherwise never get one, and
+    /// because the pool reuses <see cref="Chunk"/> instances, enabling the setting mid-session would do
+    /// nothing for them (the failure looked intermittent, since chunks built *after* the toggle worked). See
+    /// Documentation/Bugs/_FIXED_BUGS.md.</para>
+    /// <para><b>Why this is not the runtime <c>AddComponent</c> the Project Auditor flagged.</b> The cached
+    /// field short-circuits it, so this runs <b>at most once per Chunk instance, ever</b> — never per pool
+    /// activation, which is what the original audit targeted. Do not "optimize" it back into a
+    /// construction-time-only add; that is exactly what broke the toggle.</para>
+    /// <para><b>Seeding is load-bearing.</b> A freshly added component has no target position, so it must be
+    /// parked underground relative to this chunk before it animates — otherwise it lerps toward the world
+    /// origin instead of rising into place.</para>
+    /// <para><b>Pool-recycle note:</b> deliberately never cleared in <see cref="Reset"/>/<see cref="Release"/>
+    /// — the component lives on the persistent <see cref="ChunkGameObject"/>, so clearing it would force a
+    /// fresh <c>AddComponent</c> on every recycle.</para>
+    /// </remarks>
+    private void EnsureLoadAnimation()
+    {
+        if (_loadAnimation != null) return;
+
+        _loadAnimation = ChunkGameObject.AddComponent<ChunkLoadAnimation>();
+        _loadAnimation.ResetToUnderground(UnityPosition);
+    }
+
     private void PlayChunkLoadAnimation()
     {
         if (_hasPlayedLoadAnimation) return;
 
-        if (World.Instance.settings.enableChunkLoadAnimations && _loadAnimation != null)
+        if (World.Instance.settings.enableChunkLoadAnimations)
         {
+            EnsureLoadAnimation();
             _loadAnimation.enabled = true;
             _loadAnimation.StartAnimation();
         }
