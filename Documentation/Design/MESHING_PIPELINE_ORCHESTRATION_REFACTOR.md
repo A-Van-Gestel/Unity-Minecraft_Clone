@@ -780,6 +780,18 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
     > by `AcquireVoxelMap(center.Neighbor(dx, dz))` (N = `(0,+1)`, E = `(+1,0)`, S = `(0,-1)`, W = `(-1,0)`).
     > So: **Back→S, Front→N, Left→W, Right→E, FrontRight→NE, BackRight→SE, BackLeft→SW, FrontLeft→NW**, and
     > the eight `Light*` twins identically. The executor should re-confirm rather than re-derive.
+    >
+    > **On the Rider MCP** (MP-4/MP-5/MP-6 each recorded it "not exposed", which reads like a project-level
+    > defect — it is not): the cause was simply that the **Rider IDE was not running** in those sessions, per
+    > CLAUDE.md's "requires Rider to be running with the solution open". With Rider open, `rename_refactoring`
+    > is available and is the **preferred** tool for this phase — a 16-field rename is exactly what it is for,
+    > and it catches `nameof(...)` / `<see cref>` references a grep sweep can miss. Run `preview: true` first
+    > (the `refactor-safely` mandate) and audit the blast radius.
+    >
+    > **If the tools are missing, that is recoverable mid-session — do not fall back and do not restart.**
+    > Open Rider, then reconnect the server with the `/mcp` command; the tools appear immediately in the
+    > running session (verified 2026-07-25). Manual edits + an exhaustive Grep sweep are the fallback only
+    > when Rider genuinely cannot be run.
 - **Acceptance:** universal gate (byte-identical output — `OutputsEqual` across the suite is the real guard) + in-game seam check (fly a chunk border; no doubled/missing border faces).
 - **Doc-sync:** pipeline doc §9.5; meshing fidelity doc §2 if it names the old fields. **Serialization:** none.
 
