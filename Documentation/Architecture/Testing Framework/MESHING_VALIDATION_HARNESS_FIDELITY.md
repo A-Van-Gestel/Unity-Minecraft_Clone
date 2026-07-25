@@ -1,7 +1,8 @@
 # Meshing Validation Harness — Fidelity Boundary & Extension Backlog
 
 **Status:** ✅ **Active backlog** — Wave 1 executed 2026-06-17 (MH-1/MH-4/MH-9 closed), Wave 2 executed 2026-06-18 (MH-5/MH-3 closed), Wave 3 executed 2026-06-18 (MH-6 closed — buildable-now portion), Wave 5 executed 2026-06-21 (MH-10/MH-11 cross-chunk border culling closed); see §6. **Optimizations landed (guarded by this suite):** MR-1, MR-7 (2026-06-15); **MR-3 + MR-4 + MR-5**
-(2026-06-18, Wave 1 of the MR-* implementation phase) — MR-3/MR-4 added the build-alongside postconditions **B15** (no-reassign-when-bitmask-unchanged) and **B16** (constant-cell-bounds); MR-6 added **B17** (pooled-output stale guard); the cross-chunk substrate prerequisite added **B18–B21**. baselines now **B1–B21**. **Created:** 2026-06-16 · **Last updated:** 2026-06-21 **Scope:** `Assets/Editor/Validation/Meshing/` — the `MeshingValidationSuite` + `MeshingTestWorld` +
+(2026-06-18, Wave 1 of the MR-* implementation phase) — MR-3/MR-4 added the build-alongside postconditions **B15** (no-reassign-when-bitmask-unchanged) and **B16** (constant-cell-bounds); MR-6 added **B17** (pooled-output stale guard); the cross-chunk substrate prerequisite added **B18–B21**. Since then FL-1/FL-2 added **B22/B23**, the MP-* orchestration arc added **B24–B27**, and MP-5 added **B28–B30** — **tip is B30 (30 baselines); see §4 for the arc detail.** **Created:** 2026-06-16 · **Last updated:** 2026-07-25 **Scope:**
+`Assets/Editor/Validation/Meshing/` — the `MeshingValidationSuite` + `MeshingTestWorld` +
 `MeshOracle` + `MeshAssert` + `TestMeshBlockPalette` harness (menu item **`Minecraft Clone/Dev/Validate Meshing`**). **Sibling:** [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](LIGHTING_VALIDATION_HARNESS_FIDELITY.md) — same document shape; the meshing suite was built test-first as that suite's younger sibling.
 
 ---
@@ -213,8 +214,11 @@ The lighting suite already closed its half of this loop: A1 routes harness input
   **CLOSED for the decision layer (MP-2, 2026-07-24), baselines B24/B25 in this same suite** — the gates are the pure `MeshingScheduleDecision` (B24 decision census) and the drain loop is `MeshDrainPolicy.Drain` (B25 drain policy: quota/window/cap stops, purge, remove-vs-leave, priority order). **MP-3 (2026-07-24) added B26** — the in-flight request policy fix (F1): the shared `MeshingScheduleDecision.DequeuesChunk` mapping leaves an in-flight request queued instead of dropping it, guarded by the pure mapping + a two-frame drain scenario. Owned by
   [MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md](../../Design/MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md), not this job-fidelity doc. **MP-4 (2026-07-25) added B27** — the completion pass (F5): `ProcessMeshJobs` now drives the shared
   `Helpers/JobCompletionPass` skeleton (renamed from `LightingCompletionPass`, generalized with the P-4
-  `window` + rotating `startIndex`) through a separate cached driver, and B27 replays that skeleton world-free with a recording fake driver — stage-1 carries over without releasing, stage-2 still releases + enrolls, remove strictly after the merge loop, the window break, and the rotated visit order. Suite tip is now **B27**
-  (27 baselines). **The draw-tail stage remains uncovered here (MP-6).**
+  `window` + rotating `startIndex`) through a separate cached driver, and B27 replays that skeleton world-free with a recording fake driver — stage-1 carries over without releasing, stage-2 still releases + enrolls, remove strictly after the merge loop, the window break, and the rotated visit order. **MP-5 (2026-07-25) added B28–B30** — the GS-5 §7.3 **renderer-ownership split** (F3), on the MH-6 renderer fixture rather than the job harness:
+  `SectionRenderer.SetOcclusionCulled(bool)` is the codebase's only writer of
+  `MeshRenderer.forceRenderingOff`, and the baselines pin the two axes apart — **B28** the apply path never writes the flag (an externally-set flag survives both a non-empty and an empty
+  `UpdateMeshNative`), **B29** `Clear()` resets it on pool recycle, **B30** the setter round-trips without touching `activeSelf`. Suite tip is now **B30**
+  (30 baselines). **The draw-tail stage remains uncovered here (MP-6).**
 
 ---
 

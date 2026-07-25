@@ -1,7 +1,7 @@
 # Sub-Chunk (Section) Meshing Architecture
 
-**Status:** Implemented (Active)
-**Target Engine:** Unity 6.4+
+**Status:** Implemented (Active)  
+**Target Engine:** Unity 6.4+  
 **Context:** The engine renders the world using 16x16x16 `ChunkSection` GameObjects instead of monolithic columns.
 
 ## 1. Executive Summary
@@ -14,9 +14,8 @@ Instead of generating one massive mesh for a 16x16x128 column, the engine genera
 
 The previous "Monolithic" approach and the attempted "Vertical Passability" optimization faced insurmountable architectural flaws:
 
-1. **Scaling Cost (O(N)):** Modifying a single block at Y=5 required regenerating the mesh for the entire column (Y=0 to Y=127). As height increases to 256 or 512, this cost becomes prohibitive, causing frame spikes.
-2. **Ineffective Culling:** Unity's Frustum Culling operates on `Renderers`. A tall chunk column is almost always "in view" (e.g., player looking at the bottom, top is off-screen). Unity is forced to submit geometry for the entire column, including parts behind the player or deep
-   underground.
+1. **Scaling Cost (O (N)):** Modifying a single block at Y=5 required regenerating the mesh for the entire column (Y=0 to Y=127). As height increases to 256 or 512, this cost becomes prohibitive, causing frame spikes.
+2. **Ineffective Culling:** Unity's Frustum Culling operates on `Renderers`. A tall chunk column is almost always "in view" (e.g., player looking at the bottom, top is off-screen). Unity is forced to submit geometry for the entire column, including parts behind the player or deep underground.
 3. **Complex Visibility Logic:** The "Vertical Passability" algorithm attempted to manually calculate occlusion. This was CPU-intensive, complex to maintain, and failed to account for 3D visibility (e.g., viewing a cave from the side).
 
 ## 3. Proposed Architecture
@@ -37,6 +36,17 @@ The engine uses **Individual GameObjects per Section** with `MeshFilter` and `Me
 * **Physics:** We need `MeshColliders`. Updating a small collider for a 16x16x16 area is significantly faster than baking a collider for a massive column.
 * **Ease of Use:** Unity's built-in systems (Frustum Culling, Sorting, LODs) work best with standard GameObjects.
 * **Performance:** In Unity 6, the overhead of GameObjects is low. With **GPU Instancing** enabled on the material, draw calls are batched efficiently.
+
+**Visibility ownership (two axes, GS-5 Phase 0.5 — shipped 2026-07-25):** a section can be hidden for two unrelated reasons, and each has exactly one mechanism and one owner:
+
+| Axis                 | Mechanism                        | Owner                                                                          |
+|----------------------|----------------------------------|--------------------------------------------------------------------------------|
+| *"Has geometry"*     | `GameObject.SetActive`           | `SectionRenderer` (`UpdateMeshNative`'s vertex-count toggle, `Clear()`)        |
+| *"Occlusion-culled"* | `MeshRenderer.forceRenderingOff` | the future `VisibilityManager`, via `SectionRenderer.SetOcclusionCulled(bool)` |
+
+Neither owner writes the other's flag, so remesh and cull events compose in any order — a single shared flag is what made the previous culling attempt render stale geometry. The one exception:
+`Clear()` resets **both** axes on pool recycle (reset-only — it never *sets* the occlusion flag), so a memoizing culler must re-issue after a recycle. See
+[Design/VISIBILITY_CULLING_ARCHITECTURE.md](../Design/VISIBILITY_CULLING_ARCHITECTURE.md) §7.3.
 
 ### 3.3. Culling Strategy (The "Natural" Cull)
 
@@ -87,8 +97,7 @@ public class SectionRenderer {
 
 To support future Cubic Chunks, the Meshing Job must become granular.
 
-**Current:** `MeshGenerationJob` processes 0..Height.
-**New:** `MeshGenerationJob` processes a **Single Section** (or a batch of sections independently).
+**Current:** `MeshGenerationJob` processes 0..Height. **New:** `MeshGenerationJob` processes a **Single Section** (or a batch of sections independently).
 
 **Job Input:**
 
@@ -147,8 +156,7 @@ mesh.SetSubMesh(0, new SubMeshDescriptor(0, indexCount));
 
 ## 6. Path to Cubic Chunks (Future)
 
-This architecture is the prerequisite for Infinite Height / Cubic Chunks.
-Once implemented, the `Chunk` (Column) class effectively becomes a legacy wrapper.
+This architecture is the prerequisite for Infinite Height / Cubic Chunks. Once implemented, the `Chunk` (Column) class effectively becomes a legacy wrapper.
 
 **Migration to Cubic:**
 
@@ -178,16 +186,11 @@ For the detailed design and implementation plan of this feature, please refer to
 
 ## 9. Testing & Validation
 
-The mesher has an editor validation suite at `Assets/Editor/Validation/Meshing/` (menu
-**`Minecraft Clone/Dev/Validate Meshing`**). It runs the **real** `MeshGenerationJob` over a synthetic
-single chunk and asserts the output against an independent standard-cube geometry oracle plus
-structural/determinism invariants — the regression guard that lets the `MR-*` meshing optimizations in
+The mesher has an editor validation suite at `Assets/Editor/Validation/Meshing/` (menu **`Minecraft Clone/Dev/Validate Meshing`**). It runs the **real** `MeshGenerationJob` over a synthetic single chunk and asserts the output against an independent standard-cube geometry oracle plus structural/determinism invariants — the regression guard that lets the `MR-*` meshing optimizations in
 [PERFORMANCE_IMPROVEMENTS_REPORT.md](../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) claim "output-preserving"
 (it already guards MR-1, MR-2, MR-3, MR-4, MR-5, and MR-7).
 
-- **What it covers and its remaining blind spots** (interior-only placement; no custom/cross-mesh block
-  or lava in the palette; smooth-light *values* covered only for the uniform-field case — distinct-per-corner
-  / AO darkening still un-modelled), plus the phased `MH-*` extension backlog keyed to each open `MR-*` item:
+- **What it covers and its remaining blind spots** (interior-only placement; no custom/cross-mesh block or lava in the palette; smooth-light *values* covered only for the uniform-field case — distinct-per-corner / AO darkening still un-modelled), plus the phased `MH-*` extension backlog keyed to each open `MR-*` item:
   [Testing Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md](Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md).
 - **Harness file map, API cheat sheet, and the MR-* guard pattern** (for authoring scenarios):
   `.agents/skills/validation-driven-bugfix/references/meshing-suite.md`.

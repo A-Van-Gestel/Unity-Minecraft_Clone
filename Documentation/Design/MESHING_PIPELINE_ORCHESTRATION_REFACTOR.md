@@ -266,14 +266,14 @@ Note `WorldJobManager` already implements `ILightingCompletionDriver<ChunkCoord>
 
 What each named GS-5 requirement needs from this plan, and where it lands:
 
-| Culling-doc requirement                                                                  | Where honored                                                                                                        |
-|------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------|
-| §7.3 ownership split (`forceRenderingOff` vs `SetActive`) — hard prerequisite, Phase 0.5 | **MP-5** executes it, with fixture baselines asserting the non-interference invariant                                |
-| §7.4 staleness rule — mask published in the same main-thread step that applies the mesh  | §4.3: the single apply site is preserved by MP-4 (the skeleton keeps merge = apply) and named in doc-sync            |
-| §7.4 corollary — while a mesh job is in flight, the culler uses the *old* mask           | **MP-3**: a request during flight stays queued, so the post-edit mask is never silently skipped (the F1 fix)         |
-| §7.5 conservative defaults (unknown ⇒ render)                                            | Out of scope here (culler-side), but MP-5's default `forceRenderingOff = false` on every reset path is its substrate |
-| §8 no save-format impact (masks derived, never persisted)                                | §6 row: nothing in MP-* touches serialization; tripwire stated                                                       |
-| GS-6 ordering note — visibility expressed through a swappable presentation layer         | §4.3: occlusion toggle is one `SectionRenderer` method, not scattered renderer pokes                                 |
+| Culling-doc requirement                                                                  | Where honored                                                                                                                                        |
+|------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
+| §7.3 ownership split (`forceRenderingOff` vs `SetActive`) — hard prerequisite, Phase 0.5 | ✅ **MP-5 (2026-07-25)** — `SectionRenderer.SetOcclusionCulled` is the sole writer; B28–B30 pin non-interference, recycle reset, and axis separation |
+| §7.4 staleness rule — mask published in the same main-thread step that applies the mesh  | §4.3: the single apply site is preserved by MP-4 (the skeleton keeps merge = apply) and named in doc-sync                                            |
+| §7.4 corollary — while a mesh job is in flight, the culler uses the *old* mask           | **MP-3**: a request during flight stays queued, so the post-edit mask is never silently skipped (the F1 fix)                                         |
+| §7.5 conservative defaults (unknown ⇒ render)                                            | Out of scope here (culler-side), but MP-5's default `forceRenderingOff = false` on every reset path is its substrate                                 |
+| §8 no save-format impact (masks derived, never persisted)                                | §6 row: nothing in MP-* touches serialization; tripwire stated                                                                                       |
+| GS-6 ordering note — visibility expressed through a swappable presentation layer         | §4.3: occlusion toggle is one `SectionRenderer` method, not scattered renderer pokes                                                                 |
 
 ---
 
@@ -292,7 +292,7 @@ What each named GS-5 requirement needs from this plan, and where it lands:
 
 ## 7. Phased implementation plan
 
-**Universal regression gate for every phase**: `Minecraft Clone/Dev/Validate Meshing` (tip **B21** — new baselines take **B22+**) green, `Minecraft Clone/Dev/Validate Mesh Build Queue`
+**Universal regression gate for every phase**: `Minecraft Clone/Dev/Validate Meshing` (tip **B30** after MP-5 — new baselines take **B31+**) green, `Minecraft Clone/Dev/Validate Mesh Build Queue`
 (9 baselines) green, and — for phases touching shared `WorldJobManager`/helper surfaces (MP-4) —
 `Minecraft Clone/Dev/Validate Lighting Engine` (62 baselines, both modes) green;
 `dotnet build "Assembly-CSharp.csproj"` AND `dotnet build "Assembly-CSharp-Editor.csproj"` clean. Workflow gotchas apply (new-file Unity import before `dotnet build`; menu suites can run stale code — confirm red/green flips after `RequestScriptCompilation` with a fresh `Unity_RunCommand`
@@ -304,7 +304,7 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 | **MP-2 — `MeshingScheduleDecision` + scheduling baselines** | new `Helpers/MeshingScheduleDecision.cs`; `WorldJobManager.ScheduleMeshing`; new suite partial                                     |   🟡   | —                     |
 | **MP-3 — In-flight request policy fix**                     | `WorldJobManager.ScheduleMeshing` (one arm); prove-red baseline                                                                    |   🟡   | MP-1 (evidence), MP-2 |
 | **MP-4 — Completion-pass unification** ✅ **DONE**          | `Helpers/JobCompletionPass.cs` (generalized/renamed); `WorldJobManager.ProcessMeshJobs` + mesh driver; B27 skeleton-order baseline |   🟡   | —                     |
-| **MP-5 — GS-5 Phase 0.5 ownership split**                   | `SectionRenderer.cs`; renderer-fixture baselines; culling-doc + perf-report checkbox flips                                         |   🟢   | —                     |
+| **MP-5 — GS-5 Phase 0.5 ownership split** ✅ **DONE**       | `SectionRenderer.cs`; renderer-fixture baselines B28–B30; culling-doc + perf-report checkbox flips                                 |   🟢   | —                     |
 | **MP-6 — Draw-tail re-home (`ChunksToDraw`)**               | `Chunk.cs`, `World.cs` step 8                                                                                                      |   🟢   | MP-1 (evidence)       |
 | **MP-7 — Naming & wiring hygiene**                          | `Jobs/MeshGenerationJob.cs` field rename; `WorldJobManager.cs` wiring; pipeline-doc §9.5 refresh                                   |   🟢   | —                     |
 
@@ -511,6 +511,21 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 >       nothing enrolled and red a baseline that gates `Validate All`. Widened to `WINDOW_BUDGET_MS = 50f` and
 >       split the precondition ("job 1 was reached") from the conclusion, so a pre-emptive break now reports
 >       itself explicitly instead of masquerading as a break-logic regression.
+> - **Second code-review round (2026-07-25, during MP-5; 2 findings against MP-4 code, both fixed —
+    > re-gated `Validate All` 340/340).** (1) *The probe's machinery outlived its own gate:* `CountMeshMerge`
+>   is `[Conditional]`-gated, but the staleness expression and the `_meshJobTargets` insert/remove ran
+>   unconditionally, so a release player maintained a dictionary for a counter that does not exist there.
+>   Fixed without any `#if` — `[Conditional]` elides argument evaluation too, so the staleness test moved
+>   *inside* `CountMeshMerge(key, chunk, targetEpoch)` and the dictionary writes became
+>   `TrackMeshJobTarget`/`UntrackMeshJobTarget`. The load-bearing part is the field comment: **`_meshJobTargets`
+    > is empty in release builds — never read it for behavior.** (2) *`MeshCompletionDriver._curJob` held its
+    > released handles* until the next `CompleteJob` overwrote them — the fidelity-B7 stranded-container shape.
+>   Now cleared (`= default`) at the end of `ReleaseJob`, **and symmetrically for `_curLightJob`** in the
+>   lighting driver (user's call): the reviewer cited `_curLightChunk = null` as precedent, but that clears a
+>   managed ref at job *start* — clearing the released job struct is a new convention, so it was applied to
+>   both drivers rather than one. Neither `RemoveAndPromote` reads the scratch, and a stage-1 fault `continue`s
+>   before `ReleaseJob`, so a retried job keeps its data. *Neither finding was reddable by any baseline — see
+    > the §8.1 rider.*
 > - **B27** (`Validate Meshing` 26 → **27**): the skeleton replayed world-free with a recording fake driver —
 >   4 candidates (clean / not-complete / stage-1 fault / stage-2 fault) asserted as an exact hook-order string,
 >   plus a deterministic mid-pass window break (spin-to-deadline, no sleep), the `startIndex` rotation, and an
@@ -527,13 +542,13 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 >   updates, place/break all correct; no warnings observed. Objective, session-cumulative:
 >
 >   | Probe | Reading |
->       |---|---|
->       | merge attempts | **32,728** (routing demonstrably live — this is what a broken routing would flatline) |
->       | gone-chunk discards | 406 (1.2 %) |
->       | **stale-instance** | **0 / 32,728** |
->       | F1 in-flight retries | 273 / 814,801 (0.03 % — no runaway; §3.2 Option C stays deferred) |
->       | F8 request drops | 0 / 7,079,946 |
->       | F4 recycled draw-refs | 0 / 32,322 |
+>         |---|---|
+>         | merge attempts | **32,728** (routing demonstrably live — this is what a broken routing would flatline) |
+>         | gone-chunk discards | 406 (1.2 %) |
+>         | **stale-instance** | **0 / 32,728** |
+>         | F1 in-flight retries | 273 / 814,801 (0.03 % — no runaway; §3.2 Option C stays deferred) |
+>         | F8 request drops | 0 / 7,079,946 |
+>         | F4 recycled draw-refs | 0 / 32,322 |
 >
 >   Editor log for the whole session: **0 `[MESHING]` lines, 0 `ObjectDisposedException`, 0 NRE** — the
 >   fidelity-B7 cascade falsifier came back empty. Pipeline drained to **0 in-flight across all three job
@@ -573,6 +588,57 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 - **Doc-sync (same commit):** flip `VISIBILITY_CULLING_ARCHITECTURE.md` §5 Phase 0.5 checkbox + §7.3/§8 "still open" notes; update `PERFORMANCE_IMPROVEMENTS_REPORT.md`'s GS-5 prerequisite line (report edit is a status-line flip, not a re-audit); `SUB_CHUNK_MESHING_ARCHITECTURE.md`
   §3.2 rendering-strategy note. **Serialization:** none.
 
+> **Amended (2026-07-25) — MP-5 implemented (uncommitted); in-game smoke pending.**
+> - **Shipped exactly as scoped, in `SectionRenderer.cs` only.** `SetOcclusionCulled(bool)` writes
+>   `_meshRenderer.forceRenderingOff` and is the **only code that *sets* it** (pre-change re-verification:
+>   `Grep` over `Assets/` returned 0 pre-existing writers; the only other repo hit is a Unity package's
+>   own test under `Library/PackageCache/`). **`Clear()` is the one other writer and is reset-only** —
+>   a code-review round (2026-07-25) caught the first cut's prose claiming a literal *sole* writer,
+>   which the culler would have read as "nothing else ever touches this flag". The consequence is now
+>   stated in culling doc §7.3: a `VisibilityManager` that memoizes its culled-set **must re-issue after
+    > a pool recycle**, since `Clear()` un-culls (failure direction: over-render, never a hole).
+>   `Clear()` resets the flag to false alongside its existing
+>   `SetActive(false)`, so a recycled section can never inherit a culled state (pool-reset-safety;
+>   §7.5's conservative "render" direction). The two-axis contract is XML-documented on the class
+>   **and** pointed at from `UpdateMeshNative` ("owns the *has geometry* axis only") and `Clear()`
+>   ("resets both axes") — F3's mistake was made at the member level, which is where the next editor
+>   looks. **Nothing in production calls the setter**; the culler (GS-5 Phase 2/3) is its first caller.
+> - **Decisions (user sign-off, all three the recommended option).** (1) **Bare write**, no cached
+>   mirror + early-out: a second copy of the truth would need its own `Clear()` reset and can desync
+>   against an external write, for a bool store that costs nothing — GS-5's manager memoizes on its
+>   own side (the "thin, swappable presentation layer" of culling doc §8). (2) **Setter only**, no
+>   `IsOcclusionCulled` getter — no consumer exists today and it is trivially additive later.
+>   (3) **Class-level contract + per-member pointers** for the docs.
+> - **API verified before writing code** (CLAUDE.md rule): `forceRenderingOff` is a settable `bool`
+>   on `UnityEngine.Renderer`, **inherited** by `MeshRenderer` — `get_class_reference("MeshRenderer")`
+>   lists only its own 9 members and does **not** show it; `get_class_reference("Renderer")` does.
+> - **B28–B30** on the **MH-6 renderer fixture** (`SectionRendererTestFixture`, not `MeshingTestWorld`),
+>   which gained a settable `OcclusionCulled` property so a baseline can stamp the flag *externally*,
+>   as the future `VisibilityManager` would: **B28** non-interference (two independent legs — a
+>   non-empty and an empty `UpdateMeshNative` — each re-stamping the flag first, plus a control that
+>   the accessor observes a real change), **B29** `Clear()` resets both axes (flag asserted true
+>   immediately before the call, so the post-condition can't pass vacuously), **B30** setter
+>   round-trip with `activeSelf` unchanged. `Validate Meshing` 27 → **30**.
+> - **Prove-red confirmed:** inserting `_meshRenderer.forceRenderingOff = false;` at
+>   `UpdateMeshNative`'s **entry** (so it covers both the non-empty and the empty-return paths) reds
+>   **exactly B28** (`29/30`), and **both** of its legs report — the empty-path leg is not vacuous.
+>   B29/B30 and every job baseline stayed green. Restored → 30/30.
+> - **Gates:** `dotnet build` both assemblies clean; `Validate Meshing` **30/30**, `Validate Mesh
+>   Build Queue` 9/9, `Validate Lighting Engine` 88/88, **`Validate All` 340/340** across 16 suites.
+> - **Note for GS-6 (BRG):** the flag is written through one `SectionRenderer` method, so a later
+>   BatchRendererGroup conversion swaps the toggle's *implementation*, not its callers (§4.3).
+> - **✅ In-game smoke (2026-07-25, high-speed fly-over, lighting disabled).** No visual change, as
+>   predicted — production sets the flag nowhere. Objective, session-cumulative:
+>   **merge attempts 7,969** (routing live — a broken driver flatlines this), gone-chunk discards 422
+>   (5.3 %), **stale-instance 0**, F4 recycled draw-refs 0 / 754, F8 request drops 0 / 15,837.
+>   *`retries=0` is the EXPECTED reading for this driver and says nothing about MP-3* — F1 is
+>   load-driven via the lighting re-request cascade, which a lighting-disabled fly-over does not
+>   generate (see the MP-3 CORRECTION note).
+> - **Code-review round (`/code-review high`, 2026-07-25) — 1 MP-5 finding, fixed.** The prose claimed a
+>   literal *sole* writer of `forceRenderingOff` while `Clear()` also writes it. Corrected everywhere the
+>   claim appeared (see the first bullet); B29 already pinned the behavior, so this was a contract-clarity
+>   fix, not a code fix. The round's other two findings were against MP-4 code — see the MP-4 note.
+
 ### MP-6 — Draw-tail re-home (🟢, small behavior change)
 
 - **Decision (2026-07-24, user sign-off):** take the **drop-the-stagger option** below — trigger the animation at apply time — AND fix the lifecycle hole. Also note the pacing is now P-4's §5.3 drain (`drawApplyBudgetMs`), not the old one-per-frame code (see the drift update); MP-6 layers onto that. The two Scope options below are preserved for context, but the option is now chosen.
@@ -580,6 +646,9 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
     - **Default (recommended): keep the paced queue, fix its lifecycle.** Store `(Chunk, ChunkCoord)`
       (or re-resolve via `_chunkMap` at drain) and skip entries whose chunk no longer occupies that coord; clear `ChunksToDraw` in the same teardown paths that clear `_meshBuildQueue`; rename the stage to what it is (`_loadAnimationQueue` / `TriggerLoadAnimation()` — `refactor-safely`), and move the enqueue out of `Chunk.ApplyMeshData` into `ProcessMeshJobs` (the chunk stays queue-agnostic, matching the MR-6 ownership style).
     - **Option (needs user sign-off — visual change):** drop the one-per-frame pacing and trigger the animation directly at apply time. Do NOT take this silently; the stagger may be a deliberate aesthetic. Ask when executing.
+- **Optional rider (§8.1, executor's call):** MP-6 moves the draw-tail enqueue out of
+  `Chunk.ApplyMeshData` into the completion pass, i.e. it edits the mesh driver's merge hook anyway — the cheapest moment to add `IMeshCompletionHost` and finally let baselines drive the **real**
+  `MeshCompletionDriver` (B27 only replays the skeleton). Take it only if the rework genuinely lands in that hook; skip it otherwise, and do not schedule it standalone.
 - **Acceptance:** universal gate + in-game visual check: load animations play once, at the right position, under streaming + a pool-churn session (sprint one direction so recycling is hot); MP-1's probe-3 counter goes to zero.
 - **Doc-sync:** `CHUNK_LIFECYCLE_PIPELINE.md` §4 step 8 + §5.3 final-draw subgraph (rename + actual semantics); `SUB_CHUNK_MESHING_ARCHITECTURE.md` if it names `CreateMesh`. **Serialization:** none.
 
@@ -596,11 +665,49 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 
 ## 8. Extension roadmap (post-MP-7, in intended order)
 
-| Version | Extension                                                                                                                                                                                                                                                                                                                 |
-|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **v2**  | **Drain park/promote** (F7): parked set for gate-failing queued chunks, promoted by the events lighting already hooks (generation/load/lighting completion). Only with MP-1 counter + profiler evidence that gate re-probing costs real frame time; rides LP-2's shared `NeighborReadinessDecision` facts if LP-2 landed. |
-| **v2**  | **Dirty-while-in-flight re-enqueue** (§3.2 Option C) — only if MP-3's leave-queued retry shows measurable redundant-rebuild cost.                                                                                                                                                                                         |
-| **v3+** | **GS-5 Phases 1–3** (connectivity masks in `MeshDataJobOutput`, `VisibilityManager`, PVS) — owned by `VISIBILITY_CULLING_ARCHITECTURE.md`; lands on MP-5's seam and §4.3's publish point. GS-6 / MR-8 follow per the performance report's sequencing.                                                                     |
+| Version        | Extension                                                                                                                                                                                                                                                                                                                 |
+|----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **v2**         | **Drain park/promote** (F7): parked set for gate-failing queued chunks, promoted by the events lighting already hooks (generation/load/lighting completion). Only with MP-1 counter + profiler evidence that gate re-probing costs real frame time; rides LP-2's shared `NeighborReadinessDecision` facts if LP-2 landed. |
+| **v2**         | **Dirty-while-in-flight re-enqueue** (§3.2 Option C) — only if MP-3's leave-queued retry shows measurable redundant-rebuild cost.                                                                                                                                                                                         |
+| **v3+**        | **GS-5 Phases 1–3** (connectivity masks in `MeshDataJobOutput`, `VisibilityManager`, PVS) — owned by `VISIBILITY_CULLING_ARCHITECTURE.md`; lands on MP-5's seam and §4.3's publish point. GS-6 / MR-8 follow per the performance report's sequencing.                                                                     |
+| **MP-6 rider** | **`IMeshCompletionHost` — let the suite drive the *real* `MeshCompletionDriver`** (§8.1). Optional, 🟡; MP-6 already touches this seam, so it is cheaper there than standalone.                                                                                                                                           |
+
+### 8.1 `IMeshCompletionHost` — closing the driver-coverage gap (proposed 2026-07-25)
+
+**The gap.** B27 replays the completion *skeleton* with a recording fake driver over `int` keys, so nothing in any suite executes the production `MeshCompletionDriver`. Everything it does is reached through its `WorldJobManager` owner — `MeshJobs[key].Handle` (real `JobHandle`s),
+`_world.GetChunkFromChunkCoord` (a live chunk map), `chunk.ApplyMeshData` (real `SectionRenderer`s → GPU upload), `_meshOutputPool` / `ReleaseMeshingJobInputs`, `_meshJobTargets` — and constructing that needs a functioning `World`, exactly what the runner's `World.Instance` isolation guard forbids.
+
+**The fix is the pattern MP-2 already shipped one phase earlier.** `MeshDrainPolicy.Drain` takes an
+`IMeshDrainHost` that `World` implements on `this` (cached, zero per-frame alloc), which is how **B25**
+drives the real drain loop with scripted facts. Give the completion driver the same seam:
+
+```csharp
+/// The collaborators MeshCompletionDriver needs from its owner — the IMeshDrainHost sibling.
+public interface IMeshCompletionHost
+{
+    bool TryGetJob(ChunkCoord key, out MeshingJobData job);
+    bool TryApplyMesh(ChunkCoord key, MeshDataJobOutput output); // resolve + apply; false = chunk gone
+    void ReturnOutput(MeshDataJobOutput output);
+    void ReleaseInputs(in MeshingJobData job);
+    void CountMerge(ChunkCoord key, bool chunkGone, int targetEpoch);
+    void RemoveJob(ChunkCoord key);
+}
+```
+
+`WorldJobManager` implements it on `this`; the driver takes the host instead of the owner ref. Folding resolve+apply into one `TryApplyMesh` is what makes the fake host possible — it records or throws instead of uploading, with no `Chunk` or `World` in sight.
+
+**What it buys over B27** (which pins ordering, the window break, and rotation — not the driver):
+
+- the **hook → effect mapping**: that the gone-chunk branch still releases (the MR-6 single-release-site invariant, today evidence-only), that a merge fault keeps the previous mesh, that removal is after;
+- **the `_curJob` scratch lifecycle** — a fake host counting `ReturnOutput` turns a double-release into a red baseline. That is precisely the code-review finding of 2026-07-25 (clear the released scratch), which had to be accepted on reasoning because no baseline could observe it.
+
+**Cost/risk.** 🟡: one interface, mechanical rewiring of the live merge path (the only real risk —
+`Validate All` gates it), a recording fake host, ~2–3 baselines (**B31+**).
+
+**Two alternatives considered and not chosen.** *(a)* Reflection-construct the driver against an uninitialized `WorldJobManager` with private fields poked in — zero production change, precedent exists in the suite, but it binds baselines to **private field names** and fails for reasons unrelated to the behavior it guards. *(b)* Stand up a real `World` + `Chunk` for a genuine `ApplyMeshData` — rejected:
+it needs play mode or a heavyweight edit-mode world builder, re-tests what B12–B16/B28–B30 already cover on the renderer side, and its one unique addition (a faulting `Handle.Complete()`) is what B27's fake driver already replays deterministically.
+
+**Why it is a rider, not a phase.** The uncovered surface is narrow — B27 covers sequencing, the renderer baselines cover the apply target, and the MP-1/MP-4 diagnostics cover live routing in-game (2026-07-25 fly-over: 7,969 merge attempts, 0 stale-instance). Do it *if* MP-6's rework touches the driver anyway; do not schedule it on its own.
 
 ---
 
@@ -615,6 +722,9 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 
 ## Document History
 
+* **v1.6** - MP-5 implemented (2026-07-25, uncommitted; in-game smoke pending): the GS-5 Phase 0.5 renderer-ownership split (F3) — `SectionRenderer.SetOcclusionCulled(bool)` as the codebase's sole writer of `MeshRenderer.forceRenderingOff`, `Clear()` resetting it on pool recycle, and the two-axis ownership contract XML-documented on the class plus `UpdateMeshNative`/`Clear()`. Decisions: bare write (no cached mirror), setter only (no getter), class + per-member docs. **B28–B30** on the MH-6 renderer fixture (non-interference over both apply paths,
+  recycle reset, setter round-trip vs `activeSelf`); prove-red at `UpdateMeshNative`'s entry reds exactly B28 with both legs reporting. `Validate Meshing` 30/30, `Validate All` **340/340**. Doc-synced the culling doc (§5 Phase 0.5 ✅, status line, §7.3, §8, Phase 3 renderer step), `PERFORMANCE_IMPROVEMENTS_REPORT.md` GS-5 prerequisite + recommendation, `SUB_CHUNK_MESHING_ARCHITECTURE.md` §3.2 (ownership table), meshing fidelity tip B27 → B30. **In-game smoke confirmed** (fly-over: 7,969 merge attempts, 0 stale-instance, no visual change). Includes a
+  `/code-review high` round: MP-5's "sole writer" prose corrected to "only *setter*" (`Clear()` is reset-only — the culler consequence now stated in culling doc §7.3), plus two MP-4 fixes (probe machinery behind `[Conditional]`; released job scratch cleared in **both** completion drivers) and the new **§8.1** `IMeshCompletionHost` rider — the seam that would let baselines drive the real `MeshCompletionDriver`, scheduled as an optional MP-6 rider because neither review finding was reddable by any suite.
 * **v1.5** - MP-4 implemented (2026-07-25, uncommitted; in-game smoke pending): the completion-pass unification — hard rename to `Helpers/JobCompletionPass.cs` / `IJobCompletionDriver<TKey>` (§9 Q3 resolved), the P-4 window + rotating start generalized as two optional `RunMergeLoop` parameters (cursor stays caller-owned), `ProcessMeshJobs` routed through a cached nested `MeshCompletionDriver`. **B27** (skeleton-order replay via a recording fake driver); prove-red reds exactly B27 — *lighting B65 stayed green*, so B27 closes a real release-on-fault gap
   rather than duplicating B65. `Validate Meshing` 27/27, `Validate All` 337/337. The out-of-range discard rider is **closed as provably redundant** (view-distance removal already precedes the unload boundary); it became the D3 **probe-only** stale-instance counter (`MeshingJobData.TargetEpoch`, blittable epoch — no managed field under `Jobs/`). Doc-synced `CHUNK_LIFECYCLE_PIPELINE.md` §4 + §10, lighting fidelity B7 + registry row, meshing fidelity tip B26 → B27.
 * **v1.4** - MP-3 implemented (2026-07-24, uncommitted; in-game repro pending): the F1 in-flight lost-update fix as the shared `MeshingScheduleDecision.DequeuesChunk` mapping (Option A — production + B26 share it), `ScheduleMeshing` switch collapsed, MP-1 counter relabeled consumed → retried. **B26** (pure mapping + two-frame drain scenario); prove-red reds exactly B26; `Validate Meshing` 26/26, `Validate All` 336/336. Doc-synced `CHUNK_LIFECYCLE_PIPELINE.md` §5.3 + §9.5 + meshing fidelity §4 (`SUB_CHUNK_MESHING_ARCHITECTURE.md` verified no-op).
@@ -625,4 +735,4 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 
 ---
 
-**Last Updated:** 2026-07-25 (MP-1…MP-4 implemented; MP-3 in-game repro + MP-4 in-game smoke pending) **Next Review:** when MP-5 starts (GS-5 Phase 0.5 renderer-ownership split — independently harmless, unblocks the culler), or when GS-5 Phase 1 is scheduled (re-check §5 contract)
+**Last Updated:** 2026-07-25 (MP-1…MP-5 implemented + in-game confirmed; only MP-3's in-game repro stays open, and §MP-3's CORRECTION explains why it is low-value) **Next Review:** when MP-6 starts (draw-tail re-home — the §9 Q2 stagger decision is already made), or when GS-5 Phase 1 is scheduled (re-check §5 contract — Phase 0.5 is now closed by MP-5)

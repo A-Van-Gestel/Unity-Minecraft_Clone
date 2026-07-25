@@ -6,6 +6,28 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
 
+/// <summary>
+/// The per-section (16×16×16) render object: one <see cref="UnityEngine.GameObject"/> with a
+/// <see cref="MeshFilter"/> + <see cref="MeshRenderer"/>, pooled together with its owning
+/// <see cref="Chunk"/>.
+/// <para>
+/// <b>Two-axis visibility ownership (GS-5 §7.3).</b> A section can be hidden for two unrelated
+/// reasons, and each reason has exactly one mechanism and one owner:
+/// <list type="bullet">
+/// <item><b>"Has geometry"</b> → <see cref="UnityEngine.GameObject.SetActive"/>, owned by this
+/// class (<see cref="UpdateMeshNative"/> toggles it by vertex count; <see cref="Clear"/>
+/// deactivates on pool recycle).</item>
+/// <item><b>"Occlusion-culled"</b> → <see cref="Renderer.forceRenderingOff"/> via
+/// <see cref="SetOcclusionCulled"/>, owned exclusively by the future <c>VisibilityManager</c>.</item>
+/// </list>
+/// Neither owner may write the other's flag, so any interleaving of remesh and cull events
+/// composes correctly — a single shared flag is what made the previous culling attempt render
+/// stale/garbage geometry (see <c>Documentation/Design/VISIBILITY_CULLING_ARCHITECTURE.md</c> §7.3).
+/// <b>One deliberate exception:</b> <see cref="Clear"/> also writes the occlusion flag, but only ever
+/// <i>resets</i> it to false on pool recycle (never sets it), so a recycled section starts rendered.
+/// A culler that caches its own culled-set must therefore re-issue after a recycle.
+/// </para>
+/// </summary>
 public class SectionRenderer
 {
     public readonly GameObject GameObject;
@@ -111,6 +133,11 @@ public class SectionRenderer
     /// This is critical to prevent Unity from validating new submesh descriptors against stale index buffer data.
     /// </para>
     /// </summary>
+    /// <remarks>
+    /// Owns the <i>"has geometry"</i> axis only (the vertex-count <c>SetActive</c> toggle) — it must never
+    /// read or write <see cref="Renderer.forceRenderingOff"/>, which belongs to the culler. See the
+    /// two-axis ownership contract on <see cref="SectionRenderer"/>.
+    /// </remarks>
     public void UpdateMeshNative(
         NativeArray<Vector3> verts, NativeArray<half4> uvs, NativeArray<Color32> colors,
         NativeArray<NormalLightVertex> stream3, int vertexStart, int vertexCount,
@@ -204,6 +231,24 @@ public class SectionRenderer
     }
 
     /// <summary>
+    /// Sets whether this section is hidden by occlusion culling — the only code in the codebase that
+    /// <i>sets</i> <see cref="Renderer.forceRenderingOff"/> (GS-5 Phase 0.5). <see cref="Clear"/> is the
+    /// one other writer and is <b>reset-only</b> (false, on pool recycle).
+    /// </summary>
+    /// <remarks>
+    /// Reserved for the future <c>VisibilityManager</c> and unused by production until GS-5 Phase 2/3,
+    /// so today every section renders. Do NOT use this to express <i>"has geometry"</i> — that axis is
+    /// <c>SetActive</c>, owned by this class; see the contract on <see cref="SectionRenderer"/>.
+    /// <see cref="Renderer.forceRenderingOff"/> is preferred over <c>SetActive</c>/<c>enabled</c> for
+    /// culling: it suppresses submission without dirtying transforms or running <c>OnEnable</c>-style work.
+    /// </remarks>
+    /// <param name="culled">True to suppress rendering of this section; false to render it normally.</param>
+    public void SetOcclusionCulled(bool culled)
+    {
+        _meshRenderer.forceRenderingOff = culled;
+    }
+
+    /// <summary>
     /// Rebuilds <see cref="s_materialCombinations"/> from the current <see cref="World.Instance"/>
     /// materials if they have changed identity (or on first use). The 8 arrays each hold the present
     /// submeshes' materials in opaque → transparent → fluid order. Main-thread only (called from the
@@ -250,10 +295,19 @@ public class SectionRenderer
     /// Clears the mesh data and disables the object for pooling.
     /// Does NOT destroy the mesh or object, preserving memory allocation.
     /// </summary>
+    /// <remarks>
+    /// The pool-recycle reset point, so it resets <b>both</b> visibility axes: <c>SetActive(false)</c>
+    /// ("has geometry") and <see cref="Renderer.forceRenderingOff"/> back to false. A recycled section
+    /// must never inherit the previous lifecycle's culled state — and when in doubt the conservative
+    /// direction is "render", never "hidden" (culling doc §7.5).
+    /// </remarks>
     public void Clear()
     {
         if (_mesh != null) _mesh.Clear();
         if (GameObject != null) GameObject.SetActive(false);
+
+        // GS-5 §7.3/§7.5: drop any occlusion state from the previous lifecycle (see the remarks above).
+        if (_meshRenderer != null) _meshRenderer.forceRenderingOff = false;
 
         // MR-3: a recycled section must reassign sharedMaterials on its first update (the renderer's
         // material state is no longer tracked once cleared). Reset to the "none assigned yet" default.
