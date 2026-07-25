@@ -8,7 +8,7 @@ namespace Editor.Validation.Lighting
 {
     /// <summary>
     /// Baseline regression scenario for the completion-pass fault isolation extracted into the shared
-    /// <c>LightingCompletionPass</c> skeleton (HF-4 #2; fidelity finding <b>B7</b>, full closure). The
+    /// <c>JobCompletionPass</c> skeleton (HF-4 #2; fidelity finding <b>B7</b>, full closure). The
     /// production pass isolates a per-job merge fault so one throwing merge cannot abort the whole pass or
     /// strand the other already-released jobs with disposed containers (the <c>ObjectDisposedException</c>
     /// cascade). Before HF-4 #2 that control flow lived only in <c>WorldJobManager.ProcessLightingJobs</c>

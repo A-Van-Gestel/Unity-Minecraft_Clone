@@ -211,7 +211,10 @@ The lighting suite already closed its half of this loop: A1 routes harness input
 - **True concurrency / Burst scheduling races.** Synchronous `job.Run()` only — mirrors the lighting suite's B3 **WONTFIX (structural)**. MR-5's value (off-main-thread scheduling) is about *where* work runs; the harness verifies output equivalence (MH-5), not the threading itself.
 - **Scheduling / drain orchestration (the decision layer).** ~~This is a *job* harness — it starts at the mesh job's inputs; the `ScheduleMeshing` gate composition and the per-frame drain policy are production-only.~~
   **CLOSED for the decision layer (MP-2, 2026-07-24), baselines B24/B25 in this same suite** — the gates are the pure `MeshingScheduleDecision` (B24 decision census) and the drain loop is `MeshDrainPolicy.Drain` (B25 drain policy: quota/window/cap stops, purge, remove-vs-leave, priority order). **MP-3 (2026-07-24) added B26** — the in-flight request policy fix (F1): the shared `MeshingScheduleDecision.DequeuesChunk` mapping leaves an in-flight request queued instead of dropping it, guarded by the pure mapping + a two-frame drain scenario. Owned by
-  [MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md](../../Design/MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md), not this job-fidelity doc. The completion-pass and draw-tail stages remain uncovered here (MP-4/MP-6).
+  [MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md](../../Design/MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md), not this job-fidelity doc. **MP-4 (2026-07-25) added B27** — the completion pass (F5): `ProcessMeshJobs` now drives the shared
+  `Helpers/JobCompletionPass` skeleton (renamed from `LightingCompletionPass`, generalized with the P-4
+  `window` + rotating `startIndex`) through a separate cached driver, and B27 replays that skeleton world-free with a recording fake driver — stage-1 carries over without releasing, stage-2 still releases + enrolls, remove strictly after the merge loop, the window break, and the rotated visit order. Suite tip is now **B27**
+  (27 baselines). **The draw-tail stage remains uncovered here (MP-6).**
 
 ---
 

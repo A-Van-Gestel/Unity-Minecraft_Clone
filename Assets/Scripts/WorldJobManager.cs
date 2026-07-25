@@ -22,7 +22,7 @@ using Debug = UnityEngine.Debug;
 /// Manages the lifecycle of all background jobs (generation, meshing, lighting).
 /// Owns the active <see cref="IChunkGenerator"/> strategy and delegates scheduling to it.
 /// </summary>
-public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord>
+public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>
 {
     private readonly World _world;
     private readonly IChunkGenerator _chunkGenerator;
@@ -139,9 +139,26 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
 
     /// <summary>MP-1 rider (2026-07-23): completed mesh jobs discarded because the target chunk was
     /// gone from the chunk map at merge time (out-of-range / unloaded). Read against
-    /// <see cref="MeshMergeAttempts"/>. Under-counts stale-instance discards (a live chunk that is a
-    /// different instance than the job targeted) — that needs a Chunk ref in MeshingJobData (MP-4).</summary>
+    /// <see cref="MeshMergeAttempts"/>. This is also where an out-of-range result lands: a chunk beyond the
+    /// unload boundary has already left <c>_chunkMap</c> (and the mesh queue) via <c>CheckViewDistance</c>,
+    /// since view distance is strictly inside the unload boundary — so no separate range test is needed here.
+    /// The stale-instance half is counted by <see cref="MeshStaleInstanceMerges"/>.</summary>
     public int MeshGoneChunkDiscards { get; private set; }
+
+    /// <summary>MP-4 probe: completed mesh jobs whose target chunk is still live but whose data is no longer the
+    /// lifecycle the job was snapshotted from — either a different <c>ChunkData</c> instance now occupies the
+    /// coord, or the same instance was <c>Reset</c> (epoch moved past
+    /// <see cref="MeshingJobData.TargetEpoch"/>). Both halves are required; see the pairing note in the mesh
+    /// driver's merge hook. The blind spot <see cref="MeshGoneChunkDiscards"/> could not see.
+    /// <para><b>Expected to stay 0 — this is a structural tripwire, not a workload measurement.</b>
+    /// <c>ChunkUnloadDecision.Evaluate</c> returns <c>DeferJobRunning</c> before any unload arm whenever a mesh
+    /// job is keyed on the chunk, so an in-flight job pins its <c>ChunkData</c> against pool recycling: the
+    /// instance cannot be swapped or <c>Reset</c> while the job that snapshotted it is still running. A chunk
+    /// that leaves the map instead surfaces as <see cref="MeshGoneChunkDiscards"/>. Measured 0 / 32,728 merges
+    /// across 8 teleport legs with 7–10 jobs in flight at each hop (2026-07-25). <b>A non-zero value here means
+    /// that pin was violated</b> — investigate the unload path, don't just add a discard.</para>
+    /// Observation only: the apply is unchanged. Read against <see cref="MeshMergeAttempts"/>.</summary>
+    public int MeshStaleInstanceMerges { get; private set; }
 
     /// <summary>MP-1 denominator: completed mesh jobs that reached the merge step this session (i.e.
     /// passed <c>Handle.Complete()</c>).</summary>
@@ -157,14 +174,17 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     [Conditional("DEVELOPMENT_BUILD")]
     private void CountMeshScheduleAttempt() => MeshScheduleAttempts++;
 
-    /// <summary>MP-1 probe: count one completed-mesh merge attempt, flagging the gone-chunk discard.</summary>
+    /// <summary>MP-1 probe: count one completed-mesh merge attempt, flagging the gone-chunk discard and
+    /// (MP-4) the live-but-recycled target.</summary>
     /// <param name="chunkGone">True when the target chunk was absent from the chunk map at merge time.</param>
+    /// <param name="staleInstance">True when the chunk is live but its data was pool-recycled mid-flight.</param>
     [Conditional("UNITY_EDITOR")]
     [Conditional("DEVELOPMENT_BUILD")]
-    private void CountMeshMerge(bool chunkGone)
+    private void CountMeshMerge(bool chunkGone, bool staleInstance)
     {
         MeshMergeAttempts++;
         if (chunkGone) MeshGoneChunkDiscards++;
+        if (staleInstance) MeshStaleInstanceMerges++;
     }
 
     #endregion
@@ -204,14 +224,26 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     private readonly List<ChunkCoord> _meshScanKeys = new List<ChunkCoord>();
     private int _meshScanCursor;
 
-    // Reused snapshot of LightingJobs.Keys for one completion pass — the shared LightingCompletionPass
+    // Reused snapshot of LightingJobs.Keys for one completion pass — the shared JobCompletionPass
     // iterates a stable candidate list rather than the live dictionary (removal is after-loop anyway).
     private readonly List<ChunkCoord> _lightCompletionCandidates = new List<ChunkCoord>();
 
-    // Per-job scratch shared across the LightingCompletionPass driver hooks (single-threaded, non-reentrant
+    // Per-job scratch shared across the JobCompletionPass driver hooks (single-threaded, non-reentrant
     // pass): the job being completed/merged/released and its chunk, cached so the hooks don't re-look-them-up.
     private LightingJobData _curLightJob;
     private ChunkData _curLightChunk;
+
+    // MP-4: the mesh pass's JobCompletionPass driver. A separate object because one class cannot implement
+    // IJobCompletionDriver<ChunkCoord> twice (the lighting pass holds that slot on `this`); cached so the
+    // per-frame pass allocates nothing.
+    private readonly MeshCompletionDriver _meshDriver;
+
+    // MP-4 stale-instance probe: the ChunkData instance each in-flight mesh job was snapshotted from, paired
+    // with MeshingJobData.TargetEpoch. Lives here rather than in MeshingJobData because that struct sits under
+    // Assets/Scripts/Jobs/, where the Burst rules ban managed fields. Reference identity is NOT optional — see
+    // the pairing rationale in MeshCompletionDriver.MergeJob. Entries share MeshJobs' lifetime exactly (added
+    // with it in ScheduleMeshing, removed in RemoveAndPromote, cleared in Dispose).
+    private readonly Dictionary<ChunkCoord, ChunkData> _meshJobTargets = new Dictionary<ChunkCoord, ChunkData>();
 
     private readonly HashSet<ChunkCoord> _chunksToRebuildMesh = new HashSet<ChunkCoord>();
     private readonly Dictionary<ChunkCoord, HashSet<Vector2Int>> _droppedLightUpdates = new Dictionary<ChunkCoord, HashSet<Vector2Int>>();
@@ -259,6 +291,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     public WorldJobManager(World world, WorldTypeDefinition activeWorldType, JobDataManager globalJobData)
     {
         _world = world;
+        _meshDriver = new MeshCompletionDriver(this); // MP-4: one cached driver for the mesh completion pass
         _isBlockFullyOpaque = id => _world.BlockTypes[id].IsOpaque;
         _blockEmission = id =>
         {
@@ -428,7 +461,14 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
         // 2. Rent all input maps from the pool and fill them (every element is written, so stale
         // pooled buffers are safe). If anything below throws, the catch releases every buffer
         // acquired so far (Return/Dispose skip uncreated entries), so the pool never leaks.
-        MeshingJobData jobData = new MeshingJobData { SectionData = sectionData };
+        // TargetEpoch (MP-4): the snapshot below describes THIS lifecycle of the chunk's data. If the pool
+        // recycles the ChunkData before the job merges, the epoch differs and the merge can recognize the
+        // result as stale (probe-only today — see CountMeshMerge).
+        MeshingJobData jobData = new MeshingJobData
+        {
+            SectionData = sectionData,
+            TargetEpoch = chunk.ChunkData.LifecycleEpoch,
+        };
         try
         {
             jobData.Map = RentAndFillVoxelMap(chunkCoord.ToVoxelOrigin());
@@ -497,6 +537,11 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
             jobData.Handle = job.Schedule();
             jobData.Handle = postJob.Schedule(jobData.Handle);
             MeshJobs.Add(chunkCoord, jobData);
+
+            // MP-4 probe: capture the snapshotted ChunkData INSTANCE alongside jobData.TargetEpoch. Inside the
+            // same try as the Add, so the two registries can never disagree (the catch below rethrows without
+            // having added either).
+            _meshJobTargets[chunkCoord] = chunk.ChunkData;
         }
         catch
         {
@@ -1118,11 +1163,11 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     /// systematic starvation of a deferred job vanishingly unlikely. <c>default</c> is unbudgeted.</param>
     public void ProcessMeshJobs(PipelinePassBudget.Window window = default)
     {
-        _completedMeshJobs.Clear();
-
         // Rotating-start snapshot iteration (see _meshScanKeys) — same probabilistic starvation guard
         // as the generation pass: a budget break must not systematically serve fresh low-index jobs
-        // every frame while an old completed job waits at a high index holding pooled buffers.
+        // every frame while an old completed job waits at a high index holding pooled buffers. The
+        // snapshot is byte-identical to iterating the live dictionary (the loop never adds to MeshJobs
+        // and removal is after-loop); only the visit ORDER rotates.
         _meshScanKeys.Clear();
         foreach (ChunkCoord key in MeshJobs.Keys) _meshScanKeys.Add(key);
         int meshKeyCount = _meshScanKeys.Count;
@@ -1133,66 +1178,115 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
         if (window.HasBudget && meshKeyCount > 0)
             meshScanStart = _meshScanCursor = (_meshScanCursor + 1) % meshKeyCount;
 
-        for (int scanIndex = 0; scanIndex < meshKeyCount; scanIndex++)
+        // MP-4: the two-stage HF-2 fault isolation and the release-inside / remove-after ordering live in
+        // the shared JobCompletionPass skeleton (driven here through _meshDriver and by the lighting pass
+        // through `this`), so both passes — and the validation harness's replay — can never disagree on the
+        // pass bookkeeping. The window + rotating start are passed through; a budget break simply leaves the
+        // un-visited remainder enrolled in MeshJobs for the next frame. _completedMeshJobs is cleared by
+        // RunMergeLoop.
+        JobCompletionPass.RunMergeLoop(_meshScanKeys, _meshDriver, _completedMeshJobs, window, meshScanStart);
+        JobCompletionPass.RunRemoveAndPromote(_completedMeshJobs, _meshDriver);
+    }
+
+    #region JobCompletionPass driver — mesh pass (MP-4)
+
+    /// <summary>
+    /// The mesh pass's <see cref="IJobCompletionDriver{TKey}"/>: the per-job side effects the shared
+    /// <see cref="JobCompletionPass"/> skeleton sequences (the exact body the old inline
+    /// <see cref="ProcessMeshJobs"/> loop ran). A separate cached object rather than another interface on
+    /// <see cref="WorldJobManager"/> itself, because one class cannot implement
+    /// <c>IJobCompletionDriver&lt;ChunkCoord&gt;</c> twice — the lighting pass already holds that slot on
+    /// <c>this</c>. Instantiated once in the constructor, so the per-frame pass allocates nothing.
+    /// </summary>
+    /// <remarks><c>_curJob</c> caches the job across a single candidate's hooks; the pass is single-threaded
+    /// and non-reentrant, so a plain field is safe (the <c>_curLightJob</c> precedent).</remarks>
+    private sealed class MeshCompletionDriver : IJobCompletionDriver<ChunkCoord>
+    {
+        private readonly WorldJobManager _owner;
+        private MeshingJobData _curJob;
+
+        /// <summary>Initializes the driver for one job manager.</summary>
+        /// <param name="owner">The job manager whose mesh pass this driver serves.</param>
+        public MeshCompletionDriver(WorldJobManager owner) => _owner = owner;
+
+        /// <inheritdoc />
+        public bool IsComplete(ChunkCoord key) => _owner.MeshJobs[key].Handle.IsCompleted;
+
+        /// <inheritdoc />
+        public void CompleteJob(ChunkCoord key)
         {
-            // §3.4 time ceiling — checked between jobs (one oversized upload can overshoot once).
-            if (window.Expired) break;
+            _curJob = _owner.MeshJobs[key];
+            _curJob.Handle.Complete();
+        }
 
-            ChunkCoord scanCoord = _meshScanKeys[(meshScanStart + scanIndex) % meshKeyCount];
-            KeyValuePair<ChunkCoord, MeshingJobData> jobEntry =
-                new KeyValuePair<ChunkCoord, MeshingJobData>(scanCoord, MeshJobs[scanCoord]);
+        /// <inheritdoc />
+        public void OnCompleteFault(ChunkCoord key, Exception e)
+        {
+            Debug.LogError($"[MESHING] Handle.Complete() for chunk {key} faulted — job left enrolled for retry. {e}");
+        }
 
-            if (!jobEntry.Value.Handle.IsCompleted) continue;
+        /// <inheritdoc />
+        public void MergeJob(ChunkCoord key)
+        {
+            Chunk chunk = _owner._world.GetChunkFromChunkCoord(key);
+            ChunkData live = chunk?.ChunkData;
 
-            // Fault isolation, stage 1 (HF-2): a failed Complete() means the job may still own its
-            // buffers — leave the entry enrolled (no release) and retry next pass.
-            try
+            // MP-1 rider + MP-4 probe: a gone chunk discards the result (out-of-range work already left the
+            // chunk map); a live chunk whose data was recycled mid-flight is merely COUNTED — the apply still
+            // happens, pending the evidence that gates the discard (MP-4 §D3).
+            //
+            // Identity AND epoch, the CP-3 pairing (World.cs: `current == admitted && epoch == admittedEpoch`).
+            // The epoch alone is NOT sufficient: LifecycleEpoch is a PER-INSTANCE counter, and the dominant
+            // recycle path swaps the instance rather than resetting it — Chunk.Release() nulls ChunkData and
+            // Chunk.Reset() re-links whatever RequestChunk hands back, so a freshly constructed successor starts
+            // at epoch 0 and would compare EQUAL to a captured 0. Reference equality is what makes the epoch
+            // meaningful; dropping it turns this probe into a silent under-count, and a spurious zero here would
+            // wrongly close the §D3 rider.
+            bool staleInstance = chunk != null
+                                 && (live == null
+                                     || !_owner._meshJobTargets.TryGetValue(key, out ChunkData captured)
+                                     || !ReferenceEquals(live, captured)
+                                     || live.LifecycleEpoch != _curJob.TargetEpoch);
+
+            _owner.CountMeshMerge(chunkGone: chunk == null, staleInstance: staleInstance);
+
+            if (chunk != null)
             {
-                jobEntry.Value.Handle.Complete();
-            }
-            catch (Exception e)
-            {
-                Debug.LogError($"[MESHING] Handle.Complete() for chunk {jobEntry.Key} faulted — job left enrolled for retry. {e}");
-                continue;
-            }
-
-            // Fault isolation, stage 2 (HF-2): a faulted upload must not abort the pass — released jobs
-            // stranded in MeshJobs get re-touched every frame (the ObjectDisposedException cascade,
-            // fidelity B7). The chunk simply keeps its previous mesh; a later rebuild request recovers.
-            try
-            {
-                Chunk chunk = _world.GetChunkFromChunkCoord(jobEntry.Key);
-                CountMeshMerge(chunkGone: chunk == null); // MP-1 rider: gone-chunk discard evidence
-                if (chunk != null)
-                {
-                    // ApplyMeshData uploads the buffers synchronously (SetVertex/IndexBufferData copy);
-                    // it no longer owns the output's lifecycle — the pool is returned to centrally below.
-                    chunk.ApplyMeshData(jobEntry.Value.Output);
-                }
-            }
-            catch (Exception e)
-            {
-                Debug.LogError($"[MESHING] Applying the completed mesh for chunk {jobEntry.Key} faulted — buffers released, previous mesh kept. {e}");
-            }
-            finally
-            {
-                // MR-6: single output-release site for both branches, symmetric with the input release.
-                // The upload above (or the discarded result when the chunk is gone) is done, so the
-                // pooled buffers can be cleared and reused (or disposed if not pooled).
-                _meshOutputPool.Return(jobEntry.Value.Output);
-
-                // POOLING: Return the input buffers for reuse.
-                ReleaseMeshingJobInputs(jobEntry.Value);
-
-                _completedMeshJobs.Add(jobEntry.Key);
+                // ApplyMeshData uploads the buffers synchronously (SetVertex/IndexBufferData copy);
+                // it does not own the output's lifecycle — ReleaseJob returns it to the pool.
+                chunk.ApplyMeshData(_curJob.Output);
             }
         }
 
-        foreach (ChunkCoord chunkCoord in _completedMeshJobs)
+        /// <inheritdoc />
+        public void OnMergeFault(ChunkCoord key, Exception e)
         {
-            MeshJobs.Remove(chunkCoord);
+            Debug.LogError($"[MESHING] Applying the completed mesh for chunk {key} faulted — buffers released, previous mesh kept. {e}");
+        }
+
+        /// <inheritdoc />
+        public void ReleaseJob(ChunkCoord key)
+        {
+            // MR-6: single output-release site for both branches, symmetric with the input release. The
+            // upload above (or the discarded result when the chunk is gone) is done, so the pooled buffers
+            // can be cleared and reused (or disposed if not pooled).
+            _owner._meshOutputPool.Return(_curJob.Output);
+
+            // POOLING: Return the input buffers for reuse.
+            _owner.ReleaseMeshingJobInputs(_curJob);
+        }
+
+        /// <inheritdoc />
+        public void RemoveAndPromote(ChunkCoord key)
+        {
+            // Removal only: unlike lighting, the mesh pipeline has no promotion concept — a chunk that still
+            // needs a rebuild is re-requested through the mesh build queue, which retries on its own.
+            _owner.MeshJobs.Remove(key);
+            _owner._meshJobTargets.Remove(key); // MP-4 probe: same lifetime as the job entry.
         }
     }
+
+    #endregion
 
     /// <summary>
     /// Releases a completed generation job: returns its pooled active-voxel list to
@@ -1291,7 +1385,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
         if (LightingJobs.Count == 0) return;
 
         _chunksToRebuildMesh.Clear();
-        // _completedLightJobs is cleared + repopulated by LightingCompletionPass.RunMergeLoop below.
+        // _completedLightJobs is cleared + repopulated by JobCompletionPass.RunMergeLoop below.
 
         foreach (HashSet<Vector2Int> set in _droppedLightUpdates.Values)
         {
@@ -1301,8 +1395,8 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
         _droppedLightUpdates.Clear();
 
         // Snapshot the in-flight keys, then run the shared completion-pass merge loop. The fault-isolation
-        // (stage 1/2, HF-2) and release-inside / enroll ordering now live in LightingCompletionPass, driven
-        // here via the ILightingCompletionDriver<ChunkCoord> hooks below and by the editor frame simulator,
+        // (stage 1/2, HF-2) and release-inside / enroll ordering now live in JobCompletionPass, driven
+        // here via the IJobCompletionDriver<ChunkCoord> hooks below and by the editor frame simulator,
         // so both replay the same bookkeeping (HF-4 #2). Snapshot is byte-identical to iterating the live
         // dictionary — the loop never adds to LightingJobs and removal is after-loop. Enrollment fills
         // _completedLightJobs (also read by the merge's cross-chunk _completedLightJobs.Contains check).
@@ -1310,7 +1404,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
         foreach (ChunkCoord coord in LightingJobs.Keys)
             _lightCompletionCandidates.Add(coord);
 
-        LightingCompletionPass.RunMergeLoop(_lightCompletionCandidates, this, _completedLightJobs);
+        JobCompletionPass.RunMergeLoop(_lightCompletionCandidates, this, _completedLightJobs);
 
         // Save vanishing neighbor updates (BATCH)
         foreach (KeyValuePair<ChunkCoord, HashSet<Vector2Int>> kvp in _droppedLightUpdates)
@@ -1344,22 +1438,22 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
         // Remove + promote every enrolled job, strictly after the whole merge loop (shared skeleton, so a
         // completion promoting a neighbor sees the fully-merged pass — MT-2). See the driver's
         // RemoveAndPromote hook for the per-job rationale.
-        LightingCompletionPass.RunRemoveAndPromote(_completedLightJobs, this);
+        JobCompletionPass.RunRemoveAndPromote(_completedLightJobs, this);
     }
 
-    #region LightingCompletionPass driver (HF-4 #2)
+    #region JobCompletionPass driver (HF-4 #2)
 
-    // Explicit ILightingCompletionDriver<ChunkCoord> implementation: the per-job side effects the shared
-    // LightingCompletionPass skeleton sequences (the exact body the old inline ProcessLightingJobs loop
+    // Explicit IJobCompletionDriver<ChunkCoord> implementation: the per-job side effects the shared
+    // JobCompletionPass skeleton sequences (the exact body the old inline ProcessLightingJobs loop
     // ran). Explicit so they don't widen WorldJobManager's public surface — the pass invokes them through
     // the interface (`this`). _curLightJob / _curLightChunk cache the job + chunk across a single job's
     // hooks; the pass is single-threaded and non-reentrant so plain fields are safe.
 
     /// <inheritdoc />
-    bool ILightingCompletionDriver<ChunkCoord>.IsComplete(ChunkCoord key) => LightingJobs[key].Handle.IsCompleted;
+    bool IJobCompletionDriver<ChunkCoord>.IsComplete(ChunkCoord key) => LightingJobs[key].Handle.IsCompleted;
 
     /// <inheritdoc />
-    void ILightingCompletionDriver<ChunkCoord>.CompleteJob(ChunkCoord key)
+    void IJobCompletionDriver<ChunkCoord>.CompleteJob(ChunkCoord key)
     {
         _curLightJob = LightingJobs[key];
         _curLightChunk = null;
@@ -1367,14 +1461,14 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     }
 
     /// <inheritdoc />
-    void ILightingCompletionDriver<ChunkCoord>.OnCompleteFault(ChunkCoord key, Exception e)
+    void IJobCompletionDriver<ChunkCoord>.OnCompleteFault(ChunkCoord key, Exception e)
     {
         LastFaultedLightJobs++;
         Debug.LogError($"[LIGHTING] Handle.Complete() for chunk {key} faulted — job left enrolled for retry. {e}");
     }
 
     /// <inheritdoc />
-    void ILightingCompletionDriver<ChunkCoord>.MergeJob(ChunkCoord key)
+    void IJobCompletionDriver<ChunkCoord>.MergeJob(ChunkCoord key)
     {
         LastProcessedJobCount++;
         _curLightChunk = _world.worldData.RequestChunk(key.ToVoxelOrigin(), false);
@@ -1382,7 +1476,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     }
 
     /// <inheritdoc />
-    void ILightingCompletionDriver<ChunkCoord>.OnMergeFault(ChunkCoord key, Exception e)
+    void IJobCompletionDriver<ChunkCoord>.OnMergeFault(ChunkCoord key, Exception e)
     {
         LastFaultedLightJobs++;
         Debug.LogError($"[LIGHTING] Merging the completed lighting job for chunk {key} faulted — containers released, chunk re-flagged. {e}");
@@ -1393,7 +1487,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     }
 
     /// <inheritdoc />
-    void ILightingCompletionDriver<ChunkCoord>.ReleaseJob(ChunkCoord key)
+    void IJobCompletionDriver<ChunkCoord>.ReleaseJob(ChunkCoord key)
     {
         // Unconditional (merge finally): the flag-pairing invariant (IsAwaitingMainThreadProcess set in
         // MergeCompletedLightingJob, cleared here even on fault) + the container release that keeps a
@@ -1405,7 +1499,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
     }
 
     /// <inheritdoc />
-    void ILightingCompletionDriver<ChunkCoord>.RemoveAndPromote(ChunkCoord key)
+    void IJobCompletionDriver<ChunkCoord>.RemoveAndPromote(ChunkCoord key)
     {
         LightingJobs.Remove(key);
 
@@ -1882,6 +1976,7 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
 
         GenerationJobs.Clear();
         MeshJobs.Clear();
+        _meshJobTargets.Clear(); // MP-4 probe: never outlive the job entries it describes.
         LightingJobs.Clear();
 
         // In-flight lighting results are discarded wholesale at shutdown, so mods deferred for

@@ -2903,6 +2903,7 @@ public class World : MonoBehaviour, IMeshDrainHost
         sb.AppendLine($"  F8 request drops : null={MeshRequestNullDrops}, inactive={MeshRequestInactiveDrops}  / total requests={MeshRequestTotal}");
         sb.AppendLine($"  F1 in-flight     : retries={jm?.MeshInFlightRetried ?? 0}  / schedule attempts={jm?.MeshScheduleAttempts ?? 0}");
         sb.AppendLine($"  gone-chunk merge : discards={jm?.MeshGoneChunkDiscards ?? 0}  / merge attempts={jm?.MeshMergeAttempts ?? 0}");
+        sb.AppendLine($"  stale-instance   : recycled-target merges={jm?.MeshStaleInstanceMerges ?? 0}  / merge attempts={jm?.MeshMergeAttempts ?? 0}");
         sb.AppendLine($"  F4 draw-queue    : recycled-refs={DrawQueueRecycledRefs}  / dequeues={DrawQueueDequeues}");
         return sb.ToString();
     }

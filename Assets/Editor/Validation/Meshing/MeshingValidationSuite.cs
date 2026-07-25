@@ -41,6 +41,7 @@ namespace Editor.Validation.Meshing
             AddBaselineScenarios(scenarios);
             AddRendererScenarios(scenarios);
             AddSchedulingScenarios(scenarios);
+            AddCompletionScenarios(scenarios);
             AddKnownBugScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Meshing", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
@@ -61,6 +62,13 @@ namespace Editor.Validation.Meshing
         /// baselines (must stay green).
         /// </summary>
         static partial void AddSchedulingScenarios(List<Scenario> scenarios);
+
+        /// <summary>
+        /// Registers the MP-4 completion-pass baseline (B27 skeleton-order replay, implemented in
+        /// MeshingValidationSuite.Completion.cs). Pure — a recording fake driver over the shared
+        /// <c>JobCompletionPass</c>, no world coupling; counts as a baseline (must stay green).
+        /// </summary>
+        static partial void AddCompletionScenarios(List<Scenario> scenarios);
 
         /// <summary>Registers the known-bug reproduction scenarios (none yet).</summary>
         static partial void AddKnownBugScenarios(List<Scenario> scenarios);

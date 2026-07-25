@@ -341,8 +341,9 @@ capturing integer callers at compile time + the latched dev-build ±2²⁴ tripw
   `CHUNK_LIFECYCLE_PIPELINE.md` §4. The full-fidelity alternative — extracting the pass skeleton into a
   shared orchestrator the harness can drive — remains **HF-4**, deliberately folded into AS-2 / NS-3
   rather than done standalone.
-- **Closed FULL by HF-4 #2 (2026-07-06):** the pass skeleton is now `Helpers/LightingCompletionPass.cs`
-  (`RunMergeLoop` + `RunRemoveAndPromote`, driven via `ILightingCompletionDriver<TKey>`).
+- **Closed FULL by HF-4 #2 (2026-07-06):** the pass skeleton is now `Helpers/JobCompletionPass.cs`
+  (`RunMergeLoop` + `RunRemoveAndPromote`, driven via `IJobCompletionDriver<TKey>`; renamed from
+  `LightingCompletionPass` by MP-4 — see the mesh-side note below).
   `ProcessLightingJobs` implements the driver on `this` (byte-identical — all 57 baselines green); the
   frame simulator implements it too, so the harness replays the exact release-inside / remove-after
   ordering and two-stage fault isolation. Baseline **B65** injects a merge fault into one job of a
@@ -351,6 +352,18 @@ capturing integer callers at compile time + the latched dev-build ±2²⁴ tripw
   rather than stranded, and the field recovers once the lost work is resubmitted — the multi-job cascade
   class the runner's per-scenario try/catch could never present. Behavior in `CHUNK_LIFECYCLE_PIPELINE.md`
   §4 (shared skeleton pointer).
+- **Mesh-side extension (MP-4, 2026-07-25) — the skeleton is now shared, and B65 has a complement.** The
+  meshing pass had the identical inline structure with no replay (the mesh analog of this very finding, F5 in
+  [MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md](../../Design/MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md)).
+  MP-4 generalized the skeleton (neutral name + the P-4 `window`/`startIndex` parameters) and routed
+  `ProcessMeshJobs` through it via a separate cached driver. The meshing suite's **B27** replays the skeleton
+  world-free with a *recording fake driver*, asserting the exact hook order.
+  **Note the coverage split, verified by prove-red:** moving `ReleaseJob` out of the merge `finally` reds
+  **B27 only — lighting B65 stays green (88/88)**. B65 pins fault *isolation and recovery* (through real
+  lighting jobs); it never observes whether the release ran on the fault path. So B27 is not a duplicate pin
+  of B65 — it closes the release-on-fault ordering hole, which is precisely the stranded-container mechanism
+  this B7 finding was opened for. Any future edit to the shared skeleton should expect B27, not B65, to be
+  the tripwire.
 
 ### B8 — The BFS work-cap fail-safe was asserted by only two scenarios ·  **CLOSED (2026-07-12)**
 
@@ -742,7 +755,7 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 | C3  | Cross-chunk sunlight darkening race quadrant (B54/B55) — prereq for LI-1 → P-2 / TG-4 Ph.4                                                                                                                                                    | **CLOSED**        | —                | done           |
 | A5  | Fail-soft `ChunkData` accessors — out-of-bounds is a position lottery (closed by HF-1)                                                                                                                                                        | **CLOSED**        | —                | done           |
 | B6  | MT-2 `LightWorkScheduler` park/promote layer unmodeled (closed by AS-2 scheduler mode + B66–B70)                                                                                                                                              | **CLOSED**        | —                | done           |
-| B7  | `ProcessLightingJobs` pass bookkeeping production-only (HF-2 near-term; full replay via `LightingCompletionPass` + B65, HF-4 #2)                                                                                                              | **CLOSED (full)** | —                | done           |
+| B7  | `ProcessLightingJobs` pass bookkeeping production-only (HF-2 near-term; full replay via `JobCompletionPass` + B65, HF-4 #2; skeleton shared with meshing + release-on-fault order pinned by meshing B27, MP-4)                                | **CLOSED (full)** | —                | done           |
 | C8  | Single-wave-only initial lighting — staggered-frontier axis unfuzzed (→ roadmap AS-3; Bug 05 fixed via the post-edit axis, so now belt-and-braces)                                                                                            | OPEN              | Low              | medium         |
 | C9  | Flat scenario worlds never exercise border shadow-casters (B60; HF-3 fuzz shipped 2026-07-05 — found Bug 15 → B62/B63 + the first sync Bug-05 repro)                                                                                          | **CLOSED**        | —                | done           |
 | C6  | Per-channel removal independence (B86–B88 — authoring it found Bugs 16+17, `_FIXED_BUGS.md` #21/#22)                                                                                                                                          | **CLOSED**        | —                | done           |

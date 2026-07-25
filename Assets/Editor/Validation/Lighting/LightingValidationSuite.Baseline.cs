@@ -112,7 +112,7 @@ namespace Editor.Validation.Lighting
                 Baseline_BorderHeightFuzz));
 
             // --- Completion-pass fault isolation (B65, HF-4 #2 / finding B7): the sim drives the shared
-            // LightingCompletionPass skeleton and injects a merge fault to prove per-job isolation. Lives in
+            // JobCompletionPass skeleton and injects a merge fault to prove per-job isolation. Lives in
             // Baselines/LightingValidationSuite.Baseline.FaultIsolation.cs and self-registers here. ---
             AddFaultIsolationBaselineScenarios(scenarios);
 

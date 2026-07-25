@@ -3,7 +3,7 @@ namespace Helpers
     /// <summary>
     /// The scheduling-drain host: the two live-state reads the drain policy needs from its owner
     /// (production: <c>World</c>). Kept as a cached interface rather than per-frame delegates so the
-    /// hot drain allocates nothing (the <c>ILightingCompletionDriver</c> precedent).
+    /// hot drain allocates nothing (the <c>IJobCompletionDriver</c> precedent).
     /// </summary>
     public interface IMeshDrainHost
     {

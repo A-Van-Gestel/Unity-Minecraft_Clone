@@ -85,7 +85,7 @@ namespace Helpers
     /// gather, scan, and extract. Everything at/above the returned height is guaranteed — by the rules
     /// below — to be uniform air whose light the job can answer virtually and can never change, so
     /// skipping those rows is bit-identical to processing them. Shared by the production scheduler and the
-    /// editor validation harness (the <see cref="LightingScanDecision"/>/<c>LightingCompletionPass</c>
+    /// editor validation harness (the <see cref="LightingScanDecision"/>/<c>JobCompletionPass</c>
     /// shared-decision pattern), so the two can never disagree on a band.
     /// </summary>
     public static class LightingBandDecision

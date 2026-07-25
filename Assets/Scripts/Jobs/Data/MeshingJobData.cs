@@ -28,6 +28,19 @@ namespace Jobs.Data
         public MeshDataJobOutput Output;
 
         /// <summary>
+        /// The target <c>ChunkData.LifecycleEpoch</c> captured when this job was scheduled (MP-4), used by the
+        /// merge to recognize a result whose chunk was recycled mid-flight — the mesh then describes terrain
+        /// that no longer exists at that coord. Blittable rather than a <c>ChunkData</c> reference so this
+        /// struct stays managed-field-free under <c>Assets/Scripts/Jobs/</c> (Burst rules).
+        /// <para><b>Only half of the identity.</b> <c>LifecycleEpoch</c> is a <i>per-instance</i> counter, so
+        /// this value is meaningful only when the live <c>ChunkData</c> is the same OBJECT it was captured from
+        /// (a successor instance starts at epoch 0 and would compare equal to a captured 0). The reference half
+        /// lives in <c>WorldJobManager._meshJobTargets</c> and the two are always checked together — the CP-3
+        /// pool-ABA pairing. Never compare this epoch on its own.</para>
+        /// </summary>
+        public int TargetEpoch;
+
+        /// <summary>
         /// Disposes all input containers and the output. Only for non-pooled usage —
         /// the runtime path returns the input buffers to the pool instead.
         /// </summary>

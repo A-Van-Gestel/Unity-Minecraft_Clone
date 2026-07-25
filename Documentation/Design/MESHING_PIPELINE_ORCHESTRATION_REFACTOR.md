@@ -47,6 +47,9 @@ L1351–1361), `WorldJobManager.cs` (`ScheduleMeshing` L297–420, `ProcessMeshJ
 >   lighting skeleton (which may itself have gained them) and generalize the skeleton to carry them.
 >   **MP-4 likely exceeds its 🟡 estimate.** Decision (2026-07-24): keep MP-4 in scope, reconcile
 >   the skeleton first.
+>   *(✅ **Resolved 2026-07-25** — the reconcile was real (the lighting skeleton had neither knob) but small:
+    > two optional `RunMergeLoop` parameters, the per-job body already identical. **MP-4 did not exceed 🟡.**
+    > The skeleton is now `Helpers/JobCompletionPass.cs`. See the MP-4 Amended note.)*
 > - **Draw tail (§2.1 stage 8 / MP-6):** the P-4 §5.3 rider already replaced the unconditional
 >   one-per-frame dequeue with a flag-gated one-vs-drain-many drain (`drawApplyBudgetMs`); stale
 >   dequeues already "don't consume the guaranteed draw." F4's recycled-lifecycle hole still
@@ -100,16 +103,16 @@ L1351–1361), `WorldJobManager.cs` (`ScheduleMeshing` L297–420, `ProcessMeshJ
 
 ### 2.1 Stage map (who does what, today)
 
-| # | Stage          | Code                                                                                                                                                                                             | Suite coverage today                                                        |
-|---|----------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------|
-| 1 | **Request**    | `World.RequestChunkMeshRebuild(Chunk, immediate)` (W:2273) — drops null/inactive chunks                                                                                                          | ❌ none                                                                     |
-| 2 | **Queue**      | `MeshBuildQueue` (MT-1): O(1) dedup, immediate→head+promote, normal→tail, O(1) remove                                                                                                            | ✅ own suite (9 baselines, incl. B9 promotion)                              |
-| 3 | **Drain**      | `World.Update` step 7 (W:1694–1728): per-frame budget + OM-1 in-flight cap (re-checked per iteration), null/inactive→remove, schedule-ok→remove, gate-fail→leave in place                        | ❌ none                                                                     |
-| 4 | **Gates**      | `WorldJobManager.ScheduleMeshing` (WJM:297–322): in-flight → `return true` (!); center `HasLightChangesToProcess/NeedsInitialLighting` (skipped when lighting disabled); `AreNeighborsMeshReady` | ❌ none (the lighting fidelity doc's **B5** scoped this out of *its* suite) |
-| 5 | **Jobs**       | `MeshGenerationJob` + chained `MeshPostProcessJob` (MR-5), pooled inputs + `MeshOutputPool` output (MR-6)                                                                                        | ✅ meshing suite B1–B11, B17–B21 (incl. cross-chunk substrate MH-10/11)     |
-| 6 | **Completion** | `ProcessMeshJobs` (WJM:875–929): HF-2 two-stage fault isolation **inline**, release-inside/remove-after, central output return                                                                   | ❌ pass bookkeeping production-only (mesh analog of lighting fidelity B7)   |
-| 7 | **Apply**      | `Chunk.ApplyMeshData` → per-section `SectionRenderer.UpdateMeshNative` (MR-2 layout, MR-3 materials, MR-4 bounds; `SetActive` by vertex count)                                                   | ✅ renderer fixture B12–B16                                                 |
-| 8 | **Draw tail**  | `ChunksToDraw.Enqueue` in ApplyMeshData → `World.Update` step 8 dequeues **one per frame** → `Chunk.CreateMesh` → `PlayChunkLoadAnimation` (once per lifecycle)                                  | ❌ none                                                                     |
+| # | Stage          | Code                                                                                                                                                                                             | Suite coverage today                                                                 |
+|---|----------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------|
+| 1 | **Request**    | `World.RequestChunkMeshRebuild(Chunk, immediate)` (W:2273) — drops null/inactive chunks                                                                                                          | ❌ none                                                                              |
+| 2 | **Queue**      | `MeshBuildQueue` (MT-1): O(1) dedup, immediate→head+promote, normal→tail, O(1) remove                                                                                                            | ✅ own suite (9 baselines, incl. B9 promotion)                                       |
+| 3 | **Drain**      | `World.Update` step 7 (W:1694–1728): per-frame budget + OM-1 in-flight cap (re-checked per iteration), null/inactive→remove, schedule-ok→remove, gate-fail→leave in place                        | ❌ none                                                                              |
+| 4 | **Gates**      | `WorldJobManager.ScheduleMeshing` (WJM:297–322): in-flight → `return true` (!); center `HasLightChangesToProcess/NeedsInitialLighting` (skipped when lighting disabled); `AreNeighborsMeshReady` | ❌ none (the lighting fidelity doc's **B5** scoped this out of *its* suite)          |
+| 5 | **Jobs**       | `MeshGenerationJob` + chained `MeshPostProcessJob` (MR-5), pooled inputs + `MeshOutputPool` output (MR-6)                                                                                        | ✅ meshing suite B1–B11, B17–B21 (incl. cross-chunk substrate MH-10/11)              |
+| 6 | **Completion** | `ProcessMeshJobs`: HF-2 two-stage fault isolation ~~inline~~ → shared `JobCompletionPass` via a cached mesh driver (MP-4), release-inside/remove-after, central output return                    | ✅ **B27** skeleton-order replay (MP-4; was the mesh analog of lighting fidelity B7) |
+| 7 | **Apply**      | `Chunk.ApplyMeshData` → per-section `SectionRenderer.UpdateMeshNative` (MR-2 layout, MR-3 materials, MR-4 bounds; `SetActive` by vertex count)                                                   | ✅ renderer fixture B12–B16                                                          |
+| 8 | **Draw tail**  | `ChunksToDraw.Enqueue` in ApplyMeshData → `World.Update` step 8 dequeues **one per frame** → `Chunk.CreateMesh` → `PlayChunkLoadAnimation` (once per lifecycle)                                  | ❌ none                                                                              |
 
 ### 2.2 Request-site census (stage 1 inputs — the ground truth for MP-1/MP-2)
 
@@ -231,6 +234,11 @@ but is now exercisable in scenarios because the per-chunk decision is pure.
 
 ### 4.2 Completion-pass reuse (MP-4)
 
+> ✅ **Implemented 2026-07-25 essentially as specified below** — the hard-rename branch, plus the P-4
+> window/rotating-start generalization. Names below are pre-rename (`LightingCompletionPass` /
+> `ILightingCompletionDriver`); the shipped names are `JobCompletionPass` / `IJobCompletionDriver`.
+> See the MP-4 Amended note in §7.
+
 `LightingCompletionPass.RunMergeLoop`/`RunRemoveAndPromote` are already generic over `TKey`; the
 "lighting" in the name is the only lighting-specific thing about the skeleton. Generalize the home (rename to `JobCompletionPass` + `IJobCompletionDriver<TKey>` via the `refactor-safely` skill, or introduce the neutral name and keep a delegating alias — executor's call, both suites decide), and give `WorldJobManager` a second, cached driver for the mesh pass:
 
@@ -290,15 +298,15 @@ What each named GS-5 requirement needs from this plan, and where it lands:
 `dotnet build "Assembly-CSharp.csproj"` AND `dotnet build "Assembly-CSharp-Editor.csproj"` clean. Workflow gotchas apply (new-file Unity import before `dotnet build`; menu suites can run stale code — confirm red/green flips after `RequestScriptCompilation` with a fresh `Unity_RunCommand`
 wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game confirmation before its baseline is trusted (validation-driven-bugfix discipline).
 
-| Phase                                                       | Scope (files)                                                                                                                     | Effort | Depends on            |
-|-------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|:------:|-----------------------|
-| **MP-1 — Request/drop observability probes**                | `World.cs`, `WorldJobManager.cs` (editor-only diagnostics)                                                                        |   🟢   | —                     |
-| **MP-2 — `MeshingScheduleDecision` + scheduling baselines** | new `Helpers/MeshingScheduleDecision.cs`; `WorldJobManager.ScheduleMeshing`; new suite partial                                    |   🟡   | —                     |
-| **MP-3 — In-flight request policy fix**                     | `WorldJobManager.ScheduleMeshing` (one arm); prove-red baseline                                                                   |   🟡   | MP-1 (evidence), MP-2 |
-| **MP-4 — Completion-pass unification**                      | `Helpers/LightingCompletionPass.cs` (generalize/rename); `WorldJobManager.ProcessMeshJobs` + mesh driver; skeleton-order baseline |   🟡   | —                     |
-| **MP-5 — GS-5 Phase 0.5 ownership split**                   | `SectionRenderer.cs`; renderer-fixture baselines; culling-doc + perf-report checkbox flips                                        |   🟢   | —                     |
-| **MP-6 — Draw-tail re-home (`ChunksToDraw`)**               | `Chunk.cs`, `World.cs` step 8                                                                                                     |   🟢   | MP-1 (evidence)       |
-| **MP-7 — Naming & wiring hygiene**                          | `Jobs/MeshGenerationJob.cs` field rename; `WorldJobManager.cs` wiring; pipeline-doc §9.5 refresh                                  |   🟢   | —                     |
+| Phase                                                       | Scope (files)                                                                                                                      | Effort | Depends on            |
+|-------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------|:------:|-----------------------|
+| **MP-1 — Request/drop observability probes**                | `World.cs`, `WorldJobManager.cs` (editor-only diagnostics)                                                                         |   🟢   | —                     |
+| **MP-2 — `MeshingScheduleDecision` + scheduling baselines** | new `Helpers/MeshingScheduleDecision.cs`; `WorldJobManager.ScheduleMeshing`; new suite partial                                     |   🟡   | —                     |
+| **MP-3 — In-flight request policy fix**                     | `WorldJobManager.ScheduleMeshing` (one arm); prove-red baseline                                                                    |   🟡   | MP-1 (evidence), MP-2 |
+| **MP-4 — Completion-pass unification** ✅ **DONE**          | `Helpers/JobCompletionPass.cs` (generalized/renamed); `WorldJobManager.ProcessMeshJobs` + mesh driver; B27 skeleton-order baseline |   🟡   | —                     |
+| **MP-5 — GS-5 Phase 0.5 ownership split**                   | `SectionRenderer.cs`; renderer-fixture baselines; culling-doc + perf-report checkbox flips                                         |   🟢   | —                     |
+| **MP-6 — Draw-tail re-home (`ChunksToDraw`)**               | `Chunk.cs`, `World.cs` step 8                                                                                                      |   🟢   | MP-1 (evidence)       |
+| **MP-7 — Naming & wiring hygiene**                          | `Jobs/MeshGenerationJob.cs` field rename; `WorldJobManager.cs` wiring; pipeline-doc §9.5 refresh                                   |   🟢   | —                     |
 
 **Minimal standalone-value set:** MP-1 + MP-2 (coverage) or MP-5 alone (unblocks GS-5 — it has no dependency on the others and the performance report asks for it early). **Validation is built alongside, not after** — MP-2/3/4/5 each add their baselines in the same commit as the code.
 
@@ -409,12 +417,36 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 >   (Lighting 88/88 — shared `WorldJobManager` surface intact). `SUB_CHUNK_MESHING_ARCHITECTURE.md` doc-sync was a
 >   **no-op** (verified: it does not describe the in-flight/dequeue behavior). Doc-synced `CHUNK_LIFECYCLE_PIPELINE.md`
 >   §5.3 + §9.5 and this fidelity doc's §4.
-> - **PENDING (user):** the end-to-end in-game repro — `enableLighting = false`, place a block then immediately a
->   second in the same chunk within the flight window; pre-fix the second edit's mesh could be lost, post-fix it
->   appears. Per validation-driven-bugfix, B26 is trusted as a standing baseline only after this confirms. **Note
-    > (from MP-1's soak):** F1 needs lighting-disabled + rapid *same-chunk edits* — a fly/streaming soak shows F1=0
->   and proves nothing. Also watch `MeshInFlightRetried` under a fluid-stress session for runaway re-meshing (the
->   §3.2 Option C dirty-flag escape hatch).
+> - ~~**PENDING (user):** the end-to-end in-game repro — `enableLighting = false`, place a block then immediately a
+    > second in the same chunk within the flight window.~~
+>
+> > **⚠️ CORRECTION (2026-07-25, measured — the recipe above does NOT work; do not retry it as written).**
+> > Three scripted probes (frame-accurate `EditorApplication.update` state machines, lighting-disabled world,
+> > edits enqueued every frame via the real `EnqueueVoxelModification` path) **never once fired the in-flight
+> > arm**: v2 = 60 attempts / 0 window hits / 0 retries; v3 = 400 attempts / 0 hits, even with
+> > `meshApplyBudgetMs` squeezed to `PipelinePassBudget.MinBudgetMs`. The diagnostic that explains it:
+> > **`maxInFlight = 1`.**
+> >
+> > **Why rapid same-chunk edits cannot reach F1.** `World.Update` order is *3. ApplyModifications → 5.
+> > ProcessMeshJobs → 6/7. drain*. An edit therefore reaches the drain only **after** `ProcessMeshJobs` has
+> > already completed and removed the previous frame's job, so `ScheduleMeshing` sees no job in flight. The
+> > entry survives into the drain only if the completion was **deferred**, and the P-4 window cannot defer a
+> > *single* job (it is tested before the first candidate, and a fresh window is never already expired). So the
+> > arm requires **many concurrent mesh jobs**, not fast edits.
+> >
+> > **Corrected exposure model: F1 is load-driven, not edit-rate-driven.** This finally reconciles MP-1's soak
+> > table, which the original model contradicted: 449 hits with lighting *enabled* (the re-request cascade
+> > produces many simultaneous in-flight jobs whose completions the budget defers), **0** in a lighting- *disabled*
+> > fly soak, and 273 / 814,801 in the MP-4 smoke session — all from streaming waves, none from editing.
+> >
+> > **The only viable in-game driver** is therefore a heavy concurrent-meshing load (post-teleport streaming wave
+> > or a large render-distance fill) *while* re-requesting a chunk that already has a deferred completion — not a
+> > quiet world plus fast clicks. Cost/benefit before anyone builds that rig: **B26's prove-red is already the
+> > decisive evidence** (restoring `Schedule || AlreadyInFlight` reds exactly B26 with the F1 signature "frame 1
+> > scheduled 1, queue left 0"), and production shows the arm firing 273× post-fix with no visual regression and
+> > no runaway (0.03 %). The remaining in-game repro confirms a *consequence* that the prove-red already pins.
+> - Watch `MeshInFlightRetried` under a fluid-stress session for runaway re-meshing (the §3.2 Option C dirty-flag
+>   escape hatch) — measured 0.03 % in the MP-4 smoke session, so the hatch stays deferred.
 
 ### MP-4 — Completion-pass unification (🟡, likely larger — see P-4 reconcile below)
 
@@ -425,11 +457,101 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 - **Scope:** §4.2. Generalize the skeleton's home (`refactor-safely` for the rename; lighting call sites + the frame simulator's driver update mechanically); add the cached mesh driver in `WorldJobManager`; `ProcessMeshJobs` becomes snapshot-keys → `RunMergeLoop` →
   `RunRemoveAndPromote` (candidates snapshot is byte-identical here for the same reason as lighting: the loop never adds to `MeshJobs`, removal is already after-loop).
   `ProcessGenerationJobs` is explicitly **excluded** — its budget-retry `continue` semantics don't fit the skeleton (same verdict as HF-2's audit).
-- **New baseline (B25):** skeleton-order replay with a recording fake driver (pure — no world needed): 4 candidates, one stage-1 fault, one stage-2 fault; assert carried-over vs released+enrolled vs removed-after ordering matches the contract (the mesh-side B65 analog — and it doubles as a regression pin for the *lighting* skeleton after the rename).
+- **New baseline (B27):** skeleton-order replay with a recording fake driver (pure — no world needed): 4 candidates, one stage-1 fault, one stage-2 fault; assert carried-over vs released+enrolled vs removed-after ordering matches the contract (the mesh-side B65 analog — and it doubles as a regression pin for the *lighting* skeleton after the rename). *(B-number: B24/B25 = MP-2, B26 = MP-3; MP-4 takes the next free number, B27 if it lands before MP-5.)*
 - **Coordination note (LP-*):** LP-3 (lighting doc) edits the lighting driver's `ReleaseJob`; if both plans are in flight, land the rename first or rebase the smaller change — the suites arbitrate either order.
 - **Acceptance:** universal gate **including the full lighting suite** (shared skeleton renamed)
     + in-game smoke.
 - **Doc-sync:** `CHUNK_LIFECYCLE_PIPELINE.md` §4 (the HF-2 fault-isolation section names the shared skeleton for lighting — extend to meshing); lighting fidelity doc B7 entry gains the mesh-side note. **Serialization:** none.
+
+> **Amended (2026-07-25) — MP-4 implemented (uncommitted); in-game smoke pending.**
+> - **§9 Q3 RESOLVED: hard rename (user sign-off).** `LightingCompletionPass` → `JobCompletionPass`,
+>   `ILightingCompletionDriver<TKey>` → `IJobCompletionDriver<TKey>`, file + `.cs.meta` moved together via
+>   `git mv` (GUID `958857f9…` preserved). No delegating alias. **The Rider MCP was not exposed in the
+    > executing session**, so the rename was manual (`git mv` + a scoped `sed` over the 6 files / 36 occurrences
+>   the grep census found) rather than `rename_refactoring` — the exhaustive grep + both builds + all 16 suites
+>   are what arbitrate it. *Gotcha for the next executor:* renaming a `.cs` breaks `dotnet build` with
+>   `CS2001: Source file … could not be found` until Unity regenerates the `.csproj` — refresh first.
+> - **P-4 reconcile (the predicted bulk) was smaller than feared.** Verified against HEAD: the lighting
+>   skeleton had **neither** a window nor a rotating cursor, while `ProcessMeshJobs` had both — but the
+>   divergence was only *two parameters*; the per-job body was already line-for-line identical. Generalized as
+>   optional `PipelinePassBudget.Window window = default, int startIndex = 0` (indexed loop, `count == 0`
+>   early-out guarding the modulo). **The cursor stays owned by the caller** — advancing it is per-pass policy
+>   (production gates it on `window.HasBudget` to keep the flag-off legs byte-exact), not a skeleton property.
+>   Lighting + simulator call sites pass neither argument and are byte-identical. **MP-4 did not exceed 🟡.**
+> - **The mesh driver is a private nested `MeshCompletionDriver`**, constructed once in the `WorldJobManager`
+>   ctor (zero per-frame alloc), holding an owner ref. `RemoveAndPromote` is `MeshJobs.Remove` only.
+> - **The out-of-range discard rider is CLOSED as provably redundant — do not re-add it.** Verified in code:
+>   leaving view removes the chunk from `_chunkMap` **and** from `_meshBuildQueue` (`World.cs:3446–3454`), and
+>   view distance is strictly inside the unload boundary. Therefore `IsBeyondUnloadDistance(coord) == true`
+>   ⟹ `GetChunkFromChunkCoord` already returns null ⟹ the existing `chunk != null` guard already discards —
+>   that IS the 21 % MP-1 measured. Skip-schedule-when-beyond-range cannot fire either (queued ⟹ in-view).
+>   Adding either check would be dead code.
+> - **What the rider became instead (D3, user sign-off: PROBE ONLY).** The live gap was the one
+>   `WorldJobManager.cs`'s own counter docstring deferred to MP-4 by name: **stale-instance** merges — a live
+>   chunk that is a *different lifecycle* than the job targeted. Captured as `MeshingJobData.TargetEpoch`, a
+>   blittable `int` holding `ChunkData.LifecycleEpoch` at schedule time (**not** a `Chunk` reference in the
+>   struct — it lives under `Assets/Scripts/Jobs/`, where the Burst rules ban managed fields), **paired with the
+    > captured `ChunkData` reference** in `WorldJobManager._meshJobTargets`. Verified: the epoch is bumped only by
+>   `ChunkData.Reset()` (pool recycle), **not** by view-distance deactivation. New counter
+>   `MeshStaleInstanceMerges` + a diagnostics line; **the apply is unchanged** — the discard is evidence-gated on
+>   an in-game reading, per MP-1's own method.
+> - **Code-review round (`/code-review high`, 2 findings, both fixed — re-gated 337/337).**
+>   - **Medium — the probe under-counted, which would have corrupted its own evidence.** The first cut compared
+>     `LifecycleEpoch` *alone*. That counter is **per-instance**, and the dominant recycle path swaps the
+>     instance rather than resetting it: `Chunk.Release()` nulls `ChunkData` and `Chunk.Reset()` re-links
+>     whatever `RequestChunk` returns, so a freshly constructed successor starts at epoch 0 and compares
+>     **equal** to a captured 0 → stale merge silently uncounted. Since §D3 gates the real discard on this
+>     count, a spurious zero would have wrongly closed the rider. Fixed by restoring the **CP-3 pairing**
+>     (`World.cs:928` — `current == admitted && epoch == admittedEpoch`): identity via `_meshJobTargets`
+>     (same lifetime as `MeshJobs`: added in `ScheduleMeshing`, removed in `RemoveAndPromote`, cleared in
+>     `Dispose`) **and** the epoch. *Lesson for future ABA guards here: `LifecycleEpoch` is never sufficient
+      > on its own — always pair it with reference identity.*
+>     - **Low — B27 leg 2 was flake-prone.** A 1 ms window armed just before `RunMergeLoop`, which also tests
+>       `Expired` before the *first* candidate: any GC pause or preemption > 1 ms would break the pass with
+>       nothing enrolled and red a baseline that gates `Validate All`. Widened to `WINDOW_BUDGET_MS = 50f` and
+>       split the precondition ("job 1 was reached") from the conclusion, so a pre-emptive break now reports
+>       itself explicitly instead of masquerading as a break-logic regression.
+> - **B27** (`Validate Meshing` 26 → **27**): the skeleton replayed world-free with a recording fake driver —
+>   4 candidates (clean / not-complete / stage-1 fault / stage-2 fault) asserted as an exact hook-order string,
+>   plus a deterministic mid-pass window break (spin-to-deadline, no sleep), the `startIndex` rotation, and an
+>   empty-list + stale-cursor no-op leg.
+> - **Prove-red confirmed, and it corrected a planning assumption.** Moving `ReleaseJob` out of the merge
+>   `finally` reds **exactly B27** (`1 OF 27 FAILED`, the missing `Release(4)` after `MergeFault(4)`) — but
+>   **lighting B65 stayed green (88/88)**, contrary to the plan's expectation that both would red. B65 pins
+>   fault *isolation and recovery*; it never observes whether the release ran on the fault path. **B27 is
+    > therefore not a duplicate of B65** — it closes the release-on-fault ordering hole, exactly the
+>   stranded-container mechanism fidelity B7 was opened for. Restored → green.
+> - **Gates:** `dotnet build` both assemblies clean; `Validate Meshing` **27/27**, `Validate Mesh Build Queue`
+>   9/9, `Validate Lighting Engine` 88/88, **`Validate All` 337/337** across 16 suites.
+> - **✅ In-game smoke CONFIRMED (2026-07-25, editor play mode).** Visual: streaming, fluid flow, lighting
+>   updates, place/break all correct; no warnings observed. Objective, session-cumulative:
+>
+>   | Probe | Reading |
+>       |---|---|
+>       | merge attempts | **32,728** (routing demonstrably live — this is what a broken routing would flatline) |
+>       | gone-chunk discards | 406 (1.2 %) |
+>       | **stale-instance** | **0 / 32,728** |
+>       | F1 in-flight retries | 273 / 814,801 (0.03 % — no runaway; §3.2 Option C stays deferred) |
+>       | F8 request drops | 0 / 7,079,946 |
+>       | F4 recycled draw-refs | 0 / 32,322 |
+>
+>   Editor log for the whole session: **0 `[MESHING]` lines, 0 `ObjectDisposedException`, 0 NRE** — the
+>   fidelity-B7 cascade falsifier came back empty. Pipeline drained to **0 in-flight across all three job
+    > types** with 819 chunks loaded, confirming the window break still enrolls correctly (a broken break would
+>   pin `MeshJobs` non-zero).
+> - **✅ §D3 RESOLVED — the discard is NOT needed, and the reason is structural. Do not re-propose it.**
+>   Driver: 8 teleport legs across the unload boundary (load distance 13 → 15-chunk boundary), deliberately
+>   hopping *while jobs were in flight* (7–10 at each hop) — the discriminating driver, not a fly soak.
+>   `stale-instance` stayed 0 throughout. The mechanism is visible in the numbers: leg 3's 7 in-flight jobs
+>   became exactly **+7 gone-chunk discards** — those chunks left `_chunkMap` so the merge resolved null, while
+>   their `ChunkData` stayed pinned. **`ChunkUnloadDecision.Evaluate` returns `DeferJobRunning` (line 103,
+    > second arm, above every unload arm) whenever a mesh job is keyed on the chunk**, so an in-flight job
+>   structurally prevents its own `ChunkData` from being recycled. The stale-instance window is therefore not
+>   merely rare — it is closed by an existing invariant. The probe is retained as a **structural tripwire**:
+>   a non-zero reading means that pin was violated, which is an unload-path bug to investigate, not a cue to
+>   add a discard.
+> - **Still pending (unrelated to MP-4):** MP-3's own in-game repro (`enableLighting = false` + two rapid
+>   same-chunk edits) — see the MP-3 Amended note.
 
 ### MP-5 — GS-5 Phase 0.5: renderer-ownership split (🟢, independently harmless)
 
@@ -441,7 +563,7 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
        (a recycled section must never inherit a culled state — the pool-reset-safety rule; the conservative direction is "render", per culling doc §7.5).
     3. Confirm-and-document: `UpdateMeshNative` and `Clear()` keep owning **only** `SetActive`
        ("has geometry"); XML-doc the two-axis ownership contract on the class.
-- **New baselines (renderer fixture, B26+):** (a) `UpdateMeshNative` never writes
+- **New baselines (renderer fixture, next free B-number — B27+ / after MP-4's B27):** (a) `UpdateMeshNative` never writes
   `forceRenderingOff` (set it true externally, run a non-empty then an empty update, assert it survived both — the non-interference invariant); (b) `Clear()` resets it false; (c)
   `SetOcclusionCulled` round-trips and does not touch `activeSelf`. Prove-red: temporarily make
   `UpdateMeshNative` clear the flag → (a) reds.
@@ -485,12 +607,15 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 
 1. **MP-1 probe results** — how often do the in-flight drop (F1), silent request drops (F8), recycled draw-queue refs (F4), and out-of-range mesh-result discards (2026-07-23 rider) fire in real sessions? Gates MP-3's go/no-go and MP-6's urgency; answers land here as Amended lines.
 2. **MP-6 pacing** — ✅ **RESOLVED (2026-07-24):** drop the one-chunk-per-frame stagger and trigger the animation at apply time (user sign-off on the visual change), plus fix the recycled-ref lifecycle hole + clear-on-unload. The stagger is now the P-4 §5.3 budgets-off leg, not the old code — see the 2026-07-24 drift update.
-3. **Skeleton rename shape (MP-4)** — hard rename to `JobCompletionPass` vs neutral new home + delegating alias. Executor decides by diff size; both must leave lighting + meshing suites green. **Note (2026-07-24):** MP-4's scope now also includes reconciling the P-4 window + rotating cursor into the shared skeleton (see the drift update) — the rename is secondary to that generalization.
+3. **Skeleton rename shape (MP-4)** — ✅ **RESOLVED (2026-07-25):** hard rename to `JobCompletionPass` /
+   `IJobCompletionDriver<TKey>` (user sign-off), no delegating alias; file + `.cs.meta` moved together, GUID preserved. The P-4 window + rotating-cursor reconcile landed as two optional `RunMergeLoop` parameters with the cursor left in the caller — see the MP-4 Amended note.
 
 ---
 
 ## Document History
 
+* **v1.5** - MP-4 implemented (2026-07-25, uncommitted; in-game smoke pending): the completion-pass unification — hard rename to `Helpers/JobCompletionPass.cs` / `IJobCompletionDriver<TKey>` (§9 Q3 resolved), the P-4 window + rotating start generalized as two optional `RunMergeLoop` parameters (cursor stays caller-owned), `ProcessMeshJobs` routed through a cached nested `MeshCompletionDriver`. **B27** (skeleton-order replay via a recording fake driver); prove-red reds exactly B27 — *lighting B65 stayed green*, so B27 closes a real release-on-fault gap
+  rather than duplicating B65. `Validate Meshing` 27/27, `Validate All` 337/337. The out-of-range discard rider is **closed as provably redundant** (view-distance removal already precedes the unload boundary); it became the D3 **probe-only** stale-instance counter (`MeshingJobData.TargetEpoch`, blittable epoch — no managed field under `Jobs/`). Doc-synced `CHUNK_LIFECYCLE_PIPELINE.md` §4 + §10, lighting fidelity B7 + registry row, meshing fidelity tip B26 → B27.
 * **v1.4** - MP-3 implemented (2026-07-24, uncommitted; in-game repro pending): the F1 in-flight lost-update fix as the shared `MeshingScheduleDecision.DequeuesChunk` mapping (Option A — production + B26 share it), `ScheduleMeshing` switch collapsed, MP-1 counter relabeled consumed → retried. **B26** (pure mapping + two-frame drain scenario); prove-red reds exactly B26; `Validate Meshing` 26/26, `Validate All` 336/336. Doc-synced `CHUNK_LIFECYCLE_PIPELINE.md` §5.3 + §9.5 + meshing fidelity §4 (`SUB_CHUNK_MESHING_ARCHITECTURE.md` verified no-op).
 * **v1.3** - MP-2 implemented (2026-07-24, uncommitted): `MeshingScheduleDecision` (B24) + `MeshDrainPolicy` drain-body extraction (B25, the "prefer it if cheap" branch — user sign-off), `World : IMeshDrainHost`. B-number drift corrected (B22/B23 were FL sway → MP-2 = B24/B25, MP-3 prove-red = B26); `Validate Meshing` 25/25, `Validate All` 335/335. Doc-synced `CHUNK_LIFECYCLE_PIPELINE.md` §5.3 + meshing fidelity §4.
 * **v1.2** - MP-1 implemented (2026-07-24, uncommitted): four `[Conditional]` probes + soak evidence (see §MP-1 Amended).
@@ -499,4 +624,4 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 
 ---
 
-**Last Updated:** 2026-07-24 (MP-1 + MP-2 + MP-3 implemented; MP-3 in-game repro pending) **Next Review:** when MP-4 starts (P-4 window + rotating-cursor reconcile into the shared completion-pass skeleton — likely exceeds 🟡), or when GS-5 Phase 1 is scheduled (re-check §5 contract)
+**Last Updated:** 2026-07-25 (MP-1…MP-4 implemented; MP-3 in-game repro + MP-4 in-game smoke pending) **Next Review:** when MP-5 starts (GS-5 Phase 0.5 renderer-ownership split — independently harmless, unblocks the culler), or when GS-5 Phase 1 is scheduled (re-check §5 contract)
