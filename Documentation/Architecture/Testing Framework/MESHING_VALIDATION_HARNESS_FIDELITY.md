@@ -1,7 +1,8 @@
 # Meshing Validation Harness — Fidelity Boundary & Extension Backlog
 
 **Status:** ✅ **Active backlog** — Wave 1 executed 2026-06-17 (MH-1/MH-4/MH-9 closed), Wave 2 executed 2026-06-18 (MH-5/MH-3 closed), Wave 3 executed 2026-06-18 (MH-6 closed — buildable-now portion), Wave 5 executed 2026-06-21 (MH-10/MH-11 cross-chunk border culling closed); see §6. **Optimizations landed (guarded by this suite):** MR-1, MR-7 (2026-06-15); **MR-3 + MR-4 + MR-5**
-(2026-06-18, Wave 1 of the MR-* implementation phase) — MR-3/MR-4 added the build-alongside postconditions **B15** (no-reassign-when-bitmask-unchanged) and **B16** (constant-cell-bounds); MR-6 added **B17** (pooled-output stale guard); the cross-chunk substrate prerequisite added **B18–B21**. Since then FL-1/FL-2 added **B22/B23**, the MP-* orchestration arc added **B24–B27**, and MP-5 added **B28–B30** — **tip is B30 (30 baselines); see §4 for the arc detail.** **Created:** 2026-06-16 · **Last updated:** 2026-07-25 **Scope:**
+(2026-06-18, Wave 1 of the MR-* implementation phase) — MR-3/MR-4 added the build-alongside postconditions **B15** (no-reassign-when-bitmask-unchanged) and **B16** (constant-cell-bounds); MR-6 added **B17** (pooled-output stale guard); the cross-chunk substrate prerequisite added **B18–B21**. Since then FL-1/FL-2 added **B22/B23**, the MP-* orchestration arc added **B24–B27**, MP-5 added **B28–B30**, MP-6 added **B31–B33**, and the chunk load-animation toggle regression added **B34–B36** — **tip is B36 (36 baselines); see §4 for the arc detail.**
+**Created:** 2026-06-16 · **Last updated:** 2026-07-25 **Scope:**
 `Assets/Editor/Validation/Meshing/` — the `MeshingValidationSuite` + `MeshingTestWorld` +
 `MeshOracle` + `MeshAssert` + `TestMeshBlockPalette` harness (menu item **`Minecraft Clone/Dev/Validate Meshing`**). **Sibling:** [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](LIGHTING_VALIDATION_HARNESS_FIDELITY.md) — same document shape; the meshing suite was built test-first as that suite's younger sibling.
 
@@ -220,8 +221,14 @@ The lighting suite already closed its half of this loop: A1 routes harness input
   `UpdateMeshNative`), **B29** `Clear()` resets it on pool recycle, **B30** the setter round-trips without touching `activeSelf`. **MP-6 (2026-07-25) added B31–B33** and closed the last uncovered stage, the **draw tail** (F4) — by deleting it. The `ChunksToDraw` queue's only remaining job was triggering the one-shot load animation, so MP-6 moved that into the mesh apply itself; what survives is one branch inside the production
   `MeshCompletionDriver`, which the §8.1 `IMeshCompletionHost` seam finally makes drivable world-free (B27 replays the *skeleton* with a fake driver; B31–B33 replay the *driver* with a fake host). **B31** the apply → animate mapping (a gone chunk discards without animating and still releases — the MR-6 single-release-site invariant, evidence-only until now), **B32** a faulting apply never animates yet still releases and does not abort the pass, **B33** the `_curJob` scratch lifecycle (each release gets its own job; the scratch is cleared, so an
   out-of-sequence hook cannot double-return the previous job's pooled buffers — the 2026-07-25 code-review finding that no baseline could observe before). Suite tip is now **B33**
-  (33 baselines).
-  > **What is still not covered, and cannot be here:** that the animation *plays* on a real chunk. The one-shot latch (`_hasPlayedLoadAnimation`) lives on `Chunk` beside a `GameObject`, which the runner's `World.Instance` isolation guard forbids standing up — B31–B33 pin the trigger's placement in the completion sequence, in-game confirmation pins the visual.
+  (33 baselines). **B34–B36 (2026-07-25) went one step further and stood a real `Chunk` up after all.** MP-6's note said the chunk-side behavior could not be reached because it needs a `GameObject`; that turned out to be too pessimistic — `SectionRenderer`'s constructor is `World.Instance`-free and resolves materials only in
+  `UpdateMeshNative`, so `ChunkLoadAnimationTestFixture` can construct a real `Chunk` with nothing but a stub
+  `World` + `Settings`. The baselines guard the `enableChunkLoadAnimations` **toggle regression**
+  (`_FIXED_BUGS.md` Chunk Management #08, introduced 2026-04-09 and unnoticed for ~3.5 months): **B34** a chunk built while animations were off still animates once the setting is enabled mid-session, **B35** the mid-session-added component is seeded relative to the chunk instead of lerping to the world origin, **B36**
+  construction-time controls. Suite tip is now **B36** (36 baselines).
+  > **What is still not covered here:** the `Reset` path's lazy creation (it needs `worldData.RequestChunk`,
+  > which the fixture deliberately does not stand up), and the real pause-menu toggle in play mode. The
+  > one-shot latch itself is exercised only indirectly. In-game confirmation remains the acceptance path.
 
 ---
 

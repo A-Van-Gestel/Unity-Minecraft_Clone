@@ -42,6 +42,7 @@ namespace Editor.Validation.Meshing
             AddRendererScenarios(scenarios);
             AddSchedulingScenarios(scenarios);
             AddCompletionScenarios(scenarios);
+            AddLoadAnimationScenarios(scenarios);
             AddKnownBugScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Meshing", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
@@ -69,6 +70,14 @@ namespace Editor.Validation.Meshing
         /// <c>JobCompletionPass</c>, no world coupling; counts as a baseline (must stay green).
         /// </summary>
         static partial void AddCompletionScenarios(List<Scenario> scenarios);
+
+        /// <summary>
+        /// Registers the chunk load-animation baselines (B34–B36, implemented in
+        /// MeshingValidationSuite.LoadAnimation.cs). These drive a real <see cref="Chunk"/> through its own
+        /// fixture — the unit is the chunk, not the renderer — and guard the 2026-04-09 toggle regression;
+        /// count as baselines (must stay green).
+        /// </summary>
+        static partial void AddLoadAnimationScenarios(List<Scenario> scenarios);
 
         /// <summary>Registers the known-bug reproduction scenarios (none yet).</summary>
         static partial void AddKnownBugScenarios(List<Scenario> scenarios);
