@@ -770,7 +770,16 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 - **Scope:** rename `MeshGenerationJob`'s neighbor fields to compass names matching
   `NeighborMapSet` (`NeighborBack→NeighborS`, `NeighborFront→NeighborN`, `NeighborLeft→NeighborW`,
   `NeighborRight→NeighborE`, + the four diagonals and the eight light twins) via `refactor-safely`
-  — naming-only inside a Burst job (no semantic change; B18–B21 + full suite pin the +X plane and output equality). Update the WJM:355–371 wiring block, which becomes self-checking (`NeighborS = jobData.Neighbors.NeighborS`). Refresh `CHUNK_LIFECYCLE_PIPELINE.md` §9.5's text with MP-1's probe reality (convention now observable).
+  — naming-only inside a Burst job (no semantic change; B18–B21 + full suite pin the +X plane and output equality). Update the wiring block, which becomes self-checking (`NeighborS = jobData.Neighbors.NeighborS`). Refresh `CHUNK_LIFECYCLE_PIPELINE.md` §9.5's text with MP-1's probe reality (convention now observable).
+
+    > **Anchors re-verified 2026-07-25 (the audit's `WJM:355–371` is ~170 lines stale — MP-4/MP-6 moved it).**
+    > The wiring block is **`WorldJobManager.cs:531–547`** — 8 voxel lines, the `LightMap` line, then 8 light
+    > lines. The job's fields are `MeshGenerationJob.cs:52–74` (voxel) and `:81–102` (light).
+    > **The mapping is already unambiguous and three independent sources agree** — the job's own field
+    > comments (`NeighborBack // South (-Z)`), the wiring block, and `Jobs/Data/NeighborMapSet.cs:16–19` fed
+    > by `AcquireVoxelMap(center.Neighbor(dx, dz))` (N = `(0,+1)`, E = `(+1,0)`, S = `(0,-1)`, W = `(-1,0)`).
+    > So: **Back→S, Front→N, Left→W, Right→E, FrontRight→NE, BackRight→SE, BackLeft→SW, FrontLeft→NW**, and
+    > the eight `Light*` twins identically. The executor should re-confirm rather than re-derive.
 - **Acceptance:** universal gate (byte-identical output — `OutputsEqual` across the suite is the real guard) + in-game seam check (fly a chunk border; no doubled/missing border faces).
 - **Doc-sync:** pipeline doc §9.5; meshing fidelity doc §2 if it names the old fields. **Serialization:** none.
 
