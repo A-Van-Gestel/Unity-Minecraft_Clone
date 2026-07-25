@@ -217,8 +217,11 @@ The lighting suite already closed its half of this loop: A1 routes harness input
   `window` + rotating `startIndex`) through a separate cached driver, and B27 replays that skeleton world-free with a recording fake driver — stage-1 carries over without releasing, stage-2 still releases + enrolls, remove strictly after the merge loop, the window break, and the rotated visit order. **MP-5 (2026-07-25) added B28–B30** — the GS-5 §7.3 **renderer-ownership split** (F3), on the MH-6 renderer fixture rather than the job harness:
   `SectionRenderer.SetOcclusionCulled(bool)` is the codebase's only writer of
   `MeshRenderer.forceRenderingOff`, and the baselines pin the two axes apart — **B28** the apply path never writes the flag (an externally-set flag survives both a non-empty and an empty
-  `UpdateMeshNative`), **B29** `Clear()` resets it on pool recycle, **B30** the setter round-trips without touching `activeSelf`. Suite tip is now **B30**
-  (30 baselines). **The draw-tail stage remains uncovered here (MP-6).**
+  `UpdateMeshNative`), **B29** `Clear()` resets it on pool recycle, **B30** the setter round-trips without touching `activeSelf`. **MP-6 (2026-07-25) added B31–B33** and closed the last uncovered stage, the **draw tail** (F4) — by deleting it. The `ChunksToDraw` queue's only remaining job was triggering the one-shot load animation, so MP-6 moved that into the mesh apply itself; what survives is one branch inside the production
+  `MeshCompletionDriver`, which the §8.1 `IMeshCompletionHost` seam finally makes drivable world-free (B27 replays the *skeleton* with a fake driver; B31–B33 replay the *driver* with a fake host). **B31** the apply → animate mapping (a gone chunk discards without animating and still releases — the MR-6 single-release-site invariant, evidence-only until now), **B32** a faulting apply never animates yet still releases and does not abort the pass, **B33** the `_curJob` scratch lifecycle (each release gets its own job; the scratch is cleared, so an
+  out-of-sequence hook cannot double-return the previous job's pooled buffers — the 2026-07-25 code-review finding that no baseline could observe before). Suite tip is now **B33**
+  (33 baselines).
+  > **What is still not covered, and cannot be here:** that the animation *plays* on a real chunk. The one-shot latch (`_hasPlayedLoadAnimation`) lives on `Chunk` beside a `GameObject`, which the runner's `World.Instance` isolation guard forbids standing up — B31–B33 pin the trigger's placement in the completion sequence, in-game confirmation pins the visual.
 
 ---
 

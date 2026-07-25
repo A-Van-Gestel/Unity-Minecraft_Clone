@@ -227,7 +227,7 @@ The deep-cap limitation above (absolute-ms ceilings collapse per-second pipeline
 flag-off is byte-identical to the fixed ceilings above).
 
 - **Intent, not measurement — the death-spiral discriminator.** The scale keys off the *configured* cap (`World.ComputeIntendedFrameIntervalSeconds`: vSync interval when active, else `Application.targetFrameRate`, else no scaling), never measured `deltaTime`. An uncapped machine merely running slow gets **no** boost, so this can never widen the ceiling into the §3 spiral the ceilings exist to bound — the whole reason a pure frame-fraction-of-`dt` ceiling was unsafe.
-- **No cross-ceiling governor** (deliberate): the ×8 clamp is the only bound; the five scaled ceilings can transiently sum above the intended frame at a deep cap under heavy fill (a bounded sub-cap FPS dip that converges), accepted over coupling the five ceilings into a shared failure surface.
+- **No cross-ceiling governor** (deliberate): the ×8 clamp is the only bound; the scaled ceilings can transiently sum above the intended frame at a deep cap under heavy fill (a bounded sub-cap FPS dip that converges), accepted over coupling them into a shared failure surface. *(Five ceilings when this shipped; four since MP-6 retired the draw budget — see the §5.3 note above.)*
 - **Guard:** Validate Pipeline Backpressure **B7** (ceiling scaling truth table — cap intent, ×1 floor, ×8 clamp, disabled/no-cap passthrough; prove-red by temporary floor mutation). Registry 16 suites / Validate All 336.
 - **Measured (IL2CPP player A/B, standing `P4BackpressureBenchmark`, 2209-chunk square;** see [`Performance/CHUNK_PIPELINE_P4_CEILING_SCALING_IL2CPP_2026-07-23_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_P4_CEILING_SCALING_IL2CPP_2026-07-23_BENCHMARK.md)**):** fixed ceilings throttle capped FPS worse-than-proportionally (÷4 FPS → ×6.9 fill); scaling ON cuts that — **30-cap ×1.82 (79.8 s → 43.8 s), 15-cap ×1.32 (117.0 s → 88.6 s)** — with **no frame-health cost** (worst frame ON ≈ OFF at both caps, hitch counts identical). Diminishing returns at deep
   caps (compute-bound floor); the no-governor limitation did not bind in practice (avg FPS held at the cap). Verdict: **GO (final)** — ships default-ON, flag retires with the P-4 family after soak.
@@ -282,12 +282,23 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
 
 ## 5. Smaller observations
 
-| #      | Finding                                                                     | Location                      | Note                                                                                                                                                                                                   |
-|--------|-----------------------------------------------------------------------------|-------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 5.1 ✅ | ~~`_chunksToBuildMesh.Remove(chunk)` is O(n) list removal called in loops~~ | `World.cs` (and unload paths) | **DONE (MT-1, 2026-07-01):** replaced with `Helpers/MeshBuildQueue.cs` (pooled intrusive linked list + coord→slot map) — enqueue/remove/drain all O(1). See `PERFORMANCE_IMPROVEMENTS_REPORT.md` MT-1. |
-| 5.2    | 1-second full fail-safe scan over `worldData.Chunks`                        | `World.cs:1158`               | Fine today; scales linearly with loaded chunk count. Add a counter for how many chunks it *rescues* — a non-zero rate indicates a dirty-set registration bug being masked.                             |
-| 5.3 ✅ | ~~One `ChunksToDraw` dequeue per frame~~                                    | `World.cs` (Update, step 8)   | **DONE (2026-07-23):** ceiling-bounded drain (`drawApplyBudgetMs`, min 1/frame preserved) — shipped with the §3.4 budgets, see the final "Implemented" note in §3.                                     |
-| 5.4    | `WorldTypeRegistry.GetWorldType` uses LINQ `FirstOrDefault`                 | `WorldTypeRegistry.cs:24`     | Not a hot path; style-guide consistency only.                                                                                                                                                          |
+| #      | Finding                                                                     | Location                      | Note                                                                                                                                                                                                          |
+|--------|-----------------------------------------------------------------------------|-------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 5.1 ✅ | ~~`_chunksToBuildMesh.Remove(chunk)` is O(n) list removal called in loops~~ | `World.cs` (and unload paths) | **DONE (MT-1, 2026-07-01):** replaced with `Helpers/MeshBuildQueue.cs` (pooled intrusive linked list + coord→slot map) — enqueue/remove/drain all O(1). See `PERFORMANCE_IMPROVEMENTS_REPORT.md` MT-1.        |
+| 5.2    | 1-second full fail-safe scan over `worldData.Chunks`                        | `World.cs:1158`               | Fine today; scales linearly with loaded chunk count. Add a counter for how many chunks it *rescues* — a non-zero rate indicates a dirty-set registration bug being masked.                                    |
+| 5.3 ✅ | ~~One `ChunksToDraw` dequeue per frame~~                                    | *(stage removed)*             | **DONE (2026-07-23):** ceiling-bounded drain (`drawApplyBudgetMs`, min 1/frame preserved) — shipped with the §3.4 budgets. **SUPERSEDED (2026-07-25, MP-6):** the stage is gone entirely; see the note below. |
+| 5.4    | `WorldTypeRegistry.GetWorldType` uses LINQ `FirstOrDefault`                 | `WorldTypeRegistry.cs:24`     | Not a hot path; style-guide consistency only.                                                                                                                                                                 |
+
+> **§5.3 superseded by MP-6 (2026-07-25) — the pass this rider budgeted no longer exists.** The draw queue's
+> only remaining work, post-MR-5, was triggering the one-shot chunk load animation; the meshing orchestration
+> refactor ([`MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md`](MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md) §MP-6)
+> moved that into the mesh **apply** pass and deleted the stage. Two consequences for this document:
+> - **`Settings.drawApplyBudgetMs` is retired** (§3.4's ceiling list is now four: light schedule 8 ms, mesh
+>   schedule 6 ms, gen process 6 ms, mesh apply 4 ms). `meshApplyBudgetMs` is now the whole mesh tail's
+>   ceiling, which is also what the standing `P4BackpressureBenchmark`'s drain predicate keys on.
+> - **`enablePipelineTimeBudgets = false` no longer restores a one-per-frame draw trickle** — that legacy leg
+>   went with the stage. The flag's off state still restores legacy behavior for every *other* budgeted pass,
+>   so the P-4 A/B legs and the pending flag-retirement pass remain valid; only the draw row is gone.
 
 ---
 

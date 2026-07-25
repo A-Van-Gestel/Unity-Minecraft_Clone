@@ -338,9 +338,8 @@ public class Chunk
         // Replay every source's precomputed job-mod run in bucket order (the mod cursor stays in lockstep with
         // ModsPerSource by construction — both come from the same single partition pass).
         int modCursor = 0;
-        for (int e = 0; e < modsPerSource.Length; e++)
+        foreach (int count in modsPerSource)
         {
-            int count = modsPerSource[e];
             for (int k = 0; k < count; k++)
                 world.EnqueueVoxelModification(jobMods[modCursor + k]);
             modCursor += count;
@@ -527,19 +526,20 @@ public class Chunk
         // returns the output to its pool (or disposes it) immediately after this call — so the meshing
         // job's output buffers are pooled and reused instead of allocated/freed per chunk.
 
-        // Add to the draw queue to be enabled on the main thread
-        World.Instance.ChunksToDraw.Enqueue(this);
-
         HasMeshApplied = true;
     }
 
     /// <summary>
-    /// Finalizes the visual creation step by optionally triggering the chunk load animation.
+    /// Starts this chunk's one-shot load animation, now that it has geometry to show (MP-6).
+    /// Called by the mesh completion pass immediately after <see cref="ApplyMeshData"/>, on the main thread.
     /// </summary>
-    public void CreateMesh()
+    /// <remarks>Idempotent within a lifecycle — the second call is a no-op until the pool recycles this
+    /// visual and <see cref="Reset"/> clears the latch. Safe to call on a chunk whose GameObject the pool has
+    /// already destroyed, so callers need no liveness check of their own.</remarks>
+    public void TriggerLoadAnimation()
     {
-        // The mesh is already assigned in ApplyMeshData.
-        // This method could be used to enable the GameObject or an animation.
+        // The mesh itself is already uploaded by ApplyMeshData; this is purely the rise-from-underground
+        // presentation step.
         PlayChunkLoadAnimation();
     }
 
@@ -586,7 +586,11 @@ public class Chunk
         {
             // If animations are heavily disabled or toggled off mid-game, ensure chunk is snapped to correct position
             if (_loadAnimation != null) _loadAnimation.enabled = false;
-            ChunkGameObject.transform.position = UnityPosition;
+
+            // The pool can destroy the GameObject while a completed mesh job is still merging in the same
+            // frame (teardown ordering), and this is the one branch that touches it directly — the branch
+            // above is already covered by _loadAnimation's own (Unity-lifetime-aware) null check.
+            if (ChunkGameObject != null) ChunkGameObject.transform.position = UnityPosition;
         }
 
         _hasPlayedLoadAnimation = true;

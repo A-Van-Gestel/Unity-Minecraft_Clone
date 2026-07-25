@@ -461,7 +461,7 @@ public class Settings
     public int calibrationVersion = 0;
 
     // ── P-4 §3.4/§3.5 pipeline backpressure knobs ────────────────────────
-    // The five ms ceilings are Performance-tab sliders (smoothness ↔ chunk-fill-speed trade is a
+    // The four ms ceilings are Performance-tab sliders (smoothness ↔ chunk-fill-speed trade is a
     // player-facing preference); the rollback flags and panic thresholds stay OM-1-style non-UI
     // fields (persisted + user-editable, but not everyday options). The ms ceilings are deliberately
     // NOT device-calibrated — frame-time targets are device-independent, and device scaling already
@@ -475,7 +475,7 @@ public class Settings
     public bool enablePipelineTimeBudgets = true;
 
     /// <summary>
-    /// When true, the five time ceilings scale with a voluntarily lowered FPS cap (a 30/15-FPS AFK /
+    /// When true, the four time ceilings scale with a voluntarily lowered FPS cap (a 30/15-FPS AFK /
     /// battery / mobile frame is mostly idle sleep and can afford a bigger pipeline slice) — anchored at
     /// 60 FPS, clamped ×8, keyed off the cap's intent and never measured frame time (see
     /// <see cref="Helpers.PipelinePassBudget.ScaleCeilingMs"/>). Off restores the fixed absolute-ms
@@ -540,20 +540,9 @@ public class Settings
              TooltipTags.DefaultColorStart + "4" + TooltipTags.DefaultColorEnd)]
     public float meshApplyBudgetMs = 4f;
 
-    /// <summary>
-    /// Time ceiling (ms) for the ChunksToDraw drain (§5.3) — how long one frame may spend applying
-    /// finished meshes to the GPU. At least one chunk is always drawn per frame; ≤ 0 drains without
-    /// a time bound (the legacy one-per-frame trickle is the budgets master flag's off state).
-    /// </summary>
-    [SettingField(SettingsTab.Performance, Label = "Chunk Draw Budget (ms)", Format = "f1", Order = 9)]
-    [Range(0.5f, 10f)]
-    [Tooltip("Per-frame time ceiling for activating finished chunk meshes (the pop-in stagger).\n" +
-             "Lower = more gradual chunk appearance; higher = chunks appear sooner after meshing.\n" +
-             "At least one chunk is always drawn per frame.\n" +
-             "(Setting 0 in the settings file disables the ceiling — drain everything each frame.)\n\n" +
-             TooltipTags.Performance + "Bounds the main-thread cost of chunk activation per frame.\n" +
-             TooltipTags.DefaultColorStart + "2" + TooltipTags.DefaultColorEnd)]
-    public float drawApplyBudgetMs = 2f;
+    // NOTE: there is no draw budget. The old "Chunk Draw Budget (ms)" ceiling paced a queue whose only
+    // job was triggering chunk load animations; MP-6 retired that stage and moved the trigger into the
+    // mesh apply pass above, so the apply budget is now the whole mesh tail.
 
     /// <summary>
     /// Master switch for the §3.5 generation panic gate (pause admissions while the lighting backlog

@@ -255,16 +255,17 @@ namespace Benchmarks
                 if (dt > HITCH_THRESHOLD_SECONDS) hitches++;
 
                 // Fill = populated terrain AND every measured pipeline stage drained — including the
-                // mesh/draw tail the budgets deliberately defer (omitting it would bias the A/B toward
-                // budgets-ON, which pushes exactly that work past the old predicate). The mesh BUILD
-                // queue and the lighting waiting set are excluded on purpose: their steady state is
-                // the load-square perimeter ring, which can never be served (missing outer neighbors).
+                // mesh apply tail the budgets deliberately defer (omitting it would bias the A/B toward
+                // budgets-ON, which pushes exactly that work past the old predicate). Since MP-6 retired
+                // the draw queue, in-flight MeshJobs IS that whole tail: the apply and the load-animation
+                // trigger both happen when the job merges. The mesh BUILD queue and the lighting waiting
+                // set are excluded on purpose: their steady state is the load-square perimeter ring,
+                // which can never be served (missing outer neighbors).
                 bool drained = world.GenerationRequestQueueCount == 0
                                && world.JobManager.GenerationJobs.Count == 0
                                && world.LightWorkReadyCount == 0
                                && world.JobManager.LightingJobs.Count == 0
-                               && world.JobManager.MeshJobs.Count == 0
-                               && world.ChunksToDraw.Count == 0;
+                               && world.JobManager.MeshJobs.Count == 0;
 
                 if (drained && IsLoadSquarePopulated(world))
                 {
@@ -335,7 +336,7 @@ namespace Benchmarks
             sb.AppendLine($"World:          '{world.worldData.worldName}' (LoadDistance {world.settings.LoadDistance.ToString()} → {squareChunks.ToString()}-chunk square)");
             sb.AppendLine($"Caps (quota anchors): light/frame {world.settings.maxLightJobsPerFrame.ToString()}, mesh/frame {world.settings.maxMeshRebuildsPerFrame.ToString()}");
             sb.AppendLine($"Base ceilings ms: light {world.settings.lightScheduleBudgetMs:F1}, meshSched {world.settings.meshScheduleBudgetMs:F1}, " +
-                          $"genProc {world.settings.genProcessBudgetMs:F1}, meshApply {world.settings.meshApplyBudgetMs:F1}, draw {world.settings.drawApplyBudgetMs:F1} " +
+                          $"genProc {world.settings.genProcessBudgetMs:F1}, meshApply {world.settings.meshApplyBudgetMs:F1} " +
                           "(scaling legs multiply these by 60/targetFps, clamped x8)");
             sb.AppendLine($"Panic gate:     close {world.settings.panicGateCloseThreshold.ToString()} / reopen {world.settings.panicGateReopenThreshold.ToString()}, " +
                           $"in-flight light cap {world.settings.maxInFlightLightingJobs.ToString()}");

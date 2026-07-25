@@ -138,6 +138,7 @@ mesh.SetSubMesh(0, new SubMeshDescriptor(0, indexCount));
     * Schedules `MeshGenerationJob`.
     * **Optimization:** The job iterates all sections but skips `IsEmpty` sections immediately. It produces a single native buffer (`MeshDataJobOutput`) containing offsets for every section.
     * **Apply:** `Chunk.ApplyMeshData` slices this buffer and updates only the necessary `SectionRenderers`.
+    * **Present:** the mesh completion pass then calls `Chunk.TriggerLoadAnimation()` on the same chunk, in the same main-thread step — the one-shot rise-from-underground animation, which each chunk plays once per lifecycle. Before MP-6 (2026-07-25) this went through a `ChunksToDraw` queue drained later in the frame; nothing survives across frames now, so a pool recycle cannot animate a slot whose new lifecycle has no mesh yet.
 
 ## 5. Performance Considerations & Limitations
 
@@ -190,7 +191,7 @@ The mesher has an editor validation suite at `Assets/Editor/Validation/Meshing/`
 [PERFORMANCE_IMPROVEMENTS_REPORT.md](../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) claim "output-preserving"
 (it already guards MR-1, MR-2, MR-3, MR-4, MR-5, and MR-7).
 
-- **What it covers and its remaining blind spots** (interior-only placement; no custom/cross-mesh block or lava in the palette; smooth-light *values* covered only for the uniform-field case — distinct-per-corner / AO darkening still un-modelled), plus the phased `MH-*` extension backlog keyed to each open `MR-*` item:
+- **What it covers and its remaining blind spots** (interior-only placement; no custom/cross-mesh block or lava in the palette; smooth-light *values* covered only for the uniform-field case — distinct-per-corner / AO darkening still un-modeled), plus the phased `MH-*` extension backlog keyed to each open `MR-*` item:
   [Testing Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md](Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md).
 - **Harness file map, API cheat sheet, and the MR-* guard pattern** (for authoring scenarios):
   `.agents/skills/validation-driven-bugfix/references/meshing-suite.md`.

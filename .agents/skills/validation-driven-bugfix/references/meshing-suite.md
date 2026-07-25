@@ -25,7 +25,7 @@ Everything lives under `Assets/Editor/Validation/Meshing/`. Menu item: **`Minecr
 | `MeshingValidationSuite.Renderer.cs`      | `B12`–`B16` renderer apply-path baselines (MH-6 + MR-3/MR-4 postconditions) **+ `B28`–`B30`** (MP-5 GS-5 §7.3 two-axis ownership: apply never writes `forceRenderingOff`, `Clear()` resets it, `SetOcclusionCulled` round-trips without touching `activeSelf`), registered via `AddRendererScenarios`                                                                                                                                                                             |
 | `MeshingValidationSuite.CrossChunk.cs`    | `B18`–`B21` cross-chunk border-face culling (MH-10/MH-11) — the opt-in full-`MAP_SIZE` +X neighbor map; registered via `AddCrossChunkBaselineScenarios`                                                                                                                                                                                                                                                                                                                           |
 | `MeshingValidationSuite.Scheduling.cs`    | **Orchestration** baselines, no `MeshingTestWorld`: `B24` `MeshingScheduleDecision` census, `B25` `MeshDrainPolicy` drain policy (quota/cap/window stops, purge, remove-vs-leave, priority order), `B26` MP-3's in-flight `DequeuesChunk` fix; registered via `AddSchedulingScenarios`                                                                                                                                                                                            |
-| `MeshingValidationSuite.Completion.cs`    | `B27` — replays the shared `Helpers/JobCompletionPass` skeleton world-free with a **recording fake driver** over `int` keys (hook order, window break, `startIndex` rotation). NOTE it does **not** execute the production `MeshCompletionDriver` — see the `IMeshCompletionHost` rider (§8.1 of the MP plan); registered via `AddCompletionScenarios`                                                                                                                            |
+| `MeshingValidationSuite.Completion.cs`    | `B27` — replays the shared `Helpers/JobCompletionPass` skeleton world-free with a **recording fake driver** over `int` keys (hook order, window break, `startIndex` rotation). **`B31`–`B33` (MP-6)** drive the *production* `Helpers/MeshCompletionDriver` through that same real skeleton behind a **recording fake `IMeshCompletionHost`** (§8.1 rider, shipped): B31 apply→animate mapping + gone-chunk-still-releases, B32 faulting apply never animates, B33 `_curJob` scratch lifecycle. ⚠ B32 logs one deliberate `[MESHING]` error per run. Registered via `AddCompletionScenarios`   |
 
 Namespace: suite = `Editor.Validation.Meshing`, framework = `Editor.Validation.Meshing.Framework`.
 
@@ -47,10 +47,11 @@ Namespace: suite = `Editor.Validation.Meshing`, framework = `Editor.Validation.M
 > **B1–B16**. **MR-* Wave 2 (2026-06-20):** MR-2 (32 B/vertex) + MR-6 (pre-size + pool the `MeshDataJobOutput`
 > buffers) landed; MR-6's build-alongside guard **MH-2** closed as **B17** (a pooled output reused across two
 > scenes == a fresh buffer, via `MeshOutputPool` + `MeshingTestWorld.Run(reuseOutput:)`) → baselines **B1–B17**.
-> **Since then the suite grew past the job harness — tip is now B30 (30 baselines, 2026-07-25):** B18–B21
+> **Since then the suite grew past the job harness — tip is now B33 (33 baselines, 2026-07-25):** B18–B21
 > (cross-chunk culling), B22/B23 (FL sway), and the **MP-\* orchestration arc** B24–B27 (schedule decision,
 > drain policy, in-flight fix, completion skeleton — none of which use `MeshingTestWorld`) plus MP-5's
-> B28–B30 on the renderer fixture. When adding a scenario, put it in the partial that matches its *unit*,
+> B28–B30 on the renderer fixture and MP-6's B31–B33 on the real `MeshCompletionDriver` behind a fake
+> `IMeshCompletionHost`. When adding a scenario, put it in the partial that matches its *unit*,
 > not the next free file.
 > The forward **execution-wave plan** (§6 — harness Waves 1–3 DONE; MH-7 build-alongside; MH-8
 > gated) and the per-gap detail (`MH-7/8`) are in

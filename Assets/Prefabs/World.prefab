@@ -86,7 +86,6 @@ MonoBehaviour:
     lightScheduleBudgetMs: 8
     meshScheduleBudgetMs: 6
     meshApplyBudgetMs: 4
-    drawApplyBudgetMs: 2
     enableGenerationPanicGate: 1
     panicGateCloseThreshold: 256
     panicGateReopenThreshold: 128

@@ -7,7 +7,7 @@ namespace Benchmarks
     /// Opt-in, <see cref="Stopwatch"/>-based sub-phase profiler that slices the <b>interior of
     /// <c>World.Update</c></b> into the four main-thread cost centers a fluid edit drives:
     /// the behavior <see cref="Phase.Tick"/>, the modification <see cref="Phase.Apply"/> drain, the
-    /// main-thread <see cref="Phase.Mesh"/> work (mesh-job process + schedule + <c>CreateMesh</c>), and the
+    /// main-thread <see cref="Phase.Mesh"/> work (mesh-job process + schedule), and the
     /// main-thread <see cref="Phase.Light"/> work (lighting-job process + schedule).
     /// <para>
     /// This is the measurement the <b>isolated</b> tick benchmark could not provide: those cost centers are
@@ -41,7 +41,8 @@ namespace Benchmarks
             /// <summary>The voxel-modification drain (<c>World.ApplyModifications</c>).</summary>
             Apply = 1,
 
-            /// <summary>Main-thread mesh work: mesh-job process + schedule + <c>CreateMesh</c> upload.</summary>
+            /// <summary>Main-thread mesh work: mesh-job process (buffer upload + load-animation trigger) +
+            /// mesh-job scheduling.</summary>
             Mesh = 2,
 
             /// <summary>Main-thread lighting work: lighting-job process + dirty-set schedule.</summary>

@@ -182,6 +182,16 @@ Today **three owners** flip section visibility: `SectionRenderer.UpdateMeshNativ
 
 Connectivity masks are computed from the same voxel snapshot as the mesh (Phase 1 integrates the flood fill into `MeshGenerationJob`). The mask must be **published in the same main-thread step that applies the mesh** (`ProcessMeshJobs` → `ApplyMeshData`), never earlier — otherwise the culler can run with a mask describing geometry that is not on screen yet (or vice versa), which flickers holes during edits. While a section has a mesh job in flight, the culler should use the *old* mask (consistent with the old on-screen mesh).
 
+> **Where that step lives today (MP-4/MP-6, 2026-07-25).** The path is now `ProcessMeshJobs` →
+> `Helpers/JobCompletionPass` → `Helpers/MeshCompletionDriver.MergeJob` →
+> `IMeshCompletionHost.TryApplyMesh` → `Chunk.ApplyMeshData`. It is still exactly one apply site, and MP-6
+> established it as the place per-chunk **presentation** side-effects hang off: the chunk load animation
+> now fires there, paired to the apply that earned it (a discarded result never animates). **Publish the
+> mask the same way** — inside that hook, gated on the apply having succeeded. Two conveniences fall out:
+> the `IMeshCompletionHost` seam means a validation baseline can observe the publish with a fake host (the
+> B31–B33 pattern), and MP-3 guarantees a rebuild requested mid-flight stays queued, so the mask refresh
+> that request implies is never silently dropped.
+
 ### 7.5 Conservative defaults (make every unknown render)
 
 - Unloaded / not-yet-meshed neighbor → treat as fully connected (visible beyond).

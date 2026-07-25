@@ -1,12 +1,10 @@
 # Debugging Tools & Diagnostic Methods
 
-This document archives powerful debug methods developed during the implementation of the Voxel Engine.
-**Do not keep these in production code (`World.cs`)**. Copy-paste them back in only when diagnosing specific issues.
+This document archives powerful debug methods developed during the implementation of the Voxel Engine. **Do not keep these in production code (`World.cs`)**. Copy-paste them back in only when diagnosing specific issues.
 
 ## 1. Invisible Chunk Diagnosis (`DebugRaycastChunkState`)
 
-**Use Case:** You are standing in the world, and a chunk is invisible (mesh not rendering), but you suspect the data exists.
-**Usage:** Add to `World.cs`. Bind a key (e.g., F8) to call `World.Instance.DebugRaycastChunkState()`. Point your crosshair at the empty space.
+**Use Case:** You are standing in the world, and a chunk is invisible (mesh not rendering), but you suspect the data exists. **Usage:** Add to `World.cs`. Bind a key (e.g., F8) to call `World.Instance.DebugRaycastChunkState()`. Point your crosshair at the empty space.
 
 ```csharp
 /// <summary>
@@ -104,8 +102,7 @@ public void DebugRaycastChunkState()
 
 ## 2. Stuck Generation Diagnosis (`DebugAnalyzeStuckChunks`)
 
-**Use Case:** The mesh build queue (`_meshBuildQueue`) is not emptying. Chunks stay at the edge of view and never load.
-**Usage:** Add to `World.cs`. Call when queue count > 0 for extended periods.
+**Use Case:** The mesh build queue (`_meshBuildQueue`) is not emptying. Chunks stay at the edge of view and never load. **Usage:** Add to `World.cs`. Call when queue count > 0 for extended periods.
 
 ```csharp
 public void DebugAnalyzeStuckChunks()
@@ -158,9 +155,7 @@ public void DebugAnalyzeStuckChunks()
 > Inactive / Destroyed / Null breakdown this section produced is now available live in the debug
 > overlay via `World.AppendMeshQueueDebugInfo` (→ `MeshBuildQueue.AppendDebugInfo`).
 
-**Usage:** Call `DebugLogMeshQueueState` to check health. Dead entries are already dropped by the
-scheduling drain and removed by coordinate on unload, so `DebugCleanMeshQueue` is rarely needed — use
-it only to force an immediate purge during a diagnostic session.
+**Usage:** Call `DebugLogMeshQueueState` to check health. Dead entries are already dropped by the scheduling drain and removed by coordinate on unload, so `DebugCleanMeshQueue` is rarely needed — use it only to force an immediate purge during a diagnostic session.
 
 ```csharp
 /// <summary>
@@ -793,8 +788,7 @@ private float GetDebugSmoothHeight(byte centerLevel, VoxelState? n1, VoxelState?
 
 ## 6. Mesh Queue Deadlock Detector (`DiagnosticStuckChunkScan`)
 
-**Use Case:** Chunks remain in the mesh build queue (`_meshBuildQueue`) for extended periods (5+ seconds) without being scheduled for meshing. Produces a detailed per-chunk report showing exactly which flags and which neighbors are blocking `ScheduleMeshing`.
-**Usage:** Add to `World.cs`. Runs automatically every 5 seconds when `settings.enableDiagnosticLogs = true`. Call from `Update()` after the mesh scheduling loop.
+**Use Case:** Chunks remain in the mesh build queue (`_meshBuildQueue`) for extended periods (5+ seconds) without being scheduled for meshing. Produces a detailed per-chunk report showing exactly which flags and which neighbors are blocking `ScheduleMeshing`. **Usage:** Add to `World.cs`. Runs automatically every 5 seconds when `settings.enableDiagnosticLogs = true`. Call from `Update()` after the mesh scheduling loop.
 
 **Key insights this tool revealed:**
 
@@ -944,7 +938,7 @@ private void DiagnosticStuckChunkScan()
 }
 ```
 
-**Call site (in `Update()`, after the mesh scheduling loop and `ChunksToDraw` dequeue):**
+**Call site (in `Update()`, after the mesh scheduling loop):**
 
 ```csharp
 if (settings.enableDiagnosticLogs)
@@ -970,8 +964,7 @@ if (settings.enableDiagnosticLogs)
 
 ## 7. Unload Stranding Detector
 
-**Use Case:** Detecting when `UnloadChunks()` removes a chunk while a neighbor still has `HasLightChangesToProcess = true` or `NeedsInitialLighting = true`, potentially stranding that neighbor in a deadlock.
-**Usage:** Add to `UnloadChunks()` in `World.cs`, just before the chunk data is actually removed. Logs a warning for each stranding event.
+**Use Case:** Detecting when `UnloadChunks()` removes a chunk while a neighbor still has `HasLightChangesToProcess = true` or `NeedsInitialLighting = true`, potentially stranding that neighbor in a deadlock. **Usage:** Add to `UnloadChunks()` in `World.cs`, just before the chunk data is actually removed. Logs a warning for each stranding event.
 
 > **Note:** This bug was fixed by adding a neighbor-aware unload guard that defers unloads when neighbors have pending work. The diagnostic below is the logging-only version for future investigation.
 

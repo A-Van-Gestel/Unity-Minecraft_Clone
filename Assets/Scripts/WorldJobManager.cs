@@ -22,7 +22,7 @@ using Debug = UnityEngine.Debug;
 /// Manages the lifecycle of all background jobs (generation, meshing, lighting).
 /// Owns the active <see cref="IChunkGenerator"/> strategy and delegates scheduling to it.
 /// </summary>
-public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>
+public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IMeshCompletionHost
 {
     private readonly World _world;
     private readonly IChunkGenerator _chunkGenerator;
@@ -273,14 +273,15 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>
 
     // MP-4: the mesh pass's JobCompletionPass driver. A separate object because one class cannot implement
     // IJobCompletionDriver<ChunkCoord> twice (the lighting pass holds that slot on `this`); cached so the
-    // per-frame pass allocates nothing.
+    // per-frame pass allocates nothing. It reaches back through IMeshCompletionHost (implemented below on
+    // `this`) rather than holding a WorldJobManager, so the suite can drive it with a fake host (§8.1).
     private readonly MeshCompletionDriver _meshDriver;
 
     // MP-4 stale-instance probe: the ChunkData instance each in-flight mesh job was snapshotted from, paired
     // with MeshingJobData.TargetEpoch. Lives here rather than in MeshingJobData because that struct sits under
     // Assets/Scripts/Jobs/, where the Burst rules ban managed fields. Reference identity is NOT optional — see
     // the pairing rationale in CountMeshMerge. Entries share MeshJobs' lifetime exactly (added with it in
-    // ScheduleMeshing, removed in RemoveAndPromote, cleared in Dispose).
+    // ScheduleMeshing, removed in RemoveJob, cleared in Dispose).
     //
     // POPULATED ONLY IN EDITOR / DEVELOPMENT BUILDS — its writers (TrackMeshJobTarget /
     // UntrackMeshJobTarget) and its only reader (CountMeshMerge) are all [Conditional]-gated, so in a
@@ -579,12 +580,16 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>
             // mesh job before its output buffers are disposed (avoids a write-after-free race).
             jobData.Handle = job.Schedule();
             jobData.Handle = postJob.Schedule(jobData.Handle);
-            MeshJobs.Add(chunkCoord, jobData);
-
-            // MP-4 probe: capture the snapshotted ChunkData INSTANCE alongside jobData.TargetEpoch. Inside the
-            // same try as the Add, so the two registries can never disagree (the catch below rethrows without
-            // having added either). No-op in a build without the probe.
+            // MP-4 probe: capture the snapshotted ChunkData INSTANCE alongside jobData.TargetEpoch. No-op in
+            // a build without the probe. Ordered BEFORE the Add so that enrolling the job is the last thing
+            // that can happen in this try: the catch releases the job's buffers but does NOT remove it from
+            // MeshJobs, so anything throwing after the Add would leave an enrolled job pointing at recycled
+            // buffers for the next ProcessMeshJobs pass to Complete() and apply. The reverse orphan — a probe
+            // entry with no job — is inert: it is overwritten by the next schedule for this coord and cleared
+            // in Dispose.
             TrackMeshJobTarget(chunkCoord, chunk.ChunkData);
+
+            MeshJobs.Add(chunkCoord, jobData);
         }
         catch
         {
@@ -1231,94 +1236,73 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>
         JobCompletionPass.RunRemoveAndPromote(_completedMeshJobs, _meshDriver);
     }
 
-    #region JobCompletionPass driver — mesh pass (MP-4)
+    #region IMeshCompletionHost — collaborators for the mesh completion driver (MP-4 / MP-6 §8.1)
 
-    /// <summary>
-    /// The mesh pass's <see cref="IJobCompletionDriver{TKey}"/>: the per-job side effects the shared
-    /// <see cref="JobCompletionPass"/> skeleton sequences (the exact body the old inline
-    /// <see cref="ProcessMeshJobs"/> loop ran). A separate cached object rather than another interface on
-    /// <see cref="WorldJobManager"/> itself, because one class cannot implement
-    /// <c>IJobCompletionDriver&lt;ChunkCoord&gt;</c> twice — the lighting pass already holds that slot on
-    /// <c>this</c>. Instantiated once in the constructor, so the per-frame pass allocates nothing.
-    /// </summary>
-    /// <remarks><c>_curJob</c> caches the job across a single candidate's hooks; the pass is single-threaded
-    /// and non-reentrant, so a plain field is safe (the <c>_curLightJob</c> precedent).</remarks>
-    private sealed class MeshCompletionDriver : IJobCompletionDriver<ChunkCoord>
+    // Explicit IMeshCompletionHost implementation: the collaborators Helpers/MeshCompletionDriver.cs needs
+    // from its owner, so the meshing suite can drive the REAL driver with a recording fake host (B31–B33)
+    // instead of needing a functioning World. Explicit so they don't widen WorldJobManager's public surface —
+    // the driver invokes them through the interface (`this`). That matters more here than for the lighting
+    // driver: ReleaseJobData returns pooled native buffers, so a stray second call from anywhere holding
+    // World.Instance.JobManager would leave two in-flight jobs renting the same MeshDataJobOutput.
+
+    /// <inheritdoc />
+    bool IMeshCompletionHost.IsJobComplete(ChunkCoord key) => MeshJobs[key].Handle.IsCompleted;
+
+    /// <inheritdoc />
+    MeshingJobData IMeshCompletionHost.CompleteJob(ChunkCoord key)
     {
-        private readonly WorldJobManager _owner;
-        private MeshingJobData _curJob;
+        MeshingJobData job = MeshJobs[key];
+        job.Handle.Complete();
+        return job;
+    }
 
-        /// <summary>Initializes the driver for one job manager.</summary>
-        /// <param name="owner">The job manager whose mesh pass this driver serves.</param>
-        public MeshCompletionDriver(WorldJobManager owner) => _owner = owner;
+    /// <inheritdoc />
+    bool IMeshCompletionHost.TryApplyMesh(ChunkCoord key, in MeshingJobData job)
+    {
+        Chunk chunk = _world.GetChunkFromChunkCoord(key);
 
-        /// <inheritdoc />
-        public bool IsComplete(ChunkCoord key) => _owner.MeshJobs[key].Handle.IsCompleted;
+        // MP-1 rider + MP-4 probe: a gone chunk discards the result (out-of-range work already left the
+        // chunk map); a live chunk whose data was recycled mid-flight is merely COUNTED — the apply still
+        // happens, pending the evidence that gates the discard (MP-4 §D3). The staleness test itself lives
+        // inside the [Conditional] counter, so a build without the probe evaluates none of it — which is
+        // also why the probe stays HERE and not on IMeshCompletionHost (an interface member cannot be
+        // [Conditional]).
+        CountMeshMerge(key, chunk, job.TargetEpoch);
 
-        /// <inheritdoc />
-        public void CompleteJob(ChunkCoord key)
-        {
-            _curJob = _owner.MeshJobs[key];
-            _curJob.Handle.Complete();
-        }
+        if (chunk == null) return false;
 
-        /// <inheritdoc />
-        public void OnCompleteFault(ChunkCoord key, Exception e)
-        {
-            Debug.LogError($"[MESHING] Handle.Complete() for chunk {key} faulted — job left enrolled for retry. {e}");
-        }
+        // ApplyMeshData uploads the buffers synchronously (SetVertex/IndexBufferData copy); it does not own
+        // the output's lifecycle — ReleaseJobData returns it to the pool.
+        chunk.ApplyMeshData(job.Output);
+        return true;
+    }
 
-        /// <inheritdoc />
-        public void MergeJob(ChunkCoord key)
-        {
-            Chunk chunk = _owner._world.GetChunkFromChunkCoord(key);
+    /// <inheritdoc />
+    void IMeshCompletionHost.TriggerLoadAnimation(ChunkCoord key)
+    {
+        // Re-resolved rather than carried out of TryApplyMesh so the host interface stays Chunk-free (the
+        // fake host's whole premise). Same call stack on the main thread, so the map cannot have changed.
+        Chunk chunk = _world.GetChunkFromChunkCoord(key);
+        if (chunk != null) chunk.TriggerLoadAnimation();
+    }
 
-            // MP-1 rider + MP-4 probe: a gone chunk discards the result (out-of-range work already left the
-            // chunk map); a live chunk whose data was recycled mid-flight is merely COUNTED — the apply still
-            // happens, pending the evidence that gates the discard (MP-4 §D3). The staleness test itself lives
-            // inside the [Conditional] counter, so a build without the probe evaluates none of it.
-            _owner.CountMeshMerge(key, chunk, _curJob.TargetEpoch);
+    /// <inheritdoc />
+    void IMeshCompletionHost.ReleaseJobData(in MeshingJobData job)
+    {
+        // MR-6: single output-release site for both branches, symmetric with the input release. The upload
+        // (or the discarded result when the chunk is gone) is done, so the pooled buffers can be cleared
+        // and reused (or disposed if not pooled).
+        _meshOutputPool.Return(job.Output);
 
-            if (chunk != null)
-            {
-                // ApplyMeshData uploads the buffers synchronously (SetVertex/IndexBufferData copy);
-                // it does not own the output's lifecycle — ReleaseJob returns it to the pool.
-                chunk.ApplyMeshData(_curJob.Output);
-            }
-        }
+        // POOLING: Return the input buffers for reuse.
+        ReleaseMeshingJobInputs(job);
+    }
 
-        /// <inheritdoc />
-        public void OnMergeFault(ChunkCoord key, Exception e)
-        {
-            Debug.LogError($"[MESHING] Applying the completed mesh for chunk {key} faulted — buffers released, previous mesh kept. {e}");
-        }
-
-        /// <inheritdoc />
-        public void ReleaseJob(ChunkCoord key)
-        {
-            // MR-6: single output-release site for both branches, symmetric with the input release. The
-            // upload above (or the discarded result when the chunk is gone) is done, so the pooled buffers
-            // can be cleared and reused (or disposed if not pooled).
-            _owner._meshOutputPool.Return(_curJob.Output);
-
-            // POOLING: Return the input buffers for reuse.
-            _owner.ReleaseMeshingJobInputs(_curJob);
-
-            // Drop the now-recycled handles: the scratch is only valid inside one Complete → Merge →
-            // Release sequence, and holding released buffers is the fidelity-B7 stranded-container shape.
-            // Any future hook reading it out of sequence then fails loudly instead of silently operating
-            // on buffers another job already owns.
-            _curJob = default;
-        }
-
-        /// <inheritdoc />
-        public void RemoveAndPromote(ChunkCoord key)
-        {
-            // Removal only: unlike lighting, the mesh pipeline has no promotion concept — a chunk that still
-            // needs a rebuild is re-requested through the mesh build queue, which retries on its own.
-            _owner.MeshJobs.Remove(key);
-            _owner.UntrackMeshJobTarget(key); // MP-4 probe: same lifetime as the job entry.
-        }
+    /// <inheritdoc />
+    void IMeshCompletionHost.RemoveJob(ChunkCoord key)
+    {
+        MeshJobs.Remove(key);
+        UntrackMeshJobTarget(key); // MP-4 probe: same lifetime as the job entry.
     }
 
     #endregion
@@ -1789,7 +1773,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>
         Vector3Int localVoxelPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
 
         ushort currentLight = targetChunk.GetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
-        // Only sunlight REMOVALs (LightLevel == 0) consult independent support — see
+        // Only sunlight REMOVAL's (LightLevel == 0) consult independent support — see
         // CrossChunkLightModApplier.ComputeSunlight. Skip the neighbor scans for placements/uplifts
         // (the common case during initial-load sunlight propagation), whose decision ignores it.
         byte independentSunSupport = 0;

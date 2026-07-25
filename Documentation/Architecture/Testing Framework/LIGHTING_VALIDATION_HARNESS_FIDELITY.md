@@ -364,6 +364,13 @@ capturing integer callers at compile time + the latched dev-build ±2²⁴ tripw
   of B65 — it closes the release-on-fault ordering hole, which is precisely the stranded-container mechanism
   this B7 finding was opened for. Any future edit to the shared skeleton should expect B27, not B65, to be
   the tripwire.
+  **Extended again by MP-6 (2026-07-25):** B27 pins the *skeleton*, but nothing executed the production mesh
+  **driver** — so a code-review finding about its released-job scratch (holding recycled buffers past
+  `ReleaseJob`, the same stranded-container shape) had to be accepted on reasoning. The §8.1
+  `IMeshCompletionHost` seam closed that: meshing **B33** now drives the real driver behind a fake host and
+  reds on a double-return with an explicit `[101, 102, 103, 103]` signature. Nothing here changes for the
+  lighting driver, whose scratch got the same `= default` clear for symmetry — but it is now *observable* on
+  the mesh side only.
 
 ### B8 — The BFS work-cap fail-safe was asserted by only two scenarios ·  **CLOSED (2026-07-12)**
 

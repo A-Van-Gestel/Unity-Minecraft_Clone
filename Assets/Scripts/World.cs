@@ -112,8 +112,6 @@ public class World : MonoBehaviour, IMeshDrainHost
 
     private readonly MeshBuildQueue _meshBuildQueue = new MeshBuildQueue();
 
-    public readonly Queue<Chunk> ChunksToDraw = new Queue<Chunk>();
-
     private bool _applyingModifications;
     private readonly Queue<VoxelMod> _modifications = new Queue<VoxelMod>();
     private float _tickTimer;
@@ -2256,40 +2254,9 @@ public class World : MonoBehaviour, IMeshDrainHost
             MeshDrainPolicy.Drain(_meshBuildQueue, meshQuota, meshWindow, inFlightMeshCap, this);
         }
 
-        // The chunksToDraw queue is populated by ApplyMeshData in Chunk.cs.
-        // P-4 §5.3: time-budgeted drain — at least one chunk per frame (the legacy trickle, which also
-        // staggers the load animation), then as many more as fit in the ms ceiling so the queue can't
-        // back up at low FPS. Ceiling ≤ 0 drains without a time bound (consistent "0 = ceiling off"
-        // semantics with the other budget sliders); budgets off → exactly the legacy one-per-frame
-        // dequeue. Stale entries (destroyed while queued) don't count as the guaranteed draw.
-        if (ChunksToDraw.Count > 0)
-        {
-            PipelinePassBudget.Window drawWindow = settings.enablePipelineTimeBudgets
-                ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.drawApplyBudgetMs, ceilingScaleInterval))
-                : default;
-            bool drainMany = settings.enablePipelineTimeBudgets;
-            int chunksDrawn = 0;
-            int dequeued = 0;
-
-            // Flag off = exactly one dequeue (stale or not) — byte-exact legacy for the A/B legs.
-            // Flag on = guarantee one REAL draw, then drain while the window allows (never-expiring
-            // when the ceiling is disabled); stale dequeues are cheap and don't consume the guarantee.
-            while (ChunksToDraw.Count > 0 &&
-                   (drainMany ? chunksDrawn == 0 || !drawWindow.Expired : dequeued == 0))
-            {
-                Chunk chunkToDraw = ChunksToDraw.Dequeue();
-                dequeued++;
-                CountDrawQueueDequeue(chunkToDraw); // MP-1/F4: recycled-ref evidence (editor/dev-only)
-
-                // Guard: The chunk's GameObject may have been destroyed by the pool
-                // while it was waiting in the draw queue (e.g., due to deferred unload timing).
-                if (chunkToDraw != null && chunkToDraw.ChunkGameObject != null)
-                {
-                    chunkToDraw.CreateMesh();
-                    chunksDrawn++;
-                }
-            }
-        }
+        // MP-6: there is no step 8. The load animation is triggered by the mesh completion pass (step 5)
+        // the instant a chunk's mesh is applied, so no queue of Chunk references survives a frame — the
+        // stage that used to hold them could act on a recycled slot's NEW lifecycle (finding F4).
 
         WorldFrameProfiler.Add(WorldFrameProfiler.Phase.Mesh, meshStart);
 
@@ -2824,9 +2791,9 @@ public class World : MonoBehaviour, IMeshDrainHost
 
     #region Mesh Orchestration Diagnostics (MP-1)
 
-    // Editor/dev-only observability for the meshing orchestration loop (MP-1). Both probes here are
-    // read-only and main-thread (RequestChunkMeshRebuild and the ChunksToDraw drain both touch the
-    // non-thread-safe _meshBuildQueue / ChunksToDraw, so they are already main-thread by invariant).
+    // Editor/dev-only observability for the meshing orchestration loop (MP-1). The probe here is
+    // read-only and main-thread (RequestChunkMeshRebuild touches the non-thread-safe _meshBuildQueue,
+    // so it is already main-thread by invariant).
     // Counters accumulate over a play session as INSTANCE fields — a fresh World is created on each
     // play-mode scene load, so no domain-reload reset is needed (the CP-1 static counter needs one
     // only because it is written from worker threads). Increment sites are [Conditional]-gated, so
@@ -2842,15 +2809,8 @@ public class World : MonoBehaviour, IMeshDrainHost
     /// <summary>MP-1/F8 denominator: total <see cref="RequestChunkMeshRebuild"/> calls this session.</summary>
     public int MeshRequestTotal { get; private set; }
 
-    /// <summary>MP-1/F4: draw-queue entries dequeued whose chunk instance is no longer the live
-    /// occupant of its own coord (a recycled/unloaded reference). Read against
-    /// <see cref="DrawQueueDequeues"/>. Misses a chunk recycled and re-registered at a NEW coord —
-    /// detecting that needs MP-6's enqueue-time-coord capture, so a zero here does not prove F4
-    /// never fires.</summary>
-    public int DrawQueueRecycledRefs { get; private set; }
-
-    /// <summary>MP-1/F4 denominator: total draw-queue entries dequeued this session.</summary>
-    public int DrawQueueDequeues { get; private set; }
+    // MP-1's fourth probe (F4 recycled draw-queue refs) is gone with the queue it observed — MP-6 retired
+    // the draw stage, so no Chunk reference survives a frame for a recycle to invalidate.
 
     // Latch: the first F8 drop logs once (with coord where available); later drops count silently.
     private bool _warnedMeshRequestDrop;
@@ -2876,25 +2836,13 @@ public class World : MonoBehaviour, IMeshDrainHost
                          "further drops counted silently. See MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md §MP-1/F8.");
     }
 
-    /// <summary>MP-1/F4 probe: tally a draw-queue dequeue and flag a recycled/stale chunk reference
-    /// (the dequeued instance is no longer what the chunk map maps its coord to).</summary>
-    /// <param name="chunkToDraw">The chunk just dequeued from <see cref="ChunksToDraw"/>.</param>
-    [Conditional("UNITY_EDITOR")]
-    [Conditional("DEVELOPMENT_BUILD")]
-    private void CountDrawQueueDequeue([CanBeNull] Chunk chunkToDraw)
-    {
-        DrawQueueDequeues++;
-        if (chunkToDraw != null && GetChunkFromChunkCoord(chunkToDraw.Coord) != chunkToDraw)
-            DrawQueueRecycledRefs++;
-    }
-
     /// <summary>
     /// Formats the MP-1 mesh-orchestration diagnostic counters (this World plus its
     /// <see cref="WorldJobManager"/>) for the dev dump menu item.
     /// </summary>
     /// <remarks>Editor/dev-only meaning: every counter is incremented behind a [Conditional] gate, so
     /// all values read 0 in a non-development release build.</remarks>
-    /// <returns>A multi-line, human-readable summary of the four MP-1 probe families with denominators.</returns>
+    /// <returns>A multi-line, human-readable summary of the MP-1 probe families with denominators.</returns>
     public string BuildMeshOrchestrationDiagnostics()
     {
         WorldJobManager jm = JobManager;
@@ -2904,7 +2852,6 @@ public class World : MonoBehaviour, IMeshDrainHost
         sb.AppendLine($"  F1 in-flight     : retries={jm?.MeshInFlightRetried ?? 0}  / schedule attempts={jm?.MeshScheduleAttempts ?? 0}");
         sb.AppendLine($"  gone-chunk merge : discards={jm?.MeshGoneChunkDiscards ?? 0}  / merge attempts={jm?.MeshMergeAttempts ?? 0}");
         sb.AppendLine($"  stale-instance   : recycled-target merges={jm?.MeshStaleInstanceMerges ?? 0}  / merge attempts={jm?.MeshMergeAttempts ?? 0}");
-        sb.AppendLine($"  F4 draw-queue    : recycled-refs={DrawQueueRecycledRefs}  / dequeues={DrawQueueDequeues}");
         return sb.ToString();
     }
 
