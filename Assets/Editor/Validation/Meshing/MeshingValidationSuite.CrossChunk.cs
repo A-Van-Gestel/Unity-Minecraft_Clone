@@ -14,7 +14,7 @@ namespace Editor.Validation.Meshing
     /// all neighbor data — had <b>zero</b> coverage. That is the seam the halo-padded substrate
     /// (LI-1 → P-2) and TG-4 Phase 4 rewrite, so it is a substrate prerequisite, not an optional extra.
     /// <list type="bullet">
-    /// <item><b>B18/B19/B20</b> (MH-10) — drive a real `NeighborRight` (+X) map and assert the job's
+    /// <item><b>B18/B19/B20</b> (MH-10) — drive a real `NeighborE` (+X) map and assert the job's
     /// <c>ShouldDrawFace</c> verdict via a face-count delta: air neighbor → drawn, opaque neighbor →
     /// culled (one face fewer), transparent (renderNeighborFaces) neighbor → drawn.</item>
     /// <item><b>B21</b> (MH-11) — repeats B19's occlusion but builds the neighbor map through the
@@ -30,7 +30,7 @@ namespace Editor.Validation.Meshing
     public static partial class MeshingValidationSuite
     {
         // A single isolated opaque cube on this chunk's +X border (local x = 15); its +X face reads the
-        // across-seam cell NeighborRight[(0, y, z)] via the job's GetVoxelStateFromLocalPos wrap.
+        // across-seam cell NeighborE[(0, y, z)] via the job's GetVoxelStateFromLocalPos wrap.
         private const int BORDER_CUBE_X = 15;
         private const int BORDER_CUBE_Y = 8;
         private const int BORDER_CUBE_Z = 8;
@@ -41,6 +41,21 @@ namespace Editor.Validation.Meshing
         private const int VERTS_ALL_SIX_FACES = 24; // +X neighbor non-occluding (air / transparent)
         private const int VERTS_PLUS_X_CULLED = 20; // +X neighbor opaque-solid → that face culled
 
+        // B37 (MH-12) permutation fixture: one isolated cube per cardinal border, each at its OWN Y so a
+        // map delivered to the wrong slot probes a cell that direction never occupied. The tangential
+        // coordinate is held at 8 (mid-face) and the four cubes are mutually non-adjacent, so each still
+        // exposes all 6 faces before its outward one is culled.
+        private const int PERM_TANGENT = 8;
+        private const int PERM_WEST_Y = 4;
+        private const int PERM_EAST_Y = 6;
+        private const int PERM_NORTH_Y = 8;
+        private const int PERM_SOUTH_Y = 10;
+        private const int PERM_LOW_BORDER = 0; // local x/z = 0 → the -X / -Z faces
+        private const int PERM_HIGH_BORDER = VoxelData.ChunkWidth - 1; // local x/z = 15 → the +X / +Z faces
+
+        // Four isolated cubes, each with exactly its outward face culled by a correctly-routed neighbor.
+        private const int VERTS_ALL_FOUR_SEAMS_CULLED = 4 * VERTS_PLUS_X_CULLED;
+
         /// <summary>Registers the cross-chunk border-culling baselines (called from <c>AddBaselineScenarios</c>).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddCrossChunkBaselineScenarios(List<Scenario> scenarios)
@@ -49,6 +64,8 @@ namespace Editor.Validation.Meshing
             scenarios.Add(new Scenario("B19: +X border face is culled when the neighbor cell is opaque-solid (MH-10 consumption)", B19_BorderFaceCulledWhenNeighborSolid));
             scenarios.Add(new Scenario("B20: a transparent (renderNeighborFaces) neighbor does NOT cull the +X border face (MH-10 consumption)", B20_BorderFaceDrawnWhenNeighborTransparent));
             scenarios.Add(new Scenario("B21: border culling holds when the neighbor map is built via the production ChunkData.FillJobVoxelMap path (MH-11 fill-faithful)", B21_BorderCullingViaProductionFill));
+            scenarios.Add(new Scenario("B37: all four cardinal neighbor maps reach the slot they belong to — any permutation reds (MH-12 permutation guard)", B37_CardinalNeighborsAreNotPermuted));
+            scenarios.Add(new Scenario("B38: all four diagonal neighbor maps reach their slot — fluid corner height drops only when the RIGHT diagonal is populated (MH-12 permutation guard)", B38_DiagonalNeighborsAreNotPermuted));
         }
 
         /// <summary>
@@ -77,7 +94,7 @@ namespace Editor.Validation.Meshing
         /// B19's culled-face delta, and pins that an air (non-occluding) neighbor does <b>not</b> cull (an
         /// inverted predicate where air culls would drop it to 20 and red this).
         /// <para>
-        /// <b>Note:</b> B18 does <i>not</i> by itself prove the job consults <c>NeighborRight</c> — an air
+        /// <b>Note:</b> B18 does <i>not</i> by itself prove the job consults <c>NeighborE</c> — an air
         /// neighbor (0), the all-zero map, and the legacy empty-array (null → draw) path all yield 24, so this
         /// count is the same whether or not the map is read. <b>B19/B21</b> (opaque neighbor → 20) are the
         /// baselines that actually exercise the consumption path; the prove-red severing the neighbor reds
@@ -89,7 +106,7 @@ namespace Editor.Validation.Meshing
             bool passed = AssertBorderCullingPaletteAssumptions("B18");
             using MeshingTestWorld world = new MeshingTestWorld();
             world.SetBlock(BORDER_CUBE_X, BORDER_CUBE_Y, BORDER_CUBE_Z, TestMeshBlockPalette.SolidOpaque);
-            world.SetNeighborRightBlock(NEIGHBOR_CELL_X, BORDER_CUBE_Y, BORDER_CUBE_Z, TestMeshBlockPalette.Air);
+            world.SetNeighborEastBlock(NEIGHBOR_CELL_X, BORDER_CUBE_Y, BORDER_CUBE_Z, TestMeshBlockPalette.Air);
             MeshDataJobOutput o = world.Run();
 
             passed &= MeshAssert.VertexCount("B18 all six border-cube faces drawn", o, VERTS_ALL_SIX_FACES);
@@ -107,7 +124,7 @@ namespace Editor.Validation.Meshing
             bool passed = AssertBorderCullingPaletteAssumptions("B19");
             using MeshingTestWorld world = new MeshingTestWorld();
             world.SetBlock(BORDER_CUBE_X, BORDER_CUBE_Y, BORDER_CUBE_Z, TestMeshBlockPalette.SolidOpaque);
-            world.SetNeighborRightBlock(NEIGHBOR_CELL_X, BORDER_CUBE_Y, BORDER_CUBE_Z, TestMeshBlockPalette.SolidOpaque);
+            world.SetNeighborEastBlock(NEIGHBOR_CELL_X, BORDER_CUBE_Y, BORDER_CUBE_Z, TestMeshBlockPalette.SolidOpaque);
             MeshDataJobOutput o = world.Run();
 
             passed &= MeshAssert.VertexCount("B19 +X border face culled by opaque neighbor", o, VERTS_PLUS_X_CULLED);
@@ -126,7 +143,7 @@ namespace Editor.Validation.Meshing
             bool passed = AssertBorderCullingPaletteAssumptions("B20");
             using MeshingTestWorld world = new MeshingTestWorld();
             world.SetBlock(BORDER_CUBE_X, BORDER_CUBE_Y, BORDER_CUBE_Z, TestMeshBlockPalette.SolidOpaque);
-            world.SetNeighborRightBlock(NEIGHBOR_CELL_X, BORDER_CUBE_Y, BORDER_CUBE_Z, TestMeshBlockPalette.TransparentCube);
+            world.SetNeighborEastBlock(NEIGHBOR_CELL_X, BORDER_CUBE_Y, BORDER_CUBE_Z, TestMeshBlockPalette.TransparentCube);
             MeshDataJobOutput o = world.Run();
 
             passed &= MeshAssert.VertexCount("B20 transparent neighbor does not cull the +X face", o, VERTS_ALL_SIX_FACES);
@@ -146,11 +163,153 @@ namespace Editor.Validation.Meshing
             bool passed = AssertBorderCullingPaletteAssumptions("B21");
             using MeshingTestWorld world = new MeshingTestWorld();
             world.SetBlock(BORDER_CUBE_X, BORDER_CUBE_Y, BORDER_CUBE_Z, TestMeshBlockPalette.SolidOpaque);
-            world.SetNeighborRightBlockViaProductionFill(NEIGHBOR_CELL_X, BORDER_CUBE_Y, BORDER_CUBE_Z, TestMeshBlockPalette.SolidOpaque);
+            world.SetNeighborEastBlockViaProductionFill(NEIGHBOR_CELL_X, BORDER_CUBE_Y, BORDER_CUBE_Z, TestMeshBlockPalette.SolidOpaque);
             MeshDataJobOutput o = world.Run();
 
             passed &= MeshAssert.VertexCount("B21 +X border face culled (production fill path)", o, VERTS_PLUS_X_CULLED);
             passed &= MeshAssert.StructuralInvariants("B21 structural", o);
+            return passed;
+        }
+
+        /// <summary>
+        /// B37 (MH-12) — the permutation guard: every cardinal neighbor map must arrive in the slot it
+        /// belongs to. B18–B21 populate only the +X map, so they red on any swap that displaces <i>+X</i>
+        /// but stay green on a swap among the other three — the residual F6 risk, since the Back/Front/
+        /// Left/Right ↔ compass mapping was a hand-written wiring table.
+        /// <para>
+        /// The fixture puts one isolated opaque cube on each cardinal border, <b>each at a different Y</b>,
+        /// and the matching occluder in each neighbor map. Correctly routed, every cube loses exactly its
+        /// outward face. Under any permutation, a probe reads a cell that direction never occupied — wrong
+        /// Y <i>and</i> wrong border plane (+X reads x=0, -X reads x=15, +Z reads z=0, -Z reads z=15) — so
+        /// the face is drawn instead and the count rises above <see cref="VERTS_ALL_FOUR_SEAMS_CULLED"/>.
+        /// </para>
+        /// </summary>
+        private static bool B37_CardinalNeighborsAreNotPermuted()
+        {
+            bool passed = AssertBorderCullingPaletteAssumptions("B37");
+            using MeshingTestWorld world = new MeshingTestWorld();
+
+            // One isolated cube per border, each at its own Y so the four probes are mutually distinct.
+            world.SetBlock(PERM_LOW_BORDER, PERM_WEST_Y, PERM_TANGENT, TestMeshBlockPalette.SolidOpaque);
+            world.SetBlock(PERM_HIGH_BORDER, PERM_EAST_Y, PERM_TANGENT, TestMeshBlockPalette.SolidOpaque);
+            world.SetBlock(PERM_TANGENT, PERM_NORTH_Y, PERM_HIGH_BORDER, TestMeshBlockPalette.SolidOpaque);
+            world.SetBlock(PERM_TANGENT, PERM_SOUTH_Y, PERM_LOW_BORDER, TestMeshBlockPalette.SolidOpaque);
+
+            // The across-seam occluder each of those faces must find. The neighbor-local coordinate is the
+            // opposite border plane from the face that reads it.
+            world.SetNeighborBlock(CardinalNeighbor.West, PERM_HIGH_BORDER, PERM_WEST_Y, PERM_TANGENT,
+                TestMeshBlockPalette.SolidOpaque);
+            world.SetNeighborBlock(CardinalNeighbor.East, PERM_LOW_BORDER, PERM_EAST_Y, PERM_TANGENT,
+                TestMeshBlockPalette.SolidOpaque);
+            world.SetNeighborBlock(CardinalNeighbor.North, PERM_TANGENT, PERM_NORTH_Y, PERM_LOW_BORDER,
+                TestMeshBlockPalette.SolidOpaque);
+            world.SetNeighborBlock(CardinalNeighbor.South, PERM_TANGENT, PERM_SOUTH_Y, PERM_HIGH_BORDER,
+                TestMeshBlockPalette.SolidOpaque);
+
+            MeshDataJobOutput o = world.Run();
+
+            passed &= MeshAssert.VertexCount("B37 every cardinal seam face culled by its own neighbor", o,
+                VERTS_ALL_FOUR_SEAMS_CULLED);
+            passed &= MeshAssert.StructuralInvariants("B37 structural", o);
+            return passed;
+        }
+
+        // B38 (MH-12, diagonal half): one water source on a chunk corner per leg. Diagonals never reach face
+        // culling — they reach GetSmoothedCornerHeight, which admits the diagonal term ONLY when an adjacent
+        // cardinal is also fluid (VoxelMeshHelper.cs:1148), so each leg also puts water in one cardinal map.
+        private const int DIAG_Y = 8;
+        private const byte FLUID_SOURCE_LEVEL = 0; // full height
+        private const byte FLUID_LOW_LEVEL = 6; // shorter column, so admitting it lowers the corner average
+
+        /// <summary>
+        /// One leg of B38: meshes a corner water source twice — without and with the diagonal neighbor
+        /// populated — and returns whether adding the diagonal strictly lowered the summed vertex height.
+        /// <para>
+        /// Only the one diagonal map under test is ever populated, so a job that routes this slot to any
+        /// other diagonal reads a length-0 map, the diagonal term is refused, and the two runs come out
+        /// identical — which is exactly the permutation signal. Comparing the two runs (rather than a
+        /// hand-computed height) keeps the engine's averaging formula out of the oracle, the A4 discipline.
+        /// </para>
+        /// </summary>
+        /// <param name="diagonal">The diagonal slot under test.</param>
+        /// <param name="centerX">Chunk-local X of the corner water source (0 or 15).</param>
+        /// <param name="centerZ">Chunk-local Z of the corner water source (0 or 15).</param>
+        /// <param name="cardinal">An adjacent cardinal neighbor to fill with fluid, opening the diagonal path.</param>
+        /// <param name="cardinalX">Neighbor-local X in that cardinal map.</param>
+        /// <param name="cardinalZ">Neighbor-local Z in that cardinal map.</param>
+        /// <param name="diagX">Neighbor-local X in the diagonal map.</param>
+        /// <param name="diagZ">Neighbor-local Z in the diagonal map.</param>
+        /// <param name="label">Assertion label for this leg.</param>
+        /// <returns>True when the diagonal demonstrably lowered the corner.</returns>
+        private static bool B38Leg(DiagonalNeighbor diagonal, int centerX, int centerZ,
+            CardinalNeighbor cardinal, int cardinalX, int cardinalZ, int diagX, int diagZ, string label)
+        {
+            float withoutDiagonal = SumVertexHeight(diagonal, centerX, centerZ, cardinal, cardinalX, cardinalZ,
+                diagX, diagZ, populateDiagonal: false);
+            float withDiagonal = SumVertexHeight(diagonal, centerX, centerZ, cardinal, cardinalX, cardinalZ,
+                diagX, diagZ, populateDiagonal: true);
+
+            return MeshAssert.IsTrue($"{label} diagonal lowers the fluid corner", withDiagonal < withoutDiagonal,
+                $"summed vertex height with the {diagonal} map populated = {withDiagonal:F4}, without = {withoutDiagonal:F4} " +
+                "(expected strictly lower — equal means the job never read this diagonal slot)");
+        }
+
+        /// <summary>Builds one B38 leg's fixture and returns the summed Y of every emitted vertex.</summary>
+        /// <param name="diagonal">The diagonal slot under test.</param>
+        /// <param name="centerX">Chunk-local X of the corner water source.</param>
+        /// <param name="centerZ">Chunk-local Z of the corner water source.</param>
+        /// <param name="cardinal">The adjacent cardinal neighbor that opens the diagonal path.</param>
+        /// <param name="cardinalX">Neighbor-local X in that cardinal map.</param>
+        /// <param name="cardinalZ">Neighbor-local Z in that cardinal map.</param>
+        /// <param name="diagX">Neighbor-local X in the diagonal map.</param>
+        /// <param name="diagZ">Neighbor-local Z in the diagonal map.</param>
+        /// <param name="populateDiagonal">Whether to place the low-level fluid in the diagonal map.</param>
+        /// <returns>The sum of every emitted vertex's Y coordinate.</returns>
+        private static float SumVertexHeight(DiagonalNeighbor diagonal, int centerX, int centerZ,
+            CardinalNeighbor cardinal, int cardinalX, int cardinalZ, int diagX, int diagZ, bool populateDiagonal)
+        {
+            using MeshingTestWorld world = new MeshingTestWorld();
+            world.SetBlock(centerX, DIAG_Y, centerZ, TestMeshBlockPalette.WaterSource, FLUID_SOURCE_LEVEL);
+            world.SetNeighborBlock(cardinal, cardinalX, DIAG_Y, cardinalZ, TestMeshBlockPalette.WaterSource,
+                FLUID_SOURCE_LEVEL);
+
+            if (populateDiagonal)
+            {
+                world.SetNeighborBlock(diagonal, diagX, DIAG_Y, diagZ, TestMeshBlockPalette.WaterSource,
+                    FLUID_LOW_LEVEL);
+            }
+
+            MeshDataJobOutput o = world.Run();
+
+            float sum = 0f;
+            for (int i = 0; i < o.Vertices.Length; i++) sum += o.Vertices[i].y;
+            return sum;
+        }
+
+        /// <summary>
+        /// B38 (MH-12, diagonal half) — every diagonal neighbor map must reach the slot it belongs to.
+        /// B37 guards the cardinals through face culling, which the diagonals never reach; they instead drive
+        /// <b>fluid corner geometry</b> (<c>GetSmoothedCornerHeight</c> / <c>CalculateSymmetricCornerFlow</c>,
+        /// unconditional — not gated on <c>SmoothLightingQuality</c>), so a transposed diagonal shows
+        /// up as a wrong fluid surface at a chunk corner rather than a missing face.
+        /// <para>
+        /// Each leg isolates one diagonal: a water source on the matching chunk corner, water in one adjacent
+        /// cardinal map (without it the engine refuses the diagonal term), and — in the second run only —
+        /// lower-level water in the diagonal map itself. Admitting that shorter column must strictly lower the
+        /// corner's averaged height. Because only the slot under test is ever populated, any misrouting reads
+        /// an empty map and the two runs coincide, so every permutation of the four is caught.
+        /// </para>
+        /// </summary>
+        private static bool B38_DiagonalNeighborsAreNotPermuted()
+        {
+            bool passed = B38Leg(DiagonalNeighbor.NorthEast, PERM_HIGH_BORDER, PERM_HIGH_BORDER,
+                CardinalNeighbor.North, PERM_HIGH_BORDER, PERM_LOW_BORDER, PERM_LOW_BORDER, PERM_LOW_BORDER, "B38-NE");
+            passed &= B38Leg(DiagonalNeighbor.SouthEast, PERM_HIGH_BORDER, PERM_LOW_BORDER,
+                CardinalNeighbor.South, PERM_HIGH_BORDER, PERM_HIGH_BORDER, PERM_LOW_BORDER, PERM_HIGH_BORDER, "B38-SE");
+            passed &= B38Leg(DiagonalNeighbor.SouthWest, PERM_LOW_BORDER, PERM_LOW_BORDER,
+                CardinalNeighbor.South, PERM_LOW_BORDER, PERM_HIGH_BORDER, PERM_HIGH_BORDER, PERM_HIGH_BORDER, "B38-SW");
+            passed &= B38Leg(DiagonalNeighbor.NorthWest, PERM_LOW_BORDER, PERM_HIGH_BORDER,
+                CardinalNeighbor.North, PERM_LOW_BORDER, PERM_LOW_BORDER, PERM_HIGH_BORDER, PERM_LOW_BORDER, "B38-NW");
             return passed;
         }
     }

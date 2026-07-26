@@ -159,11 +159,11 @@ namespace Config
             MeshProbeInput input = new MeshProbeInput
             {
                 Center = maps[0],
-                Back = maps[1], Front = maps[2], Left = maps[3], Right = maps[4],
-                FrontRight = maps[5], BackRight = maps[6], BackLeft = maps[7], FrontLeft = maps[8],
+                NeighborS = maps[1], NeighborN = maps[2], NeighborW = maps[3], NeighborE = maps[4],
+                NeighborNE = maps[5], NeighborSE = maps[6], NeighborSW = maps[7], NeighborNW = maps[8],
                 LightCenter = lightMaps[0],
-                LightBack = lightMaps[1], LightFront = lightMaps[2], LightLeft = lightMaps[3], LightRight = lightMaps[4],
-                LightFrontRight = lightMaps[5], LightBackRight = lightMaps[6], LightBackLeft = lightMaps[7], LightFrontLeft = lightMaps[8],
+                LightS = lightMaps[1], LightN = lightMaps[2], LightW = lightMaps[3], LightE = lightMaps[4],
+                LightNE = lightMaps[5], LightSE = lightMaps[6], LightSW = lightMaps[7], LightNW = lightMaps[8],
                 IncludeDiagonals = true,
             };
 

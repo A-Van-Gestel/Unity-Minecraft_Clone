@@ -27,6 +27,47 @@ namespace Editor.Validation.Meshing.Framework
     }
 
     /// <summary>
+    /// The four cardinal neighbor chunks a fixture can populate. The names are the job's own
+    /// (<see cref="MeshGenerationJob.NeighborN"/> etc.), so a fixture's direction and the slot it lands in
+    /// cannot drift apart.
+    /// </summary>
+    public enum CardinalNeighbor
+    {
+        /// <summary>The +Z neighbor; this chunk's +Z border reads its <c>z = 0</c> plane.</summary>
+        North,
+
+        /// <summary>The +X neighbor; this chunk's +X border reads its <c>x = 0</c> plane.</summary>
+        East,
+
+        /// <summary>The -Z neighbor; this chunk's -Z border reads its <c>z = 15</c> plane.</summary>
+        South,
+
+        /// <summary>The -X neighbor; this chunk's -X border reads its <c>x = 15</c> plane.</summary>
+        West,
+    }
+
+    /// <summary>
+    /// The four diagonal neighbor chunks a fixture can populate, named for the job's own
+    /// <see cref="MeshGenerationJob.NeighborNE"/> etc. Diagonals never affect face culling; they drive
+    /// <b>fluid corner geometry</b> (and smooth-lighting AO), so a fixture that exercises them meshes a
+    /// fluid on a chunk corner rather than an opaque cube on a border.
+    /// </summary>
+    public enum DiagonalNeighbor
+    {
+        /// <summary>The (+X, +Z) neighbor; this chunk's (+X, +Z) corner reads its <c>(0, ·, 0)</c> cell.</summary>
+        NorthEast,
+
+        /// <summary>The (+X, -Z) neighbor; this chunk's (+X, -Z) corner reads its <c>(0, ·, 15)</c> cell.</summary>
+        SouthEast,
+
+        /// <summary>The (-X, -Z) neighbor; this chunk's (-X, -Z) corner reads its <c>(15, ·, 15)</c> cell.</summary>
+        SouthWest,
+
+        /// <summary>The (-X, +Z) neighbor; this chunk's (-X, +Z) corner reads its <c>(15, ·, 0)</c> cell.</summary>
+        NorthWest,
+    }
+
+    /// <summary>
     /// Single-chunk meshing harness for the validation suite. Owns a synthetic voxel map and the
     /// synthetic <see cref="TestMeshBlockPalette"/>, then runs the <b>real</b>
     /// <see cref="MeshGenerationJob"/> synchronously (<c>job.Run()</c>) and exposes its
@@ -38,10 +79,10 @@ namespace Editor.Validation.Meshing.Framework
     /// fluid height templates ARE populated (16 real entries each) so the fluid meshing path — which indexes
     /// them by fluid level — runs exactly as in production. Most tests place blocks in the chunk interior so
     /// face culling only consults in-chunk neighbors and the empty neighbor-chunk maps never influence the
-    /// result. <b>Exception:</b> the cross-chunk border-culling baselines (MH-10/MH-11) opt in to a populated
-    /// +X neighbor via <see cref="SetNeighborRightBlock"/> / <see cref="SetNeighborRightBlockViaProductionFill"/>,
-    /// which <see cref="Run"/> then passes for the <c>NeighborRight</c> slot so the job's border-face culling
-    /// consults it.
+    /// result. <b>Exception:</b> the cross-chunk baselines opt in to populated cardinal neighbors via
+    /// <see cref="SetNeighborBlock"/> (or the +X shorthands <see cref="SetNeighborEastBlock"/> /
+    /// <see cref="SetNeighborEastBlockViaProductionFill"/>), which <see cref="Run"/> then passes for the
+    /// matching <c>NeighborN/E/S/W</c> slot so the job's border-face culling consults it.
     /// </para>
     /// </summary>
     public sealed class MeshingTestWorld : IDisposable
@@ -55,12 +96,16 @@ namespace Editor.Validation.Meshing.Framework
         private MeshDataJobOutput _output;
         private bool _hasOutput;
 
-        // Opt-in +X (East / NeighborRight) neighbor voxel map for the cross-chunk border-face-culling
-        // baselines (MH-10/MH-11). Left uncreated by default so every existing baseline keeps the
-        // original empty-neighbor behavior (border faces drawn as "no neighbor"); created lazily the
-        // first time a test populates it. Only the Right slot is modeled — the +X seam the lighting
-        // suite also standardizes on; the other 7 neighbor slots stay empty.
-        private NativeArray<uint> _neighborRight;
+        // Opt-in cardinal neighbor voxel maps for the cross-chunk border-face-culling baselines
+        // (MH-10/MH-11 on +X, MH-12's permutation guard on all four). Each is left uncreated by default so
+        // every existing baseline keeps the original empty-neighbor behavior (border faces drawn as "no
+        // neighbor"); each is created lazily the first time a test populates that direction.
+        private NativeArray<uint> _neighborN, _neighborE, _neighborS, _neighborW;
+
+        // The 4 diagonal maps (MH-12's B38). Diagonals never reach face culling — they feed fluid corner
+        // height/flow smoothing and smooth-lighting AO — so they are exercised by a fluid-on-a-corner
+        // fixture. Same lazy discipline: uncreated stays length-0, exactly as every pre-B38 baseline saw.
+        private NativeArray<uint> _neighborNE, _neighborSE, _neighborSW, _neighborNW;
 
         /// <summary>Creates an all-air chunk (zeroed light map) and the test block palette job data.</summary>
         public MeshingTestWorld()
@@ -88,28 +133,43 @@ namespace Editor.Validation.Meshing.Framework
         }
 
         /// <summary>
-        /// MH-10: writes a block into the +X (East / <c>NeighborRight</c>) neighbor chunk at
-        /// <b>neighbor-local</b> coordinates, lazily creating the neighbor map (all-Air) on first use.
-        /// Once created, <see cref="Run"/> passes this map for the Right slot, so the meshing job's
-        /// border-face culling actually consults it: a face on this chunk's +X border (local x = 15)
-        /// reads <c>NeighborRight[(0, y, z)]</c> via the job's <c>GetVoxelStateFromLocalPos</c> wrap.
+        /// MH-10/MH-12: writes a block into one cardinal neighbor chunk at <b>neighbor-local</b>
+        /// coordinates, lazily creating that map (all-Air) on first use. Once created, <see cref="Run"/>
+        /// passes it for the matching slot, so the meshing job's border-face culling actually consults it:
+        /// a face on this chunk's +X border (local x = 15) reads <c>NeighborE[(0, y, z)]</c> via the job's
+        /// <c>GetVoxelStateFromLocalPos</c> wrap, and symmetrically for the other three.
         /// This is a <b>direct</b> write — the consumption-gap test (does the job read + cull correctly).
-        /// For the fill-faithful variant see <see cref="SetNeighborRightBlockViaProductionFill"/>.
+        /// For the fill-faithful variant see <see cref="SetNeighborEastBlockViaProductionFill"/>.
+        /// </summary>
+        /// <param name="direction">Which cardinal neighbor to write into.</param>
+        /// <param name="x">Neighbor-local X (0–15); the +X border reads x = 0, the -X border x = 15.</param>
+        /// <param name="y">Neighbor-local Y.</param>
+        /// <param name="z">Neighbor-local Z; the +Z border reads z = 0, the -Z border z = 15.</param>
+        /// <param name="id">The palette block ID to write into the neighbor.</param>
+        /// <param name="meta">Optional metadata byte.</param>
+        public void SetNeighborBlock(CardinalNeighbor direction, int x, int y, int z, ushort id, byte meta = 0)
+        {
+            ref NativeArray<uint> map = ref NeighborMapRef(direction);
+            EnsureCreated(ref map);
+            map[ChunkMath.GetFlattenedIndexInChunk(x, y, z)] = BurstVoxelDataBitMapping.PackVoxelData(id, meta);
+        }
+
+        /// <summary>
+        /// MH-10 shorthand for the +X seam B18–B20 standardize on — <see cref="SetNeighborBlock"/> with
+        /// <see cref="CardinalNeighbor.East"/>.
         /// </summary>
         /// <param name="x">Neighbor-local X (0–15); the +X border reads x = 0.</param>
         /// <param name="y">Neighbor-local Y.</param>
         /// <param name="z">Neighbor-local Z.</param>
         /// <param name="id">The palette block ID to write into the neighbor.</param>
         /// <param name="meta">Optional metadata byte.</param>
-        public void SetNeighborRightBlock(int x, int y, int z, ushort id, byte meta = 0)
+        public void SetNeighborEastBlock(int x, int y, int z, ushort id, byte meta = 0)
         {
-            EnsureNeighborRight();
-            _neighborRight[ChunkMath.GetFlattenedIndexInChunk(x, y, z)] =
-                BurstVoxelDataBitMapping.PackVoxelData(id, meta);
+            SetNeighborBlock(CardinalNeighbor.East, x, y, z, id, meta);
         }
 
         /// <summary>
-        /// MH-11: builds the +X (<c>NeighborRight</c>) neighbor map through the <b>production</b> fill
+        /// MH-11: builds the +X (<c>NeighborE</c>) neighbor map through the <b>production</b> fill
         /// path (<see cref="ChunkData.FillJobVoxelMap"/>) instead of writing the flat array directly —
         /// the exact code a halo/border-slab substrate (P-1/P-2) rewrites. A throwaway
         /// <see cref="ChunkData"/> gets the block at neighbor-local coords, then its sections are filled
@@ -121,19 +181,75 @@ namespace Editor.Validation.Meshing.Framework
         /// <param name="z">Neighbor-local Z.</param>
         /// <param name="id">The palette block ID to write into the neighbor.</param>
         /// <param name="meta">Optional metadata byte.</param>
-        public void SetNeighborRightBlockViaProductionFill(int x, int y, int z, ushort id, byte meta = 0)
+        public void SetNeighborEastBlockViaProductionFill(int x, int y, int z, ushort id, byte meta = 0)
         {
-            EnsureNeighborRight();
+            EnsureCreated(ref _neighborE);
             ChunkData neighbor = new ChunkData(Vector2Int.zero);
             neighbor.SetVoxel(x, y, z, BurstVoxelDataBitMapping.PackVoxelData(id, meta));
-            neighbor.FillJobVoxelMap(_neighborRight);
+            neighbor.FillJobVoxelMap(_neighborE);
         }
 
-        /// <summary>Lazily allocates the persistent all-Air +X neighbor map (idempotent).</summary>
-        private void EnsureNeighborRight()
+        /// <summary>
+        /// MH-12/B38: writes a block into one diagonal neighbor chunk at <b>neighbor-local</b> coordinates,
+        /// lazily creating that map (all-Air) on first use. Diagonals do not reach face culling — they reach
+        /// <c>GetSmoothedCornerHeight</c> / <c>CalculateSymmetricCornerFlow</c> for fluids (and AO corner
+        /// sampling), so the caller is normally placing a fluid to move a corner's height.
+        /// </summary>
+        /// <param name="direction">Which diagonal neighbor to write into.</param>
+        /// <param name="x">Neighbor-local X (0–15).</param>
+        /// <param name="y">Neighbor-local Y.</param>
+        /// <param name="z">Neighbor-local Z.</param>
+        /// <param name="id">The palette block ID to write into the neighbor.</param>
+        /// <param name="meta">Optional metadata byte — for a fluid this is its level (0 = source).</param>
+        public void SetNeighborBlock(DiagonalNeighbor direction, int x, int y, int z, ushort id, byte meta = 0)
         {
-            if (!_neighborRight.IsCreated)
-                _neighborRight = new NativeArray<uint>(MAP_SIZE, Allocator.Persistent); // zero == all Air
+            ref NativeArray<uint> map = ref NeighborMapRef(direction);
+            EnsureCreated(ref map);
+            map[ChunkMath.GetFlattenedIndexInChunk(x, y, z)] = BurstVoxelDataBitMapping.PackVoxelData(id, meta);
+        }
+
+        /// <summary>
+        /// Resolves a diagonal direction to its backing map field — named per direction for the same reason
+        /// as the cardinal overload.
+        /// </summary>
+        /// <param name="direction">The diagonal direction to resolve.</param>
+        /// <returns>A reference to the backing field, so the caller can lazily create it in place.</returns>
+        private ref NativeArray<uint> NeighborMapRef(DiagonalNeighbor direction)
+        {
+            switch (direction)
+            {
+                case DiagonalNeighbor.NorthEast: return ref _neighborNE;
+                case DiagonalNeighbor.SouthEast: return ref _neighborSE;
+                case DiagonalNeighbor.SouthWest: return ref _neighborSW;
+                case DiagonalNeighbor.NorthWest: return ref _neighborNW;
+                default: throw new ArgumentOutOfRangeException(nameof(direction), direction, "Unknown diagonal neighbor");
+            }
+        }
+
+        /// <summary>
+        /// Resolves a direction to its backing map field. Named per direction rather than indexed, so the
+        /// harness cannot itself introduce the permutation bug MH-12's baseline exists to catch.
+        /// </summary>
+        /// <param name="direction">The cardinal direction to resolve.</param>
+        /// <returns>A reference to the backing field, so the caller can lazily create it in place.</returns>
+        private ref NativeArray<uint> NeighborMapRef(CardinalNeighbor direction)
+        {
+            switch (direction)
+            {
+                case CardinalNeighbor.North: return ref _neighborN;
+                case CardinalNeighbor.East: return ref _neighborE;
+                case CardinalNeighbor.South: return ref _neighborS;
+                case CardinalNeighbor.West: return ref _neighborW;
+                default: throw new ArgumentOutOfRangeException(nameof(direction), direction, "Unknown cardinal neighbor");
+            }
+        }
+
+        /// <summary>Lazily allocates a persistent all-Air neighbor map in place (idempotent).</summary>
+        /// <param name="map">The backing field to create if it is not already.</param>
+        private static void EnsureCreated(ref NativeArray<uint> map)
+        {
+            if (!map.IsCreated)
+                map = new NativeArray<uint>(MAP_SIZE, Allocator.Persistent); // zero == all Air
         }
 
         /// <summary>
@@ -197,9 +313,16 @@ namespace Editor.Validation.Meshing.Framework
             // Empty cardinal/diagonal neighbor maps: interior blocks never read them; border blocks
             // would treat them as "no neighbor" (face drawn), which no scenario relies on.
             NativeArray<uint> emptyMap = new NativeArray<uint>(0, Allocator.TempJob);
-            // MH-10/MH-11: when a test populated the +X neighbor, pass that persistent map for the Right
+            // MH-10/MH-11/MH-12: when a test populated a cardinal neighbor, pass that persistent map for its
             // slot so border-face culling consults it; otherwise behave exactly as before (empty = void).
-            NativeArray<uint> rightMap = _neighborRight.IsCreated ? _neighborRight : emptyMap;
+            NativeArray<uint> mapN = _neighborN.IsCreated ? _neighborN : emptyMap;
+            NativeArray<uint> mapE = _neighborE.IsCreated ? _neighborE : emptyMap;
+            NativeArray<uint> mapS = _neighborS.IsCreated ? _neighborS : emptyMap;
+            NativeArray<uint> mapW = _neighborW.IsCreated ? _neighborW : emptyMap;
+            NativeArray<uint> mapNE = _neighborNE.IsCreated ? _neighborNE : emptyMap;
+            NativeArray<uint> mapSE = _neighborSE.IsCreated ? _neighborSE : emptyMap;
+            NativeArray<uint> mapSW = _neighborSW.IsCreated ? _neighborSW : emptyMap;
+            NativeArray<uint> mapNW = _neighborNW.IsCreated ? _neighborNW : emptyMap;
             // Empty custom-mesh inputs (no custom-mesh blocks in the palette).
             NativeArray<CustomMeshData> customMeshes = new NativeArray<CustomMeshData>(0, Allocator.TempJob);
             NativeArray<CustomFaceData> customFaces = new NativeArray<CustomFaceData>(0, Allocator.TempJob);
@@ -230,14 +353,14 @@ namespace Editor.Validation.Meshing.Framework
                 BlockTypes = _blockTypes,
                 ClipBounds = MeshClipBounds.Disabled,
                 ChunkPosition = Vector3.zero,
-                NeighborBack = emptyMap,
-                NeighborFront = emptyMap,
-                NeighborLeft = emptyMap,
-                NeighborRight = rightMap,
-                NeighborFrontRight = emptyMap,
-                NeighborBackRight = emptyMap,
-                NeighborBackLeft = emptyMap,
-                NeighborFrontLeft = emptyMap,
+                NeighborS = mapS,
+                NeighborN = mapN,
+                NeighborW = mapW,
+                NeighborE = mapE,
+                NeighborNE = mapNE,
+                NeighborSE = mapSE,
+                NeighborSW = mapSW,
+                NeighborNW = mapNW,
                 CustomMeshes = customMeshes,
                 CustomFaces = customFaces,
                 CustomVerts = customVerts,
@@ -247,14 +370,14 @@ namespace Editor.Validation.Meshing.Framework
                 SmoothLighting = lighting,
                 Output = output,
                 LightMap = _lightMap,
-                LightBack = emptyLight,
-                LightFront = emptyLight,
-                LightLeft = emptyLight,
-                LightRight = emptyLight,
-                LightFrontRight = emptyLight,
-                LightBackRight = emptyLight,
-                LightBackLeft = emptyLight,
-                LightFrontLeft = emptyLight,
+                LightS = emptyLight,
+                LightN = emptyLight,
+                LightW = emptyLight,
+                LightE = emptyLight,
+                LightNE = emptyLight,
+                LightSE = emptyLight,
+                LightSW = emptyLight,
+                LightNW = emptyLight,
             };
 
             // Execute the gen job, optionally chaining the real MeshPostProcessJob (MH-5). The post job
@@ -361,7 +484,14 @@ namespace Editor.Validation.Meshing.Framework
             if (_map.IsCreated) _map.Dispose();
             if (_lightMap.IsCreated) _lightMap.Dispose();
             if (_blockTypes.IsCreated) _blockTypes.Dispose();
-            if (_neighborRight.IsCreated) _neighborRight.Dispose();
+            if (_neighborN.IsCreated) _neighborN.Dispose();
+            if (_neighborE.IsCreated) _neighborE.Dispose();
+            if (_neighborS.IsCreated) _neighborS.Dispose();
+            if (_neighborW.IsCreated) _neighborW.Dispose();
+            if (_neighborNE.IsCreated) _neighborNE.Dispose();
+            if (_neighborSE.IsCreated) _neighborSE.Dispose();
+            if (_neighborSW.IsCreated) _neighborSW.Dispose();
+            if (_neighborNW.IsCreated) _neighborNW.Dispose();
         }
     }
 }

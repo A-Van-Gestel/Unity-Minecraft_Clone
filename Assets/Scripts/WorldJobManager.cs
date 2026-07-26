@@ -528,23 +528,23 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 // Voxel space, from the coord — never the chunk's Unity-space transform position: jobs live in voxel
                 // space exclusively and must not see the floating origin.
                 ChunkPosition = chunkCoord.ToWorldPosition(),
-                NeighborBack = jobData.Neighbors.NeighborS,
-                NeighborFront = jobData.Neighbors.NeighborN,
-                NeighborLeft = jobData.Neighbors.NeighborW,
-                NeighborRight = jobData.Neighbors.NeighborE,
-                NeighborFrontRight = jobData.Neighbors.NeighborNE,
-                NeighborBackRight = jobData.Neighbors.NeighborSE,
-                NeighborBackLeft = jobData.Neighbors.NeighborSW,
-                NeighborFrontLeft = jobData.Neighbors.NeighborNW,
+                NeighborS = jobData.Neighbors.NeighborS,
+                NeighborN = jobData.Neighbors.NeighborN,
+                NeighborW = jobData.Neighbors.NeighborW,
+                NeighborE = jobData.Neighbors.NeighborE,
+                NeighborNE = jobData.Neighbors.NeighborNE,
+                NeighborSE = jobData.Neighbors.NeighborSE,
+                NeighborSW = jobData.Neighbors.NeighborSW,
+                NeighborNW = jobData.Neighbors.NeighborNW,
                 LightMap = jobData.LightMap,
-                LightBack = jobData.Neighbors.LightS,
-                LightFront = jobData.Neighbors.LightN,
-                LightLeft = jobData.Neighbors.LightW,
-                LightRight = jobData.Neighbors.LightE,
-                LightFrontRight = jobData.Neighbors.LightNE,
-                LightBackRight = jobData.Neighbors.LightSE,
-                LightBackLeft = jobData.Neighbors.LightSW,
-                LightFrontLeft = jobData.Neighbors.LightNW,
+                LightS = jobData.Neighbors.LightS,
+                LightN = jobData.Neighbors.LightN,
+                LightW = jobData.Neighbors.LightW,
+                LightE = jobData.Neighbors.LightE,
+                LightNE = jobData.Neighbors.LightNE,
+                LightSE = jobData.Neighbors.LightSE,
+                LightSW = jobData.Neighbors.LightSW,
+                LightNW = jobData.Neighbors.LightNW,
                 CustomMeshes = _world.JobDataManager.CustomMeshesJobData,
                 CustomFaces = _world.JobDataManager.CustomFacesJobData,
                 CustomVerts = _world.JobDataManager.CustomVertsJobData,
@@ -695,8 +695,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <summary>
     /// Acquires the filled neighbor map set (8 voxel + 8 light maps) for the given center chunk:
     /// pooled when <paramref name="pooled"/> is true, otherwise fresh allocations with the given
-    /// allocator (startup/TempJob path). This is the single authoritative fill site for
-    /// <see cref="NeighborMapSet"/> — its compass directions must match the offsets used here.
+    /// allocator (startup/TempJob path).
+    /// This is the single authoritative fill site for <see cref="NeighborMapSet"/> — its compass
+    /// directions must match the offsets used here.
     /// </summary>
     /// <param name="center">The chunk whose neighborhood is snapshotted.</param>
     /// <param name="pooled">Whether to rent from the pool instead of allocating.</param>

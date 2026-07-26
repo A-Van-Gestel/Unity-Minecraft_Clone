@@ -49,57 +49,57 @@ namespace Jobs
         // --- NEIGHBOR MAPS ---
         // 4 Cardinal Neighbors (Used for face culling)
         [ReadOnly]
-        public NativeArray<uint> NeighborBack; // South (-Z)
+        public NativeArray<uint> NeighborS; // South (-Z)
 
         [ReadOnly]
-        public NativeArray<uint> NeighborFront; // North (+Z)
+        public NativeArray<uint> NeighborN; // North (+Z)
 
         [ReadOnly]
-        public NativeArray<uint> NeighborLeft; // West  (-X)
+        public NativeArray<uint> NeighborW; // West  (-X)
 
         [ReadOnly]
-        public NativeArray<uint> NeighborRight; // East  (+X)
+        public NativeArray<uint> NeighborE; // East  (+X)
 
         // 4 Diagonal Neighbors (Used for fluid corner smoothing)
         [ReadOnly]
-        public NativeArray<uint> NeighborFrontRight; // North-East
+        public NativeArray<uint> NeighborNE; // North-East
 
         [ReadOnly]
-        public NativeArray<uint> NeighborBackRight; // South-East
+        public NativeArray<uint> NeighborSE; // South-East
 
         [ReadOnly]
-        public NativeArray<uint> NeighborBackLeft; // South-West
+        public NativeArray<uint> NeighborSW; // South-West
 
         [ReadOnly]
-        public NativeArray<uint> NeighborFrontLeft; // North-West
+        public NativeArray<uint> NeighborNW; // North-West
 
         // --- LIGHT MAPS (Phase 2 RGB) ---
         [ReadOnly]
         public NativeArray<ushort> LightMap;
 
         [ReadOnly]
-        public NativeArray<ushort> LightBack;
+        public NativeArray<ushort> LightS;
 
         [ReadOnly]
-        public NativeArray<ushort> LightFront;
+        public NativeArray<ushort> LightN;
 
         [ReadOnly]
-        public NativeArray<ushort> LightLeft;
+        public NativeArray<ushort> LightW;
 
         [ReadOnly]
-        public NativeArray<ushort> LightRight;
+        public NativeArray<ushort> LightE;
 
         [ReadOnly]
-        public NativeArray<ushort> LightFrontRight;
+        public NativeArray<ushort> LightNE;
 
         [ReadOnly]
-        public NativeArray<ushort> LightBackRight;
+        public NativeArray<ushort> LightSE;
 
         [ReadOnly]
-        public NativeArray<ushort> LightBackLeft;
+        public NativeArray<ushort> LightSW;
 
         [ReadOnly]
-        public NativeArray<ushort> LightFrontLeft;
+        public NativeArray<ushort> LightNW;
 
         // --- FLUID TEMPLATES ---
         [ReadOnly]
@@ -1094,16 +1094,16 @@ namespace Jobs
                 if (pos.z < 0)
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetLight = LightBackLeft;
+                    targetLight = LightSW;
                 }
                 else if (pos.z >= VoxelData.ChunkWidth)
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetLight = LightFrontLeft;
+                    targetLight = LightNW;
                 }
                 else
                 {
-                    targetLight = LightLeft;
+                    targetLight = LightW;
                 }
             }
             else if (pos.x >= VoxelData.ChunkWidth)
@@ -1112,16 +1112,16 @@ namespace Jobs
                 if (pos.z < 0)
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetLight = LightBackRight;
+                    targetLight = LightSE;
                 }
                 else if (pos.z >= VoxelData.ChunkWidth)
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetLight = LightFrontRight;
+                    targetLight = LightNE;
                 }
                 else
                 {
-                    targetLight = LightRight;
+                    targetLight = LightE;
                 }
             }
             else
@@ -1129,12 +1129,12 @@ namespace Jobs
                 if (pos.z < 0)
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetLight = LightBack;
+                    targetLight = LightS;
                 }
                 else if (pos.z >= VoxelData.ChunkWidth)
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetLight = LightFront;
+                    targetLight = LightN;
                 }
             }
 
@@ -1179,16 +1179,16 @@ namespace Jobs
                 if (pos.z < 0) // South-West
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetMap = NeighborBackLeft;
+                    targetMap = NeighborSW;
                 }
                 else if (pos.z >= VoxelData.ChunkWidth) // North-West
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetMap = NeighborFrontLeft;
+                    targetMap = NeighborNW;
                 }
                 else // West
                 {
-                    targetMap = NeighborLeft;
+                    targetMap = NeighborW;
                 }
             }
             else if (pos.x >= VoxelData.ChunkWidth) // EAST (+X)
@@ -1197,16 +1197,16 @@ namespace Jobs
                 if (pos.z < 0) // South-East
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetMap = NeighborBackRight;
+                    targetMap = NeighborSE;
                 }
                 else if (pos.z >= VoxelData.ChunkWidth) // North-East
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetMap = NeighborFrontRight;
+                    targetMap = NeighborNE;
                 }
                 else // East
                 {
-                    targetMap = NeighborRight;
+                    targetMap = NeighborE;
                 }
             }
             else // CENTER X
@@ -1214,12 +1214,12 @@ namespace Jobs
                 if (pos.z < 0) // South
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetMap = NeighborBack;
+                    targetMap = NeighborS;
                 }
                 else if (pos.z >= VoxelData.ChunkWidth) // North
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetMap = NeighborFront;
+                    targetMap = NeighborN;
                 }
                 // Center case handled by fast path at top
             }

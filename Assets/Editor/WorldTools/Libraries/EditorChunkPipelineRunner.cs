@@ -242,14 +242,14 @@ namespace Editor.WorldTools.Libraries
             if (!maps.TryGetValue(chunkVoxelPos, out NativeArray<uint> centerMap))
                 return null;
 
-            if (!TryGetNeighborMap(maps, chunkCoord, 0, -1, out NativeArray<uint> back) ||
-                !TryGetNeighborMap(maps, chunkCoord, 0, 1, out NativeArray<uint> front) ||
-                !TryGetNeighborMap(maps, chunkCoord, -1, 0, out NativeArray<uint> left) ||
-                !TryGetNeighborMap(maps, chunkCoord, 1, 0, out NativeArray<uint> right) ||
-                !TryGetNeighborMap(maps, chunkCoord, 1, 1, out NativeArray<uint> frontRight) ||
-                !TryGetNeighborMap(maps, chunkCoord, 1, -1, out NativeArray<uint> backRight) ||
-                !TryGetNeighborMap(maps, chunkCoord, -1, -1, out NativeArray<uint> backLeft) ||
-                !TryGetNeighborMap(maps, chunkCoord, -1, 1, out NativeArray<uint> frontLeft))
+            if (!TryGetNeighborMap(maps, chunkCoord, 0, -1, out NativeArray<uint> south) ||
+                !TryGetNeighborMap(maps, chunkCoord, 0, 1, out NativeArray<uint> north) ||
+                !TryGetNeighborMap(maps, chunkCoord, -1, 0, out NativeArray<uint> west) ||
+                !TryGetNeighborMap(maps, chunkCoord, 1, 0, out NativeArray<uint> east) ||
+                !TryGetNeighborMap(maps, chunkCoord, 1, 1, out NativeArray<uint> northEast) ||
+                !TryGetNeighborMap(maps, chunkCoord, 1, -1, out NativeArray<uint> southEast) ||
+                !TryGetNeighborMap(maps, chunkCoord, -1, -1, out NativeArray<uint> southWest) ||
+                !TryGetNeighborMap(maps, chunkCoord, -1, 1, out NativeArray<uint> northWest))
             {
                 return null;
             }
@@ -261,25 +261,25 @@ namespace Editor.WorldTools.Libraries
 
             // Create snapshot copies for the job
             NativeArray<uint> mapCopy = new NativeArray<uint>(centerMap, Allocator.Persistent);
-            NativeArray<uint> backCopy = new NativeArray<uint>(back, Allocator.Persistent);
-            NativeArray<uint> frontCopy = new NativeArray<uint>(front, Allocator.Persistent);
-            NativeArray<uint> leftCopy = new NativeArray<uint>(left, Allocator.Persistent);
-            NativeArray<uint> rightCopy = new NativeArray<uint>(right, Allocator.Persistent);
-            NativeArray<uint> frontRightCopy = new NativeArray<uint>(frontRight, Allocator.Persistent);
-            NativeArray<uint> backRightCopy = new NativeArray<uint>(backRight, Allocator.Persistent);
-            NativeArray<uint> backLeftCopy = new NativeArray<uint>(backLeft, Allocator.Persistent);
-            NativeArray<uint> frontLeftCopy = new NativeArray<uint>(frontLeft, Allocator.Persistent);
+            NativeArray<uint> southCopy = new NativeArray<uint>(south, Allocator.Persistent);
+            NativeArray<uint> northCopy = new NativeArray<uint>(north, Allocator.Persistent);
+            NativeArray<uint> westCopy = new NativeArray<uint>(west, Allocator.Persistent);
+            NativeArray<uint> eastCopy = new NativeArray<uint>(east, Allocator.Persistent);
+            NativeArray<uint> northEastCopy = new NativeArray<uint>(northEast, Allocator.Persistent);
+            NativeArray<uint> southEastCopy = new NativeArray<uint>(southEast, Allocator.Persistent);
+            NativeArray<uint> southWestCopy = new NativeArray<uint>(southWest, Allocator.Persistent);
+            NativeArray<uint> northWestCopy = new NativeArray<uint>(northWest, Allocator.Persistent);
 
             // Create light map snapshot copies
             NativeArray<ushort> lightMapCopy = GetOrCreateLightMap(lightMaps, chunkVoxelPos);
-            NativeArray<ushort> lightBackCopy = GetOrCreateLightMap(lightMaps, chunkCoord.Neighbor(0, -1).ToVoxelOrigin());
-            NativeArray<ushort> lightFrontCopy = GetOrCreateLightMap(lightMaps, chunkCoord.Neighbor(0, 1).ToVoxelOrigin());
-            NativeArray<ushort> lightLeftCopy = GetOrCreateLightMap(lightMaps, chunkCoord.Neighbor(-1, 0).ToVoxelOrigin());
-            NativeArray<ushort> lightRightCopy = GetOrCreateLightMap(lightMaps, chunkCoord.Neighbor(1, 0).ToVoxelOrigin());
-            NativeArray<ushort> lightFrontRightCopy = GetOrCreateLightMap(lightMaps, chunkCoord.Neighbor(1, 1).ToVoxelOrigin());
-            NativeArray<ushort> lightBackRightCopy = GetOrCreateLightMap(lightMaps, chunkCoord.Neighbor(1, -1).ToVoxelOrigin());
-            NativeArray<ushort> lightBackLeftCopy = GetOrCreateLightMap(lightMaps, chunkCoord.Neighbor(-1, -1).ToVoxelOrigin());
-            NativeArray<ushort> lightFrontLeftCopy = GetOrCreateLightMap(lightMaps, chunkCoord.Neighbor(-1, 1).ToVoxelOrigin());
+            NativeArray<ushort> lightSouthCopy = GetOrCreateLightMap(lightMaps, chunkCoord.Neighbor(0, -1).ToVoxelOrigin());
+            NativeArray<ushort> lightNorthCopy = GetOrCreateLightMap(lightMaps, chunkCoord.Neighbor(0, 1).ToVoxelOrigin());
+            NativeArray<ushort> lightWestCopy = GetOrCreateLightMap(lightMaps, chunkCoord.Neighbor(-1, 0).ToVoxelOrigin());
+            NativeArray<ushort> lightEastCopy = GetOrCreateLightMap(lightMaps, chunkCoord.Neighbor(1, 0).ToVoxelOrigin());
+            NativeArray<ushort> lightNorthEastCopy = GetOrCreateLightMap(lightMaps, chunkCoord.Neighbor(1, 1).ToVoxelOrigin());
+            NativeArray<ushort> lightSouthEastCopy = GetOrCreateLightMap(lightMaps, chunkCoord.Neighbor(1, -1).ToVoxelOrigin());
+            NativeArray<ushort> lightSouthWestCopy = GetOrCreateLightMap(lightMaps, chunkCoord.Neighbor(-1, -1).ToVoxelOrigin());
+            NativeArray<ushort> lightNorthWestCopy = GetOrCreateLightMap(lightMaps, chunkCoord.Neighbor(-1, 1).ToVoxelOrigin());
 
             MeshDataJobOutput meshOutput = new MeshDataJobOutput(Allocator.Persistent);
 
@@ -290,22 +290,22 @@ namespace Editor.WorldTools.Libraries
                 SectionData = sectionData,
                 BlockTypes = _jobDataManager.BlockTypesJobData,
                 ChunkPosition = new Vector3(chunkVoxelPos.x, 0, chunkVoxelPos.y),
-                NeighborBack = backCopy,
-                NeighborFront = frontCopy,
-                NeighborLeft = leftCopy,
-                NeighborRight = rightCopy,
-                NeighborFrontRight = frontRightCopy,
-                NeighborBackRight = backRightCopy,
-                NeighborBackLeft = backLeftCopy,
-                NeighborFrontLeft = frontLeftCopy,
-                LightBack = lightBackCopy,
-                LightFront = lightFrontCopy,
-                LightLeft = lightLeftCopy,
-                LightRight = lightRightCopy,
-                LightFrontRight = lightFrontRightCopy,
-                LightBackRight = lightBackRightCopy,
-                LightBackLeft = lightBackLeftCopy,
-                LightFrontLeft = lightFrontLeftCopy,
+                NeighborS = southCopy,
+                NeighborN = northCopy,
+                NeighborW = westCopy,
+                NeighborE = eastCopy,
+                NeighborNE = northEastCopy,
+                NeighborSE = southEastCopy,
+                NeighborSW = southWestCopy,
+                NeighborNW = northWestCopy,
+                LightS = lightSouthCopy,
+                LightN = lightNorthCopy,
+                LightW = lightWestCopy,
+                LightE = lightEastCopy,
+                LightNE = lightNorthEastCopy,
+                LightSE = lightSouthEastCopy,
+                LightSW = lightSouthWestCopy,
+                LightNW = lightNorthWestCopy,
                 CustomMeshes = _jobDataManager.CustomMeshesJobData,
                 CustomFaces = _jobDataManager.CustomFacesJobData,
                 CustomVerts = _jobDataManager.CustomVertsJobData,
@@ -323,23 +323,23 @@ namespace Editor.WorldTools.Libraries
             NativeArray<JobHandle> disposalHandles = new NativeArray<JobHandle>(19, Allocator.Persistent);
             disposalHandles[0] = mapCopy.Dispose(meshJobHandle);
             disposalHandles[1] = sectionData.Dispose(meshJobHandle);
-            disposalHandles[2] = backCopy.Dispose(meshJobHandle);
-            disposalHandles[3] = frontCopy.Dispose(meshJobHandle);
-            disposalHandles[4] = leftCopy.Dispose(meshJobHandle);
-            disposalHandles[5] = rightCopy.Dispose(meshJobHandle);
-            disposalHandles[6] = frontRightCopy.Dispose(meshJobHandle);
-            disposalHandles[7] = backRightCopy.Dispose(meshJobHandle);
-            disposalHandles[8] = backLeftCopy.Dispose(meshJobHandle);
-            disposalHandles[9] = frontLeftCopy.Dispose(meshJobHandle);
+            disposalHandles[2] = southCopy.Dispose(meshJobHandle);
+            disposalHandles[3] = northCopy.Dispose(meshJobHandle);
+            disposalHandles[4] = westCopy.Dispose(meshJobHandle);
+            disposalHandles[5] = eastCopy.Dispose(meshJobHandle);
+            disposalHandles[6] = northEastCopy.Dispose(meshJobHandle);
+            disposalHandles[7] = southEastCopy.Dispose(meshJobHandle);
+            disposalHandles[8] = southWestCopy.Dispose(meshJobHandle);
+            disposalHandles[9] = northWestCopy.Dispose(meshJobHandle);
             disposalHandles[10] = lightMapCopy.Dispose(meshJobHandle);
-            disposalHandles[11] = lightBackCopy.Dispose(meshJobHandle);
-            disposalHandles[12] = lightFrontCopy.Dispose(meshJobHandle);
-            disposalHandles[13] = lightLeftCopy.Dispose(meshJobHandle);
-            disposalHandles[14] = lightRightCopy.Dispose(meshJobHandle);
-            disposalHandles[15] = lightFrontRightCopy.Dispose(meshJobHandle);
-            disposalHandles[16] = lightBackRightCopy.Dispose(meshJobHandle);
-            disposalHandles[17] = lightBackLeftCopy.Dispose(meshJobHandle);
-            disposalHandles[18] = lightFrontLeftCopy.Dispose(meshJobHandle);
+            disposalHandles[11] = lightSouthCopy.Dispose(meshJobHandle);
+            disposalHandles[12] = lightNorthCopy.Dispose(meshJobHandle);
+            disposalHandles[13] = lightWestCopy.Dispose(meshJobHandle);
+            disposalHandles[14] = lightEastCopy.Dispose(meshJobHandle);
+            disposalHandles[15] = lightNorthEastCopy.Dispose(meshJobHandle);
+            disposalHandles[16] = lightSouthEastCopy.Dispose(meshJobHandle);
+            disposalHandles[17] = lightSouthWestCopy.Dispose(meshJobHandle);
+            disposalHandles[18] = lightNorthWestCopy.Dispose(meshJobHandle);
 
             JobHandle combinedDisposalHandle = JobHandle.CombineDependencies(disposalHandles);
             JobHandle finalHandle = disposalHandles.Dispose(combinedDisposalHandle);
