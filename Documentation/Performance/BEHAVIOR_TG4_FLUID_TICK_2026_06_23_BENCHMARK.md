@@ -11,7 +11,7 @@
 
 > **This is the TG-4 §5 profile-gate capture** — the data that decides full TG-4 (parallelize the behavior tick
 > into per-family Burst jobs, Phases 2–4) vs the lighter TG-5 finisher, per
-> [`Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md`](../Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md) §5. It measures
+> [`Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`](../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md) Appendix A. It measures
 > the **isolated** behavior-tick cost — `Chunk.TickUpdate` (per-family buckets) + `World.ApplyModifications` — with
 > **no rendering, meshing, or lighting**, over hand-seeded interior (Tier-1) chunks.
 
@@ -143,7 +143,7 @@ surrounding engine, not the tick under measurement. Per-voxel cost is min-based 
 
 ## Cross-references
 
-- **Design / fork:** [`Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md`](../Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md) §5 (TG-4-vs-TG-5 profile-gated decision).
+- **Design / fork:** [`Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`](../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md) Appendix A (TG-4-vs-TG-5 profile-gated decision).
 - **Backlog:** [`Design/PERFORMANCE_IMPROVEMENTS_REPORT.md`](../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) — TG-4.
 - **Harness:** `Assets/Scripts/Benchmarks/FluidTickBenchmark.cs`, `Assets/Scripts/Benchmarks/FluidBenchmarkScenarios.cs`.
 - **Folder conventions:** [`README.md`](README.md).

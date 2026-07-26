@@ -10,7 +10,7 @@
 
 > **This is the TG-4 Phase 4b "measure the Y-band on a green full-height base" capture** (locked decision #1: full
 > height first → measure → band later), per
-> [`Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md`](../Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md) Phase 4b. It is an
+> [`Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`](../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md) Phase 4b. It is an
 > **A/B over the same build**: each scenario is measured under three legs — `managed` (Phase-3/4a hybrid), `halo-full`
 > (Phase-4b full-height halo), and `halo-band` (the same halo, gather/read window sized to the active-fluid Y-band).
 > The `halo-full → halo-band` delta is the Y-band's contribution; `managed → halo-full` re-confirms the prior
@@ -180,7 +180,7 @@ throttled pipeline, per-frame Stopwatch attribution (IL2CPP-valid).
 
 ## Cross-references
 
-- **Design / plan:** [`Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md`](../Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md) Phase 4b (Y-band optimization).
+- **Design / plan:** [`Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`](../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md) Phase 4b (Y-band optimization).
 - **Prior baseline (full-height halo A/B):** [`BEHAVIOR_TG4_PHASE4B_HALO_AB_2026-06-24_BENCHMARK.md`](BEHAVIOR_TG4_PHASE4B_HALO_AB_2026-06-24_BENCHMARK.md).
 - **Correctness gates:** `BH-D1[H|HB]` / `BH-D1[L|HB]` (`Validate Behavior`), `BH-4-SPLIT-Y` / `BH-4-BAND-EDGE` fixtures; `Validate Fluid Parallel Determinism (Cross-Chunk Halo, Y-band)`.
 - **Harness:** `Assets/Scripts/Benchmarks/FluidTickBenchmark.cs` (`_sweepBandGather`), `Assets/Scripts/Benchmarks/FluidBenchmarkScenarios.cs`.

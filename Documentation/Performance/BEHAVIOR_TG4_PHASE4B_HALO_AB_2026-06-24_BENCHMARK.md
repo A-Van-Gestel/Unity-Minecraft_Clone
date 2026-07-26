@@ -10,7 +10,7 @@
 
 > **This is the TG-4 Phase 4b "measure the full-height halo as a baseline" capture** (locked decision #1: full height
 > first → measure → band later), per
-> [`Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md`](../Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md) Phase 4b. It is an
+> [`Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`](../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md) Phase 4b. It is an
 > **A/B over the same build**: each scenario is measured twice — `managed` (border fluids on the managed path, the
 > Phase-3/4a hybrid) vs `halo` (every fluid Bursted, border voxels reading the per-tick **9-snapshot neighbor halo**).
 
@@ -137,7 +137,7 @@ not narrow it. A confirming IL2CPP capture is a nice-to-have, not a gate.
 
 ## Cross-references
 
-- **Design / plan:** [`Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md`](../Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md) Phase 4b (Option B halo gather).
+- **Design / plan:** [`Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`](../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md) Phase 4b (Option B halo gather).
 - **Prior baseline:** [`BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md`](BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md) (the §5 profile gate — fully-managed tick).
 - **Parallel determinism gate:** `Assets/Editor/Validation/Behavior/FluidParallelDeterminismValidation.cs` (`Validate Fluid Parallel Determinism (Cross-Chunk Halo)`).
 - **Harness:** `Assets/Scripts/Benchmarks/FluidTickBenchmark.cs`, `Assets/Scripts/Benchmarks/FluidBenchmarkScenarios.cs`.
