@@ -1,7 +1,28 @@
-# P-2 — Worker-Thread Gather & (optional) Persistent Native Chunk Storage
+# P-2 — Worker-Thread Gather & (optional) Persistent Native Chunk Storage  `[ARCHIVED]`
 
-> **Status: Layer 1 (Phase 1) — IMPLEMENTED & SHIPPED (2026-06-22, commit `e3e1635`). Layer 2 — Design
-> (proposed), profiler-gated.** Promotes the backlog finding `PERFORMANCE_IMPROVEMENTS_REPORT.md` → P-2
+**Version:** 1.2
+**Date:** 2026-06-22
+**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+
+> **Archived:** 2026-07-26.
+> **Reason — Layer 1 shipped; Layer 2 is shelved, not pending.** **Layer 1 (the worker-thread gather) is
+> live production code** and its runtime behavior is documented authoritatively in
+> [`../Architecture/LIGHTING_SYSTEM_OVERVIEW.md`](../Architecture/LIGHTING_SYSTEM_OVERVIEW.md) (the BFS
+> job's "worker-thread gather" step) and
+> [`../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`](../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md)
+> §2.2 (the fluid tick's halo). What this document uniquely preserves for Layer 1 is the *rationale* — the
+> §1 copy-tax analysis, the §3.2 race-free/bit-identical argument, the §3.3 implementation notes, and §4's
+> rejected materialized-halo alternative.
+> **Layer 2 (persistent native cores + zero-copy reads) has no remaining consumer.** Lighting — its
+> original motivation — took Layer 1 and stopped; the fluid tick evaluated Layer 2 explicitly as its
+> cross-chunk substrate and **chose the tick-local halo gather instead** (recorded as a rejected
+> alternative in the tick architecture doc §3.2); and MP-7's `NeighborMapAssembler` extraction further
+> entrenched the snapshot model Layer 2 would have replaced. Its 🔴 profiler gate was never triggered.
+> Kept as the historical record: if the substrate is ever revived it starts from a **fresh demand case**,
+> not from a pending gate — and §5–§7's layout, lifetime and consistency analysis is the starting point.
+
+> **Original status header (as written):** Layer 1 (Phase 1) — IMPLEMENTED & SHIPPED (2026-06-22, commit
+> `e3e1635`). Layer 2 — Design (proposed), profiler-gated. Promotes the backlog finding `PERFORMANCE_IMPROVEMENTS_REPORT.md` → P-2
 > (and `CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md` §1.3) into a full design, and is the home for the validated
 > **LI-1** halo-padded lighting layout —
 > [`Performance/LIGHTING_LI1_2026_06_22_BENCHMARK.md`](../Performance/LIGHTING_LI1_2026_06_22_BENCHMARK.md):
@@ -25,6 +46,25 @@
 > ⚠️ **Touches the chunk generation → lighting → meshing pipeline (three historical deadlocks).** Consult
 > the `chunk-lifecycle` skill and `Architecture/CHUNK_LIFECYCLE_PIPELINE.md`. Layer 1 does **not** change
 > the pipeline's lifetime/gate model; **Layer 2 does** (§6 is load-bearing).
+
+
+
+**Audited:** 2026-06-22, at commit `e3e1635` (Layer 1's own shipping commit). Layer 1's result is
+**measured, not projected** — see the linked Phase-1 benchmark. Layer 2 remains unbuilt and its
+estimates are static analysis only.
+
+**Relationship to other documents:**
+
+- [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) — promotes that report's
+  `P-2` entry (and `CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md` §1.3) into a full design.
+- [`../Architecture/LIGHTING_SYSTEM_OVERVIEW.md`](../Architecture/LIGHTING_SYSTEM_OVERVIEW.md) — the BFS
+  consumer whose gather Layer 1 moved onto the worker thread.
+- [`../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`](../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md)
+  — §3.2 there **considered Layer 2 and did not take it**, shipping a tick-local halo gather instead;
+  this document remains the sole design authority for Layer 2 itself.
+- [`../Architecture/Testing Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md`](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md)
+  and [`../Architecture/Testing Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md`](../Architecture/Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md)
+  — the cross-chunk seam guards (C3 / B54–B55 and MH-10/MH-11 / B18–B21) any substrate must satisfy.
 
 ---
 
@@ -260,16 +300,53 @@ Phase 1 (Layer 1 gather)  ──►  [profiler gate]  ──►  Phase 2 (cores)
 ## 12. Cross-references
 
 - **Motivation / decision:** [`Performance/LIGHTING_LI1_2026_06_22_BENCHMARK.md`](../Performance/LIGHTING_LI1_2026_06_22_BENCHMARK.md).
-- **Backlog rows:** [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) — P-1, **P-2**, P-3, P-4, LI-1.
-- **Deep dive:** [`CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md`](CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md) §1.3, §2, §3.
+- **Backlog rows:** [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) — P-1, **P-2**, P-3, P-4, LI-1.
+- **Deep dive:** [`CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md`](../Design/CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md) §1.3, §2, §3.
 - **Architecture SoT (the systems this design changes):**
   [`DATA_STRUCTURES.md`](../Architecture/DATA_STRUCTURES.md) §2 (chunk/section storage),
   [`LIGHTING_SYSTEM_OVERVIEW.md`](../Architecture/LIGHTING_SYSTEM_OVERVIEW.md) §3.3 + **§4.3 (the zero-copy rejection Layer 2 must supersede)**,
   [`SUB_CHUNK_MESHING_ARCHITECTURE.md`](../Architecture/SUB_CHUNK_MESHING_ARCHITECTURE.md) §4.2/§6.
-- **Scaling:** [`WORLD_SCALING_ANALYSIS.md`](WORLD_SCALING_ANALYSIS.md) §4.3, §6.
+- **Scaling:** [`WORLD_SCALING_ANALYSIS.md`](../Design/WORLD_SCALING_ANALYSIS.md) §4.3, §6.
 - **Invariants:** `chunk-lifecycle` skill + `Architecture/CHUNK_LIFECYCLE_PIPELINE.md`;
   `.agents/rules/pool-reset-safety.md`; `.agents/rules/serialization-safety.md`.
 - **Constants:** `ChunkMath` — `PADDED_LIGHTING_VOLUME` (51,200), `PADDED_CHUNK_WIDTH` (20),
   `LIGHTING_HALO` (2), `CHUNK_VOLUME` (32,768), `SECTION_VOLUME` (4,096). Use these, not literals.
 - **Suite guards:** `LIGHTING_VALIDATION_HARNESS_FIDELITY.md` (C3 / B54-B55),
   `MESHING_VALIDATION_HARNESS_FIDELITY.md` (MH-10/MH-11 / B18-B21).
+
+---
+
+## Document History
+
+*Entries below the newest are reconstructed from git history — this document predates the
+project's Document History convention, so they record what the commits changed rather than
+contemporaneous notes.*
+
+* **v1.2** - **Archived (2026-07-26).** Layer 1 is live production code documented in `Architecture/`;
+  **Layer 2 is shelved, not pending** — its profiler gate was never triggered and its last prospective
+  consumer disappeared when the fluid tick chose a tick-local halo gather over it. See the archive banner
+  at the top for what this document still uniquely preserves. Inbound claims that Layer 2 was awaiting a
+  profiler capture were corrected in `PERFORMANCE_IMPROVEMENTS_REPORT.md` (both the P-2 row and the §5
+  long-horizon line), `CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md` §1.3 recommendation 3, and
+  `BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md` §3.2.
+* **v1.1** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Target`, an `Audited` line
+  separating Layer 1's *measured* result from Layer 2's *estimated* one, and a relationship list — which
+  now records that the TG-4 arc **evaluated Layer 2 as its cross-chunk substrate and chose not to use
+  it**, so Layer 2 has no remaining consumer waiting on it. The two-layer status in the summary was
+  already accurate and is unchanged.
+* *(2026-07-26, `beac42b1`)* - MP-7 close-out: the retire-the-fill pointer updated for the extracted
+  `NeighborMapAssembler`.
+* *(2026-06-22, `44217c12`)* - **Layer 1 shipped net-positive** and recorded: the worker-thread gather
+  turned LI-1's validated 2.4–3× in-job BFS win from net-negative into a −34 % to −50 % improvement,
+  captured in a new benchmark report.
+* *(2026-06-22, `ea23618d`)* - Initial design: the two-layer split — **Layer 1 worker-thread gather**
+  (low risk, no storage change) and **Layer 2 persistent native cores with zero-copy reads**
+  (🔴 high risk, profiler-gated) — decided and sequenced independently.
+
+---
+
+**Last Updated:** 2026-07-26 (archived; Layer 1 shipped, Layer 2 shelved)
+**Next Review:** none scheduled. Layer 2 is **not** waiting on a profiler capture — it is waiting on a
+consumer, and it has none. If one ever appears, re-establish the demand case first; §5–§7's layout,
+lifetime and consistency analysis is the starting point, but its risk ratings predate the snapshot-model
+work (LI-2's banded gather, MP-7's `NeighborMapAssembler`) and must be re-derived.

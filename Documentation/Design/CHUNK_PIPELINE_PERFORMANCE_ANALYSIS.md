@@ -1,5 +1,13 @@
 # Chunk Pipeline Performance Analysis
 
+**Version:** 1.0
+**Date:** 2026-06-11
+**Status:** **Partially implemented.** §1.1 (job `NativeArray` pooling) and the whole §3 backpressure
+family are shipped — §3.1/§3.2 + recommendation 3 (2026-07-21) and §3.4/§3.5 + the §5.3 draw rider
+(2026-07-23). **§2 and §4 remain open**, and §5.3 was later *superseded* when MP-6 deleted the stage it
+budgeted. Per-finding status is recorded in "Implemented" blocks inline.
+**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+
 > Findings from a code-level performance review of the chunk generation → lighting → meshing pipeline,
 > focused on two observed symptoms: (1) a cascading memory/FPS failure when the player outruns
 > generation, and (2) slow initial world *loading* (not creation) of already-generated chunks.
@@ -24,6 +32,24 @@ Related docs: `Architecture/CHUNK_LIFECYCLE_PIPELINE.md`, `Architecture/LIGHTING
 > tracked there as `P-1`…`P-6`, plus meshing/rendering/lighting/tick findings from the June 2026
 > audit) is `PERFORMANCE_IMPROVEMENTS_REPORT.md`. Note: the report's LI-1 (padded lighting volume)
 > trades *against* §1.2 below — benchmark both before committing to either.
+
+
+
+**Relationship to other documents:**
+
+- [`../Architecture/CHUNK_LIFECYCLE_PIPELINE.md`](../Architecture/CHUNK_LIFECYCLE_PIPELINE.md) — the
+  authoritative description of the pipeline analyzed here; its invariants constrain every fix below.
+- [`CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md`](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) — the CP-*
+  clarity/testability complement: CP-1's deferral counters instrument §3.3's pinned-trail mechanism, and
+  CP-5's `ChunkUnloadDecision` is the seam §3 recommendation 3 landed on.
+- [`MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md`](MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md) — MP-6
+  **superseded §5.3** by deleting the draw stage entirely; see the note at that entry.
+- [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) — the master backlog; the
+  `P-*` items here are tracked there alongside everything else.
+- [`../Architecture/LIGHTING_SYSTEM_OVERVIEW.md`](../Architecture/LIGHTING_SYSTEM_OVERVIEW.md),
+  [`../Guides/GENERAL_OPTIMIZATION_GUIDE.md`](../Guides/GENERAL_OPTIMIZATION_GUIDE.md),
+  [`../Bugs/JOB_SYSTEM_BUGS.md`](../Bugs/JOB_SYSTEM_BUGS.md),
+  [`../Bugs/LIGHTING_BUGS.md`](../Bugs/LIGHTING_BUGS.md) — supporting context named throughout.
 
 ---
 
@@ -60,8 +86,8 @@ With `maxLightJobsPerFrame = 32` and `maxMeshRebuildsPerFrame = 10`, a single fr
    `NativeArray<uint>` / `NativeArray<ushort>` (Persistent, reused, cleared on rent) removes the alloc/dispose churn with no architecture change. Note: the disposal-chain pattern (`disposalHandles` in `ScheduleMeshing`) must become "return to pool on completion" instead of
    `Dispose(handle)`.
 2. **Copy only what jobs need.** Meshing needs a 1-voxel shell from each neighbor, not 8 full volumes — border slabs are ~1/16th the data. Lighting BFS legitimately reads deeper into cardinal neighbors, but corner neighbors (NE/SE/SW/NW) are only touched along a 1×128 column.
-3. **Long term:** store canonical voxel/light data in persistent native memory per chunk so jobs read it directly (with a generation/version guard), eliminating schedule-time copies entirely. This touches the whole pipeline — consult `chunk-lifecycle` invariants before attempting. **Now designed as P-2 — see [`PERSISTENT_CHUNK_STORAGE_P2.md`](PERSISTENT_CHUNK_STORAGE_P2.md)**
-   (Layer 1 = move the LI-1 gather to a worker thread over the existing snapshots — ✅ **SHIPPED 2026-06-22**, net-positive, banks the win, see [`Performance/LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md`](../Performance/LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md); Layer 2 = this rec's zero-copy persistent storage — eliminates the schedule-time *fill* (copy #1) this §1.3 targets, optional/profiler-gated (gate not yet triggered), subsumes P-1, overlaps §2/P-3).
+3. **Long term:** store canonical voxel/light data in persistent native memory per chunk so jobs read it directly (with a generation/version guard), eliminating schedule-time copies entirely. This touches the whole pipeline — consult `chunk-lifecycle` invariants before attempting. **Now designed as P-2 — see [`PERSISTENT_CHUNK_STORAGE_P2.md`](../Archived/PERSISTENT_CHUNK_STORAGE_P2.md)**
+   (Layer 1 = move the LI-1 gather to a worker thread over the existing snapshots — ✅ **SHIPPED 2026-06-22**, net-positive, banks the win, see [`Performance/LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md`](../Performance/LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md); Layer 2 = this rec's zero-copy persistent storage — would eliminate the schedule-time *fill* (copy #1) this §1.3 targets, subsumes P-1, overlaps §2/P-3, but is **SHELVED as of 2026-07-26**: its profiler gate was never triggered and no consumer remains — lighting took Layer 1, and the fluid tick evaluated Layer 2 and shipped its own tick-local halo gather instead. **This recommendation is therefore dormant, not queued**; reviving it needs a fresh demand case first).
 
 > **Validation prerequisite for recs 2–3 (border slabs = P-1, persistent halo = P-2).** Both change
 > *what neighbor data each job receives*, so their "output-preserving" claim hinges on the seam being
@@ -131,7 +157,7 @@ Production is unbounded while consumption is fixed-per-frame:
 3. **Chunks behind the player can't unload.** `World.UnloadChunks` (`World.cs:2702`) skips any chunk with a running job or `HasLightChangesToProcess` / `IsAwaitingMainThreadProcess`, and the
    `wouldStrandNeighbor` check additionally pins neighbors of pending chunks. Freshly generated chunks all carry `NeedsInitialLighting` / `HasLightChangesToProcess`; lighting drains at ≤ 32 jobs/frame. A fast player therefore leaves a contiguous trail of fully populated, pinned chunks the unloader is forbidden to touch. Memory climbs until the run ends.
 4. **Fixed per-frame caps invert under load** (as observed in benchmark runs): at 60 FPS, 32 light jobs/frame = 1,920/s; at 8 FPS it collapses to 256/s — throughput is lowest exactly when the backlog is largest. The death spiral is self-reinforcing.
-5. **Draw queue trickle.** `Update()` dequeues only **one** chunk from `ChunksToDraw` per frame (`World.cs:2087`) while up to 10 mesh jobs/frame can complete. If this is deliberate GPU-upload spreading, it should also be time-budgeted; at low FPS it backs up.
+5. **Draw queue trickle.** `Update()` dequeues only **one** chunk from `ChunksToDraw` per frame (`World.cs:2087`) while up to 10 mesh jobs/frame can complete. If this is deliberate GPU-upload spreading, it should also be time-budgeted; at low FPS it backs up. *(Time-budgeted by the §5.3 rider 2026-07-23, then made moot 2026-07-25 — MP-6 deleted the stage; see the §5.3 note.)*
 
 ### Recommendations
 
@@ -320,3 +346,36 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
   `Documentation/Performance/README.md` conventions.
 - After each fix: re-run the same scenarios; the cascading-failure scenario should show bounded
   `GenerationJobs.Count` and flat native memory; the load scenario should show near-zero lighting jobs for stable saved chunks.
+
+---
+
+## Document History
+
+*Entries below the newest are reconstructed from git history — this document predates the
+project's Document History convention, so they record what the commits changed rather than
+contemporaneous notes.*
+
+* **v1.0** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Status`/`Target` and a
+  relationship list. The status roll-up was lifted out of the summary blockquote into a proper field,
+  and §2's draw-queue-trickle symptom gained the supersession annotation its siblings already carried.
+  No findings changed. First versioned edition.
+* *(2026-07-25, `d3012337`)* - **§5.3 superseded by MP-6** — the one-per-frame draw trickle it budgeted
+  no longer exists; `Settings.drawApplyBudgetMs` retired with the stage.
+* *(2026-07-23, `179e408b` · `91ff5ea5` · `3e744d30` · `9abd6a9c`)* - **§3.4 time budgets + §3.5 panic
+  gate shipped**, closing the §3 backpressure family, with two review-hardening rounds and an IL2CPP A/B
+  GO (final) — plus the FPS-cap-proportional ceiling refinement.
+* *(2026-07-21, `77e8bcbb` · `b522e060` · `30ad10dc` · `690d422a`)* - **§3.1 in-flight cap + §3.2
+  out-of-range discard + recommendation 3 (unload light-pending chunks via persistence)** shipped, the
+  last landing on CP-5's extracted `ChunkUnloadDecision`.
+* *(2026-06-22, `ea23618d` · `44217c12`)* - §1.3 promoted into the standalone
+  [`PERSISTENT_CHUNK_STORAGE_P2.md`](../Archived/PERSISTENT_CHUNK_STORAGE_P2.md) design; Layer 1 shipped.
+* *(2026-06-12, `5c692c1c`)* - Initial analysis at commit `8f90450`: a code-level review of the
+  generation → lighting → meshing pipeline targeting two observed symptoms — cascading memory/FPS
+  failure when the player outruns generation, and slow *loading* of already-generated chunks.
+
+---
+
+**Last Updated:** 2026-07-26 (header completed; §5.3 supersession annotated)
+**Next Review:** when §2 (`ApplyLightingJobResult` merge scan, owned by P-3) or §4 (load-path edge-check
+cascade) is picked up. **§4 needs re-verification before use** — §4.2's Bug 11 was fixed in June 2026,
+yet §4.3 still reads as live "do this first" instructions written before that.

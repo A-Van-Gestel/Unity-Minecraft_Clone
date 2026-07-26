@@ -1,4 +1,14 @@
-# Unity Test Framework Implementation Guide
+# Unity Test Framework Implementation Guide  `[ARCHIVED]`
+
+> **Archived:** 2026-07-26
+> **Reason:** The decision this document records has held. The project's own editor validation
+> framework (`Assets/Editor/Validation/`) is the testing system of record and has since grown to
+> 16 registered suites — with the shared `ValidationSuiteRunner` (VS-1), the `Validate All`
+> aggregate + headless CI entry point and NUnit3 XML output (VS-2), and the stale-assembly guard
+> (VS-3) all shipped. Every operational gap this document weighed UTF against is therefore closed
+> *without* UTF, so the migration is not a live option and the doc no longer belongs in the
+> `Design/` backlog. Kept as a historical record of the evaluation and its reasoning; §1's
+> assembly-restructure analysis remains the reference for anyone re-opening the question.
 
 > Status: **Reference only — migration rejected (evaluated 2026-07-02).** The custom editor
 > validation framework (`Assets/Editor/Validation/`, six suites + three standalone test files —

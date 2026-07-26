@@ -10,7 +10,7 @@
 | **Verdict**      | **Phase 1 acceptance gate MET — net-positive, shipped.** LI-1 flips NO-GO → GO.                                      |
 
 > **This is the acceptance-gate capture for P-2 Phase 1** (Layer 1, worker-thread gather), the deliverable
-> designed in [`Design/PERSISTENT_CHUNK_STORAGE_P2.md`](../Design/PERSISTENT_CHUNK_STORAGE_P2.md) §8. It
+> designed in [`Archived/PERSISTENT_CHUNK_STORAGE_P2.md`](../Archived/PERSISTENT_CHUNK_STORAGE_P2.md) §8. It
 > supersedes the standalone-LI-1 "NO-GO" verdict of
 > [`LIGHTING_LI1_2026_06_22_BENCHMARK.md`](LIGHTING_LI1_2026_06_22_BENCHMARK.md): the validated halo-padded
 > layout is now net-positive once its gather runs on the worker thread instead of serially on the main
@@ -105,6 +105,6 @@ the magnitudes are coarse.
 ## Cross-references
 
 - **Predecessor / PRE baseline:** [`LIGHTING_LI1_2026_06_22_BENCHMARK.md`](LIGHTING_LI1_2026_06_22_BENCHMARK.md).
-- **Design:** [`Design/PERSISTENT_CHUNK_STORAGE_P2.md`](../Design/PERSISTENT_CHUNK_STORAGE_P2.md) §3 (Layer 1), §8 (Phase 1), §10 (validation).
+- **Design:** [`Archived/PERSISTENT_CHUNK_STORAGE_P2.md`](../Archived/PERSISTENT_CHUNK_STORAGE_P2.md) §3 (Layer 1), §8 (Phase 1), §10 (validation).
 - **Backlog:** [`Design/PERFORMANCE_IMPROVEMENTS_REPORT.md`](../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) — P-2, LI-1.
 - **Folder conventions:** [`README.md`](README.md).

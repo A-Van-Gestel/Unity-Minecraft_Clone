@@ -1,5 +1,12 @@
 # Validation Suite Coverage Roadmap — Uncovered Systems, Ranked
 
+**Version:** 1.0
+**Date:** 2026-07-02
+**Status:** **Living backlog.** `NS-5` is ✅ complete (CP-2 close-out) and `NS-1` is partially seeded
+(CP-3's robustness slice); `NS-2`, `NS-3`, `NS-4` and `NS-6` remain proposals. Existing-coverage counts
+are re-verified against a real `Validate All` run each time they are touched.
+**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+
 > Which systems currently have **no validation suite** and deserve one, ranked most → least
 > important by the severity of the failure class each suite would guard and by how many queued
 > backlog items (`PERFORMANCE_IMPROVEMENTS_REPORT.md`) are blocked on an ad-hoc version of the same
@@ -15,7 +22,25 @@
 **light** maps), Behavior/fluid tick (12 + determinism gates), Placement (17), MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (46), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (7), Save Durability (13), Deserialization Robustness (7), Spawn (10), Command Console (54), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` / `ChunkRelativePosition` tests.
 
 **Build protocol for every suite below:** the `validation-driven-bugfix` skill (deterministic repro first, prove-red before trusting green, promote repros to baselines). New suites should land on the shared `ValidationSuiteRunner` (`VS-1`, ✅ shipped 2026-07-08): register `Scenario`s and return its `ValidationRunResult` from a headless `Execute()`, with a thin `[MenuItem]` wrapper. All suites stay on the custom validation framework: migrating to the Unity Test Framework was evaluated 2026-07-02 and rejected (see the status header in
-[`UNITY_TEST_FRAMEWORK_MIGRATION.md`](UNITY_TEST_FRAMEWORK_MIGRATION.md)); the CI/coverage/XML gaps close via the VS-2 extensions instead.
+[`../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md`](../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md)); the CI/coverage/XML gaps close via the VS-2 extensions instead.
+
+
+
+**Audited:** 2026-07-02 (seventh-pass audit), counts re-verified 2026-07-26 against a `Validate All`
+run — **350 baselines / 16 suites**. The audit found the then-six suites architecturally sound, so the
+`VS-*` items it produced are operational only; the residual risk it identified is *coverage*, which is
+what this document ranks.
+
+**Relationship to other documents:**
+
+- [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) — the `VS-1..3` operational
+  items (all shipped) came from the same audit pass; several backlog items there are blocked on an
+  ad-hoc version of a gate one of these suites would provide.
+- [`../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md`](../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md) — why
+  every suite here stays on the project's own framework rather than the Unity Test Framework.
+- The per-system fidelity docs under
+  [`../Architecture/Testing Framework/`](../Architecture/Testing%20Framework/) — those track *blind
+  spots in suites that exist*; this document tracks *systems with no suite at all*.
 
 ---
 
@@ -123,3 +148,32 @@ No suites proposed for: **UI/menus and input** (event-driven, low blast radius, 
 
 `NS-1` (core, parts 1–5) and `NS-2` first — they guard the two irreversible failure classes (data loss, seed breaks) and unblock the most queued work (`SL-*`, `WG-3`, `ET-2`). `NS-5`/`NS-6` are 🟢-sized and should simply ride along with the work that triggers them (WS-1/VQ-1 and the next new pool, respectively). `NS-3` is the biggest investment — start it as repro fixtures for the three historical deadlocks and grow it scenario-wise, ideally before `P-4`/`OM-2` rework the scheduling invariants it guards. `NS-4` lands whenever `PH-1`/`VQ-1` get scheduled,
 using the §2 scenario table as its baseline list.
+
+---
+
+## Document History
+
+*Entries below the newest are reconstructed from git history — this document predates the
+project's Document History convention, so they record what the commits changed rather than
+contemporaneous notes.*
+
+* **v1.0** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Status`/`Target`, an `Audited`
+  line carrying the re-verified 350/16 counts, and a relationship list — including the distinction that
+  keeps this document from overlapping the fidelity docs (**no suite at all** vs **blind spots in an
+  existing suite**). No rankings or item content changed. First versioned edition.
+* *(2026-07-26, `be22fefc` · `beac42b1`)* - Coverage census re-verified twice during the MP-* close-out;
+  meshing tip advanced to **B40** as MH-13's neighbor light maps were closed.
+* *(2026-07-25, `e788db9e` · `d3012337` · `ff3b14b6`)* - Census refreshed across the MP-* arc: the
+  CrossChunk/Scheduling/Completion partials added, the `RunAll` → `Execute` registration corrected.
+* *(2026-07-22 – 2026-07-23, `51553999` · `72c8b9d9`)* - **`NS-5` completed** and **`NS-1` seeded** by the
+  CP-2/CP-3 phases — the first two items to move off "proposal".
+* *(2026-07-08, `8ca99ab7`)* - `VS-1`'s shared runner shipped, becoming the mandated landing pattern for
+  every new suite listed here.
+* *(2026-07-02, `ba637e9c`)* - Initial roadmap: `NS-1..6` ranked by the severity of the failure class
+  each suite would guard and by how many backlog items are blocked on an ad-hoc equivalent.
+
+---
+
+**Last Updated:** 2026-07-26 (header completed; counts verified at 350 baselines / 16 suites)
+**Next Review:** whenever a suite is added or a `Validate All` count changes — the existing-coverage
+paragraph is the one part of this document that goes stale silently.
