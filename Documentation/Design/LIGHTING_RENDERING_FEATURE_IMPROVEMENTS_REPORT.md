@@ -1,5 +1,13 @@
 # Lighting & Rendering Feature Improvements Report
 
+**Version:** 1.1
+**Date:** 2026-07-20
+**Status:** **Open backlog.** Items are removed (archived) when implemented and verified. Owns lighting
+and rendering *features* (`RF-*`); the *performance* counterparts (`LI-*`, `GS-*`) live in
+[`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md), and the combined ranked
+roadmap lives at the end of the sibling worldgen report.
+**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+
 > The master backlog for **lighting and rendering features** in the VoxelEngine — the
 > feature-and-design counterpart to [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md),
 > which owns lighting/GPU *performance* items (`LI-*`, `GS-*`). Sibling report to
@@ -587,3 +595,34 @@ See the **combined ranked roadmap** at the end of
 [`WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md`](WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md) — RF items
 rank: RF-1 (#1), RF-2 (#5), RF-7 (#17), RF-4 (#18), RF-3 (#19), RF-6 (#20), RF-5 (#21),
 RF-8 (#22 — added 2026-07-20).
+
+---
+
+## Document History
+
+*Entries below the newest are reconstructed from git history — this document predates the
+project's Document History convention, so they record what the commits changed rather than
+contemporaneous notes.*
+
+* **v1.1** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Status`/`Target` lifted out of
+  the summary blockquote into proper fields, including the RF-vs-LI/GS ownership split that keeps this
+  report from overlapping the performance backlog. No findings or rankings changed.
+* *(2026-07-20, `6728bee0`)* - Cross-linked the new `VX-*` volumetric/ray-traced report; RF-2 §6 gained
+  the sky-ambience v2 ideas (aurora, shooting stars) routed from that sweep, and RF-8 was added at #22.
+* *(2026-07-19, `cf425bae` · `0cbd46c8` · `505ce646` · `e2b2cb0c`)* - `CL-*` cloud and `FL-*` foliage
+  reports split out as siblings: **CL-2 absorbed RF-2 §5** (cloud tinting) and RF-7 §4's cloud knobs
+  were handed to CL-4; RF-3 §2 re-pointed at the shipped `uv.zw` sway channel.
+* *(2026-07-03, `2dde457e`)* - **RF-1 substantially amended**: the `SkyDarken` effective-light query
+  layer (§9) and subtractive shader parity (§10) — stored skylight is time-invariant *sky exposure*,
+  and gameplay reads a derived effective light rather than raw storage. Blue-moonlight authoring rules
+  added to §3; §4's event tint changed from multiply to lerp/replace.
+* *(2026-07-03, `7e99e6f7` · `95b2cbc1`)* - Second gap sweep added RF-7 (weather) alongside the sibling
+  worldgen report's TF-10…TF-14.
+* *(2026-07-02)* - Initial report at commit `a458173`: the `RF-*` lighting/rendering feature backlog.
+
+---
+
+**Last Updated:** 2026-07-26 (header completed)
+**Next Review:** when RF-1 (day/night cycle) is scheduled — it ranks #1 on the combined roadmap and its
+§9/§10 amendments are the most intricate part of this document; re-verify them against the shipped
+lighting storage before building.

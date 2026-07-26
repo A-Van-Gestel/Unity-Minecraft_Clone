@@ -1,8 +1,19 @@
 # OM-1 — Device Calibration of Throughput & Memory Budgets
 
-> **Status: Implemented (2026-06-27); player-build verified + reference re-anchored (2026-06-28).** A
+**Version:** 1.1
+**Date:** 2026-06-27
+**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+
+> **Status: Implemented (2026-06-27); player-build verified + reference re-anchored (2026-06-28) —
+> stays in `Design/` pending its final calibration pass.** A
 > first-launch IL2CPP run calibrated and wrote `settings.json` correctly, and `REFERENCE_*_MS` were
-> re-anchored from a 99-sample player-build capture (§3.2). Promotes the backlog
+> re-anchored from a 99-sample player-build capture (§3.2). **The one deliberate residual: the
+> known-good budget column (§3.2, §3.3, §11) is still open** — each non-anchor device has to be
+> *playtested* to find its smooth budget before the implied-slice check can run and the
+> single-anchor-linear vs piecewise-linear question can be settled. The medians half of every future
+> baseline row is already captured; only the manual playtest half is outstanding, and it is a
+> time cost rather than a design gap. This document is therefore **not** promotable to
+> `Architecture/` until that pass lands. Promotes the backlog
 > finding [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](./PERFORMANCE_IMPROVEMENTS_REPORT.md) → **OM-1** into a
 > full design and records the as-built implementation. OM-1 replaces the desktop-tuned absolute constants
 > that gate engine throughput and native memory retention with values **calibrated once on first launch**
@@ -26,6 +37,13 @@
 > A third, larger structural cleanup it unblocks — **C. Fully decoupling `World.blockDatabase` from the
 > `World` instance** — is intentionally **out of scope** here and specified separately in
 > [`BLOCK_DATABASE_DECOUPLING.md`](../Architecture/BLOCK_DATABASE_DECOUPLING.md).
+
+**Audited:** design 2026-06-27; as-built and reference constants **verified by measurement, not static
+review** — a first-launch IL2CPP run on a player build wrote `settings.json` correctly, and
+`REFERENCE_*_MS` were re-anchored from a 99-sample player-build capture (§3.2). Four devices have been
+captured (§3.2 table); the desktop sanity check resolves an i9-9900K / 64 GB box to exactly the historical
+10 / 32 / 20 / 512. The known-good budget column of that table is the outstanding half — it needs a manual
+per-device playtest and cannot be derived from the captures.
 
 **Relationship to other documents:**
 
@@ -452,3 +470,33 @@ the calibration.
 - Calibrate-at-Main-Menu (Option A, recommended) vs defer-to-first-frame (Option B).
 - **Multi-baseline throughput interpolation (§3.3):** capture laptop + Xperia 10 III baselines, compute
   each implied slice `S_i`, and decide single-anchor-linear vs piecewise-linear from whether they agree.
+
+---
+
+## Document History
+
+*Entries below the newest are reconstructed from git history — this document predates the
+project's Document History convention, so they record what the commits changed rather than
+contemporaneous notes.*
+
+* **v1.1** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Target` added, and the status
+  line corrected to state the outstanding work explicitly — it previously read as fully closed, while
+  §3.2/§3.3/§11 record that the **known-good budget column is still open** pending a manual per-device
+  playtest. That residual is why this document stays in `Design/` rather than being promoted.
+* *(2026-07-21, `77e8bcbb`)* - `maxInFlightGenerationJobs` added to the calibrated knob set by P-4 §3.1.
+* *(2026-06-28, `7ac39346` · `264d51c3` · `2df56c30` · `bef374e9` · `9e565574`)* - Baseline-capture probe
+  mode (99-sample precision, on-disk report), the Android public-Downloads writer lifted into
+  `BenchmarkEnvironment`, the Results-Screen "Open folder" fix, and `RecalibrateDevice` apply semantics
+  documented. `REFERENCE_*_MS` re-anchored from a player-build capture.
+* *(2026-06-27, `77167489` · `4dd43e77`)* - Initial design + wiring: first-launch calibration written to
+  `settings.json`, replacing desktop-tuned absolute constants with values scaled from `f(SystemInfo)`,
+  all user-editable afterwards. As-built deltas recorded in §3.2/§5 — the throughput model is
+  **reference-anchored**, not an absolute time-slice (the time-slice regressed the desktop), and the
+  `IsolatedJobProbe` extraction is mesh-only.
+
+---
+
+**Last Updated:** 2026-07-26 (header completed; outstanding calibration pass made explicit)
+**Next Review:** when the known-good-budget playtest is run — capture each non-anchor device's smooth
+budget, compute the implied slices, and settle single-anchor-linear vs piecewise-linear (§3.3). Once
+that lands this document is promotable to `Architecture/`.

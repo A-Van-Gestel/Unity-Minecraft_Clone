@@ -6,6 +6,7 @@
 Shipped and archived so far: **FL-1 wind sway** (v1.1) and **FL-2 leaf shimmer + the coherent
 traveling-wave sway model** (v1.2), both 2026-07-19, in-game verified — the "What exists today"
 table below is the substrate every remaining sway item (FL-8) builds on.
+**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The master backlog for making the **grass / foliage layer feel alive** in the VoxelEngine —
 > wind sway (vertex animation), per-voxel visual variation, flora variety, ambient and

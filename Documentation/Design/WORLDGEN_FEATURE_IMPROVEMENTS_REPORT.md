@@ -1,5 +1,13 @@
 # World Generation Feature Improvements Report
 
+**Version:** 1.2
+**Date:** 2026-07-20
+**Status:** **Open backlog.** Items are removed (archived) when implemented and verified. **TF-14 (world
+border) shipped 2026-07-13/17** and the combined ranked TF/RF roadmap lives at the end of this document.
+Several items here are *deliberately* seed-breaking — acceptable while the Standard world type is WIP;
+see §"Seed-stability note".
+**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+
 > The master backlog for **terrain & world-generation features and design changes** in the
 > VoxelEngine — the feature-and-design counterpart to
 > [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md), which owns worldgen
@@ -1079,3 +1087,32 @@ items last. RF items are detailed in
 | 20   | **RF-6** SSAO ("GI")                        | Polish; drop-in URP feature                                                                           |
 | 21   | **RF-5** Animated light sources             | Polish with an architectural ceiling — budgeted block-swap animation only                             |
 | 22   | **RF-8** Animated block textures            | Polish; MC-style atlas blitting (`Graphics.CopyTexture` per tick) — zero mesh/shader/vertex contact   |
+
+---
+
+## Document History
+
+*Entries below the newest are reconstructed from git history — this document predates the
+project's Document History convention, so they record what the commits changed rather than
+contemporaneous notes.*
+
+* **v1.2** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Status`/`Target` lifted out of
+  the summary blockquote into proper fields. No findings or rankings changed.
+* *(2026-07-20, `6728bee0`)* - Combined roadmap extended with the `VX-*` volumetric/ray-traced items and
+  the RF-2 §6 sky-ambience routing.
+* *(2026-07-19, `505ce646`)* - `FL-*` foliage backlog split out into its own report; the combined ranking
+  updated to account for it.
+* *(2026-07-13 – 2026-07-17, `2f25757b` · `78ee112e` · `d83e05f8` · `c3e6cd77`)* - **TF-14 world border
+  shipped** end to end — per-world radius, minimap rect, the animated border wall, and the edit gate at
+  the interaction boundary — with the decision recorded that the border stays *out* of
+  `IsVoxelInWorld`/`IsChunkInWorld`.
+* *(2026-07-03, `95b2cbc1`)* - Initial report (`TF-1..14`), including the same-session gap sweep that
+  added TF-10…TF-14 (structures, climate surface effects, per-world generation options, worldgen
+  versioning, world border).
+
+---
+
+**Last Updated:** 2026-07-26 (header completed)
+**Next Review:** when the next TF item is scheduled, or when the Standard world type stabilizes — at
+that point the seed-stability note's "deliberately seed-breaking is acceptable" premise expires and
+every remaining ⚠️ Seed item needs re-rating.

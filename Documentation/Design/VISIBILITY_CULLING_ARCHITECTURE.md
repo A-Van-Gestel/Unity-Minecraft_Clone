@@ -1,9 +1,42 @@
 # Advanced Visibility Culling (Graph Connectivity)
 
+**Version:** 1.0
+**Date:** 2026-07-26
+**Status:** **Proposed design — not implemented.** Phases 0 **and 0.5** are complete — the §7.3 renderer
+ownership split, the last hard prerequisite, shipped 2026-07-25 as MP-5 — but the culler itself
+(Phases 1–3: connectivity masks, BFS traversal, integration) is unbuilt.
+**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+
+> How to stop rendering sealed-off underground geometry that frustum culling cannot reject. **The
+> pivotal decision: cull by asking "can air flow from the camera to this section?" — a per-section
+> connectivity mask plus a BFS traversal over the section graph — rather than any count- or
+> depth-based heuristic**, because a voxel world's caves make every heuristic both over-cull (visible
+> holes) and under-cull. Masks are derived data, never persisted, so no save-format change exists
+> anywhere in this design.
+
 - **Status:** Planned (Phases 0 **and 0.5** complete — the §7.3 ownership split, the last hard prerequisite, shipped 2026-07-25 as MP-5; Phases 1–3 open)
 - **Current Implementation:** Standard Frustum Culling + Empty Section Skipping
 - **Target:** Advanced Occlusion Culling via Graph Traversal
 - **Context:** Solving the "Underground Overdraw" problem where caves render while the player is on the surface.
+
+
+
+**Audited:** the §5 phase table and §7 corrections were last re-verified 2026-07-25 when MP-5 shipped
+Phase 0.5. **Tracked as `GS-5`** in
+[`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md), which carries the
+effort/risk/benefit rating; this document is the design authority.
+
+**Relationship to other documents:**
+
+- [`../Architecture/SUB_CHUNK_MESHING_ARCHITECTURE.md`](../Architecture/SUB_CHUNK_MESHING_ARCHITECTURE.md)
+  — the section meshing this culls, and the renderer-ownership contract Phase 0.5 established.
+- [`../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`](../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md)
+  — precedent for the "derived data, no save bump" position taken in §8.
+- [`WORLD_SCALING_ANALYSIS.md`](WORLD_SCALING_ANALYSIS.md) — taller worlds (Tier A) multiply subsurface
+  section counts, so this system's value grows with world height; store masks per-section, not
+  per-chunk-column, so cubic chunks (Tier C) inherit them unchanged.
+
+---
 
 ## 1. The Problem: Frustum vs. Occlusion
 
@@ -220,3 +253,33 @@ Both are rare events compared to per-frame; rotation costs nothing. Add the frus
     - `WORLD_SCALING_ANALYSIS.md`: taller worlds (Tier A) multiply subsurface section counts — this system's value grows ~linearly with world height, and cubic chunks (Tier C) would consume the same per-section masks unchanged. Design the mask storage per-section (not per-chunk-column)
       so it carries over.
 - **Verification:** the corruption mode to test for is *holes* (over-culling): fly/noclip through cave networks while toggling a debug overlay that renders culled sections in wireframe; any visible-through-hole means an entry-face or staleness bug. Add a `VisibilityManager` debug stat (sections culled / total) to the `DebugScreen` to quantify the win.
+
+---
+
+## Document History
+
+*Entries below the newest are reconstructed from git history — this document predates the
+project's Document History convention, so they record what the commits changed rather than
+contemporaneous notes.*
+
+* **v1.0** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Target`, the **summary
+  blockquote this document never had**, an `Audited`/`GS-5` tracking line and a relationship list. The
+  existing bullet-style `Status`/`Current Implementation`/`Context` block is kept directly below as the
+  at-a-glance state. No design content changed. First versioned edition.
+* *(2026-07-25, `f443903e` · `d3012337`)* - **Phase 0.5 completed by MP-5**: `SectionRenderer.SetOcclusionCulled`
+  became the only *setter* of `forceRenderingOff`, removing the three-owner `SetActive` surface the
+  culler would otherwise have landed on. §7.3 narrowed accordingly (`Clear()` is reset-only), and the
+  MP-6 draw-tail retirement removed the stale-visibility-actor class §7.3 warned about.
+* *(2026-07-06, `0a12036a`)* - MP-* orchestration plan scheduled the §7.3 ownership split as its own
+  phase, making it an explicit prerequisite rather than an assumption.
+* *(2026-07-02, `7f75338a`)* - Tracked as `GS-5` in the performance backlog, with blocker status recorded.
+* *(2026-06-12, `cff7265e`)* - Added the correctness analysis of the cave-culling BFS (§7) — the
+  entry-face accumulation and staleness rules that make the traversal sound.
+* *(2025-11-29, `16aa7e4c`)* - Originated with the section-based meshing work that introduced empty-section
+  skipping, the "Current Implementation" this design extends.
+
+---
+
+**Last Updated:** 2026-07-26 (header completed; Phases 1–3 still open)
+**Next Review:** when `GS-5` Phase 1 is scheduled — re-verify §5's contract first (Phase 0.5 is closed,
+and §4.3's single apply site is now also the load-animation trigger point).

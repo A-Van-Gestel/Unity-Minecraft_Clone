@@ -1,5 +1,13 @@
 # World Scaling Analysis — Height/Depth Increase, Negative Quadrants, Cubic Chunks & Floating Origin
 
+**Version:** 1.0
+**Date:** 2026-06-12
+**Status:** **Analysis / reference — superseded for execution.** Tier B shipped in full via
+[`WORLD_SCALING_IMPLEMENTATION.md`](WORLD_SCALING_IMPLEMENTATION.md); §3.2's floor-div audit shipped as
+`WS-1`+`VQ-1`. This document remains the **"what breaks per tier"** reference, and Tiers A and C are
+still unbuilt.
+**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+
 > Architectural analysis of what it takes to scale the world beyond its current hard-coded bounds,
 > in three tiers of increasing ambition:
 >
@@ -24,6 +32,20 @@ Related docs: `Architecture/DATA_STRUCTURES.md`, `Architecture/SUB_CHUNK_MESHING
 `Architecture/LIGHTING_SYSTEM_OVERVIEW.md`,
 `Architecture/INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md`,
 `Design/PERFORMANCE_IMPROVEMENTS_REPORT.md` (items `P-2`, `LI-1`, `OM-*` are prerequisites or strong synergies — see §6), `Design/CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md`.
+
+
+
+**Relationship to other documents:**
+
+- [`WORLD_SCALING_IMPLEMENTATION.md`](WORLD_SCALING_IMPLEMENTATION.md) — the decided Tier B execution
+  path (WS-2/WS-3/WS-4). Analysis says *what breaks*; that doc says *how we shipped it*.
+- [`../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md`](../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md)
+  — WS-4 as built. **Two suggestions in this analysis were superseded there** (§3, §4.2) — drift noted
+  inline at those sections.
+- [`../Guides/COORDINATE_SPACES_GUIDE.md`](../Guides/COORDINATE_SPACES_GUIDE.md) — the five coordinate
+  spaces the WS-4 work made explicit, and the rules that came out of this analysis.
+- [`../Architecture/AOT_WORLD_MIGRATION_SYSTEM.md`](../Architecture/AOT_WORLD_MIGRATION_SYSTEM.md) — the
+  protocol for the ⚠️ format-changing items flagged per tier below.
 
 ---
 
@@ -169,7 +191,7 @@ Float32 has ~7 significant digits: at |pos| ≈ 100k, positions quantize to ~1 c
 - `ChunkRelativePosition`: the right idea — int macro + float micro. Extend usage from spawn point to **the player/camera and any future entities** (the `−` operator already returns exact deltas; that's the primitive everything else needs).
 - Physics: `VoxelRigidbody` is custom (no PhysX world-space dependency) — make it operate on
   `ChunkRelativePosition` natively and it is origin-independent.
-  > **Superseded** by [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) §4.2
+  > **Superseded** by [`../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md`](../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md) §4.2
   > (shipped in WS-4a): reading the solver shows no such rewrite is needed. Its float math is already
   > origin-relative by nature (velocity, momentum, AABB sweeps are deltas or near-origin floats), so it
   > stays a pure Unity-space solver and only its two voxel *lookup* sites offset. Likewise
@@ -187,7 +209,7 @@ Maintain a `WorldOriginChunk` (a `ChunkCoord`); Unity world position of anything
    > chokepoint for chunk *GameObjects*, but the WS-4a sweep found voxel→Unity placement also in the
    > chunk-border visualizer, `ChunkPoolManager.GetBorder`, `VisualizerChunkData`, the collision-bounds
    > debug draw, `BorderWallRenderer`, `Clouds`, the spawn writes, and the benchmark waypoint drivers.
-   > See [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) §5.1 for the full list.
+   > See [`../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md`](../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md) §5.1 for the full list.
 2. **Shift by integer multiples of the chunk size only.** This keeps every voxel boundary, every
    `frac()` in shaders, and every texture-tiling computation bit-exact across shifts.
 3. **Shaders:** `LiquidCore.hlsl` uses `worldPos` for noise coordinates, `frac(worldPos)` shore distances, and flow routing. `frac()` itself survives integer shifts, but the *noise field*
@@ -278,3 +300,31 @@ LI-1 padded lighting volume ────────────────┘ 
   `PERFORMANCE_IMPROVEMENTS_REPORT.md`). Rather than waiting for CP-2's NS-5 suite, WS-1 landed its own equivalence guard in the existing "Chunk Math" validation suite (negative-domain sweeps + boundary/teeth cases). The §2.4 constants unification (`VoxelData.ChunkHeight` vs
   `ChunkMath.CHUNK_HEIGHT`) remains open — phase **CP-7** of
   [CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) (2026-07-06).
+
+---
+
+## Document History
+
+*Entries below the newest are reconstructed from git history — this document predates the
+project's Document History convention, so they record what the commits changed rather than
+contemporaneous notes.*
+
+* **v1.0** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Status`/`Target` and a
+  relationship list. Status made explicit — **analysis/reference, superseded for execution** — since a
+  reader could otherwise mistake the three tiers for open work when Tier B is fully shipped. No analysis
+  content changed. First versioned edition.
+* *(2026-07-23, `10d993b6`)* - §2.4 constants-unification note re-pointed at CP-7, which resolved it.
+* *(2026-07-16, `16f4c25a`)* - Drift sync against the WS-4a audit record.
+* *(2026-07-12, `9b87229b` · `7dd4661a`)* - Execution handed off to the new
+  `WORLD_SCALING_IMPLEMENTATION.md` roadmap; **`WS-1` marked shipped** and the codec "already live"
+  premise corrected — the V2 truncation was latent-but-unreachable, not a live bug.
+* *(2026-07-02, `7f75338a`)* - Cross-linked into the performance backlog as the `WS-*` enabler family.
+* *(2026-06-12, `e5379df5`)* - Initial analysis: Tier A (taller/deeper bounded world), Tier B (unbounded
+  XZ + floating origin), Tier C (cubic chunks), each with the hard-coded assumptions that break, the
+  silent negative-coordinate gotchas, and per-item save-format impact.
+
+---
+
+**Last Updated:** 2026-07-26 (header completed; Tier B recorded as shipped elsewhere)
+**Next Review:** if Tier A (taller worlds) or Tier C (cubic chunks) is ever scheduled — re-verify the
+per-tier breakage lists against HEAD first, since Tier B's execution changed much of the code they name.

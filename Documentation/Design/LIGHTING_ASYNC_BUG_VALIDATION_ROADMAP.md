@@ -1,5 +1,9 @@
 # Lighting Async-Bug Validation Roadmap (AS-1 … AS-5)
 
+**Version:** 1.0
+**Date:** 2026-07-03
+**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+
 > **Status:** In progress — **AS-1 CLOSED 2026-07-04** (Bugs 13 + 14 both reproduced, fixed, confirmed
 > in-game, and archived — see §3 outcome). **§10 harness-hardening HF-1/HF-2/HF-3 DONE 2026-07-05**
 > (HF-3's fuzz found + closed **Bug 15** and produced the first synchronous **Bug 05** repro — see the
@@ -20,6 +24,24 @@
 > [LIGHTING_PIPELINE_STATE_REFACTOR.md](LIGHTING_PIPELINE_STATE_REFACTOR.md) (LP-* — the
 > structural clean-up plan that builds ON AS-2/HF-4's shared scan-arm/completion-pass
 > extractions: flag transition API, shared neighbor-gate predicate; orthogonal to AS-3/4/5).
+
+
+
+**Audited:** 2026-07-03, at commit `a458173` (async-testability analysis session). Scope: making the
+async-flavored open lighting bugs testable, and closing the async surfaces the *synchronous* lighting
+validation suite cannot model.
+
+**Relationship to other documents:**
+
+- [`../Architecture/Testing Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md`](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md)
+  — the living blind-spot backlog; its findings B3 / B6 / C8 reference this roadmap.
+- [`../Architecture/Testing Framework/LIGHTING_FRAME_SIMULATOR_DESIGN.md`](../Architecture/Testing%20Framework/LIGHTING_FRAME_SIMULATOR_DESIGN.md)
+  — the orchestration-layer simulator AS-2 builds on.
+- [`VALIDATION_SUITE_COVERAGE_ROADMAP.md`](VALIDATION_SUITE_COVERAGE_ROADMAP.md) — AS-2 is the
+  lighting-slice embryo of that document's `NS-3`.
+- [`LIGHTING_PIPELINE_STATE_REFACTOR.md`](LIGHTING_PIPELINE_STATE_REFACTOR.md) — the LP-* clean-up of the
+  same orchestration layer these bugs live in.
+- [`../Bugs/LIGHTING_BUGS.md`](../Bugs/LIGHTING_BUGS.md) — the bugs themselves (Bug 09 still open).
 
 ---
 
@@ -481,3 +503,32 @@ The only way the harness can truly replay the pass bookkeeping (B7's full closur
 Both extractions are chunk-pipeline edits → `CHUNK_LIFECYCLE_PIPELINE.md` doc-sync in the same commit, and cross-check `_FIXED_BUGS.md` (flag-pairing / deadlock history) before merging.
 
 **Sequencing:** HF-1 first (small, unlocks HF-3's detector value and B60's prove-red), HF-2 second (independent, small), HF-3 third, HF-4 whenever AS-2 lands. On completion, flip fidelity A5/B7 and record the new baseline numbers here and in the fidelity backlog. **All done 2026-07-05/06** (HF-1/2/3 → 2026-07-05; HF-4 #1/#2 → 2026-07-06 with AS-2; fidelity A5/B7/B6 all CLOSED, suite at B70).
+
+---
+
+## Document History
+
+*Entries below the newest are reconstructed from git history — this document predates the
+project's Document History convention, so they record what the commits changed rather than
+contemporaneous notes.*
+
+* **v1.0** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Target`, an `Audited` line and a
+  relationship list. The detailed status roll-up already at the top of the summary blockquote is
+  unchanged — it is more specific than a one-line `Status:` field could be. First versioned edition.
+* *(2026-07-25, `7cbb4e41`)* - Reflowed by the formatter; HF-4's shipped note re-pointed at the renamed
+  `JobCompletionPass` (MP-4 generalized it from the lighting-only `LightingCompletionPass`).
+* *(2026-07-06, `4491c075` · `a1bdbc81` · `4cb80e4d`)* - **AS-2 DONE**: scheduler-mode baselines B66–B70
+  closed fidelity B6, and HF-4 #2 extracted the shared completion pass. Roadmap refs flipped to B70/62
+  baselines.
+* *(2026-07-05, `f44b1e16` · `ca59ee02` · `2b43143e` · `3a48f490`)* - **§10 harness hardening HF-1/HF-2/HF-3
+  done.** HF-3's fuzz found and closed **Bug 15**, then produced the first *synchronous* **Bug 05**
+  repro — which closed Bug 05 (border-column edge-check re-grant) and was promoted to baseline B64.
+* *(2026-07-04, `9cef8d43` · `28bf8d66` · `161ddb82` · `9cfcf907`)* - **AS-1 CLOSED**: Bugs 13 and 14 both
+  reproduced, fixed, confirmed in-game and archived; repros K13a–K13d promoted to baselines B56–B59.
+* *(2026-07-03, `7e99e6f7`)* - Initial roadmap: AS-1…AS-5, the async-bug testability plan.
+
+---
+
+**Last Updated:** 2026-07-26 (header completed)
+**Next Review:** when Bug 09 is picked up — it is the last open bug in scope, and still has no faithful
+synchronous repro. AS-3…AS-5 remain proposals.

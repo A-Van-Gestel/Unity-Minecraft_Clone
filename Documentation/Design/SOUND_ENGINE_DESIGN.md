@@ -1,5 +1,12 @@
 # Sound Engine Design
 
+**Version:** 1.0
+**Date:** 2026-07-03
+**Status:** **Proposed design — not implemented.** No audio code exists in the project yet: there is no
+`SoundMaterial` channel on `BlockType`, no emitter or mixer plumbing, and no `Validate Sound Engine`
+suite. The design is complete enough to build against as-is.
+**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+
 > Design for the VoxelEngine's audio system: block sounds (break / place / step), fluid and
 > ambient loop emitters, world-layer ambience & music, and the mixer/settings plumbing that ties
 > them together. The core data-model decision — **a dedicated per-block `SoundMaterial` channel
@@ -479,3 +486,29 @@ not per author — a profile blurb is intent, not a license, and the more specif
 
 The same three-step policy applies to sonic.tcpmusic.com and any future "free to download but no
 attached license" source.
+
+---
+
+## Document History
+
+*Entries below the newest are reconstructed from git history — this document predates the
+project's Document History convention, so they record what the commits changed rather than
+contemporaneous notes.*
+
+* **v1.0** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Status`/`Target` added above the
+  existing summary, `Audited` line and relationship list retained as written. Status made explicit —
+  **Proposed design — not implemented** — which the original only stated in passing inside the summary
+  blockquote. No design content changed. First versioned edition.
+* *(2026-07-03, `0da76ddf`)* - Extension roadmap gained its v3+ row when
+  [`STEAM_AUDIO_INTEGRATION.md`](STEAM_AUDIO_INTEGRATION.md) was drafted as a child document.
+* *(2026-07-03, `39f3261c`)* - Initial design: the **`SoundMaterial`-per-`BlockType` decision** (§3 — a
+  dedicated channel rather than overloading `BlockTags`) plus the four-layer runtime (block one-shots,
+  fluid/ambient loop emitters, world ambience & music, mixer/settings plumbing).
+
+---
+
+**Last Updated:** 2026-07-26 (header completed; still unimplemented)
+**Next Review:** when the sound engine is scheduled — re-verify the §Audited findings against
+`BlockType`/`BlockDatabase` and the fluid tick path first, since the tick was re-architected by the
+TG-4 arc after this was written (see
+[`../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`](../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md)).

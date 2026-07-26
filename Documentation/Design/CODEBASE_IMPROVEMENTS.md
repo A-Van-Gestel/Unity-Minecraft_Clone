@@ -1,9 +1,34 @@
 # Codebase Improvement Backlog
 
-> Open **non-performance** improvement items for the VoxelEngine codebase (API modernization, dependency hygiene). Each finding includes affected files, a recommendation, and a brief **Impact Analysis**.
-> Completed items have been archived to `Documentation/Archived/CODEBASE_IMPROVEMENTS_COMPLETED.md`.
+**Version:** 1.0
+**Date:** 2026-07-26
+**Status:** **Open backlog.** Items are removed (archived) when implemented and verified.
+**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
-**Last audited:** 2026-07-02 (added §2.1 `World.cs` decomposition; §1 items re-confirmed still open)
+> Open **non-performance** improvement items for the VoxelEngine codebase — API modernization and
+> dependency hygiene. Each finding lists affected files, a recommendation, and an **Impact Analysis**
+> using the same effort/risk/benefit symbols as the performance report. **The one structural item is
+> §2.1: `World.cs` remains the project's god object and is still growing** — every other entry here is
+> a localized cleanup. Completed items are archived to
+> [`../Archived/CODEBASE_IMPROVEMENTS_COMPLETED.md`](../Archived/CODEBASE_IMPROVEMENTS_COMPLETED.md);
+> performance findings live in the separate master backlog (see below).
+
+**Last audited:** 2026-07-02 (added §2.1 `World.cs` decomposition; §1 items re-confirmed still open).
+**Facts re-verified:** 2026-07-26, at commit `3f579e44` (branch `feat/world-scaling`) — §1.2's five
+`GameObject.Find` call sites all still present; §1.3's `Camera.main` list **corrected** (three more
+files than recorded); §2.1's `World.cs` line count **corrected** 3,184 → 4,615; §2.2 confirmed resolved
+by CP-4. No new findings were added — this was a fact check of the existing entries, not a fresh audit.
+
+**Relationship to other documents:**
+
+- [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) — the sibling master
+  backlog owning every *performance* finding, with the completed/open split described in its header.
+- [`CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md`](CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md) — deep dive on the
+  generation → lighting → meshing pipeline.
+- [`CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md`](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) — the CP-*
+  arc; it resolved §2.2 and is the executed template §2.1's extractions should follow.
+- [`../Guides/CODING_STYLE_GUIDE.md`](../Guides/CODING_STYLE_GUIDE.md) — the conventions these
+  modernization items move the codebase toward.
 
 > **Performance items moved (June 2026):** All `[Performance]` and performance-motivated `[Architecture]` findings formerly tracked here (legacy mesh API in `Clouds.cs`, `UnityEngine.Random` in behaviors, O (n) mesh queue, startup lookup/`.ToArray()` allocations, `BlockBehavior` data separation & function pointers) now live in
 > **`PERFORMANCE_IMPROVEMENTS_REPORT.md`** — the single master performance backlog with at-a-glance effort/risk/benefit/seed-safety ratings. The string-allocation-on-pool-reset item (§4.1) was implemented and archived.
@@ -38,9 +63,11 @@
 
 `Camera.main` is cached internally since Unity 2020.1 and is no longer a performance problem. However, relying on it introduces an implicit dependency on `MainCamera` tags.
 
-| Affected Files                                                    |
-|-------------------------------------------------------------------|
-| `World.cs`, `Player.cs`, `PlayerInteraction.cs`, `DebugScreen.cs` |
+| Affected Files                                                                                                                                              |
+|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `World.cs`, `Player.cs`, `PlayerInteraction.cs`, `DebugScreen.cs`, `UI/GraphicsSettingsController.cs`, `Benchmarks/BenchmarkController.cs`, `Jobs/BurstData/BurstVoxelMetadataUtility.cs` |
+
+*(List re-verified 2026-07-26: the last three were missing from the original audit.)*
 
 **Recommendation:** Inject or serialize the camera reference for explicit control.
 
@@ -55,7 +82,7 @@
 
 ### 2.1 `World.cs` God-Object Decomposition  `[Refactor]`
 
-*(Added 2026-07-02.)* `World.cs` is **3,184 lines** — the largest handwritten file in the project — and remains the orchestration hub for chunk streaming/activation/unload, the voxel-modification queue (`EnqueueVoxelModification` + application), the tick pump (`ProcessTickUpdates`), lighting scheduling glue, global job-data preparation, debug tooling, and settings plumbing. Recent extractions prove the pattern works and are the template: `WorldJobManager` (job scheduling/completion), `LightWorkScheduler` (MT-2 ready/waiting sets), `MeshBuildQueue`
+*(Added 2026-07-02; line count re-verified 2026-07-26.)* `World.cs` is **4,615 lines** — the largest handwritten file in the project, and **up ~45 % from the 3,184 lines recorded at the original audit**, so this item is getting worse, not better, despite the extractions listed below — and remains the orchestration hub for chunk streaming/activation/unload, the voxel-modification queue (`EnqueueVoxelModification` + application), the tick pump (`ProcessTickUpdates`), lighting scheduling glue, global job-data preparation, debug tooling, and settings plumbing. Recent extractions prove the pattern works and are the template: `WorldJobManager` (job scheduling/completion), `LightWorkScheduler` (MT-2 ready/waiting sets), `MeshBuildQueue`
 (MT-1),
 `PlacementController` (placement decisions).
 
@@ -97,3 +124,37 @@ carries a commented-out `SaveSystem.LoadChunk` block plus two stacked TODOs ("PH
 > (dead block + both TODOs), BOTH `EnsureChunkExists` overloads retired (zero/discarded callers),
 > and all three placeholder-creation sites consolidated onto the new method. See
 > `CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md` §7 CP-4 Amended block.
+
+---
+
+## Document History
+
+*Entries before v1.0 are reconstructed from git history — this document predates the project's
+Document History convention, so they record what the commits changed, not contemporaneous notes.*
+
+* **v1.0** - Mandatory header added (2026-07-26): `Version`/`Date`/`Status`/`Target`, summary
+  blockquote, and the relationship list; the existing archive and performance-backlog pointers were
+  folded into it. **Two stale facts corrected in the body** while re-verifying the entries: §2.1's
+  `World.cs` line count **3,184 → 4,615** (the item has grown ~45 % since it was written, despite the
+  extractions it lists), and §1.3's `Camera.main` file list gained three files the original audit
+  missed (`UI/GraphicsSettingsController.cs`, `Benchmarks/BenchmarkController.cs`,
+  `Jobs/BurstData/BurstVoxelMetadataUtility.cs`). §1.2's five `GameObject.Find` sites re-confirmed
+  present. **This was a fact check of existing entries, not a fresh audit** — no new findings added.
+  First versioned edition.
+* *(2026-07-22, `830ecf13`)* - §2.2 (dead legacy load path in `WorldData.LoadChunk`) marked
+  ✅ RESOLVED by CP-4.
+* *(2026-07-02, `7f75338a`)* - Fourth-pass audit added §2.1 (`World.cs` god-object decomposition) and
+  §2.2; §1 items re-confirmed still open.
+* *(2026-06-12, `c4d58cb9`)* - **Scope split:** every `[Performance]` and performance-motivated
+  `[Architecture]` finding moved out to the new `PERFORMANCE_IMPROVEMENTS_REPORT.md`, leaving this
+  document as the *non-performance* backlog. §4.1 (string allocation on pool reset) was implemented and
+  archived in the same pass.
+* *(2026-04-16, `cb787249`)* - Moved into the restructured `Documentation/` tree; completed items
+  split out to `Archived/CODEBASE_IMPROVEMENTS_COMPLETED.md`.
+
+---
+
+**Last Updated:** 2026-07-26 (header added; §2.1 line count and §1.3 file list corrected)
+**Next Review:** when §2.1 is scheduled — re-measure `World.cs` first, since the figure has drifted
+badly twice now. A genuine re-audit for *new* non-performance findings is also overdue; the last one
+was 2026-07-02.
