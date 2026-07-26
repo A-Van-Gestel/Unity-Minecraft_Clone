@@ -1,8 +1,9 @@
 # Meshing Validation Harness — Fidelity Boundary & Extension Backlog
 
 **Status:** ✅ **Active backlog** — Wave 1 executed 2026-06-17 (MH-1/MH-4/MH-9 closed), Wave 2 executed 2026-06-18 (MH-5/MH-3 closed), Wave 3 executed 2026-06-18 (MH-6 closed — buildable-now portion), Wave 5 executed 2026-06-21 (MH-10/MH-11 cross-chunk border culling closed); see §6. **Optimizations landed (guarded by this suite):** MR-1, MR-7 (2026-06-15); **MR-3 + MR-4 + MR-5**
-(2026-06-18, Wave 1 of the MR-* implementation phase) — MR-3/MR-4 added the build-alongside postconditions **B15** (no-reassign-when-bitmask-unchanged) and **B16** (constant-cell-bounds); MR-6 added **B17** (pooled-output stale guard); the cross-chunk substrate prerequisite added **B18–B21**. Since then FL-1/FL-2 added **B22/B23**, the MP-* orchestration arc added **B24–B27**, MP-5 added **B28–B30**, MP-6 added **B31–B33**, and the chunk load-animation toggle regression added **B34–B36** — **tip is B36 (36 baselines); see §4 for the arc detail.**
-**Created:** 2026-06-16 · **Last updated:** 2026-07-25 **Scope:**
+(2026-06-18, Wave 1 of the MR-* implementation phase) — MR-3/MR-4 added the build-alongside postconditions **B15** (no-reassign-when-bitmask-unchanged) and **B16** (constant-cell-bounds); MR-6 added **B17** (pooled-output stale guard); the cross-chunk substrate prerequisite added **B18–B21**. Since then FL-1/FL-2 added **B22/B23**, the MP-* orchestration arc added **B24–B27**, MP-5 added **B28–B30**, MP-6 added **B31–B33**, the chunk load-animation toggle regression added **B34–B36**, and MP-7 added **B37–B39** (neighbor-map permutation guards, MH-12 —
+cardinals via face culling, diagonals via fluid corner geometry, and the shared acquire-site offset table) — **tip is B39 (39 baselines); see §4 for the arc detail.**
+**Created:** 2026-06-16 · **Last updated:** 2026-07-26 **Scope:**
 `Assets/Editor/Validation/Meshing/` — the `MeshingValidationSuite` + `MeshingTestWorld` +
 `MeshOracle` + `MeshAssert` + `TestMeshBlockPalette` harness (menu item **`Minecraft Clone/Dev/Validate Meshing`**). **Sibling:** [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](LIGHTING_VALIDATION_HARNESS_FIDELITY.md) — same document shape; the meshing suite was built test-first as that suite's younger sibling.
 
@@ -186,12 +187,12 @@ The lighting suite already closed its half of this loop: A1 routes harness input
 
 #### MH-10 — Border-face culling never consults a neighbor (consumption gap) · **CLOSED (2026-06-21)** · gated LI-1 / P-2 / TG-4 Ph.4
 
-- **Was:** `MeshingTestWorld.Run` hard-wired all 8 neighbor voxel maps (`NeighborBack/Front/Left/Right` + 4 diagonals) to a length-0 `emptyMap`, and every fixture placed blocks in the chunk interior so culling never read a neighbor. The job's "cull this boundary face because the neighbor across the border is solid"
+- **Was:** `MeshingTestWorld.Run` hard-wired all 8 neighbor voxel maps (`NeighborS/N/W/E` + 4 diagonals — named `NeighborBack/Front/Left/Right` until MP-7) to a length-0 `emptyMap`, and every fixture placed blocks in the chunk interior so culling never read a neighbor. The job's "cull this boundary face because the neighbor across the border is solid"
   logic — the meshing-side consumer of all neighbor data — had zero coverage. (Promoted from the §4
   "out of scope" bullet because LI-1/P-2/TG-4 depend on it.)
-- **Closed by** (`MeshingValidationSuite.CrossChunk.cs`; harness capability `MeshingTestWorld.SetNeighborRightBlock`
+- **Closed by** (`MeshingValidationSuite.CrossChunk.cs`; harness capability `MeshingTestWorld.SetNeighborEastBlock`
   — a lazily-created, persistent full-`MAP_SIZE` +X neighbor map, opt-in so B1–B17 keep the empty-neighbor behavior). Face counts are hand-derived from the `ShouldDrawFace` contract (no call to the job's predicate; A4-avoidance), guarded by a B3-style palette-assumption check; the prove-red (severing the neighbor from the job) reds **only B19/B21**, confirming non-vacuity:
-    - **B18 — neighbor air ⇒ border face drawn** (24 verts). A *populated-air* `NeighborRight` proves the map is consulted and air does not cull — distinct from the length-0 "no neighbor → draw" the suite relied on.
+    - **B18 — neighbor air ⇒ border face drawn** (24 verts). A *populated-air* `NeighborE` proves the map is consulted and air does not cull — distinct from the length-0 "no neighbor → draw" the suite relied on.
     - **B19 — neighbor opaque-solid ⇒ +X face culled** (20 verts; exactly one face fewer than B18). The core culling assertion.
     - **B20 — transparent (renderNeighborFaces) neighbor does not cull** (24 verts) — pins the opaque-vs-transparent predicate against a silent flip.
 - **Effort:** 🟡 medium (harness capability + hand-derived face-count oracle).
@@ -199,10 +200,43 @@ The lighting suite already closed its half of this loop: A1 routes harness input
 #### MH-11 — Neighbor input never routed through the production fill path (fill-faithful gap) · **CLOSED (2026-06-21)** · gated LI-1 / P-2 / TG-4 Ph.4
 
 - **Was:** even with MH-10's culling baselines, `MeshingTestWorld` built its maps *directly* — it never called the production `ChunkData.FillJobVoxelMap` (which `WorldData.FillChunkMapForJob` delegates to) that the halo/slab substrate actually rewrites. So MH-10 alone guarded the job's *consumption contract*, not the *fill* that produces the neighbor planes (the meshing analog of the lighting A1 fix).
-- **Closed by** `MeshingTestWorld.SetNeighborRightBlockViaProductionFill` — a throwaway `ChunkData` gets the occluder, then `ChunkData.FillJobVoxelMap` produces the +X neighbor map exactly as production does:
+- **Closed by** `MeshingTestWorld.SetNeighborEastBlockViaProductionFill` — a throwaway `ChunkData` gets the occluder, then `ChunkData.FillJobVoxelMap` produces the +X neighbor map exactly as production does:
     - **B21 — fill-faithful repeat of B19** (20 verts; culled). **Flips red if the halo/slab substrate under-copies or mis-indexes the border plane** — the actual substrate guard.
-- **Scope note:** the 4 *diagonal* neighbor maps feed only smooth-lighting AO, not culling; their fill-faithful analog is a `SmoothLightingQuality.On` corner test with a populated diagonal map (defer as a follow-up tied to MH-3's per-corner oracle extension).
+- **Scope note:** the 4 *diagonal* neighbor maps do not feed culling. They were long described here as feeding
+  "only smooth-lighting AO" — **that is wrong, corrected 2026-07-26 (MP-7)**: they also drive **fluid corner geometry**. `GenerateFluidMeshData` unpacks them as `n_NE/n_SE/n_SW/n_NW` and feeds them to
+  `GetSmoothedCornerHeight` and `CalculateSymmetricCornerFlow` (`VoxelMeshHelper.cs:746`, `764–780`), **unconditionally — independent of `SmoothLightingQuality`**. So a diagonal fault moves fluid surface vertices, not just shading, and is observable by a geometry oracle without any corner-light oracle. Their fill-faithful analog is still a follow-up; their *routing* is guarded by **B38** (see MH-12).
 - **Effort:** 🟡 medium (the fill wiring is the bulk; the baseline reuses B19's geometry).
+
+#### MH-12 — Neighbor maps could be permuted without any baseline noticing · **CLOSED (2026-07-26)** — cardinals B37, diagonals B38
+
+- **Was:** B18–B21 populate only the **+X** map, so they red on any swap that displaces +X but stay green on a swap among the other seven. That is the second half of orchestration finding **F6**: the job's Back/Front/Left/Right fields were mapped onto `NeighborMapSet`'s compass names by a hand-written 16-line wiring table, and a transposed pair there is a cross-chunk seam-culling bug with no red baseline.
+- **Closed for the 4 cardinals by** MP-7's `MeshingTestWorld.SetNeighborBlock(CardinalNeighbor, …)` (the single `+X` map generalized to four lazily-created ones; unpopulated directions still pass the length-0
+  `emptyMap`, so B1–B36 are behaviorally unchanged) plus:
+    - **B37 — every cardinal map reaches its own slot** (80 verts). One isolated opaque cube per cardinal border, **each at a different Y**, with the matching occluder in each neighbor map. Correctly routed, every cube loses exactly its outward face. Under any permutation a probe reads a cell that direction never occupied — wrong Y *and* wrong border plane (+X reads `x=0`, −X reads `x=15`, +Z reads `z=0`, −Z reads `z=15`) — so the face is drawn instead and the count rises.
+    - **Prove-red:** swapping `NeighborW`↔`NeighborN` inside the job's own `GetVoxelStateFromLocalPos`
+      routing yields `expected 80, got 88` and reds **exactly B37** — B18–B21 stay green, which is the non-vacuity evidence that B37 covers what they structurally cannot.
+- **Closed for the 4 diagonals by** **B38** — see below. (The first draft of this entry deferred them as
+  "AO-only, gated on MH-3". Both halves of that were wrong; see MH-11's corrected scope note.)
+- **B38 — every diagonal map reaches its own slot**, via **fluid corner geometry** rather than culling.
+  `GetSmoothedCornerHeight` averages `templates[level]` over the centre plus each same-fluid neighbour, and admits the diagonal term **only when an adjacent cardinal is also fluid** (`VoxelMeshHelper.cs:1148`) — so the fixture puts water on a chunk corner, water in the adjoining cardinal map, and **lower-level** water in the diagonal map (uniform levels would average back to the same height, the same degeneracy MH-3 hit). Each diagonal is exercised at its own Y, so a permuted map is read where that direction holds air, the diagonal term drops out, and
+  the corner returns to full height. The assertion is a strict **inequality against a no-diagonal control run**, never template arithmetic — A4-safe.
+- **Effort:** 🟢 for the cardinal half; 🟡 for the diagonal half as executed (a cross-chunk cardinal is forced into the fixture by the adjacency gate, and the oracle is a per-corner comparison rather than one count).
+- **B39 — the acquire-site table (added by a second review round, 2026-07-26).** B37/B38 guard the *harness → job-field* routing. A **second** direction→offset table sits one layer above, in what was
+  `WorldJobManager.AcquireNeighborMaps` — and it feeds **both** the meshing and lighting schedules while **neither** suite executed it (`MeshingTestWorld` and `LightingTestWorld` each build their own
+  `NeighborMapSet`; the latter's comment even says it "mirrors production's `AcquireNeighborMaps`"). Extracted to `Helpers/NeighborMapAssembler.Build` behind an explicit `INeighborMapSource` implemented on
+  `WorldJobManager` (the `IMeshDrainHost`/`IMeshCompletionHost` pattern — explicit so pooled-buffer acquisition does not widen a type reachable as `World.Instance.JobManager`). B39 drives it with a fake source returning a coordinate-encoding marker per call and asserts all 16 slots — voxel **and** light. **Prove-red is also the proof the gap was real:** transposing N/S inside `Build` reds **only B39**
+  (`slot holds marker 1102, expected 1104`) while the other 37 meshing baselines *and all 88 lighting baselines* stay green — 126 baselines blind to a swap that would misroute every N/S seam in both pipelines.
+
+#### MH-13 — Neighbor **light** map permutation is unguarded · **OPEN**
+
+- **Gap:** the 8 `Light*` neighbor fields received the identical hand-written rewiring as the voxel maps, at the same four construction sites (`WorldJobManager.cs:540–547`, `IsolatedJobProbe.cs`,
+  `EditorChunkPipelineRunner.cs`, `StartupCalibrationProbe.cs`) plus `Helpers.NeighborMapAssembler.Build`
+  (whose light half **is** now guarded, by B39) — and **nothing observes them**. `MeshingTestWorld.Run` passes the length-0 `emptyLight` to all eight light slots, and B37/B38 run at `SmoothLightingQuality.Off`, so neither can see a light transposition.
+- **Failure scenario:** transpose `LightS`/`LightN` at any of those sites and cross-seam smooth lighting samples the wrong chunk — a visible light discontinuity along every N/S chunk border, with
+  `Validate Meshing` still fully green.
+- **Not a live bug:** the current wiring was verified correct on both producer and consumer ends (2026-07-26, three independent traces). This is a *regression* guard, and MP-7 lowered that risk by making all four sites self-checking (`LightS = …LightS`).
+- **Candidate approach (sketch, not validated):** it likely does **not** need MH-3's exact-value corner oracle. With the centre light map dark and exactly one neighbour light map bright, a border vertex either receives light or does not — a directional presence/absence assertion, no sampling LUT involved. Needs the per-direction neighbour *light* map generalization first (the light twin of what MP-7 did for voxels).
+- **Effort:** 🟡, and the oracle sketch above should be proven before the estimate is trusted.
 
 ---
 
@@ -225,28 +259,36 @@ The lighting suite already closed its half of this loop: A1 routes harness input
   `UpdateMeshNative`, so `ChunkLoadAnimationTestFixture` can construct a real `Chunk` with nothing but a stub
   `World` + `Settings`. The baselines guard the `enableChunkLoadAnimations` **toggle regression**
   (`_FIXED_BUGS.md` Chunk Management #08, introduced 2026-04-09 and unnoticed for ~3.5 months): **B34** a chunk built while animations were off still animates once the setting is enabled mid-session, **B35** the mid-session-added component is seeded relative to the chunk instead of lerping to the world origin, **B36**
-  construction-time controls. Suite tip is now **B36** (36 baselines).
+  construction-time controls.
   > **What is still not covered here:** the `Reset` path's lazy creation (it needs `worldData.RequestChunk`,
   > which the fixture deliberately does not stand up), and the real pause-menu toggle in play mode. The
   > one-shot latch itself is exercised only indirectly. In-game confirmation remains the acceptance path.
+
+  **MP-7 (2026-07-26) added B37–B38** — the neighbor-map **permutation guards** (MH-12 below), F6's coverage half: **B37** catches any permutation of the 4 cardinal maps through border-face culling, **B38** any permutation of the 4 diagonals through fluid corner height (the diagonals never reach culling, so they needed a geometry probe instead). A `/code-review` round on MP-7 also split out **MH-13** — the 8 `Light*`
+  maps, identically rewired and still unguarded — and a second round added **B39** for the *acquire-site*
+  offset table that feeds both the meshing and lighting schedules. Suite tip is now **B39** (39 baselines).
 
 ---
 
 ## 5. Phased backlog snapshot
 
-| Phase | Gap   | Finding                                              | Gates                       | Status | Effort |
-|-------|-------|------------------------------------------------------|-----------------------------|--------|--------|
-| 0     | MH-1  | Bounds-extent assertion                              | MR-4 (premise)              | CLOSED | 🟢     |
-| 0     | MH-2  | Pooled-output stale-data guard                       | MR-6 (pool variant)         | CLOSED | 🟢     |
-| 0     | MH-9  | `SectionStats` per-section ranges asserted           | per-section refactors; MR-4 | CLOSED | 🟢     |
-| 1     | MH-3  | Smooth-lighting *value* coverage (uniform)           | MR-2; prereq MR-8           | CLOSED | 🟡     |
-| 1     | MH-4  | UV / texture *value* oracle                          | MR-2; prereq MR-8           | CLOSED | 🟡     |
-| 2     | MH-5  | `MeshPostProcessJob` / section-space output coverage | MR-5                        | CLOSED | 🟡     |
-| 2     | MH-6  | `SectionRenderer` apply-path harness                 | MR-3; MR-4 (renderer)       | CLOSED | 🟡     |
-| 3     | MH-7  | Custom/cross-mesh + lava palette & oracle            | MR-4 caveat; blind spot     | OPEN   | 🟡     |
-| 4     | MH-8  | Merge-invariant geometry oracle                      | MR-8                        | OPEN   | 🔴     |
-| 5     | MH-10 | Border-face culling consumption (B18–B20)            | **LI-1 / P-2 / TG-4 Ph.4**  | CLOSED | 🟡     |
-| 5     | MH-11 | Neighbor fill-faithful via production path (B21)     | **LI-1 / P-2 / TG-4 Ph.4**  | CLOSED | 🟡     |
+| Phase | Gap   | Finding                                               | Gates                       | Status | Effort |
+|-------|-------|-------------------------------------------------------|-----------------------------|--------|--------|
+| 0     | MH-1  | Bounds-extent assertion                               | MR-4 (premise)              | CLOSED | 🟢     |
+| 0     | MH-2  | Pooled-output stale-data guard                        | MR-6 (pool variant)         | CLOSED | 🟢     |
+| 0     | MH-9  | `SectionStats` per-section ranges asserted            | per-section refactors; MR-4 | CLOSED | 🟢     |
+| 1     | MH-3  | Smooth-lighting *value* coverage (uniform)            | MR-2; prereq MR-8           | CLOSED | 🟡     |
+| 1     | MH-4  | UV / texture *value* oracle                           | MR-2; prereq MR-8           | CLOSED | 🟡     |
+| 2     | MH-5  | `MeshPostProcessJob` / section-space output coverage  | MR-5                        | CLOSED | 🟡     |
+| 2     | MH-6  | `SectionRenderer` apply-path harness                  | MR-3; MR-4 (renderer)       | CLOSED | 🟡     |
+| 3     | MH-7  | Custom/cross-mesh + lava palette & oracle             | MR-4 caveat; blind spot     | OPEN   | 🟡     |
+| 4     | MH-8  | Merge-invariant geometry oracle                       | MR-8                        | OPEN   | 🔴     |
+| 5     | MH-10 | Border-face culling consumption (B18–B20)             | **LI-1 / P-2 / TG-4 Ph.4**  | CLOSED | 🟡     |
+| 5     | MH-11 | Neighbor fill-faithful via production path (B21)      | **LI-1 / P-2 / TG-4 Ph.4**  | CLOSED | 🟡     |
+| 5     | MH-12 | Voxel-map permutation — cardinals (B37)               | MP-7 / F6                   | CLOSED | 🟢     |
+| 5     | MH-12 | Voxel-map permutation — diagonals, fluid corner (B38) | MP-7 / F6                   | CLOSED | 🟡     |
+| 5     | MH-12 | Acquire-site offset table, voxel + light (B39)        | MP-7 review 2; mesh+light   | CLOSED | 🟡     |
+| 5     | MH-13 | **Light**-map permutation (all 8, no coverage)        | regression guard; sketch    | OPEN   | 🟡     |
 
 > **Wave 1 (2026-06-17):** MH-9, MH-1, MH-4 closed (baselines B1–B9 green, one commit each).
 > **Wave 2 (2026-06-18):** MH-5 (B10) + MH-3 (B11) closed (baselines B1–B11 green, one commit each).

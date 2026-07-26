@@ -8,15 +8,13 @@
 
 ## 1. Executive Summary
 
-The chunk lifecycle is a multi-stage, asynchronous pipeline orchestrated by **`World.Update()`** on the main thread. Each stage hands off work to the Unity Job System (Burst-compiled background threads) and processes results in subsequent frames. The pipeline has three primary
-stages:
+The chunk lifecycle is a multi-stage, asynchronous pipeline orchestrated by **`World.Update()`** on the main thread. Each stage hands off work to the Unity Job System (Burst-compiled background threads) and processes results in subsequent frames. The pipeline has three primary stages:
 
 1. **Generation** — Produces terrain voxel data (block IDs, heightmap).
 2. **Lighting** — Calculates sunlight and blocklight via BFS flood-fill.
 3. **Meshing** — Builds renderable mesh geometry from lit voxel data.
 
-Each stage is gated by **readiness checks** on the chunk and its neighbors. A chunk cannot advance to the next stage until all prerequisites are met. The system is designed to converge — light values are bounded (0–15), BFS is deterministic — but edge cases in scheduling order,
-throttling, and cross-chunk dependencies can delay convergence under load.
+Each stage is gated by **readiness checks** on the chunk and its neighbors. A chunk cannot advance to the next stage until all prerequisites are met. The system is designed to converge — light values are bounded (0–15), BFS is deterministic — but edge cases in scheduling order, throttling, and cross-chunk dependencies can delay convergence under load.
 
 ---
 
@@ -157,14 +155,12 @@ flowchart TD
 All three completed-job sweeps (`ProcessGenerationJobs`, `ProcessLightingJobs`, `ProcessMeshJobs`)
 release each job's containers *inside* the loop and remove the dictionary entries only *after* it.
 `ProcessGenerationJobs` and `ProcessMeshJobs` additionally take an optional
-`PipelinePassBudget.Window` ms ceiling (P-4 §3.4, checked between jobs): on expiry the sweep breaks and the remaining completed jobs stay enrolled for next frame — the same retry contract as the generation pass's structure-mods budget. `default` = unbudgeted (the startup
-coroutine's path);
+`PipelinePassBudget.Window` ms ceiling (P-4 §3.4, checked between jobs): on expiry the sweep breaks and the remaining completed jobs stay enrolled for next frame — the same retry contract as the generation pass's structure-mods budget. `default` = unbudgeted (the startup coroutine's path);
 `ProcessLightingJobs` is deliberately not budgeted (its merge cost is §2/P-3 territory). Before HF-2, one exception mid-pass aborted the sweep and stranded already-released jobs in the dictionary — every later frame re-touched their disposed containers, spamming
 `ObjectDisposedException` and burying the original thrower. Each pass now isolates faults per job:
 
 - **`Handle.Complete()` throws** → the job may still own its buffers, so nothing is released; the entry stays enrolled and is retried (isolated again) next pass.
-- **Post-`Complete()` processing throws** → one `Debug.LogError` (errors are the regression signal), the job's containers are still released and the entry enrolled for removal, and the pass continues. Per pass: lighting re-flags the chunk (`HasLightChangesToProcess = true`,
-  stability unknown → a corrective pass runs) and counts the fault in `WorldJobManager.LastFaultedLightJobs`; generation releases only if the happy path had not (its budget-retry `continue` paths intentionally keep jobs un-released across frames); meshing returns the buffers in a
+- **Post-`Complete()` processing throws** → one `Debug.LogError` (errors are the regression signal), the job's containers are still released and the entry enrolled for removal, and the pass continues. Per pass: lighting re-flags the chunk (`HasLightChangesToProcess = true`, stability unknown → a corrective pass runs) and counts the fault in `WorldJobManager.LastFaultedLightJobs`; generation releases only if the happy path had not (its budget-retry `continue` paths intentionally keep jobs un-released across frames); meshing returns the buffers in a
   `finally` and the chunk keeps its previous mesh.
 - **Flag pairing holds on fault:** the lighting pass clears `IsAwaitingMainThreadProcess` in a per-job `finally`, so a faulted merge cannot park its chunk forever.
 
@@ -177,12 +173,10 @@ That loop structure — iterate → complete → merge → release-inside-loop �
 - `ProcessMeshJobs` drives it through a **separate cached driver object** (`WorldJobManager.MeshCompletionDriver`) — one class cannot implement `IJobCompletionDriver<ChunkCoord>` twice, and the lighting pass already holds that slot on `this`. Its hooks are the former inline body:
   merge = resolve the chunk + `ApplyMeshData`, release = the MR-6 output return + pooled-input release, remove = `MeshJobs.Remove` **only** (meshing has no promotion concept — the mesh build queue retries on its own).
 
-The skeleton carries the P-4 §3.4 budget knobs as optional parameters (`window` ms ceiling checked *between* jobs, `startIndex` rotating visit start), so the unbudgeted lighting/sim callers stay byte-identical while the budgeted mesh pass keeps its rotating-start fairness. A
-window break simply leaves the un-visited remainder unenrolled — it stays in the registry and is retried next frame, holding its pooled buffers one more frame (bounded by the in-flight cap). The *cursor* stays owned by the caller, because advancing it is per-pass policy
-(production gates the advance on `window.HasBudget` so the flag-off legs keep legacy order).
+The skeleton carries the P-4 §3.4 budget knobs as optional parameters (`window` ms ceiling checked *between* jobs, `startIndex` rotating visit start), so the unbudgeted lighting/sim callers stay byte-identical while the budgeted mesh pass keeps its rotating-start fairness. A window break simply leaves the un-visited remainder unenrolled — it stays in the registry and is retried next frame, holding its pooled buffers one more frame (bounded by the in-flight cap). The *cursor* stays owned by the caller, because advancing it is per-pass policy (production
+gates the advance on `window.HasBudget` so the flag-off legs keep legacy order).
 
-This is the completion-pass twin of the scheduling-side `LightingScanDecision` (§ shared arm decision) — HF-4. The skeleton's ordering contract is pinned world-free by the meshing suite's **B27** (recording fake driver: stage-1 carries over without releasing, stage-2 still
-releases + enrolls, remove strictly after the merge loop, window break, rotating start).
+This is the completion-pass twin of the scheduling-side `LightingScanDecision` (§ shared arm decision) — HF-4. The skeleton's ordering contract is pinned world-free by the meshing suite's **B27** (recording fake driver: stage-1 carries over without releasing, stage-2 still releases + enrolls, remove strictly after the merge loop, window break, rotating start).
 
 ### Step 5: Lighting Ready-Set Scan (The Critical Section)
 
@@ -190,11 +184,9 @@ This is where most pipeline stalls originate. The dirty set lives in `LightWorkS
 `NeedsEdgeCheck`) have been set to `true`:
 
 - **Ready** — visited by the per-frame scan.
-- **Waiting** — parked chunks whose readiness gate failed (or whose lighting job is in-flight); invisible to the scan until a promotion event moves them back. This keeps the per-frame cost at O (schedulable) instead of O (dirty) — under a backlog, blocked chunks no longer pay
-  8-neighbor gate evaluations every frame.
+- **Waiting** — parked chunks whose readiness gate failed (or whose lighting job is in-flight); invisible to the scan until a promotion event moves them back. This keeps the per-frame cost at O (schedulable) instead of O (dirty) — under a backlog, blocked chunks no longer pay 8-neighbor gate evaluations every frame.
 
-**Registration:** The three lighting flags on `ChunkData` are properties with setters. When any flag transitions to `true`, a static callback (`ChunkData.OnLightWorkFlagged` → `LightWorkScheduler.Flag`) enqueues the chunk's position into a `ConcurrentQueue<Vector2Int>` — this is
-thread-safe and supports flag-setting from background deserialization threads (`ChunkSerializer.ReadChunkInternal` via `Task.Run`). The main thread drains this queue into the ready set at the start of the scan (promoting parked entries).
+**Registration:** The three lighting flags on `ChunkData` are properties with setters. When any flag transitions to `true`, a static callback (`ChunkData.OnLightWorkFlagged` → `LightWorkScheduler.Flag`) enqueues the chunk's position into a `ConcurrentQueue<Vector2Int>` — this is thread-safe and supports flag-setting from background deserialization threads (`ChunkSerializer.ReadChunkInternal` via `Task.Run`). The main thread drains this queue into the ready set at the start of the scan (promoting parked entries).
 
 **Demotion (parking):** A visited ready chunk is moved to waiting when it cannot make progress: it is unpopulated, its lighting job is still in-flight, or its flags remain set but no branch could schedule (a readiness gate failed).
 
@@ -205,14 +197,12 @@ thread-safe and supports flag-setting from background deserialization threads (`
 3. **Lighting job completed** — the completed-job sweep in `ProcessLightingJobs` (the last event in an `AreNeighborsReadyAndLit` unblock chain, and what un-parks a chunk re-flagged mid-flight).
 4. **Own flag transition** — `Flag` → staging drain (covers e.g. cross-chunk mods landing on a parked chunk).
 
-**Fail-safe:** Every ~1 second (`FULL_LIGHT_SCAN_SECONDS`), a full scan of `worldData.Chunks.Values` runs to catch any chunks that were missed by the callback (e.g., flags set before the callback was registered), and `PromoteAll` moves the entire waiting set back to ready. This
-prevents permanent stalls: a missed promotion event degrades to ≤1 s of latency, never a deadlock. With `enableDiagnosticLogs`, a recurring non-zero fail-safe promotion count is logged — it means an unblock event lacks a promotion hook.
+**Fail-safe:** Every ~1 second (`FULL_LIGHT_SCAN_SECONDS`), a full scan of `worldData.Chunks.Values` runs to catch any chunks that were missed by the callback (e.g., flags set before the callback was registered), and `PromoteAll` moves the entire waiting set back to ready. This prevents permanent stalls: a missed promotion event degrades to ≤1 s of latency, never a deadlock. With `enableDiagnosticLogs`, a recurring non-zero fail-safe promotion count is logged — it means an unblock event lacks a promotion hook.
 
 **Self-cleaning:** When the scan encounters a position whose chunk was unloaded (`TryGetValue` returns false), the stale entry is removed from both sets automatically. When a chunk's flags are all clear after processing, it is also removed.
 
 **Shared arm decision:** The per-chunk arm selection below (initial vs. edge vs. regular vs. remove vs. park) is the pure function `LightingScanDecision.EvaluateReadyChunk` (`Assets/Scripts/Helpers/LightingScanDecision.cs`). Both `World.Update`'s scan and the editor
-`LightingFrameSimulator`'s scheduler mode call it, so the live pipeline and its validation harness can never disagree on which arm a ready chunk takes (the shared-guard pattern of `LightingScheduleDecision`; roadmap AS-2 / HF-4). The pseudocode below is that function's logic
-inlined for readability.
+`LightingFrameSimulator`'s scheduler mode call it, so the live pipeline and its validation harness can never disagree on which arm a ready chunk takes (the shared-guard pattern of `LightingScheduleDecision`; roadmap AS-2 / HF-4). The pseudocode below is that function's logic inlined for readability.
 
 ```
 // Drain thread-safe staging queue into main-thread ready set (promotes parked entries):
@@ -267,8 +257,7 @@ foreach pos in snapshot:
 
 > [!IMPORTANT]
 > ### Critical Scheduling Detail
-> When the edge-check path in the lighting scan sets `HasLightChangesToProcess = true` but `ScheduleLightingUpdate()` returns `false` (e.g., job already exists — shouldn't happen due to the earlier `lightingJobs.ContainsKey` guard), the flag would remain set and fall through to
-the regular path.
+> When the edge-check path in the lighting scan sets `HasLightChangesToProcess = true` but `ScheduleLightingUpdate()` returns `false` (e.g., job already exists — shouldn't happen due to the earlier `lightingJobs.ContainsKey` guard), the flag would remain set and fall through to the regular path.
 > However, because `ScheduleLightingUpdate` reads `NeedsEdgeCheck` internally and clears it, the **fallback path effectively performs the edge check anyway**, but under the weaker `AreNeighborsDataReady` gate instead of `AreNeighborsReadyAndLit`.
 
 ---
@@ -326,14 +315,10 @@ flowchart TD
 
 #### Load-arm failure contract (CP-3)
 
-The async load arm is no longer a fire-and-forget without a failure contract (the F1 silent-stall class): `LoadOrGenerateChunk` wraps its body and, on any fault, logs **one** `Debug.LogError`, clears the placeholder's `IsLoading` (identity-guarded — only if the placeholder is
-still the same instance AND pool lifecycle it admitted, via `ChunkData.LifecycleEpoch`, so a late fault can never clear the flag on a successor load even when the pool re-issues the same object for the same coord), and returns. The mid-await unload guard inside the load body uses
-the same instance + epoch check. The placeholder stays in `worldData.Chunks`; the next `CheckViewDistance` boundary crossing re-enqueues it and `DrainGenerationRequests` re-admits it — natural retry for transient I/O faults. A *persistently* faulting file surfaces as a repeating
-error log (loud), and a *corrupt* payload keeps its own deliberate arm: `ChunkSerializer.Deserialize` catches the parse failure, **returns the pooled shell and its attached sections to the concurrent pools** (no leak), and yields null →
-"not on disk" → regenerate. The storage boundary keeps the two outcomes distinct: a thrown I/O fault must **never** surface as the null "not on disk" result, or the load arm would regenerate terrain over the player's saved data — `RegionFile.LoadChunkData` returns null only for
-its explicit corrupt-shape branches and rethrows unexpected faults, and `ChunkStorageManager.GetRegion`
-evicts a faulted `Lazy<RegionFile>` so one transient open fault cannot poison the region for the session. Teardown cancellation (`OperationCanceledException`) stays a rethrow — not a fault. Guarded by `Minecraft Clone/Dev/Validate Deserialization Robustness` (NS-1 seed, B1–B7;
-dev-only
+The async load arm is no longer a fire-and-forget without a failure contract (the F1 silent-stall class): `LoadOrGenerateChunk` wraps its body and, on any fault, logs **one** `Debug.LogError`, clears the placeholder's `IsLoading` (identity-guarded — only if the placeholder is still the same instance AND pool lifecycle it admitted, via `ChunkData.LifecycleEpoch`, so a late fault can never clear the flag on a successor load even when the pool re-issues the same object for the same coord), and returns. The mid-await unload guard inside the load body uses
+the same instance + epoch check. The placeholder stays in `worldData.Chunks`; the next `CheckViewDistance` boundary crossing re-enqueues it and `DrainGenerationRequests` re-admits it — natural retry for transient I/O faults. A *persistently* faulting file surfaces as a repeating error log (loud), and a *corrupt* payload keeps its own deliberate arm: `ChunkSerializer.Deserialize` catches the parse failure, **returns the pooled shell and its attached sections to the concurrent pools** (no leak), and yields null →
+"not on disk" → regenerate. The storage boundary keeps the two outcomes distinct: a thrown I/O fault must **never** surface as the null "not on disk" result, or the load arm would regenerate terrain over the player's saved data — `RegionFile.LoadChunkData` returns null only for its explicit corrupt-shape branches and rethrows unexpected faults, and `ChunkStorageManager.GetRegion`
+evicts a faulted `Lazy<RegionFile>` so one transient open fault cannot poison the region for the session. Teardown cancellation (`OperationCanceledException`) stays a rethrow — not a fault. Guarded by `Minecraft Clone/Dev/Validate Deserialization Robustness` (NS-1 seed, B1–B7; dev-only
 `ChunkStorageManager.InjectLoadFaults` seam); see the CP doc §3.3/§7 CP-3.
 
 ### 5.2 Lighting Pipeline
@@ -482,15 +467,12 @@ sequenceDiagram
 
 ### Cross-Chunk Sunlight Guard Logic
 
-`ProcessLightingJobs` routes every cross-chunk mod through `LightingJobProcessor.RouteCrossChunkMod` (drop / persist / defer / apply), then applies the per-voxel decision via `CrossChunkLightModApplier.ComputeSunlight` — shared with the editor lighting validation suite. Three
-rules guard sunlight, all evaluated against the neighbor's **current** value:
+`ProcessLightingJobs` routes every cross-chunk mod through `LightingJobProcessor.RouteCrossChunkMod` (drop / persist / defer / apply), then applies the per-voxel decision via `CrossChunkLightModApplier.ComputeSunlight` — shared with the editor lighting validation suite. Three rules guard sunlight, all evaluated against the neighbor's **current** value:
 
-1. **Only-increase guard:** If `mod.LightLevel > 0 AND mod.LightLevel < currentSunlight` → skip (and an equal value is a no-op). Cross-chunk mods are computed against a stale schedule-time snapshot, so they may only **raise** sunlight; the neighbor's own column recalculation owns
-   decreases.
+1. **Only-increase guard:** If `mod.LightLevel > 0 AND mod.LightLevel < currentSunlight` → skip (and an equal value is a no-op). Cross-chunk mods are computed against a stale schedule-time snapshot, so they may only **raise** sunlight; the neighbor's own column recalculation owns decreases.
 
-2. **Bug 11 in-chunk-support veto:** A removal (`mod.LightLevel == 0`) is skipped when a voxel *inside the receiving chunk* still independently supports the current value (`CrossChunkLightModApplier.InChunkSunlightSupport ≥ currentSunlight`). Support is attenuated by the target
-   voxel's own opacity via `LightAttenuation.Attenuate`, and fully-opaque neighbors (which cannot propagate sky light) are excluded. Without this, two adjacent chunks that removed each other's shared seam column against stale snapshots oscillate forever (the reloaded-world
-   stall). See baselines B48/B49 and `LIGHTING_SYSTEM_OVERVIEW.md` §3.7.
+2. **Bug 11 in-chunk-support veto:** A removal (`mod.LightLevel == 0`) is skipped when a voxel *inside the receiving chunk* still independently supports the current value (`CrossChunkLightModApplier.InChunkSunlightSupport ≥ currentSunlight`). Support is attenuated by the target voxel's own opacity via `LightAttenuation.Attenuate`, and fully-opaque neighbors (which cannot propagate sky light) are excluded. Without this, two adjacent chunks that removed each other's shared seam column against stale snapshots oscillate forever (the reloaded-world stall).
+   See baselines B48/B49 and `LIGHTING_SYSTEM_OVERVIEW.md` §3.7.
 
 3. **Genuine darkness (level=0, unsupported):** Applied. These are critical for block removal/placement to propagate shadow correctly across borders.
 
@@ -519,12 +501,10 @@ flowchart TD
 > ### When is NeedsEdgeCheck set?
 > There are three set sites (plus one indirect trigger):
 > 1. **Disk load** — `LoadOrGenerateChunk` sets `NeedsEdgeCheck = true` for chunks loaded with stable lighting (may have stale border lighting from a previous session).
-> 2. **Post-stabilization re-arm (iterative rounds)** — `ProcessLightingJobs` re-arms `NeedsEdgeCheck` (+ `HasLightChangesToProcess`) on a chunk each time its lighting job reports `IsStable`, as long as `RemainingEdgeCheckRounds > 0` (default 2). This is what gives **freshly
-     generated** chunks their edge checks — they get them after their initial lighting stabilizes, not when `NeedsInitialLighting` clears.
+> 2. **Post-stabilization re-arm (iterative rounds)** — `ProcessLightingJobs` re-arms `NeedsEdgeCheck` (+ `HasLightChangesToProcess`) on a chunk each time its lighting job reports `IsStable`, as long as `RemainingEdgeCheckRounds > 0` (default 2). This is what gives **freshly generated** chunks their edge checks — they get them after their initial lighting stabilizes, not when `NeedsInitialLighting` clears.
 > 3. **Neighbor propagation** — when a chunk re-arms in (2) it also calls `TriggerNeighborEdgeChecks`, setting `NeedsEdgeCheck` on its 4 cardinal neighbors that are populated and past initial lighting.
 >
-> *Indirect (Bug 05 fix):* a **border-column opacity edit** does not set `NeedsEdgeCheck` directly — it re-grants `RemainingEdgeCheckRounds` (to 1) in `ModifyVoxel`, so the *next* stable pass re-arms via site (2). This gives a post-generation edit its reconciling border check
-even after generation spent the original 2 rounds.
+> *Indirect (Bug 05 fix):* a **border-column opacity edit** does not set `NeedsEdgeCheck` directly — it re-grants `RemainingEdgeCheckRounds` (to 1) in `ModifyVoxel`, so the *next* stable pass re-arms via site (2). This gives a post-generation edit its reconciling border check even after generation spent the original 2 rounds.
 >
 > Round 1 fixes the immediate frontier against the latest neighbor data; round 2 reconciles the remainder after neighbors have run their own edge checks. The counter is `[NonSerialized]` and reset to 2 by `ChunkData.Reset()`.
 
@@ -557,8 +537,7 @@ A lighting job reports `IsStable = true` only when ALL of the following are true
 When `IsStable = true`:
 
 - A mesh rebuild is requested for the center chunk and its neighbors (`RequestChunkMeshRebuild` + `RequestNeighborMeshRebuilds`).
-- If `RemainingEdgeCheckRounds > 0`, the counter is decremented and the chunk re-arms `NeedsEdgeCheck` + `HasLightChangesToProcess` on itself and `NeedsEdgeCheck` on its 4 cardinal neighbors (`TriggerNeighborEdgeChecks`). So a "stable" chunk normally still runs up to two more
-  lighting passes for iterative border convergence (see §7).
+- If `RemainingEdgeCheckRounds > 0`, the counter is decremented and the chunk re-arms `NeedsEdgeCheck` + `HasLightChangesToProcess` on itself and `NeedsEdgeCheck` on its 4 cardinal neighbors (`TriggerNeighborEdgeChecks`). So a "stable" chunk normally still runs up to two more lighting passes for iterative border convergence (see §7).
 
 When `IsStable = false`:
 
@@ -567,8 +546,7 @@ When `IsStable = false`:
 - The chunk re-enters the lighting scan next frame.
 
 > [!NOTE]
-> The stability test itself is computed only from the BFS queues + raw `CrossChunkLightMods.Length` inside the job. On the main thread, `LightingJobProcessor.IsEffectivelyStable` then overrides it to `true` when the only outstanding mods target out-of-world positions (which can
-never be consumed) — otherwise world-boundary chunks would reschedule lighting indefinitely. *(WS-3 note: with XZ fully unbounded, cross-chunk light mods — always horizontal, same Y — can no longer be out-of-world, so this override is effectively dead for XZ; undeliverable
+> The stability test itself is computed only from the BFS queues + raw `CrossChunkLightMods.Length` inside the job. On the main thread, `LightingJobProcessor.IsEffectivelyStable` then overrides it to `true` when the only outstanding mods target out-of-world positions (which can never be consumed) — otherwise world-boundary chunks would reschedule lighting indefinitely. *(WS-3 note: with XZ fully unbounded, cross-chunk light mods — always horizontal, same Y — can no longer be out-of-world, so this override is effectively dead for XZ; undeliverable
 frontier mods take the `PersistUndeliverable` route instead, which lets a frontier chunk settle exactly like any interior frontier.)*
 
 ---
@@ -577,29 +555,24 @@ frontier mods take the `PersistUndeliverable` route instead, which lets a fronti
 
 ### 9.1 Dictionary Iteration + Throttle Starvation
 
-**Mechanism:** The lighting scan previously iterated `worldData.Chunks.Values` (a `Dictionary<Vector2Int, ChunkData>`). Dictionary iteration order is **non-deterministic** and may change when entries are added/removed. Combined with the `maxLightJobsPerFrame = 32` throttle and
-the `break`, certain chunks could be consistently visited late in the iteration and starved if the throttle was exhausted by chunks visited earlier.
+**Mechanism:** The lighting scan previously iterated `worldData.Chunks.Values` (a `Dictionary<Vector2Int, ChunkData>`). Dictionary iteration order is **non-deterministic** and may change when entries are added/removed. Combined with the `maxLightJobsPerFrame = 32` throttle and the `break`, certain chunks could be consistently visited late in the iteration and starved if the throttle was exhausted by chunks visited earlier.
 
 **Risk Level:** Low. ~~Medium~~.
 
-**Status:** ✅ **MITIGATED** — The lighting scan now iterates a dirty set containing only chunks with pending work, instead of all loaded chunks. This drastically reduces iteration count during steady state (0–5 entries vs 625+). The `HashSet` iteration order is still
-non-deterministic, but with far fewer entries, throttle starvation is effectively eliminated. MT-2 further split the dirty set into ready/waiting subsets (`LightWorkScheduler`), so under a backlog the scan visits only schedulable chunks — gate-blocked chunks are parked and
-re-enter via event-driven promotion (see Step 5).
+**Status:** ✅ **MITIGATED** — The lighting scan now iterates a dirty set containing only chunks with pending work, instead of all loaded chunks. This drastically reduces iteration count during steady state (0–5 entries vs 625+). The `HashSet` iteration order is still non-deterministic, but with far fewer entries, throttle starvation is effectively eliminated. MT-2 further split the dirty set into ready/waiting subsets (`LightWorkScheduler`), so under a backlog the scan visits only schedulable chunks — gate-blocked chunks are parked and re-enter via
+event-driven promotion (see Step 5).
 
-*P-4 §3.4 note:* the throttle itself is now a rate quota (`maxLightJobsPerFrame × unscaledDeltaTime × 60`) plus a Stopwatch ms ceiling instead of the fixed count — but the **break semantics this section depends on are unchanged**: a budget break leaves the un-served remainder in
-the READY set (never parked), exactly like the old count break, so no new promotion event is needed.
+*P-4 §3.4 note:* the throttle itself is now a rate quota (`maxLightJobsPerFrame × unscaledDeltaTime × 60`) plus a Stopwatch ms ceiling instead of the fixed count — but the **break semantics this section depends on are unchanged**: a budget break leaves the un-served remainder in the READY set (never parked), exactly like the old count break, so no new promotion event is needed.
 
 ### 9.2 Cross-Chunk Mod Ping-Pong
 
-**Mechanism:** When chunk A's lighting job produces cross-chunk mods for neighbor B, B gets `HasLightChangesToProcess = true`. B then runs its lighting job, potentially producing mods back for A. This sets A's `HasLightChangesToProcess = true` again, preventing A from being
-meshed (because `ScheduleMeshing` checks this flag on the center chunk).
+**Mechanism:** When chunk A's lighting job produces cross-chunk mods for neighbor B, B gets `HasLightChangesToProcess = true`. B then runs its lighting job, potentially producing mods back for A. This sets A's `HasLightChangesToProcess = true` again, preventing A from being meshed (because `ScheduleMeshing` checks this flag on the center chunk).
 
 **Convergence:** Light values are bounded 0-15 and the BFS is monotonic within a pass. The cross-chunk sunlight guard (only INCREASE allowed for non-zero mods) further constrains oscillation. This should converge in 2-3 rounds.
 
 **Risk Level:** Low for isolated chunks. Medium when combined with continuous new chunk loading (see 9.3).
 
-**Status:** ✅ **FIXED** — Removed `lightingJobs.ContainsKey(chunkCoord)` from the center chunk gate in `ScheduleMeshing`. The meshing job and lighting job now operate on independent snapshot copies of the voxel data, so they can safely run in parallel. Any stale lighting is
-automatically corrected by the subsequent `RequestChunkMeshRebuild` when the lighting job stabilizes.
+**Status:** ✅ **FIXED** — Removed `lightingJobs.ContainsKey(chunkCoord)` from the center chunk gate in `ScheduleMeshing`. The meshing job and lighting job now operate on independent snapshot copies of the voxel data, so they can safely run in parallel. Any stale lighting is automatically corrected by the subsequent `RequestChunkMeshRebuild` when the lighting job stabilizes.
 
 ### 9.3 Wave-Front Starvation (The Likely Deadlock Candidate)
 
@@ -621,8 +594,7 @@ This creates a **starvation cascade** where interior chunks are perpetually bloc
 
 ### 9.4 Edge Check Gate Strictness
 
-**Mechanism:** `NeedsEdgeCheck` requires `AreNeighborsReadyAndLit` to fire via the primary path. If neighbors are perpetually cycling through lighting passes (due to 9.3), the edge check never gets the strict gate satisfied. However, the fallback path (section 7) means the edge
-check eventually fires with the weaker gate.
+**Mechanism:** `NeedsEdgeCheck` requires `AreNeighborsReadyAndLit` to fire via the primary path. If neighbors are perpetually cycling through lighting passes (due to 9.3), the edge check never gets the strict gate satisfied. However, the fallback path (section 7) means the edge check eventually fires with the weaker gate.
 
 **Risk Level:** Low for correctness (fallback exists). But the fallback might run edge checks against stale data, producing suboptimal corrections.
 
@@ -638,6 +610,18 @@ check eventually fires with the weaker gate.
 If the chunk is not added to `_meshBuildQueue` (e.g., because `chunk.isActive` was false at the time, or the chunk wasn't in the `_chunkMap` yet), and no subsequent code path re-adds it, the chunk is **permanently orphaned** from the mesh queue.
 
 **Risk Level:** Medium. The guards in `RequestChunkMeshRebuild` (`chunk == null || !chunk.IsActive`, plus `MeshBuildQueue.TryEnqueue`'s by-coordinate duplicate rejection) can filter out valid requests if timing is unfortunate.
+
+> **MP-1 (2026-07-24) — the drops are observable, not just conventional.** This risk was originally rated
+> on the basis that *nothing observed a drop*, so correctness rested entirely on the convention that every
+> drop site has a later re-request. `World.CountMeshRequest` now runs at the top of
+> `RequestChunkMeshRebuild` and tallies `MeshRequestTotal` against the two drop buckets
+> `MeshRequestNullDrops` / `MeshRequestInactiveDrops`, warning once with the offending coord and reporting
+> the ratio in the `[MP-1]` diagnostics dump. It is `[Conditional("UNITY_EDITOR")]` +
+> `[Conditional("DEVELOPMENT_BUILD")]`, so the machinery compiles out of release builds entirely.
+>
+> This **measures** the population race; it does not close it. A dropped request is still dropped — the
+> probe only means a session that suffers one leaves evidence instead of a silently missing mesh. The
+> risk level therefore stays Medium.
 
 > **MP-3 (2026-07-24) — one drop vector closed.** A distinct drop existed at the *drain*, not the request:
 > a rebuild requested while the chunk's mesh job was in flight was dequeued and dropped against the job's
@@ -694,8 +678,7 @@ if (isJobRunning || isProcessingLight) continue; // Skip unload
 
 1. **"Large swathes of chunks not being meshed"** — Interior chunks whose edge-neighbors were unloaded are stuck with `HasLightChangesToProcess = true`.
 2. **"Semi-reproducible when loading chunks from the same direction"** — Directional movement creates a leading edge that generates cross-chunk mods for interior chunks, then the trailing edge unloads, stranding them.
-3. **"Fully unloading and reloading fixes the issue"** — When the stuck chunk is finally unloaded (e.g., player moves far away and eventually `HasLightChangesToProcess` is cleared via some path), or when returning to the area reloads the missing neighbor, the lighting can finally
-   proceed.
+3. **"Fully unloading and reloading fixes the issue"** — When the stuck chunk is finally unloaded (e.g., player moves far away and eventually `HasLightChangesToProcess` is cleared via some path), or when returning to the area reloads the missing neighbor, the lighting can finally proceed.
 
 **Risk Level:** **CRITICAL** — Creates a permanent, non-self-resolving deadlock under normal gameplay conditions.
 
@@ -704,24 +687,18 @@ if (isJobRunning || isProcessingLight) continue; // Skip unload
 
 - **Strand guard (unchanged intent, narrowed trigger).** Unloading is still deferred (`DeferWouldStrand`) when a populated neighbor with `HasLightChangesToProcess`/`NeedsInitialLighting` would be stranded — **but only if that neighbor is itself within the unload distance**
   (`!IsBeyondUnloadDistance`). An in-range neighbor genuinely needs this chunk's data and can still make progress, so the deadlock this section describes stays guarded.
-- **P-4 rec 3 — persist-and-unload the pinned trail.** A neighbor that is *itself* beyond the unload distance no longer defers the unload: it is being reclaimed on this or a later pass, so stranding it is harmless. Consequently an out-of-range chunk pinned *only* by its own
-  pending/initial lighting — whose lighting can never complete because a further-out neighbor was never generated (the missing-neighbor gate) — takes the `UnloadPersistLightPending` arm: it forces `NeedsInitialLighting = true` (a full re-light on reload, captured by the
-  synchronous save snapshot; fresh regeneration for an unmodified chunk), persists its pending sunlight columns via `LightingStateManager.AddPending`/`PersistOrphanedSunlightColumns`, and unloads. This drains the "pinned trail" (perf analysis §3.3) that previously climbed
-  unbounded behind a moving player.
+- **P-4 rec 3 — persist-and-unload the pinned trail.** A neighbor that is *itself* beyond the unload distance no longer defers the unload: it is being reclaimed on this or a later pass, so stranding it is harmless. Consequently an out-of-range chunk pinned *only* by its own pending/initial lighting — whose lighting can never complete because a further-out neighbor was never generated (the missing-neighbor gate) — takes the `UnloadPersistLightPending` arm: it forces `NeedsInitialLighting = true` (a full re-light on reload, captured by the synchronous save
+  snapshot; fresh regeneration for an unmodified chunk), persists its pending sunlight columns via `LightingStateManager.AddPending`/`PersistOrphanedSunlightColumns`, and unloads. This drains the "pinned trail" (perf analysis §3.3) that previously climbed unbounded behind a moving player.
 
-Precedence is `job → in-range-strand → persist-light → unload`: the strand check sits **above** the light-persist arm so a chunk an in-range neighbor needs always defers rather than shedding its lighting. The only residual is a bounded boundary shell — out-of-range chunks whose
-*buffer-band* (kept, in-range) neighbor is stuck light-pending — which self-resolves the moment the player moves it past the boundary. Verified in-game (soak: beyond-unload-unreclaimable 743 → ~0–2, `Deferred — light` 308 → 0; durability: edit → unload → reload preserves the edit
+Precedence is `job → in-range-strand → persist-light → unload`: the strand check sits **above** the light-persist arm so a chunk an in-range neighbor needs always defers rather than shedding its lighting. The only residual is a bounded boundary shell — out-of-range chunks whose *buffer-band* (kept, in-range) neighbor is stuck light-pending — which self-resolves the moment the player moves it past the boundary. Verified in-game (soak: beyond-unload-unreclaimable 743 → ~0–2, `Deferred — light` 308 → 0; durability: edit → unload → reload preserves the edit
 and its lighting).
 
 **Unload save failure contract (CP-6).** The modified-chunk save the teardown fires is no longer fire-and-forget-with-swallowed-failure (the F5 silent-data-loss hole): `ChunkStorageManager.SaveChunkAsync` returns `ChunkSaveResult` (`Written`/`Canceled`/`Failed`/
 `FailedPermanent`), and a `Failed` **or `Canceled`** save hands its serialization snapshot — the edits' only surviving copy once the `ChunkData` is pool-recycled a few lines later — to the storage manager's coord-keyed **failed-save retry registry**. `ModifiedChunks.Remove`
 deliberately stays at fire time: durability responsibility transfers with the snapshot, and the recycled `ChunkData` ref must never linger in (or re-enter) `ModifiedChunks`, where the pool would hand it to a different chunk. The registry is drained per frame (`World.Update` →
-`DrainFailedSaveRetries`, backoff 1→30 s), flushed synchronously for a coord about to be loaded (`LoadChunkAsync` reload guard — a returning player never reads pre-edit bytes), and flushed one final time in the synchronous `SaveAllModifiedChunks` path at quit/force-unload —
-**before** the per-chunk live saves and regardless of whether
-`ModifiedChunks` is empty, so pending entries are never skipped and a stale snapshot can never overwrite newer just-synced bytes (retryably-failing entries are retained there, so a live-session force-unload keeps them recoverable; `StorageManager.Dispose` makes one last attempt
-per remaining entry). Every successful write also stages a **supersede** op that drops a pending entry only when the entry's **data-freshness sequence** (stamped at capture time) is older — newer failures survive regardless of completion order (B10), and failed *sync* saves stage
-a snapshot too (B12). Staging `Canceled` saves matters because cancellation only comes from the quit token, and a canceled save's chunk may already be gone from `ModifiedChunks` — the quit flush writes the staged snapshot synchronously. Deterministic failures (zero-length
-serialization, or a chunk exceeding the region record limit — `ChunkTooLargeException`) are `FailedPermanent`: released loudly, never retried. Guarded by `Minecraft Clone/Dev/Validate Save Durability` (B1–B13, dev-only `InjectSaveFaults`/`InjectZeroLengthSerializes`/
+`DrainFailedSaveRetries`, backoff 1→30 s), flushed synchronously for a coord about to be loaded (`LoadChunkAsync` reload guard — a returning player never reads pre-edit bytes), and flushed one final time in the synchronous `SaveAllModifiedChunks` path at quit/force-unload — **before** the per-chunk live saves and regardless of whether
+`ModifiedChunks` is empty, so pending entries are never skipped and a stale snapshot can never overwrite newer just-synced bytes (retryably-failing entries are retained there, so a live-session force-unload keeps them recoverable; `StorageManager.Dispose` makes one last attempt per remaining entry). Every successful write also stages a **supersede** op that drops a pending entry only when the entry's **data-freshness sequence** (stamped at capture time) is older — newer failures survive regardless of completion order (B10), and failed *sync* saves stage
+a snapshot too (B12). Staging `Canceled` saves matters because cancellation only comes from the quit token, and a canceled save's chunk may already be gone from `ModifiedChunks` — the quit flush writes the staged snapshot synchronously. Deterministic failures (zero-length serialization, or a chunk exceeding the region record limit — `ChunkTooLargeException`) are `FailedPermanent`: released loudly, never retried. Guarded by `Minecraft Clone/Dev/Validate Save Durability` (B1–B13, dev-only `InjectSaveFaults`/`InjectZeroLengthSerializes`/
 `InjectTooLargeSaves` seams); see the CP doc §4.3/§7 CP-6 and the storage doc §5.1.
 
 ---

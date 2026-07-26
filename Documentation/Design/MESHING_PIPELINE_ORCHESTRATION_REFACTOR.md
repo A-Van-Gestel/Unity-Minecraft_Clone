@@ -152,7 +152,7 @@ This is the meshing analog of the lighting suite's pre-AS-2 B6/B7 state, and the
 | F3 | **Three owners flip section visibility via `SetActive`** — `UpdateMeshNative` (vertex-count toggle, SR:122–128), `SectionRenderer.Clear()` (SR:256), `Chunk.Release`/`Reset` (parent object + renderer clears). This is the culling doc's §7.3 conflict, named there as a likely source of the previous culling attempt's corruption; its Phase 0.5 split (`forceRenderingOff` for occlusion, owned exclusively by the future `VisibilityManager`) is verified still unimplemented.                                                                                                                                                                                                                                                                                                                                                                                                                         |          MP-5          |
 | F4 | **`ChunksToDraw` / `CreateMesh` is a vestigial stage with a lifecycle hole.** Post-MR-5, `ApplyMeshData` uploads everything and the section objects are already active — `CreateMesh` only triggers the one-shot load animation, drained **one chunk per frame** (W:1731–1741). The names lie about what the stage does; the queue holds `Chunk` references that survive pool recycling (the guard checks *destroyed*, not *recycled*, W:1737), so a drain can trigger the animation for the slot's **new** lifecycle (whose `_hasPlayedLoadAnimation` was reset) before its own mesh exists; and the queue is never cleared on unload. Benign today (animation-only) but it is exactly the stale-visibility-actor class §7.3 warns about. **✅ CLOSED (MP-6, 2026-07-25) by deleting the stage** — the trigger moved into the apply, so there is no queue, no cross-frame reference, and nothing to clear. |          MP-6          |
 | F5 | **`ProcessMeshJobs` duplicates the completion-pass skeleton inline.** The HF-2 two-stage isolation + release-inside/remove-after ordering is hand-written (WJM:875–929) while the identical structure was extracted for lighting (`LightingCompletionPass` — already fully generic over `TKey`). The harness cannot replay mesh pass bookkeeping (the mesh analog of lighting fidelity **B7**, which took an in-game `ObjectDisposedException` cascade to discover).                                                                                                                                                                                                                                                                                                                                                                                                                                        |          MP-4          |
-| F6 | **Neighbor naming asymmetry.** `MeshGenerationJob` fields use Back/Front/Left/Right(+combos) while `NeighborMapSet` uses compass N/S/E/W; the mapping is a hand-written 16-line wiring table (WJM:355–371). B18–B21 pin only the +X plane; a swapped pair on another face would be a seam-culling bug no baseline reds.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |          MP-7          |
+| F6 | **Neighbor naming asymmetry.** `MeshGenerationJob` fields use Back/Front/Left/Right(+combos) while `NeighborMapSet` uses compass N/S/E/W; the mapping is a hand-written 16-line wiring table (WJM:531–547 — the audit's `355–371` was stale). B18–B21 pin only the +X plane; a swapped pair on another face would be a seam-culling bug no baseline reds. **✅ CLOSED (MP-7, 2026-07-26):** that table is compass-named at all four wiring sites, so the *job-side* mapping no longer exists to be transposed, and **B37**/**B38** red on any cardinal or diagonal voxel-map permutation. **Scope of the claim:** F6 named this table only. A *second*, distinct compass→offset table lives one layer up in `AcquireNeighborMaps` (WJM:709–724) — closed separately by **B39**; the 8 light maps' harness invisibility is fidelity **MH-13**.                                                               |          MP-7          |
 | F7 | **Drain re-probes gates O(queue) per frame under backlog.** Gate-failing chunks stay in place and are re-tested (8-neighbor probes each) every frame — the pre-MT-2 lighting shape. No starvation (the walk continues past them) and queue depths are moderate, so this is SECONDARY: an event-promoted parked set is sketched as a v2 extension, measure-first (§8).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |        §8 (v2)         |
 | F8 | **Request-drop safety is convention-only** (pipeline doc §9.5, still rated Medium). `RequestChunkMeshRebuild` silently drops null/inactive chunks; correctness relies on every drop having a later re-request (activation, load, gen-complete sites). Nothing observes drops.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |          MP-1          |
 
@@ -307,7 +307,7 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 | **MP-4 — Completion-pass unification** ✅ **DONE**                      | `Helpers/JobCompletionPass.cs` (generalized/renamed); `WorldJobManager.ProcessMeshJobs` + mesh driver; B27 skeleton-order baseline                           |   🟡   | —                     |
 | **MP-5 — GS-5 Phase 0.5 ownership split** ✅ **DONE**                   | `SectionRenderer.cs`; renderer-fixture baselines B28–B30; culling-doc + perf-report checkbox flips                                                           |   🟢   | —                     |
 | **MP-6 — Draw-tail re-home (`ChunksToDraw`)** ✅ **DONE**               | `Chunk.cs`, `World.cs` step 8, `WorldJobManager.cs`, `SettingsManager.cs`; new `Helpers/IMeshCompletionHost.cs` + `Helpers/MeshCompletionDriver.cs`; B31–B33 |   🟢   | MP-1 (evidence)       |
-| **MP-7 — Naming & wiring hygiene**                                      | `Jobs/MeshGenerationJob.cs` field rename; `WorldJobManager.cs` wiring; pipeline-doc §9.5 refresh                                                             |   🟢   | —                     |
+| ✅ **MP-7 — Naming & wiring hygiene** (done 2026-07-26)                 | `Jobs/MeshGenerationJob.cs` field rename; all 4 wiring sites; B37 permutation guard; pipeline-doc §9.5 refresh                                               |   🟢   | —                     |
 
 **Minimal standalone-value set:** MP-1 + MP-2 (coverage) or MP-5 alone (unblocks GS-5 — it has no dependency on the others and the performance report asks for it early). **Validation is built alongside, not after** — MP-2/3/4/5 each add their baselines in the same commit as the code.
 
@@ -553,13 +553,13 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 >   updates, place/break all correct; no warnings observed. Objective, session-cumulative:
 >
 >   | Probe | Reading |
->                   |---|---|
->                   | merge attempts | **32,728** (routing demonstrably live — this is what a broken routing would flatline) |
->                   | gone-chunk discards | 406 (1.2 %) |
->                   | **stale-instance** | **0 / 32,728** |
->                   | F1 in-flight retries | 273 / 814,801 (0.03 % — no runaway; §3.2 Option C stays deferred) |
->                   | F8 request drops | 0 / 7,079,946 |
->                   | F4 recycled draw-refs | 0 / 32,322 |
+>                       |---|---|
+>                       | merge attempts | **32,728** (routing demonstrably live — this is what a broken routing would flatline) |
+>                       | gone-chunk discards | 406 (1.2 %) |
+>                       | **stale-instance** | **0 / 32,728** |
+>                       | F1 in-flight retries | 273 / 814,801 (0.03 % — no runaway; §3.2 Option C stays deferred) |
+>                       | F8 request drops | 0 / 7,079,946 |
+>                       | F4 recycled draw-refs | 0 / 32,322 |
 >
 >   Editor log for the whole session: **0 `[MESHING]` lines, 0 `ObjectDisposedException`, 0 NRE** — the
 >   fidelity-B7 cascade falsifier came back empty. Pipeline drained to **0 in-flight across all three job
@@ -772,28 +772,91 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
   `NeighborRight→NeighborE`, + the four diagonals and the eight light twins) via `refactor-safely`
   — naming-only inside a Burst job (no semantic change; B18–B21 + full suite pin the +X plane and output equality). Update the wiring block, which becomes self-checking (`NeighborS = jobData.Neighbors.NeighborS`). Refresh `CHUNK_LIFECYCLE_PIPELINE.md` §9.5's text with MP-1's probe reality (convention now observable).
 
-    > **Anchors re-verified 2026-07-25 (the audit's `WJM:355–371` is ~170 lines stale — MP-4/MP-6 moved it).**
-    > The wiring block is **`WorldJobManager.cs:531–547`** — 8 voxel lines, the `LightMap` line, then 8 light
-    > lines. The job's fields are `MeshGenerationJob.cs:52–74` (voxel) and `:81–102` (light).
-    > **The mapping is already unambiguous and three independent sources agree** — the job's own field
-    > comments (`NeighborBack // South (-Z)`), the wiring block, and `Jobs/Data/NeighborMapSet.cs:16–19` fed
-    > by `AcquireVoxelMap(center.Neighbor(dx, dz))` (N = `(0,+1)`, E = `(+1,0)`, S = `(0,-1)`, W = `(-1,0)`).
-    > So: **Back→S, Front→N, Left→W, Right→E, FrontRight→NE, BackRight→SE, BackLeft→SW, FrontLeft→NW**, and
-    > the eight `Light*` twins identically. The executor should re-confirm rather than re-derive.
-    >
-    > **On the Rider MCP** (MP-4/MP-5/MP-6 each recorded it "not exposed", which reads like a project-level
-    > defect — it is not): the cause was simply that the **Rider IDE was not running** in those sessions, per
-    > CLAUDE.md's "requires Rider to be running with the solution open". With Rider open, `rename_refactoring`
-    > is available and is the **preferred** tool for this phase — a 16-field rename is exactly what it is for,
-    > and it catches `nameof(...)` / `<see cref>` references a grep sweep can miss. Run `preview: true` first
-    > (the `refactor-safely` mandate) and audit the blast radius.
-    >
-    > **If the tools are missing, that is recoverable mid-session — do not fall back and do not restart.**
-    > Open Rider, then reconnect the server with the `/mcp` command; the tools appear immediately in the
-    > running session (verified 2026-07-25). Manual edits + an exhaustive Grep sweep are the fallback only
-    > when Rider genuinely cannot be run.
+  > ⚠ **Pre-execution packet — retained as the record of what the executor was told, but its field names and
+  > anchors describe the code BEFORE MP-7 ran (2026-07-26); do not navigate by them.** The fields are now
+  > `NeighborS/N/W/E/NE/SE/SW/NW` plus the `Light*` twins, and every wiring site reads
+  > `NeighborS = …NeighborS`. The compass→offset table referenced below also moved, to
+  > `Helpers/NeighborMapAssembler.cs`.
+  >
+  > **Anchors re-verified 2026-07-25 (the audit's `WJM:355–371` is ~170 lines stale — MP-4/MP-6 moved it).**
+  > The wiring block is **`WorldJobManager.cs:531–547`** — 8 voxel lines, the `LightMap` line, then 8 light
+  > lines. The job's fields are `MeshGenerationJob.cs:52–74` (voxel) and `:81–102` (light).
+  > **The mapping is already unambiguous and three independent sources agree** — the job's own field
+  > comments (`NeighborBack // South (-Z)`), the wiring block, and `Jobs/Data/NeighborMapSet.cs:16–19` fed
+  > by `AcquireVoxelMap(center.Neighbor(dx, dz))` (N = `(0,+1)`, E = `(+1,0)`, S = `(0,-1)`, W = `(-1,0)`).
+  > So: **Back→S, Front→N, Left→W, Right→E, FrontRight→NE, BackRight→SE, BackLeft→SW, FrontLeft→NW**, and
+  > the eight `Light*` twins identically. The executor should re-confirm rather than re-derive.
+  >
+  > **On the Rider MCP** (MP-4/MP-5/MP-6 each recorded it "not exposed", which reads like a project-level
+  > defect — it is not): the cause was simply that the **Rider IDE was not running** in those sessions, per
+  > CLAUDE.md's "requires Rider to be running with the solution open". With Rider open, `rename_refactoring`
+  > is available and is the **preferred** tool for this phase — a 16-field rename is exactly what it is for,
+  > and it catches `nameof(...)` / `<see cref>` references a grep sweep can miss. Run `preview: true` first
+  > (the `refactor-safely` mandate) and audit the blast radius.
+  >
+  > **If the tools are missing, that is recoverable mid-session — do not fall back and do not restart.**
+  > Open Rider, then reconnect the server with the `/mcp` command; the tools appear immediately in the
+  > running session (verified 2026-07-25). Manual edits + an exhaustive Grep sweep are the fallback only
+  > when Rider genuinely cannot be run.
 - **Acceptance:** universal gate (byte-identical output — `OutputsEqual` across the suite is the real guard) + in-game seam check (fly a chunk border; no doubled/missing border faces).
 - **Doc-sync:** pipeline doc §9.5; meshing fidelity doc §2 if it names the old fields. **Serialization:** none.
+
+> ✅ **IMPLEMENTED + IN-GAME CONFIRMED 2026-07-26 — and F6 closed on both halves, not one.**
+> (Seam check flown across multiple chunk-border axes including a non-+X seam — no doubled or missing border
+> faces, no fluid-corner artifacts. That flight is the real acceptance for a rename whose suite evidence is
+> necessarily indirect, and it covers B38's subject matter directly.) The 16 job fields are compass-named
+> via Rider `rename_refactoring` (preview first; each of the 16 resolved to the predicted 5-file / 5-call-site
+> shape with zero conflicts, and the qualified `MeshGenerationJob.LightBack` form was **required** — an
+> identically-named twin lives on `Benchmarks.MeshProbeInput`). Field order is unchanged, so struct layout,
+> blittability and the Burst ABI are untouched; the `// South (-Z)` axis comments were left exactly as they
+> were, still accurate. Deltas from the packet:
+> - **The rename reached four wiring sites, not one.** Leaving only the job's fields renamed would have moved
+>   F6's hand-mapping rather than retired it (`NeighborS = backCopy`, `NeighborS = input.Back`). So
+>   `MeshProbeInput`'s 16 fields, `EditorChunkPipelineRunner`'s 24 locals and — a consumer the planning grep
+>   **missed and Rider found** — `MeshGenerationBenchmark.BenchmarkVoxelData`'s 8 fields were renamed too.
+>   Every wiring site now reads `NeighborS = …NeighborS`. This is the phase's real deliverable: the *job-side*
+>   mapping is no longer written down anywhere, so it cannot be written down wrong.
+>   **Corrected 2026-07-26 (review round 2) — this claim was first written unqualified, and that was too
+    > strong.** A second compass→offset table survived one layer up, then inline in `AcquireNeighborMaps`
+>   (today `Helpers/NeighborMapAssembler.cs`; the WJM method is a one-line delegation). It feeds **both** the
+>   meshing and lighting schedules and neither suite executed it (both harnesses build their own
+>   `NeighborMapSet`). Closed by the `INeighborMapSource` seam + **B39**, below.
+> - **`<c>` prose is not a tracked reference.** Rider rewrites `cref` but not `<c>NeighborRight</c>`; eight
+>   doc-comment lines needed a manual sweep. Worth remembering for the next rename.
+> - **The suite was extended rather than left as-is (user decision).** A pure rename is not reddable, and
+>   B18–B21's +X-only coverage *is* F6's complaint, so MP-7 also generalized `MeshingTestWorld` to four lazily
+>   created cardinal maps (`SetNeighborBlock(CardinalNeighbor, …)`; unpopulated directions still pass the
+>   length-0 `emptyMap`, so the generalization is inert for every pre-existing fixture — evidenced twice:
+>   **346/346 before any change, 347/347 after** with B37 the only addition; and later the diagonal
+>   generalization was run against the suite *before* B38 existed, holding at **37/37**) and
+>   added **B37**, the cardinal permutation guard — see fidelity **MH-12**. Prove-red: swapping
+>   `NeighborW`↔`NeighborN` in the job's own routing gives `expected 80, got 88` and reds **exactly B37**,
+>   with B18–B21 green. A later `/code-review` round added **B38** for the diagonals (below).
+> - **Honest residual (revised after a `/code-review` round).** The first write-up of this note said the
+>   residual was "the 4 diagonals, AO-only, gated on MH-3". Both halves were wrong. The diagonals also drive
+>   **fluid corner geometry** (`GetSmoothedCornerHeight` / `CalculateSymmetricCornerFlow`, unconditional), so
+>   they are observable without any corner-light oracle — closed here by **B38**. And the review correctly
+>   caught a third surface the note omitted entirely: the **8 `Light*` maps**, which got the identical
+>   rewiring and which no baseline can see (the harness passes `emptyLight` to all eight). That is now
+>   fidelity **MH-13**, open, with a candidate oracle sketched but not proven.
+> - **B38 (diagonals).** Each leg isolates one diagonal — a water source on the matching chunk corner, water
+>   in one adjacent cardinal map (the engine refuses the diagonal term unless an adjacent cardinal is fluid,
+>   `VoxelMeshHelper.cs:1148`), and lower-level water in the diagonal map — and asserts the summed vertex
+>   height strictly drops. Only the slot under test is populated, so any misroute reads a length-0 map and the
+>   two runs coincide. Prove-red: swapping `NeighborNE`↔`NeighborSW` reds **exactly B38**, and only its NE/SW
+>   legs, each reporting `168.7500` vs `168.7500`; B37 and B18–B21 stay green.
+> - **B39 (acquire site, review round 2).** F6's closure claim was first written unqualified; narrowing it
+>   surfaced a *second* direction→offset table in `AcquireNeighborMaps`, feeding **both** the meshing and
+>   lighting schedules and executed by **neither** harness. Extracted to `Helpers/NeighborMapAssembler.Build`
+>   behind an explicit `INeighborMapSource` on `WorldJobManager` (pooled-buffer acquisition must not widen a
+>   type reachable as `World.Instance.JobManager`). B39 asserts all 16 slots with a marker-per-coordinate fake.
+>   **Prove-red doubles as the gap's proof:** transposing N/S reds only B39, with the other 37 meshing
+>   baselines *and all 88 lighting baselines* green.
+> - `Validate Meshing` 36 → **39**, `Mesh Build Queue` 9/9, **`Validate All` 346 → 349/349** (16 suites).
+>   `lint_files` clean on all 8 touched files (the one warning, `MeshGenerationBenchmark.cs:699`, is
+>   pre-existing and outside every edited region). Doc-synced `CHUNK_LIFECYCLE_PIPELINE.md` §9.5 (F8 is now
+>   observable via `CountMeshRequest` — measured, not fixed, so the risk stays Medium), this fidelity doc
+>   (MH-12 + MH-13 + tip B36 → B39), and the meshing-suite skill reference.
 
 ---
 
@@ -872,6 +935,11 @@ it needs play mode or a heavyweight edit-mode world builder, re-tests what B12�
 
 ## Document History
 
+* **v1.9** - MP-7 implemented + **in-game confirmed** (2026-07-26) — **the MP-1…MP-7 arc is COMPLETE; this document is now a record, not a plan.** The 16 `MeshGenerationJob` neighbor fields are compass-named via Rider `rename_refactoring` (16/16 previewed to the predicted 5-file shape, zero conflicts, field order and therefore Burst ABI untouched), and the rename deliberately reached **all four** wiring sites — `WorldJobManager`, `MeshProbeInput`/`StartupCalibrationProbe`, `EditorChunkPipelineRunner`'s locals, and
+  `MeshGenerationBenchmark.BenchmarkVoxelData` (a consumer the planning grep missed and Rider's reference index found). Every site now reads `NeighborS = …NeighborS`, so **F6's job-side mapping no longer exists to be transposed** (a second review round narrowed that claim: the compass→offset table in `AcquireNeighborMaps` is a distinct site, closed by **B39**). On user decision the phase also closed F6's *coverage* half rather than only its naming half: `MeshingTestWorld` generalized to four lazily-created cardinal maps (inert for existing fixtures —
+  **346/346** before any change, **347/347** after, with B37 the only addition; the later diagonal generalization likewise held at **37/37** before B38 existed) plus **B37**, whose prove-red — swapping `NeighborW`↔`NeighborN` in the job's own routing — gives `expected 80, got 88` and reds **exactly B37** while B18–B21 stay green. A `/code-review high` round then corrected the residual twice over: the diagonals are **not** AO-only (they drive fluid corner geometry unconditionally, so **B38** closes them via a corner-height oracle), and the review caught
+  an omitted third surface — the **8 `Light*` maps**, identically rewired and completely unguarded, now fidelity **MH-13** (open). A **third** round narrowed F6's closure claim to the job-side table and closed the *acquire-site* table it excluded — `Helpers/NeighborMapAssembler` + `INeighborMapSource` + **B39**, whose prove-red shows 88 lighting baselines were blind to it. `Validate Meshing` 36 → **39**, **`Validate All` 346 → 349/349**. Doc-synced `CHUNK_LIFECYCLE_PIPELINE.md` §9.5 (F8 now observable via `CountMeshRequest`, measured not fixed — risk
+  stays Medium), the meshing fidelity doc (new MH-12 + MH-13, tip B36 → B39), the lighting fidelity doc (new A0 — the neighbor offset table the lighting harness never executes), `VALIDATION_SUITE_COVERAGE_ROADMAP.md`'s verified counts, `PERSISTENT_CHUNK_STORAGE_P2.md`'s retire-the-fill pointer, and the meshing-suite skill reference.
 * **v1.8** - MP-6 implemented + in-game confirmed (2026-07-25) — **the MP-1…MP-6 arc is CLOSED, only MP-7 remains**: the **draw-tail retirement**. `World.ChunksToDraw`, `World.Update`'s step 8, `Chunk.CreateMesh`, MP-1's F4 probe and `Settings.drawApplyBudgetMs` are all **deleted**; `Chunk.TriggerLoadAnimation()` is now called by the mesh completion pass immediately after `ApplyMeshData`, so no `Chunk` reference survives a frame — **F4's lifecycle hole is eliminated structurally**, and clear-on-teardown is vacuous. Took the **§8.1
   `IMeshCompletionHost` rider** (its precondition held: the whole change is one branch in the merge hook): `MeshCompletionDriver` moved to `Helpers/` as a public class behind a 6-member host interface implemented on `WorldJobManager`, deliberately **excluding** the `[Conditional]` merge probes. **B31–B33** drive the real driver through the real skeleton with a fake host; each prove-red mutation reds exactly its own baseline, including the double-return (`[101, 102, 103, 103]`) that finally observes the 2026-07-25 scratch-lifecycle review finding.
   `Validate Meshing` 30 → **33**, **`Validate All` 343/343**. Doc-synced `CHUNK_LIFECYCLE_PIPELINE.md`
@@ -891,4 +959,5 @@ it needs play mode or a heavyweight edit-mode world builder, re-tests what B12�
 
 ---
 
-**Last Updated:** 2026-07-25 (**MP-1…MP-6 all shipped and CLOSED** — MP-6 plus its §8.1 rider landed the same day, in-game confirmed incl. teleport-thrash pool churn; zero open items. MP-3's in-game repro was retired as structurally unreachable, see its Amended note) **Next Review:** when MP-7 starts (compass-name rename — the last phase), or when GS-5 Phase 1 is scheduled (re-check §5 contract — Phase 0.5 is closed by MP-5, and §4.3's single apply site is now also the load-animation trigger point)
+**Last Updated:** 2026-07-26 (**MP-1…MP-7 ALL shipped, in-game confirmed and CLOSED — the arc is COMPLETE and this document is now a historical record.** MP-7 landed the compass rename across all four wiring sites plus B37's permutation guard, closing F6 on both its naming and coverage halves; zero open items remain in any phase. MP-3's in-game repro was retired as structurally unreachable, see its Amended note) **Next Review:** when GS-5 Phase 1 is scheduled (re-check §5 contract — Phase 0.5 is closed by MP-5, and §4.3's single apply site is now also
+the load-animation trigger point), or if either §8 v2 extension is picked up (F7 drain park/promote, §3.2 Option C) — both still measure-first gated

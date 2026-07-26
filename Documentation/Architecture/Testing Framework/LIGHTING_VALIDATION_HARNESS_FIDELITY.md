@@ -49,6 +49,24 @@ Findings came from a June 2026 audit comparing the harness against production
 These pass green in the suite but the corresponding production code is **not** exercised, so a defect
 there is invisible.
 
+### A0 — The neighbor direction→offset table is never executed · **COVERED ELSEWHERE (2026-07-26, meshing B39)**
+
+- **Was:** `LightingTestWorld` bundles its snapshots into a `NeighborMapSet` by hand — it *mirrors* the
+  production fill rather than calling it. So the compass→offset table that decides **which chunk** each
+  neighbor slot receives (`Helpers.NeighborMapAssembler.Build`, formerly inline in
+  `WorldJobManager.AcquireNeighborMaps`) was executed by **no** lighting scenario, even though the lighting
+  schedule depends on it exactly as meshing does.
+- **Why it matters:** transposing N/S there sends every N/S seam's lighting to the wrong chunk. Measured
+  2026-07-26: that mutation left **all 88 lighting baselines green**.
+- **Covered by** meshing baseline **B39**, which drives `NeighborMapAssembler.Build` through a fake
+  `INeighborMapSource` and asserts all 16 slots — voxel *and* light. Recorded here because the guard lives in
+  the sibling suite: **the lighting harness itself is still blind to this table**, so anyone extending
+  `LightingTestWorld`'s neighbor plumbing should not expect a lighting baseline to catch a mis-slotted map.
+- **Residual (open):** the harness could route through the production assembler instead of mirroring it,
+  which would close it on this side too. Not scheduled — B39 covers the code, and the A1-style fill-faithful
+  rework is the larger prize. See
+  [MESHING_VALIDATION_HARNESS_FIDELITY.md](MESHING_VALIDATION_HARNESS_FIDELITY.md) MH-12.
+
 ### A1 — Section / uniform-sky merge is bypassed entirely ·  **CLOSED (2026-06-13)**
 
 - **Was:** `LightingTestWorld.CompleteLightingJob` merged with `job.LightMap.CopyTo(chunk.Light)` onto a
@@ -776,6 +794,7 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 | C1  | Bug-09 geometry fuzz (randomize geometry)                                                                                                                                                                                                     | **CLOSED**        | —                | done           |
 | B1  | Chunk-unload / persist-replay path                                                                                                                                                                                                            | **CLOSED**        | —                | done           |
 | B4  | Pool-recycle / flag-pairing                                                                                                                                                                                                                   | **CLOSED**        | —                | done           |
+| A0  | Neighbor direction→offset table never executed here                                                                                                                                                                                           | **COVERED (meshing B39)** | —        | 2026-07-26     |
 | A1  | Section / uniform-sky merge bypass                                                                                                                                                                                                            | **CLOSED**        | —                | done           |
 | A2  | Shared mod-routing decision                                                                                                                                                                                                                   | **CLOSED**        | —                | done           |
 
