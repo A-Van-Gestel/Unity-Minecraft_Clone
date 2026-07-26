@@ -24,7 +24,7 @@ the render-distance-scaling session that produced `c7eabd6`, not assumed.
 - [`LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md)
   — RF-2 §5 (clouds tint by `SkyLightColor`) is **absorbed by CL-2** here; RF-7 §4 names cloud
   color/density as storm knobs — CL-4's density parameter is the receiving end.
-- [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) — §5.1 owns the cloud
+- [`../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md`](../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md) — §5.1 owns the cloud
   coordinate rules every item must respect: tiles re-derive through `VoxelToUnity`, pattern
   wrap stays **integer** (v1.11 records the render-distance-scaled tile system CL-* builds on).
 - [`../Architecture/DATA_DRIVEN_SETTINGS_UI.md`](../Architecture/DATA_DRIVEN_SETTINGS_UI.md) —

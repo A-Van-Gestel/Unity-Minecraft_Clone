@@ -1,8 +1,8 @@
-# Command Console System Design
+# Command Console System
 
-**Version:** 1.12
-**Date:** 2026-07-21
-**Status:** **Implemented (v1 arc + CMD-4 + CMD-5)** — the v1 arc (CMD-0..3), **CMD-4 relative `~` coordinates** (§8.2), and **CMD-5 tab autocomplete + PowerShell-style inline ghost suggestion** (§8.3) are all shipped and in-game confirmed. Suite **54** baselines; Validate All **287/287** across 11 suites (2026-07-21). Remaining §8 items (selectable/copyable output, chat, entity selectors, `/fill`) stay deliberate v2+ work.
+**Version:** 1.13
+**Date:** 2026-07-26
+**Status:** **Implemented (Stable)** — the v1 arc (CMD-0..3), **CMD-4 relative `~` coordinates** (§8.2), and **CMD-5 tab autocomplete + PowerShell-style inline ghost suggestion** (§8.3) are all shipped and in-game confirmed. Guarded by the `Validate Command Console` suite (**54** baselines; see [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md) for live aggregate counts). Promoted from `Design/` 2026-07-26. §7 and §8.1–§8.3 are retained as **as-built records**; §8's table is the live extension roadmap — the remaining v2/v3+ rows (selectable/copyable output, chat, entity selectors, permissions) are deferred wishes, each owed a design pass when it becomes concrete.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > An in-game command console (Minecraft-chat-style: `T` opens a left-anchored panel with
@@ -30,7 +30,7 @@ v1 scope).
 - [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) — WS-4c ships this
   system's v1 with `/teleport` as the first command; teleport execution is a thin wrapper over
   its `WorldOrigin` helpers. This doc owns the console; that doc owns the origin machinery.
-- [`WORLD_SCALING_IMPLEMENTATION.md`](WORLD_SCALING_IMPLEMENTATION.md) — grandparent roadmap
+- [`../Design/WORLD_SCALING_IMPLEMENTATION.md`](../Design/WORLD_SCALING_IMPLEMENTATION.md) — grandparent roadmap
   (WS-4 phase table).
 - [`../Guides/CODING_STYLE_GUIDE.md`](../Guides/CODING_STYLE_GUIDE.md) — naming/docstring rules
   for the new public engine surface.
@@ -534,6 +534,15 @@ argument-completion tests — confirmed (reused by B50/B52).
 
 ## Document History
 
+* **v1.13** - **Promoted `Design/` → `Architecture/` (2026-07-26).** The v1 arc plus CMD-3/4/5 are all shipped
+  and in-game confirmed, so this document now describes a live system rather than a proposal; title dropped
+  "Design", status flipped to **Implemented (Stable)**. §7 (phased plan) and §8.1–§8.3 are retained verbatim as
+  as-built records — they are the executor packets each phase actually shipped against. §8's roadmap table stays
+  live: the v2 row is down to selectable/copyable output, and the v3+ row (entity selectors, chat, permissions)
+  is unchanged, each still owed its own design pass when concrete. The dated `Validate All` figure was replaced
+  with a pointer to `VALIDATION_SUITE_COVERAGE_ROADMAP.md` so the aggregate count cannot re-stale here; the
+  suite's own 54 baselines are stated directly. Inbound links updated in `WORLD_SCALING_FLOATING_ORIGIN.md`
+  (promoted alongside).
 * **v1.12** - **ConsoleUI resilience hardening (UI_BUGS #04), in-game confirmed 2026-07-21.** A natural repro
   confirmed the failure mode: a built object is *destroyed* out from under the live view (e.g. `_inputField`
   Unity-null while the panel survives) during heavy chunk churn — a far-lands `/teleport` (user-confirmed) or a

@@ -1,8 +1,9 @@
-# World Scaling — WS-4 Floating Origin Design
+# World Scaling — WS-4 Floating Origin
 
-**Version:** 1.15
-**Date:** 2026-07-20
-**Status:** **Implemented** — every WS-4 phase is shipped and in-game confirmed: WS-4a (origin plumbing),
+**Version:** 1.17
+**Date:** 2026-07-26
+**Status:** **Implemented (Stable)** — promoted from `Design/` 2026-07-26; the WS-4 phase plan (§10) and
+extension roadmap are retained as as-built records. Every WS-4 phase is shipped and in-game confirmed: WS-4a (origin plumbing),
 WS-4b (the shift), WS-4c persistence (`ChunkRelativePosition` player position, level.dat v13), and WS-4c
 tooling (`/teleport` = CMD-2, 2026-07-18). The v2 noise rider is **shipped + in-game confirmed 2026-07-20**
 (terrain normal even at the ±2³¹ edge) — see the extension roadmap and `WORLD_SCALING_IMPLEMENTATION.md` §6.
@@ -36,14 +37,14 @@ systems, no other runtime `worldPos` consumers except `BorderWallShader.shader` 
 
 **Relationship to other documents:**
 
-- [`WORLD_SCALING_IMPLEMENTATION.md`](WORLD_SCALING_IMPLEMENTATION.md) — parent roadmap; this doc
+- [`../Design/WORLD_SCALING_IMPLEMENTATION.md`](../Design/WORLD_SCALING_IMPLEMENTATION.md) — parent roadmap; this doc
   executes its §6 (WS-4). WS-2/WS-3 shipped 2026-07-13; the noise-precision rider stays deferred
   (§1 non-goals).
-- [`WORLD_SCALING_ANALYSIS.md`](WORLD_SCALING_ANALYSIS.md) — grandparent analysis; §3.3 is the
+- [`../Design/WORLD_SCALING_ANALYSIS.md`](../Design/WORLD_SCALING_ANALYSIS.md) — grandparent analysis; §3.3 is the
   design seed. Two of its suggestions are superseded here (§3, §4.2) — drift noted inline.
-- [`../Architecture/AOT_WORLD_MIGRATION_SYSTEM.md`](../Architecture/AOT_WORLD_MIGRATION_SYSTEM.md)
+- [`AOT_WORLD_MIGRATION_SYSTEM.md`](AOT_WORLD_MIGRATION_SYSTEM.md)
   — the v12→v13 level.dat migration in WS-4c follows this protocol.
-- [`../Architecture/CHUNK_LIFECYCLE_PIPELINE.md`](../Architecture/CHUNK_LIFECYCLE_PIPELINE.md) —
+- [`CHUNK_LIFECYCLE_PIPELINE.md`](CHUNK_LIFECYCLE_PIPELINE.md) —
   untouched by this design: streaming/gates are chunk-coord-relative and origin-independent (§2).
 - [`COMMAND_CONSOLE_SYSTEM.md`](COMMAND_CONSOLE_SYSTEM.md) — the WS-4c "dev teleport command" is
   `CMD-2` of the command console system (its own design, 2026-07-16); WS-4c = CMD-2 + the
@@ -71,7 +72,7 @@ systems, no other runtime `worldPos` consumers except `BorderWallShader.shader` 
   phase (decided 2026-07-16). Terrain generation still degrades at ~±2²⁴ ≈ 16.7M voxels; WS-4
   makes *travel* stable, not *generation*. The rider (double-precision per-chunk noise base
   offsets, ⚠️ seed-breaking, world-version-gated) keeps its
-  [`WORLD_SCALING_IMPLEMENTATION.md`](WORLD_SCALING_IMPLEMENTATION.md) §6 spec and ships as its
+  [`../Design/WORLD_SCALING_IMPLEMENTATION.md`](../Design/WORLD_SCALING_IMPLEMENTATION.md) §6 spec and ships as its
   own follow-up — the WS-4c teleport tool (§7) is its test harness when it does.
 - **Entities.** None exist. §4.5 states the rule future entities must follow so they plug in
   without restructuring.
@@ -544,11 +545,11 @@ graduate to work items).
   coordinate pipeline (global "Far Lands (Classic Noise)" setting, default precise), so generation
   is artifact-free toward the ±2³¹ edge; the classic float pipeline — and its Far Lands — is
   preserved bit-identically as the opt-in mode. Detail in
-  [`WORLD_SCALING_IMPLEMENTATION.md`](WORLD_SCALING_IMPLEMENTATION.md) §6. The worm-carver residual
+  [`../Design/WORLD_SCALING_IMPLEMENTATION.md`](../Design/WORLD_SCALING_IMPLEMENTATION.md) §6. The worm-carver residual
   (far worm caves degraded in precise mode) was **closed 2026-07-20** — a cell-local simulation frame
   (Precise64-gated, Classic32 bit-identical) makes worm caves generate correctly to the ±2³¹ border,
   in-game confirmed; see
-  [`WORM_CARVER_FAR_COORDINATE_PRECISION.md`](WORM_CARVER_FAR_COORDINATE_PRECISION.md) (Implemented).
+  [`World Generation/CAVE_GENERATION.md`](World%20Generation/CAVE_GENERATION.md) §3.1.5 (Implemented).
   The *lighting* crash at those magnitudes
   (Bug 19, archived as `_FIXED_BUGS.md` #24) was fixed independently 2026-07-19 — integer column
   routing end-to-end (`SunlightColumnRouting` + `Vector3Int` overloads on the `WorldData`/`ChunkCoord`
@@ -591,7 +592,7 @@ graduate to work items).
   silently defaulted and written away. With ~200 saves on disk spanning v1–v12, this would have blanked the player
   position in every one of them, with no error — the backup being the only recourse.
   <br>This is exactly the coupling
-  [`AOT_WORLD_MIGRATION_SYSTEM.md`](../Architecture/AOT_WORLD_MIGRATION_SYSTEM.md) §1.2 forbids ("a complete
+  [`AOT_WORLD_MIGRATION_SYSTEM.md`](AOT_WORLD_MIGRATION_SYSTEM.md) §1.2 forbids ("a complete
   rewrite of those classes in the future cannot break old migrations"); those steps simply never adopted frozen
   DTOs, and nothing forced the issue until now. Fixed first, as its own commit, by `LegacyLevelDat` — one frozen
   v1–v12 shape all four now read. **The generalization is in the DTO's header:** a step migrating vN→vN+1 only ever
@@ -649,10 +650,19 @@ graduate to work items).
 
 ## Document History
 
+* **v1.17** - **Promoted `Design/` → `Architecture/` (2026-07-26).** Every WS-4 phase is shipped and in-game
+  confirmed and `WorldOrigin` is load-bearing engine surface (`COORDINATE_SPACES_GUIDE.md` and CLAUDE.md's WS-4
+  rule both route readers here), so this document is now authoritative rather than proposed; title dropped
+  "Design", status flipped to **Implemented (Stable)**. §10's phase plan and the extension roadmap are retained
+  as as-built records. Relative links rebased for the new location; the two worm-carver references now point at
+  `Architecture/World Generation/CAVE_GENERATION.md` §3.1.5, which absorbed
+  `WORM_CARVER_FAR_COORDINATE_PRECISION.md` in the same pass.
 * **v1.16** - Worm-carver residual **closed 2026-07-20**: §9's residual note flipped to done (cell-local
   frame shipped + in-game confirmed, worm caves correct to the ±2³¹ border).
 * **v1.15** - Worm-carver residual cross-linked (2026-07-20): §9's residual note now points at
-  [`WORM_CARVER_FAR_COORDINATE_PRECISION.md`](WORM_CARVER_FAR_COORDINATE_PRECISION.md).
+  [`WORM_CARVER_FAR_COORDINATE_PRECISION.md`](../Archived/WORM_CARVER_FAR_COORDINATE_PRECISION.md). *(That document was archived 2026-07-26 and its
+  architectural content merged into `World Generation/CAVE_GENERATION.md` §3.1.5 — see v1.17; the link
+  here is left pointing at the original target because that is what this entry recorded at the time.)*
 * **v1.14** - **v2 noise rider in-game confirmed** (2026-07-20): terrain noise verified normal
   in-game up to and including the ±2³¹ integer-limit world border. §9 closure, extension-roadmap
   v2 row, and status line flipped from "verification pending" to confirmed.
@@ -660,7 +670,7 @@ graduate to work items).
   pending): §9's terrain-degradation limitation closed (struck through with residuals noted) and
   the extension-roadmap v2 row flipped. The rider's shipped design — FNL `Precise64` double
   pipeline, global Far Lands setting (default precise), bit-identical classic path — is owned by
-  [`WORLD_SCALING_IMPLEMENTATION.md`](WORLD_SCALING_IMPLEMENTATION.md) §6 (v2.2).
+  [`../Design/WORLD_SCALING_IMPLEMENTATION.md`](../Design/WORLD_SCALING_IMPLEMENTATION.md) §6 (v2.2).
 * **v1.12** - **CL-1 cloud wind drift** (2026-07-19, `d52b089`): tiles moved from per-tile
   `VoxelToUnity` re-derivation to **root-local placement** — the `Clouds` root alone re-derives
   (exact integer anchor + wrapped sub-block drift remainder), tiles are keyed by cloud-space

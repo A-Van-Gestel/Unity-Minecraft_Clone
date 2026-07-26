@@ -8,7 +8,7 @@ reviews may cite this document.**
 
 Related architecture: `Assets/Scripts/Helpers/WorldOrigin.cs` (the WS-4 reference header),
 `Assets/Scripts/Data/ChunkCoord.cs` (the three chunk-scale reference header),
-`Documentation/Design/WORLD_SCALING_FLOATING_ORIGIN.md`.
+`Documentation/Architecture/WORLD_SCALING_FLOATING_ORIGIN.md`.
 
 ---
 

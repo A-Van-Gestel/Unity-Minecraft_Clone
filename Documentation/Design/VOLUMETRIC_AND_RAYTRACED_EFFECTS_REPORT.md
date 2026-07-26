@@ -50,7 +50,7 @@ that unblocks MR-8's smooth-lighting constraint), VX-9 (heat-haze distortion), V
   the `ushort` light model (sky 4b + RGB 3×4b) that VX-1 uploads and VX-4 extends.
 - [`../Architecture/LIGHTING_SYSTEM_OVERVIEW.md`](../Architecture/LIGHTING_SYSTEM_OVERVIEW.md) —
   the BFS engine VX-4 modifies (per-channel propagation is the extension point).
-- [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) — all
+- [`../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md`](../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md) — all
   GPU volumes are camera-following and sampled in **voxel space** via `_WorldOriginOffset`
   (the LiquidCore/FL-2 precedent); WS-4 coordinate rules apply to every item.
 - [`OM1_DEVICE_CALIBRATION.md`](OM1_DEVICE_CALIBRATION.md) — the experimental tier defaults
