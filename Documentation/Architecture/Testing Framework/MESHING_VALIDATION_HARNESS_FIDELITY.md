@@ -1,8 +1,8 @@
 # Meshing Validation Harness — Fidelity Boundary & Extension Backlog
 
 **Status:** ✅ **Active backlog** — Wave 1 executed 2026-06-17 (MH-1/MH-4/MH-9 closed), Wave 2 executed 2026-06-18 (MH-5/MH-3 closed), Wave 3 executed 2026-06-18 (MH-6 closed — buildable-now portion), Wave 5 executed 2026-06-21 (MH-10/MH-11 cross-chunk border culling closed); see §6. **Optimizations landed (guarded by this suite):** MR-1, MR-7 (2026-06-15); **MR-3 + MR-4 + MR-5**
-(2026-06-18, Wave 1 of the MR-* implementation phase) — MR-3/MR-4 added the build-alongside postconditions **B15** (no-reassign-when-bitmask-unchanged) and **B16** (constant-cell-bounds); MR-6 added **B17** (pooled-output stale guard); the cross-chunk substrate prerequisite added **B18–B21**. Since then FL-1/FL-2 added **B22/B23**, the MP-* orchestration arc added **B24–B27**, MP-5 added **B28–B30**, MP-6 added **B31–B33**, the chunk load-animation toggle regression added **B34–B36**, and MP-7 added **B37–B39** (neighbor-map permutation guards, MH-12 —
-cardinals via face culling, diagonals via fluid corner geometry, and the shared acquire-site offset table) — **tip is B39 (39 baselines); see §4 for the arc detail.**
+(2026-06-18, Wave 1 of the MR-* implementation phase) — MR-3/MR-4 added the build-alongside postconditions **B15** (no-reassign-when-bitmask-unchanged) and **B16** (constant-cell-bounds); MR-6 added **B17** (pooled-output stale guard); the cross-chunk substrate prerequisite added **B18–B21**. Since then FL-1/FL-2 added **B22/B23**, the MP-* orchestration arc added **B24–B27**, MP-5 added **B28–B30**, MP-6 added **B31–B33**, the chunk load-animation toggle regression added **B34–B36**, MP-7 added **B37–B39** (neighbor-map permutation guards, MH-12 —
+cardinals via face culling, diagonals via fluid corner geometry, and the shared acquire-site offset table), and MH-13 added **B40** (the same guard for the eight neighbor **light** maps) — **tip is B40 (40 baselines); see §4 for the arc detail.**
 **Created:** 2026-06-16 · **Last updated:** 2026-07-26 **Scope:**
 `Assets/Editor/Validation/Meshing/` — the `MeshingValidationSuite` + `MeshingTestWorld` +
 `MeshOracle` + `MeshAssert` + `TestMeshBlockPalette` harness (menu item **`Minecraft Clone/Dev/Validate Meshing`**). **Sibling:** [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](LIGHTING_VALIDATION_HARNESS_FIDELITY.md) — same document shape; the meshing suite was built test-first as that suite's younger sibling.
@@ -224,19 +224,28 @@ The lighting suite already closed its half of this loop: A1 routes harness input
 - **B39 — the acquire-site table (added by a second review round, 2026-07-26).** B37/B38 guard the *harness → job-field* routing. A **second** direction→offset table sits one layer above, in what was
   `WorldJobManager.AcquireNeighborMaps` — and it feeds **both** the meshing and lighting schedules while **neither** suite executed it (`MeshingTestWorld` and `LightingTestWorld` each build their own
   `NeighborMapSet`; the latter's comment even says it "mirrors production's `AcquireNeighborMaps`"). Extracted to `Helpers/NeighborMapAssembler.Build` behind an explicit `INeighborMapSource` implemented on
-  `WorldJobManager` (the `IMeshDrainHost`/`IMeshCompletionHost` pattern — explicit so pooled-buffer acquisition does not widen a type reachable as `World.Instance.JobManager`). B39 drives it with a fake source returning a coordinate-encoding marker per call and asserts all 16 slots — voxel **and** light. **Prove-red is also the proof the gap was real:** transposing N/S inside `Build` reds **only B39**
-  (`slot holds marker 1102, expected 1104`) while the other 37 meshing baselines *and all 88 lighting baselines* stay green — 126 baselines blind to a swap that would misroute every N/S seam in both pipelines.
+  `WorldJobManager` (the `IMeshDrainHost`/`IMeshCompletionHost` pattern — explicit so the `ChunkCoord` wrappers stay out of the class's own overload set beside its private `Vector2Int` originals, and buffer acquisition is not discoverable on a `World.Instance.JobManager` reference; note that this prevents accidents, **not** misuse — `INeighborMapSource` is public, so a deliberate cast still reaches a pooled rent with no matching `Return`). B39 drives it with a fake source that mints a unique marker per call and records which chunk it was minted for, then
+  asserts all 16 slots — voxel **and** light — by resolving each slot's marker back to a coordinate. The marker is a **counter, not a packing of the coordinate**: any such packing collides outside a bounded domain, and the light markers narrow to `ushort`, so a far-out center could alias two slots — a silent false green in the very oracle B39 exists to be. **Prove-red is also the proof the gap was real:** transposing N/S inside `Build` reds **only B39**, failing as
+  `slot holds the map for ChunkCoord(3, -6), expected ChunkCoord(3, -4)`. As of MP-7's close (39 baselines) the other **38** meshing baselines *and all 88 lighting baselines* stayed green — 126 baselines blind to a swap that would misroute every N/S seam in both pipelines. Re-run against the rewritten oracle on 2026-07-26 (40 baselines): still exactly B39, with 39 + 88 = **127** green.
 
-#### MH-13 — Neighbor **light** map permutation is unguarded · **OPEN**
+#### MH-13 — Neighbor **light** map permutation is unguarded · **CLOSED (2026-07-26)** — B40
 
-- **Gap:** the 8 `Light*` neighbor fields received the identical hand-written rewiring as the voxel maps, at the same four construction sites (`WorldJobManager.cs:540–547`, `IsolatedJobProbe.cs`,
+- **Was:** the 8 `Light*` neighbor fields received the identical hand-written rewiring as the voxel maps, at the same four construction sites (`WorldJobManager.cs:540–547`, `IsolatedJobProbe.cs`,
   `EditorChunkPipelineRunner.cs`, `StartupCalibrationProbe.cs`) plus `Helpers.NeighborMapAssembler.Build`
-  (whose light half **is** now guarded, by B39) — and **nothing observes them**. `MeshingTestWorld.Run` passes the length-0 `emptyLight` to all eight light slots, and B37/B38 run at `SmoothLightingQuality.Off`, so neither can see a light transposition.
-- **Failure scenario:** transpose `LightS`/`LightN` at any of those sites and cross-seam smooth lighting samples the wrong chunk — a visible light discontinuity along every N/S chunk border, with
-  `Validate Meshing` still fully green.
-- **Not a live bug:** the current wiring was verified correct on both producer and consumer ends (2026-07-26, three independent traces). This is a *regression* guard, and MP-7 lowered that risk by making all four sites self-checking (`LightS = …LightS`).
-- **Candidate approach (sketch, not validated):** it likely does **not** need MH-3's exact-value corner oracle. With the centre light map dark and exactly one neighbour light map bright, a border vertex either receives light or does not — a directional presence/absence assertion, no sampling LUT involved. Needs the per-direction neighbour *light* map generalization first (the light twin of what MP-7 did for voxels).
-- **Effort:** 🟡, and the oracle sketch above should be proven before the estimate is trusted.
+  (whose light half **is** guarded, by B39) — and **nothing observed them**. `MeshingTestWorld.Run` passed the length-0 `emptyLight` to all eight light slots, and B37/B38 run at `SmoothLightingQuality.Off`, so neither could see a light transposition.
+- **Failure scenario:** transpose `LightS`/`LightN` and cross-seam smooth lighting samples the wrong chunk — a visible light discontinuity along every N/S chunk border, with `Validate Meshing` still fully green.
+- **Not a live bug:** the wiring was verified correct on both producer and consumer ends (2026-07-26, three independent traces). B40 is a *regression* guard; MP-7 had already lowered the risk at the four construction sites by making them self-checking (`LightS = …LightS`).
+- **Closed by** `MeshingTestWorld`'s per-direction light maps — 8 lazily-created `NativeArray<ushort>` fields resolved through per-direction `NeighborLightRef` switches (never an index), with
+  `FillNeighborLight(direction, packed)` to brighten one and `EnsureNeighborChunk(direction)` to materialize a neighbor as *loaded but empty and dark*. Uncreated stays length-0, so B1–B39 are behaviorally unchanged (verified: the harness commit alone re-ran **39/39**) — plus:
+    - **B40 — every neighbor light map reaches its own slot**, in 8 legs (4 cardinal + 4 diagonal). Each leg materializes all eight neighbor chunks, puts one opaque cube where its corner samples cross the seam under test, and meshes twice at `SmoothLightingQuality.High`: a **control** run with every light map dark, then a run with **only** that direction's map filled to full sky. The assertion is presence-vs-absence of light on the emitted vertices — never a predicted corner value — so the engine's
+      `CornerOffsets` LUT and averaging formula stay out of the oracle (the A4 discipline, as in B38).
+    - **Why it catches every permutation:** the four cardinal probes sit mid-face and therefore read **exactly one** slot, so any permutation displacing a cardinal reds that leg; a permutation confined to the diagonals moves a diagonal's map outside its probe's read set (a corner probe reads only its own diagonal plus the two adjacent cardinals); and any diagonal→cardinal move necessarily displaces some cardinal. No non-identity permutation of the eight slots survives all eight legs.
+    - **The MH-3 uniform-field trick deliberately does not transfer**, and the sketch below needed one correction to work at all. A spatially uniform field would make the corner average permutation- **invariant**; B40's field is asymmetric by construction (one bright neighbor, everything else dark). More importantly, `SampleNeighborLight` resolves the **voxel** state first, and a *missing* neighbor voxel map short-circuits to full sunlight (15) **without ever reading the light map** — so a bright reading can mean "the routing works" *or* "there is no
+      neighbor at all". `FillNeighborLight` therefore materializes the whole neighbor chunk (a `/code-review` round closed that hole in the API itself rather than leaving it to caller discipline; `EnsureNeighborChunk` remains the way to model a deliberately **dark** neighbor), and each leg's all-dark **control run** is what mechanically enforces the property — any un-modelled sunlight source reds the control instead of passing silently.
+    - **Prove-red:** transposing `LightS`/`LightN` inside the job's own `GetLightDataFromLocalPos` routing reds **exactly B40** — and inside it, exactly the **N and S legs** (`brightest vertex sky = 0`), with the other six legs, the other 39 meshing baselines, and **all 88 lighting baselines** green. Reverted and re-verified at `Validate All` 350.
+- **What B40 does *not* observe (the honest boundary):** it drives the **meshing job's own** direction→slot light routing plus the harness wiring into it. It does **not** execute the four production construction sites (those remain guarded only by MP-7's self-checking field names, exactly as B37/B38 leave the voxel side), nor `NeighborhoodLightingJob`'s separate light routing.
+- **Residual (open):** the **fill-faithful** light half — the MH-11 analog, routing a neighbor light map through the production `ChunkData.FillJobLightMap` rather than a direct array write — so a halo/slab substrate that under-copies or mis-indexes a border **light** plane is still unguarded (B21 covers only the voxel plane). Small, and best built alongside the substrate work it guards.
+- **Effort:** 🟢 as executed (the sketch held once the voxel-map prerequisite was found); the pre-execution estimate was 🟡.
 
 ---
 
@@ -266,7 +275,7 @@ The lighting suite already closed its half of this loop: A1 routes harness input
 
   **MP-7 (2026-07-26) added B37–B38** — the neighbor-map **permutation guards** (MH-12 below), F6's coverage half: **B37** catches any permutation of the 4 cardinal maps through border-face culling, **B38** any permutation of the 4 diagonals through fluid corner height (the diagonals never reach culling, so they needed a geometry probe instead). A `/code-review` round on MP-7 also split out **MH-13** — the 8 `Light*`
   maps, identically rewired and still unguarded — and a second round added **B39** for the *acquire-site*
-  offset table that feeds both the meshing and lighting schedules. Suite tip is now **B39** (39 baselines).
+  offset table that feeds both the meshing and lighting schedules. **MH-13 then closed (2026-07-26) as B40** — the light twin of B37/B38, and the first baseline to run `MeshingTestWorld` with populated neighbor **light** maps at all. Suite tip is now **B40** (40 baselines).
 
 ---
 
@@ -288,7 +297,8 @@ The lighting suite already closed its half of this loop: A1 routes harness input
 | 5     | MH-12 | Voxel-map permutation — cardinals (B37)               | MP-7 / F6                   | CLOSED | 🟢     |
 | 5     | MH-12 | Voxel-map permutation — diagonals, fluid corner (B38) | MP-7 / F6                   | CLOSED | 🟡     |
 | 5     | MH-12 | Acquire-site offset table, voxel + light (B39)        | MP-7 review 2; mesh+light   | CLOSED | 🟡     |
-| 5     | MH-13 | **Light**-map permutation (all 8, no coverage)        | regression guard; sketch    | OPEN   | 🟡     |
+| 5     | MH-13 | **Light**-map permutation, all 8 (B40)                | regression guard            | CLOSED | 🟢     |
+| 5     | —     | Fill-faithful **light** plane (MH-11 analog)          | halo/slab substrate         | OPEN   | 🟢     |
 
 > **Wave 1 (2026-06-17):** MH-9, MH-1, MH-4 closed (baselines B1–B9 green, one commit each).
 > **Wave 2 (2026-06-18):** MH-5 (B10) + MH-3 (B11) closed (baselines B1–B11 green, one commit each).

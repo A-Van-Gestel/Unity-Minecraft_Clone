@@ -84,6 +84,13 @@ namespace Editor.Validation.Meshing.Framework
     /// <see cref="SetNeighborEastBlockViaProductionFill"/>), which <see cref="Run"/> then passes for the
     /// matching <c>NeighborN/E/S/W</c> slot so the job's border-face culling consults it.
     /// </para>
+    /// <para>
+    /// The eight neighbor <b>light</b> maps are opt-in the same way (MH-13): uncreated stays length-0 —
+    /// the job reads such a slot as light 0 — and <see cref="FillNeighborLight"/> creates + fills one
+    /// direction's map so a cross-seam smooth-light sample actually reads it. Populating a neighbor's light
+    /// is only meaningful once that neighbor's <b>voxel</b> map exists too (see
+    /// <see cref="EnsureNeighborChunk"/> for why).
+    /// </para>
     /// </summary>
     public sealed class MeshingTestWorld : IDisposable
     {
@@ -106,6 +113,13 @@ namespace Editor.Validation.Meshing.Framework
         // height/flow smoothing and smooth-lighting AO — so they are exercised by a fluid-on-a-corner
         // fixture. Same lazy discipline: uncreated stays length-0, exactly as every pre-B38 baseline saw.
         private NativeArray<uint> _neighborNE, _neighborSE, _neighborSW, _neighborNW;
+
+        // The 8 neighbor LIGHT maps (MH-13's B40) — the light twin of the voxel maps above, and the slots
+        // the job's GetLightDataFromLocalPos routes cross-seam smooth-light samples into. Same lazy
+        // discipline: uncreated stays length-0, which the job reads as light 0, so every pre-B40 baseline
+        // sees exactly the behavior it always did.
+        private NativeArray<ushort> _lightN, _lightE, _lightS, _lightW;
+        private NativeArray<ushort> _lightNE, _lightSE, _lightSW, _lightNW;
 
         /// <summary>Creates an all-air chunk (zeroed light map) and the test block palette job data.</summary>
         public MeshingTestWorld()
@@ -209,6 +223,116 @@ namespace Editor.Validation.Meshing.Framework
         }
 
         /// <summary>
+        /// MH-13: materializes a neighbor chunk as <b>loaded but empty and dark</b> — an all-Air voxel map
+        /// plus a zeroed light map for that direction — without writing anything into either.
+        /// <para>
+        /// Use it directly to model a neighbor that must stay <b>dark</b> (every B40 control run needs eight
+        /// of them); <see cref="FillNeighborLight"/> calls it for you, because a bright light map without it
+        /// is unreadable. The job resolves a cross-seam
+        /// smooth-light sample in two steps: <c>SampleNeighborLight</c> first calls
+        /// <c>GetVoxelStateFromLocalPos</c>, and a <b>missing</b> (length-0) voxel map means "no neighbor
+        /// chunk", which short-circuits to full sunlight (15) and <b>never reads the light map at all</b>.
+        /// A fixture that brightens a light map without materializing the voxel map therefore reads bright
+        /// for the wrong reason — a false green. Materializing the neighbor makes the sample resolve to Air,
+        /// which is transparent, so the light map is the only thing left that can brighten the corner.
+        /// </para>
+        /// </summary>
+        /// <param name="direction">Which cardinal neighbor to materialize.</param>
+        public void EnsureNeighborChunk(CardinalNeighbor direction)
+        {
+            EnsureCreated(ref NeighborMapRef(direction));
+            EnsureCreated(ref NeighborLightRef(direction));
+        }
+
+        /// <summary>
+        /// MH-13: the diagonal overload of <see cref="EnsureNeighborChunk(CardinalNeighbor)"/> — same
+        /// contract, same reason (a corner sample reaches the diagonal chunk and needs its voxel map present
+        /// before its light map can be observed).
+        /// </summary>
+        /// <param name="direction">Which diagonal neighbor to materialize.</param>
+        public void EnsureNeighborChunk(DiagonalNeighbor direction)
+        {
+            EnsureCreated(ref NeighborMapRef(direction));
+            EnsureCreated(ref NeighborLightRef(direction));
+        }
+
+        /// <summary>
+        /// MH-13: fills one cardinal neighbor's <b>light</b> map with a single packed value. <see cref="Run"/>
+        /// then passes it for the matching <c>LightN/E/S/W</c> slot, so a border vertex's smooth-light corner
+        /// samples read it through the job's <c>GetLightDataFromLocalPos</c> routing.
+        /// <para>
+        /// Materializes the whole neighbor chunk (<see cref="EnsureNeighborChunk"/>), not just its light map:
+        /// a bright light map on a <i>missing</i> chunk is unreadable by construction — see that method — so
+        /// there is no state worth expressing in which the two come apart. Call
+        /// <see cref="EnsureNeighborChunk"/> directly for a neighbor that should stay <b>dark</b>.
+        /// </para>
+        /// </summary>
+        /// <param name="direction">Which cardinal neighbor's light map to fill.</param>
+        /// <param name="packed">Packed <c>ushort</c> light value (sky + blocklight RGB, each 0-15).</param>
+        public void FillNeighborLight(CardinalNeighbor direction, ushort packed)
+        {
+            EnsureNeighborChunk(direction);
+            FillLightMap(ref NeighborLightRef(direction), packed);
+        }
+
+        /// <summary>
+        /// MH-13: the diagonal overload of <see cref="FillNeighborLight(CardinalNeighbor, ushort)"/> — same
+        /// contract, including materializing the neighbor chunk. A diagonal light map is reached only by a
+        /// corner sample (the corner-offset LUT's diagonal term), so the fixture places its probe on a chunk
+        /// corner.
+        /// </summary>
+        /// <param name="direction">Which diagonal neighbor's light map to fill.</param>
+        /// <param name="packed">Packed <c>ushort</c> light value (sky + blocklight RGB, each 0-15).</param>
+        public void FillNeighborLight(DiagonalNeighbor direction, ushort packed)
+        {
+            EnsureNeighborChunk(direction);
+            FillLightMap(ref NeighborLightRef(direction), packed);
+        }
+
+        /// <summary>
+        /// Resolves a cardinal direction to its backing <b>light</b> map field. Named per direction rather
+        /// than indexed, for the same reason as <see cref="NeighborMapRef(CardinalNeighbor)"/>: the harness
+        /// must not be able to introduce the very permutation its baseline exists to catch.
+        /// </summary>
+        /// <param name="direction">The cardinal direction to resolve.</param>
+        /// <returns>A reference to the backing field, so the caller can lazily create it in place.</returns>
+        private ref NativeArray<ushort> NeighborLightRef(CardinalNeighbor direction)
+        {
+            switch (direction)
+            {
+                case CardinalNeighbor.North: return ref _lightN;
+                case CardinalNeighbor.East: return ref _lightE;
+                case CardinalNeighbor.South: return ref _lightS;
+                case CardinalNeighbor.West: return ref _lightW;
+                default: throw new ArgumentOutOfRangeException(nameof(direction), direction, "Unknown cardinal neighbor");
+            }
+        }
+
+        /// <summary>Resolves a diagonal direction to its backing <b>light</b> map field.</summary>
+        /// <param name="direction">The diagonal direction to resolve.</param>
+        /// <returns>A reference to the backing field, so the caller can lazily create it in place.</returns>
+        private ref NativeArray<ushort> NeighborLightRef(DiagonalNeighbor direction)
+        {
+            switch (direction)
+            {
+                case DiagonalNeighbor.NorthEast: return ref _lightNE;
+                case DiagonalNeighbor.SouthEast: return ref _lightSE;
+                case DiagonalNeighbor.SouthWest: return ref _lightSW;
+                case DiagonalNeighbor.NorthWest: return ref _lightNW;
+                default: throw new ArgumentOutOfRangeException(nameof(direction), direction, "Unknown diagonal neighbor");
+            }
+        }
+
+        /// <summary>Lazily creates a neighbor light map, then writes one packed value into every cell.</summary>
+        /// <param name="map">The backing light-map field to fill.</param>
+        /// <param name="packed">Packed <c>ushort</c> light value to write everywhere.</param>
+        private static void FillLightMap(ref NativeArray<ushort> map, ushort packed)
+        {
+            EnsureCreated(ref map);
+            for (int i = 0; i < map.Length; i++) map[i] = packed;
+        }
+
+        /// <summary>
         /// Resolves a diagonal direction to its backing map field — named per direction for the same reason
         /// as the cardinal overload.
         /// </summary>
@@ -244,12 +368,16 @@ namespace Editor.Validation.Meshing.Framework
             }
         }
 
-        /// <summary>Lazily allocates a persistent all-Air neighbor map in place (idempotent).</summary>
+        /// <summary>
+        /// Lazily allocates a persistent zeroed neighbor map in place (idempotent). Zero means all-Air for a
+        /// voxel map and fully dark for a light map.
+        /// </summary>
+        /// <typeparam name="T">The map's element type (<c>uint</c> voxels or <c>ushort</c> packed light).</typeparam>
         /// <param name="map">The backing field to create if it is not already.</param>
-        private static void EnsureCreated(ref NativeArray<uint> map)
+        private static void EnsureCreated<T>(ref NativeArray<T> map) where T : unmanaged
         {
             if (!map.IsCreated)
-                map = new NativeArray<uint>(MAP_SIZE, Allocator.Persistent); // zero == all Air
+                map = new NativeArray<T>(MAP_SIZE, Allocator.Persistent);
         }
 
         /// <summary>
@@ -339,8 +467,18 @@ namespace Editor.Validation.Meshing.Framework
             // Light arrays must be valid (constructed) containers — the job safety system rejects
             // unassigned NativeArrays at schedule/Run time. The in-chunk map is the persistent _lightMap
             // (zeroed by default; populated via FillLight/SetLight for the smooth-light MH-3 tests).
-            // Empty neighbor light maps suffice because interior blocks only read the in-chunk map.
+            // An empty neighbor light map suffices for interior blocks, which only read the in-chunk map.
             NativeArray<ushort> emptyLight = new NativeArray<ushort>(0, Allocator.TempJob);
+            // MH-13: when a test populated a neighbor's light map, pass it for that slot so cross-seam
+            // smooth-light samples read it; otherwise behave exactly as before (empty = light 0).
+            NativeArray<ushort> lightN = _lightN.IsCreated ? _lightN : emptyLight;
+            NativeArray<ushort> lightE = _lightE.IsCreated ? _lightE : emptyLight;
+            NativeArray<ushort> lightS = _lightS.IsCreated ? _lightS : emptyLight;
+            NativeArray<ushort> lightW = _lightW.IsCreated ? _lightW : emptyLight;
+            NativeArray<ushort> lightNE = _lightNE.IsCreated ? _lightNE : emptyLight;
+            NativeArray<ushort> lightSE = _lightSE.IsCreated ? _lightSE : emptyLight;
+            NativeArray<ushort> lightSW = _lightSW.IsCreated ? _lightSW : emptyLight;
+            NativeArray<ushort> lightNW = _lightNW.IsCreated ? _lightNW : emptyLight;
 
             // MH-2: write into the caller-owned reuse buffer when provided (the harness will not dispose
             // it); otherwise allocate a fresh harness-owned output.
@@ -370,14 +508,14 @@ namespace Editor.Validation.Meshing.Framework
                 SmoothLighting = lighting,
                 Output = output,
                 LightMap = _lightMap,
-                LightS = emptyLight,
-                LightN = emptyLight,
-                LightW = emptyLight,
-                LightE = emptyLight,
-                LightNE = emptyLight,
-                LightSE = emptyLight,
-                LightSW = emptyLight,
-                LightNW = emptyLight,
+                LightS = lightS,
+                LightN = lightN,
+                LightW = lightW,
+                LightE = lightE,
+                LightNE = lightNE,
+                LightSE = lightSE,
+                LightSW = lightSW,
+                LightNW = lightNW,
             };
 
             // Execute the gen job, optionally chaining the real MeshPostProcessJob (MH-5). The post job
@@ -492,6 +630,14 @@ namespace Editor.Validation.Meshing.Framework
             if (_neighborSE.IsCreated) _neighborSE.Dispose();
             if (_neighborSW.IsCreated) _neighborSW.Dispose();
             if (_neighborNW.IsCreated) _neighborNW.Dispose();
+            if (_lightN.IsCreated) _lightN.Dispose();
+            if (_lightE.IsCreated) _lightE.Dispose();
+            if (_lightS.IsCreated) _lightS.Dispose();
+            if (_lightW.IsCreated) _lightW.Dispose();
+            if (_lightNE.IsCreated) _lightNE.Dispose();
+            if (_lightSE.IsCreated) _lightSE.Dispose();
+            if (_lightSW.IsCreated) _lightSW.Dispose();
+            if (_lightNW.IsCreated) _lightNW.Dispose();
         }
     }
 }
