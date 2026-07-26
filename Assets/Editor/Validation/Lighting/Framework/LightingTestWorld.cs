@@ -672,8 +672,11 @@ namespace Editor.Validation.Lighting.Framework
             flight.Mods = NewOwned(flight, new NativeList<LightModification>(Allocator.Persistent));
             flight.PullBackClaims = NewOwned(flight, new NativeList<PullBackClaim>(Allocator.Persistent));
 
-            // Bundle the snapshots into a NeighborMapSet (mirrors production's AcquireNeighborMaps) so the
-            // compass→job-field mapping lives only in NeighborhoodLightingJob.SetGatherSources.
+            // Bundle the snapshots into a NeighborMapSet so the compass→job-field mapping lives only in
+            // NeighborhoodLightingJob.SetGatherSources. NOTE this *mirrors* production rather than calling it:
+            // Helpers.NeighborMapAssembler.Build (the direction→offset table feeding both schedules) is never
+            // executed by this harness, which is why a transposition there leaves the whole lighting suite
+            // green. That table is guarded by meshing baseline B39 instead — see the fidelity docs.
             NeighborMapSet sources = new NeighborMapSet
             {
                 NeighborW = nW, NeighborE = nE, NeighborS = nS, NeighborN = nN,

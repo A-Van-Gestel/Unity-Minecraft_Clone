@@ -5,7 +5,8 @@ namespace Jobs.Data
     /// <summary>
     /// The full-volume voxel and light map snapshots of a chunk's 8 horizontal neighbors,
     /// as consumed by neighborhood-aware jobs (lighting, meshing). When changing the field set,
-    /// also update the fill site (<c>WorldJobManager.AcquireNeighborMaps</c>) and the pool
+    /// also update the fill site (<c>Helpers.NeighborMapAssembler.Build</c>, which owns the
+    /// direction→offset mapping and is guarded by meshing baseline B39) and the pool
     /// return overload (<c>Helpers.ChunkJobArrayPool.Return(in NeighborMapSet)</c>).
     /// <para>Buffers are either rented from <c>Helpers.ChunkJobArrayPool</c> (runtime path —
     /// return via the pool) or allocated per job (startup/editor/benchmark paths —

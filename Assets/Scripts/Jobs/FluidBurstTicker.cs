@@ -51,7 +51,7 @@ namespace Jobs
         private int _bandHeight;
 
         // Neighbor voxel-origin offsets in compass order (w,e,s,n,sw,nw,se,ne) — matches GatherPaddedFluidVoxelsBand and
-        // the lighting AcquireNeighborMaps compass (N=+Z, S=−Z, E=+X, W=−X).
+        // the shared Helpers.NeighborMapAssembler compass (N=+Z, S=−Z, E=+X, W=−X).
         private static readonly Vector2Int[] s_neighborOffsets =
         {
             new Vector2Int(-ChunkMath.CHUNK_WIDTH, 0), // W

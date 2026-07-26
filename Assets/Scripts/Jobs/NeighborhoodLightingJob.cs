@@ -64,7 +64,7 @@ namespace Jobs
 
         // P-2 Layer 1: gather SOURCES — the center + 8 neighbor section-contiguous full-chunk snapshot maps
         // the worker-thread gather reads into the padded volumes above. Compass directions match
-        // WorldJobManager.AcquireNeighborMaps / NeighborMapSet. Each is a point-in-time snapshot copied by
+        // Helpers.NeighborMapAssembler / NeighborMapSet. Each is a point-in-time snapshot copied by
         // the main thread before scheduling (read-only here). A missing neighbor is passed as a created
         // zero-length array (NOT default — Unity job-safety requires every container be constructed), which
         // ChunkMath.GatherPadded* sentinel-fills (uint/ushort MaxValue) exactly as before.

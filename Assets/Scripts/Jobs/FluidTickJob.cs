@@ -45,7 +45,7 @@ namespace Jobs
         public NativeArray<uint> CenterVoxels;
 
         // TG-4 Phase 4b: the 8 horizontal neighbor snapshots (section-contiguous full-chunk maps; compass directions
-        // match ChunkMath.GatherPaddedFluidVoxelsBand / WorldJobManager.AcquireNeighborMaps). The in-job gather scatters
+        // match ChunkMath.GatherPaddedFluidVoxelsBand / Helpers.NeighborMapAssembler). The in-job gather scatters
         // center + these into PaddedVoxels so BORDER voxels can resolve cross-chunk reads. A missing/ungenerated
         // neighbor is passed as a created zero-length array (NOT default — job safety requires constructed
         // containers), which the gather sentinel-fills with uint.MaxValue → read back as void (Has == false).
