@@ -1,8 +1,28 @@
-# Worm Carver Far-Coordinate Precision Design
+# Worm Carver Far-Coordinate Precision Design  `[ARCHIVED]`
 
-**Version:** 2.0
+**Version:** 2.1
 **Date:** 2026-07-20
-**Status:** ✅ **Implemented** (WC-0/WC-1/WC-2 shipped 2026-07-20; in-game confirmed — worm caves
+
+> **Archived:** 2026-07-26.
+> **Reason:** shipped, and its *architectural* content was merged into
+> [`../Architecture/World Generation/CAVE_GENERATION.md`](../Architecture/World%20Generation/CAVE_GENERATION.md)
+> §3.1.5 — which is now the **live home** for the cell-local simulation frame: the problem, the shipped
+> solution, the scatter re-simulation determinism invariant, the rejected `double3` and distance-gated
+> alternatives, and the deferred items. Read that section first.
+> **This document is kept for what did not merge**, and is still the reference for anyone touching the
+> `Validate Worm Carver` suite or re-opening the gating decision:
+> - **§7 — per-baseline design rationale.** Why B1 is a *relative* precise-vs-classic comparison rather
+>   than an absolute assertion (so biome cave-tuning cannot false-red it), why B2 asserts `carved > 0`
+>   first (so a silenced-classic regression cannot pass vacuously), B6's `ChunkPosition`-dependence
+>   prove-red, the anti-"flattened plane" liveness assert, the soft mask-seek telemetry check, and the
+>   note that B5's Classic32 golden is editor/Mono-captured and **not** IL2CPP `FloatMode.Fast`-verified.
+> - **§9 — the five resolved-and-locked decisions** (Precise64 gating, the accepted in-band divergence),
+>   answered by the user before implementation. Do not re-litigate these without reading them.
+>
+> Weakening a baseline or re-deciding the gating without this context is the specific failure this
+> archive exists to prevent.
+
+**Original status:** ✅ **Implemented** (WC-0/WC-1/WC-2 shipped 2026-07-20; in-game confirmed — worm caves
 generate correctly with the fix to the ±2³¹ world border, Classic32 "Far Lands" path preserved).
 The §9 open questions were all resolved by the user before implementation; their answers are
 recorded inline in §9 and drove §5's verdict (Option A, Precise64-gated).
@@ -34,13 +54,13 @@ in-game observations — far worm caves have not been visually surveyed (§9 Q4)
 
 **Relationship to other documents:**
 
-- [`WORLD_SCALING_IMPLEMENTATION.md`](WORLD_SCALING_IMPLEMENTATION.md) — parent roadmap; its §6
+- [`WORLD_SCALING_IMPLEMENTATION.md`](../Design/WORLD_SCALING_IMPLEMENTATION.md) — parent roadmap; its §6
   v2 noise rider shipped with the worm carver explicitly deferred ("worm-carver worm positions
   stay float"). This doc is that residual's analysis.
-- [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) — its §9 limitations
+- [`WORLD_SCALING_FLOATING_ORIGIN.md`](../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md) — its §9 limitations
   note the same residual; the ±2³¹ edge symptom inventory there stays accepted regardless of
   this design.
-- [`WORLD_SCALING_ANALYSIS.md`](WORLD_SCALING_ANALYSIS.md) — grandparent analysis; §3.4 first
+- [`WORLD_SCALING_ANALYSIS.md`](../Design/WORLD_SCALING_ANALYSIS.md) — grandparent analysis; §3.4 first
   named generation determinism far from origin.
 - [`../Guides/COORDINATE_SPACES_GUIDE.md`](../Guides/COORDINATE_SPACES_GUIDE.md) — the WS-4
   space-naming rules; the cell-local frame proposed here adds a job-internal space that must be

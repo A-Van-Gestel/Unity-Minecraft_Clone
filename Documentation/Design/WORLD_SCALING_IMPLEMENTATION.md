@@ -38,7 +38,7 @@ in place below.
   — the region codec (`RegionAddressCodec.V2`) and the AOT migration protocol `WS-3` needs for its V3 bump.
 - [`CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md`](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) — `CP-7`
   owns the `ChunkHeight`/`CHUNK_HEIGHT` constant unification (a Tier A prerequisite, not on this track).
-- [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) — the WS-4 execution
+- [`../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md`](../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md) — the WS-4 execution
   design (2026-07-16): `WorldOrigin` re-anchor at 64 chunks, full boundary inventory, WS-4a/b/c
   phasing. Supersedes §6's sketch; the noise-precision rider stays deferred to its v2 extension.
 
@@ -99,7 +99,7 @@ coordinates go negative. Positive-only expansion sidesteps every one of them.
 |------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------:|-------------------------------------------|----------------|
 | **WS-2** — unbounded +XZ ✅   | Relax XZ *upper* bound only (keep `>= 0`); neighbor-guard flip; reconceive `WorldCentre` as spawn const                                                                                                                                                                                                                                                                                | ✅ SHIPPED | None (V2 byte-identical)                  | WS-1 ✅, VQ-1 ✅ |
 | **WS-3** — negative XZ ✅     | Drop `>= 0` floor (bounds only); fresh spawn → origin. V3 bump SKIPPED (V2 already neg-correct); seed hygiene + floor-div kept separate (§5)                                                                                                                                                                                                                                           | ✅ SHIPPED | None (V2 byte-identical, save v11)        | WS-2 ✅         |
-| **WS-4** — floating origin ✅ | Periodic origin shift; `ChunkRelativePosition` for the player; `_WorldOriginOffset` shader continuity; rider deferred to v2. **WS-4a + WS-4b + WS-4c persistence ✅ SHIPPED 2026-07-17** (in-game confirmed to ~20k, no jitter; v13 migration confirmed over multiple saves). Only `/teleport` (CMD-2) is left → [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) | ✅ SHIPPED | level.dat **v13** (player position → CRP) | WS-3 ✅         |
+| **WS-4** — floating origin ✅ | Periodic origin shift; `ChunkRelativePosition` for the player; `_WorldOriginOffset` shader continuity; rider deferred to v2. **WS-4a + WS-4b + WS-4c persistence ✅ SHIPPED 2026-07-17** (in-game confirmed to ~20k, no jitter; v13 migration confirmed over multiple saves). Only `/teleport` (CMD-2) is left → [`../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md`](../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md) | ✅ SHIPPED | level.dat **v13** (player position → CRP) | WS-3 ✅         |
 
 **Validation is built alongside each phase** (WS-1 precedent: its equivalence guard shipped in the
 "Chunk Math" suite, not after). WS-2 adds an unbounded-streaming / positive-past-border determinism
@@ -262,7 +262,7 @@ drop + validation is WS-3**; the rest are separable riders with the homes noted:
 ## 6. WS-4 — floating origin (Phase 3, **WS-4a + WS-4b shipped**; WS-4c open)
 
 > **2026-07-16:** the full execution design now lives in
-> [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md) (WS-4a plumbing /
+> [`../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md`](../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md) (WS-4a plumbing /
 > WS-4b shift / WS-4c persistence+teleport; decision menu closed). The sketch below is retained
 > for the rider spec; where they differ, the child doc wins. Jitter was observed in-game at
 > ~10 000 voxels (2026-07-15), earlier than the ~16k estimate below.
@@ -323,7 +323,7 @@ semantics — accepted as the permanent world limit.
 > sabotage. Worm-carver residual **✅ shipped 2026-07-20** — worm positions moved to a cell-local
 > simulation frame (Precise64-gated, Classic32 bit-identical), so worm caves generate correctly to
 > the ±2³¹ border in precise mode; in-game confirmed, `Validate Worm Carver` suite green. See
-> [`WORM_CARVER_FAR_COORDINATE_PRECISION.md`](WORM_CARVER_FAR_COORDINATE_PRECISION.md) (WC-*,
+> [`../Architecture/World Generation/CAVE_GENERATION.md`](../Architecture/World%20Generation/CAVE_GENERATION.md) §3.1.5 (WC-*,
 > Implemented). `LegacyNoise` frozen; the OQ-7 seed-magnitude fix remains separate.
 
 ---
@@ -360,8 +360,10 @@ semantics — accepted as the permanent world limit.
   the ±2³¹ border, `Validate Worm Carver` suite green. Horizontal-scaling generation track now fully closed
   (terrain + structures + worm caves all far-coordinate-exact in precise mode).
 * **v2.4** - Worm-carver residual analyzed (2026-07-20): §6's deferred item now points at
-  [`WORM_CARVER_FAR_COORDINATE_PRECISION.md`](WORM_CARVER_FAR_COORDINATE_PRECISION.md) (WC-*
-  draft — cell-local frame preferred, open questions §9 recorded for a later session).
+  [`WORM_CARVER_FAR_COORDINATE_PRECISION.md`](../Archived/WORM_CARVER_FAR_COORDINATE_PRECISION.md) (WC-*
+  draft — cell-local frame preferred, open questions §9 recorded for a later session). *(Archived
+  2026-07-26; its architectural content now lives in `Architecture/World Generation/CAVE_GENERATION.md`
+  §3.1.5. Link left at the original target — that is what this entry recorded.)*
 * **v2.3** - **v2 noise rider IN-GAME CONFIRMED** (2026-07-20, committed): terrain noise verified
   normal in-game up to and including the ±2³¹ integer-limit world border under the default
   Precise64 pipeline. Status + §6 annotation flipped from "verification pending" to confirmed —
@@ -392,7 +394,7 @@ semantics — accepted as the permanent world limit.
   ~10k onset §6 describes. Far *travel* is now stable; far *generation* still degrades at ~±2²⁴ until the v2 noise
   rider, and the *saved* position keeps its ±2²⁴ cap until WS-4c (level.dat v12→v13 + `/teleport`), which is all
   that remains of WS-4. Status line, §3 row, §6 header, and Next Review updated; full detail in the child doc (v1.6).
-* **v1.8** - WS-4 design authored as child doc [`WORLD_SCALING_FLOATING_ORIGIN.md`](WORLD_SCALING_FLOATING_ORIGIN.md)
+* **v1.8** - WS-4 design authored as child doc [`../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md`](../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md)
   (2026-07-16): `WorldOrigin` explicit-helper conversions, 64-chunk re-anchor, player save →
   `ChunkRelativePosition` (v12→v13), dev teleport in scope; noise rider stays a WS-4 v2 extension.
   §6 annotated; observed jitter onset ~10k recorded. §3 row + status line updated.
