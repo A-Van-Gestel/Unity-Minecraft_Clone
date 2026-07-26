@@ -710,8 +710,11 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     }
 
     /// <inheritdoc />
-    /// <remarks>Explicit: <see cref="INeighborMapSource"/> hands out pooled buffers, so it must not widen the
-    /// public surface of a type reachable as <c>World.Instance.JobManager</c>.</remarks>
+    /// <remarks>Explicit for two reasons: it keeps these <see cref="ChunkCoord"/> wrappers out of the class's
+    /// own overload set beside the private <c>Vector2Int</c> originals below, and buffer-acquisition methods
+    /// stay undiscoverable on a <c>World.Instance.JobManager</c> reference. Note what this does <b>not</b>
+    /// buy: <see cref="INeighborMapSource"/> is public, so a deliberate cast still reaches a pooled rent with
+    /// no matching <c>Return</c> — explicit implementation prevents accidents, not misuse.</remarks>
     NativeArray<uint> INeighborMapSource.AcquireVoxelMap(ChunkCoord coord, bool pooled, Allocator allocator)
     {
         return AcquireVoxelMap(coord.ToVoxelOrigin(), pooled, allocator);

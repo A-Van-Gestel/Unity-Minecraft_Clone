@@ -553,13 +553,13 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 >   updates, place/break all correct; no warnings observed. Objective, session-cumulative:
 >
 >   | Probe | Reading |
->                       |---|---|
->                       | merge attempts | **32,728** (routing demonstrably live — this is what a broken routing would flatline) |
->                       | gone-chunk discards | 406 (1.2 %) |
->                       | **stale-instance** | **0 / 32,728** |
->                       | F1 in-flight retries | 273 / 814,801 (0.03 % — no runaway; §3.2 Option C stays deferred) |
->                       | F8 request drops | 0 / 7,079,946 |
->                       | F4 recycled draw-refs | 0 / 32,322 |
+>                         |---|---|
+>                         | merge attempts | **32,728** (routing demonstrably live — this is what a broken routing would flatline) |
+>                         | gone-chunk discards | 406 (1.2 %) |
+>                         | **stale-instance** | **0 / 32,728** |
+>                         | F1 in-flight retries | 273 / 814,801 (0.03 % — no runaway; §3.2 Option C stays deferred) |
+>                         | F8 request drops | 0 / 7,079,946 |
+>                         | F4 recycled draw-refs | 0 / 32,322 |
 >
 >   Editor log for the whole session: **0 `[MESHING]` lines, 0 `ObjectDisposedException`, 0 NRE** — the
 >   fidelity-B7 cascade falsifier came back empty. Pipeline drained to **0 in-flight across all three job
@@ -848,9 +848,11 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 > - **B39 (acquire site, review round 2).** F6's closure claim was first written unqualified; narrowing it
 >   surfaced a *second* direction→offset table in `AcquireNeighborMaps`, feeding **both** the meshing and
 >   lighting schedules and executed by **neither** harness. Extracted to `Helpers/NeighborMapAssembler.Build`
->   behind an explicit `INeighborMapSource` on `WorldJobManager` (pooled-buffer acquisition must not widen a
->   type reachable as `World.Instance.JobManager`). B39 asserts all 16 slots with a marker-per-coordinate fake.
->   **Prove-red doubles as the gap's proof:** transposing N/S reds only B39, with the other 37 meshing
+>   behind an explicit `INeighborMapSource` on `WorldJobManager` (explicit keeps the `ChunkCoord` wrappers out
+>   of the class's overload set and undiscoverable on a `World.Instance.JobManager` reference — it prevents
+>   accidents, not misuse: the interface is public, so a cast still reaches a pooled rent).
+>   B39 asserts all 16 slots with a marker-per-coordinate fake.
+>   **Prove-red doubles as the gap's proof:** transposing N/S reds only B39, with the other 38 meshing
 >   baselines *and all 88 lighting baselines* green.
 > - `Validate Meshing` 36 → **39**, `Mesh Build Queue` 9/9, **`Validate All` 346 → 349/349** (16 suites).
 >   `lint_files` clean on all 8 touched files (the one warning, `MeshGenerationBenchmark.cs:699`, is
