@@ -1,6 +1,9 @@
 using System.Collections.Generic;
 using Data;
 using Editor.Validation.Meshing.Framework;
+using Helpers;
+using Jobs.Data;
+using Unity.Collections;
 using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.Meshing
@@ -66,6 +69,7 @@ namespace Editor.Validation.Meshing
             scenarios.Add(new Scenario("B21: border culling holds when the neighbor map is built via the production ChunkData.FillJobVoxelMap path (MH-11 fill-faithful)", B21_BorderCullingViaProductionFill));
             scenarios.Add(new Scenario("B37: all four cardinal neighbor maps reach the slot they belong to — any permutation reds (MH-12 permutation guard)", B37_CardinalNeighborsAreNotPermuted));
             scenarios.Add(new Scenario("B38: all four diagonal neighbor maps reach their slot — fluid corner height drops only when the RIGHT diagonal is populated (MH-12 permutation guard)", B38_DiagonalNeighborsAreNotPermuted));
+            scenarios.Add(new Scenario("B39: NeighborMapAssembler maps each compass direction to the right chunk offset, voxel AND light (MH-12; the acquire-site table feeding both meshing and lighting)", B39_NeighborMapAssemblerOffsetsAreCorrect));
         }
 
         /// <summary>
@@ -311,6 +315,123 @@ namespace Editor.Validation.Meshing
             passed &= B38Leg(DiagonalNeighbor.NorthWest, PERM_LOW_BORDER, PERM_HIGH_BORDER,
                 CardinalNeighbor.North, PERM_LOW_BORDER, PERM_LOW_BORDER, PERM_HIGH_BORDER, PERM_LOW_BORDER, "B38-NW");
             return passed;
+        }
+
+        /// <summary>
+        /// A fake <see cref="INeighborMapSource"/> that hands back a one-element map whose single value encodes
+        /// the coordinate it was asked for, so a caller can prove which offset landed in which slot without any
+        /// buffers, pool or <c>World</c>.
+        /// </summary>
+        private sealed class MarkerNeighborMapSource : INeighborMapSource
+        {
+            private readonly List<NativeArray<uint>> _voxel = new List<NativeArray<uint>>();
+            private readonly List<NativeArray<ushort>> _light = new List<NativeArray<ushort>>();
+
+            /// <summary>Packs a coordinate delta into the marker value stored in the returned map.</summary>
+            /// <param name="dx">Chunk-space X delta from the center.</param>
+            /// <param name="dz">Chunk-space Z delta from the center.</param>
+            /// <returns>The marker value a map for that delta carries.</returns>
+            public static uint Marker(int dx, int dz) => (uint)((dx + 8) * 100 + (dz + 8));
+
+            /// <inheritdoc />
+            public NativeArray<uint> AcquireVoxelMap(ChunkCoord coord, bool pooled, Allocator allocator)
+            {
+                NativeArray<uint> map = new NativeArray<uint>(1, Allocator.Persistent);
+                map[0] = Marker(coord.X, coord.Z);
+                _voxel.Add(map);
+                return map;
+            }
+
+            /// <inheritdoc />
+            public NativeArray<ushort> AcquireLightMap(ChunkCoord coord, bool pooled, Allocator allocator)
+            {
+                NativeArray<ushort> map = new NativeArray<ushort>(1, Allocator.Persistent);
+                map[0] = (ushort)Marker(coord.X, coord.Z);
+                _light.Add(map);
+                return map;
+            }
+
+            /// <summary>Releases every map handed out.</summary>
+            public void Dispose()
+            {
+                foreach (NativeArray<uint> m in _voxel) m.Dispose();
+                foreach (NativeArray<ushort> m in _light) m.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// B39 (MH-12, acquire site) — <see cref="NeighborMapAssembler.Build"/> must send each compass
+        /// direction to the right chunk offset, for the light maps as well as the voxel maps.
+        /// <para>
+        /// This is a <b>second</b> direction→offset table, one layer above the job-field wiring B37/B38 guard,
+        /// and it feeds <b>both</b> the meshing and lighting schedules. Neither suite could see it before MP-7's
+        /// review round: <c>MeshingTestWorld</c> and <c>LightingTestWorld</c> each build their own
+        /// <c>NeighborMapSet</c>, so a transposition here (every N/S seam culling and lighting against the wrong
+        /// chunk) left all 348 baselines green. The fake source returns a coordinate-encoding marker per call,
+        /// so the assertion reads the delta straight back out of each slot.
+        /// </para>
+        /// </summary>
+        private static bool B39_NeighborMapAssemblerOffsetsAreCorrect()
+        {
+            ChunkCoord center = new ChunkCoord(3, -5);
+            MarkerNeighborMapSource source = new MarkerNeighborMapSource();
+            try
+            {
+                NeighborMapSet set = NeighborMapAssembler.Build(center, source, pooled: false, Allocator.Persistent);
+
+                bool passed = AssertSlot("B39 NeighborN", set.NeighborN, center, 0, 1);
+                passed &= AssertSlot("B39 NeighborE", set.NeighborE, center, 1, 0);
+                passed &= AssertSlot("B39 NeighborS", set.NeighborS, center, 0, -1);
+                passed &= AssertSlot("B39 NeighborW", set.NeighborW, center, -1, 0);
+                passed &= AssertSlot("B39 NeighborNE", set.NeighborNE, center, 1, 1);
+                passed &= AssertSlot("B39 NeighborSE", set.NeighborSE, center, 1, -1);
+                passed &= AssertSlot("B39 NeighborSW", set.NeighborSW, center, -1, -1);
+                passed &= AssertSlot("B39 NeighborNW", set.NeighborNW, center, -1, 1);
+
+                passed &= AssertSlot("B39 LightN", set.LightN, center, 0, 1);
+                passed &= AssertSlot("B39 LightE", set.LightE, center, 1, 0);
+                passed &= AssertSlot("B39 LightS", set.LightS, center, 0, -1);
+                passed &= AssertSlot("B39 LightW", set.LightW, center, -1, 0);
+                passed &= AssertSlot("B39 LightNE", set.LightNE, center, 1, 1);
+                passed &= AssertSlot("B39 LightSE", set.LightSE, center, 1, -1);
+                passed &= AssertSlot("B39 LightSW", set.LightSW, center, -1, -1);
+                passed &= AssertSlot("B39 LightNW", set.LightNW, center, -1, 1);
+                return passed;
+            }
+            finally
+            {
+                source.Dispose();
+            }
+        }
+
+        /// <summary>Asserts one voxel slot carries the marker for the expected neighbor offset.</summary>
+        /// <param name="label">Assertion label.</param>
+        /// <param name="slot">The map that landed in this slot.</param>
+        /// <param name="center">The center chunk the set was built for.</param>
+        /// <param name="dx">Expected chunk-space X delta.</param>
+        /// <param name="dz">Expected chunk-space Z delta.</param>
+        /// <returns>True when the slot holds the expected neighbor's map.</returns>
+        private static bool AssertSlot(string label, NativeArray<uint> slot, ChunkCoord center, int dx, int dz)
+        {
+            uint expected = MarkerNeighborMapSource.Marker(center.X + dx, center.Z + dz);
+            return MeshAssert.IsTrue(label, slot.IsCreated && slot.Length == 1 && slot[0] == expected,
+                $"slot holds marker {(slot.IsCreated && slot.Length == 1 ? slot[0].ToString() : "<none>")}, " +
+                $"expected {expected} (the map for offset ({dx}, {dz}))");
+        }
+
+        /// <summary>Asserts one light slot carries the marker for the expected neighbor offset.</summary>
+        /// <param name="label">Assertion label.</param>
+        /// <param name="slot">The map that landed in this slot.</param>
+        /// <param name="center">The center chunk the set was built for.</param>
+        /// <param name="dx">Expected chunk-space X delta.</param>
+        /// <param name="dz">Expected chunk-space Z delta.</param>
+        /// <returns>True when the slot holds the expected neighbor's map.</returns>
+        private static bool AssertSlot(string label, NativeArray<ushort> slot, ChunkCoord center, int dx, int dz)
+        {
+            ushort expected = (ushort)MarkerNeighborMapSource.Marker(center.X + dx, center.Z + dz);
+            return MeshAssert.IsTrue(label, slot.IsCreated && slot.Length == 1 && slot[0] == expected,
+                $"slot holds marker {(slot.IsCreated && slot.Length == 1 ? slot[0].ToString() : "<none>")}, " +
+                $"expected {expected} (the map for offset ({dx}, {dz}))");
         }
     }
 }

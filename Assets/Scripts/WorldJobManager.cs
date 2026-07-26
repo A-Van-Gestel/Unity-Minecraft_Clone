@@ -22,7 +22,7 @@ using Debug = UnityEngine.Debug;
 /// Manages the lifecycle of all background jobs (generation, meshing, lighting).
 /// Owns the active <see cref="IChunkGenerator"/> strategy and delegates scheduling to it.
 /// </summary>
-public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IMeshCompletionHost
+public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IMeshCompletionHost, INeighborMapSource
 {
     private readonly World _world;
     private readonly IChunkGenerator _chunkGenerator;
@@ -696,8 +696,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// Acquires the filled neighbor map set (8 voxel + 8 light maps) for the given center chunk:
     /// pooled when <paramref name="pooled"/> is true, otherwise fresh allocations with the given
     /// allocator (startup/TempJob path).
-    /// This is the single authoritative fill site for <see cref="NeighborMapSet"/> — its compass
-    /// directions must match the offsets used here.
+    /// <para>The direction→offset mapping itself lives in <see cref="NeighborMapAssembler"/> so it can be
+    /// guarded world-free (meshing baseline B39) — it feeds both the meshing and lighting schedules, and
+    /// neither suite's harness executes this method.</para>
     /// </summary>
     /// <param name="center">The chunk whose neighborhood is snapshotted.</param>
     /// <param name="pooled">Whether to rent from the pool instead of allocating.</param>
@@ -705,25 +706,22 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <returns>A neighbor map set with every buffer filled.</returns>
     private NeighborMapSet AcquireNeighborMaps(ChunkCoord center, bool pooled, Allocator allocator)
     {
-        return new NeighborMapSet
-        {
-            NeighborN = AcquireVoxelMap(center.Neighbor(0, 1).ToVoxelOrigin(), pooled, allocator),
-            NeighborE = AcquireVoxelMap(center.Neighbor(1, 0).ToVoxelOrigin(), pooled, allocator),
-            NeighborS = AcquireVoxelMap(center.Neighbor(0, -1).ToVoxelOrigin(), pooled, allocator),
-            NeighborW = AcquireVoxelMap(center.Neighbor(-1, 0).ToVoxelOrigin(), pooled, allocator),
-            NeighborNE = AcquireVoxelMap(center.Neighbor(1, 1).ToVoxelOrigin(), pooled, allocator),
-            NeighborSE = AcquireVoxelMap(center.Neighbor(1, -1).ToVoxelOrigin(), pooled, allocator),
-            NeighborSW = AcquireVoxelMap(center.Neighbor(-1, -1).ToVoxelOrigin(), pooled, allocator),
-            NeighborNW = AcquireVoxelMap(center.Neighbor(-1, 1).ToVoxelOrigin(), pooled, allocator),
-            LightN = AcquireLightMap(center.Neighbor(0, 1).ToVoxelOrigin(), pooled, allocator),
-            LightE = AcquireLightMap(center.Neighbor(1, 0).ToVoxelOrigin(), pooled, allocator),
-            LightS = AcquireLightMap(center.Neighbor(0, -1).ToVoxelOrigin(), pooled, allocator),
-            LightW = AcquireLightMap(center.Neighbor(-1, 0).ToVoxelOrigin(), pooled, allocator),
-            LightNE = AcquireLightMap(center.Neighbor(1, 1).ToVoxelOrigin(), pooled, allocator),
-            LightSE = AcquireLightMap(center.Neighbor(1, -1).ToVoxelOrigin(), pooled, allocator),
-            LightSW = AcquireLightMap(center.Neighbor(-1, -1).ToVoxelOrigin(), pooled, allocator),
-            LightNW = AcquireLightMap(center.Neighbor(-1, 1).ToVoxelOrigin(), pooled, allocator),
-        };
+        return NeighborMapAssembler.Build(center, this, pooled, allocator);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>Explicit: <see cref="INeighborMapSource"/> hands out pooled buffers, so it must not widen the
+    /// public surface of a type reachable as <c>World.Instance.JobManager</c>.</remarks>
+    NativeArray<uint> INeighborMapSource.AcquireVoxelMap(ChunkCoord coord, bool pooled, Allocator allocator)
+    {
+        return AcquireVoxelMap(coord.ToVoxelOrigin(), pooled, allocator);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>Explicit for the same reason as the voxel overload.</remarks>
+    NativeArray<ushort> INeighborMapSource.AcquireLightMap(ChunkCoord coord, bool pooled, Allocator allocator)
+    {
+        return AcquireLightMap(coord.ToVoxelOrigin(), pooled, allocator);
     }
 
     /// <summary>
