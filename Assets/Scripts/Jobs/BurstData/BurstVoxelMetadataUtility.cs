@@ -11,7 +11,7 @@ namespace Jobs.BurstData
     /// </summary>
     /// <remarks>
     /// <para>The frozen bit layouts below must never change once a schema value
-    /// has shipped. See <c>Documentation/Design/PER_BLOCK_METADATA_SCHEMAS.md §5.3</c>.</para>
+    /// has shipped. See <c>Documentation/Architecture/PER_BLOCK_METADATA_SCHEMAS.md §5.3</c>.</para>
     /// <para>Encode/decode helpers apply strict bit masking against each schema's
     /// frozen layout. Higher-level validation (e.g. "Axis3 only allows 0-2 even
     /// though the mask permits 0-3") is handled separately by

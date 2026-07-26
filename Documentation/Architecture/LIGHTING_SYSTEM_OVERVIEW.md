@@ -116,7 +116,7 @@ On the main thread each frame, `World.Update()` iterates the **ready set** of th
 3. Check that all 8 neighbors have finished terrain generation (`AreNeighborsDataReady`).
 4. Create snapshot copies of the center chunk map (writable) and all 8 neighbor maps (read-only).
 5. Transfer the managed light queues to `NativeQueue`s for the job.
-6. Check `SkylightRecalculationQueue` for pending column recalculations (from unloaded neighbor recovery).
+6. Check `SunlightRecalculationQueue` for pending column recalculations (from unloaded neighbor recovery).
 7. Schedule the `NeighborhoodLightingJob`.
 8. **Self-clean / park:** Remove the chunk from the scheduler when all flags are clear; if flags remain but a readiness gate blocked scheduling, the chunk is parked in a **waiting set** the scan does not visit. Parked chunks are promoted back on the events that can flip their gate (neighbor generation/load completed, lighting job completed, own flag re-set).
 
@@ -453,7 +453,7 @@ The disabled-lighting path is implemented via guards at specific pipeline entry 
 |-----------------------------------------|------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|
 | `ChunkData.AddToSunLightQueue`          | `enableLighting` check                                                       | Prevents BFS queue entries + `HasLightChangesToProcess` flag                                    |
 | `ChunkData.AddToBlockLightQueue`        | `enableLighting` check                                                       | Same, for blocklight channel                                                                    |
-| `ChunkData.ModifyVoxel`                 | `lightingEnabled` local                                                      | Sets initial sky light = 15 (not 0); gates `QueueSkylightRecalculation`                         |
+| `ChunkData.ModifyVoxel`                 | `lightingEnabled` local                                                      | Sets initial sky light = 15 (not 0); gates `QueueSunlightRecalculation`                         |
 | `WorldJobManager.ProcessGenerationJobs` | Stage 2: gates `LightingStateManager` recovery                               | Prevents orphaned recalculation queue entries and stale `HasLightChangesToProcess`              |
 | `WorldJobManager.ProcessGenerationJobs` | Stage 3: sky light fill (else branch)                                        | Fills `LightData` with sky=15 on all non-null sections via `LightingHelper.FillUniformSkyLight` |
 | `WorldJobManager.ScheduleMeshing`       | `enableLighting` gate on `HasLightChangesToProcess` / `NeedsInitialLighting` | Bypasses lighting-readiness check — meshing proceeds without waiting for lighting               |
@@ -479,7 +479,7 @@ physical `ChunkSection` objects.
 
 ### 6.4 Block Modification Path
 
-`ModifyVoxel` writes sky light = 15 to the section's `LightData[]` (instead of the normal 0) so every placed block starts at full brightness. The `QueueSkylightRecalculation` call is skipped entirely — without a running BFS engine, queued columns would set `HasLightChangesToProcess = true` with no job to clear it.
+`ModifyVoxel` writes sky light = 15 to the section's `LightData[]` (instead of the normal 0) so every placed block starts at full brightness. The `QueueSunlightRecalculation` call is skipped entirely — without a running BFS engine, queued columns would set `HasLightChangesToProcess = true` with no job to clear it.
 
 The heightmap is still maintained unconditionally (it is cheap and has no downstream consumers when lighting is disabled).
 

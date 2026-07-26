@@ -56,6 +56,6 @@ All custom mesh blocks currently use a **full-block collision box** regardless o
 - In-game debug visualization (e.g., wireframe overlay) to inspect collision bounds per block
 - Visual distinction between "uses visual mesh as collision" vs "has custom collision override"
 
-**Design document:** [SUB_VOXEL_COLLISION_SYSTEM.md](../Design/SUB_VOXEL_COLLISION_SYSTEM.md)
+**Design document:** [SUB_VOXEL_COLLISION_SYSTEM.md](../Architecture/SUB_VOXEL_COLLISION_SYSTEM.md)
 
 ---

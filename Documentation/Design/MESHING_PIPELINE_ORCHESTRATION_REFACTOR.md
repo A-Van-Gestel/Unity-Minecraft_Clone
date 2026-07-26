@@ -1,6 +1,6 @@
 # Meshing Pipeline Orchestration Refactor (MP-*)
 
-**Version:** 1.0 **Date:** 2026-07-06 **Status:** Proposed design — not implemented. **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
+**Version:** 1.9 **Date:** 2026-07-06 **Status:** ✅ Executed — MP-1…MP-7 all shipped and in-game confirmed (arc closed 2026-07-26); this document is a historical record, not a plan. **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > Clean-up / refactor plan for the meshing pipeline's **orchestration layer** — request routing,
 > the `MeshBuildQueue` drain, the `ScheduleMeshing` gates, `ProcessMeshJobs`, and the apply/draw

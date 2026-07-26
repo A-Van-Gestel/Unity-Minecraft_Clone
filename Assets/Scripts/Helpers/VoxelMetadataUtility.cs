@@ -11,7 +11,7 @@ namespace Helpers
     /// without requiring callers to reference the Burst namespace.
     /// </summary>
     /// <remarks>
-    /// <para>Per <c>Documentation/Design/PER_BLOCK_METADATA_SCHEMAS.md §7.1</c>, main-thread
+    /// <para>Per <c>Documentation/Architecture/PER_BLOCK_METADATA_SCHEMAS.md §7.1</c>, main-thread
     /// code should call into this class; jobs should call <see cref="BurstVoxelMetadataUtility"/>
     /// directly. Both share the same frozen bit layouts (§5.3).</para>
     /// <para>The implementations here are strict pass-throughs. This indirection exists so
