@@ -25,6 +25,7 @@ namespace Editor.Validation
         {
             scenarios.Add(new Scenario("ChunkMath Power-Of-Two Guard", RunChunkMathPow2Guard));
             scenarios.Add(new Scenario("Section/Height Coupling Guard", RunSectionHeightCouplingGuard));
+            scenarios.Add(new Scenario("Section/Width Coupling Guard", RunSectionWidthCouplingGuard));
             scenarios.Add(new Scenario("VoxelToChunk == Floor Div (sweep)", RunVoxelToChunkSweep));
             scenarios.Add(new Scenario("VoxelToChunk == Legacy FloorToInt (positives)", RunVoxelToChunkLegacyParity));
             scenarios.Add(new Scenario("VoxelToLocal Reconstructs Voxel (sweep)", RunVoxelToLocalSweep));
@@ -85,6 +86,34 @@ namespace Editor.Validation
             Debug.LogError($"[FAIL] Section/Height Coupling Guard — CHUNK_HEIGHT={ChunkMath.CHUNK_HEIGHT} must be an " +
                            $"exact multiple of SECTION_SIZE={ChunkMath.SECTION_SIZE} " +
                            $"(SECTIONS_PER_CHUNK={ChunkMath.SECTIONS_PER_CHUNK}, CHUNK_VOLUME={ChunkMath.CHUNK_VOLUME}).");
+            return false;
+        }
+
+        /// <summary>
+        /// A <see cref="ChunkMath.SECTION_VOLUME"/> section is <see cref="ChunkMath.SECTION_SIZE"/> cubed, so
+        /// every section-local index (<c>x + y·S + z·S²</c>) silently assumes a section spans the chunk's <b>full
+        /// horizontal extent</b> — i.e. <see cref="ChunkMath.CHUNK_WIDTH"/> equals
+        /// <see cref="ChunkMath.SECTION_SIZE"/>. Nothing asserted that until now, yet
+        /// <c>Chunk.OnDataPopulated</c>, <c>ChunkData.PopulateFromFlattened</c> and
+        /// <c>SeamWakeDecision.WakeSeamSlab</c> all index sections that way; were the two constants to diverge,
+        /// each would read the wrong cells with no error raised.
+        /// <para>Companion to <see cref="RunSectionHeightCouplingGuard"/>, which pins the vertical half of the
+        /// same coupling.</para>
+        /// </summary>
+        private static bool RunSectionWidthCouplingGuard()
+        {
+            const bool spansWidth = ChunkMath.CHUNK_WIDTH == ChunkMath.SECTION_SIZE;
+            const bool volumeOk = ChunkMath.SECTION_VOLUME ==
+                                  ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE;
+            if (spansWidth && volumeOk)
+            {
+                Debug.Log("[PASS] Section/Width Coupling Guard");
+                return true;
+            }
+
+            Debug.LogError($"[FAIL] Section/Width Coupling Guard — CHUNK_WIDTH={ChunkMath.CHUNK_WIDTH} must equal " +
+                           $"SECTION_SIZE={ChunkMath.SECTION_SIZE} for section-local x + y·S + z·S² indexing to " +
+                           $"address the full chunk width (SECTION_VOLUME={ChunkMath.SECTION_VOLUME}).");
             return false;
         }
 
