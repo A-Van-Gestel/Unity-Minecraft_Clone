@@ -195,6 +195,8 @@ T11
             // Placeholder-neighbor guards (promoted K18a/K18b) — see BehaviorValidationSuite.Baseline.PlaceholderNeighbor.cs.
             scenarios.Add(new Scenario("BH-B8: fluids do not spread into an unpopulated placeholder (Burst path)", Bh8_NoSpreadIntoPlaceholderBurst));
             scenarios.Add(new Scenario("BH-B9: fluids do not spread into an unpopulated placeholder (managed path)", Bh9_NoSpreadIntoPlaceholderManaged));
+            scenarios.Add(new Scenario("BH-B10: a seam quiesced against a placeholder wakes when it populates", Bh10_SeamWakesWhenPlaceholderPopulates));
+            scenarios.Add(new Scenario("BH-B11: the seam wake covers grass (up-diagonal dirt target)", Bh11_SeamWakeCoversGrass));
 
             // BH-D1 old-vs-new differential (comparator self-test + driver-pair fixtures) — see BehaviorValidationSuite.Differential.cs.
             AddDifferentialScenarios(scenarios);

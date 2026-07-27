@@ -1200,6 +1200,10 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             // The job's removal is what flips AreNeighborsDataReady for the 8 neighbors — wake any
             // parked light work now instead of waiting for the fail-safe scan (MT-2).
             _world.PromoteLightWorkNeighborhood(chunkCoord.ToVoxelOrigin());
+
+            // The behavior tick's equivalent: neighbors whose seam voxels quiesced against this coord while it
+            // was an unpopulated placeholder have no other path back into their active buckets.
+            _world.WakeSeamBehaviorNeighborhood(chunkCoord.ToVoxelOrigin());
         }
     }
 

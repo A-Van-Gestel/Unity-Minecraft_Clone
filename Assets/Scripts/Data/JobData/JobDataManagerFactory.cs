@@ -89,6 +89,10 @@ namespace Data.JobData
             // disagree on the active criterion — keep them built together.
             bool[] isActiveById = new bool[blockDatabase.blockTypes.Length];
 
+            // Flat isSolid lookup, co-built for the same reason: the seam-wake pass tests solidity once per
+            // scanned cell, and BlockType is a class — a per-cell deref there would cost more than the skip saves.
+            bool[] isSolidById = new bool[blockDatabase.blockTypes.Length];
+
             for (int i = 0; i < blockDatabase.blockTypes.Length; i++)
             {
                 int customMeshIndex = -1;
@@ -99,6 +103,7 @@ namespace Data.JobData
 
                 blockTypesJobData[i] = new BlockTypeJobData(blockDatabase.blockTypes[i], customMeshIndex);
                 isActiveById[i] = blockDatabase.blockTypes[i].isActive;
+                isSolidById[i] = blockDatabase.blockTypes[i].isSolid;
             }
 
             // --- Step 5: Create the final JobDataManager ---
@@ -114,7 +119,7 @@ namespace Data.JobData
             FluidTemplates fluidTemplates = ResourceLoader.LoadFluidTemplates();
             FluidVertexTemplatesNativeData fluidVertexTemplates = new FluidVertexTemplatesNativeData(fluidTemplates);
 
-            return new GlobalJobData(jobDataManager, fluidVertexTemplates, isActiveById);
+            return new GlobalJobData(jobDataManager, fluidVertexTemplates, isActiveById, isSolidById);
         }
     }
 
@@ -134,18 +139,24 @@ namespace Data.JobData
         /// <summary>Flat <c>blockId → isActive</c> lookup for the fallback active-voxel scan.</summary>
         public readonly bool[] IsActiveById;
 
+        /// <summary>Flat <c>blockId → isSolid</c> lookup for the seam-wake pass's per-cell wall test.</summary>
+        public readonly bool[] IsSolidById;
+
         /// <summary>Initializes the assembled job-data bundle.</summary>
         /// <param name="jobDataManager">Native block/custom-mesh job data.</param>
         /// <param name="fluidVertexTemplates">Native fluid vertex templates.</param>
         /// <param name="isActiveById">Flat active-voxel lookup keyed by block id.</param>
+        /// <param name="isSolidById">Flat solidity lookup keyed by block id.</param>
         public GlobalJobData(
             JobDataManager jobDataManager,
             FluidVertexTemplatesNativeData fluidVertexTemplates,
-            bool[] isActiveById)
+            bool[] isActiveById,
+            bool[] isSolidById)
         {
             JobDataManager = jobDataManager;
             FluidVertexTemplates = fluidVertexTemplates;
             IsActiveById = isActiveById;
+            IsSolidById = isSolidById;
         }
     }
 }

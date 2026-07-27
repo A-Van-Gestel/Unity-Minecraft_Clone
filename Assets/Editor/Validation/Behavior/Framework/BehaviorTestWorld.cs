@@ -162,7 +162,26 @@ namespace Editor.Validation.Behavior.Framework
                 ValidationReflection.SetInstanceProperty(_world, nameof(World.ChunkPool),
                     new ChunkPoolManager(_worldGo.transform));
 
+                // World.IsActiveById / IsSolidById are built by World init (bypassed in edit mode), and the
+                // production seam-wake pass reads both. Mirror them from the test palette so
+                // PopulateNeighborPlaceholder can drive the real World.WakeSeamBehaviorNeighborhood rather than a
+                // copy of it. Keep this in step with JobDataManagerFactory's co-built tables.
+                _world.IsActiveById = new bool[_palette.Length];
+                _world.IsSolidById = new bool[_palette.Length];
+                for (int i = 0; i < _palette.Length; i++)
+                {
+                    _world.IsActiveById[i] = _palette[i].isActive;
+                    _world.IsSolidById[i] = _palette[i].isSolid;
+                }
+
                 ChunkData = new ChunkData(centerChunkVoxelOrigin);
+
+                // Register the center in the stub store exactly as production does. Cross-chunk reads resolve
+                // *other* coords, never the center itself, so this changes no existing fixture — but the seam-wake
+                // pass looks the center up by coord, and would silently no-op if it were absent (which is how
+                // BH-B10 first passed for the wrong reason).
+                ChunkData.IsPopulated = true;
+                _world.worldData.SetChunk(centerChunkVoxelOrigin, ChunkData);
 
                 ValidationReflection.SetStaticProperty(typeof(World), nameof(World.Instance), _world);
                 SetTickCounter(0);
@@ -252,6 +271,75 @@ namespace Editor.Validation.Behavior.Framework
             }
 
             GetOrCreateNeighbor(origin);
+        }
+
+        /// <summary>
+        /// Flips a placeholder neighbor to <b>populated</b> mid-scenario — the event a chunk's terrain job
+        /// completing raises in production — and drives the real
+        /// <see cref="World.WakeSeamBehaviorNeighborhood"/> for it, so a scenario can assert that behavior which
+        /// quiesced against the placeholder resumes.
+        /// </summary>
+        /// <param name="dChunkX">Neighbor chunk offset on X (−1, 0, or +1).</param>
+        /// <param name="dChunkZ">Neighbor chunk offset on Z (−1, 0, or +1).</param>
+        /// <param name="seed">Optional voxel writes applied before population, modeling what the chunk generated.</param>
+        /// <exception cref="InvalidOperationException">No placeholder exists at that coord to populate.</exception>
+        /// <remarks>
+        /// The harness drives its tick from <see cref="_activeVoxels"/>, and
+        /// <see cref="SyncFluidBucketToActives"/> <b>evicts</b> anything in <see cref="ChunkData"/>'s bucket that
+        /// the model does not know about — so a production-side wake would be silently undone on the next tick and
+        /// the scenario would fail for the wrong reason. After running the real pass this re-reads the center's
+        /// seam slab through the public <see cref="ChunkData.IsVoxelActive"/> and absorbs whatever production
+        /// registered into the model. It mirrors, it never decides.
+        /// </remarks>
+        public void PopulateNeighborPlaceholder(int dChunkX, int dChunkZ, Action<ChunkData> seed = null)
+        {
+            if (dChunkX != 0 && dChunkZ != 0)
+            {
+                throw new ArgumentException(
+                    $"PopulateNeighborPlaceholder({dChunkX.ToString()}, {dChunkZ.ToString()}): diagonal offsets are " +
+                    "not modelled. The production wake is cardinal-only (a diagonal chunk is never an immediate " +
+                    "neighbor of any cell), so a diagonal here would assert against a seam that never wakes — and " +
+                    "the mirror-slab arithmetic below is cardinal-only by construction.");
+            }
+
+            Vector2Int origin = new Vector2Int(
+                ChunkData.Position.x + dChunkX * VoxelData.ChunkWidth,
+                ChunkData.Position.y + dChunkZ * VoxelData.ChunkWidth);
+
+            if (!_neighbors.TryGetValue(origin, out ChunkData neighbor))
+            {
+                throw new InvalidOperationException(
+                    $"PopulateNeighborPlaceholder({dChunkX.ToString()}, {dChunkZ.ToString()}): no chunk registered " +
+                    $"at {origin.ToString()} — call AddNeighborPlaceholder first.");
+            }
+
+            seed?.Invoke(neighbor);
+
+            // Reconcile the bucket to the model FIRST. The harness evicts a voxel that went inactive only on the
+            // NEXT tick's sync, so without this the bucket still holds last tick's quiesced voxels — and the mirror
+            // below would read them back as "woken" no matter what the production pass did (a false green this
+            // scenario was written to catch). Production's drain has already removed them by this point.
+            SyncFluidBucketToActives();
+
+            neighbor.IsPopulated = true;
+
+            // The production pass, unmodified: it resolves the newly populated chunk's cardinal neighbors itself.
+            _world.WakeSeamBehaviorNeighborhood(origin);
+
+            // Absorb the result into the harness's own active model (see remarks).
+            bool centerIsOnX = dChunkX != 0;
+            int slabLocal = dChunkX < 0 || dChunkZ < 0 ? 0 : VoxelData.ChunkWidth - 1;
+
+            for (int y = 0; y < VoxelData.ChunkHeight; y++)
+            for (int across = 0; across < VoxelData.ChunkWidth; across++)
+            {
+                Vector3Int pos = centerIsOnX
+                    ? new Vector3Int(slabLocal, y, across)
+                    : new Vector3Int(across, y, slabLocal);
+
+                if (ChunkData.IsVoxelActive(pos))
+                    _activeVoxels.Add(pos);
+            }
         }
 
         /// <summary>Returns the neighbor chunk at a voxel origin, creating + registering it in the stub store on first use.</summary>

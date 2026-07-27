@@ -97,6 +97,19 @@ public class World : MonoBehaviour, IMeshDrainHost
     [NonSerialized]
     public bool[] IsActiveById;
 
+    /// <summary>
+    /// Flat <c>blockId → isSolid</c> lookup, co-built with <see cref="IsActiveById"/> (see
+    /// <c>JobDataManagerFactory</c>) and read per scanned cell by the seam-wake gate.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="NonSerializedAttribute"/> is load-bearing, not hygiene: serialized into the scene this would
+    /// come back as a non-null <b>zero-length</b> array before <see cref="PrepareGlobalJobData"/> runs, and the
+    /// gate's out-of-range fallback would silently degrade to "wake every cell" instead of failing loudly the
+    /// way a null table does.
+    /// </remarks>
+    [NonSerialized]
+    public bool[] IsSolidById;
+
     public Material OpaqueMaterial => _blockDatabase.opaqueMaterial;
     public Material TransparentMaterial => _blockDatabase.transparentMaterial;
     public Material LiquidMaterial => _blockDatabase.liquidMaterial;
@@ -1046,6 +1059,10 @@ public class World : MonoBehaviour, IMeshDrainHost
                 // parked light work now instead of waiting for the fail-safe scan (MT-2). The chunk's own
                 // flags fire the staging callback from PopulateFromSave, so this is for the neighbors.
                 _lightWork.PromoteNeighborhood(chunkVoxelPos);
+
+                // The behavior tick's equivalent: neighbors whose seam voxels quiesced against this coord while
+                // it was an unpopulated placeholder have no other path back into their active buckets.
+                WakeSeamBehaviorNeighborhood(chunkVoxelPos);
 
                 // Apply Pending Mods (Trees, etc. that spilled over)
                 if (ModManager.TryGetModsForChunk(chunkCoord, out List<VoxelMod> pendingMods))
@@ -2295,6 +2312,7 @@ public class World : MonoBehaviour, IMeshDrainHost
         JobDataManager = jobData.JobDataManager;
         FluidVertexTemplates = jobData.FluidVertexTemplates;
         IsActiveById = jobData.IsActiveById;
+        IsSolidById = jobData.IsSolidById;
     }
 
     /// <summary>
@@ -2396,6 +2414,38 @@ public class World : MonoBehaviour, IMeshDrainHost
     public void PromoteLightWorkNeighborhood(Vector2Int chunkPos)
     {
         _lightWork.PromoteNeighborhood(chunkPos);
+    }
+
+    /// <summary>
+    /// Wakes behavior work in the 4 cardinal neighbors of a chunk that just became populated. The behavior tick
+    /// has no readiness gate — it ticks any chunk with a non-empty active bucket — so correctness depends on
+    /// voxels that quiesced against this chunk while it was still an unpopulated placeholder being re-registered
+    /// now. Nothing else does it: population registers only the new chunk's own voxels
+    /// (<see cref="Chunk.RegisterActiveVoxelsFromJob"/> / <see cref="Chunk.OnDataPopulated"/>), and
+    /// <see cref="ApplyModifications"/>'s cross-chunk wake needs an applied mod next to the sleeping cell.
+    /// <para>The newly populated chunk's own side needs nothing — its full scan registers every active voxel it
+    /// has, and those evaluate against real neighbor data. Only the already-populated side was asleep. Called
+    /// from the same two population sites as <see cref="PromoteLightWorkNeighborhood"/>.</para>
+    /// </summary>
+    /// <param name="chunkPos">Voxel-origin position of the chunk that just became populated.</param>
+    public void WakeSeamBehaviorNeighborhood(Vector2Int chunkPos)
+    {
+        // The pass reads the newly populated chunk's own seam face to decide what can actually receive
+        // behavior, so it must be resolvable; if it is not, there is nothing to wake against.
+        if (!worldData.TryGetChunk(chunkPos, out ChunkData populated) || populated is not { IsPopulated: true })
+            return;
+
+        for (int direction = 0; direction < SeamWakeDecision.CardinalCount; direction++)
+        {
+            Vector2Int neighborPos = chunkPos + SeamWakeDecision.NeighborVoxelOffset(direction);
+
+            // Unpopulated neighbors are skipped, not woken: they have no voxel data to register, and their own
+            // population will run this pass in the other direction.
+            if (!worldData.TryGetChunk(neighborPos, out ChunkData neighbor) || neighbor is not { IsPopulated: true })
+                continue;
+
+            SeamWakeDecision.WakeSeamSlab(neighbor, populated, direction, IsActiveById, IsSolidById);
+        }
     }
 
     public bool AreNeighborsReadyAndLit(ChunkCoord chunkCoord)
