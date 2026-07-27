@@ -27,6 +27,30 @@ namespace Helpers
     /// <see cref="PipelinePassBudget.Window"/>) is derived by the caller and passed in — this owns
     /// only the loop that consumes it.
     /// </summary>
+    /// <summary>
+    /// What one <see cref="MeshDrainPolicy.Drain"/> pass did: how many chunks it scheduled, and
+    /// <b>why it stopped</b> (FP-2). The reason is returned rather than re-derived by the caller because
+    /// re-reading the limits after the loop cannot distinguish them — a pass that broke on quota may also
+    /// have an expired window by the time anyone asks, and would then be misreported as ceiling-bound.
+    /// </summary>
+    public readonly struct DrainResult
+    {
+        /// <summary>Chunks scheduled this frame.</summary>
+        public readonly int Scheduled;
+
+        /// <summary>Why the drain stopped.</summary>
+        public readonly PassStopReason Reason;
+
+        /// <summary>Initializes a drain result.</summary>
+        /// <param name="scheduled">Chunks scheduled this frame.</param>
+        /// <param name="reason">Why the drain stopped.</param>
+        public DrainResult(int scheduled, PassStopReason reason)
+        {
+            Scheduled = scheduled;
+            Reason = reason;
+        }
+    }
+
     public static class MeshDrainPolicy
     {
         /// <summary>
@@ -42,22 +66,45 @@ namespace Helpers
         /// <param name="window">The time ceiling for this pass (<c>default</c> = unbounded).</param>
         /// <param name="cap">The in-flight mesh-job ceiling (OM-1 memory bound).</param>
         /// <param name="host">The live-state provider + schedule sink (production: <c>World</c>).</param>
-        /// <returns>The number of chunks scheduled this frame.</returns>
-        public static int Drain(MeshBuildQueue queue, int quota, PipelinePassBudget.Window window,
+        /// <returns>The chunks scheduled and the reason the pass stopped.</returns>
+        public static DrainResult Drain(MeshBuildQueue queue, int quota, PipelinePassBudget.Window window,
             int cap, IMeshDrainHost host)
         {
             int scheduled = 0;
 
+            // FP-2: candidates actually examined. Distinguishes "walked a queue and nothing was eligible"
+            // (AllDeclined — readiness-bound) from "the queue was empty" (OutOfWork — healthy). Purged
+            // null/inactive entries do NOT count: they were never real work.
+            int candidatesSeen = 0;
+
+            bool quotaSpent = false;
+            bool ceilingExpired = false;
+            bool capReached = false;
+
             MeshBuildQueue.Enumerator it = queue.GetEnumerator();
             while (it.MoveNext())
             {
-                if (scheduled >= quota || window.Expired) break;
+                if (scheduled >= quota)
+                {
+                    quotaSpent = true;
+                    break;
+                }
+
+                if (window.Expired)
+                {
+                    ceilingExpired = true;
+                    break;
+                }
 
                 // Re-check the in-flight cap every iteration, not just on entry: each successful schedule
                 // grows the in-flight set, and one frame's whole quota must not push it past the cap. On a
                 // fast-CPU / low-RAM device the per-frame quota (CPU-scaled) can far exceed the cap
                 // (RAM-scaled), so the entry gate alone would let one frame overshoot the OM-1 ceiling.
-                if (host.InFlightCount >= cap) break;
+                if (host.InFlightCount >= cap)
+                {
+                    capReached = true;
+                    break;
+                }
 
                 Chunk chunk = it.Current;
 
@@ -66,6 +113,8 @@ namespace Helpers
                     it.RemoveCurrent();
                     continue;
                 }
+
+                candidatesSeen++;
 
                 // TrySchedule returns false when deps (neighbors/lighting) aren't ready — leave the chunk
                 // queued (in place) to try again next frame.
@@ -76,7 +125,8 @@ namespace Helpers
                 }
             }
 
-            return scheduled;
+            return new DrainResult(scheduled, PipelinePassBudget.ClassifyStop(
+                scheduled, candidatesSeen, quotaSpent, ceilingExpired, capReached));
         }
     }
 }

@@ -116,7 +116,7 @@ namespace Editor.Validation.Meshing
             {
                 MeshBuildQueue q = BuildQueue((a, true), (b, true), (c, true));
                 ScriptedDrainHost host = new ScriptedDrainHost(0, a, b, c);
-                int scheduled = MeshDrainPolicy.Drain(q, 10, default, 10, host);
+                int scheduled = MeshDrainPolicy.Drain(q, 10, default, 10, host).Scheduled;
                 ok &= MeshAssert.IsTrue("B25.1 budgets-off drains all ready chunks",
                     scheduled == 3 && q.Count == 0 && host.Scheduled.Count == 3,
                     $"scheduled {scheduled} (want 3), queue left {q.Count} (want 0)");
@@ -126,7 +126,7 @@ namespace Editor.Validation.Meshing
             {
                 MeshBuildQueue q = BuildQueue((a, true), (b, true), (c, true), (d, true), (e, true));
                 ScriptedDrainHost host = new ScriptedDrainHost(0, a, b, c, d, e);
-                int scheduled = MeshDrainPolicy.Drain(q, 2, default, 10, host);
+                int scheduled = MeshDrainPolicy.Drain(q, 2, default, 10, host).Scheduled;
                 ok &= MeshAssert.IsTrue("B25.2 quota stop schedules exactly `quota` chunks",
                     scheduled == 2 && q.Count == 3 && host.Scheduled.Count == 2,
                     $"scheduled {scheduled} (want 2), queue left {q.Count} (want 3)");
@@ -137,7 +137,7 @@ namespace Editor.Validation.Meshing
             {
                 MeshBuildQueue q = BuildQueue((a, true), (b, true), (c, true), (d, true), (e, true));
                 ScriptedDrainHost host = new ScriptedDrainHost(2, a, b, c, d, e); // starts 2 in flight
-                int scheduled = MeshDrainPolicy.Drain(q, 10, default, 3, host);
+                int scheduled = MeshDrainPolicy.Drain(q, 10, default, 3, host).Scheduled;
                 ok &= MeshAssert.IsTrue("B25.3 in-flight cap re-check stops mid-quota once the live count hits the cap",
                     scheduled == 1 && q.Count == 4,
                     $"scheduled {scheduled} (want 1: cap 3 − 2 already in flight), queue left {q.Count} (want 4)");
@@ -147,7 +147,7 @@ namespace Editor.Validation.Meshing
             {
                 MeshBuildQueue q = BuildQueue((a, true), (b, true), (c, true), (d, true), (e, true));
                 ScriptedDrainHost host = new ScriptedDrainHost(0, a, b, c, d, e);
-                int scheduled = MeshDrainPolicy.Drain(q, 10, ExpiredWindow(), 10, host);
+                int scheduled = MeshDrainPolicy.Drain(q, 10, ExpiredWindow(), 10, host).Scheduled;
                 ok &= MeshAssert.IsTrue("B25.4 expired time-window stops the drain with nothing scheduled",
                     scheduled == 0 && q.Count == 5,
                     $"scheduled {scheduled} (want 0), queue left {q.Count} (want 5)");
@@ -157,7 +157,7 @@ namespace Editor.Validation.Meshing
             {
                 MeshBuildQueue q = BuildQueue((a, true), (b, false), (c, true)); // b inactive
                 ScriptedDrainHost host = new ScriptedDrainHost(0, a, b, c);
-                int scheduled = MeshDrainPolicy.Drain(q, 10, default, 10, host);
+                int scheduled = MeshDrainPolicy.Drain(q, 10, default, 10, host).Scheduled;
                 ok &= MeshAssert.IsTrue("B25.5 inactive chunk is purged, not scheduled",
                     scheduled == 2 && q.Count == 0
                                    && host.Scheduled.Contains(a) && host.Scheduled.Contains(c) && !host.Scheduled.Contains(b),
@@ -169,7 +169,7 @@ namespace Editor.Validation.Meshing
             {
                 MeshBuildQueue q = BuildQueue((a, true), (b, true)); // both active; a will decline, b will schedule
                 ScriptedDrainHost host = new ScriptedDrainHost(0, b); // only b is schedulable
-                int scheduled = MeshDrainPolicy.Drain(q, 10, default, 10, host);
+                int scheduled = MeshDrainPolicy.Drain(q, 10, default, 10, host).Scheduled;
                 ok &= MeshAssert.IsTrue("B25.6 declined chunk is left queued (retry next frame), scheduled chunk is removed",
                     scheduled == 1 && q.Count == 1 && q.Contains(a) && !q.Contains(b),
                     $"scheduled {scheduled} (want 1: b), a still queued? {q.Contains(a)} (want true), b still queued? {q.Contains(b)} (want false)");
@@ -181,7 +181,7 @@ namespace Editor.Validation.Meshing
                 q.TryEnqueue(MakeSchedulingChunk(a, true), false); // normal
                 q.TryEnqueue(MakeSchedulingChunk(b, true), true); // immediate → jumps to head
                 ScriptedDrainHost host = new ScriptedDrainHost(0, a, b);
-                int scheduled = MeshDrainPolicy.Drain(q, 1, default, 10, host); // budget one schedule
+                int scheduled = MeshDrainPolicy.Drain(q, 1, default, 10, host).Scheduled; // budget one schedule
                 ok &= MeshAssert.IsTrue("B25.7 immediate request drains ahead of an earlier normal request",
                     scheduled == 1 && host.Scheduled.Count == 1 && host.Scheduled[0].Equals(b)
                     && q.Contains(a) && !q.Contains(b),
@@ -225,14 +225,14 @@ namespace Editor.Validation.Meshing
             InFlightDrainHost host = new InFlightDrainHost { InFlight = true };
 
             // Frame 1 — X's mesh job is in flight: the request must survive the drain (F1 pre-fix would drop it).
-            int f1 = MeshDrainPolicy.Drain(q, 10, default, 10, host);
+            int f1 = MeshDrainPolicy.Drain(q, 10, default, 10, host).Scheduled;
             ok &= MeshAssert.IsTrue("B26.3 request during flight stays queued (drain schedules nothing, chunk retained)",
                 f1 == 0 && q.Count == 1 && q.Contains(x),
                 $"frame 1 scheduled {f1} (want 0), queue left {q.Count} (want 1: X retained for retry)");
 
             // Frame 2 — the flight completed: the retained request now schedules and is dequeued.
             host.InFlight = false;
-            int f2 = MeshDrainPolicy.Drain(q, 10, default, 10, host);
+            int f2 = MeshDrainPolicy.Drain(q, 10, default, 10, host).Scheduled;
             ok &= MeshAssert.IsTrue("B26.4 after the flight completes the retained request schedules and is dequeued",
                 f2 == 1 && q.Count == 0 && host.Scheduled.Contains(x),
                 $"frame 2 scheduled {f2} (want 1), queue left {q.Count} (want 0), X scheduled? {host.Scheduled.Contains(x)}");

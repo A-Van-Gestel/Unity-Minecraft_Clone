@@ -4,6 +4,62 @@ using UnityEngine;
 
 namespace Helpers
 {
+    /// <summary>The budgeted per-frame pipeline passes a stop reason can be attributed to (FP-2).</summary>
+    /// <remarks>
+    /// Four, not five: MP-6 retired the draw budget along with the stage it bounded. The lighting
+    /// <i>merge</i> (<c>ProcessLightingJobs</c>) is deliberately absent — it takes no budget window, so it
+    /// has no stop reason to report.
+    /// </remarks>
+    public enum PipelinePass : byte
+    {
+        /// <summary>The lighting ready-set scan (quota + ceiling + in-flight cap).</summary>
+        LightSchedule = 0,
+
+        /// <summary>The mesh-build queue drain (quota + ceiling + in-flight cap).</summary>
+        MeshSchedule = 1,
+
+        /// <summary>Completed-generation-job processing (ceiling only).</summary>
+        GenerationProcess = 2,
+
+        /// <summary>Completed-mesh-job processing (ceiling only).</summary>
+        MeshProcess = 3,
+    }
+
+    /// <summary>
+    /// Why a budgeted pass stopped — the admission-bound signal
+    /// (<c>Documentation/Design/FLIGHT_PROFILE_CAPTURE.md</c> §5.1). Lives here rather than with the
+    /// telemetry that reports it: the reason is a property of the <i>pass</i>, so the pure policies can
+    /// return it without a scheduling type depending on the benchmark layer.
+    /// </summary>
+    public enum PassStopReason : byte
+    {
+        /// <summary>
+        /// The pass did not execute this frame — <b>not</b> a break reason, and deliberately the zero value
+        /// so a default-initialized record cannot masquerade as <see cref="OutOfWork"/> ("ran, nothing
+        /// left"), a materially different and more flattering claim. Never tallied.
+        /// </summary>
+        NotRun = 0,
+
+        /// <summary>Ran to completion with work served. The pipeline is keeping up.</summary>
+        OutOfWork = 1,
+
+        /// <summary>The per-frame rate quota was spent. Unreachable for the two ceiling-only passes.</summary>
+        Quota = 2,
+
+        /// <summary>The Stopwatch ms ceiling was spent (hitch guard).</summary>
+        Ceiling = 3,
+
+        /// <summary>The OM-1 in-flight job cap was reached — a memory bound, not a throughput budget.</summary>
+        InFlightCap = 4,
+
+        /// <summary>
+        /// The queue was walked in full and nothing was schedulable — a readiness gate is failing upstream.
+        /// Distinct from <see cref="OutOfWork"/> by design: conflating them reports a stalled pipeline as a
+        /// healthy one, the worst misreading this instrument could produce.
+        /// </summary>
+        AllDeclined = 5,
+    }
+
     /// <summary>
     /// Pure frame-budget math for the per-frame pipeline passes (P-4 §3.4). Two cooperating pieces:
     /// a rate <b>quota</b> that scales an existing per-frame count cap by the frame's real duration
@@ -117,6 +173,39 @@ namespace Helpers
             // low cap must not yield an unbounded per-frame slice — the quota's guard, same rationale).
             float scale = Mathf.Clamp(intendedFrameIntervalSeconds * ReferenceFps, 1f, MAX_QUOTA_SCALE);
             return configuredMs * scale;
+        }
+
+        /// <summary>
+        /// Classifies why a scheduling pass stopped (FP-2). One implementation for both scheduling loops —
+        /// the lighting ready-set scan and the mesh drain break on the same three limits in the same order —
+        /// so the two can never disagree about what a stop <i>means</i>, and a single suite baseline pins
+        /// both.
+        /// <para>
+        /// Precedence mirrors the loops' own check order (quota → ceiling → in-flight cap). The final
+        /// discrimination is the load-bearing one: a pass that walked its whole queue and scheduled
+        /// <b>nothing</b> is <see cref="PassStopReason.AllDeclined"/> (readiness-bound — work exists but no
+        /// chunk is eligible), which must never collapse into <see cref="PassStopReason.OutOfWork"/>. An
+        /// empty queue is genuinely <see cref="PassStopReason.OutOfWork"/>, which is why
+        /// <paramref name="candidatesSeen"/> and not merely <paramref name="scheduled"/> decides it.
+        /// </para>
+        /// </summary>
+        /// <param name="scheduled">Items the pass actually scheduled this frame.</param>
+        /// <param name="candidatesSeen">Queue entries the pass examined (0 = the queue was empty).</param>
+        /// <param name="quotaSpent">Whether the rate quota was exhausted.</param>
+        /// <param name="ceilingExpired">Whether the ms window expired.</param>
+        /// <param name="inFlightCapReached">Whether the in-flight job cap was hit.</param>
+        /// <returns>The stop reason to record for the pass.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static PassStopReason ClassifyStop(int scheduled, int candidatesSeen, bool quotaSpent,
+            bool ceilingExpired, bool inFlightCapReached)
+        {
+            if (quotaSpent) return PassStopReason.Quota;
+            if (ceilingExpired) return PassStopReason.Ceiling;
+            if (inFlightCapReached) return PassStopReason.InFlightCap;
+
+            // Walked the queue to the end. Serving nothing despite having candidates is the readiness-bound
+            // signal; having no candidates at all is a healthy idle pass.
+            return candidatesSeen > 0 && scheduled == 0 ? PassStopReason.AllDeclined : PassStopReason.OutOfWork;
         }
 
         /// <summary>Starts a budget window ending <paramref name="budgetMs"/> from now (≤ 0 ms → an unbudgeted window; tiny positive budgets floored via <see cref="SanitizeBudgetMs"/>).</summary>

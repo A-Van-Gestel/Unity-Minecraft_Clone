@@ -49,6 +49,7 @@ namespace Editor.Validation.PipelineBackpressure
                 new Scenario("B5 Panic gate truth table (all four arms + boundaries)", RunB5GateTruthTable),
                 new Scenario("B6 Panic gate hysteresis walk (band holds both ways)", RunB6HysteresisWalk),
                 new Scenario("B7 Ceiling scaling: FPS-cap intent, floor, clamp, disabled passthrough", RunB7CeilingScaling),
+                new Scenario("B8 Stop-reason classifier: precedence, and AllDeclined never collapsing into OutOfWork", RunB8StopReasonClassifier),
             };
             return ValidationSuiteRunner.Execute("Pipeline Backpressure", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -62,6 +63,47 @@ namespace Editor.Validation.PipelineBackpressure
             if (condition) Debug.Log($"  [PASS] {label}");
             else Debug.LogError($"  [FAIL] {label}");
             return condition;
+        }
+
+        /// <summary>
+        /// FP-2: the shared stop-reason classifier both scheduling loops route through. Two things are
+        /// pinned. <b>Precedence</b> — quota → ceiling → in-flight cap, matching the loops' own check order,
+        /// so a pass that broke on the first limit is never attributed to a later one that also happens to
+        /// be true. <b>The readiness discrimination</b> — a pass that walked its whole queue and scheduled
+        /// nothing is <c>AllDeclined</c>, never <c>OutOfWork</c>; collapsing those two would report a
+        /// stalled pipeline as a healthy one, which is the single worst misreading the flight capture could
+        /// produce (FLIGHT_PROFILE_CAPTURE.md §5.1). An empty queue stays <c>OutOfWork</c>, which is why the
+        /// candidate count and not merely the scheduled count decides it.
+        /// </summary>
+        private static bool RunB8StopReasonClassifier()
+        {
+            // Precedence: each limit wins over the ones below it even when several are true at once.
+            bool ok = Check("quota outranks ceiling and cap when all three are true",
+                PipelinePassBudget.ClassifyStop(5, 9, true, true, true) == PassStopReason.Quota);
+            ok &= Check("ceiling outranks the in-flight cap",
+                PipelinePassBudget.ClassifyStop(5, 9, false, true, true) == PassStopReason.Ceiling);
+            ok &= Check("in-flight cap reported when it is the only limit hit",
+                PipelinePassBudget.ClassifyStop(5, 9, false, false, true) == PassStopReason.InFlightCap);
+
+            // The readiness discrimination — the load-bearing pair.
+            ok &= Check("walked candidates, scheduled none -> AllDeclined (readiness-bound)",
+                PipelinePassBudget.ClassifyStop(0, 9, false, false, false) == PassStopReason.AllDeclined);
+            ok &= Check("empty queue (no candidates) -> OutOfWork, NOT AllDeclined",
+                PipelinePassBudget.ClassifyStop(0, 0, false, false, false) == PassStopReason.OutOfWork);
+            ok &= Check("walked candidates and served some -> OutOfWork (healthy drain)",
+                PipelinePassBudget.ClassifyStop(4, 9, false, false, false) == PassStopReason.OutOfWork);
+
+            // A limit break with zero scheduled must still report the limit, not AllDeclined: the pass was
+            // cut short, so it never learned whether the remaining candidates were eligible.
+            ok &= Check("cap break with nothing scheduled -> InFlightCap, not AllDeclined",
+                PipelinePassBudget.ClassifyStop(0, 9, false, false, true) == PassStopReason.InFlightCap);
+
+            // NotRun is a caller-side sentinel for a pass that never executed; the classifier describes a
+            // pass that DID run, so it must never produce it.
+            ok &= Check("classifier never returns NotRun (it only describes passes that ran)",
+                PipelinePassBudget.ClassifyStop(0, 0, false, false, false) != PassStopReason.NotRun);
+
+            return ok;
         }
 
         /// <summary>On a perfect reference frame the quota IS the cap — the flag-on steady-state contract.</summary>

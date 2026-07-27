@@ -1,65 +1,11 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using Data;
+using Helpers;
 using UnityEngine;
 
 namespace Benchmarks
 {
-    /// <summary>The budgeted per-frame pipeline passes a stop reason can be attributed to (FP-2).</summary>
-    /// <remarks>
-    /// Four, not five: MP-6 retired the draw budget with the stage it bounded. The lighting <i>merge</i>
-    /// (<c>ProcessLightingJobs</c>) is deliberately absent — it takes no budget window, so it has no stop
-    /// reason to report.
-    /// </remarks>
-    public enum PipelinePass : byte
-    {
-        /// <summary>The lighting ready-set scan (quota + ceiling + in-flight cap).</summary>
-        LightSchedule = 0,
-
-        /// <summary>The mesh-build queue drain (quota + ceiling + in-flight cap).</summary>
-        MeshSchedule = 1,
-
-        /// <summary>Completed-generation-job processing (ceiling only).</summary>
-        GenerationProcess = 2,
-
-        /// <summary>Completed-mesh-job processing (ceiling only).</summary>
-        MeshProcess = 3,
-    }
-
-    /// <summary>
-    /// Why a budgeted pass stopped — the admission-bound signal (design §5.1). Five values, because the
-    /// three the design first proposed could not express two real break conditions.
-    /// </summary>
-    public enum PassStopReason : byte
-    {
-        /// <summary>
-        /// The pass did not execute this frame — <b>not</b> a break reason, and deliberately the zero value
-        /// so a default-initialized sample cannot masquerade as <see cref="OutOfWork"/> ("ran, nothing left"),
-        /// which is a materially different claim. Never tallied: <see cref="PipelineTelemetry.RecordPassStop"/>
-        /// ignores it.
-        /// </summary>
-        NotRun = 0,
-
-        /// <summary>Ran to completion with work served. The pipeline is keeping up.</summary>
-        OutOfWork = 1,
-
-        /// <summary>The per-frame rate quota was spent. Unreachable for the two ceiling-only passes.</summary>
-        Quota = 2,
-
-        /// <summary>The Stopwatch ms ceiling was spent (hitch guard).</summary>
-        Ceiling = 3,
-
-        /// <summary>The OM-1 in-flight job cap was reached — a memory bound, not a throughput budget.</summary>
-        InFlightCap = 4,
-
-        /// <summary>
-        /// The queue was walked in full and nothing was schedulable — a readiness gate is failing upstream.
-        /// Distinct from <see cref="OutOfWork"/> by design: conflating them reports a stalled pipeline as a
-        /// healthy one, which is the worst misreading this instrument could produce.
-        /// </summary>
-        AllDeclined = 5,
-    }
-
     /// <summary>How a chunk's traced lifecycle ended.</summary>
     public enum TraceDisposition : byte
     {

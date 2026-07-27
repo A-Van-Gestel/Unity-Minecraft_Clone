@@ -96,7 +96,14 @@ namespace Helpers
         /// <param name="startIndex">Optional rotating visit start (P-4 §3.4 fairness): candidates are visited
         /// from this index and wrap, so a budget break cannot systematically starve the same high-index job every
         /// frame. <c>0</c> is plain front-to-back order.</param>
-        public static void RunMergeLoop<TKey>(
+        /// <returns>
+        /// <c>true</c> when the loop stopped because the <paramref name="window"/> expired, <c>false</c> when
+        /// it walked every candidate (FP-2 stop-reason attribution). Returned rather than re-derived by the
+        /// caller: re-reading <c>window.Expired</c> after the call would report a ceiling stop for a pass
+        /// that finished all its work and only then ran out of window. Callers that do not report a stop
+        /// reason simply ignore it.
+        /// </returns>
+        public static bool RunMergeLoop<TKey>(
             IReadOnlyList<TKey> candidates,
             IJobCompletionDriver<TKey> driver,
             List<TKey> enrolled,
@@ -106,12 +113,12 @@ namespace Helpers
             enrolled.Clear();
 
             int count = candidates.Count;
-            if (count == 0) return; // Also guards the modulo below against a divide-by-zero.
+            if (count == 0) return false; // Also guards the modulo below against a divide-by-zero.
 
             for (int i = 0; i < count; i++)
             {
                 // §3.4 time ceiling — between jobs only, so the budget never leaves a job half-merged.
-                if (window.Expired) break;
+                if (window.Expired) return true;
 
                 TKey candidate = candidates[(startIndex + i) % count];
 
@@ -146,6 +153,8 @@ namespace Helpers
                     enrolled.Add(candidate);
                 }
             }
+
+            return false; // Walked every candidate — no ceiling break.
         }
 
         /// <summary>

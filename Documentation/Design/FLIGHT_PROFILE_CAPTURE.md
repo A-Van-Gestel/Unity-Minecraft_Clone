@@ -1,6 +1,6 @@
 # Flight-Profile Capture (Pipeline Telemetry) Design
 
-**Version:** 1.4  
+**Version:** 1.5  
 **Date:** 2026-07-27  
 **Amended:** 2026-07-27 (v1.1) — re-verified every §2 row, §5 hook site, and both §8 questions against the
 code. Six §2 rows corrected, the hook chain shortened from five stamps to four (MP-6), the stop-reason set
@@ -13,8 +13,10 @@ and a correction to v1.1's overstated `Validate All` guard claim.
 enum, §8 Q1 closed with measured capacities.  
 **Amended:** 2026-07-27 (v1.4) — FP-1 as-built sync: six hook sites, `UnloadedBeforeMeshApplied` restored
 (dispositions → 7), and `StampRequested` made idempotent before admission.  
-**Status:** **Partially implemented.** FP-0 (telemetry core) and FP-1 (stage stamps) are shipped and gated;
-FP-2…FP-4 remain proposed. Per-phase status is in §7.  
+**Amended:** 2026-07-27 (v1.5) — FP-2 as-built sync: stop reasons returned by the pure policies, the enums
+relocated to `Helpers`, one shared `ClassifyStop`, and the B8 baseline (Validate All → 356).  
+**Status:** **Partially implemented.** FP-0 (telemetry core), FP-1 (stage stamps) and FP-2 (admission
+pressure) are shipped and gated; **FP-3 and FP-4 remain proposed.** Per-phase status is in §7.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > A telemetry layer that answers **one question the existing benchmark cannot**: when chunks appear
@@ -311,14 +313,37 @@ whether FP-2 is testable at all.
 | `out StopReason` parameter                            | Same testability, smaller diff — but every existing decision type in this engine (`ChunkUnloadDecision`, `PoolPruneDecision`, `SeamWakeDecision`, `LightingScanDecision`) *returns* its verdict. An out-param on a hot pure policy breaks that pattern for no gain. |
 | Re-derive it in `World` after the pass                | **Rejected.** Zero production diff, but it duplicates the loop's break conditions in a second place that can silently disagree with them (re-reading `window.Expired` *after* the loop reports `Ceiling` for a pass that actually stopped on quota), and it lives in `World.Update`, where **no suite can reach it** — see §7's guard limitation. |
 
-**Cost, stated honestly:** the return-type change touches 11 call sites. `World.cs:2271` discards the return
-and is source-compatible; the other **10 are in `Assets/Editor/Validation/Meshing/MeshingValidationSuite.Scheduling.cs`**
-(B25/B26) and need a mechanical `int scheduled = …` → `… .Scheduled` edit. That is rename-shaped work, not a
-re-derivation of the baselines' meaning, but it must land in the same commit as the signature change.
+**Cost, as built:** the return-type change touched 10 call sites — `World.cs` (which now consumes the reason)
+plus **9 mechanical `int scheduled = …` → `….Scheduled` edits** in
+`Assets/Editor/Validation/Meshing/MeshingValidationSuite.Scheduling.cs` (B25/B26). Rename-shaped work, landed
+in the same commit as the signature change.
 
-**Payoff:** FP-2 stops being an unguarded observation layer. The five-value reason set becomes suite-pinned in
-the Meshing and Pipeline Backpressure suites, so a future change that quietly makes a pass stop for a new
-reason fails a baseline instead of silently mislabeling every subsequent capture.
+**Payoff:** FP-2 stops being an unguarded observation layer. The reason set is suite-pinned by **B8**, so a
+future change that quietly makes a pass stop for a new reason fails a baseline instead of silently
+mislabeling every subsequent capture.
+
+#### 5.2.1 As built (FP-2) — three decisions the plan did not anticipate
+
+1. **`PipelinePass` and `PassStopReason` live in `Helpers`, not `Benchmarks`.** FP-0 declared them beside the
+   telemetry; FP-2 exposed the layering problem that creates — `MeshDrainPolicy.Drain` would have to *return*
+   a benchmark type, making a core scheduling policy depend on the diagnostic layer. They now sit in
+   `Helpers/PipelinePassBudget.cs` alongside the quota/window math they describe, and `PipelineTelemetry`
+   consumes them. The stop reason is a property of the **pass**, not of the instrument that reports it.
+
+2. **One shared classifier, `PipelinePassBudget.ClassifyStop`.** Both scheduling loops break on the same three
+   limits in the same order, so rather than two parallel implementations they route through one pure function.
+   The two passes therefore cannot drift on what a stop *means*, and a single baseline (B8) pins both.
+
+3. **`JobCompletionPass.RunMergeLoop` returns `bool` (did the ceiling break the loop?).** The same
+   return-don't-re-derive principle as §5.2, applied to the two ceiling-only completion passes: re-reading
+   `window.Expired` after the call would report a ceiling stop for a pass that finished all its work and only
+   *then* ran out of window. Source-compatible — every existing caller ignores the value.
+
+**One subtlety worth recording, because getting it wrong would fake a readiness stall.** The lighting scan's
+candidate count deliberately **excludes stale ready-set entries** (chunks already unloaded, which the scan
+launders away). They are bookkeeping, not work the pass declined to serve — counting them would let a mass
+unload present as `AllDeclined` and score a healthy pipeline as readiness-bound. A parked *placeholder*, by
+contrast, **does** count: that is genuinely "work exists but is not yet eligible".
 
 ---
 
@@ -341,7 +366,7 @@ reason fails a baseline instead of silently mislabeling every subsequent capture
 |-----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|:------:|------------|
 | **FP-0 — Telemetry core** ✅ **DONE** | `Benchmarks/PipelineTelemetry.cs`: `Enabled` flag + domain reset, `ChunkTrace`/`AdmissionSample` structs, side table, rolling frame window + exact tallies, phase begin/end, `EstimateTraceCapacity`. Modeled on `WorldFrameProfiler`. |   🟢   | —          |
 | **FP-1 — Stage stamps** ✅ **DONE** | Guarded hooks at **six** sites / eight call sites (§5) producing the **four-stamp** chain; terminal dispositions incl. both previously-uncounted discards (generation out-of-range *and* the disk-load stranding, §8 Q2) plus the mid-flight unload restored in v1.4. |   🟡   | FP-0       |
-| **FP-2 — Admission pressure**     | Per-frame sampling: queue depths, panic-gate state (**sampling the existing `World` probes** — §2 — not building new ones), and the **five-value per-pass stop reason** (§5.1) returned by the pure policies (§5.2 — incl. the `DrainResult` signature change and its 10 suite call-site edits). |   🟡   | FP-0       |
+| **FP-2 — Admission pressure** ✅ **DONE** | Per-frame sampling: queue depths, panic-gate state (**sampled from the existing `World` probes** — §2 — not newly instrumented), and the per-pass stop reason (§5.1) returned by the pure policies (§5.2/§5.2.1), pinned by **B8**. |   🟡   | FP-0       |
 | **FP-3 — Report section**         | `Benchmarks/TraceStatistics.cs` (pure static, so §7's baseline is writable) + the "Pipeline" report section: stage-latency distributions per speed phase — **normalized by each phase's own `DurationSeconds`**, since the last generation phase is not 30 s (§2) — waste %, gate-closed %, stop-reason histogram, the §7.1 verdict rule, the **§7.2 raw-results block**, and the §8 Q1 saturation banner. |   🟢   | FP-1, FP-2 |
 | **FP-4 — Capture + verdict**      | Run in an **IL2CPP Development Build**, write the report under `Documentation/Performance/` per the `perf-benchmark` protocol, and state which of the **four** regimes the numbers show — **by §7.1's pre-committed rule, over the §7.2 raw results, both present in the report**. |   🟢   | FP-3       |
 
@@ -364,6 +389,10 @@ its own. Three things *are* checkable and should be:
    `BenchmarkReportGenerator`'s private code would make the baseline impossible to write.
 3. **§7.1's verdict rule is pinned by the same suite** — it is pure arithmetic over the counters, so a
    rule that silently changes meaning between captures is a baseline failure, not a surprise.
+4. **The stop-reason classifier is pinned by `Validate Pipeline Backpressure` B8** (added in FP-2):
+   precedence across the three limits, and — the load-bearing pair — `AllDeclined` never collapsing into
+   `OutOfWork` while an *empty* queue still reports `OutOfWork`. Prove-red confirmed by temporary mutation:
+   collapsing the readiness arm turns exactly B8 red on exactly that assertion.
 
 Allocation-freedom of the disabled path is **not** assertable on editor Mono (project precedent) and is
 verified by inspection plus an IL2CPP GC-alloc read.
@@ -495,6 +524,20 @@ whether they inherit them *knowingly*.
 
 ## Document History
 
+* **v1.5** - FP-2 as-built sync (2026-07-27). **FP-2 shipped and gated** — per-pass stop reasons returned by
+  the pure policies, per-frame admission sampling, **Validate All 356/356** (355 + the new B8) with telemetry
+  disabled and enabled, Rider clean on every touched production file, and B8 prove-red confirmed by temporary
+  mutation. New §5.2.1 records three decisions the plan did not anticipate: **(1)** `PipelinePass` /
+  `PassStopReason` moved from `Benchmarks` to `Helpers` — otherwise `MeshDrainPolicy.Drain` would have to
+  *return* a benchmark type, making a core scheduling policy depend on the diagnostic layer; the stop reason
+  is a property of the pass, not of the instrument reporting it. **(2)** One shared
+  `PipelinePassBudget.ClassifyStop` for both scheduling loops, so they cannot drift on what a stop means and a
+  single baseline pins both. **(3)** `JobCompletionPass.RunMergeLoop` now returns whether the ceiling broke
+  the loop — the same return-don't-re-derive principle as §5.2, since re-reading `window.Expired` afterwards
+  would report a ceiling stop for a pass that finished everything and only then ran out of window
+  (source-compatible; existing callers ignore it). Also records the candidate-counting subtlety: stale
+  ready-set entries are excluded, because counting them would let a mass unload masquerade as a readiness
+  stall, while a parked placeholder *is* counted as genuinely-ineligible work.
 * **v1.4** - FP-1 as-built sync (2026-07-27). **FP-1 shipped and gated** — six hook sites / eight call sites,
   `dotnet build` 0 errors, Unity clean, **Validate All 355/355 both with telemetry disabled AND enabled with a
   live phase**, plus a synthetic lifecycle run pinning the recording logic. Two corrections, both of the same
@@ -553,5 +596,5 @@ whether they inherit them *knowingly*.
 
 ---
 
-**Last Updated:** 2026-07-27 (v1.4 FP-1 as-built sync)  
+**Last Updated:** 2026-07-27 (v1.5 FP-2 as-built sync)  
 **Next Review:** when FP-0 starts, or if the flight symptom is diagnosed by other means first

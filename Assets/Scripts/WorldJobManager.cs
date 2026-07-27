@@ -966,11 +966,20 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         if (window.HasBudget && genKeyCount > 0)
             genScanStart = _genScanCursor = (_genScanCursor + 1) % genKeyCount;
 
+        // FP-2: ceiling-only pass — a quota stop is unreachable here, so ClassifyStop can only ever return
+        // Ceiling or OutOfWork. Completed jobs are the candidates; AllDeclined is likewise unreachable
+        // because reaching a completed job always processes it.
+        bool genCeilingExpired = false;
+
         for (int scanIndex = 0; scanIndex < genKeyCount; scanIndex++)
         {
             // §3.4 time ceiling — checked between jobs, never mid-job (a job's Complete()+process is
             // atomic within the pass), so one oversized job can overshoot the ceiling once.
-            if (window.Expired) break;
+            if (window.Expired)
+            {
+                genCeilingExpired = true;
+                break;
+            }
 
             ChunkCoord scanCoord = _genScanKeys[(genScanStart + scanIndex) % genKeyCount];
             KeyValuePair<ChunkCoord, GenerationJobData> jobEntry =
@@ -1205,6 +1214,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         // job (e.g. an early removal on view-distance change before it completes) MUST Complete() then
         // ReleaseGenerationJobData() it first — see ReleaseGenerationJobData / GenerationJobData.Dispose — or its
         // per-chunk native buffers leak (and a pooled active-voxel list is lost from the pool).
+        PipelineTelemetry.RecordPassStop(PipelinePass.GenerationProcess,
+            genCeilingExpired ? PassStopReason.Ceiling : PassStopReason.OutOfWork);
+
         foreach (ChunkCoord chunkCoord in _completedGenJobs)
         {
             GenerationJobs.Remove(chunkCoord);
@@ -1250,8 +1262,13 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         // pass bookkeeping. The window + rotating start are passed through; a budget break simply leaves the
         // un-visited remainder enrolled in MeshJobs for the next frame. _completedMeshJobs is cleared by
         // RunMergeLoop.
-        JobCompletionPass.RunMergeLoop(_meshScanKeys, _meshDriver, _completedMeshJobs, window, meshScanStart);
+        bool meshCeilingExpired = JobCompletionPass.RunMergeLoop(
+            _meshScanKeys, _meshDriver, _completedMeshJobs, window, meshScanStart);
         JobCompletionPass.RunRemoveAndPromote(_completedMeshJobs, _meshDriver);
+
+        // FP-2: ceiling-only pass — Quota and AllDeclined are structurally unreachable here.
+        PipelineTelemetry.RecordPassStop(PipelinePass.MeshProcess,
+            meshCeilingExpired ? PassStopReason.Ceiling : PassStopReason.OutOfWork);
     }
 
     #region IMeshCompletionHost — collaborators for the mesh completion driver (MP-4 / MP-6 §8.1)

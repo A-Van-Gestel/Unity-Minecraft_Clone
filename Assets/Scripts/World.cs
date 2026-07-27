@@ -2148,6 +2148,15 @@ public class World : MonoBehaviour, IMeshDrainHost
                 ? Mathf.Max(1, settings.maxInFlightLightingJobs)
                 : int.MaxValue;
 
+            // FP-2 stop-reason inputs, classified after the loop by the SAME pure helper the mesh drain
+            // uses (PipelinePassBudget.ClassifyStop) so the two passes can never disagree on what a stop
+            // means. candidatesSeen counts ready entries actually examined, so "walked the ready set and
+            // scheduled nothing" (AllDeclined — readiness-bound) stays distinct from an empty set.
+            int lightCandidatesSeen = 0;
+            bool lightQuotaSpent = false;
+            bool lightCeilingExpired = false;
+            bool lightCapReached = false;
+
             // Snapshot the ready set into a pooled list to allow safe modification during iteration.
             List<Vector2Int> readySnapshot = ListPool<Vector2Int>.Get();
             try
@@ -2160,15 +2169,37 @@ public class World : MonoBehaviour, IMeshDrainHost
                     // the un-served remainder in the READY set, exactly like the legacy count break
                     // (§9.1 semantics). The in-flight count is re-checked every iteration because each
                     // successful schedule grows LightingJobs (the mesh loop's OM-1 pattern).
-                    if (lightJobsScheduled >= lightQuota || lightWindow.Expired
-                                                         || JobManager.LightingJobs.Count >= inFlightLightCap) break;
+                    if (lightJobsScheduled >= lightQuota)
+                    {
+                        lightQuotaSpent = true;
+                        break;
+                    }
+
+                    if (lightWindow.Expired)
+                    {
+                        lightCeilingExpired = true;
+                        break;
+                    }
+
+                    if (JobManager.LightingJobs.Count >= inFlightLightCap)
+                    {
+                        lightCapReached = true;
+                        break;
+                    }
 
                     // If the chunk was unloaded, clean up the stale entry
                     if (!worldData.TryGetChunk(pos, out ChunkData chunkData))
                     {
+                        // Deliberately NOT a candidate: a stale entry for an unloaded chunk is bookkeeping
+                        // laundering, not work the pass declined to serve. Counting it would let a mass
+                        // unload masquerade as a readiness stall (AllDeclined).
                         _lightWork.Remove(pos);
                         continue;
                     }
+
+                    // A real candidate from here down — including the placeholder park below, which IS
+                    // "work that exists but is not yet eligible" (exactly the readiness-bound signal).
+                    lightCandidatesSeen++;
 
                     // Placeholder data that hasn't generated terrain yet cannot schedule anything —
                     // park it; population promotes it back (flag callback + neighborhood promotion).
@@ -2242,6 +2273,10 @@ public class World : MonoBehaviour, IMeshDrainHost
                 ListPool<Vector2Int>.Release(readySnapshot);
             }
 
+            // FP-2: classify the scan's stop with the shared helper (same precedence as the mesh drain).
+            PipelineTelemetry.RecordPassStop(PipelinePass.LightSchedule, PipelinePassBudget.ClassifyStop(
+                lightJobsScheduled, lightCandidatesSeen, lightQuotaSpent, lightCeilingExpired, lightCapReached));
+
             // Panic-gate signal sample (§3.5): taken AFTER the scan so this frame's transient
             // promotions (notably the ~1s PromoteAll of the parked frontier ring) have been re-parked
             // and only genuinely un-served schedulable work is counted. Read by next frame's
@@ -2263,7 +2298,20 @@ public class World : MonoBehaviour, IMeshDrainHost
         //    NOTE: If too many mesh jobs are already in flight, pause scheduling new ones to let the
         //          Job System catch up. The cap is device-calibrated (OM-1) — see Settings.maxInFlightMeshJobs.
         int inFlightMeshCap = Mathf.Max(1, settings.maxInFlightMeshJobs);
-        if (_meshBuildQueue.Count > 0 && JobManager.MeshJobs.Count < inFlightMeshCap)
+        if (_meshBuildQueue.Count == 0)
+        {
+            // FP-2: the pass is skipped, but "no work queued" is a real, healthy outcome — record it rather
+            // than letting the frame default to NotRun, which would hide an idle pipeline from the histogram.
+            PipelineTelemetry.RecordPassStop(PipelinePass.MeshSchedule, PassStopReason.OutOfWork);
+        }
+        else if (JobManager.MeshJobs.Count >= inFlightMeshCap)
+        {
+            // FP-2: work IS queued and the entry gate refused it — that is a genuine in-flight-cap stop and
+            // must be recorded as one. Left to fall through it would read as NotRun, silently dropping an
+            // admission-bound signal from the capture (design §5.1).
+            PipelineTelemetry.RecordPassStop(PipelinePass.MeshSchedule, PassStopReason.InFlightCap);
+        }
+        else
         {
             // P-4 §3.4: rate quota + ms ceiling, same shape as the lighting throttle above. The break
             // (inside MeshDrainPolicy) leaves un-served chunks queued in place — legacy semantics. The
@@ -2277,7 +2325,12 @@ public class World : MonoBehaviour, IMeshDrainHost
                 ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.meshScheduleBudgetMs, ceilingScaleInterval))
                 : default;
 
-            MeshDrainPolicy.Drain(_meshBuildQueue, meshQuota, meshWindow, inFlightMeshCap, this);
+            DrainResult meshDrain = MeshDrainPolicy.Drain(
+                _meshBuildQueue, meshQuota, meshWindow, inFlightMeshCap, this);
+
+            // FP-2: the reason comes FROM the policy, never re-derived here — re-reading the limits after
+            // the loop cannot tell a quota break from a window that expired in the meantime (design §5.2).
+            PipelineTelemetry.RecordPassStop(PipelinePass.MeshSchedule, meshDrain.Reason);
         }
 
         // MP-6: there is no step 8. The load animation is triggered by the mesh completion pass (step 5)
@@ -2305,6 +2358,17 @@ public class World : MonoBehaviour, IMeshDrainHost
 
         // Publish the four sub-phase accumulators (no-op unless a fluid stress capture is running).
         WorldFrameProfiler.EndFrame();
+
+        // FP-2: close the telemetry frame — queue depths + panic-gate state, committing this frame's
+        // per-pass stop reasons. Placed last so every budgeted pass above has already reported. The gate
+        // state is SAMPLED from the probes P-4 §3.5 already exposes; nothing new is instrumented here.
+        PipelineTelemetry.RecordFrame(
+            _generationRequestQueue.Count,
+            JobManager.GenerationJobs.Count,
+            _lightWork.ReadyCount,
+            _lightWork.WaitingCount,
+            _meshBuildQueue.Count,
+            _generationGateOpen);
     }
 
     // --- JOB-RELATED METHODS ---
