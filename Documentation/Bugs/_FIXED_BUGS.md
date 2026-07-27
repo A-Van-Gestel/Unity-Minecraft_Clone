@@ -731,7 +731,32 @@ Lighting already guarded against this (`WorldData.QueueLightUpdate` and the mesh
 
 **No migration was written — deliberate (July 2026).** The fix stops new emissions but does not undo pre-fix writes, and the in-game run settled the open question: **already-affected chunks do NOT self-heal.** (The pre-fix reasoning that `infiniteSourceRegeneration` would decay a level-1 stamp back to a source did not hold in practice — do not re-derive it as a reason to skip a cleanup elsewhere.) A cleanup pass was still declined because exposure is limited to local dev builds; the single external tester takes a full release build every 2–3 weeks, so no shipped save carries the artifact. Existing dev worlds keep their seams. If that calculus changes, a cleanup needs two parts: dropping queued fluid mods from `pending_mods.bin`, and repairing seams already saved into region files.
 
-**Left open:** `FLUID_BUGS.md` §19 (quiesced seam fluids are never re-woken when the neighbor populates) — pre-existing, but this fix widened its exposure by moving the placeholder ring onto the void-read path.
+**Follow-on:** Fluid §19 below (quiesced seam fluids are never re-woken when the neighbor populates) — pre-existing, but this fix widened its exposure by moving the placeholder ring onto the void-read path. Fixed separately; both entries are archived here.
+
+### ~~19. Quiesced seam fluids are never re-woken when the neighbor chunk populates~~
+
+**Severity:** Low (narrow geometry; self-corrected on any adjacent edit)  
+**Files:** `Helpers/SeamWakeDecision.cs` (new), `World.cs` (`WakeSeamBehaviorNeighborhood`), `WorldJobManager.cs` (`ProcessGenerationJobs` completed-job sweep), `Chunk.cs` (`RegisterActiveVoxelsFromJob` / `OnDataPopulated`)  
+**Fixed:** July 2026  
+**Status:** Resolved — guarded by baseline **BH-B10** (`Validate Behavior`), prove-red confirmed. **Never observed in-game**, before or after: it was found by code review of Fluid §18 and fixed from analysis, so there is no visual confirmation to obtain — the prove-red baseline is the evidence.
+
+**Symptom:** Chunk B generates an opening at a seam at the same Y as chunk A's water — an ocean-floor cave mouth, an underwater cliff face below sea level — and A's water never flows in. The pocket stays dry until the player breaks or places a block next to it.
+
+**Root Cause:** A read of an unpopulated chunk resolves to *void*, and a void read satisfies no spread test, so a fluid whose only flow-receptive direction was a not-yet-loaded neighbor evaluated inactive and left `ActiveFluidsBucket` on its first tick. Nothing re-registered it: population registers only the **newly populated chunk's own** active voxels, and the sole cross-chunk wake (`ApplyModifications` step 4) requires an applied modification 6-adjacent to the sleeping cell.
+
+Pre-existing rather than introduced — a genuinely absent neighbor has always read as void — but the Fluid §18 fix widened the exposure by moving the whole load-distance placeholder ring onto that same path.
+
+**Fix:** `World.WakeSeamBehaviorNeighborhood`, the behavior-tick sibling of `PromoteLightWorkNeighborhood`, fired from the same two population sites. For each of the 4 cardinal neighbors that is already `IsPopulated`, it re-registers the active-behavior voxels in the 1-deep slab facing the seam.
+
+Two properties keep it cheap and correct:
+
+- **One cell deep, cardinal only.** Activity depends solely on a voxel's ±1 reads (`IsFluidActive`); the ≤4-cell flow pathfinder only ranks directions among already-valid ones, and a diagonal chunk is never an immediate neighbor. Deeper or diagonal waking would be dead work.
+- **Re-registration is safe.** A woken voxel that is still stable re-evaluates inactive on the next tick and drops back out, so the wake cannot accumulate. It is family-agnostic (routes through `ChunkData.AddActiveVoxel`), so grass — same `GetState` path, same gap — is fixed by the same pass, guarded by **BH-B11**.
+- **The gate samples two rows, not one.** A cell across the seam admits when it is non-solid, is `BlockIDs.Dirt`, *or* when the cell one row **above** it is — grass's up-diagonal spread target is dirt, which is solid, so a same-Y-only gate would silently stop waking grass at seams. The y−1 grass path (`IsDirtNextToAir`) needs air at the same Y, which already admits, so no third sample is needed.
+
+Sections are walked whole, so an all-air span costs one null check rather than 256 reads. **The pass is not itself budgeted:** it runs in `ProcessGenerationJobs`' completed-job sweep, *after* the `modsBudget`/window checks, so P-4 §3.4 bounds it only indirectly — via how many chunks are admitted per frame — and the ms ceiling never measures the wake. Measured (editor-Mono screening, `Documentation/Performance/SEAM_WAKE_FLUID19_2026-07-27_BENCHMARK.md`): **~78 µs per ocean population, ~5.8 µs per land/grass population** (the gate is 13.5× on the latter and does nothing for the former); the extra tick over the woken voxels is not measured, and an IL2CPP fill-load capture is still outstanding.
+
+**Harness note (two false greens caught by the prove-red):** BH-B10 first passed with the fix *neutered*, twice, for two independent reasons — `BehaviorTestWorld` evicts a voxel that went inactive only on the *next* tick's bucket sync (so the scenario read last tick's stale bucket as "woken"), and the harness never registered its **center** chunk in the stub `WorldData` (so the production pass looked the chunk up by coord and silently found nothing). Both are fixed in the harness; a green BH-B10 now means the production pass actually ran.
 
 ---
 
