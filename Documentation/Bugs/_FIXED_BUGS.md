@@ -701,6 +701,38 @@ waterfall effect that properly blends with horizontal pools at its base.
 
 **Symptom:** Breaking a source block with a waterfall beneath it left floating, non-decaying waterfall columns that indefinitely supplied water to adjacent blocks. **Root Cause:** `CalculateExpectedFluidLevel` allowed orphaned waterfall blocks to act as level-0 support for each other, establishing a self-sustaining loop. **Fix:** Added an `isFedFromAbove` check. Now, if a falling fluid block is cut off from the stream above, it immediately decays to air or regular decaying fluid, ending the loop.
 
+### ~~18. Fluids flow into unpopulated placeholder chunks → chunk-aligned "flowing water" seams on ocean surfaces~~
+
+**Severity:** High (visible world corruption, persisted to disk)  
+**Files:** `Jobs/FluidBurstTicker.cs` (`PrepareNeighbors`), `Data/WorldData.cs` (`TryGetVoxel`), `Data/ChunkData.cs` (`FillJobVoxelMap`, `GetVoxel`), `World.cs` (`ApplyModifications`), `WorldJobManager.cs` (pending-mod replay)  
+**Fixed:** July 2026  
+**Status:** Resolved — confirmed in-game (new chunks no longer ring); guarded by baselines **BH-B8** (Burst path) and **BH-B9** (managed path) in `Validate Behavior`, promoted from this bug's own `K18a`/`K18b` repros (unrelated to the Lighting suite's identically-named `K18a`).
+
+**Symptom:** Straight, chunk-boundary-aligned lines of *flowing* water (fluid level 1) on otherwise flat ocean surfaces, tracing rectangular outlines that follow chunk seams. Produced off-screen in the load-distance buffer during chunk streaming — most reliably after load → quick unload → reload churn — and surviving a reload of the area because they were written into `pending_mods.bin`.
+
+**Root Cause:** A chunk present in `WorldData.Chunks` but **not yet populated** — the placeholder `GetOrCreatePlaceholder` reserves for every load-distance coord before its terrain job lands — read back as a full column of `Air` instead of "no data", on **both** fluid read paths:
+
+- `ChunkData.FillJobVoxelMap` zero-fills null sections, and `FluidBurstTicker.PrepareNeighbors` accepted any non-null neighbor, so the Burst halo received `Air` rather than the `uint.MaxValue` missing-neighbor sentinel.
+- `ChunkData.GetVoxel` returns 0 for a null section and `WorldData.TryGetVoxel` did not check `IsPopulated`, so the managed path saw the same phantom air.
+
+The chain that turned that into a persistent artifact:
+
+1. Ocean water at a chunk border is a *source*, so it is active and `canSpreadHorizontally`. Across the seam it saw air, and because the placeholder's column *below* also read air, the flow pathfinder scored that direction as an immediate drop — making it the single optimal direction.
+2. Every border water voxel emitted a level-1 `VoxelMod` into the placeholder, once per tick, at every Y where water touched the seam.
+3. `World.ApplyModifications` correctly refuses to write into an unpopulated chunk and routed the mods to `ModManager.AddPendingMod` — which **persists** them to `pending_mods.bin`.
+4. When that chunk finally generated, `WorldJobManager.ProcessGenerationJobs` replayed the pending mods with `chunkData.ModifyVoxel`, stamping flowing water over the freshly generated ocean surface. The replay runs *after* the active-voxel scan and bypasses `ApplyModifications`' placement rules entirely.
+
+Lighting already guarded against this (`WorldData.QueueLightUpdate` and the meshing/lighting neighbor gates all test `IsPopulated`); the fluid tick had no equivalent gate — `World.TickChunksParallel` ticks any chunk with a non-empty active bucket regardless of neighbor state.
+
+**Fix:** Treat "present but unpopulated" as *missing* at both read boundaries:
+
+- `FluidBurstTicker.PrepareNeighbors` requires `neighbor.IsPopulated`; otherwise the neighbor slot points at the empty buffer, which the gather sentinel-fills → border reads resolve to void.
+- `WorldData.TryGetVoxel` resolves populated chunks only (checked live, after the last-chunk cache, so a placeholder that generates later starts resolving on the next query).
+
+**No migration was written — deliberate (July 2026).** The fix stops new emissions but does not undo pre-fix writes, and the in-game run settled the open question: **already-affected chunks do NOT self-heal.** (The pre-fix reasoning that `infiniteSourceRegeneration` would decay a level-1 stamp back to a source did not hold in practice — do not re-derive it as a reason to skip a cleanup elsewhere.) A cleanup pass was still declined because exposure is limited to local dev builds; the single external tester takes a full release build every 2–3 weeks, so no shipped save carries the artifact. Existing dev worlds keep their seams. If that calculus changes, a cleanup needs two parts: dropping queued fluid mods from `pending_mods.bin`, and repairing seams already saved into region files.
+
+**Left open:** `FLUID_BUGS.md` §19 (quiesced seam fluids are never re-woken when the neighbor populates) — pre-existing, but this fix widened its exposure by moving the placeholder ring onto the void-read path.
+
 ---
 
 ## Chunk Management

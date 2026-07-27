@@ -124,6 +124,47 @@ Checks all **8 horizontal neighbors** (cardinal + diagonal) with relaxed require
 >
 > This is intentional: edge checks are quality corrections, not correctness blockers. Any border light they add triggers an automatic re-mesh. See `LIGHTING_SYSTEM_OVERVIEW.md` §3.5.
 
+### 3.4 The behavior tick has no neighbor gate — reads resolve per voxel
+
+Unlike lighting and meshing, `World.TickChunksParallel` schedules a chunk's fluid/grass tick on the sole
+condition that its active bucket is non-empty; there is no `AreNeighbors*` precondition. Correctness therefore
+rests entirely on each individual cross-seam **read** resolving to *void* when the neighbor has no data, which
+in turn rests on one invariant:
+
+> **A chunk that is present in `Chunks` but not `IsPopulated` holds no voxel data. Every read of it must
+> resolve to "no data", never to `Air`.**
+
+This is not automatic: `ChunkData.GetVoxel` returns `0` (= `Air`) for a null section and
+`ChunkData.FillJobVoxelMap` zero-fills them, so a placeholder looks like a clean column of air to any reader
+that only null-checks. Both fluid read paths enforce the invariant explicitly:
+
+| Path                | Enforcement                                                                                        |
+|---------------------|----------------------------------------------------------------------------------------------------|
+| Burst halo          | `FluidBurstTicker.PrepareNeighbors` requires `IsPopulated`; otherwise the slot points at the empty buffer, which `GatherPaddedFluidVoxelsBand` sentinel-fills (`uint.MaxValue`) → `GetStateLocal` reports `Has == false` |
+| Managed             | `WorldData.TryGetVoxel` resolves populated chunks only (checked live, after the last-chunk cache), so `GetVoxelState` → `ChunkData.GetState` returns null                                                                |
+
+Dropping either check reintroduces Fluid Bug 18 (archived in `_FIXED_BUGS.md` → Fluid §18 — not to be confused
+with Lighting §18): border fluids read the placeholder ring as free space, spread into it, and
+`ApplyModifications` persists the resulting cross-chunk mods via `ModManager.AddPendingMod` — which replays them
+over the neighbor's real terrain once it generates. Guarded by baselines **BH-B8** (Burst path) and **BH-B9**
+(managed path) in `Validate Behavior`, promoted from the repro scenarios after the July 2026 in-game
+confirmation; each names its own prove-red mutation.
+
+> [!NOTE]
+> ### Quiesced seams are not re-woken when a neighbor populates
+> Because a void read cannot satisfy any spread test, a fluid whose only flow-receptive direction was a
+> not-yet-loaded neighbor evaluates as inactive and leaves `ActiveFluidsBucket` on its first tick. Nothing
+> re-registers it later: population registers only the **newly populated chunk's own** voxels
+> (`RegisterActiveVoxelsFromJob` / `OnDataPopulated`), and the only cross-chunk wake
+> (`ApplyModifications` step 4) requires an applied mod 6-adjacent to the sleeping cell.
+>
+> Consequence: where chunk B generates an opening at the seam at the same Y as chunk A's water (an ocean-floor
+> cave mouth or an underwater cliff face below sea level), A's water will not flood it until something edits an
+> adjacent block. This predates the §3.4 invariant — a genuinely absent neighbor has always read as void — but
+> the invariant makes the load-edge placeholder ring take the same path, so the exposure is wider. Tracked as
+> `FLUID_BUGS.md` §19; fixing it means a wake-on-populate pass over the 4 cardinal neighbors' seam columns,
+> which belongs on the generation hot path's budget discussion (P-4), not in a fluid read fix.
+
 ---
 
 ## 4. The Main Loop (`World.Update()`)

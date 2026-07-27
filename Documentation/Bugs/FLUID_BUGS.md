@@ -2,7 +2,7 @@
 
 This document outlines **open** bugs related to fluid behavior and simulation. Resolved bugs are archived in [`_FIXED_BUGS.md`](./_FIXED_BUGS.md).
 
-> **Last reviewed:** March 2026
+> **Last reviewed:** July 2026
 
 ---
 
@@ -125,3 +125,36 @@ the session, so the offending path (if float) does not go through the guarded ch
 
 **Not part of this bug:** the fluid *shader* rendering flat blue (flow vectors collapsing) at that magnitude is
 the accepted cosmetic liquid-noise precision limitation (`WORLD_SCALING_FLOATING_ORIGIN.md` §9).
+
+---
+
+## 19. Quiesced Seam Fluids Are Never Re-Woken When the Neighbor Chunk Populates
+
+**Severity:** Low (narrow geometry; self-corrects on any adjacent edit)
+**Status:** Open — logged 2026-07-27 during the code review of Fluid §18 (archived in `_FIXED_BUGS.md`).
+Pre-existing; that fix widened its exposure rather than creating it.
+**Files:** `WorldJobManager.cs` (`ProcessGenerationJobs` population stage), `Chunk.cs`
+(`RegisterActiveVoxelsFromJob` / `OnDataPopulated`), `World.cs` (`ApplyModifications` step 4)
+
+**Description:**
+
+A fluid whose only flow-receptive direction is a not-yet-loaded neighbor reads that direction as void, so
+`IsFluidActive` returns false and the voxel is dropped from `ActiveFluidsBucket` on its first tick. Nothing
+re-registers it when the neighbor later populates: the population stage registers only the newly populated
+chunk's own active voxels, and the sole cross-chunk wake (`ApplyModifications` step 4) needs an applied
+modification 6-adjacent to the sleeping cell.
+
+Symptom: chunk B generates an opening at the seam at the same Y as chunk A's water — an ocean-floor cave mouth
+or an underwater cliff face below sea level — and A's water never flows in. The pocket stays dry until the
+player breaks or places a block next to it.
+
+**Why it got wider:** before the Fluid §18 fix, only a *genuinely absent* neighbor read as void; the load-distance
+placeholder ring read as `Air`, which kept seam fluids spuriously active (and was itself the §18
+corruption). With placeholders correctly resolving to void, the whole load edge now takes the quiescing path.
+
+**Candidate fix (not implemented):** on population, re-register the 4 cardinal neighbors' seam-column active
+voxels. That is a 4 × 16 × 128 scan per chunk population landing on the generation hot path, so it needs to be
+weighed against the P-4 backpressure budgets (`PIPELINE_BACKPRESSURE`) and reviewed under the `chunk-lifecycle`
+invariants — deliberately deferred out of the §18 fix rather than bolted on.
+
+**Not yet observed in-game.** Logged from code analysis; watch for dry pockets at chunk seams on ocean floors.
