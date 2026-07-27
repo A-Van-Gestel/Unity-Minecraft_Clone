@@ -97,8 +97,24 @@ chunk allocates one set), `Clear()`ed in `ChunkData.Reset`, and `Dispose()`d via
 
 Because the buckets live on `ChunkData`, `ChunkData.ModifyVoxel` maintains them **directly on `this`**; there
 is no `if (Chunk != null) Chunk.AddActiveVoxel(...)` back-call into the visual layer, and therefore no worldgen
-registration gap. All four registration sinks (`ActiveVoxelScanJob`, `RegisterActiveVoxelsFromJob`,
-`OnDataPopulated`, `AddActiveVoxel`/`RemoveActiveVoxel`) route through `ClassifyFamily`.
+registration gap. All **five** registration sinks (`ActiveVoxelScanJob`, `RegisterActiveVoxelsFromJob`,
+`OnDataPopulated`, `AddActiveVoxel`/`RemoveActiveVoxel`, and `Helpers/SeamWakeDecision.WakeSeamSlab`) route
+through `ClassifyFamily`.
+
+> [!IMPORTANT]
+> ### The tick has no readiness gate — registration is the whole contract
+> Unlike lighting and meshing, `World.TickChunksParallel` schedules a chunk on the sole condition that its
+> active bucket is non-empty; there is no `AreNeighbors*` precondition (see
+> `CHUNK_LIFECYCLE_PIPELINE.md` §3.4). Correctness therefore rests entirely on (a) each cross-seam **read**
+> resolving to *void* when the neighbor holds no data, and (b) something **re-registering** a voxel that
+> quiesced against such a read once that neighbor arrives.
+>
+> (b) is why the fifth sink exists. A void read satisfies no spread test, so a voxel whose only receptive
+> direction was a not-yet-loaded neighbor evaluates inactive and leaves its bucket on the first tick — and
+> population registers only the *newly populated chunk's own* voxels, while the cross-chunk wake in
+> `ApplyModifications` needs an applied mod 6-adjacent to the sleeping cell. `World.WakeSeamBehaviorNeighborhood`
+> closes that loop from the two population sites (archived `_FIXED_BUGS.md` Fluid §18 and §19 are the two halves
+> of this contract; guarded by `BH-B8`–`BH-B11`).
 
 ### 2.2 The fluid job and its neighbor halo
 

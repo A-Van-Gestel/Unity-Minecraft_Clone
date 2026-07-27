@@ -150,20 +150,28 @@ over the neighbor's real terrain once it generates. Guarded by baselines **BH-B8
 (managed path) in `Validate Behavior`, promoted from the repro scenarios after the July 2026 in-game
 confirmation; each names its own prove-red mutation.
 
-> [!NOTE]
-> ### Quiesced seams are not re-woken when a neighbor populates
-> Because a void read cannot satisfy any spread test, a fluid whose only flow-receptive direction was a
-> not-yet-loaded neighbor evaluates as inactive and leaves `ActiveFluidsBucket` on its first tick. Nothing
-> re-registers it later: population registers only the **newly populated chunk's own** voxels
-> (`RegisterActiveVoxelsFromJob` / `OnDataPopulated`), and the only cross-chunk wake
-> (`ApplyModifications` step 4) requires an applied mod 6-adjacent to the sleeping cell.
->
-> Consequence: where chunk B generates an opening at the seam at the same Y as chunk A's water (an ocean-floor
-> cave mouth or an underwater cliff face below sea level), A's water will not flood it until something edits an
-> adjacent block. This predates the §3.4 invariant — a genuinely absent neighbor has always read as void — but
-> the invariant makes the load-edge placeholder ring take the same path, so the exposure is wider. Tracked as
-> `FLUID_BUGS.md` §19; fixing it means a wake-on-populate pass over the 4 cardinal neighbors' seam columns,
-> which belongs on the generation hot path's budget discussion (P-4), not in a fluid read fix.
+#### The seam wake — population's behavior-tick counterpart
+
+The invariant above has a corollary: because a void read satisfies no spread test, a voxel whose only
+flow-receptive direction was a not-yet-loaded neighbor evaluates **inactive** and leaves its bucket on the first
+tick. Population alone does not bring it back — `RegisterActiveVoxelsFromJob` / `OnDataPopulated` register only
+the **newly populated chunk's own** voxels, and the sole cross-chunk wake (`ApplyModifications` step 4) needs an
+applied mod 6-adjacent to the sleeping cell.
+
+`World.WakeSeamBehaviorNeighborhood` closes that loop. It is the behavior-tick sibling of
+`PromoteLightWorkNeighborhood` and fires from the same two population sites — `ProcessGenerationJobs`'
+completed-job sweep and the load-from-save path in `LoadOrGenerateChunkInner`:
+
+| Property | Value |
+|---|---|
+| Scope | The 4 **cardinal** neighbors that are already `IsPopulated`. Whether a fluid is active depends only on its ±1 reads (`IsFluidActive`); the ≤4-cell pathfinder only ranks *directions*. A diagonal chunk is never an immediate neighbor, so it cannot change any activity decision. |
+| Depth | The 1-deep slab facing the seam (16 × 128), walked section-by-section so an all-air span costs one null check. |
+| Gating | The two facing slabs are walked as **pairs**: a neighbor voxel is woken only when the cell across the seam could change its evaluation. A solid cell is a wall to every fluid predicate — exactly what void already was — so it is skipped. Two rows are sampled, at **y and y+1**, and either admits when it is non-solid or is `BlockIDs.Dirt`. Solidity comes from the flat `World.IsSolidById`, co-built with `IsActiveById` in `JobDataManagerFactory` — a per-cell `BlockType` deref (it is a class) would cost more than the skip saves. **This skips most of a land or underground seam and nothing of an ocean seam** (water is non-solid); narrowing further would mean re-deciding activity outside the tick. |
+| Direction | Only the already-populated side needs waking — the new chunk's own scan registers everything it has. |
+| Families | Agnostic: it routes through `ChunkData.AddActiveVoxel`, so grass (same `GetState` path, same gap) is covered — but only because the gate samples y+1. Grass's up-diagonal target (`s_grassSpreadVectors`' "Above Adjacent" entries) is `Dirt`, which is **solid**, so a same-Y-only gate would skip it; its y−1 path (`IsDirtNextToAir`) needs air at the same Y, which already admits. Guarded by **BH-B11**. |
+| Safety | A woken voxel that is still stable simply re-evaluates inactive next tick — the wake cannot accumulate. Runs on the main thread in a different `Update` phase than `TickChunksParallel`, which completes every fluid handle before returning, so it cannot race an in-flight job. |
+
+Guarded by baseline **BH-B10** (`Validate Behavior`), whose prove-red is an early return from the method.
 
 ---
 
@@ -763,6 +771,7 @@ a snapshot too (B12). Staging `Canceled` saves matters because cancellation only
 | `Assets/Scripts/Helpers/MeshDrainPolicy.cs`                                                                                                                                             | Extracted per-frame mesh-queue drain loop + its `IMeshDrainHost` seam (quota/window/in-flight-cap stops, null/inactive purge, remove-on-schedule vs leave-on-decline); driven by both `World.Update` and the suite (MP-2)                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `Assets/Scripts/Helpers/MeshCompletionDriver.cs` + `IMeshCompletionHost.cs`                                                                                                             | The mesh pass's `JobCompletionPass` driver and the host seam it reaches its owner through — resolve+apply, the MP-6 load-animation trigger, the MR-6 single release site, registry removal. The seam lets the suite drive the real driver with a fake host (MP-6 §8.1)                                                                                                                                                                                                                                                                                                                                                                                       |
 | [SettingsManager.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/SettingsManager.cs)                      | `maxLightJobsPerFrame` (32), `maxMeshRebuildsPerFrame` (10) — quota anchors since P-4 §3.4; plus the P-4 knobs: `enablePipelineTimeBudgets`/`enableGenerationPanicGate` (rollback flags), `scaleBudgetCeilingsWithFpsCap` (default-ON: ms ceilings scale with a voluntarily lowered FPS cap), per-pass ms ceilings (8/6/6/4 — Performance-tab sliders floored at 0.5; 0 = ceiling off is settings-file-only; the fifth, the draw budget, retired with its stage in MP-6), panic thresholds (256/128, sanitized `0 ≤ reopen < close`; signal = post-scan ReadyCount sample + 3-frame close debounce), `maxInFlightLightingJobs` (64, budgets-on memory bound) |
+| `Assets/Scripts/Helpers/SeamWakeDecision.cs`                                                                                                                                            | The seam wake's decision half (§3.4): cardinal offsets, the facing-slab mirror, and the paired-slab gate that decides which of an already-populated neighbor's voxels a fresh population can affect. Pure over (`ChunkData`, direction, the flat `IsActiveById`/`IsSolidById` tables); driven by `World.WakeSeamBehaviorNeighborhood` and by the Behavior suite (BH-B10/BH-B11) |
 | `Assets/Scripts/Helpers/PipelinePassBudget.cs`                                                                                                                                          | P-4 §3.4 budget math: rate quota (cap × dt × 60, clamped) + Stopwatch window ceiling + `ScaleCeilingMs` (FPS-cap-proportional ceiling, anchored 60 FPS, clamped ×8); pure, suite-pinned ("Pipeline Backpressure")                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `Assets/Scripts/Helpers/GenerationPanicGate.cs`                                                                                                                                         | P-4 §3.5 hysteresis gate over `LightWorkScheduler.ReadyCount`; pauses admissions in `DrainGenerationRequests`; pure, suite-pinned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 

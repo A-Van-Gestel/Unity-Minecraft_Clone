@@ -75,7 +75,7 @@ v1 scope).
 | "Pause" semantics | `InUI` blocks input only — **no `Time.timeScale` write exists in the project**; fluids, streaming, and day/night continue while the inventory is open. Console adopts the same semantics.                                      |
 | Input             | `InputManager` wraps an `InputActionAsset` with Gameplay/UI maps. `T` is unbound in both maps (verified in `GameInputActions.inputactions`). Escape handling is a priority chain in `WorldUIManager.HandleEscape`.             |
 | UI toolkit        | TMP + UGUI (`ScrollRect`) used throughout (`DebugScreen`, menus). No console/command code exists anywhere.                                                                                                                     |
-| Teleport hazard   | `World.CheckPhysicsCollision` treats unloaded chunks as empty (`TryGetVoxel` miss → no hit), and `VoxelRigidbody`'s `IsWorldLoaded` gate covers only the initial load — a raw far teleport drops the player through the world. |
+| Teleport hazard   | `World.CheckPhysicsCollision` treats unloaded chunks as empty (`TryGetVoxel` miss → no hit), and `VoxelRigidbody`'s `IsWorldLoaded` gate covers only the initial load — a raw far teleport drops the player through the world. Since the Fluid §18 fix, "unloaded" means **not `IsPopulated`**, so an unpopulated placeholder also misses — which widens the hazard slightly but makes collision agree with the arrival hold, which already gated on `IsPopulated`. |
 | Suite precedent   | The Placement suite drives `PlacementController` against a real stub `World` ("exercise the real subsystem"); the engine follows the same pattern.                                                                             |
 
 ---
