@@ -84,6 +84,7 @@ namespace Editor.Validation.Behavior
                 }
 
                 SeedChunkFlood(c, dx, dz); // distinct per-chunk content so neighbor buffers differ
+                c.IsPopulated = true; // a seeded chunk models a GENERATED one; the halo skips placeholders (Fluid Bug 18)
                 wd.SetChunk(origin, c);
                 chunks.Add(c);
             }

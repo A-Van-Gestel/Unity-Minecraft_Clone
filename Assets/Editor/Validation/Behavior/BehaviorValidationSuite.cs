@@ -44,7 +44,7 @@ namespace Editor.Validation.Behavior
         /// <summary>Registers the baseline regression scenarios (implemented in BehaviorValidationSuite.Baseline.cs).</summary>
         static partial void AddBaselineScenarios(List<Scenario> scenarios);
 
-        /// <summary>Registers the known-bug reproduction scenarios (none yet).</summary>
+        /// <summary>Registers the known-bug reproduction scenarios (none open — K18a/K18b were promoted to BH-B8/BH-B9).</summary>
         static partial void AddKnownBugScenarios(List<Scenario> scenarios);
     }
 }

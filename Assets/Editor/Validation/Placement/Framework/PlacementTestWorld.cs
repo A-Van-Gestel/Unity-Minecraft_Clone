@@ -127,6 +127,9 @@ namespace Editor.Validation.Placement.Framework
                 // whole model shifts with the origin and every existing scenario keeps its meaning at the identity.
                 Vector2Int chunkVoxelPos = originChunk.ToVoxelOrigin();
                 ChunkData = new ChunkData(chunkVoxelPos);
+                // The harness models a loaded, generated chunk — WorldData.TryGetVoxel (which the placement
+                // controller queries) resolves populated chunks only (Fluid Bug 18).
+                ChunkData.IsPopulated = true;
                 _world.worldData.SetChunk(chunkVoxelPos, ChunkData);
 
                 // The origin this harness drives every probe with. Supplied per call (like production), so the suite

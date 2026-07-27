@@ -101,7 +101,8 @@ namespace Editor.Validation.Behavior.Framework
         // _world.worldData.Chunks so the center chunk's border voxels resolve real neighbor data through the
         // production GetState → worldData.GetVoxelState path (no shim). Neighbors are read-only context — they are
         // NOT ticked and their voxels are NOT registered active; an UNSEEDED neighbor coord resolves to null (void),
-        // which IS the missing/ungenerated-neighbor case. Keyed by voxel origin; disposed in Dispose.
+        // which IS the missing/unloaded-neighbor case. A third state — registered but empty and !IsPopulated — is the
+        // production placeholder (AddNeighborPlaceholder). Keyed by voxel origin; disposed in Dispose.
         private readonly Dictionary<Vector2Int, ChunkData> _neighbors = new Dictionary<Vector2Int, ChunkData>();
         private readonly GameObject _worldGo;
         private readonly BlockDatabase _stubDatabase;
@@ -215,14 +216,54 @@ namespace Editor.Validation.Behavior.Framework
                 ChunkData.Position.x + dChunkX * VoxelData.ChunkWidth,
                 ChunkData.Position.y + dChunkZ * VoxelData.ChunkWidth);
 
-            if (!_neighbors.TryGetValue(origin, out ChunkData neighbor))
+            ChunkData neighbor = GetOrCreateNeighbor(origin);
+            // A seeded neighbor models a GENERATED chunk, so it carries IsPopulated — the flag the fluid read
+            // paths use to tell real voxel data from an empty placeholder (see AddNeighborPlaceholder).
+            neighbor.IsPopulated = true;
+            neighbor.SetVoxel(lx, ly, lz, BurstVoxelDataBitMapping.PackVoxelData(id, meta));
+        }
+
+        /// <summary>
+        /// Registers an <b>empty, unpopulated</b> neighbor chunk — the production <b>placeholder</b> that
+        /// <c>WorldData.GetOrCreatePlaceholder</c> creates for every load-distance coord before its terrain job
+        /// runs. It is present in <see cref="WorldData.Chunks"/> (so a lookup finds it) yet holds no section data
+        /// and has <c>IsPopulated == false</c>. This is a third, distinct neighbor state alongside
+        /// <see cref="SetNeighborBlock"/> (generated) and an unseeded coord (absent → void).
+        /// </summary>
+        /// <param name="dChunkX">Neighbor chunk offset on X (−1, 0, or +1).</param>
+        /// <param name="dChunkZ">Neighbor chunk offset on Z (−1, 0, or +1).</param>
+        /// <exception cref="InvalidOperationException">
+        /// The coord was already seeded by <see cref="SetNeighborBlock"/>, which marks it populated. Silently
+        /// returning that generated neighbor would model the opposite of a placeholder and pass the scenario
+        /// vacuously — the exact false green the placeholder scenarios exist to catch.
+        /// </exception>
+        public void AddNeighborPlaceholder(int dChunkX, int dChunkZ)
+        {
+            Vector2Int origin = new Vector2Int(
+                ChunkData.Position.x + dChunkX * VoxelData.ChunkWidth,
+                ChunkData.Position.y + dChunkZ * VoxelData.ChunkWidth);
+
+            if (_neighbors.TryGetValue(origin, out ChunkData existing) && existing.IsPopulated)
             {
-                neighbor = new ChunkData(origin);
-                _neighbors[origin] = neighbor;
-                _world.worldData.SetChunk(origin, neighbor); // the seam GetVoxelState resolves
+                throw new InvalidOperationException(
+                    $"AddNeighborPlaceholder({dChunkX.ToString()}, {dChunkZ.ToString()}): the neighbor at " +
+                    $"{origin.ToString()} was already seeded via SetNeighborBlock and is populated. A chunk " +
+                    "cannot model a generated neighbor and a placeholder at once — drop the seeding calls.");
             }
 
-            neighbor.SetVoxel(lx, ly, lz, BurstVoxelDataBitMapping.PackVoxelData(id, meta));
+            GetOrCreateNeighbor(origin);
+        }
+
+        /// <summary>Returns the neighbor chunk at a voxel origin, creating + registering it in the stub store on first use.</summary>
+        private ChunkData GetOrCreateNeighbor(Vector2Int origin)
+        {
+            if (_neighbors.TryGetValue(origin, out ChunkData neighbor))
+                return neighbor;
+
+            neighbor = new ChunkData(origin);
+            _neighbors[origin] = neighbor;
+            _world.worldData.SetChunk(origin, neighbor); // the seam GetVoxelState resolves
+            return neighbor;
         }
 
         /// <summary>

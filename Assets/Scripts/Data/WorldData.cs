@@ -306,7 +306,15 @@ namespace Data
         /// <param name="y">World voxel Y.</param>
         /// <param name="z">World voxel Z.</param>
         /// <param name="state">The resolved voxel state; <c>default</c> when the method returns false.</param>
-        /// <returns>True when the coordinate is in-world and its chunk is loaded; false otherwise (matches the old <c>null</c>).</returns>
+        /// <returns>True when the coordinate is in-world and its chunk is <b>populated</b>; false otherwise (matches the old <c>null</c>).</returns>
+        /// <remarks>
+        /// "Loaded" means <see cref="ChunkData.IsPopulated"/>, not merely present in <see cref="Chunks"/>. A
+        /// placeholder — the entry <see cref="GetOrCreatePlaceholder"/> reserves for every load-distance coord
+        /// before its terrain job lands — has no sections, so <see cref="ChunkData.GetVoxel"/> would report its
+        /// whole column as <c>Air</c>. Callers must not mistake that reservation for real empty space
+        /// (<c>_FIXED_BUGS.md</c> Fluid §18: border fluids read it as air and flowed into it; guarded by
+        /// baseline BH-B9 in <c>Validate Behavior</c>).
+        /// </remarks>
         public bool TryGetVoxel(int x, int y, int z, out VoxelState state)
         {
             // Integer world-bounds check. WS-3: XZ is fully unbounded (no floor), so only the Y bound remains —
@@ -340,6 +348,14 @@ namespace Data
                 return false;
             }
 
+            // Read live (never cached alongside the reference): a placeholder that generates later starts
+            // resolving on the very next query without invalidating the cache entry.
+            if (!chunkData.IsPopulated)
+            {
+                state = default;
+                return false;
+            }
+
             state = new VoxelState(chunkData.GetVoxel(ChunkMath.VoxelToLocal(x), y, ChunkMath.VoxelToLocal(z)));
             return true;
         }
@@ -349,7 +365,11 @@ namespace Data
         /// <see cref="TryGetVoxel"/> fast path.
         /// </summary>
         /// <param name="worldPos">The world position</param>
-        /// <returns>The `voxel state` at the given position or `null` if the voxel is `outside the world` or the `chunk doesn't exist`.</returns>
+        /// <returns>
+        /// The `voxel state` at the given position, or `null` if the voxel is `outside the world`, its
+        /// `chunk doesn't exist`, or that chunk exists but is `not yet populated` (an unpopulated placeholder
+        /// holds no voxel data — see <see cref="TryGetVoxel"/>).
+        /// </returns>
         [CanBeNull]
         public VoxelState? GetVoxelState(Vector3 worldPos)
         {

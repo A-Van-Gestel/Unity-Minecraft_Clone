@@ -160,7 +160,9 @@ namespace Editor.Validation
             // Teeth: seed a chunk at the past-border origin (chunk index (100,0)); TryGetVoxel must pass the bounds
             // gate and hit the dictionary.
             Vector2Int borderChunkKey = new Vector2Int(1600, 0);
-            wd.SetChunk(borderChunkKey, new ChunkData(borderChunkKey));
+            // IsPopulated models a GENERATED chunk: TryGetVoxel resolves populated chunks only, so an
+            // unpopulated placeholder would fail here for the wrong reason (see Fluid Bug 18).
+            wd.SetChunk(borderChunkKey, new ChunkData(borderChunkKey) { IsPopulated = true });
 
             if (!wd.TryGetVoxel(1600, 64, 0, out _))
             {
@@ -244,7 +246,8 @@ namespace Editor.Validation
             // TryGetVoxel must pass the (now floorless) bounds gate and hit the dictionary. Both an exact-origin and
             // a fractional-negative coordinate floor into that same chunk.
             Vector2Int negChunkKey = new Vector2Int(-16, -16);
-            wd.SetChunk(negChunkKey, new ChunkData(negChunkKey));
+            // Populated for the same reason as the +XZ probe above (Fluid Bug 18).
+            wd.SetChunk(negChunkKey, new ChunkData(negChunkKey) { IsPopulated = true });
 
             if (!wd.TryGetVoxel(-16, 64, -16, out _))
             {

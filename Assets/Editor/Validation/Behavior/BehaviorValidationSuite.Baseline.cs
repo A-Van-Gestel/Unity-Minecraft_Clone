@@ -192,13 +192,12 @@ T11
             scenarios.Add(new Scenario("BH-B6: grass spreads to convertible dirt (reservoir sampling + spread roll)", Bh6_GrassSpreadsToDirt));
             scenarios.Add(new Scenario("BH-B7: grass turns to dirt under a solid block (deterministic)", Bh7_GrassUnderSolidTurnsToDirt));
 
+            // Placeholder-neighbor guards (promoted K18a/K18b) — see BehaviorValidationSuite.Baseline.PlaceholderNeighbor.cs.
+            scenarios.Add(new Scenario("BH-B8: fluids do not spread into an unpopulated placeholder (Burst path)", Bh8_NoSpreadIntoPlaceholderBurst));
+            scenarios.Add(new Scenario("BH-B9: fluids do not spread into an unpopulated placeholder (managed path)", Bh9_NoSpreadIntoPlaceholderManaged));
+
             // BH-D1 old-vs-new differential (comparator self-test + driver-pair fixtures) — see BehaviorValidationSuite.Differential.cs.
             AddDifferentialScenarios(scenarios);
-        }
-
-        /// <summary>Registers the known-bug reproduction scenarios (none yet).</summary>
-        static partial void AddKnownBugScenarios(List<Scenario> scenarios)
-        {
         }
 
         /// <summary>

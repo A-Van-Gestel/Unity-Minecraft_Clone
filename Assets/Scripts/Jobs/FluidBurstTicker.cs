@@ -176,6 +176,11 @@ namespace Jobs
         /// Fills the owned neighbor buffers from the 8 loaded neighbor chunks (pre-tick snapshots) and points
         /// <see cref="_jobNeighbors"/> at them; a missing/unloaded neighbor points at <see cref="_emptyNeighbor"/>
         /// (zero-length → the gather sentinel-fills it → border reads resolve to void, matching managed GetVoxelState).
+        /// <para><b>Populated, not merely present (Fluid Bug 18):</b> an <b>unpopulated placeholder</b> counts as
+        /// missing. Its sections are all null, so <see cref="ChunkData.FillJobVoxelMap"/> would zero-fill the buffer
+        /// and hand the job a full column of <c>Air</c> — which border fluids read as free space and flow into,
+        /// emitting cross-chunk mods that <c>World.ApplyModifications</c> then persists via
+        /// <c>ModManager.AddPendingMod</c> and replays over the neighbor's real terrain once it generates.</para>
         /// </summary>
         private void PrepareNeighbors(ChunkData cd, WorldData worldData)
         {
@@ -183,7 +188,8 @@ namespace Jobs
             for (int i = 0; i < s_neighborOffsets.Length; i++)
             {
                 Vector2Int origin = cd.Position + s_neighborOffsets[i];
-                if (worldData != null && worldData.TryGetChunk(origin, out ChunkData neighbor) && neighbor != null)
+                if (worldData != null && worldData.TryGetChunk(origin, out ChunkData neighbor) && neighbor != null &&
+                    neighbor.IsPopulated)
                 {
                     neighbor.FillJobVoxelMap(_neighborBuffers[i]);
                     _jobNeighbors[i] = _neighborBuffers[i];
