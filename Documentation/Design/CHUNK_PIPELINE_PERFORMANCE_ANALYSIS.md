@@ -1,11 +1,12 @@
 # Chunk Pipeline Performance Analysis
 
-**Version:** 1.0
-**Date:** 2026-06-11
+**Version:** 1.1  
+**Date:** 2026-06-11  
+**Amended:** 2026-07-27 — §6 ordering caveat: items 5 and 6 are gated on the FP-* capture.  
 **Status:** **Partially implemented.** §1.1 (job `NativeArray` pooling) and the whole §3 backpressure
 family are shipped — §3.1/§3.2 + recommendation 3 (2026-07-21) and §3.4/§3.5 + the §5.3 draw rider
 (2026-07-23). **§2 and §4 remain open**, and §5.3 was later *superseded* when MP-6 deleted the stage it
-budgeted. Per-finding status is recorded in "Implemented" blocks inline.
+budgeted. Per-finding status is recorded in "Implemented" blocks inline.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > Findings from a code-level performance review of the chunk generation → lighting → meshing pipeline,
@@ -337,6 +338,26 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
 5. **§4.4 "lighting stable" save bit** (serialization migration).
 6. **§2 jobified lighting merge**, then **§1.2/§1.3** deeper copy reductions.
 
+> **Ordering caveat (2026-07-27, revised same day) — measure before picking 5 or 6.** A reported symptom the
+> numbers behind this order do not cover: at sustained fly speeds (15+ m/s) chunks appear sluggishly. That
+> could be admission-bound (§3.4/§3.5 throttling by design), throughput-bound (a genuinely slow stage),
+> ordering-bound, or **readiness-bound** (queues full of work that no readiness gate will admit — made
+> observable only by FP's `AllDeclined` stop reason, and previously indistinguishable from a healthy
+> pipeline).
+>
+> On ordering specifically, the first draft of this caveat overstated the case and is corrected here: the
+> generation queue **is** distance-ordered — `CheckViewDistance` rebuilds it nearest-first via `SpiralLoop`
+> on every boundary crossing (`World.cs:3374–3409`). Its defect is **staleness**, not absence: the order is
+> refreshed only per crossing, so at speed the head can still be work already flown past. `MeshBuildQueue` is
+> FIFO with promotion-to-head (MT-1), and `LightWorkScheduler`'s ready set is a `HashSet` iterated in **hash
+> order** (`LightWorkScheduler.cs:26,84–90`) — so a quota break there serves an arbitrary subset, which is a
+> sharper ordering problem than "a ready/waiting split" suggested.
+>
+> The four regimes point at different items: §4.4 helps **revisited** terrain only, §4.1/§2 help both, and
+> neither an ordering fix nor a readiness fix is in either.
+> **[FLIGHT_PROFILE_CAPTURE.md](FLIGHT_PROFILE_CAPTURE.md)** (FP-*, v1.1) specifies the capture that
+> arbitrates them; run it before committing to 5 or 6.
+
 ---
 
 ## 7. Verification
@@ -355,6 +376,13 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.1** - §6 gains the **ordering caveat** (2026-07-27): the reported 15+ m/s sluggish-chunk symptom is
+  not covered by the evidence behind this document's suggested order, so items 5 and 6 are gated on the
+  FP-* capture ([FLIGHT_PROFILE_CAPTURE.md](FLIGHT_PROFILE_CAPTURE.md)) that arbitrates the regimes. Revised
+  the same day against FP's v1.1 re-verification: the regime set is **four** (readiness-bound added), and the
+  caveat's first-draft claim that "no queue is distance- or direction-ordered" is corrected — the generation
+  queue *is* nearest-first per boundary crossing; its defect is staleness, while the lighting ready set's
+  hash-order iteration is a sharper ordering problem than first stated. No finding in §1–§5 changed.
 * **v1.0** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Status`/`Target` and a
   relationship list. The status roll-up was lifted out of the summary blockquote into a proper field,
   and §2's draw-queue-trickle symptom gained the supersession annotation its siblings already carried.
@@ -375,7 +403,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-07-26 (header completed; §5.3 supersession annotated)
+**Last Updated:** 2026-07-27 (§6 ordering caveat added, then revised against FP v1.1)  
 **Next Review:** when §2 (`ApplyLightingJobResult` merge scan, owned by P-3) or §4 (load-path edge-check
 cascade) is picked up. **§4 needs re-verification before use** — §4.2's Bug 11 was fixed in June 2026,
 yet §4.3 still reads as live "do this first" instructions written before that.
