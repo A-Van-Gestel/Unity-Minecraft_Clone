@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using Benchmarks;
 using Data;
 using Data.JobData;
 using Data.WorldTypes;
@@ -1016,6 +1017,12 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                     ReleaseGenerationJobData(jobEntry.Value);
                     _completedGenJobs.Add(jobEntry.Key);
                     released = true;
+
+                    // FP-1 terminal disposition: the §3.2 out-of-range discard — completed generation work
+                    // thrown away because the player outran it. Previously uncounted. Non-throwing by
+                    // construction: a fault here would be caught by the enclosing HF-2 handler and misreported
+                    // as a JOB fault, sending an investigator after a bug that does not exist.
+                    PipelineTelemetry.StampDisposition(jobEntry.Key, TraceDisposition.DiscardedOutOfRange);
                     continue;
                 }
 
@@ -1042,6 +1049,11 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                         chunkData.Chunk?.RegisterActiveVoxelsFromJob(jobEntry.Value.ActiveVoxels);
                     else
                         chunkData.Chunk?.OnDataPopulated();
+
+                    // FP-1 stage stamp: terrain data is available (generation arm; the disk-load arm is
+                    // stamped in World.LoadOrGenerateChunkInner). Inside the `if` so a job re-entering an
+                    // already-populated chunk cannot re-stamp and reset the hop.
+                    PipelineTelemetry.StampPopulated(jobEntry.Key);
                 }
 
                 bool jobFullyProcessed = true;
@@ -1498,6 +1510,11 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         LastProcessedJobCount++;
         _curLightChunk = _world.worldData.RequestChunk(key.ToVoxelOrigin(), false);
         MergeCompletedLightingJob(key, _curLightJob, _curLightChunk);
+
+        // FP-1 stage stamp: one completed lighting pass. Deliberately stamped AFTER the merge (the light
+        // data is only live once merged) and deliberately overwriting: the edge-check cascade runs several
+        // passes per chunk, and the hop meshing actually waits on is the one before the LAST.
+        PipelineTelemetry.StampLit(key);
     }
 
     /// <inheritdoc />

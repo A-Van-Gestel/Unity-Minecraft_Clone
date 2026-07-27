@@ -1038,6 +1038,11 @@ public class World : MonoBehaviour, IMeshDrainHost
                     ChunkPool.ReturnChunkData(loaded);
                 }
 
+                // FP-1 terminal disposition: a completed disk read thrown away because the chunk was
+                // unloaded or pool-recycled mid-flight. The loading pass's counterpart to the §3.2
+                // generation discard, and — unlike it — waste that has never been counted before.
+                PipelineTelemetry.StampDisposition(chunkCoord, TraceDisposition.LoadStranded);
+
                 return;
             }
 
@@ -1054,6 +1059,10 @@ public class World : MonoBehaviour, IMeshDrainHost
                 ChunkPool.ReturnChunkData(
                     loaded); // Recycle the outer shell of the loaded data now that we've extracted its contents.
                 data.Chunk?.OnDataPopulated();
+
+                // FP-1 stage stamp: terrain data is available. The disk-load arm of "populated" — the
+                // generation arm is stamped in WorldJobManager.ProcessGenerationJobs.
+                PipelineTelemetry.StampPopulated(chunkCoord);
 
                 // Becoming populated is what flips AreNeighborsDataReady for the 8 neighbors — wake any
                 // parked light work now instead of waiting for the fail-safe scan (MT-2). The chunk's own
@@ -3113,6 +3122,14 @@ public class World : MonoBehaviour, IMeshDrainHost
 
             // decision == Unload or UnloadPersistLightPending — proceed to persist / save / pool teardown.
 
+            // FP-1 terminal disposition: the chunk is leaving memory. If it still holds a live trace, it never
+            // reached MeshApplied — every stage it did complete was thrown away because the player outran it,
+            // which is the ordering-bound signal the capture exists to weigh. A no-op for chunks that already
+            // finished (their trace was closed and removed at the mesh apply), so this hook cannot double-count
+            // an arrival. Placed where both unload arms converge, and read-only: it mutates no pipeline flag
+            // and cannot influence the unload decision above.
+            PipelineTelemetry.StampDisposition(chunkCoord, TraceDisposition.UnloadedBeforeMeshApplied);
+
             // 1. Persist Orphaned Lighting Queue
             if (worldData.SunlightRecalculationQueue.TryGetValue(chunkVoxelPos, out HashSet<Vector2Int> globalCols))
             {
@@ -3350,6 +3367,11 @@ public class World : MonoBehaviour, IMeshDrainHost
             if (data.IsPopulated || data.IsLoading || JobManager.GenerationJobs.ContainsKey(chunkCoord)) continue;
 
             data.IsLoading = true;
+
+            // FP-1 stage stamp: admitted past the in-flight cap and the §3.5 panic gate. Also the
+            // discriminator StampRequested uses to tell a re-enqueue from a genuinely dead journey.
+            PipelineTelemetry.StampAdmitted(chunkCoord);
+
             _ = LoadOrGenerateChunk(chunkCoord);
             admittedThisFrame++;
         }
@@ -3406,6 +3428,10 @@ public class World : MonoBehaviour, IMeshDrainHost
                     && _pendingGenerationRequests.Add(chunkCoord))
                 {
                     _generationRequestQueue.Enqueue(chunkCoord);
+
+                    // FP-1 stage stamp: the chain's first hop. Idempotent across the per-crossing queue
+                    // rebuild — see PipelineTelemetry.StampRequested.
+                    PipelineTelemetry.StampRequested(chunkCoord);
                 }
 
                 // If within view distance, it's a candidate for being active.

@@ -1,4 +1,5 @@
 using System;
+using Benchmarks;
 using Data;
 using Jobs.Data;
 using UnityEngine;
@@ -45,7 +46,14 @@ namespace Helpers
             // it, the animation: MP-6 pairs the load animation to the apply that earned it, so a discarded
             // result can never animate an empty slot.
             if (_host.TryApplyMesh(key, in _curJob))
+            {
                 _host.TriggerLoadAnimation(key);
+
+                // FP-1 terminal stage stamp. Post-MP-6 the apply IS the moment the chunk becomes visible —
+                // the animation fires on this same line — so there is no later "visible" hop to stamp.
+                // Inside the success branch: a discarded result must not be recorded as an arrival.
+                PipelineTelemetry.StampMeshApplied(key);
+            }
         }
 
         /// <inheritdoc />

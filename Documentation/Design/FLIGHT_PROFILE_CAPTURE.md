@@ -1,6 +1,6 @@
 # Flight-Profile Capture (Pipeline Telemetry) Design
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Date:** 2026-07-27  
 **Amended:** 2026-07-27 (v1.1) — re-verified every §2 row, §5 hook site, and both §8 questions against the
 code. Six §2 rows corrected, the hook chain shortened from five stamps to four (MP-6), the stop-reason set
@@ -11,8 +11,10 @@ flush-and-restart (the side table's coord-collision defect), §5.2 stop reason r
 and a correction to v1.1's overstated `Validate All` guard claim.  
 **Amended:** 2026-07-27 (v1.3) — FP-0 as-built sync: dispositions 4 → 6, `NotRun` added to the stop-reason
 enum, §8 Q1 closed with measured capacities.  
-**Status:** **Partially implemented.** FP-0 (telemetry core) is shipped and gated; FP-1…FP-4 remain
-proposed. Per-phase status is in §7.  
+**Amended:** 2026-07-27 (v1.4) — FP-1 as-built sync: six hook sites, `UnloadedBeforeMeshApplied` restored
+(dispositions → 7), and `StampRequested` made idempotent before admission.  
+**Status:** **Partially implemented.** FP-0 (telemetry core) and FP-1 (stage stamps) are shipped and gated;
+FP-2…FP-4 remain proposed. Per-phase status is in §7.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > A telemetry layer that answers **one question the existing benchmark cannot**: when chunks appear
@@ -196,13 +198,19 @@ BenchmarkController  ──BeginPhase/EndPhase──▶  PipelineTelemetry (stat
       ▼                                              └── waste counters
 World.Update ── guarded hooks ──────────────────────▶
   CheckViewDistance / DrainGenerationRequests  → Requested, Admitted, GateClosed   (World.cs:3361 / 3265)
-  WorldJobManager.ProcessGenerationJobs        → Populated, GenDiscarded           (WorldJobManager.cs:948)
-  LoadOrGenerateChunkInner post-await guard    → LoadStranded                      (World.cs:1032)
+  WorldJobManager.ProcessGenerationJobs        → Populated, DiscardedOutOfRange    (WorldJobManager.cs:948)
+  LoadOrGenerateChunkInner (disk arm)          → Populated, LoadStranded           (World.cs:1032 / 1053)
   WorldJobManager.ProcessLightingJobs          → Lit (+ pass count)                (WorldJobManager.cs:1393)
   MeshCompletionDriver.MergeJob / apply        → MeshApplied  [TERMINAL]           (MeshCompletionDriver.cs:47)
+  UnloadChunks (both unload arms converge)     → UnloadedBeforeMeshApplied         (World.cs:3123, v1.4)
                                                      │
                               BenchmarkReportGenerator ◀── new "Pipeline" report section
 ```
+
+**Six sites, eight call sites** (as built in FP-1): `Populated` has both a generation arm and a disk-load
+arm, and the disk arm's method also carries the `LoadStranded` guard. The sixth site — the unload hook — was
+added during FP-1; see the disposition note below for why its absence would have mis-scored the ordering
+regime.
 
 **All five sites verified main-thread** at the re-audit: they are `World.Update` steps at `World.cs:2011`,
 `2054`, `2048`, `2069` and `2249`, plus the `await` continuation of the load path, which resumes on Unity's
@@ -225,8 +233,8 @@ nothing is read from inside a Burst job.
 counter + a terminal disposition). `AdmissionSample` is one struct per frame (queue depths, gate
 open/closed, and a per-pass stop reason).
 
-**Dispositions — six, not four (v1.3, as built in FP-0).** The planning pass named four; implementing the
-side table forced two more, and both are load-bearing rather than cosmetic:
+**Dispositions — seven, not four (v1.4, as built through FP-1).** The planning pass named four; building the
+side table and wiring the hooks forced three more, each load-bearing rather than cosmetic:
 
 | Disposition                 | Meaning                                                                                                    |
 |-----------------------------|--------------------------------------------------------------------------------------------------------------|
@@ -234,12 +242,23 @@ side table forced two more, and both are load-bearing rather than cosmetic:
 | `MeshApplied`               | Reached the terminal stage. **The only disposition that contributes latency samples.**                       |
 | `DiscardedOutOfRange`       | Generation result discarded — chunk left the unload boundary mid-flight (`WorldJobManager.cs:1012–1020`).    |
 | `LoadStranded`              | Disk load thrown away — chunk unloaded or pool-recycled mid-read (`World.cs:1032–1042`).                     |
-| `Rerequested` *(added)*     | Superseded by a fresh request for the same coord — the §4.1 flush. **This count IS the re-request metric.**   |
-| `InFlightAtPhaseEnd` *(added)* | The phase ended first. **Not waste** — kept distinct so an unfinished chunk is never booked as discarded work, which would inflate the waste % the ordering verdict reads. |
+| `Rerequested` *(v1.3)*      | Superseded by a fresh request for the same coord — the §4.1 flush. **This count IS the re-request metric.**   |
+| `InFlightAtPhaseEnd` *(v1.3)* | The phase ended first. **Not waste** — kept distinct so an unfinished chunk is never booked as discarded work, which would inflate the waste % the ordering verdict reads. |
+| `UnloadedBeforeMeshApplied` *(v1.4, restored)* | Unloaded mid-flight: every stage the chunk completed was thrown away because the player outran it. **Waste, and the ordering-bound signal proper.** |
 
 The alternative to `InFlightAtPhaseEnd` was to drop those traces (silent loss) or fold them into a waste
 bucket (corrupting an input to §7.1). Neither is acceptable in an instrument whose whole purpose is to be
 believed.
+
+> **v1.4 — `UnloadedBeforeMeshApplied` was wrongly dropped in v1.3 and is restored.** v1.3's six-row table
+> *replaced* the original fourth disposition instead of adding to it. FP-1 exposed the consequence: a chunk
+> populated and then unloaded because the player flew past had **no hook at all**, so it surfaced as
+> `Rerequested` (if later re-requested) or — worse — as `InFlightAtPhaseEnd`, which this document explicitly
+> defines as *not* waste. The single most characteristic ordering-bound event would have been recorded as a
+> benign one. The hook lands at the point where both unload arms converge (`World.cs`, after the
+> `Unload` / `UnloadPersistLightPending` switch), is read-only, and cannot double-count a completed chunk —
+> a trace that reached `MeshApplied` is already closed and removed, so the later unload stamp is a no-op
+> (verified).
 
 **Buffering, as built.** The per-frame ring is a **bounded rolling window** for post-hoc inspection; the
 stop-reason and disposition **tallies it feeds are exact and unbounded**. Only the window can wrap, and it
@@ -321,7 +340,7 @@ reason fails a baseline instead of silently mislabeling every subsequent capture
 | Phase                             | Scope                                                                                                                                          | Effort | Depends on |
 |-----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|:------:|------------|
 | **FP-0 — Telemetry core** ✅ **DONE** | `Benchmarks/PipelineTelemetry.cs`: `Enabled` flag + domain reset, `ChunkTrace`/`AdmissionSample` structs, side table, rolling frame window + exact tallies, phase begin/end, `EstimateTraceCapacity`. Modeled on `WorldFrameProfiler`. |   🟢   | —          |
-| **FP-1 — Stage stamps**           | Guarded hooks at the **five** verified sites (§5) producing a **four-stamp** chain; terminal dispositions incl. **both** uncounted discards — generation out-of-range *and* the disk-load stranding (§8 Q2). |   🟡   | FP-0       |
+| **FP-1 — Stage stamps** ✅ **DONE** | Guarded hooks at **six** sites / eight call sites (§5) producing the **four-stamp** chain; terminal dispositions incl. both previously-uncounted discards (generation out-of-range *and* the disk-load stranding, §8 Q2) plus the mid-flight unload restored in v1.4. |   🟡   | FP-0       |
 | **FP-2 — Admission pressure**     | Per-frame sampling: queue depths, panic-gate state (**sampling the existing `World` probes** — §2 — not building new ones), and the **five-value per-pass stop reason** (§5.1) returned by the pure policies (§5.2 — incl. the `DrainResult` signature change and its 10 suite call-site edits). |   🟡   | FP-0       |
 | **FP-3 — Report section**         | `Benchmarks/TraceStatistics.cs` (pure static, so §7's baseline is writable) + the "Pipeline" report section: stage-latency distributions per speed phase — **normalized by each phase's own `DurationSeconds`**, since the last generation phase is not 30 s (§2) — waste %, gate-closed %, stop-reason histogram, the §7.1 verdict rule, the **§7.2 raw-results block**, and the §8 Q1 saturation banner. |   🟢   | FP-1, FP-2 |
 | **FP-4 — Capture + verdict**      | Run in an **IL2CPP Development Build**, write the report under `Documentation/Performance/` per the `perf-benchmark` protocol, and state which of the **four** regimes the numbers show — **by §7.1's pre-committed rule, over the §7.2 raw results, both present in the report**. |   🟢   | FP-3       |
@@ -476,6 +495,20 @@ whether they inherit them *knowingly*.
 
 ## Document History
 
+* **v1.4** - FP-1 as-built sync (2026-07-27). **FP-1 shipped and gated** — six hook sites / eight call sites,
+  `dotnet build` 0 errors, Unity clean, **Validate All 355/355 both with telemetry disabled AND enabled with a
+  live phase**, plus a synthetic lifecycle run pinning the recording logic. Two corrections, both of the same
+  class — a measurement bias that would have skewed the verdict in the regime under investigation:
+  **(1) `UnloadedBeforeMeshApplied` restored** (v1.3 replaced rather than extended the disposition list, so a
+  chunk populated-then-outrun had no hook and surfaced as `InFlightAtPhaseEnd`, which this document defines as
+  *not* waste — the most characteristic ordering-bound event would have read as benign); **(2) `StampRequested`
+  made idempotent before admission** — `CheckViewDistance` clears and rebuilds the whole request queue on every
+  boundary crossing, so a naive stamp restarted the trace each crossing and measured latency from the *last*
+  crossing rather than the first request. That error grows with crossing rate, i.e. with speed, so it would
+  have under-reported latency exactly where the capture must be trusted. Admission is now the discriminator
+  between a re-enqueue (idempotent) and a genuinely dead journey (§4.1 flush). Also records what the enabled
+  suite leg does and does not prove: the hooks execute without perturbing behavior (B31 drives the real
+  `MeshCompletionDriver`), but nothing records, because no suite drives a full request→apply lifecycle.
 * **v1.3** - FP-0 as-built sync (2026-07-27). **Status → Partially implemented**; FP-0 shipped and gated
   (`dotnet build` 0 errors with the file genuinely in the csproj, Unity console clean, Rider inspections
   clean, **Validate All 355/355 across 16 suites**, and a live smoke check confirming the disabled path is
@@ -520,5 +553,5 @@ whether they inherit them *knowingly*.
 
 ---
 
-**Last Updated:** 2026-07-27 (v1.3 FP-0 as-built sync)  
+**Last Updated:** 2026-07-27 (v1.4 FP-1 as-built sync)  
 **Next Review:** when FP-0 starts, or if the flight symptom is diagnosed by other means first

@@ -83,6 +83,15 @@ namespace Benchmarks
         /// Kept distinct so an unfinished chunk is never miscounted as discarded work.
         /// </summary>
         InFlightAtPhaseEnd = 5,
+
+        /// <summary>
+        /// Unloaded mid-flight: the chunk left the unload boundary before its mesh was ever applied, so every
+        /// stage it did complete was thrown away. <b>This is waste, and it is the ordering-bound signal</b> —
+        /// work the pipeline finished for a chunk the player had already flown past. Distinct from
+        /// <see cref="InFlightAtPhaseEnd"/> (which is explicitly *not* waste) because folding the two would
+        /// let genuine churn hide behind "the capture just stopped first".
+        /// </summary>
+        UnloadedBeforeMeshApplied = 6,
     }
 
     /// <summary>
@@ -284,7 +293,7 @@ namespace Benchmarks
         public const int StopReasonCount = 6;
 
         /// <summary>Number of <see cref="TraceDisposition"/> values.</summary>
-        public const int DispositionCount = 6;
+        public const int DispositionCount = 7;
 
         // Sizing floor/ceiling for the derived trace capacity. The floor keeps a tiny-LoadDistance session
         // from saturating instantly; the ceiling bounds worst-case memory (~48 B/trace + dictionary
@@ -466,9 +475,20 @@ namespace Benchmarks
 
             if (s_traces.TryGetValue(coord, out ChunkTrace existing))
             {
-                if (existing.Disposition == TraceDisposition.Pending)
-                    existing.Disposition = TraceDisposition.Rerequested;
+                // Admission is the discriminator between the two ways a coord can already be traced.
+                //
+                // NOT yet admitted: CheckViewDistance clears and REBUILDS the whole request queue on every
+                // boundary crossing, so an un-admitted request is re-enqueued on each crossing. That is the
+                // same logical request, not a new one — restarting it would measure latency from the LAST
+                // crossing instead of the first request, biasing every latency downward precisely as the
+                // crossing rate rises with speed. That is the regime under investigation, so the bias would
+                // corrupt the capture's central question. Keep the original stamp; count nothing.
+                if (existing.AdmittedTicks == 0) return;
 
+                // Admitted but never finished: the journey entered the pipeline and died without a terminal
+                // hook (unloaded mid-flight). THIS is the §4.1 flush-and-restart case, and the count of these
+                // is the design's re-request / wave-front-churn metric.
+                existing.Disposition = TraceDisposition.Rerequested;
                 CloseTrace(existing);
             }
             else if (s_traces.Count >= s_traceCapacity)
