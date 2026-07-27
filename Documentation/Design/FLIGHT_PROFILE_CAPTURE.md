@@ -1,6 +1,6 @@
 # Flight-Profile Capture (Pipeline Telemetry) Design
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** 2026-07-27  
 **Amended:** 2026-07-27 (v1.1) — re-verified every §2 row, §5 hook site, and both §8 questions against the
 code. Six §2 rows corrected, the hook chain shortened from five stamps to four (MP-6), the stop-reason set
@@ -9,7 +9,10 @@ widened by two, and the verdict widened to **four** regimes. Both open questions
 flush-and-restart (the side table's coord-collision defect), §5.2 stop reason returned by the pure policies,
 §7.1 the pre-committed verdict rule, **§7.2 the mandatory raw-results block**, §9 assumptions + limitations,
 and a correction to v1.1's overstated `Validate All` guard claim.  
-**Status:** Proposed design — not implemented.  
+**Amended:** 2026-07-27 (v1.3) — FP-0 as-built sync: dispositions 4 → 6, `NotRun` added to the stop-reason
+enum, §8 Q1 closed with measured capacities.  
+**Status:** **Partially implemented.** FP-0 (telemetry core) is shipped and gated; FP-1…FP-4 remain
+proposed. Per-phase status is in §7.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > A telemetry layer that answers **one question the existing benchmark cannot**: when chunks appear
@@ -219,9 +222,29 @@ nothing is read from inside a Burst job.
 > is deliberately unbudgeted (§2/P-3 owns it), so it contributes a `Lit` stamp but **no stop reason**.
 
 **Two record types.** `ChunkTrace` is one struct per chunk (coords + a stamp per stage + a lighting-pass
-counter + a terminal disposition: `MeshApplied` / `DiscardedOutOfRange` / `LoadStranded` /
-`UnloadedBeforeMeshApplied`). `AdmissionSample` is one struct per frame (queue depths, gate open/closed, and a
-per-pass stop reason) written into a fixed ring buffer.
+counter + a terminal disposition). `AdmissionSample` is one struct per frame (queue depths, gate
+open/closed, and a per-pass stop reason).
+
+**Dispositions — six, not four (v1.3, as built in FP-0).** The planning pass named four; implementing the
+side table forced two more, and both are load-bearing rather than cosmetic:
+
+| Disposition                 | Meaning                                                                                                    |
+|-----------------------------|--------------------------------------------------------------------------------------------------------------|
+| `Pending`                   | In flight — no terminal event yet. The zero value.                                                           |
+| `MeshApplied`               | Reached the terminal stage. **The only disposition that contributes latency samples.**                       |
+| `DiscardedOutOfRange`       | Generation result discarded — chunk left the unload boundary mid-flight (`WorldJobManager.cs:1012–1020`).    |
+| `LoadStranded`              | Disk load thrown away — chunk unloaded or pool-recycled mid-read (`World.cs:1032–1042`).                     |
+| `Rerequested` *(added)*     | Superseded by a fresh request for the same coord — the §4.1 flush. **This count IS the re-request metric.**   |
+| `InFlightAtPhaseEnd` *(added)* | The phase ended first. **Not waste** — kept distinct so an unfinished chunk is never booked as discarded work, which would inflate the waste % the ordering verdict reads. |
+
+The alternative to `InFlightAtPhaseEnd` was to drop those traces (silent loss) or fold them into a waste
+bucket (corrupting an input to §7.1). Neither is acceptable in an instrument whose whole purpose is to be
+believed.
+
+**Buffering, as built.** The per-frame ring is a **bounded rolling window** for post-hoc inspection; the
+stop-reason and disposition **tallies it feeds are exact and unbounded**. Only the window can wrap, and it
+reports that separately (`FrameWindowWrapped`) from true data loss (`TracesSaturated` / `SamplesSaturated`).
+This is what lets §7.2 promise complete tallies without an unbounded per-frame buffer.
 
 **Stop-reason attribution is the admission-bound signal** and is the one genuinely new thing the engine must
 report: `PipelinePassBudget` already computes the quota and window, so each budgeted drain loop returns *why*
@@ -244,6 +267,19 @@ conditions that are **not** reducible to those, and conflating either one mis-at
 **nothing** because `AreNeighborsReadyAndLit` keeps failing is indistinguishable from `OutOfWork` — i.e. a
 stalled pipeline would be reported as a **healthy** one. That is the single most dangerous misreading this
 instrument could produce, and it is why §7's verdict gains a fourth regime.
+
+> **v1.3 (as built in FP-0) — a sixth enum value, `NotRun = 0`, which is *not* a break reason.** The five
+> above are outcomes of a pass that executed. A default-initialized sample would otherwise report the
+> **first** value for a pass that never ran that frame, and with `OutOfWork` in that slot the instrument
+> would silently claim "ran, nothing left to do" — a different and flattering claim — for passes that were
+> skipped entirely (the mesh drain is skipped outright when its queue is empty or its in-flight cap is
+> already reached, `World.cs:2257`). `NotRun` therefore takes the zero slot and is **never tallied**:
+> `RecordPassStop` rejects it, so it can only ever appear in the rolling per-frame window, never in the
+> histogram §7.1's verdict reads.
+>
+> **Binding consequence for FP-2:** the pass-skipped early-outs must record their *real* reason explicitly.
+> The mesh drain's entry gate reaching the in-flight cap is an `InFlightCap` stop and must be recorded as
+> one — leaving it to fall through as `NotRun` would silently drop a genuine admission-bound signal.
 
 ### 5.2 Decision: the stop reason is returned by the pure policies (v1.2)
 
@@ -284,7 +320,7 @@ reason fails a baseline instead of silently mislabeling every subsequent capture
 
 | Phase                             | Scope                                                                                                                                          | Effort | Depends on |
 |-----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|:------:|------------|
-| **FP-0 — Telemetry core**         | `Benchmarks/PipelineTelemetry.cs`: `Enabled` flag + domain reset, `ChunkTrace`/`AdmissionSample` structs, side table, ring buffer, phase begin/end. Modeled on `WorldFrameProfiler`. |   🟢   | —          |
+| **FP-0 — Telemetry core** ✅ **DONE** | `Benchmarks/PipelineTelemetry.cs`: `Enabled` flag + domain reset, `ChunkTrace`/`AdmissionSample` structs, side table, rolling frame window + exact tallies, phase begin/end, `EstimateTraceCapacity`. Modeled on `WorldFrameProfiler`. |   🟢   | —          |
 | **FP-1 — Stage stamps**           | Guarded hooks at the **five** verified sites (§5) producing a **four-stamp** chain; terminal dispositions incl. **both** uncounted discards — generation out-of-range *and* the disk-load stranding (§8 Q2). |   🟡   | FP-0       |
 | **FP-2 — Admission pressure**     | Per-frame sampling: queue depths, panic-gate state (**sampling the existing `World` probes** — §2 — not building new ones), and the **five-value per-pass stop reason** (§5.1) returned by the pure policies (§5.2 — incl. the `DrainResult` signature change and its 10 suite call-site edits). |   🟡   | FP-0       |
 | **FP-3 — Report section**         | `Benchmarks/TraceStatistics.cs` (pure static, so §7's baseline is writable) + the "Pipeline" report section: stage-latency distributions per speed phase — **normalized by each phase's own `DurationSeconds`**, since the last generation phase is not 30 s (§2) — waste %, gate-closed %, stop-reason histogram, the §7.1 verdict rule, the **§7.2 raw-results block**, and the §8 Q1 saturation banner. |   🟢   | FP-1, FP-2 |
@@ -371,13 +407,27 @@ bucket resolution, that is the demand case that promotes the v3 item — record 
 
 ## 8. Open questions — both closed (v1.1)
 
-1. **Ring-buffer and side-table sizing at 200 m/s.** ✅ **Resolved in approach, sized in FP-0.** The capacity
-   number is still derived during FP-0 from the benchmark's own region math (`BuildWaypoints` /
-   `CalculateMinimumRegionChunks`, `BenchmarkController.cs:505–574`) — it depends on the operator's
-   `LoadDistance` and configured region, so it cannot be pinned in this document. What *is* settled is the
-   failure mode: saturation is **never** silent truncation. The trace table and the ring buffer each carry a
-   sticky `Saturated` flag, and FP-3 prints an explicit **"⚠ TRACE BUFFER SATURATED — percentiles below cover
-   only the first N chunks of this phase"** banner in the report section. A saturated capture is still
+1. **Ring-buffer and side-table sizing at 200 m/s.** ✅ **CLOSED — sized and measured in FP-0 (v1.3).**
+   `PipelineTelemetry.EstimateTraceCapacity(loadDistance, speed, phaseSeconds)` derives it from the same
+   region geometry the rig flies: the resident load square `(2·LD+1)²` plus one square-width swath per chunk
+   of travel, times 1.5 headroom for the §4.1 revisits, clamped to [4096, 65536]. Run against the actual
+   speed sweep at `LoadDistance = 12`, 30 s phases:
+
+   | Speed     | Estimated traces |
+   |-----------|------------------|
+   | 10–20 m/s | 4,096 (floor)    |
+   | 50 m/s    | 4,462            |
+   | 100 m/s   | 7,987            |
+   | **200 m/s** | **15,000**     |
+
+   The worst realistic case sits **~4× below the 65,536 ceiling**, so the clamp does not bind at sane
+   settings and saturation should be the exception rather than the norm. Floor and ceiling were both
+   verified at the extremes (`LD=0 @ 0 m/s → 4,096`; `LD=64 @ 500 m/s → 65,536`).
+
+   The failure mode is unchanged and remains the point: saturation is **never** silent truncation. The trace
+   table and latency series carry sticky `TracesSaturated` / `SamplesSaturated` flags — reported separately
+   from the merely-rolling `FrameWindowWrapped` — and FP-3 prints an explicit **"⚠ TRACE BUFFER SATURATED —
+   percentiles below cover only the first N chunks of this phase"** banner. A saturated capture is still
    *readable*; it is simply not allowed to look complete. This is an FP-3 acceptance test, not a nice-to-have.
 2. **Whether the loading pass needs a different disposition set.** ✅ **Answered: yes.** The load path has its
    own stranding site, and it is uncounted. `LoadOrGenerateChunkInner` re-checks after its `await
@@ -426,6 +476,18 @@ whether they inherit them *knowingly*.
 
 ## Document History
 
+* **v1.3** - FP-0 as-built sync (2026-07-27). **Status → Partially implemented**; FP-0 shipped and gated
+  (`dotnet build` 0 errors with the file genuinely in the csproj, Unity console clean, Rider inspections
+  clean, **Validate All 355/355 across 16 suites**, and a live smoke check confirming the disabled path is
+  inert). Three code/doc drifts closed, each a case where building it revealed the design had under-specified
+  something: **§5 dispositions 4 → 6** (`Rerequested` names the §4.1 flush and *is* the re-request metric;
+  `InFlightAtPhaseEnd` keeps chunks the phase merely outran from being booked as waste, which would inflate
+  an input to §7.1); **§5.1 gains `NotRun = 0`**, a non-outcome occupying the zero slot so a default-
+  initialized sample cannot report the flattering "ran, nothing left" for a pass that never executed —
+  with the binding FP-2 consequence that skipped-pass early-outs must record their real reason;
+  **§8 Q1 CLOSED** with measured capacities (15,000 at the 200 m/s worst case, ~4× under the ceiling).
+  Also records the as-built buffering split: exact unbounded tallies vs a rolling frame window, which is
+  what makes §7.2's "full tallies, never truncated" promise implementable.
 * **v1.2** - Implementation-planning amendment (2026-07-27) — folds the FP-0…FP-4 planning session's
   decisions into the design so a cold session inherits them from the doc rather than from a transcript.
   **New §4.1:** `ChunkCoord` is not unique within a phase (the loading pass revisits by design), so the
@@ -458,5 +520,5 @@ whether they inherit them *knowingly*.
 
 ---
 
-**Last Updated:** 2026-07-27 (v1.2 implementation-planning amendment)  
+**Last Updated:** 2026-07-27 (v1.3 FP-0 as-built sync)  
 **Next Review:** when FP-0 starts, or if the flight symptom is diagnosed by other means first
