@@ -81,6 +81,9 @@ namespace Benchmarks
         private Stopwatch _totalStopwatch;
         private Material _blurMaterial;
 
+        /// <summary>LoadDistance captured at run start — the geometry input to the FP trace-capacity estimate.</summary>
+        private int _loadDistanceForCapture;
+
         // ── Frame Rate Overrides ─────────────────────────────────────────
 
         private int _savedVSyncCount;
@@ -185,6 +188,12 @@ namespace Benchmarks
 
             _metricsCollector = new BenchmarkMetricsCollector(_totalPhaseCount);
             _metricsCollector.StartRecording();
+
+            // FP: pipeline-internal telemetry rides the same phase boundaries as the frame-health collector,
+            // so the two report the same phases. Enabled only for the duration of this run and cleared in
+            // OnDestroy — the WorldFrameProfiler/FluidStressController pattern.
+            _loadDistanceForCapture = settings.LoadDistance;
+            PipelineTelemetry.Enabled = true;
             _totalStopwatch = Stopwatch.StartNew();
             IsRunning = true;
 
@@ -205,6 +214,10 @@ namespace Benchmarks
 
             _totalStopwatch.Stop();
             _metricsCollector.StopRecording();
+
+            // Close the final telemetry phase BEFORE the report reads CompletedPhases — an open phase is
+            // never in that list, so the last (fastest, most interesting) speed tier would be missing.
+            PipelineTelemetry.EndPhase();
             IsRunning = false;
 
             BenchmarkReportResult reportResult = BenchmarkReportGenerator.GenerateAndWriteReport(
@@ -227,6 +240,11 @@ namespace Benchmarks
         {
             _metricsCollector?.StopRecording();
 
+            // Close any phase still open (an aborted run) and switch the layer off. The domain reset covers
+            // a play-mode restart, but not returning to the main menu within one session.
+            PipelineTelemetry.EndPhase();
+            PipelineTelemetry.Enabled = false;
+
             if (_frameRateOverridden)
             {
                 QualitySettings.vSyncCount = _savedVSyncCount;
@@ -239,6 +257,29 @@ namespace Benchmarks
 
             if (_blurMaterial != null)
                 Destroy(_blurMaterial);
+        }
+
+        /// <summary>
+        /// Opens a phase on <b>both</b> recorders at once. Routed through one helper so the frame-health
+        /// collector and the FP pipeline telemetry can never disagree about which phase a sample belongs
+        /// to — the report prints them side by side, and a one-sided <c>BeginPhase</c> would silently
+        /// attribute pipeline data to the wrong speed tier.
+        /// </summary>
+        /// <param name="phaseName">Display name (e.g. "200 m/s").</param>
+        /// <param name="groupName">Logical group (e.g. "Generation Pass").</param>
+        /// <param name="speedMetersPerSecond">The phase's flight speed, sizing the trace table (§8 Q1).</param>
+        private void BeginPhaseBoth(string phaseName, string groupName, float speedMetersPerSecond)
+        {
+            _metricsCollector.BeginPhase(phaseName, groupName);
+            PipelineTelemetry.BeginPhase(phaseName, groupName,
+                PipelineTelemetry.EstimateTraceCapacity(_loadDistanceForCapture, speedMetersPerSecond, TIME_PER_PHASE));
+        }
+
+        /// <summary>Closes the current phase on both recorders (both are no-ops when none is open).</summary>
+        private void EndPhaseBoth()
+        {
+            _metricsCollector.EndPhase();
+            PipelineTelemetry.EndPhase();
         }
 
         // ── Pass Execution ───────────────────────────────────────────────
@@ -265,7 +306,7 @@ namespace Benchmarks
             float phaseTimer = 0f;
 
             CurrentPhaseName = $"{_generationSpeeds[0]} m/s";
-            _metricsCollector.BeginPhase(CurrentPhaseName, GROUP_GENERATION);
+            BeginPhaseBoth(CurrentPhaseName, GROUP_GENERATION, _generationSpeeds[0]);
             Debug.Log($"[Benchmark] Generation Pass — Phase 0: {_generationSpeeds[0]}m/s");
 
             while (_activeWaypointIndex < _generationWaypoints.Count)
@@ -277,7 +318,7 @@ namespace Benchmarks
                     speedIndex++;
                     _currentOverallPhaseIndex++;
                     CurrentPhaseName = $"{_generationSpeeds[speedIndex]} m/s";
-                    _metricsCollector.BeginPhase(CurrentPhaseName, GROUP_GENERATION);
+                    BeginPhaseBoth(CurrentPhaseName, GROUP_GENERATION, _generationSpeeds[speedIndex]);
                     Debug.Log($"[Benchmark] Generation Pass — Phase {speedIndex}: " +
                               $"{_generationSpeeds[speedIndex]}m/s");
                 }
@@ -293,7 +334,7 @@ namespace Benchmarks
 
             Progress = 1f;
             _currentOverallPhaseIndex = _generationSpeeds.Length;
-            _metricsCollector.EndPhase();
+            EndPhaseBoth();
             Debug.Log("[Benchmark] === Generation Pass Complete ===");
         }
 
@@ -310,10 +351,10 @@ namespace Benchmarks
             OverallProgress = (float)_currentOverallPhaseIndex / _totalPhaseCount;
             TotalWaypointsInActivePass = 0;
 
-            _metricsCollector.BeginPhase(CurrentPhaseName, GROUP_TRANSITION);
+            BeginPhaseBoth(CurrentPhaseName, GROUP_TRANSITION, 0f);
             Debug.Log("[Benchmark] === Transition: Force-unloading all chunks... ===");
             yield return World.Instance.ForceUnloadAllChunks();
-            _metricsCollector.EndPhase();
+            EndPhaseBoth();
             Debug.Log("[Benchmark] === Transition Complete ===");
         }
 
@@ -347,7 +388,7 @@ namespace Benchmarks
                 _currentOverallPhaseIndex = loadingPhaseBase + i;
 
                 CurrentPhaseName = $"{_loadingSpeeds[i]} m/s";
-                _metricsCollector.BeginPhase(CurrentPhaseName, GROUP_LOADING);
+                BeginPhaseBoth(CurrentPhaseName, GROUP_LOADING, _loadingSpeeds[i]);
                 Debug.Log($"[Benchmark] Loading Pass — Phase {i}: {_loadingSpeeds[i]}m/s");
 
                 while (phaseTimer < TIME_PER_PHASE)
@@ -359,7 +400,7 @@ namespace Benchmarks
                     yield return null;
                 }
 
-                _metricsCollector.EndPhase();
+                EndPhaseBoth();
             }
 
             Progress = 1f;

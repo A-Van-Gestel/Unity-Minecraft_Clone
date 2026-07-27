@@ -1,6 +1,6 @@
 # Flight-Profile Capture (Pipeline Telemetry) Design
 
-**Version:** 1.5  
+**Version:** 1.6  
 **Date:** 2026-07-27  
 **Amended:** 2026-07-27 (v1.1) — re-verified every §2 row, §5 hook site, and both §8 questions against the
 code. Six §2 rows corrected, the hook chain shortened from five stamps to four (MP-6), the stop-reason set
@@ -15,8 +15,10 @@ enum, §8 Q1 closed with measured capacities.
 (dispositions → 7), and `StampRequested` made idempotent before admission.  
 **Amended:** 2026-07-27 (v1.5) — FP-2 as-built sync: stop reasons returned by the pure policies, the enums
 relocated to `Helpers`, one shared `ClassifyStop`, and the B8 baseline (Validate All → 356).  
-**Status:** **Partially implemented.** FP-0 (telemetry core), FP-1 (stage stamps) and FP-2 (admission
-pressure) are shipped and gated; **FP-3 and FP-4 remain proposed.** Per-phase status is in §7.  
+**Amended:** 2026-07-27 (v1.6) — FP-3 as-built sync: pure `TraceStatistics` + `PipelineRegimeVerdict`, the
+report section with §7.2's raw block, B9/B10, and the narrowed ordering criterion.  
+**Status:** **Partially implemented.** FP-0…FP-3 are shipped and gated. **Only FP-4 remains** — the IL2CPP
+capture itself, which requires an operator to fly the build. Per-phase status is in §7.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > A telemetry layer that answers **one question the existing benchmark cannot**: when chunks appear
@@ -367,7 +369,7 @@ contrast, **does** count: that is genuinely "work exists but is not yet eligible
 | **FP-0 — Telemetry core** ✅ **DONE** | `Benchmarks/PipelineTelemetry.cs`: `Enabled` flag + domain reset, `ChunkTrace`/`AdmissionSample` structs, side table, rolling frame window + exact tallies, phase begin/end, `EstimateTraceCapacity`. Modeled on `WorldFrameProfiler`. |   🟢   | —          |
 | **FP-1 — Stage stamps** ✅ **DONE** | Guarded hooks at **six** sites / eight call sites (§5) producing the **four-stamp** chain; terminal dispositions incl. both previously-uncounted discards (generation out-of-range *and* the disk-load stranding, §8 Q2) plus the mid-flight unload restored in v1.4. |   🟡   | FP-0       |
 | **FP-2 — Admission pressure** ✅ **DONE** | Per-frame sampling: queue depths, panic-gate state (**sampled from the existing `World` probes** — §2 — not newly instrumented), and the per-pass stop reason (§5.1) returned by the pure policies (§5.2/§5.2.1), pinned by **B8**. |   🟡   | FP-0       |
-| **FP-3 — Report section**         | `Benchmarks/TraceStatistics.cs` (pure static, so §7's baseline is writable) + the "Pipeline" report section: stage-latency distributions per speed phase — **normalized by each phase's own `DurationSeconds`**, since the last generation phase is not 30 s (§2) — waste %, gate-closed %, stop-reason histogram, the §7.1 verdict rule, the **§7.2 raw-results block**, and the §8 Q1 saturation banner. |   🟢   | FP-1, FP-2 |
+| **FP-3 — Report section** ✅ **DONE** | `Benchmarks/TraceStatistics.cs` + `PipelineRegimeVerdict.cs` (both pure, so B9/B10 can pin them) + `PipelineReportSection.cs`: stage-latency distributions per speed phase — **normalized by each phase's own `DurationSeconds`**, since the last generation phase is not 30 s (§2) — waste accounting, gate-closed %, full stop-reason tallies, the §7.1 verdict, the **§7.2 raw-results block**, and the §8 Q1 saturation banner. `BenchmarkController` drives both recorders through one paired `BeginPhaseBoth`/`EndPhaseBoth`. |   🟢   | FP-1, FP-2 |
 | **FP-4 — Capture + verdict**      | Run in an **IL2CPP Development Build**, write the report under `Documentation/Performance/` per the `perf-benchmark` protocol, and state which of the **four** regimes the numbers show — **by §7.1's pre-committed rule, over the §7.2 raw results, both present in the report**. |   🟢   | FP-3       |
 
 **FP-0…FP-3 deliver standalone value**; FP-4 is the deliverable that actually arbitrates the next
@@ -383,12 +385,20 @@ its own. Three things *are* checkable and should be:
    `MeshCompletionDriver` (B24/B25/B31–B33). This is a further argument for §5.2's placement decision: putting
    the stop reason in the pure policies is what moves it from the unguarded side of this line to the guarded
    side. Read the enabled-run as *"the suite-reachable hooks are inert"*, never as *"the hooks are inert"*.
-2. **FP-3's percentile selection is pinned by a baseline in the ChunkMath suite** — a wrong percentile
-   silently mis-ranks every future capture. This requires the percentile math to be a **pure static**
+2. **FP-3's percentile selection is pinned by a baseline** (**B9**) — a wrong percentile silently mis-ranks
+   every future capture. This requires the percentile math to be a **pure static**
    (`Benchmarks/TraceStatistics.cs`) callable from edit mode with no `World`; burying it in
    `BenchmarkReportGenerator`'s private code would make the baseline impossible to write.
-3. **§7.1's verdict rule is pinned by the same suite** — it is pure arithmetic over the counters, so a
-   rule that silently changes meaning between captures is a baseline failure, not a surprise.
+3. **§7.1's verdict rule is pinned** (**B10**) — pure arithmetic over the counters, so a rule that silently
+   changes meaning between captures is a baseline failure rather than a surprise. Two reports produced by
+   different rules are not comparable, and nothing in a report would reveal that on its own.
+
+> **v1.6 — these live in `Validate Pipeline Backpressure`, not the ChunkMath suite as v1.0 proposed.**
+> ChunkMath is scoped to *coordinate and addressing* math (its own docstring says so, and it deliberately
+> avoids even a namespace that would shadow `Helpers.ChunkMath`). Percentile selection and a regime verdict
+> are pipeline-capture math, and Pipeline Backpressure already owns exactly that — the quota/window/ceiling
+> math plus FP-2's `ClassifyStop` (B8). Putting them there keeps one suite per subject rather than filing
+> capture statistics under coordinate math, where a future reader would not think to look.
 4. **The stop-reason classifier is pinned by `Validate Pipeline Backpressure` B8** (added in FP-2):
    precedence across the three limits, and — the load-bearing pair — `AllDeclined` never collapsing into
    `OutOfWork` while an *empty* queue still reports `OutOfWork`. Prove-red confirmed by temporary mutation:
@@ -408,11 +418,27 @@ before any number exists, so it can be argued with on its merits rather than fit
 | `Quota` or `Ceiling` dominates the stop-reason histogram     | **Admission-bound** |
 | `InFlightCap` dominates, or stage latency dominates the hop breakdown with no dominant stop reason | **Throughput-bound** |
 | `AllDeclined` dominates                                      | **Readiness-bound** |
-| Waste % high **and** the enqueue→applied gap is concentrated in chunks already behind the player | **Ordering-bound** |
+| Waste fraction ≥ **20 %** of terminal traces | **Ordering-bound** |
 
 Ordering is deliberately established on a **different axis** from the other three: it is a property of *which*
-chunks were served, not of *why* a pass stopped, so it is read from the waste and gap distributions rather
-than the histogram, and it can co-occur with any of the other three.
+chunks were served, not of *why* a pass stopped, so it is read from the waste distribution rather than the
+histogram, and it can co-occur with any of the other three — including `Healthy`, which is the shape the
+reported flight symptom is most likely to take.
+
+> **v1.6 — the ordering criterion changed during FP-3, and the change is a narrowing.** v1.2 specified "waste %
+> high **and** the enqueue→applied gap concentrated in chunks already behind the player". The second clause is
+> **not computable from what the capture records**: a `ChunkTrace` holds coords and stamps, but the player's
+> position at each moment is never sampled, so "behind the player" has no operand. Rather than add
+> player-position tracking (scope) or quietly drop the clause, the criterion is now the waste fraction alone —
+> which is well-founded rather than a proxy, because every disposition it counts (`DiscardedOutOfRange`,
+> `LoadStranded`, `UnloadedBeforeMeshApplied`) *literally means the chunk left range while work was in flight*.
+> Waste is therefore already "work completed for chunks the player flew past"; the deleted clause was
+> restating it less measurably.
+>
+> **The 20 % threshold is a judgment call, pre-committed before any capture existed** (`OrderingWasteThreshold`).
+> One chunk in five is clear of the incidental churn a turning flight path produces, while still firing long
+> before the pipeline is spending most of its budget on discarded work. It is a named constant precisely so a
+> future session can disagree with it and recompute from the raw counts §7.2 mandates.
 
 **"Dominant" means the plurality bucket of the phase's stop-reason histogram.** No margin threshold is
 imposed — a near-tie is reported as a near-tie in the numbers, which §7.2 guarantees are present, and the
@@ -524,6 +550,22 @@ whether they inherit them *knowingly*.
 
 ## Document History
 
+* **v1.6** - FP-3 as-built sync (2026-07-27). **FP-3 shipped and gated** — `TraceStatistics` (nearest-rank
+  percentiles + a totality-guaranteed histogram), `PipelineRegimeVerdict` (the §7.1 rule as pure arithmetic),
+  and `PipelineReportSection` (the §7.2 raw-results block with the verdict's input vector printed verbatim
+  above the verdict line). **Validate All 358/358** (356 + B9 + B10), both baselines prove-red confirmed by
+  disjoint mutations that turned exactly their own scenario red. Two decisions recorded rather than made
+  silently: **(1) §7.1's ordering criterion was narrowed** — its second clause ("the gap concentrated in
+  chunks already behind the player") is *not computable* from what the capture records, since no player
+  position is ever sampled; the criterion is now the waste fraction alone, which is well-founded rather than
+  a proxy because every disposition it counts literally means the chunk left range while work was in flight.
+  The 20 % threshold is a named, pre-committed constant so a later session can disagree and recompute from
+  the §7.2 counts. **(2) B9/B10 live in `Validate Pipeline Backpressure`, not the ChunkMath suite v1.0
+  proposed** — ChunkMath is scoped to coordinate/addressing math, while Pipeline Backpressure already owns
+  the pipeline's pure math including FP-2's `ClassifyStop`. Verified end-to-end by rendering the section from
+  synthetic phase data: percentiles, histogram totality (buckets summing to n), waste arithmetic, the
+  saturation banner, and a `Healthy + ORDERING-BOUND` verdict — the exact case the separate ordering axis
+  exists to express.
 * **v1.5** - FP-2 as-built sync (2026-07-27). **FP-2 shipped and gated** — per-pass stop reasons returned by
   the pure policies, per-frame admission sampling, **Validate All 356/356** (355 + the new B8) with telemetry
   disabled and enabled, Rider clean on every touched production file, and B8 prove-red confirmed by temporary
@@ -596,5 +638,5 @@ whether they inherit them *knowingly*.
 
 ---
 
-**Last Updated:** 2026-07-27 (v1.5 FP-2 as-built sync)  
+**Last Updated:** 2026-07-27 (v1.6 FP-3 as-built sync)  
 **Next Review:** when FP-0 starts, or if the flight symptom is diagnosed by other means first

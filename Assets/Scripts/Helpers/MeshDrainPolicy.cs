@@ -20,14 +20,6 @@ namespace Helpers
     }
 
     /// <summary>
-    /// Pure per-frame policy for draining the mesh-build queue: the loop that <c>World.Update</c>
-    /// runs and the meshing validation suite replays, sharing one implementation so a policy change
-    /// (stop conditions, purge, remove-vs-leave, priority order) can never diverge between production
-    /// and its baseline. The budget <i>math</i> (<see cref="PipelinePassBudget.ComputeQuota"/> /
-    /// <see cref="PipelinePassBudget.Window"/>) is derived by the caller and passed in — this owns
-    /// only the loop that consumes it.
-    /// </summary>
-    /// <summary>
     /// What one <see cref="MeshDrainPolicy.Drain"/> pass did: how many chunks it scheduled, and
     /// <b>why it stopped</b> (FP-2). The reason is returned rather than re-derived by the caller because
     /// re-reading the limits after the loop cannot distinguish them — a pass that broke on quota may also
@@ -51,6 +43,14 @@ namespace Helpers
         }
     }
 
+    /// <summary>
+    /// Pure per-frame policy for draining the mesh-build queue: the loop that <c>World.Update</c>
+    /// runs and the meshing validation suite replays, sharing one implementation so a policy change
+    /// (stop conditions, purge, remove-vs-leave, priority order) can never diverge between production
+    /// and its baseline. The budget <i>math</i> (<see cref="PipelinePassBudget.ComputeQuota"/> /
+    /// <see cref="PipelinePassBudget.Window"/>) is derived by the caller and passed in — this owns
+    /// only the loop that consumes it.
+    /// </summary>
     public static class MeshDrainPolicy
     {
         /// <summary>

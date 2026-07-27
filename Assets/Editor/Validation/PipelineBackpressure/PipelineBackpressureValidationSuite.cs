@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using Benchmarks;
 using Editor.Validation.Framework;
 using Helpers;
 using UnityEditor;
@@ -50,6 +52,8 @@ namespace Editor.Validation.PipelineBackpressure
                 new Scenario("B6 Panic gate hysteresis walk (band holds both ways)", RunB6HysteresisWalk),
                 new Scenario("B7 Ceiling scaling: FPS-cap intent, floor, clamp, disabled passthrough", RunB7CeilingScaling),
                 new Scenario("B8 Stop-reason classifier: precedence, and AllDeclined never collapsing into OutOfWork", RunB8StopReasonClassifier),
+                new Scenario("B9 Nearest-rank percentile selection + histogram totality (FP-3)", RunB9TraceStatistics),
+                new Scenario("B10 Regime verdict rule: each arm, plurality, and the ordering axis (FP-3 §7.1)", RunB10VerdictRule),
             };
             return ValidationSuiteRunner.Execute("Pipeline Backpressure", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -102,6 +106,117 @@ namespace Editor.Validation.PipelineBackpressure
             // pass that DID run, so it must never produce it.
             ok &= Check("classifier never returns NotRun (it only describes passes that ran)",
                 PipelinePassBudget.ClassifyStop(0, 0, false, false, false) != PassStopReason.NotRun);
+
+            return ok;
+        }
+
+        /// <summary>
+        /// FP-3: the percentile selection every future capture is ranked by. A wrong percentile does not
+        /// fail loudly — it silently mis-ranks one capture against another, so this is pinned rather than
+        /// trusted. Nearest-rank (no interpolation) means every reported value is a real observed sample,
+        /// which is what lets a reader reconcile the percentile table against the raw histogram beside it.
+        /// Also pins that the histogram <b>drops nothing</b>: the bucket counts must sum to the sample count,
+        /// or the §7.2 "raw results" block would understate the tail it exists to expose.
+        /// </summary>
+        private static bool RunB9TraceStatistics()
+        {
+            // 1..10: nearest-rank ranks are ceil(p/100*10), so p50 -> index 5 (value 5), p95 -> index 10.
+            List<long> ten = new List<long> { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+            bool ok = Check("p50 of 1..10 -> 5 (nearest-rank, not the 5.5 interpolation would give)",
+                TraceStatistics.Percentile(ten, 50) == 5);
+            ok &= Check("p95 of 1..10 -> 10", TraceStatistics.Percentile(ten, 95) == 10);
+            ok &= Check("p99 of 1..10 -> 10", TraceStatistics.Percentile(ten, 99) == 10);
+            ok &= Check("p0 -> min", TraceStatistics.Percentile(ten, 0) == 1);
+            ok &= Check("p100 -> max", TraceStatistics.Percentile(ten, 100) == 10);
+
+            // Single sample: every percentile is that sample — the degenerate case a capture hits whenever
+            // exactly one chunk completed in a phase.
+            List<long> one = new List<long> { 42 };
+            ok &= Check("single-sample series: p50 == p95 == max == the sample",
+                TraceStatistics.Percentile(one, 50) == 42 && TraceStatistics.Percentile(one, 95) == 42);
+
+            ok &= Check("empty series -> 0 (never throws)",
+                TraceStatistics.Percentile(new List<long>(), 95) == 0);
+
+            // Histogram totality — including a sample past the last edge, which must land in the overflow
+            // slot rather than being discarded.
+            List<double> ms = new List<double> { 0.5, 1.0, 3.0, 7.0, 99.0, 100000.0 };
+            int[] buckets = TraceStatistics.Histogram(ms);
+            int summed = 0;
+            foreach (int b in buckets) summed += b;
+            ok &= Check("histogram buckets sum to the sample count (nothing dropped)", summed == ms.Count);
+            ok &= Check("a sample past the last edge lands in the overflow bucket",
+                buckets[^1] == 1);
+            ok &= Check("bucket count is edges + 1 (one overflow slot)",
+                buckets.Length == TraceStatistics.HistogramEdgesMs.Length + 1);
+
+            return ok;
+        }
+
+        /// <summary>
+        /// FP-3 §7.1: the verdict rule, pinned so it cannot silently change meaning between captures — two
+        /// reports produced by different rules are not comparable, and nothing in a report would reveal that.
+        /// Covers each regime arm, the plurality selection across passes, and the ordering axis (which is
+        /// deliberately independent, so it can fire on top of a Healthy primary — the shape the reported
+        /// flight symptom is most likely to take).
+        /// </summary>
+        private static bool RunB10VerdictRule()
+        {
+            const int passes = PipelineTelemetry.PassCount;
+            const int reasons = PipelineTelemetry.StopReasonCount;
+
+            // Helper: a tally matrix with a single dominant reason.
+            int[,] Only(PassStopReason r, int count)
+            {
+                int[,] t = new int[passes, reasons];
+                t[(int)PipelinePass.MeshSchedule, (int)r] = count;
+                return t;
+            }
+
+            bool ok = Check("Quota dominant -> AdmissionBound",
+                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.Quota, 10), 0, 100).Primary
+                == PipelineRegime.AdmissionBound);
+            ok &= Check("Ceiling dominant -> AdmissionBound",
+                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.Ceiling, 10), 0, 100).Primary
+                == PipelineRegime.AdmissionBound);
+            ok &= Check("InFlightCap dominant -> ThroughputBound",
+                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.InFlightCap, 10), 0, 100).Primary
+                == PipelineRegime.ThroughputBound);
+            ok &= Check("AllDeclined dominant -> ReadinessBound",
+                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.AllDeclined, 10), 0, 100).Primary
+                == PipelineRegime.ReadinessBound);
+            ok &= Check("OutOfWork dominant -> Healthy",
+                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.OutOfWork, 10), 0, 100).Primary
+                == PipelineRegime.Healthy);
+            ok &= Check("no tallies at all -> NoData",
+                PipelineRegimeVerdict.Evaluate(new int[passes, reasons], 0, 0).Primary
+                == PipelineRegime.NoData);
+
+            // NotRun must never win: it is the did-not-execute sentinel, and an idle frame is not a regime.
+            int[,] notRunHeavy = new int[passes, reasons];
+            notRunHeavy[(int)PipelinePass.MeshSchedule, (int)PassStopReason.NotRun] = 9999;
+            notRunHeavy[(int)PipelinePass.MeshSchedule, (int)PassStopReason.Quota] = 3;
+            ok &= Check("NotRun is excluded from the plurality (Quota still wins)",
+                PipelineRegimeVerdict.Evaluate(notRunHeavy, 0, 100).Primary == PipelineRegime.AdmissionBound);
+
+            // Reasons are summed ACROSS passes: the question is what bound the pipeline, not one stage.
+            int[,] split = new int[passes, reasons];
+            split[(int)PipelinePass.MeshSchedule, (int)PassStopReason.AllDeclined] = 6;
+            split[(int)PipelinePass.LightSchedule, (int)PassStopReason.AllDeclined] = 6;
+            split[(int)PipelinePass.GenerationProcess, (int)PassStopReason.Ceiling] = 10;
+            ok &= Check("reasons sum across passes (12 AllDeclined beats 10 Ceiling)",
+                PipelineRegimeVerdict.Evaluate(split, 0, 100).Primary == PipelineRegime.ReadinessBound);
+
+            // The ordering axis is independent of the primary regime.
+            RegimeVerdict wasteful = PipelineRegimeVerdict.Evaluate(Only(PassStopReason.OutOfWork, 10), 30, 100);
+            ok &= Check("waste 30% >= threshold -> ordering-bound flagged",
+                wasteful.OrderingBound);
+            ok &= Check("...and it composes with a Healthy primary (the flight symptom's likely shape)",
+                wasteful.Primary == PipelineRegime.Healthy);
+            ok &= Check("waste just under the threshold -> NOT ordering-bound",
+                !PipelineRegimeVerdict.Evaluate(Only(PassStopReason.OutOfWork, 10), 19, 100).OrderingBound);
+            ok &= Check("waste fraction is reported for the raw block",
+                Math.Abs(wasteful.WasteFraction - 0.30) < 1e-9);
 
             return ok;
         }

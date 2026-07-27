@@ -63,6 +63,10 @@ namespace Benchmarks
             AppendOverallSummary(sb, collector.CompletedPhases, totalDuration);
             AppendGroupedPhases(sb, collector.CompletedPhases);
 
+            // FP-3: the pipeline-internal section, reported ALONGSIDE frame health rather than replacing it
+            // (§1 non-goals). No-op when the capture ran with telemetry disabled.
+            PipelineReportSection.Append(sb, PipelineTelemetry.CompletedPhases);
+
             string report = sb.ToString();
             Debug.Log(report);
             string filePath = BenchmarkEnvironment.WriteReportToDisk(report, "BenchmarkRun");
