@@ -81,8 +81,12 @@ namespace Benchmarks
         private Stopwatch _totalStopwatch;
         private Material _blurMaterial;
 
-        /// <summary>LoadDistance captured at run start — the geometry input to the FP trace-capacity estimate.</summary>
-        private int _loadDistanceForCapture;
+        /// <summary>
+        /// Pipeline tuning captured at run start (FP-6) — the geometry input to the FP trace-capacity
+        /// estimate, and the values the report must state so its stop-reason tallies are interpretable.
+        /// Snapshotted rather than re-read at report time: settings are editable mid-session.
+        /// </summary>
+        private PipelineSettingsSnapshot _pipelineSettingsForCapture;
 
         // ── Frame Rate Overrides ─────────────────────────────────────────
 
@@ -192,7 +196,7 @@ namespace Benchmarks
             // FP: pipeline-internal telemetry rides the same phase boundaries as the frame-health collector,
             // so the two report the same phases. Enabled only for the duration of this run and cleared in
             // OnDestroy — the WorldFrameProfiler/FluidStressController pattern.
-            _loadDistanceForCapture = settings.LoadDistance;
+            _pipelineSettingsForCapture = new PipelineSettingsSnapshot(settings);
 
             // Pairs with the freshly-constructed collector above: both recorders must start a run empty, or
             // a second run in one process reports the first run's phases as its own (FP-5).
@@ -235,7 +239,8 @@ namespace Benchmarks
                 _loadingWaypoints.Count,
                 _totalStopwatch.Elapsed,
                 _savedVSyncCount,
-                _savedTargetFrameRate);
+                _savedTargetFrameRate,
+                _pipelineSettingsForCapture);
 
             ShowResults(reportResult);
         }
@@ -276,7 +281,8 @@ namespace Benchmarks
         {
             _metricsCollector.BeginPhase(phaseName, groupName);
             PipelineTelemetry.BeginPhase(phaseName, groupName,
-                PipelineTelemetry.EstimateTraceCapacity(_loadDistanceForCapture, speedMetersPerSecond, TIME_PER_PHASE));
+                PipelineTelemetry.EstimateTraceCapacity(_pipelineSettingsForCapture.LoadDistance,
+                    speedMetersPerSecond, TIME_PER_PHASE));
         }
 
         /// <summary>Closes the current phase on both recorders (both are no-ops when none is open).</summary>

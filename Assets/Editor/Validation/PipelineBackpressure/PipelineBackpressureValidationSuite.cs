@@ -55,6 +55,7 @@ namespace Editor.Validation.PipelineBackpressure
                 new Scenario("B9 Nearest-rank percentile selection + histogram totality (FP-3)", RunB9TraceStatistics),
                 new Scenario("B10 Regime verdict rule: each arm, plurality, and the ordering axis (FP-3 §7.1)", RunB10VerdictRule),
                 new Scenario("B11 Run boundary: a second capture reports only its own phases (FP-5)", RunB11RunBoundaryReset),
+                new Scenario("B12 Settings snapshot: resident square + gate-threshold ratio (FP-6)", RunB12SettingsSnapshot),
             };
             return ValidationSuiteRunner.Execute("Pipeline Backpressure", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -479,6 +480,67 @@ namespace Editor.Validation.PipelineBackpressure
                 PipelineTelemetry.BeginRun();
                 PipelineTelemetry.Enabled = wasEnabled;
             }
+        }
+
+        /// <summary>
+        /// FP-6: the two <i>derived</i> values on the settings snapshot, pinned because the FP-4 sweep
+        /// reasons from them rather than from the raw thresholds. The resident square is the denominator for
+        /// the gate ratio, and that ratio — not the absolute threshold — is what predicts whether the panic
+        /// gate ever closes, since the threshold is fixed while the population it guards grows with the
+        /// square of view distance.
+        /// <para>Built from an explicit <see cref="Settings"/> instance rather than
+        /// <c>SettingsManager.LoadSettings()</c>: a baseline must not depend on whatever the user currently
+        /// has configured.</para>
+        /// </summary>
+        private static bool RunB12SettingsSnapshot()
+        {
+            // The three view distances of the FP-4 sweep, with their hand-computed geometry.
+            // LoadDistance = viewDistance + DATA_LOAD_BUFFER(3).
+            (int viewDistance, int expectedLoad, int expectedResident, double expectedRatio)[] cases =
+            {
+                (5, 8, 289, 100.0 * 256 / 289), // default — 88.6 %, gate never observed closing
+                (10, 13, 729, 100.0 * 256 / 729), // 35.1 %
+                (20, 23, 2209, 100.0 * 256 / 2209), // 11.6 % — gate closed 96.4 % of frames
+            };
+
+            bool ok = true;
+            foreach ((int viewDistance, int expectedLoad, int expectedResident, double expectedRatio) c in cases)
+            {
+                Settings settings = new Settings
+                {
+                    viewDistance = c.viewDistance,
+                    panicGateCloseThreshold = 256,
+                };
+                PipelineSettingsSnapshot snap = new PipelineSettingsSnapshot(settings);
+
+                ok &= Check($"vd {c.viewDistance} -> LoadDistance {c.expectedLoad}",
+                    snap.LoadDistance == c.expectedLoad);
+                ok &= Check($"vd {c.viewDistance} -> resident square {c.expectedResident:N0}",
+                    snap.ResidentChunks == c.expectedResident);
+                ok &= Check($"vd {c.viewDistance} -> gate threshold {c.expectedRatio:F1}% of resident",
+                    Math.Abs(snap.PanicGateCloseThresholdPercentOfResident - c.expectedRatio) < 1e-9);
+            }
+
+            // The ratio must FALL as view distance rises — the monotonicity the F5 argument rests on.
+            PipelineSettingsSnapshot near = new PipelineSettingsSnapshot(
+                new Settings { viewDistance = 5, panicGateCloseThreshold = 256 });
+            PipelineSettingsSnapshot far = new PipelineSettingsSnapshot(
+                new Settings { viewDistance = 20, panicGateCloseThreshold = 256 });
+            ok &= Check("a fixed threshold is a SMALLER share of the resident set at higher view distance",
+                far.PanicGateCloseThresholdPercentOfResident < near.PanicGateCloseThresholdPercentOfResident);
+
+            // Degenerate guard: a view distance negative enough to drive the square width below 1 must clamp,
+            // never produce a zero (divide-by-zero in the ratio) or a bogus positive from squaring a negative.
+            PipelineSettingsSnapshot degenerate = new PipelineSettingsSnapshot(
+                // ReSharper disable once ValueRangeAttributeViolation
+                new Settings { viewDistance = -10, panicGateCloseThreshold = 256 });
+            ok &= Check("width below 1 clamps: resident square is 1, not 0 and not a squared negative",
+                degenerate.ResidentWidth == 1 && degenerate.ResidentChunks == 1);
+            ok &= Check("the gate ratio stays finite at the clamped floor",
+                !double.IsInfinity(degenerate.PanicGateCloseThresholdPercentOfResident) &&
+                !double.IsNaN(degenerate.PanicGateCloseThresholdPercentOfResident));
+
+            return ok;
         }
     }
 }

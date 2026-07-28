@@ -1,6 +1,6 @@
 # Flight-Profile Capture (Pipeline Telemetry) Design
 
-**Version:** 1.9  
+**Version:** 1.10  
 **Date:** 2026-07-27  
 **Amended:** 2026-07-27 (v1.1) — re-verified every §2 row, §5 hook site, and both §8 questions against the
 code. Six §2 rows corrected, the hook chain shortened from five stamps to four (MP-6), the stop-reason set
@@ -24,6 +24,9 @@ single-leg verdict is refined: ordering-boundness is **universal**, admission-bo
 viewDistance ≥ 10**. Adds the lockstep result, the visibility criterion, and a telemetry bug the sweep exposed.  
 **Amended:** 2026-07-28 (v1.9) — **FP-5 fixed and guarded** (§7.4): `BeginRun()` at the run boundary, baseline
 **B11**, Validate All 358 → **359**. Records the UDR0002 constraint that dictates its shape.  
+**Amended:** 2026-07-28 (v1.10) — **FP-6 done and widened** (§7.4): the report now prints every pipeline knob
+that produces a stop reason, grouped by which one, via `PipelineSettingsSnapshot`. Baseline **B12**,
+Validate All → **360**. Notes that the FP-4 captures predate this and their tuning is unrecorded.  
 **Status:** ✅ **Implemented.** FP-0…FP-4 are all shipped; the capture is
 [`../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md)
 (three IL2CPP runs at viewDistance 5 / 10 / 20). **Verdict: ORDERING-BOUND at every view distance;
@@ -382,7 +385,7 @@ contrast, **does** count: that is genuinely "work exists but is not yet eligible
 | **FP-4 — Capture + verdict** ✅ **DONE** | Captured 2026-07-27 in an **IL2CPP Development Build** at commit `73de6511`; report and verdict in [`../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md). **Verdict: ordering-bound + admission-bound** in the loading pass ≥ 50 m/s; throughput- and readiness-bound both ruled out by the raw counts. Exposed a defect in §7.1 v1 itself — see §7.1.1. |   🟢   | FP-3       |
 
 | **FP-5 — fix the run-boundary phase leak** ✅ **DONE** | `PipelineTelemetry.BeginRun()` (public, calls the existing `DomainReset` body) called from `BenchmarkController` at run start, so a second run in one process no longer reports the first run's phases. Guarded by **B11**; prove-red confirmed. |   🟢   | FP-4       |
-| **FP-6 — print `LoadDistance`**   | Add the capture's own sizing input to the Configuration block (§7.4). Caused v1.7's retracted capacity claim.                                          |   🟢   | FP-4       |
+| **FP-6 — print the pipeline settings** ✅ **DONE** | `PipelineSettingsSnapshot` captured at run start and rendered as its own report block, grouped by the stop reason each knob produces (§7.4). Guarded by **B12**. |   🟢   | FP-4       |
 
 **FP-0…FP-3 deliver standalone value**; FP-4 is the deliverable that actually arbitrates the next
 optimization. **FP-5 and FP-6 are defects FP-4 exposed in the instrument itself** — they are not extensions,
@@ -528,7 +531,7 @@ mirrored in the master backlog; instrument items are owned by this document.
 | **2** | **Scale panic-gate thresholds with view distance** | **`P-8`** — same two docs | §7.1.1's sibling finding (F5), confirmed by measurement: 0 % / 92.8 % / 96.4 % closure at vd 5/10/20. Correctness-of-intent, not tuning. |
 | **3** | **Adopt the visibility criterion as the acceptance target** | This doc + P-7's design | `latency ≤ viewDistance × 16 ÷ speed`. Falsifiable, matches independent visual observation across three legs, and gives (1) a target number rather than "less waste". |
 | **4** | ~~**FP-5 — fix the phase leak across runs**~~ ✅ **DONE 2026-07-28** | **this doc, §7.4** | Was blocking trustworthy multi-run sessions. Fixed via `BeginRun()`; guarded by **B11** (Validate All → 359). |
-| **5** | **FP-6 — print `LoadDistance` in the report** | **this doc, §7.4** | Caused v1.7's retracted capacity claim. Nearly free. |
+| **5** | ~~**FP-6 — print `LoadDistance` in the report**~~ ✅ **DONE 2026-07-28, widened** | **this doc, §7.4** | Became "print every knob that produces a stop reason", once it was clear the capture machine runs non-default quotas. Guarded by **B12** (Validate All → 360). |
 | **6** | **§7.1 v2 — fix the plurality dilution** | this doc, §7.1.1 | Removes the manual recomputation every future capture would otherwise need. Must bump `RULE_VERSION`. |
 | **7** | **Per-chunk CSV export** | Extension roadmap below (v3+) | Only way to separate F4's two stall populations. Demand case now recorded. |
 
@@ -542,7 +545,45 @@ Both were found *by* the capture, and both must land before the next one or its 
 | Phase | Defect | Fix |
 |-------|--------|-----|
 | **FP-5** ✅ **FIXED** | **Telemetry phases leaked across benchmark runs in one process.** `s_completedPhases` was cleared only in `DomainReset`, i.e. once per play-mode entry / player start. `BenchmarkController` set `Enabled = true` at run start but never cleared the list, while `_metricsCollector.StartRecording()` resets its own — so the two recorders **disagreed at the run boundary** and a second run reported the first run's phases as its own. Observed: the vd-10 log carries all 9 vd-5 phases verbatim before its own 8. The *run-level* instance of exactly the desync FP-3's paired `BeginPhaseBoth`/`EndPhaseBoth` prevents at the phase level. | **As built:** public `PipelineTelemetry.BeginRun()`, called from `BenchmarkController` immediately before `Enabled = true` so both recorders start a run empty. **`BeginRun` is the caller of `DomainReset`, not the reverse** — a shared private helper is the obvious shape and is *wrong here*: UDR0002 requires every mutable static to be assigned **lexically inside** the `[RuntimeInitializeOnLoadMethod]`, and delegating outward trips it on `s_activePhase`. A comment at the site says so, because the natural "tidy-up" reintroduces the warning. Side effect worth knowing: `BeginRun` also clears `Enabled`, so callers restoring a saved flag must restore it *after* the call. |
-| **FP-6** | **`LoadDistance` is absent from the report** despite being the input to the trace-capacity estimate and to any reproduction. It caused v1.7's retracted "capacity model under-predicts 46 %" claim — the wrong table row was read because the run's actual load distance was not in its own output. | Print it in the Configuration block. `_loadDistanceForCapture` is already captured at `BenchmarkController.cs:195`. |
+| **FP-6** ✅ **DONE — and widened beyond the original scope** | **The report stated none of the tuning that produces its own stop reasons.** `LoadDistance` was the entry point (its absence caused v1.7's retracted "capacity model under-predicts 46 %" claim, since the wrong table row was read), but it is not the only one: a phase reporting `Quota` on 99 % of frames is uninterpretable without the quota, and the §7.1 rule turns exactly those tallies into a regime. Confirmed non-hypothetical, though **not** for the reason first recorded — see §7.4.1. | **As built:** `Benchmarks/PipelineSettingsSnapshot.cs` — 18 values captured at run start (not read at report time: settings are editable mid-session, so the report must state what the run *used*) and rendered by `AppendTo` into a new **`=== Pipeline Settings (as used by this run) ===`** block, **grouped by the stop reason each knob produces** (quotas → `Quota`, in-flight caps → `InFlightCap`, ms ceilings → `Ceiling`, panic gate → *no* stop reason, visible only as the per-phase gate-closed %). Prints the derived resident square and the F5 ratio. `_loadDistanceForCapture` is subsumed by the snapshot. Rendering lives **on the snapshot**, not in `BenchmarkReportGenerator`, so a field added to the capture cannot be silently left unprinted. Guarded by **B12**. |
+
+#### 7.4.1 Why a capture's settings are genuinely undeterminable without printing them (v1.10)
+
+An earlier draft of §7.4 justified FP-6 by claiming the FP-4 sweep ran at non-default quotas, citing values
+read from `SettingsManager` **in the editor**. That claim is **retracted**: settings persist to
+`Application.dataPath + "/settings.json"` (falling back to `persistentDataPath`), so the editor and every
+player build keep **separate files**, and an editor reading says nothing about what a player build ran with.
+
+The corrected justification is stronger, and rests on three verified mechanisms rather than one observation:
+
+1. **OM-1 device calibration overwrites four of these very settings at startup.**
+   `SettingsManager.ApplyCalibration` writes `maxMeshRebuildsPerFrame`, `maxLightJobsPerFrame`,
+   `maxInFlightMeshJobs`, `maxInFlightGenerationJobs` (plus pool retention) from
+   `DeviceCalibration.Resolve()`, which derives them from system RAM *and* a `StartupCalibrationProbe`
+   micro-benchmark. They are therefore **device-dependent, and not knowable from any checked-in default**.
+   It is skipped in edit mode (`Application.isPlaying` guard), so the editor and a player can legitimately
+   disagree on all four.
+2. **Per-platform settings files**, per the retraction above.
+3. **Benchmark mode's "deterministic gameplay settings" intent is defeated by the settings cache.**
+   `LoadSettings()`'s benchmark branch builds a fresh `new Settings()` and overlays only three fields
+   (`benchmarkRegionSize`, `benchmarkGenerationSpeeds`, `benchmarkLoadingSpeeds`) — but **only if
+   `s_cachedSettings` is null**. The cache is cleared solely by `ResetStatics()` at process start, never on a
+   mode switch, and the normal route into a benchmark is via the main menu, which loads settings first. So a
+   benchmark launched the usual way runs on the **player's real settings**, and the deterministic-defaults
+   path is effectively unreachable. This is visible in the FP-4 data itself: waypoint counts are derived from
+   `LoadDistance` and differ across the three runs (12 / 6 / 4), which the defaults path could not produce.
+
+**Conclusion: what a capture ran with is not derivable from code inspection** — it depends on cache warmth,
+on which platform's settings file exists, and on a device-specific calibration probe. Printing the values at
+run time is the only thing that settles it, which is precisely FP-6. **The snapshot is correct by
+construction here:** it reads the same shared `LoadSettings()` instance the `World` uses, so it records
+whatever actually applied, regardless of which path produced it.
+
+> **Open question, deliberately not answered here:** whether benchmark mode *should* force deterministic
+> settings (making captures comparable across machines but no longer representative of real play), or keep
+> using live settings (representative, but only comparable when the printed block matches). Both are
+> defensible; changing it alters benchmark behaviour and needs its own decision. FP-6 makes either choice
+> *auditable*, which is why it was worth doing first.
 
 > A third, lower-severity gap from the same capture: **generation waypoint counts differ per run** (12 / 6 / 4
 > at vd 5 / 10 / 20), so the generation route is not held constant and cross-run *generation* comparisons are
@@ -642,6 +683,48 @@ whether they inherit them *knowingly*.
 
 ## Document History
 
+* **v1.10** - **FP-6 done, and deliberately wider than it was filed as** (2026-07-28). It was scoped as "print
+  `LoadDistance`"; the operator pointed out that the per-frame caps and time budgets shape the pipeline just as
+  much, and that is right for a reason the original framing missed: **every one of those knobs *produces* one
+  of the stop reasons the §7.1 verdict is computed from.** A phase reporting `Quota` on 99 % of frames is
+  uninterpretable without the quota. **A first-draft justification for this was wrong and is retracted in
+  §7.4.1**: it cited quota values read from the *editor's* settings, but settings persist per-platform
+  (`Application.dataPath/settings.json`), so an editor reading says nothing about a player build. The
+  corrected reasoning is stronger and rests on three verified mechanisms — **OM-1 device calibration
+  overwrites four of these settings at startup** from system RAM plus a timing probe (so they are
+  device-dependent and absent from any checked-in default), settings files are per-platform, and benchmark
+  mode's deterministic-defaults branch is **unreachable via the normal main-menu route** because the settings
+  cache is only cleared at process start. Net: a capture's tuning is *not derivable from code inspection*,
+  which is exactly why it must be printed. As built: `Benchmarks/PipelineSettingsSnapshot.cs` captures 18 values
+  at run start — **not** read at report time, since settings are editable mid-session and the report must
+  state what the run *used*, the same reasoning that already governed the trace-capacity input — and renders
+  them **grouped by the stop reason each produces** (quotas → `Quota`, in-flight caps → `InFlightCap`, ms
+  ceilings → `Ceiling`, and the panic gate under an explicit "no stop reason" heading, because it withholds
+  admissions at `DrainGenerationRequests`, outside all four instrumented passes, and is visible only as the
+  per-phase gate-closed %). Two derived values are printed because the FP-4 analysis reasons from them rather
+  than from the raw numbers: the resident square, and the gate threshold **as a percentage of it** — the F5
+  predictor. Rendering lives **on the snapshot** rather than in `BenchmarkReportGenerator` (the FP-5 lesson:
+  two places that must agree eventually don't), which also made it directly verifiable — the block was
+  rendered from live settings and its derived values cross-checked against an independent recomputation.
+  Guarded by **B12**, built from explicit `Settings` instances rather than `LoadSettings()` so a baseline
+  never depends on the user's current configuration; it pins the geometry at all three swept view distances,
+  the monotonicity F5 rests on, and a clamped degenerate case — which surfaced a real gap while being written,
+  since `ResidentWidth` did not originally floor at 1 the way `EstimateTraceCapacity` does. **Prove-red
+  confirmed:** corrupting the width formula turns exactly B12 red (11 passed / 1 failed) on all six geometry
+  assertions, B1–B11 untouched. Gated at `dotnet build` 0 errors on both assemblies with no new warnings,
+  Rider clean on all four touched files, Validate All **360/360** across 16 suites with telemetry disabled and
+  enabled. **Known limitation:** the three FP-4 captures predate this, so their tuning is unrecorded and
+  cannot be recovered — the report's own numbers are unaffected, but a comparison against a *future* capture
+  must not assume matched settings. **New §7.4.1 records a retraction and the corrected reasoning**: the
+  claim that the sweep ran at non-default quotas came from reading the *editor's* settings file, and settings
+  are per-platform, so it said nothing about the player build that produced the captures. Investigating it
+  surfaced three mechanisms that make the case for FP-6 much stronger than the retracted one — OM-1
+  calibration writes four of these settings at startup from device RAM and a timing probe; settings files are
+  per-platform; and benchmark mode's deterministic-defaults branch is **unreachable on the normal main-menu
+  route**, because `s_cachedSettings` is cleared only at process start, so a benchmark runs on the player's
+  live settings. The last is a latent harness gap in its own right (benchmark determinism is intended but not
+  achieved) and is left as an explicit open question rather than changed here, since fixing it alters
+  benchmark behaviour.
 * **v1.9** - **FP-5 fixed and guarded** (2026-07-28). The run-boundary phase leak the sweep exposed is closed:
   public `PipelineTelemetry.BeginRun()`, called from `BenchmarkController` immediately before `Enabled = true`,
   so both recorders start a run empty. **The shape is dictated by UDR0002 and is deliberately not the obvious

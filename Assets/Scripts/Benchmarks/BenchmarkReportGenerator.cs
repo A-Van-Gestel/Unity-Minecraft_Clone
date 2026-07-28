@@ -40,6 +40,8 @@ namespace Benchmarks
         /// <param name="totalDuration">Wall-clock duration of the entire benchmark run.</param>
         /// <param name="savedVSyncCount">The VSync count that was saved before forcing it off.</param>
         /// <param name="savedTargetFrameRate">The target frame rate that was saved before uncapping.</param>
+        /// <param name="pipelineSettings">Pipeline tuning captured at run start (FP-6) — the values the
+        /// FP stop-reason tallies must be read against.</param>
         /// <returns>A <see cref="BenchmarkReportResult"/> containing the report text and file path.</returns>
         public static BenchmarkReportResult GenerateAndWriteReport(
             BenchmarkMetricsCollector collector,
@@ -52,7 +54,8 @@ namespace Benchmarks
             int loadingWaypointCount,
             TimeSpan totalDuration,
             int savedVSyncCount,
-            int savedTargetFrameRate)
+            int savedTargetFrameRate,
+            PipelineSettingsSnapshot pipelineSettings)
         {
             StringBuilder sb = new StringBuilder(4096);
 
@@ -60,6 +63,7 @@ namespace Benchmarks
             sb.Append(BenchmarkEnvironment.DescribeSystem());
             AppendConfiguration(sb, generationSpeeds, loadingSpeeds, timePerPhase, regionSize,
                 configuredRegionSize, generationWaypointCount, loadingWaypointCount, savedVSyncCount, savedTargetFrameRate);
+            pipelineSettings.AppendTo(sb);
             AppendOverallSummary(sb, collector.CompletedPhases, totalDuration);
             AppendGroupedPhases(sb, collector.CompletedPhases);
 
