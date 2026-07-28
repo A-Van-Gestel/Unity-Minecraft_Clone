@@ -1,6 +1,6 @@
 # Flight-Profile Capture (Pipeline Telemetry) Design
 
-**Version:** 1.6  
+**Version:** 1.8  
 **Date:** 2026-07-27  
 **Amended:** 2026-07-27 (v1.1) — re-verified every §2 row, §5 hook site, and both §8 questions against the
 code. Six §2 rows corrected, the hook chain shortened from five stamps to four (MP-6), the stop-reason set
@@ -17,8 +17,15 @@ enum, §8 Q1 closed with measured capacities.
 relocated to `Helpers`, one shared `ClassifyStop`, and the B8 baseline (Validate All → 356).  
 **Amended:** 2026-07-27 (v1.6) — FP-3 as-built sync: pure `TraceStatistics` + `PipelineRegimeVerdict`, the
 report section with §7.2's raw block, B9/B10, and the narrowed ordering criterion.  
-**Status:** **Partially implemented.** FP-0…FP-3 are shipped and gated. **Only FP-4 remains** — the IL2CPP
-capture itself, which requires an operator to fly the build. Per-phase status is in §7.  
+**Amended:** 2026-07-28 (v1.7) — **FP-4 captured; the arc is complete.** The verdict, the §7.1 v1 rule defect
+the capture exposed (§7.1.1), and the three follow-ups the numbers licensed are recorded below.  
+**Amended:** 2026-07-28 (v1.8) — FP-4 **extended to a three-point view-distance sweep** (vd 5 / 10 / 20). The
+single-leg verdict is refined: ordering-boundness is **universal**, admission-boundness is **conditional on
+viewDistance ≥ 10**. Adds the lockstep result, the visibility criterion, and a telemetry bug the sweep exposed.  
+**Status:** ✅ **Implemented.** FP-0…FP-4 are all shipped; the capture is
+[`../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md)
+(three IL2CPP runs at viewDistance 5 / 10 / 20). **Verdict: ORDERING-BOUND at every view distance;
+ADMISSION-BOUND only from viewDistance ≥ 10.** Per-phase status is in §7.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > A telemetry layer that answers **one question the existing benchmark cannot**: when chunks appear
@@ -370,10 +377,14 @@ contrast, **does** count: that is genuinely "work exists but is not yet eligible
 | **FP-1 — Stage stamps** ✅ **DONE** | Guarded hooks at **six** sites / eight call sites (§5) producing the **four-stamp** chain; terminal dispositions incl. both previously-uncounted discards (generation out-of-range *and* the disk-load stranding, §8 Q2) plus the mid-flight unload restored in v1.4. |   🟡   | FP-0       |
 | **FP-2 — Admission pressure** ✅ **DONE** | Per-frame sampling: queue depths, panic-gate state (**sampled from the existing `World` probes** — §2 — not newly instrumented), and the per-pass stop reason (§5.1) returned by the pure policies (§5.2/§5.2.1), pinned by **B8**. |   🟡   | FP-0       |
 | **FP-3 — Report section** ✅ **DONE** | `Benchmarks/TraceStatistics.cs` + `PipelineRegimeVerdict.cs` (both pure, so B9/B10 can pin them) + `PipelineReportSection.cs`: stage-latency distributions per speed phase — **normalized by each phase's own `DurationSeconds`**, since the last generation phase is not 30 s (§2) — waste accounting, gate-closed %, full stop-reason tallies, the §7.1 verdict, the **§7.2 raw-results block**, and the §8 Q1 saturation banner. `BenchmarkController` drives both recorders through one paired `BeginPhaseBoth`/`EndPhaseBoth`. |   🟢   | FP-1, FP-2 |
-| **FP-4 — Capture + verdict**      | Run in an **IL2CPP Development Build**, write the report under `Documentation/Performance/` per the `perf-benchmark` protocol, and state which of the **four** regimes the numbers show — **by §7.1's pre-committed rule, over the §7.2 raw results, both present in the report**. |   🟢   | FP-3       |
+| **FP-4 — Capture + verdict** ✅ **DONE** | Captured 2026-07-27 in an **IL2CPP Development Build** at commit `73de6511`; report and verdict in [`../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md). **Verdict: ordering-bound + admission-bound** in the loading pass ≥ 50 m/s; throughput- and readiness-bound both ruled out by the raw counts. Exposed a defect in §7.1 v1 itself — see §7.1.1. |   🟢   | FP-3       |
+
+| **FP-5 — fix the run-boundary phase leak** | Clear `s_completedPhases` at benchmark-run start, so a second run in one process stops reporting the first run's phases. Found *by* FP-4 (§7.4). **Blocks trustworthy multi-run sessions — land before the next capture.** |   🟢   | FP-4       |
+| **FP-6 — print `LoadDistance`**   | Add the capture's own sizing input to the Configuration block (§7.4). Caused v1.7's retracted capacity claim.                                          |   🟢   | FP-4       |
 
 **FP-0…FP-3 deliver standalone value**; FP-4 is the deliverable that actually arbitrates the next
-optimization.
+optimization. **FP-5 and FP-6 are defects FP-4 exposed in the instrument itself** — they are not extensions,
+and the ranked follow-ups in §7.3 put them ahead of any further capture.
 
 **What is and is not guarded.** This is an instrument, not engine behavior, so it gets no scenario suite of
 its own. Three things *are* checkable and should be:
@@ -446,6 +457,32 @@ verdict names the plurality while the report shows the runner-up. This deliberat
 verdict with visible ambiguity over a "mixed regime, no single fix indicated" outcome that would leave the
 capture having arbitrated nothing.
 
+### 7.1.1 The rule has a defect, and FP-4 found it (v1.7)
+
+**FP-4's first act was to falsify the rule it was pre-committed to.** Recorded here rather than quietly
+patched, because §7.1 exists to be arguable and a rule that is silently corrected after seeing a result is
+worth nothing.
+
+The rule sums each stop reason **across all four passes**. But `GenerationProcess` and `MeshProcess` are
+**ceiling-only** passes: they can emit only `OutOfWork` or `Ceiling`, never `Quota`, `InFlightCap` or
+`AllDeclined`. The capture confirms this empirically — across 8 phases × 2 passes × 3 reasons, **all 48 cells
+are zero**. Two passes that can vote for exactly one of the five outcomes are therefore added to two passes
+genuinely contesting all five, and they reliably contribute ~100 % `OutOfWork`.
+
+The consequence is not academic. At loading 200 m/s the plurality came down to **68 frames out of 27 744**
+(OutOfWork 50.0 % vs Quota 49.8 %) and the rule printed *Healthy*. Restricted to the two passes that actually
+have an admission budget, the same raw numbers give **Quota at 99.5 %** — decisively admission-bound. Across
+the three loading phases the scheduling-pass-only plurality is Quota at **83.1 / 97.2 / 99.5 %**.
+
+**The rule was not fed bad data; it aggregated good data wrongly.** §7.2 is what made this recoverable — the
+correction needed only the printed tallies, not a re-capture on a build that no longer exists. Treat this as
+the strongest available argument for §7.2 as a standing requirement.
+
+**Not fixed here** (§9.5 — FP fixes nothing, and amending the rule would break comparability with the report
+that found it). A §7.1 v2 should restrict the plurality to passes capable of expressing the contested reason,
+or abandon the single-plurality framing for a per-pass regime vector. Whoever writes it must bump
+`RULE_VERSION` so the two generations of report are never silently compared.
+
 ### 7.2 Raw results are mandatory — the verdict never replaces them (v1.2)
 
 **A capture that reports only its conclusion has failed, exactly as surely as one that reports no
@@ -468,6 +505,48 @@ only thing a later session can read. Every report FP-3 emits therefore carries, 
 arbitrary percentiles, not exact. Exact re-derivation over every individual chunk trace is the **v3+ per-chunk
 CSV export** in the roadmap below, and remains out of scope here. If a future capture's analysis is blocked by
 bucket resolution, that is the demand case that promotes the v3 item — record it rather than widening FP-3.
+
+> **v1.7 — the demand case arrived on the first capture.** FP-4 found a thin catastrophic tail (at 20 m/s,
+> ~95 % of chunks land in a tight ~2.5 s cohort while **~1 % take 24–30 s**), and that tail is the most
+> plausible source of the *felt* symptom — a mostly-complete world with occasional half-minute holes. It
+> cannot be attributed from aggregates: the `populated→lit` and `lit→meshApplied` p99s **sum to more than the
+> phase's own maximum end-to-end latency**, which proves they belong to different chunks, i.e. there are two
+> distinct stall populations rather than one slow stage. Separating them needs per-chunk traces. This is a
+> recorded demand case for the v3+ CSV export, per the rule above.
+
+### 7.3 Ranked follow-ups from the FP-4 capture (v1.8)
+
+The capture's whole purpose was to decide what to do next, so the ranking is recorded **here** — the report
+that produced it is a point-in-time, append-only artifact and cannot be kept current. Engine items are
+mirrored in the master backlog; instrument items are owned by this document.
+
+| # | Item | Home | Why it ranks here |
+|---|------|------|-------------------|
+| **1** | **Chunk service ordering** | **`P-7`** — [analysis §6 item 5](CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md), mirrored in [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) | Waste above threshold in **all 9** loading phases at every view distance, including the default with the gate never closing. Largest measured inefficiency in the engine, and now known to be intrinsic. |
+| **2** | **Scale panic-gate thresholds with view distance** | **`P-8`** — same two docs | §7.1.1's sibling finding (F5), confirmed by measurement: 0 % / 92.8 % / 96.4 % closure at vd 5/10/20. Correctness-of-intent, not tuning. |
+| **3** | **Adopt the visibility criterion as the acceptance target** | This doc + P-7's design | `latency ≤ viewDistance × 16 ÷ speed`. Falsifiable, matches independent visual observation across three legs, and gives (1) a target number rather than "less waste". |
+| **4** | **FP-5 — fix the phase leak across runs** | **this doc, §7.4** | Blocks trustworthy multi-run sessions. A second run currently reports the first run's phases. |
+| **5** | **FP-6 — print `LoadDistance` in the report** | **this doc, §7.4** | Caused v1.7's retracted capacity claim. Nearly free. |
+| **6** | **§7.1 v2 — fix the plurality dilution** | this doc, §7.1.1 | Removes the manual recomputation every future capture would otherwise need. Must bump `RULE_VERSION`. |
+| **7** | **Per-chunk CSV export** | Extension roadmap below (v3+) | Only way to separate F4's two stall populations. Demand case now recorded. |
+
+**Not licensed by the capture:** any in-flight-cap or readiness work. Both regimes were tested for at three
+view distances and are absent in all of them (`InFlightCap` ≤ 0.6 %, `AllDeclined` ≤ 7.8 %).
+
+### 7.4 FP-5 / FP-6 — instrument defects found by running it (v1.8)
+
+Both were found *by* the capture, and both must land before the next one or its output is untrustworthy.
+
+| Phase | Defect | Fix |
+|-------|--------|-----|
+| **FP-5** | **Telemetry phases leak across benchmark runs in one process.** `s_completedPhases` is cleared only in `DomainReset` (`PipelineTelemetry.cs:305`), i.e. once per play-mode entry / player start. `BenchmarkController` sets `Enabled = true` at run start (`:196`) but never clears the list, while `_metricsCollector.StartRecording()` resets its own — so the two recorders **disagree at the run boundary** and a second run reports the first run's phases as its own. Observed: the vd-10 log carries all 9 vd-5 phases verbatim before its own 8. | Clear `s_completedPhases` where the run begins. One line, but it is a behavior change to the instrument — own commit, own suite pass. This is the *run-level* instance of exactly the desync FP-3's paired `BeginPhaseBoth`/`EndPhaseBoth` prevents at the phase level. |
+| **FP-6** | **`LoadDistance` is absent from the report** despite being the input to the trace-capacity estimate and to any reproduction. It caused v1.7's retracted "capacity model under-predicts 46 %" claim — the wrong table row was read because the run's actual load distance was not in its own output. | Print it in the Configuration block. `_loadDistanceForCapture` is already captured at `BenchmarkController.cs:195`. |
+
+> A third, lower-severity gap from the same capture: **generation waypoint counts differ per run** (12 / 6 / 4
+> at vd 5 / 10 / 20), so the generation route is not held constant and cross-run *generation* comparisons are
+> confounded. The loading pass uses 12 everywhere and is comparable. Either hold waypoints constant across a
+> sweep, or print them prominently enough that the confound cannot be missed — they are currently in the
+> Configuration block but easy to overlook.
 
 ### Extension roadmap (post-FP-4, in intended order)
 
@@ -497,6 +576,17 @@ bucket resolution, that is the demand case that promotes the v3 item — record 
    The worst realistic case sits **~4× below the 65,536 ceiling**, so the clamp does not bind at sane
    settings and saturation should be the exception rather than the norm. Floor and ceiling were both
    verified at the extremes (`LD=0 @ 0 m/s → 4,096`; `LD=64 @ 500 m/s → 65,536`).
+
+   > **v1.7 — FP-4 exercised this and the model held.** The 200 m/s loading phase started **21,848 traces**.
+   > The capture ran at **`LoadDistance = 23`** (viewDistance 20 + `DATA_LOAD_BUFFER` 3), *not* the 12 the
+   > table above tabulates, so the applicable budget is `EstimateTraceCapacity(23, 200, 30)` = **29,751** —
+   > ~27 % headroom, and no saturation banner fired. **The sizing model is not implicated.**
+   >
+   > One process lesson worth more than the number: FP-4's first draft read the wrong row of this very table
+   > and reported a phantom "46 % under-prediction", because **`LoadDistance` is not printed in the capture
+   > report** and had to be supplied by the operator out of band. A capture that omits its own sizing input
+   > invites exactly that error. Printing it is nearly free — `_loadDistanceForCapture` is already held at
+   > `BenchmarkController.cs:195`.
 
    The failure mode is unchanged and remains the point: saturation is **never** silent truncation. The trace
    table and latency series carry sticky `TracesSaturated` / `SamplesSaturated` flags — reported separately
@@ -550,6 +640,71 @@ whether they inherit them *knowingly*.
 
 ## Document History
 
+* **v1.8** - **FP-4 extended to a three-point view-distance sweep** (2026-07-28), vd 5 / 10 / 20 on one build.
+  The single-leg verdict is **refined, and one v1.7 claim is retracted**. (1) **Ordering-boundness is
+  universal**: waste exceeds the 20 % threshold in **all 9** loading phases across all three runs
+  (22.9–61.2 %), including the **default** viewDistance 5 where the panic gate **never closes once** in
+  ~380,000 sampled frames. Ordering is therefore intrinsic pipeline behavior, not a gate side-effect and not a
+  stress-configuration artifact. (2) **Admission-boundness is conditional** on viewDistance ≥ 10 — **F5 is now
+  CONFIRMED by measurement rather than arithmetic**: gate closure at loading 200 m/s is **0.0 % / 92.8 % /
+  96.4 %** at vd 5 / 10 / 20, against a fixed 256-backlog threshold that represents 88.6 % / 35.1 % / 11.6 % of
+  the resident square. The transition is a sharp tipping point, exactly as a fixed threshold against a
+  quantity scaling with view-distance² predicts. (3) **RETRACTED — "waste rises with view distance"** was
+  inferred from the single leg and is false at moderate speed: at 50 and 100 m/s the *default* view distance
+  is the **worst** of the three (33.1 % / 22.9 % / 27.2 %); only at 200 m/s does it rise with vd. The
+  unifying relation is `waste ≈ latency ÷ residence-time` where residence ≈ ring diameter ÷ speed.
+  (4) **v1.7's F2 is upgraded to a structural result: the generation pipeline is LOCKSTEP.** Expressed in
+  boundary-crossing intervals, `populated→lit` costs ~**2** crossings and `lit→meshApplied` ~**1**, totalling
+  **3.01–3.40 across 12 measurements**, three view distances and five speeds — and the total is *invariant to
+  view distance* (3.01 / 3.02 / 3.05 at 10 m/s) despite a 7.6× change in resident-set size. Integer hop counts
+  are not something a throughput limit produces; the generation pass has a **latency floor no extra throughput
+  can lower**. (5) **New: the visibility criterion.** A chunk must render before the player covers the
+  view-distance margin, i.e. `latency ≤ viewDistance × 16 ÷ speed`. Measured as a ratio it is
+  **0.87 / 1.23 / 1.56** at loading 200 m/s — crossing 1.0 exactly between vd 5 and vd 10, which is precisely
+  where the operator's independent visual report changed from "all chunks loaded fine" to "chunks lagging
+  behind", and at vd 20 chunks arrive **11 chunks beyond** the view boundary ("only a handful even rendered").
+  The criterion separates reported-good from reported-bad in all 21 cells and gives ordering work a target
+  number instead of "less waste". (6) **New bug found in the data, confirmed in code:**
+  `PipelineTelemetry.s_completedPhases` is cleared only in `DomainReset`, never at benchmark-run start, while
+  `BenchmarkMetricsCollector` resets itself — so a **second run in one process reports the previous run's
+  phases as its own** (the vd 10 log carries all 9 vd 5 phases verbatim before its own 8). One-line fix, own
+  commit. Also confirmed: the generation waypoint counts differ across runs (12 / 6 / 4), so cross-run
+  *generation* comparisons are confounded and only the loading pass (12 everywhere) is directly comparable —
+  F2 survives this because it reproduces on three different routes.
+* **v1.7** - **FP-4 captured — the arc is complete** (2026-07-28). Report:
+  [`../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md)
+  (IL2CPP Development Build, 8 phases, commit `73de6511`). **Verdict: ordering-bound + admission-bound** in
+  the loading pass ≥ 50 m/s — waste rises monotonically with speed (27.2 → 29.8 → **61.2 %**) while the panic
+  gate sits closed on 69.8 → 86.2 → **96.4 %** of frames; **throughput-bound and readiness-bound are both
+  ruled out** (`InFlightCap` ≤ 0.6 % and `AllDeclined` ≤ 0.9 % at 200 m/s). At 200 m/s the pipeline starts
+  728 chunks/s and delivers 219 — **~3.3 units of work per chunk shipped** — which is why ordering outranks
+  throughput as the next item. Three things the capture established that the design did not anticipate:
+  **(1) §7.1 v1 is defective (new §7.1.1)** — summing stop reasons across all four passes lets two
+  *ceiling-only* completion passes, structurally able to vote only `OutOfWork` (empirically 48/48 zero cells),
+  dilute the plurality; loading 200 m/s came down to 68 frames of 27,744 and printed *Healthy*, where the same
+  raw numbers restricted to the budgeted passes give **Quota at 99.5 %**. The rule aggregated good data wrongly
+  and §7.2 is what made the correction possible without a re-capture — deliberately left unfixed here, since
+  patching a pre-committed rule after seeing its result would defeat its purpose. **(2) Generation-pass latency
+  is paced by distance, not throughput** — `p50 × speed` is a near-constant **49–55 m (~3 chunk boundaries)**
+  across a 10× speed range, and latency *falls* as speed rises; the loading pass's same product is not constant
+  (100/209/498 m), which rules out an arithmetic artifact. Nobody should optimize generation throughput against
+  the 4.9 s figure at 10 m/s until that pacing hypothesis is confirmed. **(3) The felt symptom is likely the
+  tail, not the median** — ~1 % of chunks at 20 m/s take 24–30 s against a 2.5 s cohort, and the two hop p99s
+  sum past the phase maximum, proving two distinct stall populations; this is the recorded demand case that
+  promotes the v3+ per-chunk CSV export (§7.2). **(4) The panic gate's threshold does not scale with view
+  distance** — it is a fixed 256/128 band read from `SettingsManager`, while the resident square it guards
+  grows as view-distance²: a 256 backlog is **88.6 %** of the resident set at the default viewDistance 5 but
+  only **11.6 %** at the viewDistance 20 this capture ran, which is the mechanism behind the 96.4 % closure
+  rate. A hysteresis band pinned to an absolute count cannot mean the same thing across a setting that moves
+  the guarded population by 7.6×; that is a design gap needing its own pass, and it is now second in the
+  report's ranked follow-ups.
+  **Capture caveats:** the run used **viewDistance 20 (4× default)**, so the *severity* figures are
+  stress-configuration magnitudes while the *regime* conclusion is the robust part — the report carries a
+  Generality table separating the two, and a viewDistance-5 leg is the cheapest confirmation available. The
+  generation sweep is **incomplete** (100 m/s ran 0.7 s of 30 s, 200 m/s never ran — the 4-waypoint route is
+  exhausted at speed). §8 Q1's capacity model was re-checked at the true `LoadDistance = 23` and **held**
+  (29,751 budget vs 21,848 used); a first-draft claim that it under-predicted by 46 % was **retracted** — it
+  had read the LD=12 row, an error caused by `LoadDistance` being absent from the report.
 * **v1.6** - FP-3 as-built sync (2026-07-27). **FP-3 shipped and gated** — `TraceStatistics` (nearest-rank
   percentiles + a totality-guaranteed histogram), `PipelineRegimeVerdict` (the §7.1 rule as pure arithmetic),
   and `PipelineReportSection` (the §7.2 raw-results block with the verdict's input vector printed verbatim
