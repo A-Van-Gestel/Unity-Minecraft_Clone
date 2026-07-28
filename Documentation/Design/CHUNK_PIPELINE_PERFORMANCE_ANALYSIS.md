@@ -1,8 +1,11 @@
 # Chunk Pipeline Performance Analysis
 
-**Version:** 1.1  
+**Version:** 1.3  
 **Date:** 2026-06-11  
 **Amended:** 2026-07-27 — §6 ordering caveat: items 5 and 6 are gated on the FP-* capture.  
+**Amended:** 2026-07-28 (v1.2) — **the FP-4 capture ran and lifted that gate.** The symptom is
+ordering-bound + admission-bound, so items 5 and 6 (both throughput work) are **not** licensed by the
+evidence. §6 records the result and the redirected order.  
 **Status:** **Partially implemented.** §1.1 (job `NativeArray` pooling) and the whole §3 backpressure
 family are shipped — §3.1/§3.2 + recommendation 3 (2026-07-21) and §3.4/§3.5 + the §5.3 draw rider
 (2026-07-23). **§2 and §4 remain open**, and §5.3 was later *superseded* when MP-6 deleted the stage it
@@ -335,8 +338,26 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
 2. ✅ ~~**§1.1 pool the job NativeArrays** — low effort, large win, no architecture change.~~ (Done 2026-06-11.)
 3. ✅ ~~**§3.1 + §3.2 generation in-flight cap + out-of-range discard** — stops the memory spiral.~~ (Done 2026-07-21 — see the "Implemented" note in §3.)
 4. ✅ ~~**§3.4 time-based budgets** (+ §3.5 panic gate).~~ (Done 2026-07-23 — see the final "Implemented" note in §3.)
-5. **§4.4 "lighting stable" save bit** (serialization migration).
-6. **§2 jobified lighting merge**, then **§1.2/§1.3** deeper copy reductions.
+5. **P-7 — chunk service ordering** ⬅ **top open item, promoted by the FP-4 capture (v1.3).** Waste exceeds
+   the 20 % ordering threshold in **all 9** loading phases across viewDistance 5 / 10 / 20 (22.9–61.2 %),
+   *including the default view distance where the panic gate never closes once* — so this is intrinsic
+   pipeline behavior, not a throttling side-effect. At vd 20 / 200 m/s the pipeline starts 728 chunks/s and
+   delivers 219. The three known order defects are named in the caveat below (stale nearest-first generation
+   queue, hash-ordered lighting ready set, FIFO mesh queue). **Acceptance target: FP-4's visibility criterion,
+   `latency ≤ viewDistance × 16 ÷ speed`** — a budget, not a percentage. **Needs its own design doc**; touches
+   pipeline invariants, so the `chunk-lifecycle` skill is mandatory.
+6. **P-8 — scale the panic-gate thresholds with view distance.** `panicGateCloseThreshold` / `ReopenThreshold`
+   are absolute constants (256 / 128) while the resident square they guard grows as view-distance²: a
+   256-chunk backlog is 88.6 % of the resident set at vd 5 but 11.6 % at vd 20. Measured consequence — gate
+   closure at loading 200 m/s is **0.0 % / 92.8 % / 96.4 %** at vd 5 / 10 / 20. The same constant is an
+   unreachable emergency brake at the default and a near-permanent throttle at vd 20. Localized fix, but it
+   changes admission behavior (P-4 family) — pair it with a vd-5 confirmation capture. Note it **interacts
+   with P-7**: raising admission without fixing ordering buys more discarded work.
+7. **§4.4 "lighting stable" save bit** (serialization migration) — **deprioritized by FP-4.** Throughput work;
+   throughput is not the binding constraint (`InFlightCap` ≤ 0.6 % at every view distance). Still a real win
+   for revisited terrain, just not what the flight symptom calls for.
+8. **§2 jobified lighting merge**, then **§1.2/§1.3** deeper copy reductions — **deprioritized by FP-4**, same
+   reason. Worth revisiting once P-7 has cut the volume of work these run on.
 
 > **Ordering caveat (2026-07-27, revised same day) — measure before picking 5 or 6.** A reported symptom the
 > numbers behind this order do not cover: at sustained fly speeds (15+ m/s) chunks appear sluggishly. That
@@ -358,6 +379,25 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
 > **[FLIGHT_PROFILE_CAPTURE.md](FLIGHT_PROFILE_CAPTURE.md)** (FP-*, v1.1) specifies the capture that
 > arbitrates them; run it before committing to 5 or 6.
 
+> **✅ v1.3 — confirmed across a three-point view-distance sweep (vd 5 / 10 / 20).** Ordering-boundness holds
+> at **every** view distance including the default, where the panic gate never closes once — so it is
+> intrinsic, not a large-view-distance artifact. Admission-boundness appears only from vd ≥ 10. Neither
+> finding revives items 5 or 6.
+
+> **✅ v1.2 — the gate is lifted; the capture ran and the answer is neither 5 nor 6.**
+> [FP-4](../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md) (IL2CPP,
+> 2026-07-27) arbitrates the symptom as **ordering-bound + admission-bound**. The decisive numbers: waste
+> climbs monotonically with flight speed to **61.2 %** of terminal traces at 200 m/s — the pipeline starts
+> 728 chunks/s and delivers 219 — while the panic gate sits closed **96.4 %** of frames and the lighting
+> schedule is `Quota`-stopped on **99.5 %** of frames it could act on. Both remaining candidates are ruled
+> out by direct measurement: `InFlightCap` ≤ 0.6 % and `AllDeclined` ≤ 0.9 %.
+>
+> **Consequences for this document's §6 order.** Items 5 (§4.4 save bit) and 6 (§2 jobified merge) are both
+> *throughput* work, and throughput is **not** what binds. Neither is licensed by the capture. The work the
+> evidence points at is ordering — not serving chunks the player has already flown past — with the lighting
+> schedule quota second, noting the two interact: raising the quota without fixing ordering buys more
+> discarded work. Ordering has no item in §1–§5 and needs its own design.
+
 ---
 
 ## 7. Verification
@@ -376,6 +416,17 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.2** - **§6's gate lifted by the FP-4 capture** (2026-07-28). The capture this document deferred to
+  ([report](../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md)) arbitrates the
+  15+ m/s symptom as **ordering-bound + admission-bound**: 61.2 % waste at 200 m/s against `InFlightCap`
+  ≤ 0.6 % and `AllDeclined` ≤ 0.9 %. Since items 5 and 6 are both throughput work and throughput is not the
+  binding constraint, **neither is licensed** — the evidence redirects to ordering (no item exists for it here;
+  it needs its own design) with the lighting schedule quota second. No finding in §1–§5 changed; what changed
+  is which of them the evidence supports acting on.
+* **v1.3** - **FP-4's verdict confirmed across three view distances** (2026-07-28). vd 5 / 10 / 20 legs show
+  ordering-boundness in **all 9** loading phases (waste 22.9–61.2 %), including the default view distance
+  where the panic gate never closes — so §6's redirect away from items 5 and 6 is not a stress-configuration
+  artifact. Admission pressure is additionally present from vd ≥ 10. No finding in §1–§5 changed.
 * **v1.1** - §6 gains the **ordering caveat** (2026-07-27): the reported 15+ m/s sluggish-chunk symptom is
   not covered by the evidence behind this document's suggested order, so items 5 and 6 are gated on the
   FP-* capture ([FLIGHT_PROFILE_CAPTURE.md](FLIGHT_PROFILE_CAPTURE.md)) that arbitrates the regimes. Revised
