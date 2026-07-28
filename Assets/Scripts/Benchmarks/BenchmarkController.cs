@@ -193,6 +193,10 @@ namespace Benchmarks
             // so the two report the same phases. Enabled only for the duration of this run and cleared in
             // OnDestroy — the WorldFrameProfiler/FluidStressController pattern.
             _loadDistanceForCapture = settings.LoadDistance;
+
+            // Pairs with the freshly-constructed collector above: both recorders must start a run empty, or
+            // a second run in one process reports the first run's phases as its own (FP-5).
+            PipelineTelemetry.BeginRun();
             PipelineTelemetry.Enabled = true;
             _totalStopwatch = Stopwatch.StartNew();
             IsRunning = true;

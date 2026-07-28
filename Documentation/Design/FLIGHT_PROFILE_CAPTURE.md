@@ -1,6 +1,6 @@
 # Flight-Profile Capture (Pipeline Telemetry) Design
 
-**Version:** 1.8  
+**Version:** 1.9  
 **Date:** 2026-07-27  
 **Amended:** 2026-07-27 (v1.1) — re-verified every §2 row, §5 hook site, and both §8 questions against the
 code. Six §2 rows corrected, the hook chain shortened from five stamps to four (MP-6), the stop-reason set
@@ -22,6 +22,8 @@ the capture exposed (§7.1.1), and the three follow-ups the numbers licensed are
 **Amended:** 2026-07-28 (v1.8) — FP-4 **extended to a three-point view-distance sweep** (vd 5 / 10 / 20). The
 single-leg verdict is refined: ordering-boundness is **universal**, admission-boundness is **conditional on
 viewDistance ≥ 10**. Adds the lockstep result, the visibility criterion, and a telemetry bug the sweep exposed.  
+**Amended:** 2026-07-28 (v1.9) — **FP-5 fixed and guarded** (§7.4): `BeginRun()` at the run boundary, baseline
+**B11**, Validate All 358 → **359**. Records the UDR0002 constraint that dictates its shape.  
 **Status:** ✅ **Implemented.** FP-0…FP-4 are all shipped; the capture is
 [`../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md)
 (three IL2CPP runs at viewDistance 5 / 10 / 20). **Verdict: ORDERING-BOUND at every view distance;
@@ -379,7 +381,7 @@ contrast, **does** count: that is genuinely "work exists but is not yet eligible
 | **FP-3 — Report section** ✅ **DONE** | `Benchmarks/TraceStatistics.cs` + `PipelineRegimeVerdict.cs` (both pure, so B9/B10 can pin them) + `PipelineReportSection.cs`: stage-latency distributions per speed phase — **normalized by each phase's own `DurationSeconds`**, since the last generation phase is not 30 s (§2) — waste accounting, gate-closed %, full stop-reason tallies, the §7.1 verdict, the **§7.2 raw-results block**, and the §8 Q1 saturation banner. `BenchmarkController` drives both recorders through one paired `BeginPhaseBoth`/`EndPhaseBoth`. |   🟢   | FP-1, FP-2 |
 | **FP-4 — Capture + verdict** ✅ **DONE** | Captured 2026-07-27 in an **IL2CPP Development Build** at commit `73de6511`; report and verdict in [`../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md). **Verdict: ordering-bound + admission-bound** in the loading pass ≥ 50 m/s; throughput- and readiness-bound both ruled out by the raw counts. Exposed a defect in §7.1 v1 itself — see §7.1.1. |   🟢   | FP-3       |
 
-| **FP-5 — fix the run-boundary phase leak** | Clear `s_completedPhases` at benchmark-run start, so a second run in one process stops reporting the first run's phases. Found *by* FP-4 (§7.4). **Blocks trustworthy multi-run sessions — land before the next capture.** |   🟢   | FP-4       |
+| **FP-5 — fix the run-boundary phase leak** ✅ **DONE** | `PipelineTelemetry.BeginRun()` (public, calls the existing `DomainReset` body) called from `BenchmarkController` at run start, so a second run in one process no longer reports the first run's phases. Guarded by **B11**; prove-red confirmed. |   🟢   | FP-4       |
 | **FP-6 — print `LoadDistance`**   | Add the capture's own sizing input to the Configuration block (§7.4). Caused v1.7's retracted capacity claim.                                          |   🟢   | FP-4       |
 
 **FP-0…FP-3 deliver standalone value**; FP-4 is the deliverable that actually arbitrates the next
@@ -525,7 +527,7 @@ mirrored in the master backlog; instrument items are owned by this document.
 | **1** | **Chunk service ordering** | **`P-7`** — [analysis §6 item 5](CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md), mirrored in [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) | Waste above threshold in **all 9** loading phases at every view distance, including the default with the gate never closing. Largest measured inefficiency in the engine, and now known to be intrinsic. |
 | **2** | **Scale panic-gate thresholds with view distance** | **`P-8`** — same two docs | §7.1.1's sibling finding (F5), confirmed by measurement: 0 % / 92.8 % / 96.4 % closure at vd 5/10/20. Correctness-of-intent, not tuning. |
 | **3** | **Adopt the visibility criterion as the acceptance target** | This doc + P-7's design | `latency ≤ viewDistance × 16 ÷ speed`. Falsifiable, matches independent visual observation across three legs, and gives (1) a target number rather than "less waste". |
-| **4** | **FP-5 — fix the phase leak across runs** | **this doc, §7.4** | Blocks trustworthy multi-run sessions. A second run currently reports the first run's phases. |
+| **4** | ~~**FP-5 — fix the phase leak across runs**~~ ✅ **DONE 2026-07-28** | **this doc, §7.4** | Was blocking trustworthy multi-run sessions. Fixed via `BeginRun()`; guarded by **B11** (Validate All → 359). |
 | **5** | **FP-6 — print `LoadDistance` in the report** | **this doc, §7.4** | Caused v1.7's retracted capacity claim. Nearly free. |
 | **6** | **§7.1 v2 — fix the plurality dilution** | this doc, §7.1.1 | Removes the manual recomputation every future capture would otherwise need. Must bump `RULE_VERSION`. |
 | **7** | **Per-chunk CSV export** | Extension roadmap below (v3+) | Only way to separate F4's two stall populations. Demand case now recorded. |
@@ -539,7 +541,7 @@ Both were found *by* the capture, and both must land before the next one or its 
 
 | Phase | Defect | Fix |
 |-------|--------|-----|
-| **FP-5** | **Telemetry phases leak across benchmark runs in one process.** `s_completedPhases` is cleared only in `DomainReset` (`PipelineTelemetry.cs:305`), i.e. once per play-mode entry / player start. `BenchmarkController` sets `Enabled = true` at run start (`:196`) but never clears the list, while `_metricsCollector.StartRecording()` resets its own — so the two recorders **disagree at the run boundary** and a second run reports the first run's phases as its own. Observed: the vd-10 log carries all 9 vd-5 phases verbatim before its own 8. | Clear `s_completedPhases` where the run begins. One line, but it is a behavior change to the instrument — own commit, own suite pass. This is the *run-level* instance of exactly the desync FP-3's paired `BeginPhaseBoth`/`EndPhaseBoth` prevents at the phase level. |
+| **FP-5** ✅ **FIXED** | **Telemetry phases leaked across benchmark runs in one process.** `s_completedPhases` was cleared only in `DomainReset`, i.e. once per play-mode entry / player start. `BenchmarkController` set `Enabled = true` at run start but never cleared the list, while `_metricsCollector.StartRecording()` resets its own — so the two recorders **disagreed at the run boundary** and a second run reported the first run's phases as its own. Observed: the vd-10 log carries all 9 vd-5 phases verbatim before its own 8. The *run-level* instance of exactly the desync FP-3's paired `BeginPhaseBoth`/`EndPhaseBoth` prevents at the phase level. | **As built:** public `PipelineTelemetry.BeginRun()`, called from `BenchmarkController` immediately before `Enabled = true` so both recorders start a run empty. **`BeginRun` is the caller of `DomainReset`, not the reverse** — a shared private helper is the obvious shape and is *wrong here*: UDR0002 requires every mutable static to be assigned **lexically inside** the `[RuntimeInitializeOnLoadMethod]`, and delegating outward trips it on `s_activePhase`. A comment at the site says so, because the natural "tidy-up" reintroduces the warning. Side effect worth knowing: `BeginRun` also clears `Enabled`, so callers restoring a saved flag must restore it *after* the call. |
 | **FP-6** | **`LoadDistance` is absent from the report** despite being the input to the trace-capacity estimate and to any reproduction. It caused v1.7's retracted "capacity model under-predicts 46 %" claim — the wrong table row was read because the run's actual load distance was not in its own output. | Print it in the Configuration block. `_loadDistanceForCapture` is already captured at `BenchmarkController.cs:195`. |
 
 > A third, lower-severity gap from the same capture: **generation waypoint counts differ per run** (12 / 6 / 4
@@ -640,6 +642,26 @@ whether they inherit them *knowingly*.
 
 ## Document History
 
+* **v1.9** - **FP-5 fixed and guarded** (2026-07-28). The run-boundary phase leak the sweep exposed is closed:
+  public `PipelineTelemetry.BeginRun()`, called from `BenchmarkController` immediately before `Enabled = true`,
+  so both recorders start a run empty. **The shape is dictated by UDR0002 and is deliberately not the obvious
+  one:** a shared private helper called by both `DomainReset` and `BeginRun` is the natural refactor and
+  *fails* — the analyzer requires every mutable static to be assigned **lexically inside** the
+  `[RuntimeInitializeOnLoadMethod]`, and delegating outward raised UDR0002 on `s_activePhase` on the first
+  attempt. So `BeginRun` calls `DomainReset`, not the reverse, with a comment at the site to stop the natural
+  tidy-up reintroducing it. Side effect recorded because it bit the baseline: `BeginRun` also clears
+  `Enabled`, so a caller restoring a saved flag must restore it *after* the call. Guarded by **B11** in
+  `Validate Pipeline Backpressure` (registry 16, Validate All 358 → **359**), whose scope is stated in its own
+  docstring rather than overclaimed: it pins `BeginRun`'s *semantics* — clearing completed phases, dropping a
+  phase left open by an aborted run, and working while the layer is still disabled — but **not** the call
+  site, which lives in a play-mode coroutine over a live `World` and is unreachable from edit mode (§7 item
+  1); deleting the call would leave B11 green. **Prove-red confirmed by temporary mutation:** commenting out
+  `s_completedPhases.Clear()` turns exactly B11 red (10 passed / 1 failed) on exactly its three leak
+  assertions, with B1–B10 untouched. Gated at `dotnet build` 0 errors on **both** assemblies with **no new
+  warnings** (the first attempt's UDR0002 was fixed, not suppressed), Rider inspections clean on all three
+  touched files, and **Validate All 359/359 across 16 suites with telemetry both disabled and enabled** — the
+  enabled leg additionally reporting `phasesLeftBehind = 0`, i.e. the whole registry runs without any suite
+  leaving a phase recorded.
 * **v1.8** - **FP-4 extended to a three-point view-distance sweep** (2026-07-28), vd 5 / 10 / 20 on one build.
   The single-leg verdict is **refined, and one v1.7 claim is retracted**. (1) **Ordering-boundness is
   universal**: waste exceeds the 20 % threshold in **all 9** loading phases across all three runs

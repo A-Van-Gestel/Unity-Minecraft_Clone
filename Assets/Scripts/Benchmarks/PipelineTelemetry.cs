@@ -292,14 +292,33 @@ namespace Benchmarks
         public static double TicksToMs(long ticks) => ticks * 1000.0 / Stopwatch.Frequency;
 
         /// <summary>
+        /// Discards every record from any previous capture, so a run reports only its own phases. Must be
+        /// called at the start of each benchmark run, before <see cref="Enabled"/> is set — and deliberately
+        /// is <b>not</b> guarded by <see cref="Enabled"/>, since at that moment the layer is still off.
+        /// <para>
+        /// Play-mode entry alone is not a sufficient reset point (FP-5): a second run inside one process
+        /// otherwise appends to the first run's <see cref="CompletedPhases"/>, and the report — which reads
+        /// that list wholesale — presents the earlier run's phases as its own. The frame-health collector is
+        /// rebuilt per run, so without this the two recorders disagree about where a run begins.
+        /// </para>
+        /// </summary>
+        /// <remarks>Also leaves the layer <see cref="Enabled"/><c> == false</c>; the caller enables it
+        /// explicitly once the run is ready to record.</remarks>
+        public static void BeginRun() => DomainReset();
+
+        /// <summary>
         /// Clears all static state on play-mode entry so a capture left <see cref="Enabled"/> (or holding a
         /// previous session's phases) never leaks into the next when domain reload is disabled. Mirrors the
         /// <c>DomainReset</c> convention used by <see cref="WorldFrameProfiler"/> and
-        /// <see cref="PerformanceMonitor"/>.
+        /// <see cref="PerformanceMonitor"/>. Also the body of <see cref="BeginRun"/>.
         /// </summary>
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void DomainReset()
         {
+            // The full reset lives HERE, not in a shared helper both entry points call: UDR0002 requires
+            // every mutable static to be assigned lexically inside the [RuntimeInitializeOnLoadMethod], and
+            // delegating outward trips it on s_activePhase. So BeginRun calls this, not the reverse — do not
+            // "tidy" the body into a helper without re-checking the analyzer.
             Enabled = false;
             s_traces.Clear();
             s_completedPhases.Clear();

@@ -54,6 +54,7 @@ namespace Editor.Validation.PipelineBackpressure
                 new Scenario("B8 Stop-reason classifier: precedence, and AllDeclined never collapsing into OutOfWork", RunB8StopReasonClassifier),
                 new Scenario("B9 Nearest-rank percentile selection + histogram totality (FP-3)", RunB9TraceStatistics),
                 new Scenario("B10 Regime verdict rule: each arm, plurality, and the ordering axis (FP-3 §7.1)", RunB10VerdictRule),
+                new Scenario("B11 Run boundary: a second capture reports only its own phases (FP-5)", RunB11RunBoundaryReset),
             };
             return ValidationSuiteRunner.Execute("Pipeline Backpressure", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -417,6 +418,67 @@ namespace Editor.Validation.PipelineBackpressure
             ok &= Check("reopened at 200 (inside band) stays open again",
                 d == GenerationPanicGate.Decision.RemainOpen);
             return ok;
+        }
+
+        /// <summary>
+        /// FP-5: a capture must report only its own phases. This is a *regression* guard for a defect that
+        /// actually shipped — <c>s_completedPhases</c> was cleared only on play-mode entry, so a second
+        /// benchmark run inside one process appended to the first run's list and the report presented the
+        /// earlier run's phases as its own. The vd-10 capture of 2026-07-28 carried all 9 phases of the
+        /// preceding vd-5 run verbatim.
+        /// <para>Drives the real static (no <c>World</c> needed), so it also pins that
+        /// <see cref="PipelineTelemetry.BeginRun"/> works with the layer still disabled — it is called
+        /// before <c>Enabled</c> is set, and a guard clause there would silently restore the bug.</para>
+        /// <para><b>Scope, stated so it is not over-read:</b> this pins <c>BeginRun</c>'s <i>semantics</i>,
+        /// not the wiring. The shipped defect was a missing <b>call</b> at
+        /// <c>BenchmarkController</c>'s run start, and that site lives in a play-mode coroutine over a live
+        /// <c>World</c> — unreachable from edit mode (design §7 item 1). Deleting the call would leave this
+        /// scenario green. The call site remains guarded by review only.</para>
+        /// </summary>
+        private static bool RunB11RunBoundaryReset()
+        {
+            bool wasEnabled = PipelineTelemetry.Enabled;
+            try
+            {
+                // --- Run 1: two phases ---
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = true;
+                PipelineTelemetry.BeginPhase("10 m/s", "Generation Pass", 4096);
+                PipelineTelemetry.EndPhase();
+                PipelineTelemetry.BeginPhase("20 m/s", "Generation Pass", 4096);
+                PipelineTelemetry.EndPhase();
+
+                bool ok = Check("run 1 records its 2 phases", PipelineTelemetry.CompletedPhases.Count == 2);
+
+                // --- Run 2, same process: one phase ---
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = true;
+                PipelineTelemetry.BeginPhase("50 m/s", "Loading Pass", 4096);
+                PipelineTelemetry.EndPhase();
+
+                ok &= Check("run 2 reports ONLY its own phase (run 1 did not leak)",
+                    PipelineTelemetry.CompletedPhases.Count == 1);
+                ok &= Check("the surviving phase is run 2's, not run 1's first",
+                    PipelineTelemetry.CompletedPhases.Count == 1 &&
+                    PipelineTelemetry.CompletedPhases[0].PhaseName == "50 m/s" &&
+                    PipelineTelemetry.CompletedPhases[0].GroupName == "Loading Pass");
+
+                // BeginRun must also close an abandoned phase, or an aborted run leaves one open and the
+                // next run's first EndPhase would file it under the wrong run.
+                PipelineTelemetry.BeginPhase("aborted", "Generation Pass", 4096);
+                PipelineTelemetry.BeginRun();
+                ok &= Check("BeginRun drops an open phase left by an aborted run",
+                    !PipelineTelemetry.IsPhaseActive && PipelineTelemetry.CompletedPhases.Count == 0);
+
+                return ok;
+            }
+            finally
+            {
+                // Leave nothing behind: a live phase or an enabled layer would perturb every later suite.
+                // BeginRun clears Enabled, so restore the flag AFTER it, not before.
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = wasEnabled;
+            }
         }
     }
 }
