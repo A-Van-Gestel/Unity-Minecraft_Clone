@@ -645,16 +645,20 @@ namespace Benchmarks
             // it is only a frame count while a pass reports at most once per frame. Every current call site
             // obeys that, but only by enable-timing: ForceCompleteDataJobsCoroutine drives
             // ProcessGenerationJobs in a tight while-loop, and it is merely the case today that telemetry is
-            // still off during startup. If that ordering ever changes, shares silently exceed 1.0 — so check
-            // it rather than depend on it.
+            // still off during startup.
+            //
+            // The symptom is NOT an out-of-range share — participation sums the same cells the numerator
+            // draws from, so shares stay <= 1 by construction either way. It is that the offending pass
+            // votes with DOUBLE WEIGHT in every reason it is eligible for, skewing the plurality with
+            // nothing in the report to show for it. Undetectable after the fact, so it is checked here.
             if (s_pendingFrame.StopReasons[pass] != PassStopReason.NotRun
                 && !s_doubleRecordWarned[(int)pass])
             {
                 s_doubleRecordWarned[(int)pass] = true;
                 UnityEngine.Debug.LogError($"[PipelineTelemetry] {pass} recorded a stop reason twice in one " +
                                            $"frame ({s_pendingFrame.StopReasons[pass]} then {reason}). The §7.1 v2 " +
-                                           "participation denominator assumes one report per pass per frame; shares are " +
-                                           "no longer bounded by 1. (Reported once.)");
+                                           "participation denominator assumes one report per pass per frame; this " +
+                                           "pass now votes with double weight and the verdict is skewed. (Reported once.)");
             }
 #endif
 
