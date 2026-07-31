@@ -49,6 +49,13 @@ namespace Benchmarks
             sb.AppendLine($"Mode:           {(Application.isEditor ? "Editor" : "Player")}");
             sb.AppendLine($"Backend:        {ScriptingBackend}");
 
+            // Development vs Release is NOT cosmetic provenance: the P-4 budgets are frame-time-proportional
+            // (PipelinePassBudget.ComputeQuota scales by unscaledDeltaTime, ScaleCeilingMs by the FPS-cap
+            // interval), so a Development Build's overhead lengthens frames, inflates quotas and shifts the
+            // admission regime the capture exists to measure. Two reports that differ only in this line are
+            // not comparable, and without it that difference is invisible — the FP-6 defect exactly.
+            sb.AppendLine($"Configuration:  {(Debug.isDebugBuild ? "Development" : "Release")}");
+
             // Application.buildGUID is the all-zeros sentinel in Editor mode and meaningful only in Player builds.
             string buildGUID = Application.buildGUID;
             if (!string.IsNullOrEmpty(buildGUID) && buildGUID != "00000000000000000000000000000000")
