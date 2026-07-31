@@ -1038,11 +1038,12 @@ public class World : MonoBehaviour, IMeshDrainHost
                     ChunkPool.ReturnChunkData(loaded);
                 }
 
-                // FP-1 terminal disposition: a completed disk read thrown away because the chunk was
-                // unloaded or pool-recycled mid-flight. The loading pass's counterpart to the §3.2
-                // generation discard, and — unlike it — waste that has never been counted before.
-                PipelineTelemetry.StampDisposition(chunkCoord, TraceDisposition.LoadStranded);
-
+                // No FP-1 disposition is stamped here (FP-7d). UnloadChunks is the only site that removes a
+                // chunk from WorldData, and it closes the trace before this guard can ever observe the
+                // removal — so the only arm that could still find a live trace is the pool-ABA recycle,
+                // where the trace belongs to the SUCCESSOR placeholder for this coord. Stamping there
+                // recorded the successor as waste and cost it its end-to-end latency sample. The discarded
+                // load is already accounted for by the predecessor's UnloadedBeforeMeshApplied.
                 return;
             }
 
@@ -2198,7 +2199,9 @@ public class World : MonoBehaviour, IMeshDrainHost
                     }
 
                     // A real candidate from here down — including the placeholder park below, which IS
-                    // "work that exists but is not yet eligible" (exactly the readiness-bound signal).
+                    // "work that exists but is not yet eligible" (exactly the readiness-bound signal). The
+                    // one exception is the flag-less Remove arm, which un-counts itself (FP-7c); it is
+                    // counted here first because only EvaluateReadyChunk below can identify it.
                     lightCandidatesSeen++;
 
                     // Placeholder data that hasn't generated terrain yet cannot schedule anything —
@@ -2255,6 +2258,13 @@ public class World : MonoBehaviour, IMeshDrainHost
 
                         case LightingScanDecision.ScanAction.Remove:
                             // No lighting flags remain — forget the chunk.
+                            //
+                            // FP-7c: un-count it. Like the stale unloaded entry above, this is bookkeeping
+                            // laundering rather than work the pass declined to serve — the flags were
+                            // already cleared by an earlier successful schedule. Counting it lets the ~1s
+                            // PromoteAll of the parked frontier report AllDeclined (readiness-bound) on a
+                            // frame where nothing was actually declined.
+                            lightCandidatesSeen--;
                             _lightWork.Remove(pos);
                             break;
 
@@ -3187,12 +3197,13 @@ public class World : MonoBehaviour, IMeshDrainHost
             // decision == Unload or UnloadPersistLightPending — proceed to persist / save / pool teardown.
 
             // FP-1 terminal disposition: the chunk is leaving memory. If it still holds a live trace, it never
-            // reached MeshApplied — every stage it did complete was thrown away because the player outran it,
-            // which is the ordering-bound signal the capture exists to weigh. A no-op for chunks that already
-            // finished (their trace was closed and removed at the mesh apply), so this hook cannot double-count
-            // an arrival. Placed where both unload arms converge, and read-only: it mutates no pipeline flag
-            // and cannot influence the unload decision above.
-            PipelineTelemetry.StampDisposition(chunkCoord, TraceDisposition.UnloadedBeforeMeshApplied);
+            // reached MeshApplied. StampUnloaded splits that by whether the journey was ever admitted (FP-7a) —
+            // an admitted one is the ordering-bound signal, an un-admitted one performed no work at all and
+            // must not be counted as waste. A no-op for chunks that already finished (their trace was closed
+            // and removed at the mesh apply), so this hook cannot double-count an arrival. Placed where both
+            // unload arms converge, and read-only: it mutates no pipeline flag and cannot influence the
+            // unload decision above.
+            PipelineTelemetry.StampUnloaded(chunkCoord);
 
             // 1. Persist Orphaned Lighting Queue
             if (worldData.SunlightRecalculationQueue.TryGetValue(chunkVoxelPos, out HashSet<Vector2Int> globalCols))

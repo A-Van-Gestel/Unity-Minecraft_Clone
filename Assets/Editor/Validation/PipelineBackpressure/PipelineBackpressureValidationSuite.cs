@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Benchmarks;
+using Data;
 using Editor.Validation.Framework;
 using Helpers;
 using UnityEditor;
@@ -20,7 +21,21 @@ namespace Editor.Validation.PipelineBackpressure
     /// ceils 10 → 11 on a perfect 60 FPS frame; 104 of the 128 in-range caps overshoot); dropping the
     /// <c>budgetTicks &gt; 0</c> guard in <see cref="PipelinePassBudget.IsExpired"/> reds B4's
     /// unbudgeted-default pin; evaluating the closed arm against the close threshold reds B6's
-    /// inside-band <c>RemainClosed</c> pin.</para>
+    /// inside-band <c>RemainClosed</c> pin. FP-7 adds three, each isolating exactly one baseline with the
+    /// other thirteen untouched: inverting the <c>AdmittedTicks == 0</c> test in
+    /// <see cref="PipelineTelemetry.StampUnloaded"/> reds B13 (4 of its 6 assertions — the arrival and
+    /// phase-end arms do not route through that branch); adding
+    /// <see cref="TraceDisposition.AbandonedBeforeAdmission"/> to
+    /// <see cref="PipelineRegimeVerdict.IsWaste"/> reds B14 on exactly its governing assertion; granting
+    /// <see cref="PipelinePass.MeshProcess"/> full capability in
+    /// <see cref="PipelineRegimeVerdict.CanEmit"/> reds B10 — including the §7.1.1 dilution scenario, which
+    /// is the point: that assertion detects the v1 defect returning, not merely a changed constant.
+    /// The FP-7 review adds three more, all isolating to B10: replacing the measured participation
+    /// denominator with a nominal <c>frameCount × eligible passes</c> reds the lighting-off scenario (whose
+    /// proportions are chosen so the two formulas <i>disagree</i> — a shape both accept would guard nothing);
+    /// dropping the <see cref="PipelineRegimeVerdict.OutranksOnTie"/> clause reds the exact-tie assertion;
+    /// and removing the
+    /// <see cref="PipelineRegimeVerdict.MinOrderingTerminalTraces"/> floor reds the small-sample pair.</para>
     /// </summary>
     public static class PipelineBackpressureValidationSuite
     {
@@ -53,9 +68,11 @@ namespace Editor.Validation.PipelineBackpressure
                 new Scenario("B7 Ceiling scaling: FPS-cap intent, floor, clamp, disabled passthrough", RunB7CeilingScaling),
                 new Scenario("B8 Stop-reason classifier: precedence, and AllDeclined never collapsing into OutOfWork", RunB8StopReasonClassifier),
                 new Scenario("B9 Nearest-rank percentile selection + histogram totality (FP-3)", RunB9TraceStatistics),
-                new Scenario("B10 Regime verdict rule: each arm, plurality, and the ordering axis (FP-3 §7.1)", RunB10VerdictRule),
+                new Scenario("B10 Regime verdict rule v2: arms, capability matrix, dilution, ordering axis (§7.1 v2)", RunB10VerdictRule),
                 new Scenario("B11 Run boundary: a second capture reports only its own phases (FP-5)", RunB11RunBoundaryReset),
                 new Scenario("B12 Settings snapshot: resident square + gate-threshold ratio (FP-6)", RunB12SettingsSnapshot),
+                new Scenario("B13 Unload disposition: admitted work vs never-admitted request (FP-7a)", RunB13UnloadDisposition),
+                new Scenario("B14 Waste predicates: numerator and denominator membership (FP-7a)", RunB14WastePredicates),
             };
             return ValidationSuiteRunner.Execute("Pipeline Backpressure", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -156,18 +173,26 @@ namespace Editor.Validation.PipelineBackpressure
         }
 
         /// <summary>
-        /// FP-3 §7.1: the verdict rule, pinned so it cannot silently change meaning between captures — two
-        /// reports produced by different rules are not comparable, and nothing in a report would reveal that.
-        /// Covers each regime arm, the plurality selection across passes, and the ordering axis (which is
-        /// deliberately independent, so it can fire on top of a Healthy primary — the shape the reported
-        /// flight symptom is most likely to take).
+        /// FP-3 §7.1, rewritten for the <b>v2</b> rule (FP-7e): the verdict, pinned so it cannot silently
+        /// change meaning between captures — two reports produced by different rules are not comparable, and
+        /// nothing in a report would reveal that. Covers each regime arm, the capability matrix, the
+        /// capability-weighted plurality, and the ordering axis (deliberately independent, so it can fire on
+        /// top of a Healthy primary — the shape the reported flight symptom is most likely to take).
+        /// <para>
+        /// The load-bearing scenario is the <b>dilution regression</b>: v1 summed every reason over all four
+        /// passes, so the two completion passes' near-constant <c>OutOfWork</c> outvoted a decisive
+        /// <c>Quota</c> on the passes that actually carry a job quota. At FP-4's loading 200 m/s phase that
+        /// decided the plurality by 68 frames out of 27,744 and printed <i>Healthy</i>. v2 must call the same
+        /// shape <c>AdmissionBound</c>, or the defect §7.1.1 recorded is back.
+        /// </para>
         /// </summary>
         private static bool RunB10VerdictRule()
         {
             const int passes = PipelineTelemetry.PassCount;
             const int reasons = PipelineTelemetry.StopReasonCount;
 
-            // Helper: a tally matrix with a single dominant reason.
+            // Helper: one reason, reported by a pass eligible to emit it. That pass's participation is the
+            // count itself, so its share is 1.0 and every other reason scores 0.
             int[,] Only(PassStopReason r, int count)
             {
                 int[,] t = new int[passes, reasons];
@@ -176,19 +201,19 @@ namespace Editor.Validation.PipelineBackpressure
             }
 
             bool ok = Check("Quota dominant -> AdmissionBound",
-                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.Quota, 10), 0, 100).Primary
+                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.Quota, 90), 0, 100).Primary
                 == PipelineRegime.AdmissionBound);
             ok &= Check("Ceiling dominant -> AdmissionBound",
-                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.Ceiling, 10), 0, 100).Primary
+                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.Ceiling, 90), 0, 100).Primary
                 == PipelineRegime.AdmissionBound);
             ok &= Check("InFlightCap dominant -> ThroughputBound",
-                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.InFlightCap, 10), 0, 100).Primary
+                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.InFlightCap, 90), 0, 100).Primary
                 == PipelineRegime.ThroughputBound);
             ok &= Check("AllDeclined dominant -> ReadinessBound",
-                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.AllDeclined, 10), 0, 100).Primary
+                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.AllDeclined, 90), 0, 100).Primary
                 == PipelineRegime.ReadinessBound);
             ok &= Check("OutOfWork dominant -> Healthy",
-                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.OutOfWork, 10), 0, 100).Primary
+                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.OutOfWork, 90), 0, 100).Primary
                 == PipelineRegime.Healthy);
             ok &= Check("no tallies at all -> NoData",
                 PipelineRegimeVerdict.Evaluate(new int[passes, reasons], 0, 0).Primary
@@ -200,25 +225,120 @@ namespace Editor.Validation.PipelineBackpressure
             notRunHeavy[(int)PipelinePass.MeshSchedule, (int)PassStopReason.Quota] = 3;
             ok &= Check("NotRun is excluded from the plurality (Quota still wins)",
                 PipelineRegimeVerdict.Evaluate(notRunHeavy, 0, 100).Primary == PipelineRegime.AdmissionBound);
+            ok &= Check("...and NotRun does not inflate the participation denominator either",
+                Math.Abs(PipelineRegimeVerdict.Evaluate(notRunHeavy, 0, 100).DominantShare - 1.0) < 1e-9);
 
-            // Reasons are summed ACROSS passes: the question is what bound the pipeline, not one stage.
-            int[,] split = new int[passes, reasons];
-            split[(int)PipelinePass.MeshSchedule, (int)PassStopReason.AllDeclined] = 6;
-            split[(int)PipelinePass.LightSchedule, (int)PassStopReason.AllDeclined] = 6;
-            split[(int)PipelinePass.GenerationProcess, (int)PassStopReason.Ceiling] = 10;
-            ok &= Check("reasons sum across passes (12 AllDeclined beats 10 Ceiling)",
-                PipelineRegimeVerdict.Evaluate(split, 0, 100).Primary == PipelineRegime.ReadinessBound);
+            // --- The capability matrix (§7.1 v2) ---
+            ok &= Check("both scheduling passes can emit every real reason",
+                PipelineRegimeVerdict.CanEmit(PipelinePass.LightSchedule, PassStopReason.InFlightCap)
+                && PipelineRegimeVerdict.CanEmit(PipelinePass.LightSchedule, PassStopReason.AllDeclined)
+                && PipelineRegimeVerdict.CanEmit(PipelinePass.MeshSchedule, PassStopReason.Quota));
+            ok &= Check("GenerationProcess CAN emit Quota (its structure-mods budget — FP-7b)",
+                PipelineRegimeVerdict.CanEmit(PipelinePass.GenerationProcess, PassStopReason.Quota));
+            ok &= Check("...but not InFlightCap or AllDeclined",
+                !PipelineRegimeVerdict.CanEmit(PipelinePass.GenerationProcess, PassStopReason.InFlightCap)
+                && !PipelineRegimeVerdict.CanEmit(PipelinePass.GenerationProcess, PassStopReason.AllDeclined));
+            ok &= Check("MeshProcess is genuinely ceiling-only (OutOfWork + Ceiling, nothing else)",
+                PipelineRegimeVerdict.CanEmit(PipelinePass.MeshProcess, PassStopReason.OutOfWork)
+                && PipelineRegimeVerdict.CanEmit(PipelinePass.MeshProcess, PassStopReason.Ceiling)
+                && !PipelineRegimeVerdict.CanEmit(PipelinePass.MeshProcess, PassStopReason.Quota));
+            ok &= Check("no pass can emit the NotRun sentinel",
+                !PipelineRegimeVerdict.CanEmit(PipelinePass.LightSchedule, PassStopReason.NotRun)
+                && !PipelineRegimeVerdict.CanEmit(PipelinePass.MeshProcess, PassStopReason.NotRun));
 
-            // The ordering axis is independent of the primary regime.
-            RegimeVerdict wasteful = PipelineRegimeVerdict.Evaluate(Only(PassStopReason.OutOfWork, 10), 30, 100);
+            // --- The dilution regression (§7.1.1), in FP-4's own proportions ---
+            // Both scheduling passes report Quota on nearly every frame; both completion passes report
+            // OutOfWork on nearly every frame. v1 summed these and called it Healthy by a hair.
+            int[,] dilution = new int[passes, reasons];
+            dilution[(int)PipelinePass.LightSchedule, (int)PassStopReason.Quota] = 99;
+            dilution[(int)PipelinePass.MeshSchedule, (int)PassStopReason.Quota] = 99;
+            dilution[(int)PipelinePass.GenerationProcess, (int)PassStopReason.OutOfWork] = 100;
+            dilution[(int)PipelinePass.MeshProcess, (int)PassStopReason.OutOfWork] = 100;
+
+            RegimeVerdict undiluted = PipelineRegimeVerdict.Evaluate(dilution, 0, 100);
+            ok &= Check("the §7.1.1 dilution shape is AdmissionBound under v2 (v1 called it Healthy)",
+                undiluted.Primary == PipelineRegime.AdmissionBound);
+            // Quota is scored over its THREE eligible passes (FP-7b made GenerationProcess quota-capable), so
+            // GenerationProcess reporting OutOfWork is a real "no" vote: 198 of the 298 reports those three
+            // passes made. OutOfWork scores 200 of all four passes' 398. Quota wins 0.664 to 0.503, where
+            // v1's raw sums gave 198 to 200 — i.e. Healthy.
+            ok &= Check("...with Quota at 198/298 participating pass-frames vs OutOfWork at 200/398",
+                Math.Abs(undiluted.DominantShare - 198.0 / 298.0) < 1e-9);
+            ok &= Check("...and OutOfWork is the visible runner-up, not silently dropped",
+                undiluted.RunnerUpReason == PassStopReason.OutOfWork);
+
+            // Eligibility is per (pass, reason), so an ineligible pass cannot dilute a contested reason even
+            // when it holds a large tally — the cell is ignored outright rather than down-weighted.
+            int[,] ineligibleHeavy = new int[passes, reasons];
+            ineligibleHeavy[(int)PipelinePass.LightSchedule, (int)PassStopReason.AllDeclined] = 60;
+            ineligibleHeavy[(int)PipelinePass.MeshProcess, (int)PassStopReason.OutOfWork] = 100;
+            // AllDeclined: 60 of LightSchedule's own 60 reports = 1.00 (MeshSchedule never ran). OutOfWork:
+            // 100 of the 160 reports made by its four eligible passes = 0.625.
+            ok &= Check("a contested reason outranks a ceiling-only pass's 100% OutOfWork",
+                PipelineRegimeVerdict.Evaluate(ineligibleHeavy, 0, 100).Primary
+                == PipelineRegime.ReadinessBound);
+
+            // --- FP-7 review finding 1: a pass that never RUNS must not be charged opportunity ---
+            // LightSchedule lives inside `if (settings.enableLighting)`, so a lighting-off capture records
+            // nothing for it. Dividing by frameCount x eligiblePasses charged it a full phase of chances
+            // anyway, capping Quota at 2/3 while OutOfWork reached 3/4 — printing Healthy over a flat-out
+            // quota stall, which is the §7.1.1 dilution rebuilt in a new place.
+            // Proportions chosen so the two formulas DISAGREE — a scenario both accept would guard nothing.
+            // Over 100 frames with LightSchedule silent: MeshSchedule reports Quota throughout,
+            // GenerationProcess splits 25 Quota / 75 OutOfWork, MeshProcess reports OutOfWork throughout.
+            //   old: Quota 125/(100x3) = 0.417 vs OutOfWork 175/(100x4) = 0.438 -> Healthy
+            //   new: Quota 125/200     = 0.625 vs OutOfWork 175/300      = 0.583 -> AdmissionBound
+            int[,] lightingOff = new int[passes, reasons];
+            lightingOff[(int)PipelinePass.MeshSchedule, (int)PassStopReason.Quota] = 100;
+            lightingOff[(int)PipelinePass.GenerationProcess, (int)PassStopReason.Quota] = 25;
+            lightingOff[(int)PipelinePass.GenerationProcess, (int)PassStopReason.OutOfWork] = 75;
+            lightingOff[(int)PipelinePass.MeshProcess, (int)PassStopReason.OutOfWork] = 100;
+
+            RegimeVerdict lightsOut = PipelineRegimeVerdict.Evaluate(lightingOff, 0, 100);
+            ok &= Check("a pass that never ran does not dilute the verdict (lighting disabled -> AdmissionBound)",
+                lightsOut.Primary == PipelineRegime.AdmissionBound);
+            ok &= Check("...with Quota at 125/200 participating pass-frames, not 125/300 nominal ones",
+                Math.Abs(lightsOut.DominantShare - 125.0 / 200.0) < 1e-9);
+
+            // --- Tie-break: an exact tie must not resolve toward "everything is fine" ---
+            // Both scheduling passes split 50/50 between InFlightCap and OutOfWork; the completion passes are
+            // silent. OutOfWork = 100 of its 4 eligible passes' 200 reports = 0.5. InFlightCap = 100 of its 2
+            // eligible passes' 200 = 0.5. Exactly equal, and walk order reaches OutOfWork first, so a strict
+            // `>` comparison would leave the phase reading Healthy.
+            int[,] tied = new int[passes, reasons];
+            tied[(int)PipelinePass.LightSchedule, (int)PassStopReason.InFlightCap] = 50;
+            tied[(int)PipelinePass.LightSchedule, (int)PassStopReason.OutOfWork] = 50;
+            tied[(int)PipelinePass.MeshSchedule, (int)PassStopReason.InFlightCap] = 50;
+            tied[(int)PipelinePass.MeshSchedule, (int)PassStopReason.OutOfWork] = 50;
+
+            RegimeVerdict tieBreak = PipelineRegimeVerdict.Evaluate(tied, 0, 100);
+            ok &= Check("an exact share tie resolves to the BOUND regime, not to Healthy",
+                tieBreak.Primary == PipelineRegime.ThroughputBound);
+            ok &= Check("...and the tie is visible: both shares are equal in the printed inputs",
+                Math.Abs(tieBreak.DominantShare - tieBreak.RunnerUpShare) < 1e-9);
+
+            // --- The ordering axis, unchanged by v2 and still independent of the primary ---
+            RegimeVerdict wasteful = PipelineRegimeVerdict.Evaluate(
+                Only(PassStopReason.OutOfWork, 90), 30, 100);
             ok &= Check("waste 30% >= threshold -> ordering-bound flagged",
-                wasteful.OrderingBound);
+                wasteful.OrderingBound && wasteful.OrderingDecidable);
             ok &= Check("...and it composes with a Healthy primary (the flight symptom's likely shape)",
                 wasteful.Primary == PipelineRegime.Healthy);
             ok &= Check("waste just under the threshold -> NOT ordering-bound",
-                !PipelineRegimeVerdict.Evaluate(Only(PassStopReason.OutOfWork, 10), 19, 100).OrderingBound);
+                !PipelineRegimeVerdict.Evaluate(Only(PassStopReason.OutOfWork, 90), 19, 100).OrderingBound);
             ok &= Check("waste fraction is reported for the raw block",
                 Math.Abs(wasteful.WasteFraction - 0.30) < 1e-9);
+
+            // Minimum-sample floor: 1 waste of 3 terminal traces is 33 % and would clear the threshold, but
+            // three traces cannot support a verdict. "Undecidable" must be distinguishable from "not bound".
+            RegimeVerdict tinySample = PipelineRegimeVerdict.Evaluate(Only(PassStopReason.OutOfWork, 90), 1, 3);
+            ok &= Check("33% waste off 3 terminal traces is NOT reported as ordering-bound",
+                !tinySample.OrderingBound);
+            ok &= Check("...and is flagged undecidable, not as a clean 'well ordered' result",
+                !tinySample.OrderingDecidable);
+            ok &= Check("at exactly the floor the axis decides again (boundary inclusive)",
+                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.OutOfWork, 90), 10,
+                    PipelineRegimeVerdict.MinOrderingTerminalTraces).OrderingDecidable);
 
             return ok;
         }
@@ -480,6 +600,151 @@ namespace Editor.Validation.PipelineBackpressure
                 PipelineTelemetry.BeginRun();
                 PipelineTelemetry.Enabled = wasEnabled;
             }
+        }
+
+        /// <summary>
+        /// FP-7a: the unload hook's two endings, driven end-to-end through the real telemetry statics (the
+        /// technique B11 established — no <c>World</c> is needed to exercise the trace table).
+        /// <para>
+        /// This is a <i>regression</i> guard for a defect that shipped and reached a verdict: every unloaded
+        /// chunk holding a trace was stamped <c>UnloadedBeforeMeshApplied</c> — counted as waste, and waste
+        /// is the sole input to the ORDERING-BOUND axis — <b>including requests the panic gate never
+        /// admitted</b>, for which no stage ran and no work was thrown away. The distortion is largest
+        /// exactly where the gate is closed most (92–96 % of frames at vd ≥ 10), i.e. in the regime the
+        /// capture exists to weigh.
+        /// </para>
+        /// <para><b>Scope, stated so it is not over-read:</b> this pins the <i>classification</i>. The
+        /// <c>StampUnloaded</c> call site is in <c>World.UnloadChunks</c>, a play-mode path unreachable from
+        /// edit mode (design §7 item 1) — reverting that one line would leave this scenario green. The call
+        /// site stays guarded by review only, exactly as B11's does.</para>
+        /// </summary>
+        private static bool RunB13UnloadDisposition()
+        {
+            bool wasEnabled = PipelineTelemetry.Enabled;
+            try
+            {
+                // --- A request that was admitted, did work, and was then unloaded: waste. ---
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = true;
+                PipelineTelemetry.BeginPhase("admitted", "FP-7a", 4096);
+
+                ChunkCoord admitted = new ChunkCoord(1, 1);
+                PipelineTelemetry.StampRequested(admitted);
+                PipelineTelemetry.StampAdmitted(admitted);
+                PipelineTelemetry.StampUnloaded(admitted);
+                PipelineTelemetry.EndPhase();
+
+                PipelinePhaseMetrics phase = PipelineTelemetry.CompletedPhases[0];
+                bool ok = Check("admitted then unloaded -> UnloadedBeforeMeshApplied",
+                    phase.DispositionCounts[(int)TraceDisposition.UnloadedBeforeMeshApplied] == 1);
+                ok &= Check("...and NOT AbandonedBeforeAdmission",
+                    phase.DispositionCounts[(int)TraceDisposition.AbandonedBeforeAdmission] == 0);
+
+                // --- A request the gate never admitted, then unloaded: no work was ever performed. ---
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = true;
+                PipelineTelemetry.BeginPhase("never admitted", "FP-7a", 4096);
+
+                ChunkCoord abandoned = new ChunkCoord(2, 2);
+                PipelineTelemetry.StampRequested(abandoned);
+                PipelineTelemetry.StampUnloaded(abandoned);
+                PipelineTelemetry.EndPhase();
+
+                phase = PipelineTelemetry.CompletedPhases[0];
+                ok &= Check("requested but never admitted, then unloaded -> AbandonedBeforeAdmission",
+                    phase.DispositionCounts[(int)TraceDisposition.AbandonedBeforeAdmission] == 1);
+                ok &= Check("...and NOT counted as UnloadedBeforeMeshApplied (the shipped defect)",
+                    phase.DispositionCounts[(int)TraceDisposition.UnloadedBeforeMeshApplied] == 0);
+
+                // A completed journey must still close as an arrival — the hook cannot double-count, and a
+                // later unload of the same coord must find no trace to reclassify.
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = true;
+                PipelineTelemetry.BeginPhase("arrival", "FP-7a", 4096);
+
+                ChunkCoord arrived = new ChunkCoord(3, 3);
+                PipelineTelemetry.StampRequested(arrived);
+                PipelineTelemetry.StampAdmitted(arrived);
+                PipelineTelemetry.StampMeshApplied(arrived);
+                PipelineTelemetry.StampUnloaded(arrived);
+                PipelineTelemetry.EndPhase();
+
+                phase = PipelineTelemetry.CompletedPhases[0];
+                ok &= Check("a chunk that reached MeshApplied stays an arrival when later unloaded",
+                    phase.DispositionCounts[(int)TraceDisposition.MeshApplied] == 1
+                    && phase.DispositionCounts[(int)TraceDisposition.UnloadedBeforeMeshApplied] == 0
+                    && phase.DispositionCounts[(int)TraceDisposition.AbandonedBeforeAdmission] == 0);
+
+                // An un-admitted trace still live when the phase ends is InFlightAtPhaseEnd, NOT abandoned:
+                // the capture stopped first, which is a statement about the instrument, not the pipeline.
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = true;
+                PipelineTelemetry.BeginPhase("cutoff", "FP-7a", 4096);
+                PipelineTelemetry.StampRequested(new ChunkCoord(4, 4));
+                PipelineTelemetry.EndPhase();
+
+                phase = PipelineTelemetry.CompletedPhases[0];
+                ok &= Check("un-admitted trace open at phase end -> InFlightAtPhaseEnd, not Abandoned",
+                    phase.DispositionCounts[(int)TraceDisposition.InFlightAtPhaseEnd] == 1
+                    && phase.DispositionCounts[(int)TraceDisposition.AbandonedBeforeAdmission] == 0);
+
+                return ok;
+            }
+            finally
+            {
+                // Leave nothing behind. BeginRun clears Enabled, so restore the flag AFTER it (B11's gotcha).
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = wasEnabled;
+            }
+        }
+
+        /// <summary>
+        /// FP-7a: which dispositions the ordering axis counts, and which population it divides by. Pinned as
+        /// a pair because the fraction is only meaningful if both ends agree — a disposition added to the
+        /// numerator but not the denominator (or vice versa) yields a number that is not a fraction of
+        /// anything. Lives on <see cref="PipelineRegimeVerdict"/> rather than the report section precisely so
+        /// the verdict and the table printed under it cannot classify a disposition differently.
+        /// </summary>
+        private static bool RunB14WastePredicates()
+        {
+            // The numerator: work the pipeline completed and then threw away.
+            bool ok = Check("DiscardedOutOfRange is waste",
+                PipelineRegimeVerdict.IsWaste(TraceDisposition.DiscardedOutOfRange));
+            ok &= Check("UnloadedBeforeMeshApplied is waste (the ordering-bound signal)",
+                PipelineRegimeVerdict.IsWaste(TraceDisposition.UnloadedBeforeMeshApplied));
+
+            // Not waste, each for a different reason — collapsing any of them inflates the ordering axis.
+            ok &= Check("MeshApplied is not waste (it arrived)",
+                !PipelineRegimeVerdict.IsWaste(TraceDisposition.MeshApplied));
+            ok &= Check("InFlightAtPhaseEnd is not waste (the capture stopped first)",
+                !PipelineRegimeVerdict.IsWaste(TraceDisposition.InFlightAtPhaseEnd));
+            ok &= Check("Rerequested is not waste (churn; its work may still land)",
+                !PipelineRegimeVerdict.IsWaste(TraceDisposition.Rerequested));
+            ok &= Check("AbandonedBeforeAdmission is not waste (no stage ever ran)",
+                !PipelineRegimeVerdict.IsWaste(TraceDisposition.AbandonedBeforeAdmission));
+
+            // The denominator: terminal traces for which the pipeline actually performed work.
+            ok &= Check("MeshApplied is in the denominator",
+                PipelineRegimeVerdict.IsInWasteDenominator(TraceDisposition.MeshApplied));
+            ok &= Check("every waste disposition is in the denominator (or the fraction is not a fraction)",
+                PipelineRegimeVerdict.IsInWasteDenominator(TraceDisposition.DiscardedOutOfRange)
+                && PipelineRegimeVerdict.IsInWasteDenominator(TraceDisposition.UnloadedBeforeMeshApplied));
+            ok &= Check("InFlightAtPhaseEnd is in the denominator (terminal, and work was done)",
+                PipelineRegimeVerdict.IsInWasteDenominator(TraceDisposition.InFlightAtPhaseEnd));
+            ok &= Check("Pending is NOT in the denominator (not terminal)",
+                !PipelineRegimeVerdict.IsInWasteDenominator(TraceDisposition.Pending));
+            ok &= Check("AbandonedBeforeAdmission is NOT in the denominator (never entered the pipeline)",
+                !PipelineRegimeVerdict.IsInWasteDenominator(TraceDisposition.AbandonedBeforeAdmission));
+
+            // The consequence the choice exists for: a phase dominated by never-admitted requests must still
+            // report the waste among chunks the pipeline actually served. 30 waste of 100 admitted terminal
+            // traces is ordering-bound whether 0 or 9,000 requests were abandoned alongside them.
+            int[,] tallies = new int[PipelineTelemetry.PassCount, PipelineTelemetry.StopReasonCount];
+            tallies[(int)PipelinePass.MeshSchedule, (int)PassStopReason.OutOfWork] = 90;
+            ok &= Check("the ordering axis is unmoved by abandoned traces (they are in neither term)",
+                PipelineRegimeVerdict.Evaluate(tallies, 30, 100).OrderingBound);
+
+            return ok;
         }
 
         /// <summary>

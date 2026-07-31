@@ -17,8 +17,12 @@ namespace Benchmarks
     /// </summary>
     public static class PipelineReportSection
     {
-        private const string RULE_VERSION = "§7.1 v1 (dominant/plurality stop reason; ordering axis at "
-                                            + "waste ≥ 20%)";
+        // Bumped from v1 by FP-7: the plurality is now capability-weighted (§7.1.1's defect), and the waste
+        // axis no longer counts requests that were never admitted. A v1 report and a v2 report are NOT
+        // comparable on either axis — which is what this string exists to make impossible to miss.
+        private const string RULE_VERSION = "§7.1 v2 (participation-weighted plurality over passes able to "
+                                            + "emit each reason; ordering axis at waste ≥ 20% of admitted "
+                                            + "terminal traces, min 30)";
 
         /// <summary>
         /// Appends the whole Pipeline section for every recorded phase.
@@ -151,7 +155,7 @@ namespace Benchmarks
                 int count = phase.DispositionCounts[i];
                 table.AddRow(d.ToString(), count.ToString("N0"),
                     started > 0 ? $"{100.0 * count / started:F1}%" : "-",
-                    IsWaste(d) ? "WASTE" : "");
+                    PipelineRegimeVerdict.IsWaste(d) ? "WASTE" : "");
             }
 
             // Formatted, not a "100.0%" literal: every other cell goes through :F1 and picks up the
@@ -178,6 +182,22 @@ namespace Benchmarks
 
             table.AppendTo(sb);
 
+            // The v2 weighting is recomputable from the table above only if the reader knows which cells
+            // count toward which reason — so name the eligible passes per contested reason (§7.2).
+            sb.AppendLine("    Verdict weighting (§7.1 v2) — a reason is scored only over passes able to emit it:");
+            for (int reason = (int)PassStopReason.OutOfWork; reason < PipelineTelemetry.StopReasonCount; reason++)
+            {
+                string eligible = "";
+                for (int pass = 0; pass < PipelineTelemetry.PassCount; pass++)
+                {
+                    if (!PipelineRegimeVerdict.CanEmit((PipelinePass)pass, (PassStopReason)reason)) continue;
+                    if (eligible.Length > 0) eligible += ", ";
+                    eligible += ((PipelinePass)pass).ToString();
+                }
+
+                sb.AppendLine($"      {(PassStopReason)reason,-12} <- {eligible}");
+            }
+
             sb.AppendLine($"    Panic gate closed:  {phase.GateClosedFrames:N0} / {phase.FrameCount:N0} frames" +
                           (phase.FrameCount > 0 ? $" ({100.0 * phase.GateClosedFrames / phase.FrameCount:F1}%)" : ""));
         }
@@ -188,11 +208,13 @@ namespace Benchmarks
             for (int i = 0; i < PipelineTelemetry.DispositionCount; i++)
             {
                 TraceDisposition d = (TraceDisposition)i;
-                if (d == TraceDisposition.Pending) continue;
+                if (!PipelineRegimeVerdict.IsInWasteDenominator(d)) continue;
 
                 terminal += phase.DispositionCounts[i];
-                if (IsWaste(d)) waste += phase.DispositionCounts[i];
+                if (PipelineRegimeVerdict.IsWaste(d)) waste += phase.DispositionCounts[i];
             }
+
+            int abandoned = phase.DispositionCounts[(int)TraceDisposition.AbandonedBeforeAdmission];
 
             RegimeVerdict verdict = PipelineRegimeVerdict.Evaluate(phase.StopReasonCounts, waste, terminal);
 
@@ -200,23 +222,25 @@ namespace Benchmarks
             // disagreeing with the rule needs only this report (§7.2).
             sb.AppendLine();
             sb.AppendLine("  Verdict inputs (verbatim):");
-            sb.AppendLine($"    dominant stop reason = {verdict.DominantReason}, runner-up = {verdict.RunnerUpReason}");
+            sb.AppendLine($"    dominant stop reason = {verdict.DominantReason} " +
+                          $"({verdict.DominantShare * 100:F1}% of eligible pass-frames), " +
+                          $"runner-up = {verdict.RunnerUpReason} ({verdict.RunnerUpShare * 100:F1}%)");
             sb.AppendLine($"    waste = {waste:N0} / {terminal:N0} terminal traces = {verdict.WasteFraction * 100:F1}% " +
-                          $"(ordering threshold {PipelineRegimeVerdict.OrderingWasteThreshold * 100:F0}%)");
+                          $"(ordering threshold {PipelineRegimeVerdict.OrderingWasteThreshold * 100:F0}%, " +
+                          $"min {PipelineRegimeVerdict.MinOrderingTerminalTraces:N0} traces to decide)");
+
+            // §7.2: the denominator EXCLUDES a population, so state which and how large — otherwise the
+            // fraction above cannot be recomputed from the disposition table beside it.
+            sb.AppendLine($"    denominator excludes {abandoned:N0} AbandonedBeforeAdmission " +
+                          "(requested then unloaded before admission — no stage ran, so not pipeline work)");
             sb.AppendLine($"    rule = {RULE_VERSION}");
 
-            string ordering = verdict.OrderingBound ? " + ORDERING-BOUND" : "";
+            // "Not ordering-bound" and "could not tell" are different claims and must never render alike —
+            // the second is the one a reader would otherwise mistake for a clean bill of health.
+            string ordering = verdict.OrderingDecidable
+                ? verdict.OrderingBound ? " + ORDERING-BOUND" : ""
+                : " + ordering axis UNDECIDABLE (too few terminal traces)";
             sb.AppendLine($"  <b>VERDICT: {verdict.Primary}{ordering}</b>");
-        }
-
-        /// <summary>Whether a disposition represents work the pipeline completed and then threw away.</summary>
-        private static bool IsWaste(TraceDisposition d)
-        {
-            // InFlightAtPhaseEnd is deliberately NOT waste — the capture stopped first, the pipeline did
-            // nothing wrong. Rerequested is not waste either: it counts churn, and its work may still land.
-            return d == TraceDisposition.DiscardedOutOfRange
-                   || d == TraceDisposition.LoadStranded
-                   || d == TraceDisposition.UnloadedBeforeMeshApplied;
         }
 
         private static string Ms(long ticks) => $"{PipelineTelemetry.TicksToMs(ticks):F1}";

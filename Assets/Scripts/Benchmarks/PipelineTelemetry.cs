@@ -18,7 +18,15 @@ namespace Benchmarks
         /// <summary>Its completed generation result was discarded — the chunk left the unload boundary mid-flight.</summary>
         DiscardedOutOfRange = 2,
 
-        /// <summary>Its completed disk load was thrown away — the chunk was unloaded or pool-recycled mid-read.</summary>
+        /// <summary>
+        /// <b>Retired (FP-7d) — never produced.</b> Intended to mark a completed disk load thrown away when
+        /// the chunk was unloaded or pool-recycled mid-read. Unreachable as intended: the only site that
+        /// removes a chunk from <c>WorldData</c> is <c>World.UnloadChunks</c>, which stamps
+        /// <see cref="UnloadedBeforeMeshApplied"/> and closes the trace <i>first</i>, so the post-await guard
+        /// could only ever find a live trace on the pool-ABA arm — where the trace belongs to the successor
+        /// placeholder, not the load that was stranded. Kept (rather than renumbered away) so disposition
+        /// tables in reports across the FP-7 boundary still line up column-for-column.
+        /// </summary>
         LoadStranded = 3,
 
         /// <summary>Superseded by a fresh request for the same coord before finishing (design §4.1 flush-and-restart).</summary>
@@ -38,6 +46,17 @@ namespace Benchmarks
         /// let genuine churn hide behind "the capture just stopped first".
         /// </summary>
         UnloadedBeforeMeshApplied = 6,
+
+        /// <summary>
+        /// Requested, then unloaded <b>before it was ever admitted</b> — no stage ran and no work was
+        /// performed. <b>Not waste</b>, and deliberately excluded from the waste fraction's denominator too
+        /// (FP-7a): that fraction means "of the work the pipeline completed, how much was thrown away", and a
+        /// request that never entered the pipeline is not in that population at either end. Split out from
+        /// <see cref="UnloadedBeforeMeshApplied"/> because folding the two inflates the ordering-bound signal
+        /// with chunks the pipeline never touched — which is most severe exactly where the panic gate holds
+        /// admissions back, i.e. the regime the capture exists to weigh.
+        /// </summary>
+        AbandonedBeforeAdmission = 7,
     }
 
     /// <summary>
@@ -239,7 +258,7 @@ namespace Benchmarks
         public const int StopReasonCount = 6;
 
         /// <summary>Number of <see cref="TraceDisposition"/> values.</summary>
-        public const int DispositionCount = 7;
+        public const int DispositionCount = 8;
 
         // Sizing floor/ceiling for the derived trace capacity. The floor keeps a tiny-LoadDistance session
         // from saturating instantly; the ceiling bounds worst-case memory (~48 B/trace + dictionary
@@ -273,6 +292,13 @@ namespace Benchmarks
             new Dictionary<ChunkCoord, ChunkTrace>(MIN_TRACE_CAPACITY);
 
         private static readonly List<PipelinePhaseMetrics> s_completedPhases = new List<PipelinePhaseMetrics>(16);
+
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        // Diagnostic latches for the two RecordPassStop asserts — readonly (never reassigned, so UDR0002
+        // does not apply) but their CONTENTS are session state, so DomainReset clears them like s_traces.
+        private static readonly bool[,] s_capabilityWarned = new bool[PassCount, StopReasonCount];
+        private static readonly bool[] s_doubleRecordWarned = new bool[PassCount];
+#endif
 
         private static PipelinePhaseMetrics s_activePhase;
         private static float s_phaseStartTime;
@@ -327,6 +353,13 @@ namespace Benchmarks
             s_traceCapacity = MIN_TRACE_CAPACITY;
             s_frameWindowCursor = 0;
             s_pendingFrame = default;
+
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            // Re-arm the diagnostic latches: a divergence already reported in a previous run must be
+            // reported again in the next, or a repeat capture would run silently on a known-bad matrix.
+            System.Array.Clear(s_capabilityWarned, 0, s_capabilityWarned.Length);
+            System.Array.Clear(s_doubleRecordWarned, 0, s_doubleRecordWarned.Length);
+#endif
         }
 
         /// <summary>
@@ -547,6 +580,31 @@ namespace Benchmarks
             s_traces.Remove(coord);
         }
 
+        /// <summary>
+        /// Stamps a chunk leaving memory, choosing between the two unload endings from the trace itself:
+        /// a journey that was never admitted ended before any stage ran
+        /// (<see cref="TraceDisposition.AbandonedBeforeAdmission"/>), while an admitted one had work thrown
+        /// away (<see cref="TraceDisposition.UnloadedBeforeMeshApplied"/> — the ordering-bound signal).
+        /// <para>
+        /// The discrimination lives here rather than at the call site because <c>AdmittedTicks</c> is trace
+        /// state the engine cannot see (FP-7a). Passing the wrong one of the two is what let requests the
+        /// panic gate never admitted count as completed-then-discarded work.
+        /// </para>
+        /// </summary>
+        /// <param name="coord">The chunk being unloaded.</param>
+        public static void StampUnloaded(ChunkCoord coord)
+        {
+            if (!Enabled || s_activePhase == null) return;
+            if (!s_traces.TryGetValue(coord, out ChunkTrace trace)) return;
+
+            trace.Disposition = trace.AdmittedTicks == 0
+                ? TraceDisposition.AbandonedBeforeAdmission
+                : TraceDisposition.UnloadedBeforeMeshApplied;
+
+            CloseTrace(trace);
+            s_traces.Remove(coord);
+        }
+
         #endregion
 
         #region Per-frame admission pressure (FP-2 hook targets)
@@ -564,6 +622,41 @@ namespace Benchmarks
             // NotRun is the sample window's default, not an outcome — tallying it would invent frames in
             // which a pass "stopped" for a reason that is really an absence of data.
             if (reason == PassStopReason.NotRun) return;
+
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            // §7.1 v2 weights each reason by which passes can express it, so a stale capability declaration
+            // silently mis-weights every verdict. FP-7b was exactly that failure — a pass documented as
+            // ceiling-only had carried a quota stop for two captures. Assert the declaration against what
+            // production actually records, so the next divergence surfaces on the frame it happens.
+            //
+            // Latched per (pass, reason): this runs once per pass per frame, so an unlatched error would
+            // emit thousands of lines into the very log the capture is read from, burying the signal it is
+            // trying to raise. Qualified `UnityEngine.Debug` — the file imports System.Diagnostics for
+            // Stopwatch, so the bare name is ambiguous.
+            if (!PipelineRegimeVerdict.CanEmit(pass, reason) && !s_capabilityWarned[(int)pass, (int)reason])
+            {
+                s_capabilityWarned[(int)pass, (int)reason] = true;
+                UnityEngine.Debug.LogError($"[PipelineTelemetry] {pass} recorded {reason}, which PipelineRegimeVerdict." +
+                                           "CanEmit says it cannot emit — the §7.1 v2 capability matrix is stale and " +
+                                           "every verdict weighted by it is wrong until it is corrected. (Reported once.)");
+            }
+
+            // The v2 denominator is each pass's MEASURED participation, summed straight from this matrix, so
+            // it is only a frame count while a pass reports at most once per frame. Every current call site
+            // obeys that, but only by enable-timing: ForceCompleteDataJobsCoroutine drives
+            // ProcessGenerationJobs in a tight while-loop, and it is merely the case today that telemetry is
+            // still off during startup. If that ordering ever changes, shares silently exceed 1.0 — so check
+            // it rather than depend on it.
+            if (s_pendingFrame.StopReasons[pass] != PassStopReason.NotRun
+                && !s_doubleRecordWarned[(int)pass])
+            {
+                s_doubleRecordWarned[(int)pass] = true;
+                UnityEngine.Debug.LogError($"[PipelineTelemetry] {pass} recorded a stop reason twice in one " +
+                                           $"frame ({s_pendingFrame.StopReasons[pass]} then {reason}). The §7.1 v2 " +
+                                           "participation denominator assumes one report per pass per frame; shares are " +
+                                           "no longer bounded by 1. (Reported once.)");
+            }
+#endif
 
             s_activePhase.StopReasonCounts[(int)pass, (int)reason]++;
             s_pendingFrame.StopReasons[pass] = reason;

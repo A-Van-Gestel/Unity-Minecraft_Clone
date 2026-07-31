@@ -38,6 +38,14 @@ namespace Benchmarks
         /// </summary>
         public readonly bool OrderingBound;
 
+        /// <summary>
+        /// Whether the ordering axis had enough terminal traces to decide at all
+        /// (<see cref="PipelineRegimeVerdict.MinOrderingTerminalTraces"/>). When <c>false</c>,
+        /// <see cref="OrderingBound"/> is <c>false</c> because the question was unanswerable, <b>not</b>
+        /// because the pipeline was well-ordered — the report must render those differently.
+        /// </summary>
+        public readonly bool OrderingDecidable;
+
         /// <summary>The plurality stop reason across all budgeted passes (excluding the untallied sentinel).</summary>
         public readonly PassStopReason DominantReason;
 
@@ -47,20 +55,36 @@ namespace Benchmarks
         /// <summary>Fraction of traces that ended as waste, in [0, 1].</summary>
         public readonly double WasteFraction;
 
+        /// <summary>
+        /// The dominant reason's capability-weighted share, in [0, 1] — its frames over the frames in which
+        /// a pass able to report it could have. Printed so a near-tie is auditable as a number, not implied.
+        /// </summary>
+        public readonly double DominantShare;
+
+        /// <summary>The runner-up's capability-weighted share, on the same scale.</summary>
+        public readonly double RunnerUpShare;
+
         /// <summary>Initializes a verdict.</summary>
         /// <param name="primary">The regime from the dominant stop reason.</param>
         /// <param name="orderingBound">Whether the ordering axis also fired.</param>
+        /// <param name="orderingDecidable">Whether the ordering axis had enough terminal traces to decide.</param>
         /// <param name="dominantReason">The plurality stop reason.</param>
         /// <param name="runnerUpReason">The second-place stop reason.</param>
         /// <param name="wasteFraction">Fraction of traces that ended as waste.</param>
-        public RegimeVerdict(PipelineRegime primary, bool orderingBound, PassStopReason dominantReason,
-            PassStopReason runnerUpReason, double wasteFraction)
+        /// <param name="dominantShare">The dominant reason's capability-weighted share.</param>
+        /// <param name="runnerUpShare">The runner-up's capability-weighted share.</param>
+        public RegimeVerdict(PipelineRegime primary, bool orderingBound, bool orderingDecidable,
+            PassStopReason dominantReason, PassStopReason runnerUpReason, double wasteFraction,
+            double dominantShare, double runnerUpShare)
         {
             Primary = primary;
             OrderingBound = orderingBound;
+            OrderingDecidable = orderingDecidable;
             DominantReason = dominantReason;
             RunnerUpReason = runnerUpReason;
             WasteFraction = wasteFraction;
+            DominantShare = dominantShare;
+            RunnerUpShare = runnerUpShare;
         }
     }
 
@@ -78,6 +102,90 @@ namespace Benchmarks
     public static class PipelineRegimeVerdict
     {
         /// <summary>
+        /// Which stop reasons each pass is <i>capable</i> of emitting (§7.1 v2). The v1 rule summed every
+        /// reason across all four passes, so passes that can vote for only one outcome were added to passes
+        /// genuinely contesting all five — and reliably contributed ~100 % <c>OutOfWork</c>. At FP-4's
+        /// loading 200 m/s phase that dilution decided the plurality by <b>68 frames out of 27,744</b> and
+        /// printed <i>Healthy</i> over what the eligible passes alone called <c>Quota</c> at 99.5 %.
+        /// <para>
+        /// Declared as data rather than hardcoded as "the scheduling passes", because the split is not
+        /// scheduling-vs-completion: <see cref="PipelinePass.GenerationProcess"/> owns a real per-frame
+        /// structure-mods quota (FP-7b), and only <see cref="PipelinePass.MeshProcess"/> is genuinely
+        /// ceiling-only. A hand-written capability claim is exactly what went stale before, so
+        /// <see cref="CanEmit"/> is asserted against reality at every
+        /// <see cref="PipelineTelemetry.RecordPassStop"/> in development builds.
+        /// </para>
+        /// </summary>
+        /// <param name="pass">The pass to test.</param>
+        /// <param name="reason">The stop reason to test.</param>
+        /// <returns><c>true</c> when <paramref name="pass"/> can legitimately report <paramref name="reason"/>.</returns>
+        public static bool CanEmit(PipelinePass pass, PassStopReason reason)
+        {
+            // NotRun is a sentinel, never an outcome, and is excluded from the plurality entirely.
+            if (reason == PassStopReason.NotRun) return false;
+
+            // Every pass that runs can finish its queue or hit its ms ceiling.
+            if (reason == PassStopReason.OutOfWork || reason == PassStopReason.Ceiling) return true;
+
+            return pass switch
+            {
+                // The two scheduling loops carry a job quota, an in-flight cap, and a readiness gate.
+                PipelinePass.LightSchedule => true,
+                PipelinePass.MeshSchedule => true,
+
+                // Completion pass with a quota (structure mods) but no in-flight cap of its own, and no
+                // readiness gate — reaching a completed job always processes or quota-defers it (FP-7b).
+                PipelinePass.GenerationProcess => reason == PassStopReason.Quota,
+
+                // MeshProcess: genuinely ceiling-only, so it votes on nothing beyond the two above.
+                _ => false,
+            };
+        }
+
+        /// <summary>
+        /// How many stop reasons a pass actually reported across the phase — its contribution to the v2
+        /// denominator. Summed over the reasons it is <see cref="CanEmit"/>-eligible for, so a stale-matrix
+        /// cell cannot inflate the denominator while being excluded from the numerator.
+        /// </summary>
+        /// <param name="stopReasonTallies">The phase's <c>[pass, reason]</c> matrix.</param>
+        /// <param name="pass">The pass index to total.</param>
+        /// <returns>The number of frames in which that pass reported an eligible reason.</returns>
+        private static int Participation(int[,] stopReasonTallies, int pass)
+        {
+            int reasonCount = stopReasonTallies.GetLength(1);
+            int participation = 0;
+
+            for (int reason = (int)PassStopReason.OutOfWork; reason < reasonCount; reason++)
+            {
+                if (CanEmit((PipelinePass)pass, (PassStopReason)reason))
+                    participation += stopReasonTallies[pass, reason];
+            }
+
+            return participation;
+        }
+
+        /// <summary>
+        /// Tie-break for two reasons with an exactly equal share: a reason indicating a <i>bound</i> pipeline
+        /// outranks <see cref="PassStopReason.OutOfWork"/>.
+        /// </summary>
+        /// <param name="challenger">The reason currently being scored.</param>
+        /// <param name="incumbentIndex">The leading reason's index, or negative when none has been chosen.</param>
+        /// <returns><c>true</c> when the challenger should take the lead despite not exceeding its share.</returns>
+        /// <remarks>
+        /// Without this the loop's walk order (<c>OutOfWork</c> first) plus a strict <c>&gt;</c> resolves every
+        /// tie toward the "everything is fine" arm — a bias an instrument built to detect stalls should not
+        /// have. Exact ties are reachable because shares are ratios over differing denominators (200⁄400 and
+        /// 150⁄300 are both exactly 0.5). Ties between two <i>bound</i> reasons have no principled ordering,
+        /// so they keep the deterministic walk order and are visible as near-equal
+        /// <see cref="RegimeVerdict.DominantShare"/> / <see cref="RegimeVerdict.RunnerUpShare"/> values.
+        /// </remarks>
+        private static bool OutranksOnTie(int challenger, int incumbentIndex)
+        {
+            return incumbentIndex == (int)PassStopReason.OutOfWork
+                   && challenger != (int)PassStopReason.OutOfWork;
+        }
+
+        /// <summary>
         /// Waste fraction at or above which a phase is called ordering-bound. Pre-committed at 20 %: waste
         /// here means work the pipeline <i>completed</i> for chunks that then left range
         /// (<c>DiscardedOutOfRange</c> / <c>LoadStranded</c> / <c>UnloadedBeforeMeshApplied</c>), so it is a
@@ -88,52 +196,139 @@ namespace Benchmarks
         public const double OrderingWasteThreshold = 0.20;
 
         /// <summary>
-        /// Applies the rule. <paramref name="stopReasonTallies"/> is the phase's
-        /// <c>[pass, reason]</c> matrix; reasons are summed across passes because the question is which
-        /// constraint bound the <i>pipeline</i>, not which bound one stage.
+        /// Terminal traces required before the ordering axis returns a verdict at all. Below it the fraction
+        /// is arithmetically fine but statistically meaningless — 1 waste of 3 terminal traces is 33 %, over
+        /// the threshold, off a sample of three. 30 is the conventional small-sample floor and is deliberately
+        /// far below any real phase (FP-4's ran from hundreds to thousands), so it gates truncated or
+        /// near-empty phases without ever suppressing a genuine capture.
+        /// </summary>
+        public const int MinOrderingTerminalTraces = 30;
+
+        /// <summary>
+        /// Whether a disposition represents work the pipeline <i>completed</i> and then threw away — the
+        /// ordering axis's numerator.
+        /// </summary>
+        /// <param name="disposition">The terminal disposition to classify.</param>
+        /// <returns><c>true</c> when the disposition counts as waste.</returns>
+        /// <remarks>
+        /// <see cref="TraceDisposition.InFlightAtPhaseEnd"/> is deliberately not waste — the capture stopped
+        /// first, the pipeline did nothing wrong. <see cref="TraceDisposition.Rerequested"/> is not waste
+        /// either: it counts churn, and its work may still land.
+        /// <see cref="TraceDisposition.AbandonedBeforeAdmission"/> is not waste because no work was ever
+        /// performed (FP-7a); it is excluded from the denominator too — see
+        /// <see cref="IsInWasteDenominator"/>. Lives here rather than on the report section so the verdict
+        /// and the table it is printed under can never classify a disposition differently (the FP-5 lesson).
+        /// </remarks>
+        public static bool IsWaste(TraceDisposition disposition)
+        {
+            return disposition == TraceDisposition.DiscardedOutOfRange
+                   || disposition == TraceDisposition.LoadStranded
+                   || disposition == TraceDisposition.UnloadedBeforeMeshApplied;
+        }
+
+        /// <summary>
+        /// Whether a disposition belongs in the waste fraction's <i>denominator</i> — the population of
+        /// traces for which the pipeline actually performed work and reached a terminal state.
+        /// </summary>
+        /// <param name="disposition">The disposition to classify.</param>
+        /// <returns><c>true</c> when the disposition contributes to the denominator.</returns>
+        /// <remarks>
+        /// Excludes <see cref="TraceDisposition.Pending"/> (not terminal) and
+        /// <see cref="TraceDisposition.AbandonedBeforeAdmission"/> (terminal, but the pipeline never touched
+        /// it — counting it would deflate the fraction hardest exactly where the panic gate withholds the
+        /// most admissions, which is the regime the ordering axis must stay readable in).
+        /// </remarks>
+        public static bool IsInWasteDenominator(TraceDisposition disposition)
+        {
+            return disposition != TraceDisposition.Pending
+                   && disposition != TraceDisposition.AbandonedBeforeAdmission;
+        }
+
+        /// <summary>
+        /// Applies the §7.1 <b>v2</b> rule. <paramref name="stopReasonTallies"/> is the phase's
+        /// <c>[pass, reason]</c> matrix. Each reason is scored as its share of the reports actually made by
+        /// the passes <see cref="CanEmit"/> admits for it — numerator and denominator are both drawn from
+        /// those passes only, so a pass can never vote on an outcome it cannot express (§7.1.1).
         /// </summary>
         /// <param name="stopReasonTallies">Per-pass, per-reason frame counts.</param>
         /// <param name="wasteTraces">Traces that ended in a waste disposition.</param>
         /// <param name="terminalTraces">Traces that reached any terminal disposition (the waste denominator).</param>
         /// <returns>The verdict, including the inputs that produced it.</returns>
+        /// <remarks>
+        /// <b>The denominator is measured participation, not nominal opportunity.</b> An earlier draft divided
+        /// by <c>frameCount × eligible passes</c>, which charges a full phase of chances to passes that never
+        /// ran — <see cref="PipelinePass.LightSchedule"/> is inside <c>if (settings.enableLighting)</c>, so a
+        /// lighting-off capture gave it a silent zero vote in every reason while still paying for its slot.
+        /// That capped <c>Quota</c> at 2⁄3 against <c>OutOfWork</c>'s 3⁄4 and printed <i>Healthy</i> over a
+        /// genuine quota stall — the §7.1.1 dilution, rebuilt in a new place. Summing each eligible pass's own
+        /// reports instead makes an absent pass contribute nothing to either term.
+        /// <para>
+        /// Participation is derived from the matrix rather than counted separately, so it cannot desync from
+        /// the numerator it divides (the FP-5 lesson), and is filtered by <see cref="CanEmit"/> for the same
+        /// reason the numerator is: an ineligible non-zero cell must not inflate the denominator while being
+        /// excluded from the numerator. It assumes <b>one report per pass per frame</b> — true of every
+        /// current call site, and guarded by an assert in <see cref="PipelineTelemetry.RecordPassStop"/>
+        /// rather than left to hold by accident.
+        /// </para>
+        /// </remarks>
         public static RegimeVerdict Evaluate(int[,] stopReasonTallies, int wasteTraces, int terminalTraces)
         {
-            // Sum each reason across passes. NotRun is skipped: it is the "did not execute" sentinel, not an
-            // outcome, and letting it win a plurality would report an idle editor frame as a regime.
             int reasonCount = stopReasonTallies.GetLength(1);
             int passCount = stopReasonTallies.GetLength(0);
 
             int dominantIndex = -1, runnerUpIndex = -1;
-            int dominantTotal = 0, runnerUpTotal = 0;
-            int grandTotal = 0;
+            double dominantShare = 0.0, runnerUpShare = 0.0;
+            int eligibleTotal = 0;
 
             for (int reason = (int)PassStopReason.OutOfWork; reason < reasonCount; reason++)
             {
-                int total = 0;
-                for (int pass = 0; pass < passCount; pass++) total += stopReasonTallies[pass, reason];
+                int total = 0, participation = 0;
+                for (int pass = 0; pass < passCount; pass++)
+                {
+                    // Ineligible cells are ignored, not merely down-weighted. A non-zero one means the
+                    // capability declaration has gone stale — RecordPassStop asserts against exactly that.
+                    if (!CanEmit((PipelinePass)pass, (PassStopReason)reason)) continue;
 
-                grandTotal += total;
+                    total += stopReasonTallies[pass, reason];
+                    participation += Participation(stopReasonTallies, pass);
+                }
 
-                if (total > dominantTotal)
+                eligibleTotal += total;
+                if (participation == 0) continue;
+
+                double share = (double)total / participation;
+
+                // Exact equality is the intended test, not an oversight: only a bit-identical share is a tie
+                // worth breaking. A tolerance would hand NEAR-ties to the bound regime as well, which is a
+                // broader change than this rule makes — a near-tie is already visible as the printed
+                // dominant/runner-up shares, which is where §7.2 wants that judgment made.
+                // ReSharper disable once CompareOfFloatsByEqualityOperator
+                if (share > dominantShare || (share == dominantShare && OutranksOnTie(reason, dominantIndex)))
                 {
                     runnerUpIndex = dominantIndex;
-                    runnerUpTotal = dominantTotal;
+                    runnerUpShare = dominantShare;
                     dominantIndex = reason;
-                    dominantTotal = total;
+                    dominantShare = share;
                 }
-                else if (total > runnerUpTotal)
+                else if (share > runnerUpShare)
                 {
                     runnerUpIndex = reason;
-                    runnerUpTotal = total;
+                    runnerUpShare = share;
                 }
             }
 
             double wasteFraction = terminalTraces > 0 ? (double)wasteTraces / terminalTraces : 0.0;
-            bool orderingBound = wasteFraction >= OrderingWasteThreshold;
 
-            if (grandTotal == 0 || dominantIndex < 0)
-                return new RegimeVerdict(PipelineRegime.NoData, orderingBound,
-                    PassStopReason.NotRun, PassStopReason.NotRun, wasteFraction);
+            // The ordering axis needs a population before a percentage of it means anything. Excluding
+            // never-admitted requests (FP-7a) was correct but shrank this denominator, and the BOOLEAN is what
+            // downstream docs quote — so below the floor the axis reports "undecidable" rather than a verdict
+            // computed off a handful of traces.
+            bool orderingDecidable = terminalTraces >= MinOrderingTerminalTraces;
+            bool orderingBound = orderingDecidable && wasteFraction >= OrderingWasteThreshold;
+
+            if (eligibleTotal == 0 || dominantIndex < 0)
+                return new RegimeVerdict(PipelineRegime.NoData, orderingBound, orderingDecidable,
+                    PassStopReason.NotRun, PassStopReason.NotRun, wasteFraction, 0.0, 0.0);
 
             PassStopReason dominant = (PassStopReason)dominantIndex;
             PassStopReason runnerUp = runnerUpIndex < 0 ? PassStopReason.NotRun : (PassStopReason)runnerUpIndex;
@@ -153,7 +348,8 @@ namespace Benchmarks
                 _ => PipelineRegime.Healthy,
             };
 
-            return new RegimeVerdict(primary, orderingBound, dominant, runnerUp, wasteFraction);
+            return new RegimeVerdict(primary, orderingBound, orderingDecidable, dominant, runnerUp,
+                wasteFraction, dominantShare, runnerUpShare);
         }
     }
 }
