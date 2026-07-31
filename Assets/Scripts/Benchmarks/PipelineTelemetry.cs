@@ -233,6 +233,19 @@ namespace Benchmarks
         /// </summary>
         public readonly bool[] PassDoubleRecorded = new bool[PipelineTelemetry.PassCount];
 
+        /// <summary>
+        /// Whether a §7.1 regime verdict is meaningful for this phase at all. <c>false</c> for phases that
+        /// are not measurements — the drain/save/unload transition being the one that exists today (FP-9a).
+        /// <para>
+        /// Distinct from a sample-size problem and not fixable by one: FP-8's transition carried ~1 332
+        /// eligible observations, comfortably over
+        /// <see cref="PipelineRegimeVerdict.MinRegimeObservations"/>, and still printed
+        /// <c>AdmissionBound</c> for a phase whose entire job is to drain queues and unload. A pass being
+        /// quota-limited while deliberately flushing is not a regime; it is the point.
+        /// </para>
+        /// </summary>
+        public bool RegimeBearing = true;
+
         /// <summary>Whether any pass double-reported — the report's integrity banner condition.</summary>
         public bool AnyPassDoubleRecorded
         {
@@ -428,7 +441,13 @@ namespace Benchmarks
         /// <param name="phaseName">Display name, matching the frame-health collector's.</param>
         /// <param name="groupName">Logical group (e.g. "Generation Pass").</param>
         /// <param name="expectedTraceCapacity">Capacity hint from <see cref="EstimateTraceCapacity"/>.</param>
-        public static void BeginPhase(string phaseName, string groupName, int expectedTraceCapacity)
+        /// <param name="regimeBearing">
+        /// <c>false</c> for a phase that is not a measurement (the drain/save/unload transition), so the
+        /// report withholds a regime verdict instead of describing a deliberate flush as a pipeline state.
+        /// Optional so every existing call site keeps the measurement default.
+        /// </param>
+        public static void BeginPhase(string phaseName, string groupName, int expectedTraceCapacity,
+            bool regimeBearing = true)
         {
             if (!Enabled) return;
 
@@ -443,6 +462,7 @@ namespace Benchmarks
             {
                 PhaseName = phaseName,
                 GroupName = groupName,
+                RegimeBearing = regimeBearing,
             };
 
             // Pre-size the capture buffers (design §6: no incremental growth during a capture). Done here

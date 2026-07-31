@@ -75,6 +75,7 @@ namespace Editor.Validation.PipelineBackpressure
                 new Scenario("B13 Unload disposition: admitted work vs never-admitted request (FP-7a)", RunB13UnloadDisposition),
                 new Scenario("B14 Waste predicates: numerator and denominator membership (FP-7a)", RunB14WastePredicates),
                 new Scenario("B15 Report integrity banners: stale capability matrix + double-recorded pass", RunB15ReportIntegrity),
+                new Scenario("B16 Primary-regime credibility: sample floor + non-measurement phases (FP-9a)", RunB16PrimaryRegimeCredibility),
             };
             return ValidationSuiteRunner.Execute("Pipeline Backpressure", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -193,6 +194,11 @@ namespace Editor.Validation.PipelineBackpressure
             const int passes = PipelineTelemetry.PassCount;
             const int reasons = PipelineTelemetry.StopReasonCount;
 
+            // All fixture magnitudes clear PipelineRegimeVerdict.MinRegimeObservations (FP-9a), or every
+            // regime arm below would come back NoData. Scaling a matrix by a constant leaves every share
+            // exactly unchanged — numerator and denominator scale together — so the expected values are the
+            // same ones this scenario has always pinned.
+            //
             // Helper: one reason, reported by a pass eligible to emit it. That pass's participation is the
             // count itself, so its share is 1.0 and every other reason scores 0.
             int[,] Only(PassStopReason r, int count)
@@ -203,19 +209,19 @@ namespace Editor.Validation.PipelineBackpressure
             }
 
             bool ok = Check("Quota dominant -> AdmissionBound",
-                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.Quota, 90), 0, 100).Primary
+                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.Quota, 2000), 0, 100).Primary
                 == PipelineRegime.AdmissionBound);
             ok &= Check("Ceiling dominant -> AdmissionBound",
-                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.Ceiling, 90), 0, 100).Primary
+                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.Ceiling, 2000), 0, 100).Primary
                 == PipelineRegime.AdmissionBound);
             ok &= Check("InFlightCap dominant -> ThroughputBound",
-                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.InFlightCap, 90), 0, 100).Primary
+                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.InFlightCap, 2000), 0, 100).Primary
                 == PipelineRegime.ThroughputBound);
             ok &= Check("AllDeclined dominant -> ReadinessBound",
-                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.AllDeclined, 90), 0, 100).Primary
+                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.AllDeclined, 2000), 0, 100).Primary
                 == PipelineRegime.ReadinessBound);
             ok &= Check("OutOfWork dominant -> Healthy",
-                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.OutOfWork, 90), 0, 100).Primary
+                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.OutOfWork, 2000), 0, 100).Primary
                 == PipelineRegime.Healthy);
             ok &= Check("no tallies at all -> NoData",
                 PipelineRegimeVerdict.Evaluate(new int[passes, reasons], 0, 0).Primary
@@ -224,7 +230,7 @@ namespace Editor.Validation.PipelineBackpressure
             // NotRun must never win: it is the did-not-execute sentinel, and an idle frame is not a regime.
             int[,] notRunHeavy = new int[passes, reasons];
             notRunHeavy[(int)PipelinePass.MeshSchedule, (int)PassStopReason.NotRun] = 9999;
-            notRunHeavy[(int)PipelinePass.MeshSchedule, (int)PassStopReason.Quota] = 3;
+            notRunHeavy[(int)PipelinePass.MeshSchedule, (int)PassStopReason.Quota] = 1200;
             ok &= Check("NotRun is excluded from the plurality (Quota still wins)",
                 PipelineRegimeVerdict.Evaluate(notRunHeavy, 0, 100).Primary == PipelineRegime.AdmissionBound);
             ok &= Check("...and NotRun does not inflate the participation denominator either",
@@ -252,10 +258,10 @@ namespace Editor.Validation.PipelineBackpressure
             // Both scheduling passes report Quota on nearly every frame; both completion passes report
             // OutOfWork on nearly every frame. v1 summed these and called it Healthy by a hair.
             int[,] dilution = new int[passes, reasons];
-            dilution[(int)PipelinePass.LightSchedule, (int)PassStopReason.Quota] = 99;
-            dilution[(int)PipelinePass.MeshSchedule, (int)PassStopReason.Quota] = 99;
-            dilution[(int)PipelinePass.GenerationProcess, (int)PassStopReason.OutOfWork] = 100;
-            dilution[(int)PipelinePass.MeshProcess, (int)PassStopReason.OutOfWork] = 100;
+            dilution[(int)PipelinePass.LightSchedule, (int)PassStopReason.Quota] = 990;
+            dilution[(int)PipelinePass.MeshSchedule, (int)PassStopReason.Quota] = 990;
+            dilution[(int)PipelinePass.GenerationProcess, (int)PassStopReason.OutOfWork] = 1000;
+            dilution[(int)PipelinePass.MeshProcess, (int)PassStopReason.OutOfWork] = 1000;
 
             RegimeVerdict undiluted = PipelineRegimeVerdict.Evaluate(dilution, 0, 100);
             ok &= Check("the §7.1.1 dilution shape is AdmissionBound under v2 (v1 called it Healthy)",
@@ -272,8 +278,8 @@ namespace Editor.Validation.PipelineBackpressure
             // Eligibility is per (pass, reason), so an ineligible pass cannot dilute a contested reason even
             // when it holds a large tally — the cell is ignored outright rather than down-weighted.
             int[,] ineligibleHeavy = new int[passes, reasons];
-            ineligibleHeavy[(int)PipelinePass.LightSchedule, (int)PassStopReason.AllDeclined] = 60;
-            ineligibleHeavy[(int)PipelinePass.MeshProcess, (int)PassStopReason.OutOfWork] = 100;
+            ineligibleHeavy[(int)PipelinePass.LightSchedule, (int)PassStopReason.AllDeclined] = 600;
+            ineligibleHeavy[(int)PipelinePass.MeshProcess, (int)PassStopReason.OutOfWork] = 1000;
             // AllDeclined: 60 of LightSchedule's own 60 reports = 1.00 (MeshSchedule never ran). OutOfWork:
             // 100 of the 160 reports made by its four eligible passes = 0.625.
             ok &= Check("a contested reason outranks a ceiling-only pass's 100% OutOfWork",
@@ -291,10 +297,10 @@ namespace Editor.Validation.PipelineBackpressure
             //   old: Quota 125/(100x3) = 0.417 vs OutOfWork 175/(100x4) = 0.438 -> Healthy
             //   new: Quota 125/200     = 0.625 vs OutOfWork 175/300      = 0.583 -> AdmissionBound
             int[,] lightingOff = new int[passes, reasons];
-            lightingOff[(int)PipelinePass.MeshSchedule, (int)PassStopReason.Quota] = 100;
-            lightingOff[(int)PipelinePass.GenerationProcess, (int)PassStopReason.Quota] = 25;
-            lightingOff[(int)PipelinePass.GenerationProcess, (int)PassStopReason.OutOfWork] = 75;
-            lightingOff[(int)PipelinePass.MeshProcess, (int)PassStopReason.OutOfWork] = 100;
+            lightingOff[(int)PipelinePass.MeshSchedule, (int)PassStopReason.Quota] = 500;
+            lightingOff[(int)PipelinePass.GenerationProcess, (int)PassStopReason.Quota] = 125;
+            lightingOff[(int)PipelinePass.GenerationProcess, (int)PassStopReason.OutOfWork] = 375;
+            lightingOff[(int)PipelinePass.MeshProcess, (int)PassStopReason.OutOfWork] = 500;
 
             RegimeVerdict lightsOut = PipelineRegimeVerdict.Evaluate(lightingOff, 0, 100);
             ok &= Check("a pass that never ran does not dilute the verdict (lighting disabled -> AdmissionBound)",
@@ -308,10 +314,10 @@ namespace Editor.Validation.PipelineBackpressure
             // eligible passes' 200 = 0.5. Exactly equal, and walk order reaches OutOfWork first, so a strict
             // `>` comparison would leave the phase reading Healthy.
             int[,] tied = new int[passes, reasons];
-            tied[(int)PipelinePass.LightSchedule, (int)PassStopReason.InFlightCap] = 50;
-            tied[(int)PipelinePass.LightSchedule, (int)PassStopReason.OutOfWork] = 50;
-            tied[(int)PipelinePass.MeshSchedule, (int)PassStopReason.InFlightCap] = 50;
-            tied[(int)PipelinePass.MeshSchedule, (int)PassStopReason.OutOfWork] = 50;
+            tied[(int)PipelinePass.LightSchedule, (int)PassStopReason.InFlightCap] = 500;
+            tied[(int)PipelinePass.LightSchedule, (int)PassStopReason.OutOfWork] = 500;
+            tied[(int)PipelinePass.MeshSchedule, (int)PassStopReason.InFlightCap] = 500;
+            tied[(int)PipelinePass.MeshSchedule, (int)PassStopReason.OutOfWork] = 500;
 
             RegimeVerdict tieBreak = PipelineRegimeVerdict.Evaluate(tied, 0, 100);
             ok &= Check("an exact share tie resolves to the BOUND regime, not to Healthy",
@@ -321,25 +327,25 @@ namespace Editor.Validation.PipelineBackpressure
 
             // --- The ordering axis, unchanged by v2 and still independent of the primary ---
             RegimeVerdict wasteful = PipelineRegimeVerdict.Evaluate(
-                Only(PassStopReason.OutOfWork, 90), 30, 100);
+                Only(PassStopReason.OutOfWork, 2000), 30, 100);
             ok &= Check("waste 30% >= threshold -> ordering-bound flagged",
                 wasteful.OrderingBound && wasteful.OrderingDecidable);
             ok &= Check("...and it composes with a Healthy primary (the flight symptom's likely shape)",
                 wasteful.Primary == PipelineRegime.Healthy);
             ok &= Check("waste just under the threshold -> NOT ordering-bound",
-                !PipelineRegimeVerdict.Evaluate(Only(PassStopReason.OutOfWork, 90), 19, 100).OrderingBound);
+                !PipelineRegimeVerdict.Evaluate(Only(PassStopReason.OutOfWork, 2000), 19, 100).OrderingBound);
             ok &= Check("waste fraction is reported for the raw block",
                 Math.Abs(wasteful.WasteFraction - 0.30) < 1e-9);
 
             // Minimum-sample floor: 1 waste of 3 terminal traces is 33 % and would clear the threshold, but
             // three traces cannot support a verdict. "Undecidable" must be distinguishable from "not bound".
-            RegimeVerdict tinySample = PipelineRegimeVerdict.Evaluate(Only(PassStopReason.OutOfWork, 90), 1, 3);
+            RegimeVerdict tinySample = PipelineRegimeVerdict.Evaluate(Only(PassStopReason.OutOfWork, 2000), 1, 3);
             ok &= Check("33% waste off 3 terminal traces is NOT reported as ordering-bound",
                 !tinySample.OrderingBound);
             ok &= Check("...and is flagged undecidable, not as a clean 'well ordered' result",
                 !tinySample.OrderingDecidable);
             ok &= Check("at exactly the floor the axis decides again (boundary inclusive)",
-                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.OutOfWork, 90), 10,
+                PipelineRegimeVerdict.Evaluate(Only(PassStopReason.OutOfWork, 2000), 10,
                     PipelineRegimeVerdict.MinOrderingTerminalTraces).OrderingDecidable);
 
             return ok;
@@ -742,7 +748,7 @@ namespace Editor.Validation.PipelineBackpressure
             // report the waste among chunks the pipeline actually served. 30 waste of 100 admitted terminal
             // traces is ordering-bound whether 0 or 9,000 requests were abandoned alongside them.
             int[,] tallies = new int[PipelineTelemetry.PassCount, PipelineTelemetry.StopReasonCount];
-            tallies[(int)PipelinePass.MeshSchedule, (int)PassStopReason.OutOfWork] = 90;
+            tallies[(int)PipelinePass.MeshSchedule, (int)PassStopReason.OutOfWork] = 2000;
             ok &= Check("the ordering axis is unmoved by abandoned traces (they are in neither term)",
                 PipelineRegimeVerdict.Evaluate(tallies, 30, 100).OrderingBound);
 
@@ -833,6 +839,117 @@ namespace Editor.Validation.PipelineBackpressure
             // pass reporting on every frame of a long phase is the normal case.
             ok &= Check("one report per pass per frame does not trip the flag",
                 !clean.AnyPassDoubleRecorded);
+
+            return ok;
+        }
+
+        /// <summary>
+        /// FP-9a: a primary regime must not be asserted from a sample too small to support one, and a phase
+        /// that is not a measurement must not be assigned a regime at all.
+        /// <para>
+        /// A <i>regression</i> guard for verdicts FP-8 actually printed: <c>ThroughputBound</c> for a
+        /// 14-frame generation phase (56 eligible observations), <c>AdmissionBound</c> for a 148-frame one
+        /// (592), and <c>AdmissionBound</c> for the drain/save/unload <b>transition</b>. The first two are
+        /// sample size; the third is not, and could not be fixed by any floor — that phase carried ~1 332
+        /// observations, comfortably above it. Hence two mechanisms, pinned here together.
+        /// </para>
+        /// <para>
+        /// The three no-regime outcomes must render <b>distinguishably</b> — "no pass reported", "too little
+        /// to decide", and "not a measurement" are different claims, and only the first is a statement about
+        /// an idle pipeline. This is the same discrimination FP-7 established for the ordering axis.
+        /// </para>
+        /// </summary>
+        private static bool RunB16PrimaryRegimeCredibility()
+        {
+            const int passes = PipelineTelemetry.PassCount;
+            const int reasons = PipelineTelemetry.StopReasonCount;
+
+            int[,] Quota(int count)
+            {
+                int[,] t = new int[passes, reasons];
+                t[(int)PipelinePass.MeshSchedule, (int)PassStopReason.Quota] = count;
+                return t;
+            }
+
+            // --- The floor itself, at the boundary ---
+            RegimeVerdict below = PipelineRegimeVerdict.Evaluate(
+                Quota(PipelineRegimeVerdict.MinRegimeObservations - 1), 0, 100);
+            bool ok = Check("one observation below the floor -> not decidable",
+                !below.PrimaryDecidable);
+            ok &= Check("...and Primary is NoData, so a caller ignoring the flag cannot be misled",
+                below.Primary == PipelineRegime.NoData);
+            ok &= Check("...while the dominant reason and share are still reported (§7.2 inputs survive)",
+                below.DominantReason == PassStopReason.Quota && Math.Abs(below.DominantShare - 1.0) < 1e-9);
+
+            RegimeVerdict atFloor = PipelineRegimeVerdict.Evaluate(
+                Quota(PipelineRegimeVerdict.MinRegimeObservations), 0, 100);
+            ok &= Check("exactly at the floor decides (boundary inclusive)",
+                atFloor.PrimaryDecidable && atFloor.Primary == PipelineRegime.AdmissionBound);
+
+            // FP-8's own rejected phases, by their real observation counts.
+            ok &= Check("FP-8's 14-frame phase (56 observations) would no longer assert a regime",
+                !PipelineRegimeVerdict.Evaluate(Quota(56), 0, 100).PrimaryDecidable);
+            ok &= Check("FP-8's 148-frame phase (592 observations) would no longer assert a regime",
+                !PipelineRegimeVerdict.Evaluate(Quota(592), 0, 100).PrimaryDecidable);
+
+            // Empty vs sparse must stay distinguishable, and EligibleObservations is what does it.
+            RegimeVerdict empty = PipelineRegimeVerdict.Evaluate(new int[passes, reasons], 0, 100);
+            ok &= Check("an empty phase reports 0 eligible observations",
+                !empty.PrimaryDecidable && empty.EligibleObservations == 0);
+            ok &= Check("a sparse phase reports its real count, not 0",
+                below.EligibleObservations == PipelineRegimeVerdict.MinRegimeObservations - 1);
+
+            // --- Rendering: the three no-regime outcomes must read differently ---
+            PipelinePhaseMetrics sparse = new PipelinePhaseMetrics { PhaseName = "sparse", GroupName = "FP-9a" };
+            sparse.StopReasonCounts[(int)PipelinePass.MeshSchedule, (int)PassStopReason.Quota] = 56;
+            string sparseText = Render(sparse);
+            ok &= Check("a sparse phase renders UNDECIDABLE with its observation count",
+                sparseText.Contains("UNDECIDABLE") && sparseText.Contains("56"));
+            ok &= Check("...and does NOT claim a regime",
+                !sparseText.Contains("VERDICT: ThroughputBound") && !sparseText.Contains("VERDICT: AdmissionBound"));
+
+            PipelinePhaseMetrics emptyPhase = new PipelinePhaseMetrics { PhaseName = "empty", GroupName = "FP-9a" };
+            string emptyText = Render(emptyPhase);
+            ok &= Check("an empty phase renders NO DATA, distinct from UNDECIDABLE",
+                emptyText.Contains("NO DATA") && !emptyText.Contains("UNDECIDABLE (only"));
+
+            // The transition: plenty of observations, but no regime is meaningful. A floor cannot catch this.
+            PipelinePhaseMetrics transition = new PipelinePhaseMetrics
+            {
+                PhaseName = "Drain + Save + Unload", GroupName = "Transition", RegimeBearing = false,
+            };
+            transition.StopReasonCounts[(int)PipelinePass.MeshSchedule, (int)PassStopReason.Quota] = 5000;
+            string transitionText = Render(transition);
+            ok &= Check("a non-measurement phase renders NO REGIME even with ample observations",
+                transitionText.Contains("NO REGIME"));
+            ok &= Check("...and does NOT print AdmissionBound (the verdict FP-8 actually gave it)",
+                !transitionText.Contains("VERDICT: AdmissionBound"));
+            ok &= Check("...which no sample floor could have caught (it is over the floor)",
+                PipelineRegimeVerdict.Evaluate(transition.StopReasonCounts, 0, 100).PrimaryDecidable);
+
+            // Both axes, not just the primary. A drain phase that closes enough traces would otherwise print
+            // ORDERING-BOUND for discarding work on purpose — the same category error, one axis over.
+            PipelinePhaseMetrics wastefulTransition = new PipelinePhaseMetrics
+            {
+                PhaseName = "Drain + Save + Unload", GroupName = "Transition", RegimeBearing = false,
+            };
+            wastefulTransition.StopReasonCounts[(int)PipelinePass.MeshSchedule, (int)PassStopReason.Quota] = 5000;
+            wastefulTransition.DispositionCounts[(int)TraceDisposition.UnloadedBeforeMeshApplied] = 900;
+            wastefulTransition.DispositionCounts[(int)TraceDisposition.MeshApplied] = 100;
+
+            string wastefulText = Render(wastefulTransition);
+            ok &= Check("a non-measurement phase is spared the ORDERING axis too (90% waste, 1 000 traces)",
+                !wastefulText.Contains("ORDERING-BOUND"));
+
+            // A healthy measurement phase must still render its regime — the guards must not swallow results.
+            PipelinePhaseMetrics good = new PipelinePhaseMetrics { PhaseName = "good", GroupName = "FP-9a" };
+            good.StopReasonCounts[(int)PipelinePass.MeshSchedule, (int)PassStopReason.Quota] = 5000;
+            string goodText = Render(good);
+            ok &= Check("a well-sampled measurement phase still prints its regime",
+                goodText.Contains("VERDICT: AdmissionBound"));
+
+            ok &= Check("PipelinePhaseMetrics defaults to regime-bearing (only the transition opts out)",
+                good.RegimeBearing);
 
             return ok;
         }

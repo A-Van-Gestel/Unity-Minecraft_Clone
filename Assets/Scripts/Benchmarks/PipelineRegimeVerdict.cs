@@ -64,6 +64,22 @@ namespace Benchmarks
         /// <summary>The runner-up's capability-weighted share, on the same scale.</summary>
         public readonly double RunnerUpShare;
 
+        /// <summary>
+        /// Whether the phase carried enough eligible pass-reports to decide a regime at all
+        /// (<see cref="PipelineRegimeVerdict.MinRegimeObservations"/>). When <c>false</c>,
+        /// <see cref="Primary"/> is <see cref="PipelineRegime.NoData"/> because the question was
+        /// unanswerable — <b>not</b> because the pipeline was idle. The ordering axis's exact counterpart
+        /// (FP-9a); FP-8 printed <c>ThroughputBound</c> from a 14-frame phase for want of this.
+        /// </summary>
+        public readonly bool PrimaryDecidable;
+
+        /// <summary>
+        /// Eligible pass-reports the plurality was computed from — the sample size behind
+        /// <see cref="PrimaryDecidable"/>. Printed as a verdict input (§7.2) and the only thing that
+        /// distinguishes "nothing was recorded" (0) from "too little was recorded" (below the floor).
+        /// </summary>
+        public readonly int EligibleObservations;
+
         /// <summary>Initializes a verdict.</summary>
         /// <param name="primary">The regime from the dominant stop reason.</param>
         /// <param name="orderingBound">Whether the ordering axis also fired.</param>
@@ -73,9 +89,11 @@ namespace Benchmarks
         /// <param name="wasteFraction">Fraction of traces that ended as waste.</param>
         /// <param name="dominantShare">The dominant reason's capability-weighted share.</param>
         /// <param name="runnerUpShare">The runner-up's capability-weighted share.</param>
+        /// <param name="primaryDecidable">Whether the sample supported deciding a regime.</param>
+        /// <param name="eligibleObservations">Eligible pass-reports behind the plurality.</param>
         public RegimeVerdict(PipelineRegime primary, bool orderingBound, bool orderingDecidable,
             PassStopReason dominantReason, PassStopReason runnerUpReason, double wasteFraction,
-            double dominantShare, double runnerUpShare)
+            double dominantShare, double runnerUpShare, bool primaryDecidable, int eligibleObservations)
         {
             Primary = primary;
             OrderingBound = orderingBound;
@@ -85,6 +103,8 @@ namespace Benchmarks
             WasteFraction = wasteFraction;
             DominantShare = dominantShare;
             RunnerUpShare = runnerUpShare;
+            PrimaryDecidable = primaryDecidable;
+            EligibleObservations = eligibleObservations;
         }
     }
 
@@ -203,6 +223,20 @@ namespace Benchmarks
         /// near-empty phases without ever suppressing a genuine capture.
         /// </summary>
         public const int MinOrderingTerminalTraces = 30;
+
+        /// <summary>
+        /// Eligible pass-reports required before a <i>primary regime</i> is asserted at all. The ordering
+        /// axis's counterpart, added because FP-8 showed the plurality had no such guard: a 14-frame
+        /// generation phase printed <c>ThroughputBound</c> off 56 observations, and a 148-frame phase printed
+        /// <c>AdmissionBound</c> off 592 — both truncated routes, neither a result.
+        /// <para>
+        /// Measured in eligible <i>observations</i> rather than frames because that is the unit
+        /// <see cref="Evaluate"/> actually consumes, so the guard cannot drift from the quantity it guards.
+        /// 1 000 sits an order of magnitude clear on both sides of the FP-8 evidence — it rejects 56 and 592
+        /// while the smallest legitimate phase in that capture carried ~13 600.
+        /// </para>
+        /// </summary>
+        public const int MinRegimeObservations = 1000;
 
         /// <summary>
         /// Whether a disposition represents work the pipeline <i>completed</i> and then threw away — the
@@ -328,7 +362,15 @@ namespace Benchmarks
 
             if (eligibleTotal == 0 || dominantIndex < 0)
                 return new RegimeVerdict(PipelineRegime.NoData, orderingBound, orderingDecidable,
-                    PassStopReason.NotRun, PassStopReason.NotRun, wasteFraction, 0.0, 0.0);
+                    PassStopReason.NotRun, PassStopReason.NotRun, wasteFraction, 0.0, 0.0,
+                    false, eligibleTotal);
+
+            // Below the floor the plurality is arithmetically fine and statistically meaningless, so the
+            // regime is withheld rather than asserted — but the dominant/runner-up shares are still returned,
+            // because §7.2 requires the inputs a reader would need to disagree with this refusal. Primary is
+            // forced to NoData so a consumer reading it WITHOUT checking PrimaryDecidable cannot be misled;
+            // EligibleObservations is what separates "too little data" from "no data at all".
+            bool primaryDecidable = eligibleTotal >= MinRegimeObservations;
 
             PassStopReason dominant = (PassStopReason)dominantIndex;
             PassStopReason runnerUp = runnerUpIndex < 0 ? PassStopReason.NotRun : (PassStopReason)runnerUpIndex;
@@ -348,8 +390,9 @@ namespace Benchmarks
                 _ => PipelineRegime.Healthy,
             };
 
-            return new RegimeVerdict(primary, orderingBound, orderingDecidable, dominant, runnerUp,
-                wasteFraction, dominantShare, runnerUpShare);
+            return new RegimeVerdict(primaryDecidable ? primary : PipelineRegime.NoData, orderingBound,
+                orderingDecidable, dominant, runnerUp, wasteFraction, dominantShare, runnerUpShare,
+                primaryDecidable, eligibleTotal);
         }
     }
 }

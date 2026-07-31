@@ -277,12 +277,18 @@ namespace Benchmarks
         /// <param name="phaseName">Display name (e.g. "200 m/s").</param>
         /// <param name="groupName">Logical group (e.g. "Generation Pass").</param>
         /// <param name="speedMetersPerSecond">The phase's flight speed, sizing the trace table (§8 Q1).</param>
-        private void BeginPhaseBoth(string phaseName, string groupName, float speedMetersPerSecond)
+        /// <param name="regimeBearing">
+        /// <c>false</c> for the transition, which drains and unloads by design rather than measuring a
+        /// pipeline state (FP-9a). Defaults true so the generation and loading phases are unaffected.
+        /// </param>
+        private void BeginPhaseBoth(string phaseName, string groupName, float speedMetersPerSecond,
+            bool regimeBearing = true)
         {
             _metricsCollector.BeginPhase(phaseName, groupName);
             PipelineTelemetry.BeginPhase(phaseName, groupName,
                 PipelineTelemetry.EstimateTraceCapacity(_pipelineSettingsForCapture.LoadDistance,
-                    speedMetersPerSecond, TIME_PER_PHASE));
+                    speedMetersPerSecond, TIME_PER_PHASE),
+                regimeBearing);
         }
 
         /// <summary>Closes the current phase on both recorders (both are no-ops when none is open).</summary>
@@ -361,7 +367,7 @@ namespace Benchmarks
             OverallProgress = (float)_currentOverallPhaseIndex / _totalPhaseCount;
             TotalWaypointsInActivePass = 0;
 
-            BeginPhaseBoth(CurrentPhaseName, GROUP_TRANSITION, 0f);
+            BeginPhaseBoth(CurrentPhaseName, GROUP_TRANSITION, 0f, regimeBearing: false);
             Debug.Log("[Benchmark] === Transition: Force-unloading all chunks... ===");
             yield return World.Instance.ForceUnloadAllChunks();
             EndPhaseBoth();

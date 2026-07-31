@@ -1,6 +1,6 @@
 # Flight-Profile Capture (Pipeline Telemetry) Design
 
-**Version:** 1.12  
+**Version:** 1.13  
 **Date:** 2026-07-27  
 **Amended:** 2026-07-27 (v1.1) — re-verified every §2 row, §5 hook site, and both §8 questions against the
 code. Six §2 rows corrected, the hook chain shortened from five stamps to four (MP-6), the stop-reason set
@@ -38,6 +38,10 @@ first under §7.1 v2.** The headline **supersedes FP-4**: with never-admitted re
 fraction, ordering-boundness **decays** with view distance rather than growing, so it is a *low*-view-distance
 phenomenon confirmed at the default vd and absent by vd 20. §7.3 re-ranked — **P-8 promoted over P-7**. Two
 new instrument defects filed as FP-9a/FP-9b (§7.4.3).  
+**Amended:** 2026-07-31 (v1.13) — **FP-9a fixed and guarded** (§7.4.3): the primary regime gains the
+sample floor the ordering axis already had (`MinRegimeObservations = 1000` over eligible observations, plus
+`PrimaryDecidable`), and non-measurement phases are excluded from **both** axes via `RegimeBearing`. Baseline
+**B16**, Validate All 363 → **364**.  
 **Status:** ✅ **Implemented.** FP-0…FP-4 are all shipped; the capture is
 [`../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md)
 (three IL2CPP runs at viewDistance 5 / 10 / 20). **Verdict: ORDERING-BOUND at every view distance;
@@ -559,7 +563,7 @@ mirrored in the master backlog; instrument items are owned by this document.
 | **4** | ~~**FP-5 — fix the phase leak across runs**~~ ✅ **DONE 2026-07-28** | **this doc, §7.4** | Was blocking trustworthy multi-run sessions. Fixed via `BeginRun()`; guarded by **B11** (Validate All → 359). |
 | **5** | ~~**FP-6 — print `LoadDistance` in the report**~~ ✅ **DONE 2026-07-28, widened** | **this doc, §7.4** | Became "print every knob that produces a stop reason", once it was clear the capture machine runs non-default quotas. Guarded by **B12** (Validate All → 360). |
 | **6** | ~~**§7.1 v2 — fix the plurality dilution**~~ ✅ **DONE 2026-07-31** | **this doc, §7.4.2** | Shipped as FP-7e, as a per-(pass, reason) capability matrix rather than the "scheduling passes only" split this row assumed — FP-7b changed that premise. `RULE_VERSION` bumped to v2; guarded by the rewritten **B10**. |
-| **7** | **FP-9a — sample floor on the PRIMARY regime** ⬅ **new, from FP-8 D1** | this doc, §7.4.3 | FP-7's floor guards the ordering axis only. FP-8 printed `ThroughputBound` from a **14-frame** phase, `AdmissionBound` from 148 frames, and a regime for a drain-and-unload *transition*. Direct analogue of the ordering floor. |
+| **7** | ~~**FP-9a — sample floor on the PRIMARY regime**~~ ✅ **DONE 2026-07-31** | this doc, §7.4.3 | Shipped as two mechanisms rather than one: a floor over eligible observations, plus `RegimeBearing` for phases that are not measurements — which no floor could have caught, the transition being comfortably over any sane threshold. Guarded by **B16**. |
 | **8** | **FP-9b — hold generation waypoints constant across a sweep** ⬅ **new, from FP-8 D2** | this doc, §7.4.3 | Quantified at last: waypoints **12/8/6/4/4** and final-phase durations **19.7/3.2/19.8/2.2/0.7 s** at vd 5/8/10/15/20, because `BuildWaypoints` derives margin and row stride from `LoadDistance`. Generation cross-vd numbers are unusable until fixed. |
 | **9** | **Per-chunk CSV export** | Extension roadmap below (v3+) | Only way to separate F4's two stall populations. Demand case reinforced by FP-8 (vd 15 / gen / 50 m/s: p50 1 023 ms vs max 11 273 ms). |
 
@@ -715,7 +719,7 @@ again, the argument for §7.2 as a standing requirement.
 
 | Phase | Defect | Evidence | Fix (open) |
 |-------|--------|----------|-----------|
-| **FP-9a** 🔴 **OPEN** | **The min-sample floor guards the ordering axis but not the primary regime.** FP-7 added `MinOrderingTerminalTraces = 30` so a handful of traces cannot decide the ordering axis. Nothing equivalent gates the plurality, so a phase with almost no frames still asserts a regime. | FP-8 printed `ThroughputBound` for **vd 20 / Generation / 100 m/s** off **14 frames** (441 traces, all `InFlightAtPhaseEnd`, `InFlightCap` "winning" at 50.0 %); `AdmissionBound` for vd 15 / gen / 100 m/s off 148 frames; and `AdmissionBound` for vd 8's **Transition** — a drain-and-unload phase that has no meaningful regime at all. | A frame-count floor on `Evaluate`, mirroring the ordering floor, with its own report rendering (`NoData` or an explicit "undecidable" state — the FP-7 lesson is that "not bound" and "could not tell" must never render alike). |
+| **FP-9a** ✅ **DONE** | **The min-sample floor guards the ordering axis but not the primary regime.** FP-7 added `MinOrderingTerminalTraces = 30` so a handful of traces cannot decide the ordering axis. Nothing equivalent gated the plurality, so a phase with almost no frames still asserted a regime. | FP-8 printed `ThroughputBound` for **vd 20 / Generation / 100 m/s** off **14 frames** (441 traces, all `InFlightAtPhaseEnd`, `InFlightCap` "winning" at 50.0 %); `AdmissionBound` for vd 15 / gen / 100 m/s off 148 frames; and `AdmissionBound` for vd 8's **Transition** — a drain-and-unload phase that has no meaningful regime at all. | **As built — two mechanisms, because one could not do it.** (1) `MinRegimeObservations = 1000` on `eligibleTotal`, with a new `PrimaryDecidable` flag mirroring `OrderingDecidable`. Measured in **eligible observations, not frames**: that is the unit `Evaluate` consumes, so the guard cannot drift from what it guards, and it needs no extra parameter. 1 000 clears the FP-8 evidence by an order of magnitude either way — it rejects 56 and 592 while the smallest legitimate phase carried ~13 600. (2) `PipelinePhaseMetrics.RegimeBearing` + an optional `BeginPhase(…, regimeBearing)`, set `false` for the transition — **a floor could never have caught that one**, since it carried ~1 332 observations, comfortably over any sane floor. The report renders the three no-regime outcomes distinguishably (`NO DATA` / `UNDECIDABLE (n of m)` / `NO REGIME`), per the FP-7 rule that "not bound" and "could not tell" must never read alike, and prints the observation count as a verdict input. A non-measurement phase is spared **both** axes, not just the primary — self-review caught that the ordering axis could otherwise label a drain-and-unload `ORDERING-BOUND` for discarding work on purpose, the same category error one axis over; FP-8's transitions hid it only by having zero traces. Guarded by **B16**. |
 | **FP-9b** 🔴 **OPEN** | **Generation-pass results are not comparable across a view-distance sweep.** `BuildWaypoints` derives both `marginChunks` and `rowStride` from `LoadDistance`, so a larger view distance yields fewer waypoints in a fixed region and the final generation phase truncates. | Waypoints **12 / 8 / 6 / 4 / 4** and final-phase durations **19.7 / 3.2 / 19.8 / 2.2 / 0.7 s** at vd 5/8/10/15/20. The loading pass is unaffected (12 waypoints at every vd), which is why every FP-8 cross-vd claim is loading-only. | Scale `benchmarkRegionSize` with `LoadDistance` so waypoint count is held constant, or make the confound impossible to overlook in the report rather than a Configuration-block line. |
 
 ### Extension roadmap (post-FP-4, in intended order)

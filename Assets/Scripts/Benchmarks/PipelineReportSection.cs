@@ -285,6 +285,8 @@ namespace Benchmarks
             // fraction above cannot be recomputed from the disposition table beside it.
             sb.AppendLine($"    denominator excludes {abandoned:N0} AbandonedBeforeAdmission " +
                           "(requested then unloaded before admission — no stage ran, so not pipeline work)");
+            sb.AppendLine($"    eligible observations = {verdict.EligibleObservations:N0} " +
+                          $"(min {PipelineRegimeVerdict.MinRegimeObservations:N0} to decide a regime)");
             sb.AppendLine($"    rule = {RULE_VERSION}");
 
             // "Not ordering-bound" and "could not tell" are different claims and must never render alike —
@@ -292,7 +294,35 @@ namespace Benchmarks
             string ordering = verdict.OrderingDecidable
                 ? verdict.OrderingBound ? " + ORDERING-BOUND" : ""
                 : " + ordering axis UNDECIDABLE (too few terminal traces)";
-            sb.AppendLine($"  <b>VERDICT: {verdict.Primary}{ordering}</b>");
+
+            // A phase that is not a measurement gets NEITHER axis. The ordering axis would otherwise make the
+            // same category error the primary regime just stopped making: a drain-and-unload that happens to
+            // close enough traces would print ORDERING-BOUND for deliberately discarding work, which is its
+            // whole job. FP-8's transitions had zero traces so this never surfaced, but UnloadChunks does
+            // stamp dispositions, so it is reachable rather than theoretical.
+            if (!phase.RegimeBearing)
+            {
+                sb.AppendLine("  <b>VERDICT: NO REGIME (not a measurement phase — this phase drains and " +
+                              "unloads by design, so neither axis describes the pipeline)</b>");
+                return;
+            }
+
+            // Three ways the primary regime can be absent, all of which a reader must be able to tell apart
+            // (FP-9a). Only the third is a statement about the pipeline.
+            string primary;
+            if (!verdict.PrimaryDecidable)
+            {
+                primary = verdict.EligibleObservations == 0
+                    ? "NO DATA (no pass reported a stop reason)"
+                    : $"UNDECIDABLE (only {verdict.EligibleObservations:N0} eligible observations, " +
+                      $"need {PipelineRegimeVerdict.MinRegimeObservations:N0})";
+            }
+            else
+            {
+                primary = verdict.Primary.ToString();
+            }
+
+            sb.AppendLine($"  <b>VERDICT: {primary}{ordering}</b>");
         }
 
         private static string Ms(long ticks) => $"{PipelineTelemetry.TicksToMs(ticks):F1}";
