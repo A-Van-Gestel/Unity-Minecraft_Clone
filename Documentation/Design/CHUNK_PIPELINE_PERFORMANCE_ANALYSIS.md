@@ -346,6 +346,14 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
    queue, hash-ordered lighting ready set, FIFO mesh queue). **Acceptance target: FP-4's visibility criterion,
    `latency ≤ viewDistance × 16 ÷ speed`** — a budget, not a percentage. **Needs its own design doc**; touches
    pipeline invariants, so the `chunk-lifecycle` skill is mandatory.
+
+   > **Caveat on the magnitude, added 2026-07-31 (FP-7a).** The waste percentages above were computed with
+   > **requests the panic gate never admitted counted as waste** — chunks for which no stage ever ran. FP-7a
+   > removes them from both the numerator and the denominator, so the figures quoted here are **not
+   > reproducible on a current build** and a re-capture is required to restate them. The *ranking* is very
+   > likely unaffected: the threshold is exceeded at the **default** view distance too, where the gate never
+   > closes and abandonment is therefore rare, so the intrinsic-ordering conclusion does not depend on the
+   > inflated leg. Treat the ordering of this list as sound and the specific percentages as superseded.
 6. **P-8 — scale the panic-gate thresholds with view distance.** `panicGateCloseThreshold` / `ReopenThreshold`
    are absolute constants (256 / 128) while the resident square they guard grows as view-distance²: a
    256-chunk backlog is 88.6 % of the resident set at vd 5 but 11.6 % at vd 20. Measured consequence — gate

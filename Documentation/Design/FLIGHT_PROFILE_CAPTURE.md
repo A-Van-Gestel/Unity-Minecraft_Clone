@@ -1,6 +1,6 @@
 # Flight-Profile Capture (Pipeline Telemetry) Design
 
-**Version:** 1.10  
+**Version:** 1.11  
 **Date:** 2026-07-27  
 **Amended:** 2026-07-27 (v1.1) — re-verified every §2 row, §5 hook site, and both §8 questions against the
 code. Six §2 rows corrected, the hook chain shortened from five stamps to four (MP-6), the stop-reason set
@@ -27,6 +27,12 @@ viewDistance ≥ 10**. Adds the lockstep result, the visibility criterion, and a
 **Amended:** 2026-07-28 (v1.10) — **FP-6 done and widened** (§7.4): the report now prints every pipeline knob
 that produces a stop reason, grouped by which one, via `PipelineSettingsSnapshot`. Baseline **B12**,
 Validate All → **360**. Notes that the FP-4 captures predate this and their tuning is unrecorded.  
+**Amended:** 2026-07-31 (v1.11) — **FP-7: five measurement defects fixed** (§7.4.2), found by reviewing the
+instrument rather than by running it. Four concerned what the numbers *mean* — never-admitted requests counted
+as waste, a quota stop reported as `OutOfWork`, flag-less lighting entries counted as declined, and a
+disposition that was wrong in every firing — and the fifth closes §7.1.1 as **§7.1 v2**, a per-(pass, reason)
+capability-weighted plurality. Baselines **B13**/**B14**, B10 rewritten, Validate All 360 → **362**.
+**The FP-4 report is no longer comparable to future captures on either axis; `RULE_VERSION` says so.**  
 **Status:** ✅ **Implemented.** FP-0…FP-4 are all shipped; the capture is
 [`../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md)
 (three IL2CPP runs at viewDistance 5 / 10 / 20). **Verdict: ORDERING-BOUND at every view distance;
@@ -488,6 +494,14 @@ that found it). A §7.1 v2 should restrict the plurality to passes capable of ex
 or abandon the single-plurality framing for a per-pass regime vector. Whoever writes it must bump
 `RULE_VERSION` so the two generations of report are never silently compared.
 
+> **v1.11 — FIXED by FP-7e (§7.4.2).** The first option was taken, generalised: eligibility is per
+> **(pass, reason)** rather than per pass, and shares are measured against each reason's own eligible
+> opportunity. Note that **this section's own diagnosis was partly overtaken** — it says `GenerationProcess`
+> "can emit only `OutOfWork` or `Ceiling`", and FP-7b showed that was never true: the pass carries a
+> structure-mods quota, and the 48 all-zero cells the capture cited were evidence that the quota *was not hit
+> during those phases*, not that it could not be. The empirical check was sound; the inference from it to a
+> capability claim was not. `RULE_VERSION` is bumped to v2.
+
 ### 7.2 Raw results are mandatory — the verdict never replaces them (v1.2)
 
 **A capture that reports only its conclusion has failed, exactly as surely as one that reports no
@@ -532,7 +546,7 @@ mirrored in the master backlog; instrument items are owned by this document.
 | **3** | **Adopt the visibility criterion as the acceptance target** | This doc + P-7's design | `latency ≤ viewDistance × 16 ÷ speed`. Falsifiable, matches independent visual observation across three legs, and gives (1) a target number rather than "less waste". |
 | **4** | ~~**FP-5 — fix the phase leak across runs**~~ ✅ **DONE 2026-07-28** | **this doc, §7.4** | Was blocking trustworthy multi-run sessions. Fixed via `BeginRun()`; guarded by **B11** (Validate All → 359). |
 | **5** | ~~**FP-6 — print `LoadDistance` in the report**~~ ✅ **DONE 2026-07-28, widened** | **this doc, §7.4** | Became "print every knob that produces a stop reason", once it was clear the capture machine runs non-default quotas. Guarded by **B12** (Validate All → 360). |
-| **6** | **§7.1 v2 — fix the plurality dilution** | this doc, §7.1.1 | Removes the manual recomputation every future capture would otherwise need. Must bump `RULE_VERSION`. |
+| **6** | ~~**§7.1 v2 — fix the plurality dilution**~~ ✅ **DONE 2026-07-31** | **this doc, §7.4.2** | Shipped as FP-7e, as a per-(pass, reason) capability matrix rather than the "scheduling passes only" split this row assumed — FP-7b changed that premise. `RULE_VERSION` bumped to v2; guarded by the rewritten **B10**. |
 | **7** | **Per-chunk CSV export** | Extension roadmap below (v3+) | Only way to separate F4's two stall populations. Demand case now recorded. |
 
 **Not licensed by the capture:** any in-flight-cap or readiness work. Both regimes were tested for at three
@@ -546,6 +560,8 @@ Both were found *by* the capture, and both must land before the next one or its 
 |-------|--------|-----|
 | **FP-5** ✅ **FIXED** | **Telemetry phases leaked across benchmark runs in one process.** `s_completedPhases` was cleared only in `DomainReset`, i.e. once per play-mode entry / player start. `BenchmarkController` set `Enabled = true` at run start but never cleared the list, while `_metricsCollector.StartRecording()` resets its own — so the two recorders **disagreed at the run boundary** and a second run reported the first run's phases as its own. Observed: the vd-10 log carries all 9 vd-5 phases verbatim before its own 8. The *run-level* instance of exactly the desync FP-3's paired `BeginPhaseBoth`/`EndPhaseBoth` prevents at the phase level. | **As built:** public `PipelineTelemetry.BeginRun()`, called from `BenchmarkController` immediately before `Enabled = true` so both recorders start a run empty. **`BeginRun` is the caller of `DomainReset`, not the reverse** — a shared private helper is the obvious shape and is *wrong here*: UDR0002 requires every mutable static to be assigned **lexically inside** the `[RuntimeInitializeOnLoadMethod]`, and delegating outward trips it on `s_activePhase`. A comment at the site says so, because the natural "tidy-up" reintroduces the warning. Side effect worth knowing: `BeginRun` also clears `Enabled`, so callers restoring a saved flag must restore it *after* the call. |
 | **FP-6** ✅ **DONE — and widened beyond the original scope** | **The report stated none of the tuning that produces its own stop reasons.** `LoadDistance` was the entry point (its absence caused v1.7's retracted "capacity model under-predicts 46 %" claim, since the wrong table row was read), but it is not the only one: a phase reporting `Quota` on 99 % of frames is uninterpretable without the quota, and the §7.1 rule turns exactly those tallies into a regime. Confirmed non-hypothetical, though **not** for the reason first recorded — see §7.4.1. | **As built:** `Benchmarks/PipelineSettingsSnapshot.cs` — 18 values captured at run start (not read at report time: settings are editable mid-session, so the report must state what the run *used*) and rendered by `AppendTo` into a new **`=== Pipeline Settings (as used by this run) ===`** block, **grouped by the stop reason each knob produces** (quotas → `Quota`, in-flight caps → `InFlightCap`, ms ceilings → `Ceiling`, panic gate → *no* stop reason, visible only as the per-phase gate-closed %). Prints the derived resident square and the F5 ratio. `_loadDistanceForCapture` is subsumed by the snapshot. Rendering lives **on the snapshot**, not in `BenchmarkReportGenerator`, so a field added to the capture cannot be silently left unprinted. Guarded by **B12**. |
+
+| **FP-7** ✅ **DONE — five defects, all in what the numbers MEAN** | **The instrument mis-measured four of its own inputs, and the §7.1.1 rule defect was still unfixed.** Found by code review of the FP-1…FP-6 commits rather than by a capture, but every one of them moved a shipped verdict. See §7.4.2 for the five, the evidence for each, and what it costs the FP-4 report. | **As built:** `AbandonedBeforeAdmission` disposition + `StampUnloaded` (a); `ClassifyStop` wiring + `genModsQuotaSpent` (b); `lightCandidatesSeen--` on the flag-less arm (c); the `LoadStranded` stamp deleted (d); §7.1 **v2**'s capability-weighted plurality + a `RecordPassStop` staleness assert (e). Waste predicates moved onto `PipelineRegimeVerdict` so the verdict and the table under it cannot disagree. Guarded by **B13**/**B14**, B10 rewritten; Validate All 360 → **362**. |
 
 #### 7.4.1 Why a capture's settings are genuinely undeterminable without printing them (v1.10)
 
@@ -590,6 +606,81 @@ whatever actually applied, regardless of which path produced it.
 > confounded. The loading pass uses 12 everywhere and is comparable. Either hold waypoints constant across a
 > sweep, or print them prominently enough that the confound cannot be missed — they are currently in the
 > Configuration block but easy to overlook.
+
+#### 7.4.2 FP-7 — five measurement defects found by reviewing the instrument, not by running it (v1.11)
+
+FP-5 and FP-6 were found *by* a capture. FP-7's five were found by a code review of the FP-1…FP-6 commits.
+That difference matters for how much confidence to place in the FP-4 numbers: a capture only surfaces defects
+that make the output *look* wrong, and every one of these made it look *right*.
+
+| # | Defect | Evidence it is real | Fix |
+|---|--------|---------------------|-----|
+| **a** | **Requests the panic gate never admitted were counted as waste.** `UnloadChunks` stamped `UnloadedBeforeMeshApplied` on every unloaded chunk still holding a trace — including placeholders created by `CheckViewDistance` that were never admitted, for which no stage ran. Waste is the *sole* input to the ORDERING-BOUND axis. | Structural: `GetOrCreatePlaceholder` creates the `ChunkData` at request time and `StampRequested` fires there, while `IsLoading`/`AdmittedTicks` are only set at admission. An un-admitted placeholder has no job, no light flags and cannot strand a neighbour, so `ChunkUnloadDecision` always returns `Unload` and it always reaches the stamp. Worst exactly where the gate is closed most — 92–96 % of frames at vd ≥ 10. | New `AbandonedBeforeAdmission` disposition; `StampUnloaded` picks between the two from `AdmittedTicks`, since the engine cannot see trace state. Excluded from the waste numerator **and denominator** — the fraction means "of the work the pipeline completed, how much was thrown away", and a request that never entered the pipeline is in neither term. Its count is still printed, plus an explicit exclusion line under the fraction (§7.2). |
+| **b** | **`GenerationProcess` reported `OutOfWork` when its structure-mods quota stopped it.** (Its first fix over-corrected — see the quota note below §7.1 v2.) The pass has *two* exits, not one: the ms ceiling, and `maxStructureModsPerFrame`, which breaks the scan outright at one site and defers a job to the next frame at two others. `OutOfWork` maps to `Healthy`. | The `modsBudget` counter is declared once per pass and decremented across jobs, so it genuinely terminates the outer loop. Three docstrings asserted the opposite ("ceiling-only", "a quota stop is unreachable here", "Unreachable for the two ceiling-only passes") and had been wrong since FP-2. | Routed through the shared `ClassifyStop` with `genModsQuotaSpent` set at all three sites. `ClassifyStop` ranks Quota above Ceiling while this loop checks the ceiling first; the inversion is deliberate and documented — a spent quota left work behind whichever limit ended the scan, and that attribution cannot let an admission stall hide behind a hitch guard. |
+| **c** | **The lighting scan counted flag-less entries as declined candidates.** The `Remove` arm fires when *no* lighting flag remains, i.e. an earlier schedule already cleared them — bookkeeping, not declined work. | `LightingScanDecision.EvaluateReadyChunk` returns `Remove` only under `!needsInitialLighting && !needsEdgeCheck && !hasLightChanges`. The code already excluded the *stale-entry* arm for exactly this reason, three lines above. After the ~1 s `PromoteAll`, the ready set is dominated by such entries → `AllDeclined` → `ReadinessBound` on a frame where nothing was declined. | `lightCandidatesSeen--` on that arm. The park arms, which *are* the readiness signal, still count. |
+| **d** | **`LoadStranded` was wrong in 100 % of its firings and correct in none.** | `worldData.RemoveChunk` has exactly **one** call site — inside `UnloadChunks`, *after* the disposition stamp. So the post-await guard's "chunk gone" arms are only reachable once that coord's trace is already closed and removed, making the stamp a no-op there. The only arm that can still find a live trace is the pool-ABA recycle — where the trace belongs to the **successor** placeholder, which was then recorded as waste and lost its end-to-end latency sample. `LoadStranded = 0` in all 9 FP-4 phases is consistent. | Stamp deleted. The enum member is **retained and documented as retired** rather than renumbered, so disposition tables either side of the FP-7 boundary still line up column-for-column. |
+| **e** | **§7.1.1's rule defect, still unfixed** (roadmap item 6). | Recorded in §7.1.1 since v1.7. | §7.1 **v2** — see below. |
+
+**§7.1 v2 — the participation-weighted plurality.** Each reason is scored only over the passes able to emit
+it: `share(reason) = Σ tallies over eligible passes ÷ Σ those passes' own reports`. Declared as a
+`CanEmit(pass, reason)` matrix rather than hardcoded as "the scheduling passes", because **FP-7b changed the
+premise §7.1.1 assumed** — `GenerationProcess` owns a real quota, so the split is not
+scheduling-vs-completion, and only `MeshProcess` is genuinely ceiling-only.
+
+> **The denominator is measured participation, not nominal opportunity — and the first draft got this
+> wrong.** It divided by `frameCount × eligible pass count`, which charges a full phase of chances to a pass
+> that never ran. `LightSchedule` sits inside `if (settings.enableLighting)`, so a lighting-off capture gave
+> it a silent zero vote in every reason while it still occupied a denominator slot — capping `Quota` at 2⁄3
+> against `OutOfWork`'s 3⁄4 and printing *Healthy* over a flat-out quota stall. **That is the §7.1.1 dilution
+> rebuilt inside its own fix**, and it was caught by review, not by the B10 dilution scenario, which feeds
+> all four passes non-zero tallies and therefore cannot see it. The regression scenario added for it uses
+> proportions where the two formulas *disagree* (125⁄200 vs 125⁄300 against 175⁄300 vs 175⁄400) — a shape
+> both accept would guard nothing.
+>
+> Participation is **derived from the tally matrix** rather than counted alongside it, so it cannot desync
+> from the numerator it divides (the FP-5 lesson), and it is filtered by `CanEmit` for the same reason the
+> numerator is. It assumes **one report per pass per frame**. That holds at every current call site — but
+> only by enable-timing: `ForceCompleteDataJobsCoroutine` drives `ProcessGenerationJobs` in a tight
+> `while` loop, and it merely happens that telemetry is still off during startup. A second `RecordPassStop`
+> assert checks the invariant directly rather than trusting that ordering to survive.
+
+Two consequences worth stating rather than discovering later:
+
+1. **A hand-written capability claim is exactly what went stale in FP-7b**, so `RecordPassStop` now asserts
+   the matrix against what production actually records (editor/development builds), and logs loudly on
+   divergence. Without that, v2 inherits the defect it exists to fix. Both asserts are **latched per
+   (pass, reason)** — they run once per pass per frame, so an unlatched error would emit thousands of lines
+   into the very log the capture is read from, burying the signal it exists to raise. `DomainReset` re-arms
+   them so a repeat capture cannot run silently on a known-bad matrix.
+2. **v2's shares are lower than §7.1.1's hand recomputation**, and deliberately so. That recomputation dropped
+   the completion passes entirely and got "Quota at 99.5 %". v2 keeps `GenerationProcess` in Quota's
+   denominator, so its `OutOfWork` frames count as genuine *abstentions* — a pass that could have reported a
+   quota stop and didn't is evidence. Expect the more conservative number.
+
+**Two further corrections from the same review, folded into v2 rather than versioned separately.** No capture
+has ever run under v2 — FP-7 was still uncommitted — so there is no v2 report for a bump to protect, and a v3
+whose only distinguishing feature was a bug that never reached a report would mislead rather than inform.
+
+- **The structure-mods quota stop was over-reported.** FP-7b set `genModsQuotaSpent` at all three
+  `modsBudget <= 0` sites, on the reasoning "quota spent ⇒ work left behind". That does not hold at the third
+  site, which fires *after* a job is fully processed: if it was the last completed job in the scan, the break
+  is equivalent to falling out of the loop and nothing was deferred — yet the frame voted `Quota` →
+  `AdmissionBound`. The check now sits at the **top** of the loop body, where a completed job is about to be
+  refused, mirroring the ceiling's placement. Which jobs get served is unchanged.
+- **The ordering axis has a minimum-sample floor** (`MinOrderingTerminalTraces = 30`). Excluding
+  never-admitted requests was right, but it shrank the denominator, and 1 waste of 3 terminal traces is 33 % —
+  over threshold, off a sample of three. Below the floor the axis reports **undecidable**, rendered distinctly
+  from "not ordering-bound": those are different claims, and only the second is a clean bill of health.
+- **Exact share ties resolve to the bound regime, not to `Healthy`.** Ratios over differing denominators make
+  exact ties reachable (200⁄400 and 150⁄300 are both 0.5), and the walk order reaches `OutOfWork` first, so a
+  strict `>` sent every tie to the "everything is fine" arm. Ties between two *bound* reasons have no
+  principled ordering and keep the deterministic walk order, visible as near-equal printed shares. (This bias
+  is not a v2 regression — v1 had the identical walk and comparison; v2 merely makes ties more reachable.)
+
+**What this costs the FP-4 report.** Its per-phase disposition tables, waste fractions, and primary verdicts
+were all produced under superseded semantics. `RULE_VERSION` is bumped to v2 precisely so the two generations
+can never be compared without noticing. The raw tallies §7.2 mandates remain valid and re-derivable — which is,
+again, the argument for §7.2 as a standing requirement.
 
 ### Extension roadmap (post-FP-4, in intended order)
 
@@ -646,6 +737,16 @@ whatever actually applied, regardless of which path produced it.
    reporting on: the generation discard is a deliberate, flagged optimization, whereas this one is a
    correctness guard whose waste has simply never been measured.
 
+   > **v1.11 — this answer is RETRACTED (FP-7d, §7.4.2).** The site is real, but it is **not reachable with a
+   > live trace**, so no disposition can be stamped there. `worldData.RemoveChunk` has exactly one call site,
+   > inside `UnloadChunks`, which closes and removes the coord's trace *before* the awaiting load can observe
+   > the removal — so the guard's "chunk gone" arms always find nothing, and its only live-trace arm is the
+   > pool-ABA recycle, where the trace belongs to the **successor** placeholder. The stamp was therefore
+   > wrong in every firing. The waste itself is not unmeasured: the predecessor's
+   > `UnloadedBeforeMeshApplied` already accounts for it. The reasoning error was inferring reachability from
+   > the *existence* of a guard clause without tracing who can reach it — the same shape as §7.1.1's
+   > capability inference.
+
 ---
 
 ## 9. Assumptions and limitations (v1.2)
@@ -669,20 +770,65 @@ whether they inherit them *knowingly*.
 
 1. **The enabled-run guard is partial**, per §7 item 1. Hooks resident in `World.Update` are not
    suite-reachable.
-2. **Disabled-path allocation-freedom is not assertable on editor Mono** — inspection plus an IL2CPP GC-alloc
+
+   > **v1.11 — FP-7 is the demand case for this limitation, and it is not cheap.** Four of FP-7's five
+   > defects (a–d) live in play-mode call sites, so **B13/B14 pin only the classification logic, never the
+   > wiring** — reverting `StampUnloaded` to `StampDisposition`, dropping `genModsQuotaSpent`, deleting the
+   > `lightCandidatesSeen--`, or restoring the `LoadStranded` stamp would each leave the whole suite green.
+   > Every one of those defects shipped past review once already. This is the second time the same
+   > limitation has cost real correctness (B11's call site was the first); a play-mode harness is the
+   > structural answer, and it remains out of scope here.
+
+2. **Cross-generation report comparison is unsafe, and only `RULE_VERSION` prevents it.** FP-7 changed both
+   what counts as waste and how the plurality is weighted, so a v1 report (every capture through FP-4) and a
+   v2 report describe different quantities under identical headings. The raw §7.2 tallies remain valid and
+   re-derivable in both; the *derived* figures do not carry across.
+3. **Disabled-path allocation-freedom is not assertable on editor Mono** — inspection plus an IL2CPP GC-alloc
    read is the whole of the evidence.
-3. **Unlike the MP-1 counters, this layer is not `[Conditional]`-compiled out of release.** It cannot be: FP-4
+4. **Unlike the MP-1 counters, this layer is not `[Conditional]`-compiled out of release.** It cannot be: FP-4
    must *toggle* it inside a Development Build. The residual release cost is one static bool read per stage
    transition — the `WorldFrameProfiler` bargain, accepted for the same reason.
-4. **Exact percentile recomputation from a written report is not supported** — see §7.2's stated limitation
+5. **Exact percentile recomputation from a written report is not supported** — see §7.2's stated limitation
    and the v3+ CSV item.
-5. **FP fixes nothing.** The §4.4-vs-§4.1/§2-vs-ordering-vs-readiness choice happens *after* FP-4's verdict.
+6. **FP fixes nothing.** The §4.4-vs-§4.1/§2-vs-ordering-vs-readiness choice happens *after* FP-4's verdict.
    Any change to engine behavior motivated by this capture is a separate item with its own design.
 
 ---
 
 ## Document History
 
+* **v1.11** - **FP-7: the instrument's own measurements audited and corrected** (2026-07-31). Five defects,
+  found by reviewing the FP-1…FP-6 commits rather than by running a capture — which matters, because a
+  capture only surfaces what looks wrong, and all five looked right. Four concerned what the numbers *mean*:
+  requests the panic gate never admitted were counted as **waste** (the sole input to the ordering axis, and
+  worst exactly where the gate is closed 92–96 % of frames); `GenerationProcess`'s structure-mods quota stop
+  was reported as `OutOfWork`, which maps to *Healthy*; the lighting scan counted flag-less entries as
+  declined candidates, so the ~1 s `PromoteAll` could manufacture a `ReadinessBound` verdict; and
+  `LoadStranded` was **wrong in 100 % of its firings** — `RemoveChunk` has one call site, which closes the
+  trace first, leaving only the pool-ABA arm, where the trace belongs to the successor. The fifth closes
+  §7.1.1 as **§7.1 v2**: a per-(pass, reason) capability matrix, generalised from that section's own
+  proposal because FP-7b falsified its premise (`GenerationProcess` was never ceiling-only). A
+  `RecordPassStop` assert now checks the matrix against production, since a stale capability claim is
+  precisely what FP-7b was. Waste classification moved onto `PipelineRegimeVerdict` so the verdict and the
+  table beneath it cannot diverge (the FP-5 lesson). Guarded by **B13**/**B14** with B10 rewritten;
+  prove-red confirmed by three temporary mutations, each reddening exactly one baseline with the other
+  thirteen untouched. Validate All **362/362** across 16 suites, telemetry disabled *and* enabled, the
+  enabled leg reporting `phasesLeftBehind = 0` and no staleness assert. **Cost, stated plainly: the FP-4
+  report is no longer comparable to future captures on either axis, and P-7's waste magnitudes are
+  superseded pending a re-capture** — its ranking is not, since the default view distance exceeds threshold
+  with the gate never closing.
+  <br>**A second review pass over FP-7 itself found three more**, all folded into v2 before it shipped (no
+  v2 report existed, so no version bump was warranted). The serious one: v2's first denominator divided by
+  *nominal* opportunity, `frameCount × eligible passes`, which charges a full phase of chances to a pass that
+  never ran — with lighting disabled, `LightSchedule` held a denominator slot while casting no vote, capping
+  `Quota` at 2⁄3 against `OutOfWork`'s 3⁄4 and printing *Healthy* over a flat-out quota stall. **The dilution
+  defect had been rebuilt inside its own fix**, and B10's dilution scenario could not see it because that
+  scenario gives all four passes non-zero tallies. The denominator is now each eligible pass's *measured*
+  participation, derived from the tally matrix so it cannot desync, with a new assert on the
+  one-report-per-pass-per-frame invariant it rests on. Also: the quota stop was over-reported at a break that
+  left no work behind, and the ordering axis gained a 30-trace floor plus a tie-break away from `Healthy`.
+  Lesson worth keeping — **a guard scenario that both the correct and the incorrect implementation accept
+  guards nothing**; the new regression case is built from proportions where the two formulas disagree.
 * **v1.10** - **FP-6 done, and deliberately wider than it was filed as** (2026-07-28). It was scoped as "print
   `LoadDistance`"; the operator pointed out that the per-frame caps and time budgets shape the pipeline just as
   much, and that is right for a reason the original framing missed: **every one of those knobs *produces* one
@@ -898,5 +1044,5 @@ whether they inherit them *knowingly*.
 
 ---
 
-**Last Updated:** 2026-07-27 (v1.6 FP-3 as-built sync)  
-**Next Review:** when FP-0 starts, or if the flight symptom is diagnosed by other means first
+**Last Updated:** 2026-07-31 (v1.11 FP-7 measurement-correctness sync)  
+**Next Review:** when the post-FP-7 re-capture (FP-8) is run, or when P-7's design doc starts
