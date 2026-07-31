@@ -48,8 +48,7 @@ namespace Benchmarks
             float[] generationSpeeds,
             float[] loadingSpeeds,
             float timePerPhase,
-            int regionSize,
-            int configuredRegionSize,
+            BenchmarkRouteGeometry routeGeometry,
             int generationWaypointCount,
             int loadingWaypointCount,
             TimeSpan totalDuration,
@@ -61,8 +60,8 @@ namespace Benchmarks
 
             AppendHeader(sb, totalDuration);
             sb.Append(BenchmarkEnvironment.DescribeSystem());
-            AppendConfiguration(sb, generationSpeeds, loadingSpeeds, timePerPhase, regionSize,
-                configuredRegionSize, generationWaypointCount, loadingWaypointCount, savedVSyncCount, savedTargetFrameRate);
+            AppendConfiguration(sb, generationSpeeds, loadingSpeeds, timePerPhase, routeGeometry,
+                generationWaypointCount, loadingWaypointCount, savedVSyncCount, savedTargetFrameRate);
             pipelineSettings.AppendTo(sb);
             AppendOverallSummary(sb, collector.CompletedPhases, totalDuration);
             AppendGroupedPhases(sb, collector.CompletedPhases);
@@ -97,8 +96,7 @@ namespace Benchmarks
             float[] generationSpeeds,
             float[] loadingSpeeds,
             float timePerPhase,
-            int regionSize,
-            int configuredRegionSize,
+            BenchmarkRouteGeometry routeGeometry,
             int generationWaypointCount,
             int loadingWaypointCount,
             int savedVSyncCount,
@@ -106,16 +104,26 @@ namespace Benchmarks
         {
             sb.AppendLine("<b>=== Configuration ===</b>");
 
-            string regionLabel = regionSize != configuredRegionSize
-                ? $"{regionSize} chunks (configured: {configuredRegionSize}, auto-scaled)"
-                : $"{regionSize} chunks";
-
-            sb.AppendLine($"Region size:         {regionLabel}");
             sb.AppendLine($"Phase duration:      {timePerPhase:F0} s");
             sb.AppendLine($"Generation speeds:   {string.Join("; ", generationSpeeds)} m/s");
             sb.AppendLine($"Loading speeds:      {string.Join("; ", loadingSpeeds)} m/s");
             sb.AppendLine($"Generation WPs:      {generationWaypointCount}");
             sb.AppendLine($"Loading WPs:         {loadingWaypointCount}");
+            sb.AppendLine();
+
+            // FP-9b: the route is DERIVED from the speeds and phase duration, so these are outputs, not
+            // settings. Printed because two captures whose routes differ are not comparable, and before FP-9b
+            // nothing in the report said so — the generation sweep had silently collapsed from 12 waypoints
+            // to 4 across the FP-8 view-distance sweep.
+            sb.AppendLine("  Route (derived — not configurable):");
+            sb.AppendLine($"    Region:            {routeGeometry.RegionChunks} chunks (derived)");
+            sb.AppendLine($"    Sweep rows:        {routeGeometry.Rows}  (row stride {routeGeometry.RowStrideChunks} chunks = 2 x LoadDistance)");
+            sb.AppendLine($"    Route length:      {routeGeometry.RouteLengthMeters:N0} m");
+            sb.AppendLine($"    Timed travel:      {routeGeometry.TimedTravelMeters:N0} m  (what the speed phases consume)");
+            sb.AppendLine($"    Loading tour:      {routeGeometry.TourChunks} chunks square" +
+                          (routeGeometry.TourWasShrunk
+                              ? $"  ** SHRUNK from {BenchmarkRouteGeometry.LoadingTourChunks} — the timed phases do not cover it, so the loading pass GENERATED terrain. Capture not comparable. **"
+                              : "  (fixed — independent of view distance)"));
             sb.AppendLine($"VSync override:      Forced Off (was: {(savedVSyncCount > 0 ? "On" : "Off")})");
             sb.AppendLine($"FPS cap override:    Uncapped (was: {(savedTargetFrameRate > 0 ? savedTargetFrameRate.ToString() : "Uncapped")})");
             sb.AppendLine();

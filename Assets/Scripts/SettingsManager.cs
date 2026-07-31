@@ -571,36 +571,51 @@ public class Settings
     // ═══════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// The side length (in chunks) of the square region the benchmark sweeps.
-    /// Waypoints are generated within this region centered on the world origin,
-    /// independent of the actual <see cref="VoxelData.WorldSizeInChunks"/>.
+    /// Waypoints the benchmark's generation sweep emits (two per row). Honoured exactly, rounded up to an
+    /// even number. The swept region is <b>derived</b> from the configured speeds and phase duration, so
+    /// this controls the sweep's shape, not the run's length.
     /// </summary>
-    [Header("Benchmark Region")]
-    [SettingField(SettingsTab.Benchmark, Label = "Region Size (chunks)", Format = "f0", Order = 0)]
-    [Range(16, 512)]
-    [Tooltip("The side length (in chunks) of the square area the benchmark sweeps.\n" +
-             "Larger regions produce longer runs but cover more of the world.\n\n" +
-             TooltipTags.Performance + "Very large regions (256+) may produce extremely long benchmark runs.\n" +
-             TooltipTags.DefaultColorStart + "64" + TooltipTags.DefaultColorEnd)]
-    public int benchmarkRegionSize = 64;
+    [Header("Benchmark Route")]
+    [SettingField(SettingsTab.Benchmark, Label = "Generation Waypoints", Format = "f0", Order = 0)]
+    [Range(4, 128)]
+    [Tooltip("How many waypoints the generation sweep uses (2 per row, so this rounds up to an even number).\n" +
+             "Controls the SHAPE of the sweep — more waypoints means more, shorter rows — not how long the " +
+             "run takes. Phase Duration is what lengthens a run.\n\n" +
+             "Honoured exactly: extra distance from faster speeds or longer phases widens the rows rather " +
+             "than adding more.\n\n" +
+             TooltipTags.DefaultColorStart + "12" + TooltipTags.DefaultColorEnd)]
+    public int benchmarkGenerationWaypoints = 12;
+
+    /// <summary>
+    /// Seconds each speed phase runs. Drives the total distance travelled, and with it the derived size of
+    /// the benchmark region — the sweep is sized to the distance the phases will actually cover.
+    /// </summary>
+    [SettingField(SettingsTab.Benchmark, Label = "Phase Duration (s)", Format = "f0", Order = 1)]
+    [Range(5, 300)]
+    [Tooltip("How long each speed phase runs, in seconds.\n" +
+             "This is the knob that lengthens a benchmark run: every generation and loading phase uses it.\n\n" +
+             TooltipTags.Performance + "A full run is roughly (generation speeds + loading speeds) x this, " +
+             "plus the ensure-generated sweep.\n" +
+             TooltipTags.DefaultColorStart + "30" + TooltipTags.DefaultColorEnd)]
+    public float benchmarkPhaseSeconds = 30f;
 
     /// <summary>
     /// Semicolon-separated movement speeds (m/s) for the generation pass.
-    /// Each entry becomes a speed phase lasting <c>TIME_PER_PHASE</c> seconds.
-    /// The final speed is held until all waypoints are visited.
+    /// Each entry becomes a speed phase lasting <see cref="benchmarkPhaseSeconds"/> seconds. Every phase
+    /// runs its full duration; the route is sized to outlast them.
     /// Parsed at benchmark initialization time.
     /// </summary>
     [Header("Speed Phases (m/s)")]
     [SettingField(SettingsTab.Benchmark, Label = "Gen", Order = 1)]
     [Tooltip("Semicolon-separated list of movement speeds for the generation pass.\n" +
-             "Each value becomes a timed speed phase. The last speed is held until all waypoints are visited.\n\n" +
-             TooltipTags.Note + "More phases or higher speeds require a larger Region Size.\n" +
+             "Each value becomes a timed speed phase, each running its full Phase Duration.\n\n" +
+             TooltipTags.Note + "More phases or higher speeds automatically enlarge the swept region.\n" +
              TooltipTags.DefaultColorStart + "10; 20; 50; 100; 200" + TooltipTags.DefaultColorEnd)]
     public string benchmarkGenerationSpeeds = "10; 20; 50; 100; 200";
 
     /// <summary>
     /// Semicolon-separated movement speeds (m/s) for the loading pass.
-    /// Each entry becomes a speed phase lasting <c>TIME_PER_PHASE</c> seconds.
+    /// Each entry becomes a speed phase lasting <see cref="benchmarkPhaseSeconds"/> seconds.
     /// Loading waypoints loop if exhausted before phases end.
     /// Parsed at benchmark initialization time.
     /// </summary>
@@ -1045,7 +1060,7 @@ public static class SettingsManager
     /// Reads the saved settings file (if it exists) and overlays benchmark-specific
     /// fields onto the provided defaults. This allows benchmark mode to use
     /// deterministic gameplay settings while still honoring user-configured
-    /// benchmark parameters (e.g., region size).
+    /// benchmark parameters (waypoints, phase duration, speed lists).
     /// </summary>
     /// <param name="defaults">The fresh defaults to overlay onto.</param>
     private static void OverlayBenchmarkSettingsFromDisk(Settings defaults)
@@ -1058,7 +1073,8 @@ public static class SettingsManager
             Settings saved = JsonUtility.FromJson<Settings>(json);
             if (saved == null) return;
 
-            defaults.benchmarkRegionSize = saved.benchmarkRegionSize;
+            defaults.benchmarkGenerationWaypoints = saved.benchmarkGenerationWaypoints;
+            defaults.benchmarkPhaseSeconds = saved.benchmarkPhaseSeconds;
             defaults.benchmarkGenerationSpeeds = saved.benchmarkGenerationSpeeds;
             defaults.benchmarkLoadingSpeeds = saved.benchmarkLoadingSpeeds;
         }

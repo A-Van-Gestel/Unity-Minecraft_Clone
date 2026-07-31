@@ -76,6 +76,7 @@ namespace Editor.Validation.PipelineBackpressure
                 new Scenario("B14 Waste predicates: numerator and denominator membership (FP-7a)", RunB14WastePredicates),
                 new Scenario("B15 Report integrity banners: stale capability matrix + double-recorded pass", RunB15ReportIntegrity),
                 new Scenario("B16 Primary-regime credibility: sample floor + non-measurement phases (FP-9a)", RunB16PrimaryRegimeCredibility),
+                new Scenario("B17 Route geometry: waypoint constancy, route length, tour coverage (FP-9b)", RunB17RouteGeometry),
             };
             return ValidationSuiteRunner.Execute("Pipeline Backpressure", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -950,6 +951,119 @@ namespace Editor.Validation.PipelineBackpressure
 
             ok &= Check("PipelinePhaseMetrics defaults to regime-bearing (only the transition opts out)",
                 good.RegimeBearing);
+
+            return ok;
+        }
+
+        /// <summary>
+        /// FP-9b: the benchmark route's geometry, pinned across the view distances and speed configurations
+        /// a sweep actually uses.
+        /// <para>
+        /// Every property here is one FP-8 violated while looking healthy. Generation waypoints collapsed
+        /// <b>12 → 8 → 6 → 4 → 4</b> across vd 5/8/10/15/20, so the sweep at vd 20 was a quarter of the route
+        /// it was at vd 5; the route was shorter than the speed phases needed at <i>every</i> view distance
+        /// (9 344 m against 11 400 m even at the default), so the fastest generation phase was cut short and
+        /// at vd ≥ 10 never ran at all; and the loading tour shrank 84 → 54 chunks because its extent was
+        /// derived from <c>LoadDistance</c>. None of it was guarded, because the geometry lived inside a
+        /// method that mutated instance lists and no baseline could reach it.
+        /// </para>
+        /// <para>
+        /// The tour-coverage assertion is the load-bearing one: the generation pass is time-bounded, so it
+        /// stops partway along the route, and if the tour is not inside the part actually walked then the
+        /// loading pass generates terrain instead of loading it — measuring the wrong pipeline under the
+        /// right label.
+        /// </para>
+        /// </summary>
+        private static bool RunB17RouteGeometry()
+        {
+            float[] defaultSpeeds = { 10f, 20f, 50f, 100f, 200f };
+            float[] stressSpeeds = { 10f, 20f, 50f, 100f, 200f, 300f, 500f };
+            int[] viewDistances = { 5, 8, 10, 15, 20 };
+            const int dataLoadBuffer = 3;
+
+            bool ok = true;
+
+            foreach ((string label, float[] speeds, float phaseSeconds) in new[]
+                     {
+                         ("default", defaultSpeeds, 30f),
+                         ("stress +300/500", stressSpeeds, 30f),
+                         ("60 s phases", defaultSpeeds, 60f),
+                     })
+            {
+                // Waypoint request is the OUTER loop so constancy is asserted across view distances at a
+                // fixed request — the property that matters — rather than across different requests. The
+                // non-default requests are here because the default alone hid a mis-centred tour: 12
+                // waypoints happened to fall inside the covered band, 24 and 64 did not.
+                foreach (int requestedWaypoints in new[] { 12, 24, 64 })
+                {
+                    int firstWaypoints = -1;
+
+                    foreach (int viewDistance in viewDistances)
+                    {
+                        int loadDistance = viewDistance + dataLoadBuffer;
+                        BenchmarkRouteGeometry g = new BenchmarkRouteGeometry(loadDistance, speeds, phaseSeconds,
+                            requestedWaypoints);
+
+                        // 1. Route must outlast the timed phases, or a phase is cut short (the FP-8 defect).
+                        ok &= Check($"[{label}] vd {viewDistance}: route {g.RouteLengthMeters:F0} m covers the " +
+                                    $"{g.TimedTravelMeters:F0} m the phases travel",
+                            g.RouteLengthMeters >= g.TimedTravelMeters);
+
+                        // 2. Waypoint count must not depend on view distance.
+                        if (firstWaypoints < 0) firstWaypoints = g.GenerationWaypoints;
+                        ok &= Check($"[{label}] vd {viewDistance}: {g.GenerationWaypoints} generation waypoints, " +
+                                    $"same as vd {viewDistances[0]}",
+                            g.GenerationWaypoints == firstWaypoints);
+
+                        // 3. The tour must be the same size at every view distance.
+                        ok &= Check($"[{label}] vd {viewDistance}: loading tour is the full " +
+                                    $"{BenchmarkRouteGeometry.LoadingTourChunks} chunks, not shrunk",
+                            !g.TourWasShrunk && g.TourChunks == BenchmarkRouteGeometry.LoadingTourChunks);
+
+                        // 4. And it must LIE INSIDE the area the timed phases cover, with a LoadDistance margin.
+                        //
+                        // Asserted on the final coordinates, NOT by re-running the sizing helper with the
+                        // constructor's own arguments — that earlier form was a tautology of assertion 3 and let
+                        // a mis-CENTRED tour pass while claiming coverage it did not have.
+                        float margin = loadDistance * VoxelData.ChunkWidth;
+                        bool insideZ = g.TourMinZ >= g.CoveredMinZ + margin && g.TourMaxZ <= g.CoveredMaxZ - margin;
+                        bool insideX = g.TourMinX >= g.MinEdge + margin && g.TourMaxX <= g.MaxEdge - margin;
+
+                        ok &= Check($"[{label}] vd {viewDistance}: tour Z [{g.TourMinZ:F0},{g.TourMaxZ:F0}] lies " +
+                                    $"inside covered Z [{g.CoveredMinZ:F0},{g.CoveredMaxZ:F0}] with margin",
+                            insideZ);
+                        ok &= Check($"[{label}] vd {viewDistance}: tour X [{g.TourMinX:F0},{g.TourMaxX:F0}] lies " +
+                                    $"inside swept X [{g.MinEdge:F0},{g.MaxEdge:F0}] with margin",
+                            insideX);
+                    }
+                }
+            }
+
+            // The tour is centred on the COVERED band, not the full sweep. Pinned explicitly because the two
+            // coincide only when the timed phases finish every row — which, the route carrying headroom by
+            // design, they never do.
+            BenchmarkRouteGeometry centred = new BenchmarkRouteGeometry(23, defaultSpeeds, 30f, 24);
+            float tourCentreZ = (centred.TourMinZ + centred.TourMaxZ) * 0.5f;
+            float coveredCentreZ = (centred.CoveredMinZ + centred.CoveredMaxZ) * 0.5f;
+            float sweepCentreZ = (centred.MinEdgeZ + centred.MaxEdgeZ) * 0.5f;
+            ok &= Check("the tour is centred on the COVERED band in Z",
+                Mathf.Abs(tourCentreZ - coveredCentreZ) < 0.01f);
+            ok &= Check("...which is demonstrably not the full sweep's centre (completed rows < rows)",
+                centred.CompletedRows < centred.Rows && Mathf.Abs(coveredCentreZ - sweepCentreZ) > 1f);
+
+            // A degenerate speed list cannot cover any tour — it must SAY so rather than quietly shipping a
+            // loading pass that generates terrain.
+            BenchmarkRouteGeometry degenerate = new BenchmarkRouteGeometry(8, new[] { 10f, 20f }, 30f, 12);
+            ok &= Check("a speed list too slow to cover the tour reports TourWasShrunk",
+                degenerate.TourWasShrunk);
+            ok &= Check("...and floors the tour rather than collapsing it to a point",
+                degenerate.TourChunks >= BenchmarkRouteGeometry.MinimumTourChunks);
+
+            // The waypoint request is a floor: asking for fewer than the distance needs must not shorten the
+            // route below what the phases travel.
+            BenchmarkRouteGeometry floored = new BenchmarkRouteGeometry(8, defaultSpeeds, 30f, 4);
+            ok &= Check("a small waypoint request still yields a route the phases can complete",
+                floored.RouteLengthMeters >= floored.TimedTravelMeters);
 
             return ok;
         }
