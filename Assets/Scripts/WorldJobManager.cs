@@ -966,10 +966,14 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         if (window.HasBudget && genKeyCount > 0)
             genScanStart = _genScanCursor = (_genScanCursor + 1) % genKeyCount;
 
-        // FP-2: ceiling-only pass — a quota stop is unreachable here, so ClassifyStop can only ever return
-        // Ceiling or OutOfWork. Completed jobs are the candidates; AllDeclined is likewise unreachable
-        // because reaching a completed job always processes it.
+        // FP-2 stop-reason inputs. Two limits can end this pass, NOT one (FP-7b): the ms ceiling, and the
+        // per-frame structure-mods quota — which breaks the scan outright at its third site and defers a job
+        // to the next frame at the other two. Candidates are completed jobs the pass took ownership of, and
+        // AllDeclined stays unreachable: every counted candidate either gets processed or is deferred by the
+        // mods quota, and the latter already reports Quota, which outranks the readiness arm.
         bool genCeilingExpired = false;
+        bool genModsQuotaSpent = false;
+        int genJobsProcessed = 0, genCandidatesSeen = 0;
 
         for (int scanIndex = 0; scanIndex < genKeyCount; scanIndex++)
         {
@@ -987,6 +991,15 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
             if (!jobEntry.Value.Handle.IsCompleted) continue;
 
+            // §3.4 structure-mods quota — checked here, where a completed job is about to be refused, so the
+            // stop reason means "work was left behind" rather than "the budget happened to reach zero".
+            // Mirrors the ceiling's between-jobs placement above.
+            if (modsBudget <= 0)
+            {
+                genModsQuotaSpent = true;
+                break;
+            }
+
             // Fault isolation, stage 1 (HF-2): a failed Complete() means the job may still own its
             // containers — leave the entry enrolled (no release) and retry next pass.
             try
@@ -998,6 +1011,13 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 Debug.LogError($"[GENERATION] Handle.Complete() for chunk {jobEntry.Key} faulted — job left enrolled for retry. {e}");
                 continue;
             }
+
+            // A completed job the pass reached AND took ownership of — the candidate count ClassifyStop
+            // discriminates on. Counted after the fault gate, not before: a job left enrolled for retry was
+            // never served, and counting it would make a fault storm report AllDeclined (readiness-bound)
+            // for what is an HF-2 fault, not a readiness gate. A still-running job is likewise not a
+            // candidate — the pass declined nothing by walking past it.
+            genCandidatesSeen++;
 
             // Fault isolation, stage 2 (HF-2): one faulted job must not abort the pass — released
             // jobs stranded in GenerationJobs get re-touched every frame (the ObjectDisposedException
@@ -1026,6 +1046,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                     ReleaseGenerationJobData(jobEntry.Value);
                     _completedGenJobs.Add(jobEntry.Key);
                     released = true;
+                    genJobsProcessed++;
 
                     // FP-1 terminal disposition: the §3.2 out-of-range discard — completed generation work
                     // thrown away because the player outran it. Previously uncounted. Non-throwing by
@@ -1092,6 +1113,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                     if (modsBudget <= 0)
                     {
                         jobFullyProcessed = false;
+                        genModsQuotaSpent = true;
                         break;
                     }
                 }
@@ -1118,6 +1140,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                         if (modsBudget <= 0)
                         {
                             jobFullyProcessed = false;
+                            genModsQuotaSpent = true;
                             break;
                         }
                     }
@@ -1186,6 +1209,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 ReleaseGenerationJobData(jobEntry.Value);
                 _completedGenJobs.Add(jobEntry.Key);
                 released = true;
+                genJobsProcessed++;
 
                 Chunk chunk = _world.GetChunkFromChunkCoord(jobEntry.Key);
                 if (chunk != null && chunk.IsActive)
@@ -1193,9 +1217,10 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                     _world.RequestChunkMeshRebuild(chunk);
                 }
 
-                // If we ran out of budget during processing the rest of this chunk's fast STAGE 3 steps,
-                // break to respect frame time, letting the remaining completely finished jobs process next frame.
-                if (modsBudget <= 0) break;
+                // Budget exhaustion is checked at the TOP of the next iteration, not here (FP-7 review): the
+                // pass must only report Quota when the budget actually refuses a COMPLETED job. Breaking here
+                // reported Quota even when this was the last completed job in the scan — nothing was deferred,
+                // yet the frame voted AdmissionBound. Which jobs get served is unchanged either way.
             }
             catch (Exception e)
             {
@@ -1205,6 +1230,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 {
                     ReleaseGenerationJobData(jobEntry.Value);
                     _completedGenJobs.Add(jobEntry.Key);
+                    genJobsProcessed++;
                 }
             }
         }
@@ -1214,8 +1240,14 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         // job (e.g. an early removal on view-distance change before it completes) MUST Complete() then
         // ReleaseGenerationJobData() it first — see ReleaseGenerationJobData / GenerationJobData.Dispose — or its
         // per-chunk native buffers leak (and a pooled active-voxel list is lost from the pool).
-        PipelineTelemetry.RecordPassStop(PipelinePass.GenerationProcess,
-            genCeilingExpired ? PassStopReason.Ceiling : PassStopReason.OutOfWork);
+        // FP-7b: classified by the SAME shared helper the two scheduling passes use, rather than a local
+        // ceiling-or-nothing ternary — the structure-mods quota is a real stop here, and reporting it as
+        // OutOfWork made a pass that deferred every remaining job vote "Healthy". ClassifyStop ranks Quota
+        // above Ceiling while this loop checks the ceiling first; that inversion is deliberate (see its
+        // docstring): a spent quota left work behind whichever limit ended the scan, and the conservative
+        // attribution never lets an admission stall hide behind a hitch guard.
+        PipelineTelemetry.RecordPassStop(PipelinePass.GenerationProcess, PipelinePassBudget.ClassifyStop(
+            genJobsProcessed, genCandidatesSeen, genModsQuotaSpent, genCeilingExpired, false));
 
         foreach (ChunkCoord chunkCoord in _completedGenJobs)
         {

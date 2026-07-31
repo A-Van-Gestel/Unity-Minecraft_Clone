@@ -18,7 +18,7 @@ namespace Helpers
         /// <summary>The mesh-build queue drain (quota + ceiling + in-flight cap).</summary>
         MeshSchedule = 1,
 
-        /// <summary>Completed-generation-job processing (ceiling only).</summary>
+        /// <summary>Completed-generation-job processing (ms ceiling + the per-frame structure-mods quota).</summary>
         GenerationProcess = 2,
 
         /// <summary>Completed-mesh-job processing (ceiling only).</summary>
@@ -43,7 +43,11 @@ namespace Helpers
         /// <summary>Ran to completion with work served. The pipeline is keeping up.</summary>
         OutOfWork = 1,
 
-        /// <summary>The per-frame rate quota was spent. Unreachable for the two ceiling-only passes.</summary>
+        /// <summary>
+        /// A per-frame rate quota was spent — the scheduling passes' job quota, or
+        /// <see cref="PipelinePass.GenerationProcess"/>'s structure-mods quota. Unreachable only for
+        /// <see cref="PipelinePass.MeshProcess"/>, the one genuinely ceiling-only pass.
+        /// </summary>
         Quota = 2,
 
         /// <summary>The Stopwatch ms ceiling was spent (hitch guard).</summary>
@@ -176,12 +180,16 @@ namespace Helpers
         }
 
         /// <summary>
-        /// Classifies why a scheduling pass stopped (FP-2). One implementation for both scheduling loops —
-        /// the lighting ready-set scan and the mesh drain break on the same three limits in the same order —
-        /// so the two can never disagree about what a stop <i>means</i>, and a single suite baseline pins
-        /// both.
+        /// Classifies why a budgeted pass stopped (FP-2). One implementation for every pass that reports a
+        /// stop reason, so no two can disagree about what a stop <i>means</i> and a single suite baseline
+        /// pins them all.
         /// <para>
-        /// Precedence mirrors the loops' own check order (quota → ceiling → in-flight cap). The final
+        /// Precedence is quota → ceiling → in-flight cap. That mirrors the two scheduling loops' own check
+        /// order, but <b>not</b> <c>ProcessGenerationJobs</c>'s, which tests its ms ceiling first and its
+        /// structure-mods quota last (FP-7b). The ranking is kept fixed across passes rather than made
+        /// per-loop: a spent quota means work was left behind whichever limit happened to end the scan, and
+        /// attributing that to the quota is the reading that cannot let an admission stall hide behind a
+        /// hitch guard. The final
         /// discrimination is the load-bearing one: a pass that walked its whole queue and scheduled
         /// <b>nothing</b> is <see cref="PassStopReason.AllDeclined"/> (readiness-bound — work exists but no
         /// chunk is eligible), which must never collapse into <see cref="PassStopReason.OutOfWork"/>. An
