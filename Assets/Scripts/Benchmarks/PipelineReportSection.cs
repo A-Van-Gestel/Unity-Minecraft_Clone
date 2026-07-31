@@ -72,12 +72,64 @@ namespace Benchmarks
                 sb.AppendLine("        stop-reason tallies below are still EXACT for the whole phase.");
             }
 
+            AppendIntegrityWarnings(sb, phase);
+
             AppendLatency(sb, phase);
             AppendWaste(sb, phase);
             AppendAdmission(sb, phase);
             AppendVerdict(sb, phase);
 
             sb.AppendLine();
+        }
+
+        /// <summary>
+        /// Renders the two ways this phase's tallies can be untrustworthy as <i>inputs to the §7.1 v2
+        /// verdict</i>, as opposed to merely truncated (which the saturation banner above covers).
+        /// </summary>
+        /// <param name="sb">The report builder.</param>
+        /// <param name="phase">The phase being rendered.</param>
+        /// <remarks>
+        /// Deliberately checked <b>here</b> and not only by the development-build asserts in
+        /// <see cref="PipelineTelemetry.RecordPassStop"/>: those are compiled out of a Release player, which
+        /// is the build a capture should be taken in (the P-4 budgets are frame-time-proportional, so a
+        /// Development Build measures a different admission regime). A warning that reaches the console of a
+        /// build nobody captures with is not a guard. Both conditions are derived from data the report
+        /// already carries, so this costs nothing and cannot itself go stale.
+        /// </remarks>
+        private static void AppendIntegrityWarnings(StringBuilder sb, PipelinePhaseMetrics phase)
+        {
+            // A tally in a cell the capability matrix says is impossible means the matrix is stale, and every
+            // share weighted by it is wrong (§7.1.1's defect, which is what FP-7b turned out to be).
+            for (int pass = 0; pass < PipelineTelemetry.PassCount; pass++)
+            {
+                for (int reason = 0; reason < PipelineTelemetry.StopReasonCount; reason++)
+                {
+                    int count = phase.StopReasonCounts[pass, reason];
+                    if (count == 0 || PipelineRegimeVerdict.CanEmit((PipelinePass)pass, (PassStopReason)reason))
+                        continue;
+
+                    sb.AppendLine();
+                    sb.AppendLine($"  ⚠ CAPABILITY MATRIX STALE — {(PipelinePass)pass} recorded " +
+                                  $"{(PassStopReason)reason} {count:N0}×, which PipelineRegimeVerdict.CanEmit");
+                    sb.AppendLine("     says it cannot emit. Those frames are EXCLUDED from the verdict below,");
+                    sb.AppendLine("     so the regime is computed from an incomplete picture. Fix CanEmit and");
+                    sb.AppendLine("     re-derive from the raw tallies before trusting the verdict.");
+                }
+            }
+
+            if (!phase.AnyPassDoubleRecorded) return;
+
+            sb.AppendLine();
+            sb.AppendLine("  ⚠ DOUBLE-RECORDED PASS — a pass reported a stop reason more than once in a frame:");
+            for (int pass = 0; pass < PipelineTelemetry.PassCount; pass++)
+            {
+                if (phase.PassDoubleRecorded[pass])
+                    sb.AppendLine($"     · {(PipelinePass)pass}");
+            }
+
+            sb.AppendLine("     The §7.1 v2 denominator assumes one report per pass per frame, so those passes");
+            sb.AppendLine("     vote with inflated weight. Shares stay ≤ 1 either way — this is the ONLY");
+            sb.AppendLine("     symptom, so the verdict below cannot be trusted without re-deriving by hand.");
         }
 
         private static void AppendLatency(StringBuilder sb, PipelinePhaseMetrics phase)

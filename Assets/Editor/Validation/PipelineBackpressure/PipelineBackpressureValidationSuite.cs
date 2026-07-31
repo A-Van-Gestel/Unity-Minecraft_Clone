@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using Benchmarks;
 using Data;
 using Editor.Validation.Framework;
@@ -73,6 +74,7 @@ namespace Editor.Validation.PipelineBackpressure
                 new Scenario("B12 Settings snapshot: resident square + gate-threshold ratio (FP-6)", RunB12SettingsSnapshot),
                 new Scenario("B13 Unload disposition: admitted work vs never-admitted request (FP-7a)", RunB13UnloadDisposition),
                 new Scenario("B14 Waste predicates: numerator and denominator membership (FP-7a)", RunB14WastePredicates),
+                new Scenario("B15 Report integrity banners: stale capability matrix + double-recorded pass", RunB15ReportIntegrity),
             };
             return ValidationSuiteRunner.Execute("Pipeline Backpressure", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -745,6 +747,104 @@ namespace Editor.Validation.PipelineBackpressure
                 PipelineRegimeVerdict.Evaluate(tallies, 30, 100).OrderingBound);
 
             return ok;
+        }
+
+        /// <summary>
+        /// FP-7 review: the two integrity conditions that make a phase's tallies untrustworthy as verdict
+        /// <i>inputs</i> must reach the <b>report</b>, not just a development console.
+        /// <para>
+        /// The development-build asserts in <c>RecordPassStop</c> are compiled out of a Release player — and
+        /// Release is the build a capture should be taken in, since the P-4 budgets are frame-time-proportional
+        /// and a Development Build therefore measures a different admission regime. A guard that only fires in
+        /// the build nobody captures with is not a guard, so both conditions are re-derived at render time
+        /// from data the report already carries.
+        /// </para>
+        /// <para>
+        /// Renders through the real <see cref="PipelineReportSection"/> over a hand-built
+        /// <see cref="PipelinePhaseMetrics"/>, and drives the double-record flag through the real telemetry
+        /// statics (B11's technique), so this pins the wiring as well as the text.
+        /// </para>
+        /// <para><b>Emits one expected <c>LogError</c>:</b> triggering the double record necessarily trips
+        /// the development-build console assert beside the flag ("GenerationProcess recorded a stop reason
+        /// twice in one frame"). That line is the guard working, not a failure — the same convention as the
+        /// save-durability and meshing suites' injected faults. Judge this suite by its PASS/FAIL lines, not
+        /// by console errors.</para>
+        /// </summary>
+        private static bool RunB15ReportIntegrity()
+        {
+            // A clean phase must produce NO integrity banner — otherwise the warnings are noise and get
+            // ignored, which is the failure mode a always-on warning is most prone to.
+            PipelinePhaseMetrics clean = new PipelinePhaseMetrics { PhaseName = "clean", GroupName = "FP-7" };
+            clean.StopReasonCounts[(int)PipelinePass.MeshSchedule, (int)PassStopReason.Quota] = 50;
+
+            string cleanText = Render(clean);
+            bool ok = Check("a clean phase renders no CAPABILITY MATRIX STALE banner",
+                !cleanText.Contains("CAPABILITY MATRIX STALE"));
+            ok &= Check("a clean phase renders no DOUBLE-RECORDED PASS banner",
+                !cleanText.Contains("DOUBLE-RECORDED PASS"));
+
+            // A tally in a cell CanEmit forbids: the matrix is stale and the verdict is computed without it.
+            PipelinePhaseMetrics stale = new PipelinePhaseMetrics { PhaseName = "stale", GroupName = "FP-7" };
+            stale.StopReasonCounts[(int)PipelinePass.MeshProcess, (int)PassStopReason.AllDeclined] = 7;
+
+            string staleText = Render(stale);
+            ok &= Check("an ineligible non-zero cell raises the stale-matrix banner",
+                staleText.Contains("CAPABILITY MATRIX STALE"));
+            ok &= Check("...naming the offending pass, reason and count so it can be acted on",
+                staleText.Contains("MeshProcess") && staleText.Contains("AllDeclined")
+                                                  && staleText.Contains("7"));
+
+            // The double-record flag, set through the real statics rather than assigned directly.
+            bool wasEnabled = PipelineTelemetry.Enabled;
+            PipelinePhaseMetrics doubled;
+            try
+            {
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = true;
+                PipelineTelemetry.BeginPhase("doubled", "FP-7", 4096);
+
+                // Two reports for the SAME pass without an intervening RecordFrame — the shape
+                // ForceCompleteDataJobsCoroutine would produce if telemetry were ever enabled during startup.
+                PipelineTelemetry.RecordPassStop(PipelinePass.GenerationProcess, PassStopReason.OutOfWork);
+                PipelineTelemetry.RecordPassStop(PipelinePass.GenerationProcess, PassStopReason.Ceiling);
+                PipelineTelemetry.EndPhase();
+
+                doubled = PipelineTelemetry.CompletedPhases[0];
+            }
+            finally
+            {
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = wasEnabled;
+            }
+
+            ok &= Check("a second report for one pass in one frame sets that pass's flag",
+                doubled.PassDoubleRecorded[(int)PipelinePass.GenerationProcess]);
+            ok &= Check("...and only that pass's",
+                !doubled.PassDoubleRecorded[(int)PipelinePass.MeshSchedule]
+                && !doubled.PassDoubleRecorded[(int)PipelinePass.LightSchedule]);
+            ok &= Check("...and AnyPassDoubleRecorded reports it",
+                doubled.AnyPassDoubleRecorded);
+
+            string doubledText = Render(doubled);
+            ok &= Check("the double-record flag raises the banner, naming the pass",
+                doubledText.Contains("DOUBLE-RECORDED PASS") && doubledText.Contains("GenerationProcess"));
+
+            // A single report per pass must NOT trip it — the flag keys on a repeat within one frame, and a
+            // pass reporting on every frame of a long phase is the normal case.
+            ok &= Check("one report per pass per frame does not trip the flag",
+                !clean.AnyPassDoubleRecorded);
+
+            return ok;
+        }
+
+        /// <summary>Renders one phase through the real report section and returns the text.</summary>
+        /// <param name="phase">The phase to render.</param>
+        /// <returns>The rendered Pipeline section.</returns>
+        private static string Render(PipelinePhaseMetrics phase)
+        {
+            StringBuilder sb = new StringBuilder();
+            PipelineReportSection.Append(sb, new List<PipelinePhaseMetrics> { phase });
+            return sb.ToString();
         }
 
         /// <summary>

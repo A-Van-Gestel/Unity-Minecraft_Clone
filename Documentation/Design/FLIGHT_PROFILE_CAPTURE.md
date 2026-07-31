@@ -647,11 +647,26 @@ scheduling-vs-completion, and only `MeshProcess` is genuinely ceiling-only.
 Two consequences worth stating rather than discovering later:
 
 1. **A hand-written capability claim is exactly what went stale in FP-7b**, so `RecordPassStop` now asserts
-   the matrix against what production actually records (editor/development builds), and logs loudly on
-   divergence. Without that, v2 inherits the defect it exists to fix. Both asserts are **latched per
-   (pass, reason)** — they run once per pass per frame, so an unlatched error would emit thousands of lines
-   into the very log the capture is read from, burying the signal it exists to raise. `DomainReset` re-arms
-   them so a repeat capture cannot run silently on a known-bad matrix.
+   the matrix against what production actually records, and logs loudly on divergence. Without that, v2
+   inherits the defect it exists to fix. Both console asserts are **latched per (pass, reason)** — they run
+   once per pass per frame, so an unlatched error would emit thousands of lines into the very log the capture
+   is read from, burying the signal it exists to raise. `DomainReset` re-arms them so a repeat capture cannot
+   run silently on a known-bad matrix.
+
+   > **Those asserts are development-only, and a capture should be taken in a Release build** — the P-4
+   > budgets are frame-time-proportional, so a Development Build's overhead lengthens frames, inflates quotas
+   > and measures a different admission regime than a player ever sees. A guard that fires only in the build
+   > nobody captures with is not a guard. Both conditions are therefore **also** checked at render time from
+   > data the report already carries, and surface as banners in the artifact itself (`AppendIntegrityWarnings`,
+   > baseline **B15**):
+   >
+   > - **Stale capability matrix** — a non-zero tally in a cell `CanEmit` forbids. Directly visible in the
+   >   printed `[pass × reason]` matrix, so this needs no new state.
+   > - **Double-recorded pass** — *not* reconstructible after the fact, so it is carried as a sticky
+   >   `PassDoubleRecorded` flag set in **every** build (the `TracesSaturated` pattern). Note the symptom is
+   >   **not** an out-of-range share: participation sums the same cells the numerator draws from, so shares
+   >   stay ≤ 1 by construction. The offending pass simply votes with double weight, with nothing else in the
+   >   report to show for it — which is why the flag exists at all.
 2. **v2's shares are lower than §7.1.1's hand recomputation**, and deliberately so. That recomputation dropped
    the completion passes entirely and got "Quota at 99.5 %". v2 keeps `GenerationProcess` in Quota's
    denominator, so its `OutOfWork` frames count as genuine *abstentions* — a pass that could have reported a
@@ -778,6 +793,12 @@ whether they inherit them *knowingly*.
    > Every one of those defects shipped past review once already. This is the second time the same
    > limitation has cost real correctness (B11's call site was the first); a play-mode harness is the
    > structural answer, and it remains out of scope here.
+   >
+   > **Partially mitigated for the verdict's integrity conditions:** the two that would silently corrupt a
+   > §7.1 v2 verdict — a stale capability matrix and a double-recorded pass — are re-derived at *render*
+   > time and surface as banners in the report, so they hold in a Release capture where the console asserts
+   > are compiled out. **B15** pins both banners and drives the double-record flag through the real statics,
+   > which makes it the first FP baseline to guard a hook's effect end-to-end rather than only its policy.
 
 2. **Cross-generation report comparison is unsafe, and only `RULE_VERSION` prevents it.** FP-7 changed both
    what counts as waste and how the plurality is weighted, so a v1 report (every capture through FP-4) and a
@@ -829,6 +850,16 @@ whether they inherit them *knowingly*.
   left no work behind, and the ordering axis gained a 30-trace floor plus a tie-break away from `Healthy`.
   Lesson worth keeping — **a guard scenario that both the correct and the incorrect implementation accept
   guards nothing**; the new regression case is built from proportions where the two formulas disagree.
+  <br>**Then a third pass moved the verdict's integrity guards out of the console and into the report**
+  (**B15**): the `RecordPassStop` asserts are development-only, but a capture belongs in a *Release* build
+  (frame-time-proportional budgets mean a Development Build measures a different admission regime), so the
+  guards were absent exactly where captures happen. A stale capability matrix is now flagged from the printed
+  tally matrix, and a double-recorded pass from a sticky `PassDoubleRecorded` flag set in every build — the
+  `TracesSaturated` pattern. This also retracted a claim in FP-7's own comments: a double record does **not**
+  push shares above 1 (participation sums the same cells the numerator draws from, so shares are ≤ 1 by
+  construction) — it inflates one pass's voting weight with no other visible symptom, which is why a flag was
+  needed rather than a range check. The report also now prints `Configuration: Development | Release`, without
+  which two captures differing only in build type are indistinguishable from their text.
 * **v1.10** - **FP-6 done, and deliberately wider than it was filed as** (2026-07-28). It was scoped as "print
   `LoadDistance`"; the operator pointed out that the per-frame caps and time budgets shape the pipeline just as
   much, and that is right for a reason the original framing missed: **every one of those knobs *produces* one

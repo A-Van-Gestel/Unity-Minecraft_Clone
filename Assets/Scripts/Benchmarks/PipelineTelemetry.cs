@@ -1,8 +1,10 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using Data;
 using Helpers;
 using UnityEngine;
+using Debug = UnityEngine.Debug;
 
 namespace Benchmarks
 {
@@ -224,6 +226,27 @@ namespace Benchmarks
         public bool SamplesSaturated;
 
         /// <summary>
+        /// Per-pass: true when that pass reported a stop reason more than once in a single frame, which the
+        /// §7.1 v2 participation denominator assumes never happens. Sticky, and set in <b>every</b> build —
+        /// the skew it records (that pass voting with double weight) leaves no other trace in the report, and
+        /// a release capture is exactly where the runtime ordering that causes it could first differ.
+        /// </summary>
+        public readonly bool[] PassDoubleRecorded = new bool[PipelineTelemetry.PassCount];
+
+        /// <summary>Whether any pass double-reported — the report's integrity banner condition.</summary>
+        public bool AnyPassDoubleRecorded
+        {
+            get
+            {
+                foreach (bool doubled in PassDoubleRecorded)
+                    if (doubled)
+                        return true;
+
+                return false;
+            }
+        }
+
+        /// <summary>
         /// True when the per-frame rolling window wrapped. Not a data-loss flag for the tallies (those stay
         /// exact); only <see cref="RecentFrames"/> is a window rather than the whole phase.
         /// </summary>
@@ -357,8 +380,8 @@ namespace Benchmarks
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
             // Re-arm the diagnostic latches: a divergence already reported in a previous run must be
             // reported again in the next, or a repeat capture would run silently on a known-bad matrix.
-            System.Array.Clear(s_capabilityWarned, 0, s_capabilityWarned.Length);
-            System.Array.Clear(s_doubleRecordWarned, 0, s_doubleRecordWarned.Length);
+            Array.Clear(s_capabilityWarned, 0, s_capabilityWarned.Length);
+            Array.Clear(s_doubleRecordWarned, 0, s_doubleRecordWarned.Length);
 #endif
         }
 
@@ -636,10 +659,23 @@ namespace Benchmarks
             if (!PipelineRegimeVerdict.CanEmit(pass, reason) && !s_capabilityWarned[(int)pass, (int)reason])
             {
                 s_capabilityWarned[(int)pass, (int)reason] = true;
-                UnityEngine.Debug.LogError($"[PipelineTelemetry] {pass} recorded {reason}, which PipelineRegimeVerdict." +
-                                           "CanEmit says it cannot emit — the §7.1 v2 capability matrix is stale and " +
-                                           "every verdict weighted by it is wrong until it is corrected. (Reported once.)");
+                Debug.LogError($"[PipelineTelemetry] {pass} recorded {reason}, which PipelineRegimeVerdict." +
+                               "CanEmit says it cannot emit — the §7.1 v2 capability matrix is stale and " +
+                               "every verdict weighted by it is wrong until it is corrected. (Reported once.)");
             }
+
+            // Immediate console signal for the double record flagged below. The flag itself is set in every
+            // build; only this log is development-only.
+            if (s_pendingFrame.StopReasons[pass] != PassStopReason.NotRun
+                && !s_doubleRecordWarned[(int)pass])
+            {
+                s_doubleRecordWarned[(int)pass] = true;
+                Debug.LogError($"[PipelineTelemetry] {pass} recorded a stop reason twice in one " +
+                               $"frame ({s_pendingFrame.StopReasons[pass]} then {reason}). The §7.1 v2 " +
+                               "participation denominator assumes one report per pass per frame; this " +
+                               "pass now votes with double weight and the verdict is skewed. (Reported once.)");
+            }
+#endif
 
             // The v2 denominator is each pass's MEASURED participation, summed straight from this matrix, so
             // it is only a frame count while a pass reports at most once per frame. Every current call site
@@ -650,17 +686,12 @@ namespace Benchmarks
             // The symptom is NOT an out-of-range share — participation sums the same cells the numerator
             // draws from, so shares stay <= 1 by construction either way. It is that the offending pass
             // votes with DOUBLE WEIGHT in every reason it is eligible for, skewing the plurality with
-            // nothing in the report to show for it. Undetectable after the fact, so it is checked here.
-            if (s_pendingFrame.StopReasons[pass] != PassStopReason.NotRun
-                && !s_doubleRecordWarned[(int)pass])
-            {
-                s_doubleRecordWarned[(int)pass] = true;
-                UnityEngine.Debug.LogError($"[PipelineTelemetry] {pass} recorded a stop reason twice in one " +
-                                           $"frame ({s_pendingFrame.StopReasons[pass]} then {reason}). The §7.1 v2 " +
-                                           "participation denominator assumes one report per pass per frame; this " +
-                                           "pass now votes with double weight and the verdict is skewed. (Reported once.)");
-            }
-#endif
+            // nothing else in the report to show for it. Recorded as a sticky flag rather than a log so the
+            // warning reaches the ARTIFACT in every build (the TracesSaturated pattern) — a release capture
+            // is precisely where the runtime ordering could first differ, and precisely where no console is
+            // being watched.
+            if (s_pendingFrame.StopReasons[pass] != PassStopReason.NotRun)
+                s_activePhase.PassDoubleRecorded[(int)pass] = true;
 
             s_activePhase.StopReasonCounts[(int)pass, (int)reason]++;
             s_pendingFrame.StopReasons[pass] = reason;
