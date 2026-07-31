@@ -347,13 +347,19 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
    `latency ≤ viewDistance × 16 ÷ speed`** — a budget, not a percentage. **Needs its own design doc**; touches
    pipeline invariants, so the `chunk-lifecycle` skill is mandatory.
 
-   > **Caveat on the magnitude, added 2026-07-31 (FP-7a).** The waste percentages above were computed with
-   > **requests the panic gate never admitted counted as waste** — chunks for which no stage ever ran. FP-7a
-   > removes them from both the numerator and the denominator, so the figures quoted here are **not
-   > reproducible on a current build** and a re-capture is required to restate them. The *ranking* is very
-   > likely unaffected: the threshold is exceeded at the **default** view distance too, where the gate never
-   > closes and abandonment is therefore rare, so the intrinsic-ordering conclusion does not depend on the
-   > inflated leg. Treat the ordering of this list as sound and the specific percentages as superseded.
+   > **SUPERSEDED by FP-8 (2026-07-31) — re-captured, and the numbers above are withdrawn.** They counted
+   > requests the panic gate never admitted as waste. Rescored correctly, ordering-boundness **decays** with
+   > view distance instead of growing: **37.8 / 38.0 / 36.2 / 19.8 / 14.6 %** at vd 5/8/10/15/20 (loading,
+   > 200 m/s). Two consequences:
+   >
+   > - **The conclusion holds at the default view distance and only there.** vd 5 exceeds the threshold on
+   >   all three loading speeds (33.1–37.8 %) with the gate closed ≤ 0.4 % of frames, so throttling cannot
+   >   explain it — ordering really is intrinsic *there*. By vd 20 it is absent.
+   > - **P-7 is demoted below P-8** (see item 6). The high-view-distance evidence that made ordering the top
+   >   item was an artifact of the defect.
+   >
+   > P-7 is re-scoped to the low-view-distance regime; its acceptance target is unchanged. Full derivation:
+   > [`../Performance/CHUNK_PIPELINE_FP8_FLIGHT_PROFILE_IL2CPP_2026-07-31_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP8_FLIGHT_PROFILE_IL2CPP_2026-07-31_BENCHMARK.md).
 6. **P-8 — scale the panic-gate thresholds with view distance.** `panicGateCloseThreshold` / `ReopenThreshold`
    are absolute constants (256 / 128) while the resident square they guard grows as view-distance²: a
    256-chunk backlog is 88.6 % of the resident set at vd 5 but 11.6 % at vd 20. Measured consequence — gate
@@ -361,6 +367,15 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
    unreachable emergency brake at the default and a near-permanent throttle at vd 20. Localized fix, but it
    changes admission behavior (P-4 family) — pair it with a vd-5 confirmation capture. Note it **interacts
    with P-7**: raising admission without fixing ordering buys more discarded work.
+
+   > **PROMOTED to top open pipeline item by FP-8 (2026-07-31)** — above P-7, reversing the FP-4 order. The
+   > five-point sweep locates a **knee between vd 5 and 10** rather than a ramp: gate closure
+   > **0 / 54.7 / 91.3 / 96.9 / 88.6 %** at vd 5/8/10/15/20 (loading, 200 m/s). The cost is now measured
+   > rather than inferred — requests dropped **before a single stage ran** run 1 / 550 / 2 004 / 6 915 /
+   > **12 087**, the last being 55.8 % of everything requested. This is what makes vd ≥ 10 admission-bound,
+   > and `enqueue→populated` p50 confirms it independently (4.4 ms at vd 5 → 1 665 ms at vd 20, with vd 20's
+   > *minimum* at 606 ms). The P-7 interaction now cuts the other way as well: the gate is currently
+   > suppressing ordering waste by refusing the work, so fixing P-8 first will *raise* measured waste.
 7. **§4.4 "lighting stable" save bit** (serialization migration) — **deprioritized by FP-4.** Throughput work;
    throughput is not the binding constraint (`InFlightCap` ≤ 0.6 % at every view distance). Still a real win
    for revisited terrain, just not what the flight symptom calls for.

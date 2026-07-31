@@ -1,6 +1,6 @@
 # Flight-Profile Capture (Pipeline Telemetry) Design
 
-**Version:** 1.11  
+**Version:** 1.12  
 **Date:** 2026-07-27  
 **Amended:** 2026-07-27 (v1.1) — re-verified every §2 row, §5 hook site, and both §8 questions against the
 code. Six §2 rows corrected, the hook chain shortened from five stamps to four (MP-6), the stop-reason set
@@ -33,6 +33,11 @@ as waste, a quota stop reported as `OutOfWork`, flag-less lighting entries count
 disposition that was wrong in every firing — and the fifth closes §7.1.1 as **§7.1 v2**, a per-(pass, reason)
 capability-weighted plurality. Baselines **B13**/**B14**, B10 rewritten, Validate All 360 → **362**.
 **The FP-4 report is no longer comparable to future captures on either axis; `RULE_VERSION` says so.**  
+**Amended:** 2026-07-31 (v1.12) — **FP-8 captured: five-point sweep (vd 5/8/10/15/20), first Release build,
+first under §7.1 v2.** The headline **supersedes FP-4**: with never-admitted requests removed from the waste
+fraction, ordering-boundness **decays** with view distance rather than growing, so it is a *low*-view-distance
+phenomenon confirmed at the default vd and absent by vd 20. §7.3 re-ranked — **P-8 promoted over P-7**. Two
+new instrument defects filed as FP-9a/FP-9b (§7.4.3).  
 **Status:** ✅ **Implemented.** FP-0…FP-4 are all shipped; the capture is
 [`../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md)
 (three IL2CPP runs at viewDistance 5 / 10 / 20). **Verdict: ORDERING-BOUND at every view distance;
@@ -533,21 +538,30 @@ bucket resolution, that is the demand case that promotes the v3 item — record 
 > distinct stall populations rather than one slow stage. Separating them needs per-chunk traces. This is a
 > recorded demand case for the v3+ CSV export, per the rule above.
 
-### 7.3 Ranked follow-ups from the FP-4 capture (v1.8)
+### 7.3 Ranked follow-ups — **re-ranked by FP-8 (v1.12)**
 
 The capture's whole purpose was to decide what to do next, so the ranking is recorded **here** — the report
 that produced it is a point-in-time, append-only artifact and cannot be kept current. Engine items are
 mirrored in the master backlog; instrument items are owned by this document.
 
+> **FP-8 reversed the top two, and the cause is FP-7a rather than any change in the engine.** FP-4 counted
+> requests the panic gate never admitted as *waste*, which inflated the ordering signal most at exactly the
+> view distances where the gate closes hardest. Rescored correctly, ordering-boundness **decays** with view
+> distance instead of growing: 37.8 → 38.0 → 36.2 → 19.8 → 14.6 % at vd 5/8/10/15/20 (loading, 200 m/s),
+> where the v1 rule gave 37.8 → 41.4 → 47.1 → 53.0 → 62.2 %. Derivation in
+> [`../Performance/CHUNK_PIPELINE_FP8_FLIGHT_PROFILE_IL2CPP_2026-07-31_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP8_FLIGHT_PROFILE_IL2CPP_2026-07-31_BENCHMARK.md).
+
 | # | Item | Home | Why it ranks here |
 |---|------|------|-------------------|
-| **1** | **Chunk service ordering** | **`P-7`** — [analysis §6 item 5](CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md), mirrored in [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) | Waste above threshold in **all 9** loading phases at every view distance, including the default with the gate never closing. Largest measured inefficiency in the engine, and now known to be intrinsic. |
-| **2** | **Scale panic-gate thresholds with view distance** | **`P-8`** — same two docs | §7.1.1's sibling finding (F5), confirmed by measurement: 0 % / 92.8 % / 96.4 % closure at vd 5/10/20. Correctness-of-intent, not tuning. |
+| **1** | **Scale panic-gate thresholds with view distance** ⬅ **promoted by FP-8** | **`P-8`** — [analysis §6](CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md), mirrored in [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) | FP-8 F2: gate closure **0 / 54.7 / 91.3 / 96.9 / 88.6 %** at vd 5/8/10/15/20 (200 m/s) — a **knee between vd 5 and 10**, located by the vd-8 point added for this purpose. Cost now measured rather than inferred: **12 087 requests dropped before admission** at vd 20/200 m/s, 55.8 % of everything requested. It is what makes vd ≥ 10 admission-bound. |
+| **2** | **Chunk service ordering** — **re-scoped to low view distance** | **`P-7`** — same two docs | FP-8 F1: confirmed **intrinsic at the default vd 5** (33.1–37.8 % across all three loading speeds, gate closed ≤ 0.4 % of frames, so throttling cannot explain it) — but **absent by vd 20**. Target the low-vd regime; acceptance criterion is F4's visibility bound, which fails only at 200 m/s and vd ≥ 10. |
 | **3** | **Adopt the visibility criterion as the acceptance target** | This doc + P-7's design | `latency ≤ viewDistance × 16 ÷ speed`. Falsifiable, matches independent visual observation across three legs, and gives (1) a target number rather than "less waste". |
 | **4** | ~~**FP-5 — fix the phase leak across runs**~~ ✅ **DONE 2026-07-28** | **this doc, §7.4** | Was blocking trustworthy multi-run sessions. Fixed via `BeginRun()`; guarded by **B11** (Validate All → 359). |
 | **5** | ~~**FP-6 — print `LoadDistance` in the report**~~ ✅ **DONE 2026-07-28, widened** | **this doc, §7.4** | Became "print every knob that produces a stop reason", once it was clear the capture machine runs non-default quotas. Guarded by **B12** (Validate All → 360). |
 | **6** | ~~**§7.1 v2 — fix the plurality dilution**~~ ✅ **DONE 2026-07-31** | **this doc, §7.4.2** | Shipped as FP-7e, as a per-(pass, reason) capability matrix rather than the "scheduling passes only" split this row assumed — FP-7b changed that premise. `RULE_VERSION` bumped to v2; guarded by the rewritten **B10**. |
-| **7** | **Per-chunk CSV export** | Extension roadmap below (v3+) | Only way to separate F4's two stall populations. Demand case now recorded. |
+| **7** | **FP-9a — sample floor on the PRIMARY regime** ⬅ **new, from FP-8 D1** | this doc, §7.4.3 | FP-7's floor guards the ordering axis only. FP-8 printed `ThroughputBound` from a **14-frame** phase, `AdmissionBound` from 148 frames, and a regime for a drain-and-unload *transition*. Direct analogue of the ordering floor. |
+| **8** | **FP-9b — hold generation waypoints constant across a sweep** ⬅ **new, from FP-8 D2** | this doc, §7.4.3 | Quantified at last: waypoints **12/8/6/4/4** and final-phase durations **19.7/3.2/19.8/2.2/0.7 s** at vd 5/8/10/15/20, because `BuildWaypoints` derives margin and row stride from `LoadDistance`. Generation cross-vd numbers are unusable until fixed. |
+| **9** | **Per-chunk CSV export** | Extension roadmap below (v3+) | Only way to separate F4's two stall populations. Demand case reinforced by FP-8 (vd 15 / gen / 50 m/s: p50 1 023 ms vs max 11 273 ms). |
 
 **Not licensed by the capture:** any in-flight-cap or readiness work. Both regimes were tested for at three
 view distances and are absent in all of them (`InFlightCap` ≤ 0.6 %, `AllDeclined` ≤ 7.8 %).
@@ -696,6 +710,13 @@ whose only distinguishing feature was a bug that never reached a report would mi
 were all produced under superseded semantics. `RULE_VERSION` is bumped to v2 precisely so the two generations
 can never be compared without noticing. The raw tallies §7.2 mandates remain valid and re-derivable — which is,
 again, the argument for §7.2 as a standing requirement.
+
+#### 7.4.3 FP-8's two instrument defects — found by the second capture, not by review (v1.12)
+
+| Phase | Defect | Evidence | Fix (open) |
+|-------|--------|----------|-----------|
+| **FP-9a** 🔴 **OPEN** | **The min-sample floor guards the ordering axis but not the primary regime.** FP-7 added `MinOrderingTerminalTraces = 30` so a handful of traces cannot decide the ordering axis. Nothing equivalent gates the plurality, so a phase with almost no frames still asserts a regime. | FP-8 printed `ThroughputBound` for **vd 20 / Generation / 100 m/s** off **14 frames** (441 traces, all `InFlightAtPhaseEnd`, `InFlightCap` "winning" at 50.0 %); `AdmissionBound` for vd 15 / gen / 100 m/s off 148 frames; and `AdmissionBound` for vd 8's **Transition** — a drain-and-unload phase that has no meaningful regime at all. | A frame-count floor on `Evaluate`, mirroring the ordering floor, with its own report rendering (`NoData` or an explicit "undecidable" state — the FP-7 lesson is that "not bound" and "could not tell" must never render alike). |
+| **FP-9b** 🔴 **OPEN** | **Generation-pass results are not comparable across a view-distance sweep.** `BuildWaypoints` derives both `marginChunks` and `rowStride` from `LoadDistance`, so a larger view distance yields fewer waypoints in a fixed region and the final generation phase truncates. | Waypoints **12 / 8 / 6 / 4 / 4** and final-phase durations **19.7 / 3.2 / 19.8 / 2.2 / 0.7 s** at vd 5/8/10/15/20. The loading pass is unaffected (12 waypoints at every vd), which is why every FP-8 cross-vd claim is loading-only. | Scale `benchmarkRegionSize` with `LoadDistance` so waypoint count is held constant, or make the confound impossible to overlook in the report rather than a Configuration-block line. |
 
 ### Extension roadmap (post-FP-4, in intended order)
 
