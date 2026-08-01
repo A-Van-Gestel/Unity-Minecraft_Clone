@@ -1,6 +1,6 @@
 # Flight-Profile Capture (Pipeline Telemetry) Design
 
-**Version:** 1.15  
+**Version:** 1.16  
 **Date:** 2026-07-27  
 **Amended:** 2026-07-27 (v1.1) — re-verified every §2 row, §5 hook site, and both §8 questions against the
 code. Six §2 rows corrected, the hook chain shortened from five stamps to four (MP-6), the stop-reason set
@@ -56,6 +56,15 @@ measured mechanism: a fixed 256-chunk gate threshold against a resident square g
 admitted work to 1.5–1.7× growth while requests grow 4.5–4.8×**. §7.3 updated — P-8 **confirmed** at #1 with a
 frame-time constraint attached. One new instrument defect (ensure-pass coverage unmeasured) plus two minor
 items.  
+**Amended:** 2026-08-01 (v1.16) — **FP-11a/FP-11c shipped, and P-8 tested and NO-GO'd.** The ensure sweep now
+measures and prints tour coverage at two instants (and flies the closed circuit the loading pass actually
+flies, which it previously did not — see §7.4.4); guarded by **B18**, Validate All 365 → **366**. The
+[P-8 capture](../Performance/CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md) then **falsified
+the fix this document ranked #1**: scaling the thresholds moves gate closure by 0.1 pt at vd 32 because the
+backlog grows to meet the threshold, and the binding constraint is `Quota`, not admission. §7.3 re-ranked —
+**P-8 demoted and re-scoped behind throughput work**, which is promoted from "not licensed" for the
+high-view-distance regime specifically. B19 added with the (retained, default-OFF) derivation, Validate All
+366 → **367**.  
 **Status:** ✅ **Implemented.** FP-0…FP-4 are all shipped; the current capture is
 [`../Performance/CHUNK_PIPELINE_FP10_FLIGHT_PROFILE_IL2CPP_2026-08-01_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP10_FLIGHT_PROFILE_IL2CPP_2026-08-01_BENCHMARK.md)
 (six IL2CPP **Release** runs at viewDistance 5 / 8 / 10 / 15 / 20 / 32). **Verdict: ORDERING-BOUND is a
@@ -565,7 +574,7 @@ bucket resolution, that is the demand case that promotes the v3 item — record 
 > distinct stall populations rather than one slow stage. Separating them needs per-chunk traces. This is a
 > recorded demand case for the v3+ CSV export, per the rule above.
 
-### 7.3 Ranked follow-ups — **re-ranked by FP-8 (v1.12), confirmed and extended by FP-10 (v1.15)**
+### 7.3 Ranked follow-ups — **re-ranked by FP-8 (v1.12), extended by FP-10 (v1.15), and re-ranked again by the P-8 result (v1.16)**
 
 The capture's whole purpose was to decide what to do next, so the ranking is recorded **here** — the report
 that produced it is a point-in-time, append-only artifact and cannot be kept current. Engine items are
@@ -585,20 +594,42 @@ mirrored in the master backlog; instrument items are owned by this document.
 > the fix** (§F4). Derivation in
 > [`../Performance/CHUNK_PIPELINE_FP10_FLIGHT_PROFILE_IL2CPP_2026-08-01_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP10_FLIGHT_PROFILE_IL2CPP_2026-08-01_BENCHMARK.md).
 
+> **The P-8 result overturns this ranking's top item, and the reader should start here.** FP-8 and FP-10
+> both reasoned that a fixed 256/128 backlog threshold against a resident square growing as vd² was what
+> held admitted work down, and ranked scaling it #1. **The fix was built, measured across ten IL2CPP Release
+> runs with same-build controls, and returned NO-GO** — see
+> [`../Performance/CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md).
+> At vd 32 a **4.2× larger threshold changed gate closure by 0.1 points** (94.6 % vs 94.5 %), because the
+> backlog simply grows to meet whatever bar it is given; admitted work rose 0.2 %, completions fell 16 %, and
+> loading-pass minimum FPS fell ~⅓ at vd 26 and vd 32.
+>
+> **The inference that has to be corrected is FP-10 F2's second half.** F2 observed that completion-of-admitted
+> has no trend with view distance and concluded "the pipeline's efficiency on the work it accepts does not vary
+> — only its willingness to accept does." The willingness was **downstream** of a throughput ceiling: the
+> lighting and mesh schedules report `Quota` on 99 %+ of frames at high view distance in **both** legs, and
+> completions sit in a 5 658–6 803 band across vd 10 → 32 regardless of what admission does. The gate was not
+> choosing to refuse work; it was reporting that lighting could not keep up.
+>
+> **Consequence for the "not licensed" note below:** it stands for in-flight-cap and readiness work, which
+> were tested for and are absent. It does **not** extend to schedule-quota throughput, which this capture
+> identifies as the binding constraint at high view distance — reversing FP-4's deprioritisation of
+> throughput work *for that regime only*.
+
 | # | Item | Home | Why it ranks here |
 |---|------|------|-------------------|
-| **1** | **Scale panic-gate thresholds with view distance** ⬅ **promoted by FP-8** | **`P-8`** — [analysis §6](CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md), mirrored in [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) | FP-8 F2: gate closure **0 / 54.7 / 91.3 / 96.9 / 88.6 %** at vd 5/8/10/15/20 (200 m/s) — a **knee between vd 5 and 10**, located by the vd-8 point added for this purpose. Cost now measured rather than inferred: **12 087 requests dropped before admission** at vd 20/200 m/s, 55.8 % of everything requested. It is what makes vd ≥ 10 admission-bound. **FP-10 F2/F3 supply the mechanism and the fix shape:** the close/reopen pair is an absolute 256/128 backlogged chunks while residency grows as `(2·loadDistance+1)²`, so the threshold is 88.6 % of the resident square at vd 5 and **5.1 % at vd 32** — from vd 15 up the gate is essentially never open. Consequence: across vd 5 → 32 **requests grow 4.47× (loading) / 4.76× (generation) while admitted work grows only 1.51× / 1.73×** — 9 138–11 382 and 8 101–11 066 respectively from vd 8 up — and completion-*of-admitted* has no trend (53–68 %). Scale the thresholds with resident count (or vd²), consistent with the rest of P-4. **FP-10 F4 attaches the constraint:** the gate is currently succeeding at protecting frame time (flying *faster* costs *less* CPU at vd ≥ 20 because the faster phase trips the gate), so any loosening must be gated on frame time, not only on admission counts. |
-| **2** | **Chunk service ordering** — **re-scoped to low view distance** | **`P-7`** — same two docs | FP-8 F1: confirmed **intrinsic at the default vd 5** (33.1–37.8 % across all three loading speeds, gate closed ≤ 0.4 % of frames, so throttling cannot explain it) — but **absent by vd 20**. Target the low-vd regime; acceptance criterion is F4's visibility bound, which fails only at 200 m/s and vd ≥ 10. **FP-10 confirms both** — the decay reproduces, and the visibility bound fails at exactly the same boundary on a different route. It **relocates the worst case**: peak waste is **50.8 % at vd 8 / 200 m/s** (generation), not at vd 5, because that is where the gate has begun closing but has not yet suppressed admissions — full-rate admission *and* full-rate discard. Tune against vd 8, not vd 5. |
+| **1** | **Schedule-quota throughput at high view distance** ⬅ **new #1, promoted by the P-8 NO-GO** | needs a home — closest existing owner is `P-3`/§2 in [analysis](CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md) | The P-8 capture identifies the binding constraint by elimination *and* by direct measurement: `LightSchedule` reports `Quota` on **99.3 % of frames** at vd 32 / loading 200 m/s with scaling ON and **99.5 %** with it OFF; `MeshSchedule` likewise; `InFlightCap` and `AllDeclined` dominate no phase in any of the ten runs. Completions sit in a **5 658–6 803 band across vd 10 → 32 in both legs** — a ceiling far more stable than anything admission does. The question is no longer "how do we admit more?" but "why can the pipeline only finish ~6 500 chunks per 30 s phase regardless of what it admits?". Note this **reverses FP-4's deprioritisation of throughput work** for the high-vd regime specifically; FP-4 measured a different regime under a different rule. |
+| **2** | **Chunk service ordering** — **re-scoped to low view distance** ⬅ was #2, unchanged in substance | **`P-7`** — [analysis §6](CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md) + [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) | Unchanged by the P-8 result except for one confirmation: waste **rose** in the scaled leg (loading 200 m/s, vd 32: 17.9 % ON vs 10.7 % OFF), which is what the FP-10 blockquote predicted would happen if the gate stopped suppressing ordering waste by refusing work. Worst case remains **vd 8 / 200 m/s**; acceptance criterion remains the visibility bound (row 4). |
 | **3** | **Adopt the visibility criterion as the acceptance target** | This doc + P-7's design | `latency ≤ viewDistance × 16 ÷ speed`. Falsifiable, matches independent visual observation across three legs, and gives (1) a target number rather than "less waste". |
-| **4** | ~~**FP-5 — fix the phase leak across runs**~~ ✅ **DONE 2026-07-28** | **this doc, §7.4** | Was blocking trustworthy multi-run sessions. Fixed via `BeginRun()`; guarded by **B11** (Validate All → 359). |
-| **5** | ~~**FP-6 — print `LoadDistance` in the report**~~ ✅ **DONE 2026-07-28, widened** | **this doc, §7.4** | Became "print every knob that produces a stop reason", once it was clear the capture machine runs non-default quotas. Guarded by **B12** (Validate All → 360). |
-| **6** | ~~**§7.1 v2 — fix the plurality dilution**~~ ✅ **DONE 2026-07-31** | **this doc, §7.4.2** | Shipped as FP-7e, as a per-(pass, reason) capability matrix rather than the "scheduling passes only" split this row assumed — FP-7b changed that premise. `RULE_VERSION` bumped to v2; guarded by the rewritten **B10**. |
-| **7** | ~~**FP-9a — sample floor on the PRIMARY regime**~~ ✅ **DONE 2026-07-31** | this doc, §7.4.3 | Shipped as two mechanisms rather than one: a floor over eligible observations, plus `RegimeBearing` for phases that are not measurements — which no floor could have caught, the transition being comfortably over any sane threshold. Guarded by **B16**. |
-| **8** | ~~**FP-9b — hold generation waypoints constant across a sweep**~~ ✅ **DONE 2026-08-01** | this doc, §7.4.3 | Shipped as an inversion rather than a patch: the route is now the input and the region the derived output, so waypoints are **constant at every view distance** and every phase runs its full duration. Guarded by **B17**. |
-| **9** | **FP-11a — measure and print ensure-pass tour coverage** ⬅ **new, filed by FP-10** | this doc, §7.4.4 | The ensure-generated sweep exists so the loading pass flies over generated terrain, but it is **subject to the same panic gate as everything else** — at vd 32 it was throttled on **92.3 % of its frames** with 9 324 requests abandoned, so its coverage is not guaranteed. The instrument cannot currently tell whether the high-vd loading pass measured loading or partly re-measured generation: `enqueue→populated` contains both admission wait and generation, and both were saturated. Check and print `chunks generated / chunks in tour` at the end of the pass. |
-| **10** | **FP-11b — raise or make configurable the latency-sample cap** ⬅ **new** | this doc, §7.4.4 | 32 768 was reached at vd 32 / ensure-generated (35 517 completed chunks), so that block's percentiles cover a subset. FP-7's banner fired correctly, so **no number is silently wrong** — this is coverage, not correctness. |
-| **11** | **FP-11c — print the ensure sweep's speed and duration** ⬅ **new** | this doc, §7.4.4 | The derived-route block prints region, rows, route length, timed travel and tour size but not the ensure sweep's 50 m/s / 187.5 s — both derived, both needed to interpret FP-11a. FP-6 class; one line. |
-| **12** | **Per-chunk CSV export** | Extension roadmap below (v3+) | Only way to separate F4's two stall populations. Demand case reinforced by FP-8 (vd 15 / gen / 50 m/s: p50 1 023 ms vs max 11 273 ms) and again by FP-10 (vd 32 / ensure: `populated→lit` p99 **149 559 ms**). |
+| **4** | **P-8 — residency-scaled panic-gate thresholds** ⬅ **was #1, NO-GO 2026-08-01, parked** | **`P-8`** — same two docs | Built, measured, refuted: 1.58× admitted growth across vd 5 → 32 against a pre-committed ≥ 3.0×, at a ~⅓ loading-pass min-FPS cost (see the blockquote above). Code and its **B19** guard are retained behind `scalePanicGateThresholdsWithResidency`, **default-OFF**. **Not dead — premature.** Re-test it after row 1 moves the throughput ceiling, at which point the gate becomes binding again and a residency-scaled threshold is the right shape. The one leg that behaved as designed was vd 8 (closure 42 % → 24 %). |
+| **5** | ~~**FP-5 — fix the phase leak across runs**~~ ✅ **DONE 2026-07-28** | **this doc, §7.4** | Was blocking trustworthy multi-run sessions. Fixed via `BeginRun()`; guarded by **B11** (Validate All → 359). |
+| **6** | ~~**FP-6 — print `LoadDistance` in the report**~~ ✅ **DONE 2026-07-28, widened** | **this doc, §7.4** | Became "print every knob that produces a stop reason", once it was clear the capture machine runs non-default quotas. Guarded by **B12** (Validate All → 360). |
+| **7** | ~~**§7.1 v2 — fix the plurality dilution**~~ ✅ **DONE 2026-07-31** | **this doc, §7.4.2** | Shipped as FP-7e, as a per-(pass, reason) capability matrix rather than the "scheduling passes only" split this row assumed — FP-7b changed that premise. `RULE_VERSION` bumped to v2; guarded by the rewritten **B10**. |
+| **8** | ~~**FP-9a — sample floor on the PRIMARY regime**~~ ✅ **DONE 2026-07-31** | this doc, §7.4.3 | Shipped as two mechanisms rather than one: a floor over eligible observations, plus `RegimeBearing` for phases that are not measurements — which no floor could have caught, the transition being comfortably over any sane threshold. Guarded by **B16**. |
+| **9** | ~~**FP-9b — hold generation waypoints constant across a sweep**~~ ✅ **DONE 2026-08-01** | this doc, §7.4.3 | Shipped as an inversion rather than a patch: the route is now the input and the region the derived output, so waypoints are **constant at every view distance** and every phase runs its full duration. Guarded by **B17**. |
+| **10** | ~~**FP-11a — measure and print ensure-pass tour coverage**~~ ✅ **DONE 2026-08-01** | this doc, §7.4.4 | **As built, it found a second defect and fixed that too:** the ensure sweep was walking waypoints 0..N-1 while the loading pass *loops* them, so the return leg went ungenerated — at vd 5 no other leg reaches within the load radius of it, so that strip was generated by the "loading" pass. The sweep now flies the closed circuit (~5.5 % longer) and coverage is reported at **two** instants — after the sweep, and when the loading pass starts — because the transition's job drain legitimately finishes work the gate deferred, and a single ensure-time figure would fail otherwise-clean captures. Guarded by **B18**. First results: 100 % at vd 5–15, 98.1–99.7 % at vd 20–32. Original filing: The ensure-generated sweep exists so the loading pass flies over generated terrain, but it is **subject to the same panic gate as everything else** — at vd 32 it was throttled on **92.3 % of its frames** with 9 324 requests abandoned, so its coverage is not guaranteed. The instrument cannot currently tell whether the high-vd loading pass measured loading or partly re-measured generation: `enqueue→populated` contains both admission wait and generation, and both were saturated. Check and print `chunks generated / chunks in tour` at the end of the pass. |
+| **11** | **FP-11b — raise or make configurable the latency-sample cap** ⬅ **new** | this doc, §7.4.4 | 32 768 was reached at vd 32 / ensure-generated (35 517 completed chunks), so that block's percentiles cover a subset. FP-7's banner fired correctly, so **no number is silently wrong** — this is coverage, not correctness. |
+| **12** | ~~**FP-11c — print the ensure sweep's speed and duration**~~ ✅ **DONE 2026-08-01** | this doc, §7.4.4 | Shipped with FP-11a; the route block now prints speed, distance and derived duration. Original filing: The derived-route block prints region, rows, route length, timed travel and tour size but not the ensure sweep's 50 m/s / 187.5 s — both derived, both needed to interpret FP-11a. FP-6 class; one line. |
+| **13** | **Per-chunk CSV export** | Extension roadmap below (v3+) | Only way to separate F4's two stall populations. Demand case reinforced by FP-8 (vd 15 / gen / 50 m/s: p50 1 023 ms vs max 11 273 ms) and again by FP-10 (vd 32 / ensure: `populated→lit` p99 **149 559 ms**). |
 
 **Not licensed by the capture:** any in-flight-cap or readiness work. Both regimes were tested for at three
 view distances and are absent in all of them (`InFlightCap` ≤ 0.6 %, `AllDeclined` ≤ 7.8 %). **FP-10 re-tested

@@ -389,6 +389,30 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
    > *minimum* at 606 ms). The P-7 interaction now cuts the other way as well: the gate is currently
    > suppressing ordering waste by refusing the work, so fixing P-8 first will *raise* measured waste.
 
+   > **❌ BUILT, MEASURED, AND REFUTED (2026-08-01) — this item is parked, and its premise is withdrawn.**
+   > The fix the two blockquotes below argue for was implemented (scale close/reopen linearly with the resident
+   > square's width, default-ON behind `scalePanicGateThresholdsWithResidency`) and captured over ten IL2CPP
+   > Release runs on one build — seven scaled view distances plus **same-build unscaled controls** at vd 8/26/32.
+   > Verdict **NO-GO**:
+   > [`../Performance/CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md).
+   >
+   > - **The backlog grows to meet the threshold.** At vd 32 a **4.2× larger threshold moved gate closure by
+   >   0.1 points** (94.6 % ON vs 94.5 % OFF). Admitted work rose 0.2 %; **completions fell 16 %**.
+   > - **Admitted growth across vd 5 → 32 was 1.58×** against a pre-committed ≥ 3.0× — barely above the 1.51 ×
+   >   the unscaled configuration already achieved.
+   > - **It costs frame time**: loading-pass minimum FPS −37 % at vd 26 and −32 % at vd 32 versus its own control.
+   >
+   > **The premise below — that admission is the constraint — is the part that was wrong.** The lighting and
+   > mesh schedules report `Quota` on 99 %+ of frames at high view distance in **both** legs, and completions sit
+   > in a 5 658–6 803 band across vd 10 → 32 regardless of admission. The gate was not choosing to refuse work;
+   > it was reporting that lighting could not keep up. FP-10's F2 reading ("only its willingness to accept
+   > varies") is corrected: willingness was downstream of a throughput ceiling.
+   >
+   > **Status:** code and its **B19** guard retained, flag **default-OFF**, engine behaviour byte-identical to
+   > pre-P-8. **Premature rather than wrong** — re-test after the schedule-quota ceiling moves, which is now
+   > the top-ranked item in [FLIGHT_PROFILE_CAPTURE.md](FLIGHT_PROFILE_CAPTURE.md) §7.3. The two blockquotes
+   > below are left intact as the reasoning that motivated the experiment.
+
    > **CONFIRMED at #1 by FP-10 (2026-08-01), with the consequence quantified and a constraint attached.**
    > Six view distances; the threshold-vs-residency ratio now runs **88.6 / 48.4 / 35.1 / 18.7 / 11.6 / 5.1 %**
    > at vd 5/8/10/15/20/**32**, so from vd 15 up the gate is essentially never open and the pipeline never runs

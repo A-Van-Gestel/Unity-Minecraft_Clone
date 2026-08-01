@@ -38,9 +38,15 @@ Newest first within each arc. **Superseded** means a later capture withdrew or c
 
 | Capture | Date | Status |
 |---------|------|--------|
-| [`CHUNK_PIPELINE_FP10_..._2026-08-01`](CHUNK_PIPELINE_FP10_FLIGHT_PROFILE_IL2CPP_2026-08-01_BENCHMARK.md) | 2026-08-01 | **Current.** Six-point sweep (vd 5–32), first on FP-9b's derived route. Reproduces FP-8; supplies P-8's mechanism. |
+| [`CHUNK_PIPELINE_FP10_..._2026-08-01`](CHUNK_PIPELINE_FP10_FLIGHT_PROFILE_IL2CPP_2026-08-01_BENCHMARK.md) | 2026-08-01 | **Current.** Six-point sweep (vd 5–32), first on FP-9b's derived route. Reproduces FP-8; supplies P-8's mechanism. **F2's inference is corrected by the P-8 capture** — admitted work was held down by a throughput ceiling, not by the gate's willingness to accept; and its high-vd rows are not a valid baseline for builds carrying FP-11a. Raw counts stand. |
 | [`CHUNK_PIPELINE_FP8_..._2026-07-31`](CHUNK_PIPELINE_FP8_FLIGHT_PROFILE_IL2CPP_2026-07-31_BENCHMARK.md) | 2026-07-31 | **Superseded for the verdict by FP-10**, but still live as FP-10's comparison baseline. Ran the pre-FP-9b route, so its values are not continued. First Release-build capture; first under §7.1 v2. |
 | [`CHUNK_PIPELINE_FP4_..._2026-07-28`](CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md) | 2026-07-28 | **Superseded by FP-8** — scored under §7.1 v1, which counted never-admitted requests as waste and inverted the ordering trend. Its raw counts are the input to FP-8's rescoring. |
+
+### Chunk pipeline — P-8 admission-gate scaling
+
+| Capture | Date | Status |
+|---------|------|--------|
+| [`CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01`](CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md) | 2026-08-01 | **Current, and a NO-GO.** Ten runs on one build: seven residency-scaled view distances (5–32) plus **same-build unscaled controls** at vd 8/26/32. Refutes the fix FP-8/FP-10 ranked #1 — the backlog grows to meet whatever threshold it is given, so a 4.2× threshold moved gate closure 0.1 pt at vd 32 while completions fell 16 % and loading min FPS fell ~⅓. Identifies schedule `Quota` as the binding constraint. **Also establishes that FP-10 is no longer a valid high-vd baseline for the FP-11a build** — read its §F5 before comparing anything against FP-10 at vd ≥ 20. |
 
 ### Chunk pipeline — P-4 backpressure
 
