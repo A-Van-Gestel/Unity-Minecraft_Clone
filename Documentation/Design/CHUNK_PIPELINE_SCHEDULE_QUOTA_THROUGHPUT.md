@@ -1,6 +1,6 @@
 # P-9 — Schedule-Quota Throughput Ceiling
 
-**Version:** 1.3
+**Version:** 1.4
 **Date:** 2026-08-01
 **Status:** Proposed design — not implemented.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -22,9 +22,16 @@
 > correctness before the player is allowed to see anything (§6, Option B2 — an explicit product
 > decision, §3.4).
 >
-> **Nothing here needs a new build to test.** The two caps are live settings on the Performance tab
-> and settings.json is fully in effect for benchmark captures (§7.1), so the rate identity in §3.1
-> can be falsified on the *existing* FP-11a build, before a line of production code is written.
+> **Nothing here needed a new build to test.** The two caps are live settings on the Performance tab
+> and settings.json is fully in effect for benchmark captures (§7.1), so the rate identity in §3.1 was
+> falsifiable on the *existing* FP-11a build before a line of production code was written — which is
+> what **P9-0a** did on 2026-08-02.
+>
+> **⚠ P9-0a confirmed the identity and re-ranked the levers; see the v1.4 amendment below.** Raising
+> the cap works and is unaffordable (×4.79 CPU, ×0.61 min FPS), and at ×2 the binding limit becomes the
+> **8 ms ceiling**, not a higher quota. The lead lever is now **Option C — cut per-item main-thread
+> cost**, specifically the unbudgeted lighting merge (**P-3**); B2 above keeps its product rationale
+> (§3.4) but is no longer the throughput answer.
 
 **Amended:** 2026-08-01 (v1.1) — two corrections after review. (1) §7.1: the belief that a benchmark
 run ignores settings.json except for five overlaid fields is **wrong on the menu-launched path**;
@@ -32,6 +39,21 @@ verified in code, which makes a cap-sweep probe (P9-0a) free and same-build. (2)
 per-chunk multiplier is reframed from "redundant work to delete" to "correctness work serialized
 ahead of first delivery", on an explicit product preference — a dark or intermediately-lit mesh now,
 corrected seconds later, beats looking into the void. Acceptance test restructured accordingly (§2).
+
+**Amended:** 2026-08-02 (v1.4) — **P9-0a ran, and it confirms §3.1 while closing §6's Option A′.**
+Two settings-only legs at vd 32 on the P-8 build
+([capture](../Performance/CHUNK_PIPELINE_P9_0A_CAP_SWEEP_IL2CPP_2026-08-02_BENCHMARK.md)):
+doubling `maxLightJobsPerFrame` reopened the gate (95.1 % → 62.6 % closed), collapsed
+`enqueue→populated` (2 999 → 2 134 ms) and raised completions 21 % — the exact mechanism §2's
+prediction named — at a cost of **×4.79 CPU and ×0.61 minimum FPS**, failing Q2 decisively. Three
+corrections follow, folded into the sections below: **(1)** §4.2's headroom is quantified as *less
+than ×2* — at ×2 the binding limit becomes the **8 ms ceiling** (`Ceiling` on 95.8 % of frames), after
+which the count cap is inert; **(2)** the frame cost is **not** in the schedule pass (which explains
+only 6.8 ms of +23.1 ms), and a fitted model points at the unbudgeted `ProcessLightingJobs` merge —
+**P-3** — making **Option C the gating lever** rather than a parallel one; **(3)** §3.4's Option B2 is
+weakened as a *throughput* lever: the recoverable hops total ~537 ms of a 3 703 ms latency, so it
+cannot meet the visibility budget alone. Its product rationale is untouched. Phases P9-0a/L5/L3 are
+resolved or withdrawn in §8.
 
 **Audited:** 2026-08-01, at commit `c7bea678` (branch `feat/world-scaling`).
 Findings are from static review of `World.cs:2078–2345` (the lighting ready-set scan and the mesh
@@ -50,6 +72,9 @@ from field defaults (§7). No production code was changed for this document.
 - [`../Performance/CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md)
   — the capture that promoted P-9 (§F3 identifies `Quota`; §F5 invalidates FP-10 as a high-vd
   baseline).
+- [`../Performance/CHUNK_PIPELINE_P9_0A_CAP_SWEEP_IL2CPP_2026-08-02_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_P9_0A_CAP_SWEEP_IL2CPP_2026-08-02_BENCHMARK.md)
+  — **this document's phase P9-0a**. Confirms §3.1's rate identity by the mechanism §2 predicted,
+  and prices §6's Option A′ out on frame time. Read it before acting on §6.
 - [`FLIGHT_PROFILE_CAPTURE.md`](FLIGHT_PROFILE_CAPTURE.md) — the instrument. §7.3 row 1 is P-9's
   ranking rationale; the attribution work in §7 below is an extension of that instrument.
 - [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) — master backlog;
@@ -324,7 +349,10 @@ measurement says the ceiling is **not** what stops these passes:
 
 Two consequences, and they cut in opposite directions:
 
-1. **There is headroom under the ceiling.** The pass finishes its quota well inside 8 ms. The P-8
+1. **There is headroom under the ceiling — but P9-0a measured it as less than ×2.** Doubling the cap
+   put `LightSchedule` on `Ceiling` for 95.8 % of frames, after which the count cap is inert and
+   delivery is `ceiling_ms ÷ per-item cost`. The estimate below was directionally right and
+   quantitatively generous; treat it as superseded by the capture. The pass finishes its quota inside 8 ms. The P-8
    report's whole-frame average CPU at vd 32 loading is 8.5 ms for the entire pass group — an upper
    bound on what *both* schedule passes plus everything else consume on an average frame — so the
    8 ms and 6 ms ceilings are sized as hitch guards, an order of magnitude looser than steady-state
@@ -360,6 +388,21 @@ The two "not measured" rows are the whole reason P-9 opens with attribution: the
 
 The ceiling is `rate ÷ amplification`. Three levers move it; they are not exclusive, and the
 question is only which one leads.
+
+> **⚠ Re-ranked by P9-0a (2026-08-02). Read this before the options below, which are left intact as
+> the reasoning that produced the probe.** The measured order is now **C → B2 → A′**, not B2 → C → A′:
+>
+> - **A′ is closed** (not merely deferred): ×4.79 CPU for +21 % delivery, and beyond ×2 the ceiling
+>   makes the cap inert.
+> - **C is promoted from parallel to gating.** Once the ceiling binds, delivery is
+>   `ceiling_ms ÷ per-item cost`, so cutting that cost is the *only* way to raise throughput at
+>   constant frame time. The capture's fitted model puts the cost in the **unbudgeted
+>   `ProcessLightingJobs` merge (P-3)** rather than the schedule scan — pending P9-0's attribution.
+> - **B2 is weakened as a throughput lever** (its product rationale in §3.4 is untouched): the hops it
+>   can recover total ~537 ms of a 3 703 ms latency, so it cannot meet the visibility budget alone.
+>
+> Derivation: [P9-0a capture](../Performance/CHUNK_PIPELINE_P9_0A_CAP_SWEEP_IL2CPP_2026-08-02_BENCHMARK.md)
+> §F3–F4.
 
 ### Option A — Raise the caps (rejected as the opening move)
 
@@ -507,12 +550,12 @@ conditional one; that is a code-comment fix, filed as a P9-0 rider rather than d
 
 | Phase                                     | Scope                                                                                                                                                                                                                    | Effort | Depends on |
 |-------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|------------|
-| **P9-0a — Cap-sweep probe (zero code)** ⬅ **first** | On the **existing FP-11a build** (§7.1): sweep `maxLightJobsPerFrame` / `maxMeshRebuildsPerFrame` from the in-game Performance tab at vd 26 and 32, ≥ 3 points each (e.g. ×1 / ×2 / ×4), recording Q1–Q4. **A falsification test, not a proposed fix** — if completions and `Quota` share do not respond to the cap, §3.1's rate identity is wrong and this document is void. If they do respond, the frame-time curve prices Option A honestly and bounds every later phase. |   🟢   | —          |
+| ~~**P9-0a — Cap-sweep probe (zero code)**~~ ✅ **DONE 2026-08-02** | Ran as two settings-only legs at vd 32 (24 → 48 light jobs) on the P-8 build. **Identity confirmed, Option A′ closed**: gate 95.1 % → 62.6 % closed, `enqueue→populated` −28.9 %, completions +20.9 %, at ×4.79 CPU / ×0.61 min FPS (Q2 fail). Binding limit moved to the **8 ms ceiling**, not a higher quota. [Capture](../Performance/CHUNK_PIPELINE_P9_0A_CAP_SWEEP_IL2CPP_2026-08-02_BENCHMARK.md). Planned vd 26 legs were made redundant by the size of the vd 32 failure |   🟢   | —          |
 | **P9-0 — Attribution instrument**         | Report, per phase: main-thread ms for each budgeted pass (light schedule, mesh schedule, distinct from the process/apply passes); items served vs quota granted; and **work amplification** — lighting schedules and mesh schedules per `MeshApplied` chunk, **split by *first* delivery vs subsequent corrections** (the split §3.4 turns on). Extends `WorldFrameProfiler` (already Stopwatch-based and IL2CPP-valid) and `PipelineTelemetry`; wire it into `BenchmarkController`, which today never enables the profiler. **No production behaviour change.** Rider: correct the overstated remark at `SettingsManager.cs:1108–1115` (§7.1). |   🟡   | P9-0a      |
 | **P9-1 — Capture and decide**             | Fresh same-build baseline at vd 10/20/26/32 per §7, reported per `perf-benchmark`. Answers: how many ms do the passes cost, and what is amplification really? **Selects the lever** and may trigger §2's kill condition.                                                                                                              |   🟢   | P9-0       |
 | **P9-2 — Deliver-then-refine** (Option B2) | **The lead fix.** Decouples mesh delivery from settled lighting; corrections converge in place (Q7). Behind a default-OFF rollback flag, listed in the benchmark overlay for cold-cache robustness. ⚠️ Touches the mesh readiness contract — **`chunk-lifecycle` skill mandatory**, and Q7 needs a validation baseline with a prove-red, not a capture alone. |   🔴   | P9-1       |
 | **P9-2b — Delete redundancy** (Option B1) | Only what P9-1 proves is recomputing an unchanged result. Scoped after the fact; **may legitimately be empty**.                                                                                                                                                                                                                       |   🟡   | P9-1       |
-| **P9-3 — Re-tune the rate** (Option A′)   | Only if P9-0a/P9-1 show genuine ms headroom under Q2. Raises the caps *and* re-tunes the ms ceilings as steady-state budgets in one change (§4.2). Scored against §2 with Q2 as a hard gate.                                                                                                                                          |   🟡   | P9-0a, P9-1 |
+| **P9-3 — Re-tune the rate** (Option A′)   | ⛔ **BLOCKED by P9-0a.** The ms headroom it was gated on does not exist: at ×2 the ceiling binds, the cap goes inert, and the cost is ×4.79 CPU / ×0.61 min FPS. Re-openable **only after per-item cost falls (P-3)**, at which point the same 8 ms buys more items. Do not attempt before then.                                                                                                                                          |   🟡   | **P-3**, P9-1 |
 
 **P9-0a alone delivers standalone value and costs a settings edit** — it can refute this entire
 document for the price of one capture session, on a build that already exists (§7.1). **P9-0 + P9-1**
@@ -603,8 +646,17 @@ enabled *and* disabled after each phase.
   which shows vd 32 / 200 m/s (800 m lead vs 560 m load distance) is unreachable by ordering and
   therefore throughput-bound. Independent confirmation of the §7.3 ranking of P-9 above P-7. The
   predictive-ordering mechanism this was derived for is recorded on **P-7's** backlog row, not here.
+* **v1.4** - **P9-0a captured** ([report](../Performance/CHUNK_PIPELINE_P9_0A_CAP_SWEEP_IL2CPP_2026-08-02_BENCHMARK.md)).
+  §3.1's rate identity is **confirmed** by the mechanism §2 pre-committed to — doubling the light cap
+  reopened the gate (95.1 % → 62.6 % closed) and collapsed `enqueue→populated` (−28.9 %) rather than
+  the lighting hop — and §6's Option A′ is **closed on frame time** (×4.79 CPU, ×0.61 min FPS). Three
+  body corrections: §4.2's headroom quantified as **less than ×2** (the binding limit becomes the 8 ms
+  ceiling, after which the cap is inert); §6 re-ranked to **C → B2 → A′**, promoting per-item cost
+  (**P-3**, the unbudgeted lighting merge) from parallel to gating; §3.4's B2 weakened as a throughput
+  lever while its product rationale stands. §8: P9-0a done, P9-3 blocked behind P-3.
 
 ---
 
-**Last Updated:** 2026-08-01
-**Next Review:** when P9-0a starts, or immediately if a capture contradicts §3.1's rate identity
+**Last Updated:** 2026-08-02
+**Next Review:** when P9-0 (attribution) starts — it confirms or kills the P9-0a §F4 model that
+promoted P-3 to the gating lever
