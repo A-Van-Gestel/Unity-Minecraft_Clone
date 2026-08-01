@@ -360,6 +360,18 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
    >
    > P-7 is re-scoped to the low-view-distance regime; its acceptance target is unchanged. Full derivation:
    > [`../Performance/CHUNK_PIPELINE_FP8_FLIGHT_PROFILE_IL2CPP_2026-07-31_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP8_FLIGHT_PROFILE_IL2CPP_2026-07-31_BENCHMARK.md).
+
+   > **CONFIRMED by FP-10 (2026-08-01), and the worst case relocated.** FP-9b rebuilt the benchmark route
+   > entirely — waypoints and timed travel are now constant across a sweep — and the decay reproduced anyway:
+   > **38.5 / 43.2 / 36.6 / 19.5 / 13.7 / 8.6 %** at vd 5/8/10/15/20/**32**, within ~1 pt of FP-8 at four of
+   > five overlapping points. A curve that survives having its route rebuilt underneath it is a property of the
+   > pipeline rather than of the benchmark, which FP-8 could only assume. The visibility criterion fails at the
+   > identical boundary (200 m/s, vd ≥ 10).
+   >
+   > **Tune against vd 8, not vd 5.** Peak waste in the whole sweep is **50.8 % at vd 8 / 200 m/s**
+   > (generation) — the point where the panic gate has begun closing but has not yet suppressed admissions, so
+   > the pipeline admits at full rate *and* discards at full rate. Full derivation:
+   > [`../Performance/CHUNK_PIPELINE_FP10_FLIGHT_PROFILE_IL2CPP_2026-08-01_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP10_FLIGHT_PROFILE_IL2CPP_2026-08-01_BENCHMARK.md).
 6. **P-8 — scale the panic-gate thresholds with view distance.** `panicGateCloseThreshold` / `ReopenThreshold`
    are absolute constants (256 / 128) while the resident square they guard grows as view-distance²: a
    256-chunk backlog is 88.6 % of the resident set at vd 5 but 11.6 % at vd 20. Measured consequence — gate
@@ -376,6 +388,22 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
    > and `enqueue→populated` p50 confirms it independently (4.4 ms at vd 5 → 1 665 ms at vd 20, with vd 20's
    > *minimum* at 606 ms). The P-7 interaction now cuts the other way as well: the gate is currently
    > suppressing ordering waste by refusing the work, so fixing P-8 first will *raise* measured waste.
+
+   > **CONFIRMED at #1 by FP-10 (2026-08-01), with the consequence quantified and a constraint attached.**
+   > Six view distances; the threshold-vs-residency ratio now runs **88.6 / 48.4 / 35.1 / 18.7 / 11.6 / 5.1 %**
+   > at vd 5/8/10/15/20/**32**, so from vd 15 up the gate is essentially never open and the pipeline never runs
+   > in the regime its budgets were tuned for. The effect on delivered work is the cleanest number in the
+   > sweep: across vd 5 → 32, **requests grow 4.47× (loading) / 4.76× (generation) while admitted work grows
+   > only 1.51× / 1.73×**, and completion *of what is admitted* shows no trend at all (53–68 %). **The
+   > pipeline's efficiency on the work it accepts does not vary with view distance — only its willingness to
+   > accept does.**
+   >
+   > **The constraint:** the gate is currently *succeeding* at the half of its job it was built for. At
+   > vd ≥ 20, flying **faster** costs **less** CPU (vd 32 generation: 16.5 ms at 50 m/s vs 10.5 ms at 100 m/s)
+   > because the faster phase trips the gate and the gate then throttles admission. Any P-8 change must
+   > therefore be gated on **frame time**, not on admission counts alone, or it trades this away. Full
+   > derivation:
+   > [`../Performance/CHUNK_PIPELINE_FP10_FLIGHT_PROFILE_IL2CPP_2026-08-01_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP10_FLIGHT_PROFILE_IL2CPP_2026-08-01_BENCHMARK.md).
 7. **§4.4 "lighting stable" save bit** (serialization migration) — **deprioritized by FP-4.** Throughput work;
    throughput is not the binding constraint (`InFlightCap` ≤ 0.6 % at every view distance). Still a real win
    for revisited terrain, just not what the flight symptom calls for.
