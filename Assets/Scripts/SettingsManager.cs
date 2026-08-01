@@ -551,14 +551,32 @@ public class Settings
     public bool enableGenerationPanicGate = true;
 
     /// <summary>
-    /// Lighting ready-set size at which the panic gate closes (stops admitting generation requests).
-    /// Provisional default pending in-game calibration; must exceed the reopen threshold.
+    /// Scales the panic-gate thresholds with the resident load square (P-8). Default-ON; the off state is
+    /// the rollback leg and uses the two thresholds below verbatim, byte-identically to pre-P-8 behavior.
+    /// <para>Listed in <c>SettingsManager.OverlayBenchmarkSettingsFromDisk</c> so a benchmark run can
+    /// capture the OFF leg from the same build — without that, benchmark mode pins it to this default.</para>
+    /// </summary>
+    /// <remarks>
+    /// The thresholds count backlogged chunks while the population they guard grows as view distance
+    /// squared, so a fixed pair is an unreachable brake at the default and a near-permanent throttle at high
+    /// view distance. See <see cref="Helpers.GenerationPanicGate.DeriveThresholds"/> for the scale and why it
+    /// follows the square's width rather than its area.
+    /// </remarks>
+    public bool scalePanicGateThresholdsWithResidency = true;
+
+    /// <summary>
+    /// Lighting ready-set size at which the panic gate closes (stops admitting generation requests), stated
+    /// at <see cref="Helpers.GenerationPanicGate.ReferenceResidentWidth"/> — i.e. at the default view
+    /// distance, where it is used as-is. With
+    /// <see cref="scalePanicGateThresholdsWithResidency"/> on, the effective value scales up from here with
+    /// the resident square's width. Must exceed the reopen threshold.
     /// </summary>
     public int panicGateCloseThreshold = 256;
 
     /// <summary>
-    /// Lighting ready-set size at or below which a closed panic gate reopens. The gap below
-    /// <see cref="panicGateCloseThreshold"/> is the hysteresis band that prevents oscillation.
+    /// Lighting ready-set size at or below which a closed panic gate reopens, stated at the same reference
+    /// width as <see cref="panicGateCloseThreshold"/> and scaled with it. The gap below that threshold is
+    /// the hysteresis band that prevents oscillation.
     /// </summary>
     public int panicGateReopenThreshold = 128;
 
@@ -571,7 +589,7 @@ public class Settings
     // ═══════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Waypoints the benchmark's generation sweep emits (two per row). Honoured exactly, rounded up to an
+    /// Waypoints the benchmark's generation sweep emits (two per row). Honored exactly, rounded up to an
     /// even number. The swept region is <b>derived</b> from the configured speeds and phase duration, so
     /// this controls the sweep's shape, not the run's length.
     /// </summary>
@@ -587,7 +605,7 @@ public class Settings
     public int benchmarkGenerationWaypoints = 12;
 
     /// <summary>
-    /// Seconds each speed phase runs. Drives the total distance travelled, and with it the derived size of
+    /// Seconds each speed phase runs. Drives the total distance traveled, and with it the derived size of
     /// the benchmark region — the sweep is sized to the distance the phases will actually cover.
     /// </summary>
     [SettingField(SettingsTab.Benchmark, Label = "Phase Duration (s)", Format = "f0", Order = 1)]
@@ -750,6 +768,19 @@ public class Settings
     /// This is a calculated property, dynamically derived from the viewDistance plus a safe buffer.
     /// </summary>
     public int LoadDistance => viewDistance + DATA_LOAD_BUFFER;
+
+    /// <summary>
+    /// Gets the side length, in chunks, of the resident load square — <c>2 × LoadDistance + 1</c>, floored at
+    /// 1 so a nonsensical configuration cannot yield a zero or negative square. Shared by the panic gate,
+    /// which scales its thresholds by it (P-8), and the benchmark's settings snapshot, which reports it:
+    /// those two must never disagree about how big the resident world is.
+    /// </summary>
+    /// <remarks>
+    /// Not yet the <i>only</i> derivation — <c>PipelineTelemetry.EstimateTraceCapacity</c> still computes the
+    /// same square from its own <c>loadDistance</c> parameter, because it is called before a
+    /// <see cref="Settings"/> is in scope. Route new callers here rather than re-deriving.
+    /// </remarks>
+    public int ResidentWidth => Mathf.Max(1, LoadDistance * 2 + 1);
 
     #endregion
 }
@@ -1060,9 +1091,18 @@ public static class SettingsManager
     /// Reads the saved settings file (if it exists) and overlays benchmark-specific
     /// fields onto the provided defaults. This allows benchmark mode to use
     /// deterministic gameplay settings while still honoring user-configured
-    /// benchmark parameters (waypoints, phase duration, speed lists).
+    /// benchmark parameters (waypoints, phase duration, speed lists) plus the
+    /// <b>rollback levers a capture needs to A/B</b>.
     /// </summary>
     /// <param name="defaults">The fresh defaults to overlay onto.</param>
+    /// <remarks>
+    /// The overlay list is the <i>only</i> way a benchmark run can differ from code defaults: the caller
+    /// hands us a fresh <see cref="Settings"/> and never reads the file itself, deliberately, so a capture is
+    /// not silently shaped by whatever the operator last configured for play. The consequence — learned when
+    /// P-8 shipped a default-ON flag whose OFF leg turned out to be uncapturable without rebuilding — is that
+    /// <b>a rollback flag which is not listed here cannot be A/B'd in a player build at all</b>. Any future
+    /// flag that a benchmark must toggle belongs in this method, and the field's own docstring should say so.
+    /// </remarks>
     private static void OverlayBenchmarkSettingsFromDisk(Settings defaults)
     {
         if (!File.Exists(s_settingsFilePath)) return;
@@ -1077,6 +1117,11 @@ public static class SettingsManager
             defaults.benchmarkPhaseSeconds = saved.benchmarkPhaseSeconds;
             defaults.benchmarkGenerationSpeeds = saved.benchmarkGenerationSpeeds;
             defaults.benchmarkLoadingSpeeds = saved.benchmarkLoadingSpeeds;
+
+            // P-8's rollback lever: the flag is default-ON and ships on benchmark evidence, so the capture
+            // has to be able to turn it off without a rebuild (a rebuilt OFF leg would not be the same
+            // build, which is the whole point of running one).
+            defaults.scalePanicGateThresholdsWithResidency = saved.scalePanicGateThresholdsWithResidency;
         }
         catch (Exception)
         {

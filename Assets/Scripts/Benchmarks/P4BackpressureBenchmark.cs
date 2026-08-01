@@ -327,7 +327,10 @@ namespace Benchmarks
         /// <param name="legs">The measured legs.</param>
         private static void WriteReport(World world, LegResult[] legs)
         {
-            int side = world.settings.LoadDistance * 2 + 1;
+            // Through Settings.ResidentWidth, not a local re-derivation: the gate line below reports the
+            // resident width the thresholds were scaled by, and a header that computed its own unfloored
+            // version would contradict it on a degenerate configuration.
+            int side = world.settings.ResidentWidth;
             int squareChunks = side * side;
 
             StringBuilder sb = new StringBuilder(capacity: 4096);
@@ -338,7 +341,19 @@ namespace Benchmarks
             sb.AppendLine($"Base ceilings ms: light {world.settings.lightScheduleBudgetMs:F1}, meshSched {world.settings.meshScheduleBudgetMs:F1}, " +
                           $"genProc {world.settings.genProcessBudgetMs:F1}, meshApply {world.settings.meshApplyBudgetMs:F1} " +
                           "(scaling legs multiply these by 60/targetFps, clamped x8)");
-            sb.AppendLine($"Panic gate:     close {world.settings.panicGateCloseThreshold.ToString()} / reopen {world.settings.panicGateReopenThreshold.ToString()}, " +
+            // Configured AND effective: with P-8 residency scaling on, the configured pair is stated at the
+            // reference view distance and is NOT what the gate compares against at this run's view distance.
+            GenerationPanicGate.DeriveThresholds(
+                world.settings.ResidentWidth,
+                world.settings.panicGateCloseThreshold,
+                world.settings.panicGateReopenThreshold,
+                world.settings.scalePanicGateThresholdsWithResidency,
+                out int gateCloseAt,
+                out int gateReopenAt);
+
+            sb.AppendLine($"Panic gate:     close {world.settings.panicGateCloseThreshold.ToString()} / reopen {world.settings.panicGateReopenThreshold.ToString()} configured, " +
+                          $"effective {gateCloseAt.ToString()} / {gateReopenAt.ToString()} at resident width {world.settings.ResidentWidth.ToString()} " +
+                          $"(residency scaling {(world.settings.scalePanicGateThresholdsWithResidency ? "ON" : "OFF")}), " +
                           $"in-flight light cap {world.settings.maxInFlightLightingJobs.ToString()}");
             sb.AppendLine();
             sb.Append(BenchmarkEnvironment.DescribeSystem());

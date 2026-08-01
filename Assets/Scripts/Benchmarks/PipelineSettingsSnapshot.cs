@@ -1,4 +1,5 @@
 using System.Text;
+using Helpers;
 
 namespace Benchmarks
 {
@@ -81,11 +82,23 @@ namespace Benchmarks
         /// <summary>Whether the P-4 §3.5 generation panic gate is active.</summary>
         public readonly bool PanicGateEnabled;
 
-        /// <summary>Lighting-backlog level at which an open gate closes.</summary>
+        /// <summary>Configured close threshold, as persisted — stated at the reference view distance.</summary>
         public readonly int PanicGateCloseThreshold;
 
-        /// <summary>Lighting-backlog level at or below which a closed gate reopens.</summary>
+        /// <summary>Configured reopen threshold, as persisted — stated at the reference view distance.</summary>
         public readonly int PanicGateReopenThreshold;
+
+        /// <summary>Whether P-8's residency scaling is active for this run.</summary>
+        public readonly bool ScalePanicGateWithResidency;
+
+        /// <summary>
+        /// The close threshold the gate is actually evaluated against, after P-8 scaling and sanitization.
+        /// Equals <see cref="PanicGateCloseThreshold"/> at the reference view distance and with scaling off.
+        /// </summary>
+        public readonly int EffectiveCloseThreshold;
+
+        /// <summary>The reopen threshold the gate is actually evaluated against, likewise derived.</summary>
+        public readonly int EffectiveReopenThreshold;
 
         /// <summary>
         /// Whether the lighting engine is on. Load-bearing for the gate: its backlog signal is the lighting
@@ -96,22 +109,32 @@ namespace Benchmarks
         #endregion
 
         /// <summary>
-        /// Side length of the resident load square in chunks — <c>2·LoadDistance + 1</c>, floored at 1 so a
-        /// nonsensical configuration cannot yield a zero or negative square (mirrors the clamp in
-        /// <see cref="PipelineTelemetry.EstimateTraceCapacity"/>).
+        /// Side length of the resident load square in chunks, captured from <see cref="Settings.ResidentWidth"/>
+        /// — which is also what the panic gate scales its thresholds by (P-8), so the report and the gate
+        /// cannot disagree about how big the resident world is.
         /// </summary>
-        public int ResidentWidth => LoadDistance * 2 + 1 < 1 ? 1 : LoadDistance * 2 + 1;
+        public readonly int ResidentWidth;
 
         /// <summary>Chunks in the resident load square — <see cref="ResidentWidth"/> squared.</summary>
         public int ResidentChunks => ResidentWidth * ResidentWidth;
 
         /// <summary>
-        /// The gate's close threshold as a percentage of the resident square. The FP-4 sweep found this ratio
-        /// — not the threshold itself — predicts whether the gate ever closes, because the threshold is
-        /// absolute while the population it guards grows with the square of view distance.
+        /// The gate's <i>configured</i> close threshold as a percentage of the resident square. The FP-4
+        /// sweep found this ratio — not the threshold itself — predicts whether the gate ever closes, because
+        /// the threshold was absolute while the population it guards grows with the square of view distance.
+        /// Kept on the configured value so it stays the same quantity FP-8 and FP-10 reasoned from; the
+        /// post-P-8 figure is <see cref="EffectiveCloseThresholdPercentOfResident"/>.
         /// </summary>
         public double PanicGateCloseThresholdPercentOfResident =>
             ResidentChunks > 0 ? 100.0 * PanicGateCloseThreshold / ResidentChunks : 0.0;
+
+        /// <summary>
+        /// The effective close threshold as a percentage of the resident square — the ratio that actually
+        /// governs this run. With P-8 scaling on it falls as <c>1 / width</c> rather than <c>1 / width²</c>,
+        /// which is the whole of the change stated as one number.
+        /// </summary>
+        public double EffectiveCloseThresholdPercentOfResident =>
+            ResidentChunks > 0 ? 100.0 * EffectiveCloseThreshold / ResidentChunks : 0.0;
 
         /// <summary>Initializes a snapshot from the values a run is about to use.</summary>
         /// <param name="settings">The settings instance the run reads.</param>
@@ -119,6 +142,7 @@ namespace Benchmarks
         {
             ViewDistance = settings.viewDistance;
             LoadDistance = settings.LoadDistance;
+            ResidentWidth = settings.ResidentWidth;
 
             MaxLightJobsPerFrame = settings.maxLightJobsPerFrame;
             MaxMeshRebuildsPerFrame = settings.maxMeshRebuildsPerFrame;
@@ -138,7 +162,18 @@ namespace Benchmarks
             PanicGateEnabled = settings.enableGenerationPanicGate;
             PanicGateCloseThreshold = settings.panicGateCloseThreshold;
             PanicGateReopenThreshold = settings.panicGateReopenThreshold;
+            ScalePanicGateWithResidency = settings.scalePanicGateThresholdsWithResidency;
             LightingEnabled = settings.enableLighting;
+
+            // Through the same helper the gate itself calls, never a re-derivation here: a report that
+            // computed its own version of the thresholds could disagree with the run it describes.
+            GenerationPanicGate.DeriveThresholds(
+                settings.ResidentWidth,
+                settings.panicGateCloseThreshold,
+                settings.panicGateReopenThreshold,
+                settings.scalePanicGateThresholdsWithResidency,
+                out EffectiveCloseThreshold,
+                out EffectiveReopenThreshold);
         }
 
         /// <summary>
@@ -186,11 +221,17 @@ namespace Benchmarks
             // gate-closed % per phase. The ratio is printed because the threshold is absolute while the
             // backlog it guards scales with the resident square.
             sb.AppendLine("  Admission gate -> no stop reason; see 'Panic gate closed' per phase  " +
-                          $"[gate {(PanicGateEnabled ? "ON" : "OFF")}]:");
-            sb.AppendLine($"    Close / reopen:    {PanicGateCloseThreshold} / {PanicGateReopenThreshold} " +
-                          "lighting-backlog chunks");
-            sb.AppendLine($"    Close threshold:   {PanicGateCloseThresholdPercentOfResident:F1}% of the resident " +
+                          $"[gate {(PanicGateEnabled ? "ON" : "OFF")}, residency scaling " +
+                          $"{(ScalePanicGateWithResidency ? "ON" : "OFF")}]:");
+            sb.AppendLine($"    Configured:        {PanicGateCloseThreshold} / {PanicGateReopenThreshold} " +
+                          $"lighting-backlog chunks (stated at resident width " +
+                          $"{GenerationPanicGate.ReferenceResidentWidth})");
+            sb.AppendLine($"    Effective:         {EffectiveCloseThreshold} / {EffectiveReopenThreshold} " +
+                          $"at this run's resident width {ResidentWidth}");
+            sb.AppendLine($"    Close threshold:   {EffectiveCloseThresholdPercentOfResident:F1}% of the resident " +
                           "square (a LOW % means the gate closes readily)");
+            sb.AppendLine($"                       {PanicGateCloseThresholdPercentOfResident:F1}% unscaled — the " +
+                          "pre-P-8 figure FP-8/FP-10 reasoned from");
             sb.AppendLine();
         }
 

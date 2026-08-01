@@ -3366,13 +3366,17 @@ public class World : MonoBehaviour, IMeshDrainHost
         {
             int backlog = _readyCountAfterScan;
 
-            // Sanitize the persisted, user-editable thresholds: closeAt ≥ 1 and reopenAt in
-            // [0, closeAt). A degenerate band (reopen ≥ close) would flip the gate every frame —
-            // halving admissions and spamming two interpolated log strings per flip inside Update —
-            // and a negative reopenAt could never be reached by a non-negative backlog, wedging a
-            // closed gate shut forever.
-            int closeAt = Mathf.Max(1, settings.panicGateCloseThreshold);
-            int reopenAt = Mathf.Clamp(settings.panicGateReopenThreshold, 0, closeAt - 1);
+            // P-8: the thresholds are stated at the default view distance and scale with the resident
+            // square, because the backlog they guard does. Derivation AND sanitization both live in the
+            // pure helper so the value the gate uses and the value the benchmark report prints cannot
+            // diverge — the FP-11a lesson that two places which must agree eventually do not.
+            GenerationPanicGate.DeriveThresholds(
+                settings.ResidentWidth,
+                settings.panicGateCloseThreshold,
+                settings.panicGateReopenThreshold,
+                settings.scalePanicGateThresholdsWithResidency,
+                out int closeAt,
+                out int reopenAt);
 
             // Close debounce (see the field comment): the close arm only sees a "high" backlog after
             // it has been high for PANIC_CLOSE_DEBOUNCE_FRAMES consecutive samples — implemented by

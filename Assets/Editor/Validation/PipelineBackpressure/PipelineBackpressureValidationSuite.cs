@@ -78,6 +78,7 @@ namespace Editor.Validation.PipelineBackpressure
                 new Scenario("B16 Primary-regime credibility: sample floor + non-measurement phases (FP-9a)", RunB16PrimaryRegimeCredibility),
                 new Scenario("B17 Route geometry: waypoint constancy, route length, tour coverage (FP-9b)", RunB17RouteGeometry),
                 new Scenario("B18 Tour footprint + coverage accounting: closed circuit, load inflation, no vacuous 100% (FP-11a)", RunB18TourCoverage),
+                new Scenario("B19 Panic-gate thresholds scale with the resident square (P-8)", RunB19GateThresholdScaling),
             };
             return ValidationSuiteRunner.Execute("Pipeline Backpressure", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -1089,7 +1090,7 @@ namespace Editor.Validation.PipelineBackpressure
         /// </para>
         /// <para>
         /// <b>Negative-coordinate correctness</b> is inherited rather than re-tested: the footprint converts
-        /// voxel to chunk space through <see cref="ChunkMath.VoxelToChunk"/>, whose floor-division behaviour
+        /// voxel to chunk space through <see cref="ChunkMath.VoxelToChunk"/>, whose floor-division behavior
         /// for both signs is pinned by the "Chunk Math" suite. The dependency itself is asserted here so a
         /// future switch to a truncating <c>/ 16</c> reds a baseline rather than silently mis-placing the
         /// footprint in negative chunk space (which FP-10's regions reach).
@@ -1164,7 +1165,7 @@ namespace Editor.Validation.PipelineBackpressure
                     actualMinX == minX && actualMaxX == maxX
                                        && actualMinZ == minZ && actualMaxZ == maxZ);
 
-                // The tour centre is crossed by both mid legs, so it is always covered.
+                // The tour center is crossed by both mid legs, so it is always covered.
                 ok &= Check($"vd {viewDistance}: the tour centre is in the footprint",
                     footprint.Contains(new ChunkCoord(
                         ChunkMath.VoxelToChunk(Mathf.FloorToInt((g.TourMinX + g.TourMaxX) * 0.5f)),
@@ -1275,6 +1276,172 @@ namespace Editor.Validation.PipelineBackpressure
                 // the false green this instrument exists to prevent.
                 BenchmarkTourCoverage.Reset();
             }
+        }
+
+        /// <summary>
+        /// P-8: the thresholds the gate is actually evaluated against, pinned across a view-distance sweep.
+        /// <para>
+        /// FP-10 measured the defect this fixes: a fixed 256/128 pair is 88.6 % of the resident square at
+        /// view distance 5 and 5.1 % at 32, so from vd 15 up the gate is essentially never open and the
+        /// pipeline never runs in the regime its budgets were tuned for — admitted work grew only 1.5–1.7×
+        /// across the sweep while requests grew 4.5–4.8×.
+        /// </para>
+        /// <para>
+        /// <b>Expectations are literals, deliberately.</b> Asserting against a re-derivation of
+        /// <c>configured × width / 17</c> would restate the implementation and pass for any consistent
+        /// mistake — the tautology B18's extent assertion was rewritten to avoid. These six pairs were
+        /// computed once, reviewed, and frozen; a change to the scale must change this table too, which is
+        /// exactly the friction a tuning constant should have.
+        /// </para>
+        /// <para>
+        /// The scale follows the square's <b>width</b>, not its area: FP-10 F4 found the gate simultaneously
+        /// succeeding at protecting frame time (at vd ≥ 20 flying faster costs LESS CPU, because the faster
+        /// phase trips the gate), so an area-proportional threshold — which would hold the ratio at vd 5's
+        /// never-closes 88.6 % everywhere — would trade that away.
+        /// </para>
+        /// <para>
+        /// The first assertion is the one that guards the <i>constant</i> rather than the arithmetic: it
+        /// reads <c>new Settings().ResidentWidth</c>, so a change to the shipped default view distance reds
+        /// here instead of silently rescaling every default install's gate.
+        /// </para>
+        /// <para><b>Prove-red (demonstrated by temporary mutation):</b> returning <c>configured</c> unscaled
+        /// from the <c>scaleWithResidency</c> branch of
+        /// <see cref="GenerationPanicGate.DeriveThresholds"/> reds every scaled row of the table while leaving
+        /// the vd-5 identity, the flag-off rows and all eighteen other baselines green — which is the point:
+        /// the identity at the reference width is what makes the default configuration byte-identical to
+        /// pre-P-8 behavior, so it must NOT move.</para>
+        /// </summary>
+        private static bool RunB19GateThresholdScaling()
+        {
+            const int configuredClose = 256;
+            const int configuredReopen = 128;
+
+            // The invariant the whole design rests on, asserted against the SHIPPED default rather than
+            // against the literal 5 the table below pins. ReferenceResidentWidth encodes
+            // 2 x (default viewDistance + DATA_LOAD_BUFFER) + 1 with no compile-time link to either input, so
+            // changing the default view distance would silently hand every default install a scaled pair —
+            // the one configuration that must stay byte-identical to pre-P-8 behavior — while every row
+            // below stayed green, because they name their view distance explicitly.
+            bool ok = Check("the shipped default configuration sits exactly at the reference width " +
+                            $"({new Settings().ResidentWidth} vs {GenerationPanicGate.ReferenceResidentWidth})",
+                new Settings().ResidentWidth == GenerationPanicGate.ReferenceResidentWidth);
+
+            GenerationPanicGate.DeriveThresholds(new Settings().ResidentWidth, configuredClose,
+                configuredReopen, true, out int defaultClose, out int defaultReopen);
+            ok &= Check("...so the default install's gate is byte-identical to pre-P-8 (256 / 128)",
+                defaultClose == configuredClose && defaultReopen == configuredReopen);
+
+            // vd -> resident width -> the effective pair. Hand-computed at review time, frozen here.
+            (int viewDistance, int residentWidth, int close, int reopen)[] sweep =
+            {
+                (5, 17, 256, 128), // the reference: scaling is an identity, pre-P-8 behavior preserved
+                (8, 23, 346, 173),
+                (10, 27, 407, 203),
+                (15, 37, 557, 279),
+                (20, 47, 708, 354),
+                (32, 71, 1069, 535),
+            };
+
+            foreach ((int viewDistance, int residentWidth, int close, int reopen) row in sweep)
+            {
+                Settings settings = new Settings
+                {
+                    viewDistance = row.viewDistance,
+                    panicGateCloseThreshold = configuredClose,
+                    panicGateReopenThreshold = configuredReopen,
+                    scalePanicGateThresholdsWithResidency = true,
+                };
+
+                ok &= Check($"vd {row.viewDistance} -> resident width {row.residentWidth}",
+                    settings.ResidentWidth == row.residentWidth);
+
+                GenerationPanicGate.DeriveThresholds(settings.ResidentWidth, configuredClose, configuredReopen,
+                    true, out int closeAt, out int reopenAt);
+
+                ok &= Check($"vd {row.viewDistance} -> close {closeAt} (expected {row.close})",
+                    closeAt == row.close);
+                ok &= Check($"vd {row.viewDistance} -> reopen {reopenAt} (expected {row.reopen})",
+                    reopenAt == row.reopen);
+
+                // The hysteresis band must survive scaling and rounding at every point, or the gate flips
+                // every frame — halving admissions and spamming two log lines per flip inside Update.
+                ok &= Check($"vd {row.viewDistance}: reopen stays strictly below close",
+                    reopenAt < closeAt);
+
+                // The rollback leg must be byte-identical to pre-P-8 behavior at EVERY view distance.
+                GenerationPanicGate.DeriveThresholds(settings.ResidentWidth, configuredClose, configuredReopen,
+                    false, out int legacyClose, out int legacyReopen);
+
+                ok &= Check($"vd {row.viewDistance}: scaling OFF returns the configured pair unchanged",
+                    legacyClose == configuredClose && legacyReopen == configuredReopen);
+
+                // The report must describe the run it belongs to: the snapshot's effective values come from
+                // this same helper, so a divergence here is a report that lies about its own capture.
+                PipelineSettingsSnapshot snap = new PipelineSettingsSnapshot(settings);
+                ok &= Check($"vd {row.viewDistance}: the settings snapshot reports the same effective pair",
+                    snap.EffectiveCloseThreshold == closeAt && snap.EffectiveReopenThreshold == reopenAt
+                                                            && snap.ScalePanicGateWithResidency);
+                ok &= Check($"vd {row.viewDistance}: ...while still reporting the configured pair verbatim",
+                    snap.PanicGateCloseThreshold == configuredClose
+                    && snap.PanicGateReopenThreshold == configuredReopen);
+            }
+
+            // Monotonicity: a wider resident square never yields a tighter gate. The whole premise.
+            GenerationPanicGate.DeriveThresholds(17, configuredClose, configuredReopen, true,
+                out int nearClose, out int _);
+            GenerationPanicGate.DeriveThresholds(71, configuredClose, configuredReopen, true,
+                out int farClose, out int _);
+            ok &= Check("a wider resident square yields a strictly larger close threshold",
+                farClose > nearClose);
+
+            // The effective ratio must now fall as 1/width, not 1/width^2 — the change stated as one number.
+            // At vd 5 -> 32 the width grows 71/17 = 4.18x, so the ratio should fall by about that factor
+            // (88.6 % -> 21.2 %) rather than by its square (-> 5.1 %, the pre-P-8 figure FP-10 measured).
+            PipelineSettingsSnapshot near = new PipelineSettingsSnapshot(new Settings
+            {
+                viewDistance = 5, panicGateCloseThreshold = configuredClose,
+                panicGateReopenThreshold = configuredReopen, scalePanicGateThresholdsWithResidency = true,
+            });
+            PipelineSettingsSnapshot far = new PipelineSettingsSnapshot(new Settings
+            {
+                viewDistance = 32, panicGateCloseThreshold = configuredClose,
+                panicGateReopenThreshold = configuredReopen, scalePanicGateThresholdsWithResidency = true,
+            });
+
+            double ratioDrop = near.EffectiveCloseThresholdPercentOfResident /
+                               far.EffectiveCloseThresholdPercentOfResident;
+            ok &= Check($"the effective ratio falls ~4.2x from vd 5 to vd 32 (linear), not ~17x (quadratic) — {ratioDrop:F2}x",
+                ratioDrop > 3.5 && ratioDrop < 5.0);
+            ok &= Check("...and the unscaled ratio is still reported, unchanged from FP-10's 5.1 % at vd 32",
+                Math.Abs(far.PanicGateCloseThresholdPercentOfResident - 100.0 * 256 / 5041) < 1e-9);
+
+            // --- Degenerate configurations: sanitization must survive scaling ---
+            GenerationPanicGate.DeriveThresholds(71, 0, 0, true, out int zeroClose, out int zeroReopen);
+            ok &= Check("a zero close threshold floors at 1, with reopen below it",
+                zeroClose == 1 && zeroReopen == 0);
+
+            GenerationPanicGate.DeriveThresholds(71, 100, 500, true, out int invClose, out int invReopen);
+            ok &= Check("an inverted band is clamped back inside itself after scaling",
+                invReopen < invClose);
+
+            GenerationPanicGate.DeriveThresholds(71, 256, -50, true, out int negClose, out int negReopen);
+            ok &= Check("a negative reopen cannot wedge the gate shut (floored at 0)",
+                negReopen >= 0 && negReopen < negClose);
+
+            // An absurd persisted threshold must not overflow into a negative — that would sanitize to a
+            // permanently closed gate, i.e. a pipeline that admits nothing at all.
+            GenerationPanicGate.DeriveThresholds(71, int.MaxValue, int.MaxValue / 2, true,
+                out int hugeClose, out int hugeReopen);
+            ok &= Check("an int.MaxValue threshold scales without overflowing negative",
+                hugeClose > 0 && hugeReopen >= 0 && hugeReopen < hugeClose);
+
+            // A degenerate resident width is floored, never used as a zero or negative divisor/multiplier.
+            GenerationPanicGate.DeriveThresholds(0, configuredClose, configuredReopen, true,
+                out int degenerateClose, out int _);
+            ok &= Check("a zero resident width is floored to 1 rather than collapsing the threshold",
+                degenerateClose >= 1);
+
+            return ok;
         }
 
         /// <summary>Walks the tour's points in order without the return leg — the pre-FP-11a length.</summary>
