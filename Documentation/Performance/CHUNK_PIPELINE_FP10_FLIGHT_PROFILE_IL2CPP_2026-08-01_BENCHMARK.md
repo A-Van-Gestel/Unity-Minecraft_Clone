@@ -13,6 +13,18 @@
 > **GO/NO-GO does not apply.** FP ships no behavior change (design §1 non-goals, §9 limitation 6); the
 > deliverable is the **regime verdict**.
 
+> **⚠ Cross-reference added 2026-08-01 (v1.1) — the fix this report ranks #1 was built and REFUTED.**
+> Nothing below is amended: every number, table and derivation stands exactly as captured. What a later
+> capture overturned is one *inference* — **F2's second half**, "the pipeline's efficiency on the work it
+> accepts does not vary with view distance — only its willingness to accept does." The willingness turned out
+> to be **downstream** of a throughput ceiling rather than an independent choice: scaling the thresholds as
+> §F3 proposes moved gate closure by 0.1 points at vd 32 (the backlog simply grows to meet the larger
+> threshold), completions *fell* 16 %, and the lighting/mesh schedules report `Quota` on 99 %+ of frames in
+> **both** legs. See
+> [`CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md`](CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md)
+> (NO-GO), which also establishes that **this report's high-view-distance rows are no longer a valid baseline**
+> for builds carrying FP-11a — see its §F5.
+
 > **First capture in which the generation pass is cross-view-distance comparable.** FP-9b inverted the route
 > geometry — the region is now *derived* from `Σ(speed × phaseSeconds)` rather than the route being derived
 > from a fixed region — so **generation waypoints are 12 and timed travel is 11 400 m at every view distance**,
@@ -249,6 +261,12 @@ that got in*. The ordering axis is measuring a shrinking subpopulation as view d
 exclusion of `AbandonedBeforeAdmission` is what makes that visible rather than hidden — but a reader must
 carry the denominator, not just the percentage.
 
+> **Cross-reference (added v1.1):** the counts above stand; the closing sentence's inference does not. The
+> pipeline's *willingness to accept* was not a free variable — it tracked a throughput ceiling. Loosening the
+> gate to test this changed admitted work by 0.2 % at vd 32 and reduced completions by 16 %. See
+> [`CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md`](CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md)
+> §F1–F3.
+
 ### F3 — The mechanism: an absolute threshold against a quadratic resident square
 
 The panic gate closes on a fixed **256 backlogged chunks** (reopens at 128) while residency grows as
@@ -394,9 +412,9 @@ in it.
 
 | # | Item | Change vs FP-8 | Why |
 |---|------|----------------|-----|
-| **1** | **P-8 — scale panic-gate thresholds with resident count** | **confirmed at #1, mechanism upgraded** | F3: the 256/128 threshold is 88.6 % of the resident square at vd 5 and 5.1 % at vd 32, so the gate is permanently closed from vd 15 up. F2 shows the consequence: admitted work grows 1.5–1.7× while requests grow 4.5–4.8×. F4 sets the constraint — any change must hold frame time. |
+| **1** | **P-8 — scale panic-gate thresholds with resident count** | **confirmed at #1, mechanism upgraded** | F3: the 256/128 threshold is 88.6 % of the resident square at vd 5 and 5.1 % at vd 32, so the gate is permanently closed from vd 15 up. F2 shows the consequence: admitted work grows 1.5–1.7× while requests grow 4.5–4.8×. F4 sets the constraint — any change must hold frame time. **Outcome (cross-reference, v1.1): built and NO-GO'd** — the threshold change moved gate closure 0.1 pt at vd 32 and cut completions 16 %; F4's constraint is exactly what it failed. Re-ranked behind schedule-quota throughput. See [`CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md`](CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md). |
 | **2** | **P-7 — chunk service ordering, low view distance** | **unchanged, worst case relocated** | F1: worst case is now vd 8 / 200 m/s at 50.8 %, not vd 5. Acceptance criterion remains F5's visibility bound, which fails only at 200 m/s and vd ≥ 10. |
-| **3** | **I4 — measure and print ensure-pass tour coverage** | **new** | Without it, every high-vd loading-pass number rests on an unverified assumption. Cheap, and it is the difference between "the loading pass measured loading" and "we think it did". |
+| **3** | **I4 — measure and print ensure-pass tour coverage** | **new** | Without it, every high-vd loading-pass number rests on an unverified assumption. Cheap, and it is the difference between "the loading pass measured loading" and "we think it did". **Shipped 2026-08-01 (cross-reference, v1.1)**, and it found a second defect while being built: the ensure sweep skipped the return leg the loading pass flies. Guarded by baseline B18. |
 | **4** | **I1 — raise or make configurable the latency-sample cap** | new | 32 768 is reached at vd 32. The banner means no number is silently wrong, so this is a coverage improvement, not a correctness fix. |
 | **5** | **I5 — print the ensure sweep's speed and duration** | new | FP-6 class. One line. |
 | **6** | **Per-chunk CSV export** (v3+) | unchanged | Still the only way to separate the stall populations; F6's 149 559 ms p99 is the strongest demand case yet recorded. |
@@ -431,6 +449,13 @@ ensure-generated, against 18 970 `Quota`).
   trend gains a measured mechanism — a fixed 256-chunk gate threshold against a resident square growing as
   vd², which holds admitted work to 1.5–1.7× growth while requests grow 4.5–4.8×. P-8 confirmed at #1. One new
   instrument defect filed (I4, ensure-pass coverage unmeasured) plus two minor items.
+
+* **v1.1** — **Cross-references added (2026-08-01), no data or reasoning altered.** The follow-up this
+  report ranked #1 (P-8, scale the gate thresholds with residency) was implemented and captured; the result
+  is NO-GO and it corrects **F2's closing inference** — admission was downstream of a schedule-`Quota`
+  throughput ceiling, not an independent choice. Pointers added at the head, in F2, and on follow-up rows 1
+  and 3. Every measured value in this report stands as captured; its high-view-distance rows are, however,
+  no longer a valid comparison baseline for builds carrying FP-11a (see the successor's §F5).
 
 ---
 
