@@ -210,6 +210,12 @@ namespace Benchmarks
             // a second run in one process reports the first run's phases as its own (FP-5).
             PipelineTelemetry.BeginRun();
             PipelineTelemetry.Enabled = true;
+
+            // FP-11a: start crediting tour coverage HERE rather than at the ensure pass, so terrain the
+            // generation phases already produced counts — it is on disk by the time the loading pass asks
+            // for it, which is the only property the ensure sweep exists to guarantee.
+            BenchmarkTourCoverage.Arm(_routeGeometry, settings.LoadDistance);
+
             _totalStopwatch = Stopwatch.StartNew();
             IsRunning = true;
 
@@ -227,6 +233,12 @@ namespace Benchmarks
 
             // === Transition: Drain Jobs → Save → Force Unload ===
             yield return TransitionToLoadingPass();
+
+            // FP-11a: the tour's terrain is now all on disk and nothing is resident, so this is the instant
+            // the coverage question is actually asked — will the loading pass load, or generate? Freezing
+            // any later would let that pass credit itself.
+            BenchmarkTourCoverage.Freeze();
+            ReportTourCoverage();
 
             // === Pass 2: Loading ===
             yield return RunLoadingPass();
@@ -263,6 +275,11 @@ namespace Benchmarks
             // a play-mode restart, but not returning to the main menu within one session.
             PipelineTelemetry.EndPhase();
             PipelineTelemetry.Enabled = false;
+
+            // Same reasoning for the coverage tracker: a run aborted before the freeze would otherwise stay
+            // armed for the rest of the session, charging every ordinary world session a lookup per populated
+            // chunk and accruing into a footprint no report will read.
+            BenchmarkTourCoverage.Reset();
 
             if (_frameRateOverridden)
             {
@@ -417,20 +434,77 @@ namespace Benchmarks
             Debug.Log("[Benchmark] === Ensure Generated: covering the loading tour at " +
                       $"{BenchmarkRouteGeometry.EnsureGeneratedSpeed} m/s ===");
 
-            // Waypoint-bounded, unlike the timed passes: this one exists to COVER the tour, so it must walk
-            // all of it exactly once. Looping would repeat work; stopping early would defeat the purpose.
-            while (_activeWaypointIndex < _loadingWaypoints.Count)
+            // Leg-bounded, unlike the timed passes: this one exists to COVER the tour, so it walks the whole
+            // circuit exactly once. Looping beyond that would repeat work; stopping early would defeat the
+            // purpose — and stopping at the LAST WAYPOINT is stopping early, because the loading pass loops
+            // its waypoints and therefore also flies the return leg back to the first. That leg went
+            // ungenerated until FP-11a, and at low view distance the load radius does not reach across it.
+            int legsToFly = _loadingWaypoints.Count;
+            int legsFlown = 0;
+            int previousWaypointIndex = _activeWaypointIndex;
+
+            while (legsFlown < legsToFly)
             {
-                Progress = (float)_activeWaypointIndex / _loadingWaypoints.Count;
+                Progress = (float)legsFlown / legsToFly;
                 OverallProgress = Mathf.Clamp01((_currentOverallPhaseIndex + Progress) / _totalPhaseCount);
-                StepTowardWaypoint(_loadingWaypoints, BenchmarkRouteGeometry.EnsureGeneratedSpeed, loop: false);
+                StepTowardWaypoint(_loadingWaypoints, BenchmarkRouteGeometry.EnsureGeneratedSpeed, loop: true);
+
+                // An arrival ALWAYS increments the index by exactly one; the wrap back to 0 happens on a
+                // later call and completes no leg, so testing for the increment cannot double-count it.
+                if (_activeWaypointIndex == previousWaypointIndex + 1) legsFlown++;
+                previousWaypointIndex = _activeWaypointIndex;
+
                 yield return null;
             }
 
             EndPhaseBoth();
+
+            // Snapshot only — accrual continues through the transition, which drains and saves the backlog
+            // the gate deferred out of this sweep. Freezing here would count that terrain as missing even
+            // though the loading pass genuinely loads it.
+            BenchmarkTourCoverage.SnapshotEnsurePass();
+
             _currentOverallPhaseIndex++;
             Progress = 1f;
             Debug.Log("[Benchmark] === Ensure Generated Complete ===");
+        }
+
+        /// <summary>
+        /// Logs how much of the loading tour exists on disk as the loading pass begins (FP-11a), alongside
+        /// what the ensure sweep alone achieved.
+        /// </summary>
+        /// <remarks>
+        /// Only the final figure gates admissibility, and it is loud below
+        /// <see cref="BenchmarkTourCoverage.MinimumCoverage"/> on the same grounds as the shrunken-tour
+        /// banner: the loading pass is then partly generating terrain while labeled loading, and its numbers
+        /// look entirely plausible anyway. The ensure figure is informational — a sweep the gate throttled is
+        /// not a problem if the transition drain finished the job. An unmeasurable result is reported as such
+        /// and never as 100 %.
+        /// </remarks>
+        private static void ReportTourCoverage()
+        {
+            if (!BenchmarkTourCoverage.HasMeasurement)
+            {
+                Debug.LogError("[Benchmark] Loading-tour coverage NOT MEASURED — the footprint came out " +
+                               "empty. The loading pass's numbers cannot be attributed to loading.");
+                return;
+            }
+
+            int required = BenchmarkTourCoverage.RequiredChunks;
+
+            string message = $"[Benchmark] Loading-tour coverage: {BenchmarkTourCoverage.CoveredChunks.ToString()} / " +
+                             $"{required.ToString()} chunks on disk when the loading pass starts " +
+                             $"({BenchmarkTourCoverage.CoverageFraction * 100f:F1} %); the ensure sweep alone " +
+                             $"reached {BenchmarkTourCoverage.EnsurePassCoveredChunks.ToString()} " +
+                             $"({BenchmarkTourCoverage.EnsurePassCoverageFraction * 100f:F1} %).";
+
+            if (BenchmarkTourCoverage.IsSufficient) Debug.Log(message);
+            else
+                Debug.LogError(message + " Below " +
+                               (BenchmarkTourCoverage.MinimumCoverage * 100f).ToString("F0") +
+                               " % — the panic gate throttled the sweep and the transition did not finish the " +
+                               "job, so the loading pass will GENERATE part of its terrain rather than load " +
+                               "it. Treat its numbers as inadmissible at this view distance.");
         }
 
         /// <summary>

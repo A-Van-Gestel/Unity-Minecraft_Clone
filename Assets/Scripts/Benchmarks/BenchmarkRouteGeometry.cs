@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using Data;
+using Helpers;
 using UnityEngine;
 
 namespace Benchmarks
@@ -113,8 +115,10 @@ namespace Benchmarks
         public readonly bool TourWasShrunk;
 
         /// <summary>
-        /// Total length of the loading tour's twelve legs. Walked from the same point list
-        /// <see cref="BuildTourPoints"/> emits, so the length and the route flown cannot disagree.
+        /// Total length of the loading tour's twelve legs, as a <b>closed</b> circuit — the return leg from
+        /// the last waypoint back to the first is included, because that is the circuit the loading pass
+        /// flies (it loops its waypoints). Walked from the same point list <see cref="BuildTourPoints"/>
+        /// emits, so the length and the route flown cannot disagree.
         /// </summary>
         public readonly float TourLengthMeters;
 
@@ -241,21 +245,124 @@ namespace Benchmarks
             into.Add(new Vector3(minX, y, midZ));
         }
 
-        /// <summary>Sums the tour's leg lengths, over the same points the route is flown from.</summary>
+        /// <summary>Sums the closed tour circuit's leg lengths, over the same points the route is flown from.</summary>
         /// <param name="minX">Tour lower X.</param>
         /// <param name="maxX">Tour upper X.</param>
         /// <param name="minZ">Tour lower Z.</param>
         /// <param name="maxZ">Tour upper Z.</param>
-        /// <returns>Total leg length in metres.</returns>
+        /// <returns>Total leg length in metres, including the return leg.</returns>
+        /// <remarks>
+        /// The return leg counts because the loading pass loops its waypoints and therefore flies it. Leaving
+        /// it out understated the ensure sweep's duration and — worse — let the sweep stop one leg short of
+        /// the circuit it exists to cover (FP-11a).
+        /// </remarks>
         private static float MeasureTour(float minX, float maxX, float minZ, float maxZ)
         {
             List<Vector3> points = new List<Vector3>(12);
             FillTourPoints(minX, maxX, minZ, maxZ, 0f, points);
 
             float total = 0f;
-            for (int i = 1; i < points.Count; i++) total += Vector3.Distance(points[i - 1], points[i]);
+            for (int i = 0; i < points.Count; i++)
+                total += Vector3.Distance(points[i], points[(i + 1) % points.Count]);
 
             return total;
+        }
+
+        /// <summary>
+        /// Fills <paramref name="into"/> with every chunk the loading pass will make resident — the union of
+        /// the <paramref name="loadDistance"/> load square swept along the closed tour circuit. This is the
+        /// denominator FP-11a's ensure-pass coverage is measured against.
+        /// </summary>
+        /// <param name="loadDistance">Active <c>Settings.LoadDistance</c>, in chunks.</param>
+        /// <param name="into">Destination set; cleared first.</param>
+        /// <remarks>
+        /// Derived from <see cref="FillTourPoints"/>, the single definition of the tour's shape, so the
+        /// footprint and the flown route cannot disagree. Sampled every half chunk: consecutive samples then
+        /// never sit more than one chunk apart on either axis, so no chunk between them can be skipped.
+        /// <para>Rasterized into a local grid rather than inserted straight into the set — the swept squares
+        /// overlap heavily (millions of redundant inserts at high view distance), and this runs once per
+        /// benchmark run.</para>
+        /// </remarks>
+        public void BuildTourChunkSet(int loadDistance, HashSet<ChunkCoord> into)
+        {
+            into.Clear();
+            loadDistance = Mathf.Max(0, loadDistance);
+
+            List<Vector3> points = new List<Vector3>(12);
+            FillTourPoints(TourMinX, TourMaxX, TourMinZ, TourMaxZ, 0f, points);
+            if (points.Count < 2) return;
+
+            int minChunkX = ChunkMath.VoxelToChunk(Mathf.FloorToInt(TourMinX)) - loadDistance;
+            int maxChunkX = ChunkMath.VoxelToChunk(Mathf.FloorToInt(TourMaxX)) + loadDistance;
+            int minChunkZ = ChunkMath.VoxelToChunk(Mathf.FloorToInt(TourMinZ)) - loadDistance;
+            int maxChunkZ = ChunkMath.VoxelToChunk(Mathf.FloorToInt(TourMaxZ)) + loadDistance;
+
+            int gridWidth = maxChunkX - minChunkX + 1;
+            int gridDepth = maxChunkZ - minChunkZ + 1;
+            if (gridWidth <= 0 || gridDepth <= 0) return;
+
+            bool[] visited = new bool[gridWidth * gridDepth];
+
+            const float sampleStep = VoxelData.ChunkWidth * 0.5f;
+            int lastChunkX = int.MinValue;
+            int lastChunkZ = int.MinValue;
+
+            for (int i = 0; i < points.Count; i++)
+            {
+                Vector3 from = points[i];
+                Vector3 to = points[(i + 1) % points.Count];
+
+                float legLength = Vector3.Distance(from, to);
+                int steps = Mathf.Max(1, Mathf.CeilToInt(legLength / sampleStep));
+
+                for (int step = 0; step <= steps; step++)
+                {
+                    Vector3 at = Vector3.Lerp(from, to, (float)step / steps);
+                    int chunkX = ChunkMath.VoxelToChunk(Mathf.FloorToInt(at.x));
+                    int chunkZ = ChunkMath.VoxelToChunk(Mathf.FloorToInt(at.z));
+
+                    // The swept square only changes when the sample crosses a chunk boundary.
+                    if (chunkX == lastChunkX && chunkZ == lastChunkZ) continue;
+
+                    lastChunkX = chunkX;
+                    lastChunkZ = chunkZ;
+
+                    MarkLoadSquare(visited, chunkX, chunkZ, loadDistance,
+                        minChunkX, minChunkZ, gridWidth, gridDepth);
+                }
+            }
+
+            for (int z = 0; z < gridDepth; z++)
+            {
+                for (int x = 0; x < gridWidth; x++)
+                {
+                    if (visited[z * gridWidth + x]) into.Add(new ChunkCoord(minChunkX + x, minChunkZ + z));
+                }
+            }
+        }
+
+        /// <summary>Marks one resident load square into the rasterization grid, clipped to its bounds.</summary>
+        /// <param name="visited">The grid, row-major over Z.</param>
+        /// <param name="centerX">Chunk X the player occupies.</param>
+        /// <param name="centerZ">Chunk Z the player occupies.</param>
+        /// <param name="loadDistance">Load radius in chunks.</param>
+        /// <param name="minChunkX">Grid origin on X.</param>
+        /// <param name="minChunkZ">Grid origin on Z.</param>
+        /// <param name="gridWidth">Grid width in chunks.</param>
+        /// <param name="gridDepth">Grid depth in chunks.</param>
+        private static void MarkLoadSquare(bool[] visited, int centerX, int centerZ, int loadDistance,
+            int minChunkX, int minChunkZ, int gridWidth, int gridDepth)
+        {
+            int fromX = Mathf.Max(0, centerX - loadDistance - minChunkX);
+            int toX = Mathf.Min(gridWidth - 1, centerX + loadDistance - minChunkX);
+            int fromZ = Mathf.Max(0, centerZ - loadDistance - minChunkZ);
+            int toZ = Mathf.Min(gridDepth - 1, centerZ + loadDistance - minChunkZ);
+
+            for (int z = fromZ; z <= toZ; z++)
+            {
+                int rowBase = z * gridWidth;
+                for (int x = fromX; x <= toX; x++) visited[rowBase + x] = true;
+            }
         }
 
         /// <summary>Generation waypoints this route emits — two per sweep row.</summary>

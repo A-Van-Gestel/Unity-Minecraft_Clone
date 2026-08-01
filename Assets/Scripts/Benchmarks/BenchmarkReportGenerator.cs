@@ -124,9 +124,51 @@ namespace Benchmarks
                           (routeGeometry.TourWasShrunk
                               ? $"  ** SHRUNK from {BenchmarkRouteGeometry.LoadingTourChunks} — the timed phases do not cover it, so the loading pass GENERATED terrain. Capture not comparable. **"
                               : "  (fixed — independent of view distance)"));
+
+            // FP-11c: both derived, and both needed to read the coverage line below — a sweep that is slower
+            // or shorter than the reader assumes explains a coverage shortfall that would otherwise look like
+            // a pipeline result.
+            sb.AppendLine($"    Ensure sweep:      {BenchmarkRouteGeometry.EnsureGeneratedSpeed:F0} m/s over " +
+                          $"{routeGeometry.TourLengthMeters:N0} m = {routeGeometry.EnsureGeneratedSeconds:F1} s " +
+                          "(closed circuit, incl. the return leg the loading pass flies)");
+            AppendTourCoverage(sb);
+
             sb.AppendLine($"VSync override:      Forced Off (was: {(savedVSyncCount > 0 ? "On" : "Off")})");
             sb.AppendLine($"FPS cap override:    Uncapped (was: {(savedTargetFrameRate > 0 ? savedTargetFrameRate.ToString() : "Uncapped")})");
             sb.AppendLine();
+        }
+
+        /// <summary>
+        /// Renders the measured loading-tour coverage (FP-11a) — the lines that say whether the loading pass
+        /// measured loading or partly re-measured generation.
+        /// </summary>
+        /// <param name="sb">The report builder.</param>
+        /// <remarks>
+        /// Read from the static rather than passed in, exactly as the FP pipeline section reads
+        /// <see cref="PipelineTelemetry.CompletedPhases"/>. An unmeasurable result prints as NOT MEASURED: a
+        /// missing footprint must never render as a clean 100 %.
+        /// <para>Both instants are printed. The gap between them is how much of the tour the panic gate
+        /// deferred out of the ensure sweep and the transition drain then finished — a P-8 signal in its own
+        /// right, and invisible from either figure alone.</para>
+        /// </remarks>
+        private static void AppendTourCoverage(StringBuilder sb)
+        {
+            if (!BenchmarkTourCoverage.HasMeasurement)
+            {
+                sb.AppendLine("    Tour coverage:     ** NOT MEASURED — the loading pass's numbers cannot be " +
+                              "attributed to loading. **");
+                return;
+            }
+
+            sb.AppendLine($"    Tour coverage:     {BenchmarkTourCoverage.EnsurePassCoveredChunks:N0} / " +
+                          $"{BenchmarkTourCoverage.RequiredChunks:N0} chunks after the ensure sweep " +
+                          $"({BenchmarkTourCoverage.EnsurePassCoverageFraction * 100f:F1} %)");
+            sb.AppendLine($"                       {BenchmarkTourCoverage.CoveredChunks:N0} / " +
+                          $"{BenchmarkTourCoverage.RequiredChunks:N0} on disk when the loading pass starts " +
+                          $"({BenchmarkTourCoverage.CoverageFraction * 100f:F1} %)" +
+                          (BenchmarkTourCoverage.IsSufficient
+                              ? ""
+                              : "  ** the loading pass GENERATED the remainder. **"));
         }
 
         private static void AppendOverallSummary(StringBuilder sb, IReadOnlyList<PhaseMetrics> phases, TimeSpan totalDuration)

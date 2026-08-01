@@ -566,8 +566,15 @@ namespace Benchmarks
 
         /// <summary>Stamps terrain data becoming available (generated or deserialized).</summary>
         /// <param name="coord">The populated chunk.</param>
+        /// <remarks>
+        /// FP-11a's tour-coverage marking runs <i>above</i> the <see cref="Enabled"/> guard on purpose:
+        /// coverage must accrue across the whole run, including the gaps between phases, whereas the trace
+        /// table only records inside an active phase.
+        /// </remarks>
         public static void StampPopulated(ChunkCoord coord)
         {
+            BenchmarkTourCoverage.MarkPopulated(coord);
+
             if (!Enabled || s_activePhase == null) return;
             if (!s_traces.TryGetValue(coord, out ChunkTrace trace)) return;
 
