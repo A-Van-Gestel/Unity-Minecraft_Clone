@@ -428,10 +428,19 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
    > therefore be gated on **frame time**, not on admission counts alone, or it trades this away. Full
    > derivation:
    > [`../Performance/CHUNK_PIPELINE_FP10_FLIGHT_PROFILE_IL2CPP_2026-08-01_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP10_FLIGHT_PROFILE_IL2CPP_2026-08-01_BENCHMARK.md).
-7. **§4.4 "lighting stable" save bit** (serialization migration) — **deprioritized by FP-4.** Throughput work;
+7. **P-9 — schedule-quota throughput ceiling at high view distance** ⬅ **top open item, promoted 2026-08-01
+   by the P-8 NO-GO.** The pipeline completes a near-constant 5 658–6 803 chunks per 30 s phase across
+   vd 10 → 32 *regardless of how much it admits*, and both scheduling passes report `Quota` on 99 %+ of frames
+   at high view distance in **both** legs of the P-8 A/B. That is the ceiling P-8 mistook for an admission
+   problem. **Needs its own design doc**, and — per P-8’s lesson — any proposal must be gated on frame time,
+   because the quota exists to bound main-thread cost. Tracked as `P-9` in
+   [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md); ranking rationale in
+   [FLIGHT_PROFILE_CAPTURE.md](FLIGHT_PROFILE_CAPTURE.md) §7.3 row 1. Note this **reverses FP-4’s
+   deprioritisation of throughput work** for the high-view-distance regime only.
+8. **§4.4 "lighting stable" save bit** (serialization migration) — **deprioritized by FP-4.** Throughput work;
    throughput is not the binding constraint (`InFlightCap` ≤ 0.6 % at every view distance). Still a real win
    for revisited terrain, just not what the flight symptom calls for.
-8. **§2 jobified lighting merge**, then **§1.2/§1.3** deeper copy reductions — **deprioritized by FP-4**, same
+9. **§2 jobified lighting merge**, then **§1.2/§1.3** deeper copy reductions — **deprioritized by FP-4**, same
    reason. Worth revisiting once P-7 has cut the volume of work these run on.
 
 > **Ordering caveat (2026-07-27, revised same day) — measure before picking 5 or 6.** A reported symptom the
