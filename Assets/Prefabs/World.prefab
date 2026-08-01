@@ -87,7 +87,7 @@ MonoBehaviour:
     meshScheduleBudgetMs: 6
     meshApplyBudgetMs: 4
     enableGenerationPanicGate: 1
-    scalePanicGateThresholdsWithResidency: 1
+    scalePanicGateThresholdsWithResidency: 0
     panicGateCloseThreshold: 256
     panicGateReopenThreshold: 128
     benchmarkGenerationWaypoints: 12

@@ -551,18 +551,28 @@ public class Settings
     public bool enableGenerationPanicGate = true;
 
     /// <summary>
-    /// Scales the panic-gate thresholds with the resident load square (P-8). Default-ON; the off state is
-    /// the rollback leg and uses the two thresholds below verbatim, byte-identically to pre-P-8 behavior.
+    /// Scales the panic-gate thresholds with the resident load square (P-8). <b>Default-OFF</b> — the
+    /// shipping path uses the two thresholds below verbatim. ON is retained as an opt-in for re-testing,
+    /// not as a shipping default.
     /// <para>Listed in <c>SettingsManager.OverlayBenchmarkSettingsFromDisk</c> so a benchmark run can
-    /// capture the OFF leg from the same build — without that, benchmark mode pins it to this default.</para>
+    /// capture either leg from the same build — without that, benchmark mode pins it to this default.</para>
     /// </summary>
     /// <remarks>
-    /// The thresholds count backlogged chunks while the population they guard grows as view distance
-    /// squared, so a fixed pair is an unreachable brake at the default and a near-permanent throttle at high
-    /// view distance. See <see cref="Helpers.GenerationPanicGate.DeriveThresholds"/> for the scale and why it
-    /// follows the square's width rather than its area.
+    /// The reasoning was sound and the measurement refuted it. The thresholds count backlogged chunks while
+    /// the population they guard grows as view distance squared, so a fixed pair looks like an unreachable
+    /// brake at the default view distance and a permanent throttle at high ones. Scaling them buys almost
+    /// nothing, because the backlog simply grows to meet the larger threshold: at view distance 32 a 4.2×
+    /// threshold moved gate closure by 0.1 points (94.6 % vs 94.5 %) while admitted work rose 0.2 % and
+    /// <i>completions fell 16 %</i>. The binding constraint is the lighting/mesh schedule <c>Quota</c> —
+    /// saturated on 99 %+ of frames in both legs — not admission.
+    /// <para>
+    /// Keep this OFF until that throughput ceiling moves; at that point the gate becomes binding again and a
+    /// residency-scaled threshold is the right shape. Evidence:
+    /// <c>Documentation/Performance/CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md</c>
+    /// (NO-GO). Scale and rationale: <see cref="Helpers.GenerationPanicGate.DeriveThresholds"/>.
+    /// </para>
     /// </remarks>
-    public bool scalePanicGateThresholdsWithResidency = true;
+    public bool scalePanicGateThresholdsWithResidency = false;
 
     /// <summary>
     /// Lighting ready-set size at which the panic gate closes (stops admitting generation requests), stated
@@ -1118,9 +1128,9 @@ public static class SettingsManager
             defaults.benchmarkGenerationSpeeds = saved.benchmarkGenerationSpeeds;
             defaults.benchmarkLoadingSpeeds = saved.benchmarkLoadingSpeeds;
 
-            // P-8's rollback lever: the flag is default-ON and ships on benchmark evidence, so the capture
-            // has to be able to turn it off without a rebuild (a rebuilt OFF leg would not be the same
-            // build, which is the whole point of running one).
+            // P-8's opt-in lever. It is default-OFF after its capture came back NO-GO, and stays listed
+            // here because the re-test it is retained for needs to switch legs without a rebuild — a
+            // rebuilt leg would not be the same build, which is the whole point of running one.
             defaults.scalePanicGateThresholdsWithResidency = saved.scalePanicGateThresholdsWithResidency;
         }
         catch (Exception)

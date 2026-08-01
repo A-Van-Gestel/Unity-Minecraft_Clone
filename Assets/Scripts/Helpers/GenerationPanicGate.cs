@@ -71,7 +71,17 @@ namespace Helpers
         /// <param name="closeAt">Backlog level at which an open gate closes.</param>
         /// <param name="reopenAt">Backlog level at or below which a closed gate reopens.</param>
         /// <remarks>
-        /// <b>Why scale, and why linearly in the square's width.</b> The thresholds are counts of backlogged
+        /// <b>Scaling is OFF by default and this method is dormant in the shipping configuration.</b> Its
+        /// capture came back NO-GO: the backlog grows to meet whatever threshold it is given, so at view
+        /// distance 32 a 4.2× threshold moved gate closure by 0.1 points while completions fell 16 %, and
+        /// loading-pass minimum FPS dropped roughly a third. The derivation is kept — with its guard
+        /// (baseline B19) — because the fix is premature rather than wrong: the binding constraint is the
+        /// lighting/mesh schedule <c>Quota</c>, and once that ceiling moves the gate becomes binding again
+        /// and this is the right shape. See
+        /// <c>Documentation/Performance/CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md</c>.
+        /// <para>
+        /// <b>Why scale, and why linearly in the square's width</b> (the original argument, retained for the
+        /// re-test). The thresholds are counts of backlogged
         /// chunks, but the population they guard is the resident square, which grows as
         /// <c>(2 × LoadDistance + 1)²</c>. A fixed 256 is therefore 88.6 % of residency at view distance 5 and
         /// 5.1 % at view distance 32 — an unreachable emergency brake at the default and a near-permanent
@@ -81,6 +91,7 @@ namespace Helpers
         /// keeping it reachable, because the gate is simultaneously succeeding at the other half of its job —
         /// protecting frame time — and an area-proportional threshold would reproduce vd 5's never-closes
         /// behavior everywhere and trade that away.
+        /// </para>
         /// <para>
         /// The backlog signal is <c>LightWorkScheduler.ReadyCount</c>, whose entries are removed on unload and
         /// on work completion, so it tracks resident chunks — bounded by residency apart from a transient

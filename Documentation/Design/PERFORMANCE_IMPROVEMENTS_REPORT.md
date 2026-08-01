@@ -286,6 +286,41 @@ These remain fully documented in the pipeline analysis — the table is reproduc
 > (section-ranged gather) — both attack the same copies on different axes; implement at most one of
 > them first and re-measure before touching the other.
 
+### Rollback flags awaiting retirement
+
+The §8 one-toggle-revert discipline ships a proven change **default-ON behind a flag**, then a later
+cleanup pass deletes the flag and its now-dead legacy leg once the change has soaked in-game. That
+pass is a recurring task class, and the flags are easy to lose track of across arcs — TG-4 (4 flags,
+retired 2026-07-23) and LI-2 (1 flag, retired 2026-07-24) are the worked precedents. This is the
+census; retire in one atomic pass per family, not one flag at a time.
+
+| Flag (`Settings`) | Family | Shipped | Evidence | Retire when |
+|---|---|---|---|---|
+| `enablePipelineTimeBudgets` | P-4 §3.4 | 2026-07-23 | [IL2CPP A/B](../Performance/CHUNK_PIPELINE_P4_BACKPRESSURE_IL2CPP_2026-07-23_BENCHMARK.md) — **GO (final)** | Soak complete. Retirement is *unblocked*, deliberately not yet done |
+| `scaleBudgetCeilingsWithFpsCap` | P-4 §3.4 refinement | 2026-07-23 | [ceiling-scaling A/B](../Performance/CHUNK_PIPELINE_P4_CEILING_SCALING_IL2CPP_2026-07-23_BENCHMARK.md) — **GO (final)** | With the P-4 family |
+| `enableGenerationPanicGate` | P-4 §3.5 | 2026-07-23 | same P-4 A/B | With the P-4 family |
+
+**Not a retirement candidate — listed here so it is not mistaken for one:**
+`scalePanicGateThresholdsWithResidency` (P-8, `4ea1a38e`) is **default-OFF** after its capture returned
+**NO-GO** ([report](../Performance/CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md)). Its default
+*is* the legacy behaviour, so it is an opt-in experimental path rather than a rollback lever. **Do not delete it
+in the P-4 retirement pass** — that would remove the retained derivation and its B19 guard, which exist to make
+the re-test cheap once the `Quota` throughput ceiling moves.
+
+**Two notes that cost a session each to learn.** (1) The P-4 harness
+(`Benchmarks/P4BackpressureBenchmark.cs`) is **kept**, not deleted, when its flags go — collapsed to
+a single configuration, following LI-2's FullHeight oracle and TG-4's pruned harness. (2) A rollback
+flag must be listed in `SettingsManager.OverlayBenchmarkSettingsFromDisk` or it **cannot be A/B'd in
+a player build at all**: benchmark mode builds a fresh `Settings` and copies only the fields that
+method names, so an unlisted flag is pinned to its code default for every capture. P-8's flag is
+listed; `enableGenerationPanicGate` is not, and has only ever been toggled programmatically by the
+P-4 harness.
+
+Not candidates (verified — do not re-flag these as rollback levers): `enableFarLands` and
+`Clouds._useClassicPattern` are player-facing feature toggles; world-scaling `Precise64` is the
+unconditional default with Classic as the opt-in; the worldgen/HUD/diagnostic bools are intentional
+options.
+
 ---
 
 ## Detailed findings — Meshing & Rendering
