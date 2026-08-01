@@ -432,7 +432,17 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
    by the P-8 NO-GO.** The pipeline completes a near-constant 5 658–6 803 chunks per 30 s phase across
    vd 10 → 32 *regardless of how much it admits*, and both scheduling passes report `Quota` on 99 %+ of frames
    at high view distance in **both** legs of the P-8 A/B. That is the ceiling P-8 mistook for an admission
-   problem. **Needs its own design doc**, and — per P-8’s lesson — any proposal must be gated on frame time,
+   problem. **Design doc: [`CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md`](CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md)**
+   (2026-08-01) — it locates the mechanism in §3.4's own quota identity (`cap × 60` items/second, a term
+   containing neither view distance nor frame rate, so delivered chunks/s cannot vary with view distance),
+   finds that the **quota rather than the ms ceiling is the operative steady-state main-thread bound**
+   (`CeilingExpired` ≤ 0.7 % of frames — the 8 ms/6 ms ceilings are hitch guards, not steady-state budgets),
+   and consequently leads with **deliver-then-refine** (a chunk becomes visible on its first viable mesh,
+   later lighting passes correct it in place) instead of raising the caps — the per-chunk multiplier is
+   correctness work serialized *ahead of first visibility*, and the accepted product trade is that a dark
+   or intermediately-lit mesh beats void. Acceptance is visibility-primary, sharing P-7's
+   `latency ≤ vd × 16 ÷ speed` target. Its phase P9-0a is a zero-code probe on the existing build and may
+   kill the item. Per P-8’s lesson any proposal is gated on frame time,
    because the quota exists to bound main-thread cost. Tracked as `P-9` in
    [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md); ranking rationale in
    [FLIGHT_PROFILE_CAPTURE.md](FLIGHT_PROFILE_CAPTURE.md) §7.3 row 1. Note this **reverses FP-4’s
