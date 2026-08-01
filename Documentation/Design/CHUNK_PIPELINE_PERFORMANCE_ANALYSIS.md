@@ -372,6 +372,23 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
    > (generation) — the point where the panic gate has begun closing but has not yet suppressed admissions, so
    > the pipeline admits at full rate *and* discards at full rate. Full derivation:
    > [`../Performance/CHUNK_PIPELINE_FP10_FLIGHT_PROFILE_IL2CPP_2026-08-01_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_FP10_FLIGHT_PROFILE_IL2CPP_2026-08-01_BENCHMARK.md).
+
+   > **📌 Candidate mechanism recorded 2026-08-01 — predictive ordering by lead time** (design input for
+   > P-7's future doc, not a plan). Score chunks by distance to a *predicted* player position
+   > `p + v × t_lead` instead of to `p`. Deliberately **one** policy rather than a low-speed and a
+   > high-speed one: as speed → 0 the prediction term vanishes and the score degenerates exactly to
+   > today's nearest-first, so there is no crossover threshold and no hysteresis. It also attacks the
+   > **staleness** half of the defect named in the ordering caveat below — a lead-time order survives
+   > longer than a per-crossing snapshot. Natural value for `t_lead` is the pipeline's own service
+   > latency (already measured as p50 `enqueue→MeshApplied`), damped and clamped to the loaded region,
+   > since ordering → latency → ordering is a feedback loop.
+   >
+   > **Bound on what it can achieve:** the visibility criterion rearranges to
+   > `latency × speed ≤ vd × 16` — *lead distance ≤ view distance* — which is precisely the condition
+   > under which any ordering policy can work at all. At vd 32 / 200 m/s the lead is 800 m against a
+   > 560 m load distance, so that regime is throughput-bound (item 7) and no priority function reaches
+   > the chunk in time; at 50 m/s the 200 m lead sits well inside it. Derivation in
+   > [`CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md`](CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md) §2.
 6. **P-8 — scale the panic-gate thresholds with view distance.** `panicGateCloseThreshold` / `ReopenThreshold`
    are absolute constants (256 / 128) while the resident square they guard grows as view-distance²: a
    256-chunk backlog is 88.6 % of the resident set at vd 5 but 11.6 % at vd 20. Measured consequence — gate
