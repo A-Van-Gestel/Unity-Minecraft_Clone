@@ -555,7 +555,8 @@ public class Settings
     /// shipping path uses the two thresholds below verbatim. ON is retained as an opt-in for re-testing,
     /// not as a shipping default.
     /// <para>Listed in <c>SettingsManager.OverlayBenchmarkSettingsFromDisk</c> so a benchmark run can
-    /// capture either leg from the same build — without that, benchmark mode pins it to this default.</para>
+    /// capture either leg from the same build even on a cold settings cache, where the overlay list is the
+    /// only channel from disk.</para>
     /// </summary>
     /// <remarks>
     /// The reasoning was sound and the measurement refuted it. The thresholds count backlogged chunks while
@@ -1106,12 +1107,20 @@ public static class SettingsManager
     /// </summary>
     /// <param name="defaults">The fresh defaults to overlay onto.</param>
     /// <remarks>
-    /// The overlay list is the <i>only</i> way a benchmark run can differ from code defaults: the caller
-    /// hands us a fresh <see cref="Settings"/> and never reads the file itself, deliberately, so a capture is
-    /// not silently shaped by whatever the operator last configured for play. The consequence — learned when
-    /// P-8 shipped a default-ON flag whose OFF leg turned out to be uncapturable without rebuilding — is that
-    /// <b>a rollback flag which is not listed here cannot be A/B'd in a player build at all</b>. Any future
-    /// flag that a benchmark must toggle belongs in this method, and the field's own docstring should say so.
+    /// <b>This list is the only channel from disk on a COLD settings cache</b> — the caller hands us a fresh
+    /// <see cref="Settings"/> and never reads the file itself, so a capture is not silently shaped by whatever
+    /// the operator last configured for play.
+    /// <para>
+    /// It does <i>not</i> hold on the menu-launched path, which is how captures are actually run:
+    /// <see cref="LoadSettings"/>'s benchmark branch returns an already-cached instance first, and the main
+    /// menu populates that cache from disk (via <c>UIScaleController</c>) while the mode is still
+    /// <see cref="RuntimeMode.Default"/> — so a menu-launched run inherits the <b>whole</b> settings file.
+    /// That is what lets a capture sweep <c>viewDistance</c> or the per-frame budgets on one build.
+    /// </para>
+    /// <para>
+    /// A rollback flag a benchmark must toggle therefore still belongs here, so it works on <i>both</i>
+    /// paths rather than only the warm one, and the field's own docstring should say so.
+    /// </para>
     /// </remarks>
     private static void OverlayBenchmarkSettingsFromDisk(Settings defaults)
     {
