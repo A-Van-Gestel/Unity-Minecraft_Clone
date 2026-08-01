@@ -1,6 +1,6 @@
 # P-9 — Schedule-Quota Throughput Ceiling
 
-**Version:** 1.4
+**Version:** 1.5
 **Date:** 2026-08-01
 **Status:** Proposed design — not implemented.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -494,6 +494,15 @@ item has already paid for.
   a subset. Since Q1 is now a **p50 latency** criterion, check the saturation flag on every scored
   phase before reading it — this is the one criterion that saturation can distort. Disposition counts
   and stop tallies stay exact.
+- ⚠️ **Run captures on an otherwise idle machine, and say so in the report.** Q2's minimum-FPS arm is
+  a single-worst-frame statistic, so one background spike in one leg can manufacture a Q2 failure —
+  and Q2 is the hard gate. Throughput criteria are averaged over 30 s and far more robust. P9-0a's
+  L1 was captured while the operator was multitasking; it happened to reproduce P-8's control within
+  2 %, which bounds the damage there but is not a licence to repeat it.
+- ⚠️ **Restore `maxLightJobsPerFrame` / `maxMeshRebuildsPerFrame` to their OM-1 values (24 / 11 on the
+  capture machine) after any cap sweep.** Because a menu-launched run inherits the whole settings
+  file (§7.1), a left-over experimental cap silently contaminates every later capture and appears in
+  no diff. Always re-read the values from the run's own settings block rather than trusting the file.
 
 ### 7.1 How a capture actually gets its settings (verified, and it corrects a standing belief)
 
@@ -545,6 +554,21 @@ the P-8 convention is good practice, just not the load-bearing constraint it was
 conditional one; that is a code-comment fix, filed as a P9-0 rider rather than done here.
 
 ---
+
+### 7.2 Zero-code options that remain available
+
+Recorded because they cost a capture session rather than an implementation, and P9-0a showed how far
+settings alone can go:
+
+- **Ceiling discriminator** — hold `maxLightJobsPerFrame` at 48 and *lower* `lightScheduleBudgetMs`
+  from 8 ms. If frame cost stays far above the ×1 leg, the schedule pass is exonerated and §F4's
+  merge attribution gains support. Partially confounded (a lower ceiling also lowers throughput, and
+  therefore merges), so it weakens rather than settles the question — P9-0's attribution is the clean
+  answer. Worth one run only if P9-0 is not going to be built soon.
+- **Mesh-side ceiling** — untested. `MeshSchedule` was still `Quota`-bound on ~70 % of frames in
+  P9-0a's ×2 leg, so a second ceiling may sit behind it; but `maxInFlightMeshJobs` (20) already
+  reported `InFlightCap` on 29 % of those frames, so a mesh-quota leg needs that cap raised in the
+  same run or it measures the in-flight bound instead.
 
 ## 8. Phased implementation plan
 
@@ -614,6 +638,28 @@ enabled *and* disabled after each phase.
 3. **What is the right steady-state ms budget for the two scheduling passes?** The current 8 + 6 ms
    are hitch guards (§4.2). Nobody has stated what fraction of a frame the pipeline *should* own,
    and Option A′ cannot be tuned without an answer.
+4. **Why is `populated→lit` ~3.4 s at low speed when the lighting pass is idle?** ⬅ **new, from
+   P9-0a — a candidate third cause this document does not otherwise name.** In the generation pass
+   @ 10 m/s, in **both** legs, the panic gate is effectively never closed (0.4 % / 0.0 % of frames)
+   and `LightSchedule` reports **`OutOfWork` on ~92 % of frames** — an *idle* lighting pass — yet:
+
+   | Leg | light cap | `populated→lit` p50 | `lit→meshApplied` p50 |
+   |-----|-----------|---------------------|-----------------------|
+   | L1  | 24        | 3 417 ms            | 1 437 ms              |
+   | L2  | 48        | 3 408 ms            | 1 439 ms              |
+
+   **Doubling the quota moved it by 0.3 %.** That is not a throughput ceiling, an admission stall or
+   a budget: it is a chunk sitting parked, waiting to become *eligible*. The likely mechanism is
+   readiness/promotion latency — a chunk blocked on neighbour readiness is parked by MT-2, which
+   removes it from the ready set, so it cannot be counted as an `AllDeclined` candidate. **The
+   stop-reason instrument is blind to this class by construction**, which is why no capture has
+   named it before.
+
+   Consequences: it bounds what *any* throughput or admission work can achieve in the uncongested
+   regime; and if the same waiting contributes at high view distance, part of §3.3's amplification
+   is neither redundancy nor pre-delivery correctness work but pure latency. P9-0's attribution
+   should count **parked-time per chunk**, not only pass costs. May belong to the lighting async
+   roadmap (`AS-*`) rather than to P-9 — decide once it is measured rather than inferred.
 
 ---
 
