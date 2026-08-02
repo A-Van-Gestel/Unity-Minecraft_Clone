@@ -1,10 +1,10 @@
 # P-9 — Schedule-Quota Throughput Ceiling
 
-**Version:** 1.6b
+**Version:** 1.7
 **Date:** 2026-08-02
-**Status:** Partly implemented — **P9-0a and P9-0 are done**; the attribution instrument ships and is
-guarded by baselines B20–B22, but **has not yet been used for a capture**. P9-1 is the next phase and
-every §6 lever remains proposed.
+**Status:** **Measurement complete — P9-0a, P9-0 and P9-1 are all done.** The instrument ships,
+guarded by baselines B20–B22, and has been used for a five-run capture that re-ranks §6 and corrects
+§3.3's inferences. **No fix has been written**; every remaining lever is proposed.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The chunk pipeline delivers a near-constant 5 658–6 803 chunks per 30 s phase from view distance 10
@@ -34,6 +34,15 @@ every §6 lever remains proposed.
 > **8 ms ceiling**, not a higher quota. The lead lever is now **Option C — cut per-item main-thread
 > cost**, specifically the unbudgeted lighting merge (**P-3**); B2 above keeps its product rationale
 > (§3.4) but is no longer the throughput answer.
+>
+> **⚠⚠ P9-1 measured all of the above and re-ranked them again — read the v1.7 amendment before acting
+> on §6.** The rate identity is confirmed within 4 % across vd 10→32, but two of this document's own
+> inferences are wrong: **pre-delivery mesh amplification is exactly 1.00**, not ~3.5, so Option B2 has
+> no pre-delivery mesh work to skip; and **the latency is 82 % admission wait**, so B2 can reach 16 % of
+> a 42 % gap. B2 is **refuted as a throughput lever** and re-filed as a product item. **P-3 is demoted
+> from gating to enabler** — the schedule pass is `Quota`-bound on 98 % of frames, so cheaper items buy
+> frame time and not one extra chunk. The lead is now **Option B1**, the only lever that raises delivery
+> at zero frame-time cost.
 
 **Amended:** 2026-08-01 (v1.1) — two corrections after review. (1) §7.1: the belief that a benchmark
 run ignores settings.json except for five overlaid fields is **wrong on the menu-launched path**;
@@ -57,6 +66,20 @@ weakened as a *throughput* lever: the recoverable hops total ~537 ms of a 3 703 
 cannot meet the visibility budget alone. Its product rationale is untouched. Phases P9-0a/L5/L3 are
 resolved or withdrawn in §8.
 
+**Amended:** 2026-08-02 (v1.7) — **P9-1 ran, and it corrects this document as much as it confirms it**
+([capture](../Performance/CHUNK_PIPELINE_P9_1_ATTRIBUTION_IL2CPP_2026-08-02_BENCHMARK.md)). Five
+same-build IL2CPP runs — vd 10/20/26/32 at the OM-1 caps plus a vd-32 cap-48 A/B leg. **Confirmed:**
+§3.1's identity holds within 4 % across a 3.2× view-distance range (1 435–1 496 lighting schedules/s
+against a predicted 1 440) and the flat completion band reproduces on a fresh build. **Corrected:**
+§F4's fitted 0.37 ms/merge parameter was the *sum of both lighting passes* — measured, a lighting job
+costs **0.15 ms to schedule + 0.18 ms to merge**, and the merge is 39 % of the ×2-cap frame growth, not
+the ~70 % the model implied. **Refuted:** §3.3's ~3.5 mesh schedules per delivered chunk — pre-delivery
+mesh amplification is **exactly 1.00** at every view distance, and §3.3's ~7.6 lighting figure is the
+*total* (6.3–7.4), of which only **3.9** is pre-delivery. **Answered:** §10 q4 — parking is 43–48 % of
+the idle-pass `populated→lit` hop. §2's kill condition is **not** triggered (the two scheduling passes
+are 32 % of the frame). Consequences: §6 re-ranked to **B1 → C → A′**, B2 refuted as a throughput lever
+and re-filed as a product item, P-3 demoted from gating to enabler.
+
 **Audited:** 2026-08-01, at commit `c7bea678` (branch `feat/world-scaling`).
 Findings are from static review of `World.cs:2078–2345` (the lighting ready-set scan and the mesh
 schedule/apply passes), `Helpers/PipelinePassBudget.cs` (`ComputeQuota`, `ScaleCeilingMs`,
@@ -76,7 +99,10 @@ from field defaults (§7). No production code was changed for this document.
   baseline).
 - [`../Performance/CHUNK_PIPELINE_P9_0A_CAP_SWEEP_IL2CPP_2026-08-02_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_P9_0A_CAP_SWEEP_IL2CPP_2026-08-02_BENCHMARK.md)
   — **this document's phase P9-0a**. Confirms §3.1's rate identity by the mechanism §2 predicted,
-  and prices §6's Option A′ out on frame time. Read it before acting on §6.
+  and prices §6's Option A′ out on frame time.
+- [`../Performance/CHUNK_PIPELINE_P9_1_ATTRIBUTION_IL2CPP_2026-08-02_BENCHMARK.md`](../Performance/CHUNK_PIPELINE_P9_1_ATTRIBUTION_IL2CPP_2026-08-02_BENCHMARK.md)
+  — **this document's phase P9-1**, and the only capture taken with the P9-0 instrument. It supersedes
+  P9-0a's §F4 model and refutes two of §3.3's inferences. **Read it before acting on §6.**
 - [`FLIGHT_PROFILE_CAPTURE.md`](FLIGHT_PROFILE_CAPTURE.md) — the instrument. §7.3 row 1 is P-9's
   ranking rationale; the attribution work in §7 below is an extension of that instrument.
 - [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) — master backlog;
@@ -235,6 +261,25 @@ measured delivery rate at vd 32 gives, for the ON / OFF legs respectively:
 full quota (justified at a 99.3 % `Quota` share) and that the phase ran the full 30 s. They are the
 *motivation* for phase P9-0, not evidence from it. P9-0 measures both ratios directly.
 
+> **✅ MEASURED by P9-1 (2026-08-02), and the table above is half wrong.** Loading @ 200 m/s, per
+> delivered chunk, across vd 10/20/26/32:
+>
+> | Quantity                          | inferred above | **measured**                | verdict |
+> |-----------------------------------|----------------|-----------------------------|---------|
+> | Lighting schedules, **total**     | ~6.3–7.6       | **6.26 / 6.47 / 6.28 / 7.41** | ✅ close |
+> | Lighting schedules, **pre-delivery** | (assumed all) | **3.83 / 3.94 / 3.92 / 3.95** | ⚠️ ~half |
+> | Mesh schedules, **pre-delivery**  | ~2.9–3.5       | **1.00 / 1.00 / 1.00 / 1.00** | ❌ **refuted** |
+>
+> Three things follow. **(1)** The ~7.6 figure was right about the *total* and wrong about what it
+> counted — only ~62 % of lighting work happens before first delivery; the rest is post-delivery
+> correction (~1.9/chunk) and work on chunks later discarded (~0.4/chunk). **(2) There is no
+> pre-delivery mesh redundancy at all.** Every chunk is meshed exactly once before it is delivered, to
+> the unit, at every view distance — so the mesh half of the multiplier this section describes does not
+> exist, and Option B2's mesh-side premise is void (§3.4). **(3)** Pre-delivery lighting amplification is
+> **flat in view distance but varies by regime**: 3.8–4.0 on the loading pass @ 200 m/s versus **6.6–6.8**
+> in the generation pass @ 10 m/s. So it is not a single constant, and a lever that targets it must say
+> which regime it targets.
+
 If those ratios are real they are the more interesting factor — but **not because the work is
 necessarily wasted**. The v1.0 draft framed amplification as redundancy to delete; §3.4 corrects
 that. Known contributors visible in the code:
@@ -311,6 +356,24 @@ Two consequences that shape the whole design:
    problem rather than fix it, and is rejected: the point is to stop *gating visibility* on
    correctness, not to stop being correct.
 
+> **❌ REFUTED as a throughput/visibility lever by P9-1 (2026-08-02). The product argument below
+> stands; the mechanism does not.** Two independent measurements kill it:
+>
+> - **Its mesh premise is void.** This section reasons that "~3.5 mesh builds are spent ahead of the
+>   player seeing anything". Measured pre-delivery mesh amplification is **exactly 1.00** at every view
+>   distance (§3.3). There is no pre-delivery mesh work to skip, and no double-mesh cost to confine —
+>   which also makes the `SectionRenderer` stream-3 refinement below a solution to a problem that was
+>   not there.
+> - **Its reachable latency is 16 % of a 42 % gap.** At vd 32 / 200 m/s the end-to-end p50 of 3 644 ms
+>   decomposes as `enqueue→populated` **2 976 ms (82 %)**, `populated→lit` 570 ms (16 %),
+>   `lit→meshApplied` **7.1 ms (0.2 %)**. B2 acts only on the last two. Removing them entirely leaves
+>   3 067 ms against a 2 560 ms budget. The pipeline is not waiting on lighting before it can show a
+>   mesh — it is waiting on the panic gate to admit the chunk at all (closed on 91 % of frames).
+>
+> **Disposition:** B2 is removed from P-9's phases and re-filed as a standalone product item — "a dark
+> chunk beats void" remains a legitimate thing to want, and preference order 1–3 above is still the right
+> way to want it. It is simply not what closes the visibility budget, and P-9 should stop claiming it is.
+
 ⚠️ **The honest cost of this decision.** Deliver-then-refine does **not** raise the §3.1 rate ceiling.
 Total quota spent per fully-correct chunk is unchanged, so completions/second may not move at all —
 what moves is *when the chunk becomes visible*. That is why §2 makes the visibility criterion primary
@@ -384,10 +447,25 @@ Two consequences, and they cut in opposite directions:
 
 Those three rows were the whole reason P-9 opened with attribution: the instrument reported *that* the
 pass stopped on quota, and nothing about what the quota bought or what it cost. **P9-0 closed the
-instrument gap on 2026-08-02; it has not yet been pointed at a capture, which is P9-1.** Note what the
-new instrument still does *not* separate: `LightMerge` is timed as a whole pass, so it confirms or kills
-§F4's attribution to the merge without sizing the merge's internals — if P-3 needs a finer breakdown,
-that is a further step.
+instrument gap and P9-1 used it, both on 2026-08-02.** The headline numbers, loading @ 200 m/s:
+
+| Measured (vd 10 → 32)                     | Value                                          |
+|-------------------------------------------|------------------------------------------------|
+| Whole instrumented pipeline               | **68.5–70.9 % of wall clock, view-distance-invariant** |
+| `LightMerge` (unbudgeted)                 | **261–288 ms/s — the largest single slot**     |
+| `LightSchedule` (budgeted, 8 ms ceiling)  | 215–221 ms/s                                   |
+| Cost per lighting job                     | **0.15 ms schedule + 0.18 ms merge**           |
+| `LightStagingDrain` + `LightFailSafeScan` | **< 0.6 ms/s combined — negligible**           |
+| Quota utilisation at the shipping cap     | 96–98 %, `Quota`-bound on ~98 % of frames      |
+
+Two consequences worth stating here rather than in §6. **The pipeline's main-thread cost per second is
+fixed by the rate**, so it does not grow with view distance — what grows is everything beside it, which
+is why the frame rate falls while the pipeline's share does not. And **the two unbudgeted lighting
+regions this instrument added on suspicion turned out to be negligible**; only the merge mattered.
+
+Note what the instrument still does *not* separate: `LightMerge` is timed as a whole pass, so P9-1
+confirms *that* the merge is the largest cost centre without sizing its internals. **P-3 needs a finer
+breakdown before it can be scoped.**
 
 ---
 
@@ -396,8 +474,28 @@ that is a further step.
 The ceiling is `rate ÷ amplification`. Three levers move it; they are not exclusive, and the
 question is only which one leads.
 
-> **⚠ Re-ranked by P9-0a (2026-08-02). Read this before the options below, which are left intact as
-> the reasoning that produced the probe.** The measured order is now **C → B2 → A′**, not B2 → C → A′:
+> **⚠⚠ FINAL RANKING — re-ranked again by P9-1 (2026-08-02), which measured what P9-0a inferred. The
+> order is `B1 → C → A′`; B2 leaves P-9 entirely.** This supersedes the P9-0a block below, which is kept
+> because its reasoning is still how the probe was designed.
+>
+> - **B1 leads.** Delivered chunks/s = rate ÷ schedules-per-delivered-chunk = 1 435 ÷ 6.28 = 228.5/s,
+>   which matches the measured 228.6/s exactly. It is **the only lever that raises the numerator of that
+>   fraction at zero frame-time cost**, and it compounds with every other lever and every device.
+>   ⚠️ Conditional, as it always was: P9-1 *sizes* the multiplier, it does not show any of it is
+>   redundant — and §3.3 shows it varies by regime, which is what genuinely-required convergence work
+>   would also look like.
+> - **C is demoted from gating to enabler.** The merge is real and is the largest slot (§5), but at the
+>   shipping cap the schedule pass is **`Quota`-bound on ~98 % of frames, not `Ceiling`-bound**. Making
+>   each item cheaper therefore frees frame time and delivers **not one extra chunk**. P-3 buys Q2
+>   headroom and is the precondition for A′; it is not a substitute for it.
+> - **A′ stays closed**, re-failing Q2 on a second independent build (×2.71 CPU, ×0.66 min FPS).
+> - **B2 is refuted and leaves P-9** (§3.4): its mesh premise is void and it reaches 16 % of a 42 % gap.
+>
+> Derivation: [P9-1 capture](../Performance/CHUNK_PIPELINE_P9_1_ATTRIBUTION_IL2CPP_2026-08-02_BENCHMARK.md)
+> §F1–F7.
+
+> **⚠ Superseded — re-ranked by P9-0a (2026-08-02). Read this before the options below, which are left
+> intact as the reasoning that produced the probe.** The order P9-0a measured was **C → B2 → A′**:
 >
 > - **A′ is closed** (not merely deferred): ×4.79 CPU for +21 % delivery, and beyond ×2 the ceiling
 >   makes the cap inert.
@@ -426,7 +524,7 @@ question is only which one leads.
 numbers and scored by Q2. If it ever ships it needs the ms ceilings re-tuned as *steady-state*
 budgets in the same change, since they are currently sized as hitch guards.
 
-### Option B1 — Delete redundant amplification ✅ **CHOSEN (secondary)**
+### Option B1 — Delete redundant amplification ✅ **CHOSEN (LEADS, per P9-1)**
 
 Remove quota units that buy nothing: lighting schedules and re-meshes that recompute an unchanged
 result. Precedent: MT-2 (`LightWorkScheduler`'s ready/waiting split) removed *declined* candidates
@@ -441,7 +539,7 @@ work rather than budgeting more of it, and both shipped without a frame-time cos
   converges, not waste. Secondary rather than leading for that reason — and entirely conditional on
   P9-0 finding genuinely redundant work.
 
-### Option B2 — Deliver on first viable mesh, refine in place ✅ **CHOSEN (leads)**
+### Option B2 — Deliver on first viable mesh, refine in place ❌ **REFUTED by P9-1 — left P-9, re-filed as a product item (§3.4)**
 
 Stop gating visibility on settled lighting **for chunks that would otherwise be void** (§3.4): the
 full-correctness path stays the default, and a chunk that misses its visibility budget is delivered
@@ -463,7 +561,7 @@ chunk-lifecycle-invariant territory with recurring deadlock history. The `chunk-
 mandatory for P9-2, and Q7 (corrections converge; no permanently-wrong mesh) is a hard gate with a
 validation baseline behind it, not a capture-only check.
 
-### Option C — Cut per-item main-thread cost ✅ **CHOSEN (parallel, existing backlog)**
+### Option C — Cut per-item main-thread cost ✅ **CHOSEN (enabler for A′, not a throughput lever on its own — P9-1)**
 
 Make each quota unit cheaper, so the same rate costs less frame time — which then *permits* Option A
 within Q2. This is already filed as analysis §1 (per-job full-volume copies) and §2/P-3 (the
@@ -583,10 +681,10 @@ settings alone can go:
 |-------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|------------|
 | ~~**P9-0a — Cap-sweep probe (zero code)**~~ ✅ **DONE 2026-08-02** | Ran as two settings-only legs at vd 32 (24 → 48 light jobs) on the P-8 build. **Identity confirmed, Option A′ closed**: gate 95.1 % → 62.6 % closed, `enqueue→populated` −28.9 %, completions +20.9 %, at ×4.79 CPU / ×0.61 min FPS (Q2 fail). Binding limit moved to the **8 ms ceiling**, not a higher quota. [Capture](../Performance/CHUNK_PIPELINE_P9_0A_CAP_SWEEP_IL2CPP_2026-08-02_BENCHMARK.md). Planned vd 26 legs were made redundant by the size of the vd 32 failure |   🟢   | —          |
 | ~~**P9-0 — Attribution instrument**~~ ✅ **DONE 2026-08-02** | Shipped, no production behaviour change. `WorldFrameProfiler` now carries one slot per budgeted pass **plus `LightMerge` and `LightFailSafeScan`** — the two unbudgeted regions, and the reason §F4 had to be modelled; `LastFrameLightMs`/`LastFrameMeshMs` survive as derived sums so the fluid-stress collector and its past captures are unaffected. `PipelineTelemetry` gains `RecordPassWork` (served vs granted), per-chunk schedule counts split **pre-delivery / no-live-trace / wasted**, and per-chunk **parked time** (§10 q4) hooked at `LightWorkScheduler`'s park/promote transitions. `BenchmarkController` enables the profiler and clears it in `OnDestroy`. Report prints **NOT MEASURED** rather than 0.0 ms when the profiler did not run. Guarded by **B20–B22**, each prove-red-verified to redden exactly itself (370 baselines, `Validate All` green with telemetry enabled *and* disabled). The §7.1 `SettingsManager` remark rider was already discharged at `7eabda7b`. **Amended the same day after code review** — seven measurement defects found and six fixed *before* any capture ran, since a capture on the flawed instrument would have had to be re-run: the staging drain got its own slot (it sits outside the budget window, so charging it to `LightSchedule` broke that slot's ceiling-comparability); the two passes' utilisation denominators were made the same population; the park interval now survives a flush-and-restart and `LightWorkScheduler.Clear()`; and B21's wall-clock assertions now compare against *measured* spin durations, so an editor hitch can no longer redden a baseline. The seventh — the fail-safe promote-to-rescan gap — is **deliberately left unfixed** and documented in §10 q4 instead |   🟡   | P9-0a      |
-| **P9-1 — Capture and decide** ⬅ **NEXT**  | Fresh same-build baseline at vd 10/20/26/32 per §7, **plus a vd-32 `maxLightJobsPerFrame` 48 leg on that same build**. The sweep alone measures the decomposition only at the shipping cap, whereas §F4's model was fitted *across* 24 and 48 — so the extra leg is what actually confirms or kills the attribution that promoted P-3 to gating. Reported per `perf-benchmark`. **Selects the lever** and may trigger §2's kill condition. ⚠ Restore the caps to OM-1's 24/11 afterwards (§7) |   🟢   | P9-0       |
-| **P9-2 — Deliver-then-refine** (Option B2) | **The lead fix.** Decouples mesh delivery from settled lighting; corrections converge in place (Q7). Behind a default-OFF rollback flag, listed in the benchmark overlay for cold-cache robustness. ⚠️ Touches the mesh readiness contract — **`chunk-lifecycle` skill mandatory**, and Q7 needs a validation baseline with a prove-red, not a capture alone. |   🔴   | P9-1       |
-| **P9-2b — Delete redundancy** (Option B1) | Only what P9-1 proves is recomputing an unchanged result. Scoped after the fact; **may legitimately be empty**.                                                                                                                                                                                                                       |   🟡   | P9-1       |
-| **P9-3 — Re-tune the rate** (Option A′)   | ⛔ **BLOCKED by P9-0a.** The ms headroom it was gated on does not exist: at ×2 the ceiling binds, the cap goes inert, and the cost is ×4.79 CPU / ×0.61 min FPS. Re-openable **only after per-item cost falls (P-3)**, at which point the same 8 ms buys more items. Do not attempt before then.                                                                                                                                          |   🟡   | **P-3**, P9-1 |
+| ~~**P9-1 — Capture and decide**~~ ✅ **DONE 2026-08-02** | Five same-build IL2CPP runs (vd 10/20/26/32 at the OM-1 caps + a vd-32 cap-48 A/B leg). [Capture](../Performance/CHUNK_PIPELINE_P9_1_ATTRIBUTION_IL2CPP_2026-08-02_BENCHMARK.md). **Identity confirmed within 4 %**; §F4's model half-confirmed and corrected (0.15 ms schedule + 0.18 ms merge; the merge is 39 % of the ×2-cap growth); **§3.3's mesh multiplier refuted** (pre-delivery = 1.00); §10 q4 answered (parking = 43–48 % of the idle-pass hop). **Kill condition NOT triggered.** Lever order → **B1 → C → A′**; B2 leaves P-9 |   🟢   | P9-0       |
+| **P9-2 — Delete redundant amplification** (Option B1) ⬅ **NEXT** | **The lead fix.** Target: 6.28 lighting schedules per delivered chunk (3.9 pre-delivery, ~1.9 post-delivery corrections, ~0.4 on chunks later discarded). Find and remove schedules that recompute an unchanged result — raising delivery at zero frame-time cost. **Starts with an investigation, not a patch:** P9-1 sizes the multiplier but does not show any of it is redundant, and §3.3 shows it varies by regime. **May legitimately come back empty**, in which case the lead passes to C → A′. ⚠️ Touches the lighting convergence model — `chunk-lifecycle` skill mandatory |   🟡   | P9-1       |
+| ~~**P9-2b — Deliver-then-refine** (Option B2)~~ ⛔ **WITHDRAWN from P-9 2026-08-02** | Refuted as a throughput/visibility lever by P9-1 (§3.4): pre-delivery mesh amplification is exactly 1.00 so there is no pre-delivery mesh work to skip, and the hops it can reach total 16 % of a 42 % gap. **Re-filed as a standalone product item** — "a dark chunk beats void" is still worth wanting, it just does not close the visibility budget |   —    | —          |
+| **P9-3 — Re-tune the rate** (Option A′)   | ⛔ **BLOCKED, and P9-1 re-confirmed it on a second independent build** (×2.71 CPU, ×0.66 min FPS). At ×2 the ceiling binds *completely* — **one `Quota` stop in 930 frames**, utilisation collapsing to 58.5 % — so the cap is inert past that point and the same work is merely repacked into 3.2× fewer, 3.2× longer frames. Re-openable **only after per-item cost falls (P-3)**, at which point the same 8 ms buys more items. Do not attempt before then.                                                                                                                                          |   🟡   | **P-3**, P9-1 |
 
 **P9-0a alone delivers standalone value and costs a settings edit** — it can refute this entire
 document for the price of one capture session, on a build that already exists (§7.1). **P9-0 + P9-1**
@@ -638,6 +736,13 @@ enabled *and* disabled after each phase.
    lead passes to A′ or C. **P9-0 now measures both (2026-08-02); the question stays open until P9-1
    runs a capture.**
 
+   > **✅ ANSWERED by P9-1 (2026-08-02).** Amplification is real, and the split is roughly **62 %
+   > pre-delivery / 30 % post-delivery correction / 8 % spent on chunks later discarded** — 3.92 of
+   > 6.28 lighting schedules per delivered chunk, loading @ 200 m/s at vd 32. It does **not** land near
+   > 1, so the B-options were not dead on this axis. But B2 died on a different one (§3.4), so the split
+   > now serves **B1**: it says how much work exists to examine, not that any of it is removable.
+   > The mesh half of the question is settled outright — pre-delivery mesh amplification is **1.00**.
+
    Two properties of the instrument to carry into reading it. The post-delivery half is recorded as
    "schedules with no live trace", which is an **upper bound** — it also absorbs schedules for chunks
    that were never traced (saturation) or already closed by an unload, so it must be read beside the
@@ -678,7 +783,26 @@ enabled *and* disabled after each phase.
    should count **parked-time per chunk**, not only pass costs. May belong to the lighting async
    roadmap (`AS-*`) rather than to P-9 — decide once it is measured rather than inferred.
 
-   **✅ Instrumented 2026-08-02 (P9-0), still unanswered.** Per-chunk parked time is now accumulated
+   > **✅ ANSWERED by P9-1 (2026-08-02): parking is 43–48 % of the hop, and it is view-distance-invariant.**
+   > In the generation pass @ 10 m/s, where `LightSchedule` reports `OutOfWork` on 89–97 % of frames and
+   > the gate never closes:
+   >
+   > | vd | `populated→lit` p50 | **parked p50** | parked ÷ hop |
+   > |----|---------------------|----------------|--------------|
+   > | 10 | 3 282 ms            | **1 568 ms**   | **47.8 %**   |
+   > | 20 | 3 343 ms            | **1 542 ms**   | **46.1 %**   |
+   > | 26 | 3 392 ms            | **1 516 ms**   | **44.7 %**   |
+   > | 32 | 3 434 ms            | **1 474 ms**   | **42.9 %**   |
+   >
+   > So about half of this stall is a chunk sitting **ineligible**, which no quota, gate or budget change
+   > can reach — the bound this question predicted. The remaining ~1.9 s is neither parked nor un-served
+   > (the pass is idle). The most likely home is the **serialized edge-check cascade**: `populated→lit`
+   > measures to the *last* lighting completion and pre-delivery amplification in this regime is ~6.7
+   > passes per chunk. ⚠️ **That attribution is NOT measured** — the instrument counts parked time and
+   > schedules, not cascade depth per round. It is the obvious next question, and it belongs to the
+   > `AS-*` lighting roadmap rather than to P-9.
+
+   **✅ Instrumented 2026-08-02 (P9-0).** Per-chunk parked time is now accumulated
    across `LightWorkScheduler`'s park/promote transitions and reported as percentiles beside the hop
    latencies, so P9-1 can compare it directly against `populated→lit`.
 
@@ -786,8 +910,24 @@ enabled *and* disabled after each phase.
   baseline whose label asserted more than it tested, and falsely — the disabled profiler *freezes* its
   published values rather than zeroing them, which is now pinned rather than mis-described.
 
+* **v1.7** - **P9-1 captured** ([report](../Performance/CHUNK_PIPELINE_P9_1_ATTRIBUTION_IL2CPP_2026-08-02_BENCHMARK.md)),
+  and it corrects this document as much as it confirms it. **Confirmed:** §3.1's rate identity within
+  4 % across vd 10→32 (1 435–1 496/s against a predicted 1 440), the flat completion band on a fresh
+  build, and the exact closure `delivered/s = rate ÷ schedules-per-chunk`. **Corrected:** §F4's fitted
+  0.37 ms/merge was the *sum of both lighting passes* — measured 0.15 ms schedule + 0.18 ms merge, with
+  the merge 39 % of the ×2-cap growth rather than ~70 %. **Refuted:** §3.3's ~3.5 mesh schedules per
+  delivered chunk — pre-delivery mesh amplification is **exactly 1.00** everywhere, so §3.4's Option B2
+  has no pre-delivery mesh work to skip; combined with an 82 %-admission-wait latency split, **B2 is
+  refuted as a throughput lever and leaves P-9** for a standalone product item. **Answered:** §10 q1
+  (62 % pre-delivery) and §10 q4 (parking = 43–48 % of the idle-pass hop). §2's kill condition is **not**
+  triggered — the two scheduling passes are 32 % of the frame, though the whole pipeline is ~69 % and
+  lighting alone ~49 %. §6 re-ranked to **B1 → C → A′**, with **P-3 demoted from gating to enabler**
+  because the schedule pass is `Quota`-bound on ~98 % of frames, so cheaper items buy frame time and no
+  extra chunks. §8: P9-1 closes, P9-2 becomes B1, P9-2b withdrawn.
+
 ---
 
 **Last Updated:** 2026-08-02
-**Next Review:** when P9-1 (capture) runs — it confirms or kills the P9-0a §F4 model that promoted
-P-3 to the gating lever, using the instrument P9-0 just shipped
+**Next Review:** when P9-2 (delete redundant amplification) starts — its first job is to establish
+whether *any* of the measured 6.28 lighting schedules per delivered chunk recomputes an unchanged
+result. If none does, P-9's remaining path is C → A′ and this document should say so

@@ -146,6 +146,26 @@ Move the merge into a Burst job (write into persistent or pooled native staging,
 >   must be preserved exactly.
 > - **Benefit:** 🟢 High — removes a large fixed main-thread cost paid per lighting completion.
 
+> **📏 SIZED 2026-08-02 by P9-1, and re-ranked twice in two days** ([capture](../Performance/CHUNK_PIPELINE_P9_1_ATTRIBUTION_IL2CPP_2026-08-02_BENCHMARK.md)).
+> This merge is now measured rather than reasoned about: **0.18 ms per completed lighting job**, totalling
+> **261–288 ms per second of wall clock — the single largest instrumented cost centre in the pipeline**,
+> and the only pass with no budget. At `maxLightJobsPerFrame` 48 it reached **9.4 ms/frame, more than the
+> budgeted schedule pass's entire 8 ms ceiling**, which is the §3 death spiral running through the one
+> pass the budgets do not cover. So the "large fixed main-thread cost" claim above is correct and now has
+> a number.
+>
+> ⚠️ **But it is an enabler, not a throughput lever, and the ranking whiplash is worth recording.** P9-0a
+> promoted this item to *gating* on a fitted model; P9-1 measured that model's parameter as the sum of
+> this merge **and** the schedule scan (0.18 + 0.15 ms), and found that at the shipping cap the schedule
+> pass is **`Quota`-bound on ~98 % of frames, not `Ceiling`-bound**. Consequence: making each merge
+> cheaper frees frame time and delivers **not one extra chunk**, because the rate quota still caps
+> delivery at `cap × 60`. P-3 buys the frame-time headroom that makes raising the cap affordable — it is
+> the precondition for that, not a substitute. **Do not schedule P-3 expecting a throughput win.**
+>
+> One gap before it can be scoped: P9-1 times the merge as a *whole pass*, so it does not say which part
+> — full-volume light-map apply, cross-chunk mod routing, pull-back verification, stability bookkeeping —
+> owns the 0.18 ms. **A finer breakdown is P-3's first step.**
+
 ---
 
 ## 3. Cascading failure under load (Symptom 1) — missing backpressure
@@ -464,6 +484,18 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
    [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md); ranking rationale in
    [FLIGHT_PROFILE_CAPTURE.md](FLIGHT_PROFILE_CAPTURE.md) §7.3 row 1. Note this **reverses FP-4’s
    deprioritisation of throughput work** for the high-view-distance regime only.
+
+   > **✅ MEASURED 2026-08-02 by P9-0a and P9-1.** The mechanism is confirmed: `cap × 60` predicts 1 440
+   > lighting schedules/s and measures **1 435–1 496 across vd 10→32** ([P9-1
+   > capture](../Performance/CHUNK_PIPELINE_P9_1_ATTRIBUTION_IL2CPP_2026-08-02_BENCHMARK.md)). Two of the
+   > design doc's leading assumptions did **not** survive. **Deliver-then-refine is refuted** — the
+   > premise that ~3.5 mesh builds are spent ahead of first visibility is wrong (pre-delivery mesh
+   > amplification is **exactly 1.00**), and 82 % of the latency is admission wait, so it reaches 16 % of
+   > a 42 % gap; it has left P-9 as a standalone product item. **Raising the caps stays closed** on two
+   > independent builds. The lead is now **delete-redundant-amplification**, the only lever that raises
+   > delivery at zero frame-time cost — conditional on any of the measured 6.28 lighting schedules per
+   > delivered chunk turning out to be removable, which is not yet established. §2/P-3 is re-ranked by
+   > the same capture; see the note there.
 8. **§4.4 "lighting stable" save bit** (serialization migration) — **deprioritized by FP-4.** Throughput work;
    throughput is not the binding constraint (`InFlightCap` ≤ 0.6 % at every view distance). Still a real win
    for revisited terrain, just not what the flight symptom calls for.
@@ -565,7 +597,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-07-27 (§6 ordering caveat added, then revised against FP v1.1)  
+**Last Updated:** 2026-08-02 (§2 sized by P9-1 and re-ranked to enabler; §6 item 7 updated with the P-9 measurement outcome)  
 **Next Review:** when §2 (`ApplyLightingJobResult` merge scan, owned by P-3) or §4 (load-path edge-check
 cascade) is picked up. **§4 needs re-verification before use** — §4.2's Bug 11 was fixed in June 2026,
 yet §4.3 still reads as live "do this first" instructions written before that.
