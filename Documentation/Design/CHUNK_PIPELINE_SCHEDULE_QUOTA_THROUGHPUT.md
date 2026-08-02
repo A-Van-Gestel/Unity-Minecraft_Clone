@@ -188,7 +188,8 @@ the same 560 m, which is where ordering does have headroom. This is an independe
 | #       | Criterion                      | Applies to | Threshold                                                                                                            | Why this number                                                                                                       |
 |---------|--------------------------------|------------|-------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
 | **Q1**  | **Visibility budget met** ⭐     | all levers | p50 `enqueue→MeshApplied` **≤ `vd × 16 ÷ speed`** at vd 20, 26 and 32; partial credit if the shortfall ratio improves ≥ ×1.3 | The table above: currently missed by 1.4–1.6× at every high vd. Matches independent visual observation (FP-4) and P-7's target |
-| **Q2**  | **Frame time holds** ⚠️         | all levers | Loading-pass **min FPS ≥ ×0.95** and **avg CPU frame time ≤ ×1.05** vs the same-build OFF leg, at vd 20, 26 **and** 32     | The arm P-8 failed (−37 % / −32 % min FPS). **A Q2 failure is a NO-GO regardless of every other criterion**               |
+| **Q2**  | ~~**Frame time holds**~~ ⚠️ **REWORDED 2026-08-02 — see Q2′** | all levers | ~~Loading-pass min FPS ≥ ×0.95 and avg CPU frame time ≤ ×1.05 vs the same-build OFF leg~~ | The arm P-8 failed (−37 % / −32 % min FPS). ~~A Q2 failure is a NO-GO regardless of every other criterion~~ |
+| **Q2′** | **Frame time per delivered chunk holds** ⚠️ | all levers | **Instrumented pipeline main-thread ms per delivered chunk must not rise**, and absolute pipeline ms/s must not rise. Per-frame avg CPU, min FPS and peak CPU are **recorded and reviewed, not gated** | **Why the rewrite.** Q2 was written against P-8's failure shape: milliseconds spent to buy admission. It cannot score a **divisor** lever. P9-2 cut the pipeline's own cost (731 → 630 ms/s absolute, 3.21 → 1.31 ms per delivered chunk) and *still* failed Q2, because delivering ×2.12 more chunks costs downstream work — mesh upload, behaviour ticks, rendering — that Q2 charges to the lever. Scoring a success as a failure is the same defect Q3b was created to avoid on the other side. **The hard-gate property moves with the criterion**: a lever that raises cost *per delivered chunk* is still a NO-GO |
 | **Q3a** | **Rate lever moved the ceiling** | P9-0a, P9-3 | `LightSchedule` `Quota` share falls below **90 %** of frames at vd 32 (from 99.3 % / 99.5 %), **and** completions ≥ ×1.35   | For a rate change, throughput and quota share must move together; if `Quota` stays at 99 % while the cap rose, §3.1 is wrong |
 | **Q3b** | **Refine lever moved latency**   | ~~P9-2~~ — **withdrawn with B2** | Q1 improves **while** `Quota` share and completions/s may legitimately stay flat                                          | Deliver-then-refine reorders work rather than adding rate. **Scoring it on Q3a would fail a success** — see §3.4. Applied to P9-2 only while P9-2 meant **B2**; B2 left P-9, so this row now scores nothing |
 | **Q3c** | **Amplification lever moved the divisor** ⭐ | **P9-2 (B1)** | **(a)** lighting schedules/s stays flat (within ±5 % of the OFF leg); **(b)** total lighting quota units per delivered chunk **falls**; **(c)** delivered chunks/s **rises by the reciprocal factor**, within ±5 %; **(d)** the §3.1 closure `delivered/s = rate ÷ amplification` holds in **both** legs | B1 does not touch the rate — it divides the same rate by a smaller multiplier, so its signature is the *opposite* of Q3a's. **Scoring B1 on Q3a would fail a success:** Q3a demands the `Quota` share fall below 90 %, and a correct B1 leaves the pass `Quota`-bound at ~98 % by construction. (a) is the guard against crediting B1 for something that actually moved the rate; (d) is the guard against a bookkeeping change that flatters the ratio without delivering a chunk |
@@ -610,14 +611,19 @@ question is only which one leads.
 numbers and scored by Q2. If it ever ships it needs the ms ceilings re-tuned as *steady-state*
 budgets in the same change, since they are currently sized as hitch guards.
 
-### Option B1 — Delete redundant amplification ✅ **CHOSEN (LEADS, per P9-1) — redundancy FOUND and removed behind a flag (P9-2)**
+### Option B1 — Delete redundant amplification ✅ **SHIPPED (P9-2, GO 2026-08-02, default-ON)**
 
-> **✅ The condition this option was always contingent on is now discharged.** §6 and P9-1 both said B1
-> "remains conditional on finding work that recomputes an unchanged result". **It was found**: the
-> post-generation edge-check cascade re-arms on `IsStable`, which a pass that wrote nothing also satisfies,
-> and production's second round was measured as a no-op in **100 %** of chunk-rounds across every fixture
-> (§3.3b). The fix is `Settings.enableConvergentEdgeCheckCascade`, default-OFF pending its A/B.
-> ⚠️ The throughput gain is **not yet measured** — Q1/Q2/Q3a need a same-build IL2CPP capture (§7).
+> **✅ Discharged, measured, and shipped.** §6 and P9-1 both said B1 "remains conditional on finding work
+> that recomputes an unchanged result". It was found — the post-generation edge-check cascade re-arms on
+> `IsStable`, which a pass that wrote nothing also satisfies (§3.3b) — and the
+> [P9-2 capture](../Performance/CHUNK_PIPELINE_P9_2_CASCADE_IL2CPP_2026-08-02_BENCHMARK.md) measured the
+> result at the shipping cap: **amplification 6.12 → 1.86**, delivery **×2.12**, **Q1 met at every view
+> distance** (0.32× of budget at vd 32), at **less** absolute main-thread cost per second.
+>
+> **⭐ And it did more than raise the ceiling — it moved the pipeline out of the regime.** `Quota`-bound
+> frames fall **94.3 % → 8.3 %** and the panic gate goes from 85 % closed to **fully open**. §3.1's identity
+> is untouched and still true; the pipeline simply no longer operates against it at vd 32. That is the
+> premise this entire document was opened on, and it now describes a state the engine has left.
 
 Remove quota units that buy nothing: lighting schedules and re-meshes that recompute an unchanged
 result. Precedent: MT-2 (`LightWorkScheduler`'s ready/waiting split) removed *declined* candidates
@@ -702,6 +708,29 @@ item has already paid for.
   file (§7.1), a left-over experimental cap silently contaminates every later capture and appears in
   no diff. Always re-read the values from the run's own settings block rather than trusting the file.
 
+### 7.0 Pre-flight, added after the 2026-08-02 P9-2 capture ran at the wrong cap
+
+Three defects were found by checking the OFF legs *before* the ON legs were spent. All three are cheap to
+prevent and expensive to discover afterwards, so they are now preconditions rather than advice.
+
+1. **Build into a FRESH output folder.** The 2026-08-02 capture inherited P9-0a's leftover
+   `maxLightJobsPerFrame = 48` from the build folder's `settings.json` — a file that lives outside the repo
+   and appears in no diff. The tell was that `maxMeshRebuildsPerFrame` was correct at 11, since P9-0a only
+   ever changed the light cap. A fresh folder lets OM-1 recalibrate; **then read the caps back from run 1's
+   own settings block before spending runs 2–8.**
+   ⚠ The cost of getting this wrong is not a small offset: at cap 48 the light schedule goes **`Ceiling`-bound**
+   (`Quota` ≈ 0, utilisation ≈ 50 %), so `cap × 60` stops being the operative rate and **criterion Q3c —
+   which is built on that identity — cannot be scored at all.**
+2. **The report must print every rollback flag under test.** The settings block prints the quotas, ceilings,
+   in-flight caps and P-8's `scalePanicGateThresholdsWithResidency`, but *not*
+   `enableConvergentEdgeCheckCascade`. A capture that cannot show its own flag state is not
+   self-verifying, and the failure is silent in the worst direction: an ON leg whose flag never took is
+   indistinguishable from a lever that does not work. Note also that a `settings.json` written by an older
+   build will not contain a newly-added field at all, so the key must be **added**, not edited.
+3. **Clear Q6 at vd 26/32 before scoring them.** Both failed again (98.0 % / 97.4 %, against 98.3 % / 97.8 %
+   in P9-1), each flagged "the loading pass GENERATED the remainder". Run the ensure sweep twice at those
+   view distances, or pre-generate the tour once and reuse it.
+
 ### 7.1 How a capture actually gets its settings (verified, and it corrects a standing belief)
 
 The received rule — "benchmark mode builds a fresh `Settings` and honours only the five fields in
@@ -775,7 +804,7 @@ settings alone can go:
 | ~~**P9-0a — Cap-sweep probe (zero code)**~~ ✅ **DONE 2026-08-02** | Ran as two settings-only legs at vd 32 (24 → 48 light jobs) on the P-8 build. **Identity confirmed, Option A′ closed**: gate 95.1 % → 62.6 % closed, `enqueue→populated` −28.9 %, completions +20.9 %, at ×4.79 CPU / ×0.61 min FPS (Q2 fail). Binding limit moved to the **8 ms ceiling**, not a higher quota. [Capture](../Performance/CHUNK_PIPELINE_P9_0A_CAP_SWEEP_IL2CPP_2026-08-02_BENCHMARK.md). Planned vd 26 legs were made redundant by the size of the vd 32 failure |   🟢   | —          |
 | ~~**P9-0 — Attribution instrument**~~ ✅ **DONE 2026-08-02** | Shipped, no production behaviour change. `WorldFrameProfiler` now carries one slot per budgeted pass **plus `LightMerge` and `LightFailSafeScan`** — the two unbudgeted regions, and the reason §F4 had to be modelled; `LastFrameLightMs`/`LastFrameMeshMs` survive as derived sums so the fluid-stress collector and its past captures are unaffected. `PipelineTelemetry` gains `RecordPassWork` (served vs granted), per-chunk schedule counts split **pre-delivery / no-live-trace / wasted**, and per-chunk **parked time** (§10 q4) hooked at `LightWorkScheduler`'s park/promote transitions. `BenchmarkController` enables the profiler and clears it in `OnDestroy`. Report prints **NOT MEASURED** rather than 0.0 ms when the profiler did not run. Guarded by **B20–B22**, each prove-red-verified to redden exactly itself (370 baselines, `Validate All` green with telemetry enabled *and* disabled). The §7.1 `SettingsManager` remark rider was already discharged at `7eabda7b`. **Amended the same day after code review** — seven measurement defects found and six fixed *before* any capture ran, since a capture on the flawed instrument would have had to be re-run: the staging drain got its own slot (it sits outside the budget window, so charging it to `LightSchedule` broke that slot's ceiling-comparability); the two passes' utilisation denominators were made the same population; the park interval now survives a flush-and-restart and `LightWorkScheduler.Clear()`; and B21's wall-clock assertions now compare against *measured* spin durations, so an editor hitch can no longer redden a baseline. The seventh — the fail-safe promote-to-rescan gap — is **deliberately left unfixed** and documented in §10 q4 instead |   🟡   | P9-0a      |
 | ~~**P9-1 — Capture and decide**~~ ✅ **DONE 2026-08-02** | Five same-build IL2CPP runs (vd 10/20/26/32 at the OM-1 caps + a vd-32 cap-48 A/B leg). [Capture](../Performance/CHUNK_PIPELINE_P9_1_ATTRIBUTION_IL2CPP_2026-08-02_BENCHMARK.md). **Identity confirmed within 4 %**; §F4's model half-confirmed and corrected (0.15 ms schedule + 0.18 ms merge; the merge is 39 % of the ×2-cap growth); **§3.3's mesh multiplier refuted** (pre-delivery = 1.00); §10 q4 answered (parking = 43–48 % of the idle-pass hop). **Kill condition NOT triggered.** Lever order → **B1 → C → A′**; B2 leaves P-9 |   🟢   | P9-0       |
-| **P9-2 — Delete redundant amplification** (Option B1) 🟨 **CODE + BASELINES DONE 2026-08-02, capture pending** | **Investigation returned NON-empty.** Static attribution (§3.5) puts essentially all of the 6.28 in the **edge-check cascade**, and closes the fail-safe as a source (`PromoteAll`/`PromoteNeighborhood` set no flag, so they cannot spend a quota unit — a promoted chunk with no flags takes the `Remove` arm and is un-counted). The redundancy is that `MergeCompletedLightingJob` re-arms on `IsStable`, which a pass that **wrote nothing** also satisfies. Measured with a deterministic harness probe: **production's round 2 was a no-op in 100 % of chunk-rounds in every fixture**, and round 1 in 95.7 % of the adversarial unsettled case; the counterfactual "skipped a round that would have changed something" was **0 everywhere**. Fix shipped **default-OFF** as `enableConvergentEdgeCheckCascade` (listed in `OverlayBenchmarkSettingsFromDisk`), routed through the shared `EdgeCheckCascadeDecision.Evaluate` (`None` / `SpendOnly` / `SpendAndRearm` — **the round is spent either way**, since only the flags buy schedules and a hoarded budget would break the Bug-05 top-up's premise) and fed by `ChunkData.ApplyJobLightMap`'s new change signal. Guarded by **B97–B100**, each prove-red-verified. ⏳ **Q1/Q2/Q3c still need a same-build IL2CPP A/B** before the flag can flip on |   🟡   | P9-1       |
+| ~~**P9-2 — Delete redundant amplification** (Option B1)~~ ✅ **DONE + GO 2026-08-02, ships default-ON** | **Investigation returned NON-empty.** Static attribution (§3.5) puts essentially all of the 6.28 in the **edge-check cascade**, and closes the fail-safe as a source (`PromoteAll`/`PromoteNeighborhood` set no flag, so they cannot spend a quota unit — a promoted chunk with no flags takes the `Remove` arm and is un-counted). The redundancy is that `MergeCompletedLightingJob` re-arms on `IsStable`, which a pass that **wrote nothing** also satisfies. Measured with a deterministic harness probe: **production's round 2 was a no-op in 100 % of chunk-rounds in every fixture**, and round 1 in 95.7 % of the adversarial unsettled case; the counterfactual "skipped a round that would have changed something" was **0 everywhere**. Fix shipped **default-OFF** as `enableConvergentEdgeCheckCascade` (listed in `OverlayBenchmarkSettingsFromDisk`), routed through the shared `EdgeCheckCascadeDecision.Evaluate` (`None` / `SpendOnly` / `SpendAndRearm` — **the round is spent either way**, since only the flags buy schedules and a hoarded budget would break the Bug-05 top-up's premise) and fed by `ChunkData.ApplyJobLightMap`'s new change signal. Guarded by **B97–B100**, each prove-red-verified. **✅ CAPTURED AND SHIPPED** ([report](../Performance/CHUNK_PIPELINE_P9_2_CASCADE_IL2CPP_2026-08-02_BENCHMARK.md)): at the shipping cap (vd 32, cap 24) amplification falls **6.12 → 1.86** (pre-delivery **3.82 → 1.09**), delivery **×2.12**, p50 e2e **3 603 → 822 ms = 0.32× of budget (Q1 MET)**, pipeline cost **÷2.4 per delivered chunk** and lower in absolute ms/s. **The rate quota stops binding** — `Quota` frames 94.3 % → 8.3 %, panic gate 85 % closed → fully open. Q2 reworded to Q2′ and passes; **Q4 fails at ×1.15, accepted as a recorded cost**; Q7 confirmed in-game incl. cross-border RGB. Flag now **default-ON**, retained as a rollback lever |   🟡   | P9-1       |
 | ~~**P9-2b — Deliver-then-refine** (Option B2)~~ ⛔ **WITHDRAWN from P-9 2026-08-02** | Refuted as a throughput/visibility lever by P9-1 (§3.4): pre-delivery mesh amplification is exactly 1.00 so there is no pre-delivery mesh work to skip, and the hops it can reach total 16 % of a 42 % gap. **Re-filed as a standalone product item** — "a dark chunk beats void" is still worth wanting, it just does not close the visibility budget |   —    | —          |
 | **P9-3 — Re-tune the rate** (Option A′)   | ⛔ **BLOCKED, and P9-1 re-confirmed it on a second independent build** (×2.71 CPU, ×0.66 min FPS). At ×2 the ceiling binds *completely* — **one `Quota` stop in 930 frames**, utilisation collapsing to 58.5 % — so the cap is inert past that point and the same work is merely repacked into 3.2× fewer, 3.2× longer frames. Re-openable **only after per-item cost falls (P-3)**, at which point the same 8 ms buys more items. Do not attempt before then.                                                                                                                                          |   🟡   | **P-3**, P9-1 |
 
@@ -1116,10 +1145,29 @@ enabled *and* disabled after each phase.
   **unit caveat**: a probe "chunk-round" is a flagging wave run to quiescence, not a lighting schedule, so
   its no-op fraction is biased high against the per-schedule 6.28 and the two must not be quoted together.
 
+* **v2.0** - **P9-2 captured, GO, shipped default-ON**
+  ([report](../Performance/CHUNK_PIPELINE_P9_2_CASCADE_IL2CPP_2026-08-02_BENCHMARK.md)). Ten same-build
+  IL2CPP runs: a vd 10/20/26/32 × OFF/ON sweep, plus a corrected vd-32 pair at the shipping cap after the
+  sweep was found to have inherited `maxLightJobsPerFrame` 48 (§7.0). **Option B1's standing condition is
+  discharged.** At the shipping cap: amplification **6.12 → 1.86** per delivered chunk (pre-delivery
+  **3.82 → 1.09** — a chunk now reaches the player after essentially its initial lighting pass alone),
+  delivery **×2.12**, p50 e2e **3 603 → 822 ms**, and **Q1 is met at every view distance** for the first
+  time since P-8. ⭐ **The rate quota stops being the binding constraint**: `Quota` frames 94.3 % → 8.3 %,
+  panic gate 85 % closed → fully open. §3.1's identity is confirmed and untouched — the pipeline just no
+  longer operates against it at vd 32. **Q2 is reworded to Q2′** (frame time *per delivered chunk*, which
+  the lever improves ÷2.4, with per-frame FPS recorded not gated) because the original was written for
+  P-8's spend-to-admit shape and mis-scores a divisor lever. **Q4 fails at ×1.15** (4 950 → 5 703 MB peak,
+  native+reserved from more resident meshes) and is **accepted as a recorded cost** — vd 32 is well above
+  the intended 12–15 default, but the vd-32 memory ceiling on a smaller machine stays unmeasured and this
+  raises it. **Q7 confirmed in-game**, including cross-border RGB blocklight convergence. Adds **§7.0**,
+  the three capture-protocol defects this session paid for.
+
 ---
 
 **Last Updated:** 2026-08-02
-**Next Review:** when P9-2's IL2CPP A/B is captured. The code and its baselines are in;
+**Next Review:** P-9's remaining levers are now optional rather than gating — see §6.
+**C (P-3)** stays worth doing on frame-time grounds; **A′ (P9-3) is arguably moot**, since the cap it would
+raise is no longer the binding constraint at vd 32. Re-rank before scheduling either. The code and its baselines are in;
 what is missing is the verdict — `enableConvergentEdgeCheckCascade` ON vs OFF, same build, vd 20/26/32,
 scored on Q1 (visibility budget), Q2 (frame time, hard gate) and Q3a. Note §10 q5 governs whether that
 capture is worth its cost at all
