@@ -79,6 +79,9 @@ namespace Editor.Validation.PipelineBackpressure
                 new Scenario("B17 Route geometry: waypoint constancy, route length, tour coverage (FP-9b)", RunB17RouteGeometry),
                 new Scenario("B18 Tour footprint + coverage accounting: closed circuit, load inflation, no vacuous 100% (FP-11a)", RunB18TourCoverage),
                 new Scenario("B19 Panic-gate thresholds scale with the resident square (P-8)", RunB19GateThresholdScaling),
+                new Scenario("B20 Work amplification: pre-delivery / post-delivery / wasted never cross (P9-0 §10 q1)", RunB20Amplification),
+                new Scenario("B21 Parked-time accumulation: idempotent park, multi-cycle sum, open interval at delivery (P9-0 §10 q4)", RunB21ParkedTime),
+                new Scenario("B22 Pass-cost attribution: phases stay disjoint, and unmeasured never renders as 0.0 ms (P9-0)", RunB22PassCostAttribution),
             };
             return ValidationSuiteRunner.Execute("Pipeline Backpressure", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -1527,6 +1530,579 @@ namespace Editor.Validation.PipelineBackpressure
                 !double.IsNaN(degenerate.PanicGateCloseThresholdPercentOfResident));
 
             return ok;
+        }
+
+        /// <summary>
+        /// Busy-waits for approximately <paramref name="ms"/> milliseconds of real time.
+        /// </summary>
+        /// <param name="ms">Milliseconds to spin.</param>
+        /// <remarks>
+        /// A spin, not a sleep: the parked-time and pass-cost instruments read
+        /// <see cref="System.Diagnostics.Stopwatch"/> directly, so the scenario must advance the same clock
+        /// they do. Thread.Sleep would also work but overshoots unpredictably on Windows, and these
+        /// assertions compare two intervals against each other.
+        /// </remarks>
+        private static double SpinMs(double ms)
+        {
+            System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+            while (sw.Elapsed.TotalMilliseconds < ms)
+            {
+            }
+
+            return sw.Elapsed.TotalMilliseconds;
+        }
+
+        /// <summary>
+        /// Slack allowed between a measured spin and the interval the instrument recorded over it.
+        /// </summary>
+        /// <remarks>
+        /// Assertions compare against what each spin <i>actually</i> took rather than against the nominal
+        /// 10 ms, so a GC pause or editor hitch inside a timed window moves the expectation with the
+        /// measurement and cannot redden a baseline on its own. This tolerance therefore only has to cover
+        /// the handful of stamp calls bracketing each spin — it is deliberately far smaller than the ~10 ms
+        /// error every bug these scenarios target would produce, so the discrimination survives.
+        /// </remarks>
+        private const double PARK_TOLERANCE_MS = 6.0;
+
+        /// <summary>Reads the single parked-time sample from the phase just closed, or -1 if there is not exactly one.</summary>
+        /// <returns>The parked total in milliseconds.</returns>
+        private static double SingleParkedMs()
+        {
+            PipelinePhaseMetrics phase = PipelineTelemetry.CompletedPhases[0];
+            return phase.ParkedTicksSamples.Count == 1
+                ? PipelineTelemetry.TicksToMs(phase.ParkedTicksSamples[0])
+                : -1;
+        }
+
+        /// <summary>Opens a fresh single-scenario parked-time phase (each runs alone so its sample is unambiguous).</summary>
+        /// <param name="name">Phase name.</param>
+        private static void BeginParkedPhase(string name)
+        {
+            PipelineTelemetry.BeginRun();
+            PipelineTelemetry.Enabled = true;
+            PipelineTelemetry.BeginPhase(name, "P9-0", 4096);
+        }
+
+        /// <summary>
+        /// P9-0 (§10 q1): work amplification is split three ways — units spent <i>before</i> a chunk's first
+        /// delivery, units with no live trace (dominated by post-delivery corrections), and units spent on a
+        /// chunk that was unloaded before ever being delivered. Driven end-to-end through the real telemetry
+        /// statics (B11's technique).
+        /// <para>
+        /// The <b>split</b> is what this pins, with hand-computed expected values rather than a
+        /// self-consistency check: the ratio decides whether a deliver-then-refine lever has anything to
+        /// reorder, and a denominator that quietly absorbed wasted or post-delivery work would still produce
+        /// a plausible number — the failure mode a derived ratio makes easy and expensive.
+        /// </para>
+        /// </summary>
+        private static bool RunB20Amplification()
+        {
+            bool wasEnabled = PipelineTelemetry.Enabled;
+            try
+            {
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = true;
+                PipelineTelemetry.BeginPhase("amplification", "P9-0", 4096);
+
+                // Chunk A — delivered after 3 lighting + 1 mesh schedule, then corrected twice.
+                ChunkCoord delivered = new ChunkCoord(1, 1);
+                PipelineTelemetry.StampRequested(delivered);
+                PipelineTelemetry.StampAdmitted(delivered);
+                PipelineTelemetry.StampLightScheduled(delivered);
+                PipelineTelemetry.StampLightScheduled(delivered);
+                PipelineTelemetry.StampLightScheduled(delivered);
+                PipelineTelemetry.StampMeshScheduled(delivered);
+                PipelineTelemetry.StampMeshApplied(delivered);
+
+                // Post-delivery corrections: the trace is closed, so these must NOT reach pre-delivery.
+                PipelineTelemetry.StampLightScheduled(delivered);
+                PipelineTelemetry.StampLightScheduled(delivered);
+                PipelineTelemetry.StampMeshScheduled(delivered);
+
+                // Chunk B — 4 lighting + 2 mesh schedules, then unloaded mid-flight. Real work, bought nothing.
+                ChunkCoord wasted = new ChunkCoord(2, 2);
+                PipelineTelemetry.StampRequested(wasted);
+                PipelineTelemetry.StampAdmitted(wasted);
+                for (int i = 0; i < 4; i++) PipelineTelemetry.StampLightScheduled(wasted);
+                PipelineTelemetry.StampMeshScheduled(wasted);
+                PipelineTelemetry.StampMeshScheduled(wasted);
+                PipelineTelemetry.StampUnloaded(wasted);
+
+                // Chunk C — never traced at all (the saturation / out-of-phase population).
+                PipelineTelemetry.StampLightScheduled(new ChunkCoord(3, 3));
+
+                PipelineTelemetry.EndPhase();
+                PipelinePhaseMetrics phase = PipelineTelemetry.CompletedPhases[0];
+
+                bool ok = Check("pre-delivery lighting schedules = 3 (chunk A only, before its delivery)",
+                    phase.PreDeliveryLightSchedules == 3);
+                ok &= Check("pre-delivery mesh schedules = 1",
+                    phase.PreDeliveryMeshSchedules == 1);
+                ok &= Check("delivered chunks = 1, so lighting per delivered chunk = 3.00",
+                    phase.DispositionCounts[(int)TraceDisposition.MeshApplied] == 1);
+
+                // The three load-bearing non-crossings.
+                ok &= Check("post-delivery corrections do NOT reach pre-delivery (2 light + 1 mesh, plus 1 untraced)",
+                    phase.UntracedLightSchedules == 3 && phase.UntracedMeshSchedules == 1);
+                ok &= Check("wasted-chunk work is counted, and counted SEPARATELY (4 light + 2 mesh)",
+                    phase.WastedLightSchedules == 4 && phase.WastedMeshSchedules == 2);
+                ok &= Check("wasted work never inflates the delivered denominator's numerator",
+                    phase.PreDeliveryLightSchedules == 3 && phase.PreDeliveryMeshSchedules == 1);
+
+                // EXHAUSTIVENESS. The three trace arms plus the no-live-trace bucket must account for every
+                // schedule stamped — 3+2 light and 1+1 mesh on chunk A, 4/2 on the wasted chunk B, 1 untraced
+                // on C. A disposition falling through all three arms (Rerequested and InFlightAtPhaseEnd both
+                // did) silently deletes its quota units, and every surviving ratio still looks plausible.
+                ok &= Check("every lighting schedule lands in exactly one bucket (3 + 3 + 4 + 0 = 10)",
+                    phase.PreDeliveryLightSchedules + phase.UntracedLightSchedules +
+                    phase.WastedLightSchedules + phase.UnresolvedLightSchedules == 10);
+                ok &= Check("every mesh schedule lands in exactly one bucket (1 + 1 + 2 + 0 = 4)",
+                    phase.PreDeliveryMeshSchedules + phase.UntracedMeshSchedules +
+                    phase.WastedMeshSchedules + phase.UnresolvedMeshSchedules == 4);
+
+                // The population that fell through before: a trace superseded mid-flight, and one still in
+                // flight when the phase ended. Both consumed real quota.
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = true;
+                PipelineTelemetry.BeginPhase("unresolved", "P9-0", 4096);
+
+                ChunkCoord superseded = new ChunkCoord(8, 8);
+                PipelineTelemetry.StampRequested(superseded);
+                PipelineTelemetry.StampAdmitted(superseded);
+                PipelineTelemetry.StampLightScheduled(superseded);
+                PipelineTelemetry.StampLightScheduled(superseded);
+                PipelineTelemetry.StampRequested(superseded); // flush-and-restart -> Rerequested
+
+                ChunkCoord stillInFlight = new ChunkCoord(9, 9);
+                PipelineTelemetry.StampRequested(stillInFlight);
+                PipelineTelemetry.StampAdmitted(stillInFlight);
+                PipelineTelemetry.StampMeshScheduled(stillInFlight);
+                PipelineTelemetry.EndPhase(); // -> InFlightAtPhaseEnd
+
+                phase = PipelineTelemetry.CompletedPhases[0];
+                ok &= Check("a re-requested trace's 2 lighting schedules are counted as unresolved, not dropped",
+                    phase.UnresolvedLightSchedules == 2);
+                ok &= Check("a trace still in flight at phase end keeps its mesh schedule too",
+                    phase.UnresolvedMeshSchedules == 1);
+                ok &= Check("...and neither leaks into pre-delivery or wasted",
+                    phase.PreDeliveryLightSchedules == 0 && phase.PreDeliveryMeshSchedules == 0 &&
+                    phase.WastedLightSchedules == 0 && phase.WastedMeshSchedules == 0);
+
+                // Schedules are counted, completions are not — the two differ by whatever is in flight, and
+                // only the schedule spends quota.
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = true;
+                PipelineTelemetry.BeginPhase("schedule vs completion", "P9-0", 4096);
+                ChunkCoord both = new ChunkCoord(4, 4);
+                PipelineTelemetry.StampRequested(both);
+                PipelineTelemetry.StampAdmitted(both);
+                PipelineTelemetry.StampLightScheduled(both);
+                PipelineTelemetry.StampLightScheduled(both);
+                PipelineTelemetry.StampLit(both);
+                PipelineTelemetry.StampMeshApplied(both);
+                PipelineTelemetry.EndPhase();
+
+                phase = PipelineTelemetry.CompletedPhases[0];
+                ok &= Check("2 schedules and 1 completion are recorded as 2 and 1, not conflated",
+                    phase.PreDeliveryLightSchedules == 2);
+
+                return ok;
+            }
+            finally
+            {
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = wasEnabled;
+            }
+        }
+
+        /// <summary>
+        /// P9-0 (§10 q4): per-chunk parked time — the interval a chunk spends flagged for lighting work but
+        /// <i>ineligible</i>, sitting in MT-2's waiting set. Invisible to the stop-reason instrument by
+        /// construction (a parked chunk leaves the ready set, so it is never walked and never counted as an
+        /// <c>AllDeclined</c> candidate), which is why no capture has ever named this class of latency.
+        /// <para>
+        /// The <b>idempotence</b> assertion is the one with teeth: a re-park that reset the entry timestamp
+        /// would under-report exactly the chunks that waited longest, since those are the ones most likely to
+        /// be re-parked, and the instrument would then report its healthiest numbers for its worst cases.
+        /// </para>
+        /// </summary>
+        private static bool RunB21ParkedTime()
+        {
+            bool wasEnabled = PipelineTelemetry.Enabled;
+            try
+            {
+                // --- One park/unpark cycle records the time that actually elapsed. ---
+                BeginParkedPhase("single cycle");
+                ChunkCoord simple = new ChunkCoord(1, 1);
+                Vector2Int simplePos = simple.ToVoxelOrigin();
+                PipelineTelemetry.StampRequested(simple);
+                PipelineTelemetry.StampAdmitted(simple);
+                PipelineTelemetry.StampParked(simplePos);
+                double simpleSpin = SpinMs(10);
+                PipelineTelemetry.StampUnparked(simplePos);
+                PipelineTelemetry.StampMeshApplied(simple);
+                PipelineTelemetry.EndPhase();
+
+                double simpleMs = SingleParkedMs();
+                bool ok = Check($"one cycle records the elapsed wait (got {simpleMs:F1} ms, spun {simpleSpin:F1} ms)",
+                    simpleMs >= simpleSpin - PARK_TOLERANCE_MS && simpleMs <= simpleSpin + PARK_TOLERANCE_MS);
+
+                // --- Idempotent re-park: the second park must NOT restart the interval. ---
+                BeginParkedPhase("re-park");
+                ChunkCoord reparked = new ChunkCoord(2, 2);
+                Vector2Int reparkedPos = reparked.ToVoxelOrigin();
+                PipelineTelemetry.StampRequested(reparked);
+                PipelineTelemetry.StampAdmitted(reparked);
+                PipelineTelemetry.StampParked(reparkedPos);
+                double repark1 = SpinMs(10);
+                PipelineTelemetry.StampParked(reparkedPos);
+                double repark2 = SpinMs(10);
+                PipelineTelemetry.StampUnparked(reparkedPos);
+                PipelineTelemetry.StampMeshApplied(reparked);
+                PipelineTelemetry.EndPhase();
+
+                double reparkedMs = SingleParkedMs();
+                double reparkExpected = repark1 + repark2;
+                ok &= Check($"re-parking does not restart the interval (got {reparkedMs:F1} ms, both spins " +
+                            $"total {reparkExpected:F1} ms — a reset would give ~{repark2:F1} ms)",
+                    reparkedMs >= reparkExpected - PARK_TOLERANCE_MS &&
+                    reparkedMs <= reparkExpected + PARK_TOLERANCE_MS);
+
+                // --- Never parked: a zero, and a legitimate sample rather than a missing one. ---
+                BeginParkedPhase("never parked");
+                ChunkCoord never = new ChunkCoord(3, 3);
+                PipelineTelemetry.StampRequested(never);
+                PipelineTelemetry.StampAdmitted(never);
+                PipelineTelemetry.StampUnparked(never.ToVoxelOrigin()); // unpark without park: a no-op
+                PipelineTelemetry.StampMeshApplied(never);
+                PipelineTelemetry.EndPhase();
+
+                ok &= Check("a chunk that never parked records exactly 0 ms, and still contributes a sample",
+                    SingleParkedMs() == 0.0);
+
+                // --- Delivered while STILL parked: the open interval must be closed, not discarded. ---
+                BeginParkedPhase("open at delivery");
+                ChunkCoord openAtDelivery = new ChunkCoord(4, 4);
+                PipelineTelemetry.StampRequested(openAtDelivery);
+                PipelineTelemetry.StampAdmitted(openAtDelivery);
+                PipelineTelemetry.StampParked(openAtDelivery.ToVoxelOrigin());
+                double openSpin = SpinMs(10);
+                PipelineTelemetry.StampMeshApplied(openAtDelivery);
+                PipelineTelemetry.EndPhase();
+
+                double openMs = SingleParkedMs();
+                ok &= Check($"an interval still open at delivery is closed, not dropped (got {openMs:F1} ms, " +
+                            $"spun {openSpin:F1} ms)",
+                    openMs >= openSpin - PARK_TOLERANCE_MS && openMs <= openSpin + PARK_TOLERANCE_MS);
+
+                // --- Two cycles SUM, and the ELIGIBLE gap between them is excluded. ---
+                BeginParkedPhase("two cycles");
+                ChunkCoord twice = new ChunkCoord(5, 5);
+                Vector2Int twicePos = twice.ToVoxelOrigin();
+                PipelineTelemetry.StampRequested(twice);
+                PipelineTelemetry.StampAdmitted(twice);
+                PipelineTelemetry.StampParked(twicePos);
+                double cycle1 = SpinMs(10);
+                PipelineTelemetry.StampUnparked(twicePos);
+                double eligibleGap = SpinMs(10); // eligible, not parked — must NOT be counted
+                PipelineTelemetry.StampParked(twicePos);
+                double cycle2 = SpinMs(10);
+                PipelineTelemetry.StampUnparked(twicePos);
+                PipelineTelemetry.StampMeshApplied(twice);
+                PipelineTelemetry.EndPhase();
+
+                double twiceMs = SingleParkedMs();
+                double twiceExpected = cycle1 + cycle2;
+                ok &= Check($"two park cycles SUM (got {twiceMs:F1} ms, cycles total {twiceExpected:F1} ms)",
+                    twiceMs >= twiceExpected - PARK_TOLERANCE_MS);
+                ok &= Check($"the eligible gap of {eligibleGap:F1} ms between them is NOT counted " +
+                            $"(got {twiceMs:F1} ms, would be ~{twiceExpected + eligibleGap:F1} ms if it were)",
+                    twiceMs <= twiceExpected + PARK_TOLERANCE_MS);
+
+                // --- Flush-and-restart: the coord stays in the WAITING set across a re-request, so the
+                //     replacement trace must open its own interval or the chunk reports zero forever. ---
+                BeginParkedPhase("re-requested while parked");
+                ChunkCoord rerequested = new ChunkCoord(6, 6);
+                Vector2Int rerequestedPos = rerequested.ToVoxelOrigin();
+                PipelineTelemetry.StampRequested(rerequested);
+                PipelineTelemetry.StampAdmitted(rerequested);
+                PipelineTelemetry.StampParked(rerequestedPos);
+                double beforeRestart = SpinMs(10); // waited under the FIRST journey
+                PipelineTelemetry.StampRequested(rerequested); // flush-and-restart, still parked
+                PipelineTelemetry.StampAdmitted(rerequested);
+                double afterRestart = SpinMs(10); // waited under the SECOND journey
+                PipelineTelemetry.StampUnparked(rerequestedPos);
+                PipelineTelemetry.StampMeshApplied(rerequested);
+                PipelineTelemetry.EndPhase();
+
+                double rerequestedMs = SingleParkedMs();
+                double rerequestExpected = beforeRestart + afterRestart;
+                ok &= Check($"a chunk re-requested while parked still records its wait (got {rerequestedMs:F1} ms, " +
+                            "not 0)", rerequestedMs > 0);
+                ok &= Check($"...and the WHOLE wait, spanning the re-request (got {rerequestedMs:F1} ms, both " +
+                            $"spins total {rerequestExpected:F1} ms — the coord stayed ineligible throughout, " +
+                            "so a per-trace timestamp would have lost the first half)",
+                    rerequestedMs >= rerequestExpected - PARK_TOLERANCE_MS &&
+                    rerequestedMs <= rerequestExpected + PARK_TOLERANCE_MS);
+
+                // --- Across a PHASE boundary: BeginPhase drops every trace, but the scheduler's waiting set
+                //     survives, so a chunk parked at a speed-tier boundary must not report zero. This is the
+                //     §10 q4 population — an un-populated placeholder parked pending neighbour terrain. ---
+                BeginParkedPhase("phase N");
+                ChunkCoord straddler = new ChunkCoord(8, 8);
+                Vector2Int straddlerPos = straddler.ToVoxelOrigin();
+                PipelineTelemetry.StampRequested(straddler);
+                PipelineTelemetry.StampAdmitted(straddler);
+                PipelineTelemetry.StampParked(straddlerPos);
+                double beforeBoundary = SpinMs(10);
+                PipelineTelemetry.EndPhase();
+
+                // Next speed tier: fresh phase, fresh trace, same still-parked coord.
+                PipelineTelemetry.BeginPhase("phase N+1", "P9-0", 4096);
+                PipelineTelemetry.StampRequested(straddler);
+                PipelineTelemetry.StampAdmitted(straddler);
+                double afterBoundary = SpinMs(10);
+                PipelineTelemetry.StampUnparked(straddlerPos);
+                PipelineTelemetry.StampMeshApplied(straddler);
+                PipelineTelemetry.EndPhase();
+
+                // CompletedPhases[0] is phase N (no delivery); the sample belongs to phase N+1.
+                PipelinePhaseMetrics tierTwo = PipelineTelemetry.CompletedPhases[1];
+                double straddleMs = tierTwo.ParkedTicksSamples.Count == 1
+                    ? PipelineTelemetry.TicksToMs(tierTwo.ParkedTicksSamples[0])
+                    : -1;
+                double straddleExpected = beforeBoundary + afterBoundary;
+                ok &= Check($"a wait spanning a phase boundary is recorded, not zeroed (got {straddleMs:F1} ms)",
+                    straddleMs > 0);
+                ok &= Check($"...in full, and credited to the phase it ENDS in (got {straddleMs:F1} ms, both " +
+                            $"spins total {straddleExpected:F1} ms)",
+                    straddleMs >= straddleExpected - PARK_TOLERANCE_MS &&
+                    straddleMs <= straddleExpected + PARK_TOLERANCE_MS);
+
+                // --- LightWorkScheduler.Clear() closes open intervals, driven through the REAL production
+                //     hooks rather than the telemetry API (Clear is reachable mid-capture via
+                //     World.ForceUnloadAllChunks, which the benchmark's transition phase calls). ---
+                BeginParkedPhase("scheduler clear");
+                ChunkCoord cleared = new ChunkCoord(7, 7);
+                Vector2Int clearedPos = cleared.ToVoxelOrigin();
+                LightWorkScheduler scheduler = new LightWorkScheduler();
+                PipelineTelemetry.StampRequested(cleared);
+                PipelineTelemetry.StampAdmitted(cleared);
+                scheduler.MarkWaiting(clearedPos);
+                double clearSpin = SpinMs(10);
+                scheduler.Clear();
+                PipelineTelemetry.StampMeshApplied(cleared);
+                PipelineTelemetry.EndPhase();
+
+                double clearedMs = SingleParkedMs();
+                ok &= Check($"MarkWaiting opens an interval and Clear() closes it (got {clearedMs:F1} ms, " +
+                            $"spun {clearSpin:F1} ms)",
+                    clearedMs >= clearSpin - PARK_TOLERANCE_MS && clearedMs <= clearSpin + PARK_TOLERANCE_MS);
+                ok &= Check("...leaving no open interval behind", PipelineTelemetry.OpenParkIntervals == 0);
+
+                // --- Lifetime: the side table survives phases ON PURPOSE, so it is the one structure here
+                //     that a leak would grow silently across a whole run. A park with no matching unpark must
+                //     stay open across a phase boundary, and must NOT survive the run boundary. ---
+                BeginParkedPhase("leak check");
+                ChunkCoord leaked = new ChunkCoord(9, 9);
+                PipelineTelemetry.StampRequested(leaked);
+                PipelineTelemetry.StampAdmitted(leaked);
+                PipelineTelemetry.StampParked(leaked.ToVoxelOrigin());
+                PipelineTelemetry.EndPhase();
+
+                ok &= Check("an unmatched park stays open across a phase boundary (that is the fix)",
+                    PipelineTelemetry.OpenParkIntervals == 1);
+
+                PipelineTelemetry.BeginRun();
+                ok &= Check("...but never survives a run boundary", PipelineTelemetry.OpenParkIntervals == 0);
+
+                return ok;
+            }
+            finally
+            {
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = wasEnabled;
+            }
+        }
+
+        /// <summary>
+        /// P9-0: per-pass main-thread attribution — that the sub-phase regions stay disjoint, that the
+        /// pre-split totals are still recoverable, and that an unmeasured phase says so.
+        /// <para>
+        /// The <b>NOT MEASURED</b> assertion guards the instrument's worst failure mode, which is a false
+        /// green rather than a red: if the profiler never runs, every pass totals 0.0 ms, and a table of
+        /// zeros reads as "the pipeline's scheduling is free" — a finding-shaped conclusion pointing the
+        /// reader away from the cost centre the phase exists to locate.
+        /// </para>
+        /// </summary>
+        private static bool RunB22PassCostAttribution()
+        {
+            bool wasEnabled = PipelineTelemetry.Enabled;
+            bool profilerWasEnabled = WorldFrameProfiler.Enabled;
+            try
+            {
+                // --- Disjointness: time charged to one phase appears in no other. ---
+                WorldFrameProfiler.Enabled = true;
+                WorldFrameProfiler.BeginFrame();
+                long mergeStart = WorldFrameProfiler.Begin();
+                SpinMs(10);
+                WorldFrameProfiler.Add(WorldFrameProfiler.Phase.LightMerge, mergeStart);
+                WorldFrameProfiler.EndFrame();
+
+                bool ok = Check("time charged to LightMerge lands in LightMerge",
+                    WorldFrameProfiler.LastFrameLightMergeMs >= 8.0);
+                ok &= Check("...and in NO other lighting slot",
+                    WorldFrameProfiler.LastFrameLightScheduleMs == 0.0 &&
+                    WorldFrameProfiler.LastFrameLightStagingDrainMs == 0.0 &&
+                    WorldFrameProfiler.LastFrameLightFailSafeScanMs == 0.0);
+                ok &= Check("...and in no mesh or generation slot",
+                    WorldFrameProfiler.LastFrameMeshProcessMs == 0.0 &&
+                    WorldFrameProfiler.LastFrameMeshScheduleMs == 0.0 &&
+                    WorldFrameProfiler.LastFrameGenerationProcessMs == 0.0);
+
+                // The pre-split aggregate must still be recoverable, or fluid-stress captures taken across
+                // the split are silently incomparable.
+                WorldFrameProfiler.BeginFrame();
+                long scanStart = WorldFrameProfiler.Begin();
+                SpinMs(5);
+                WorldFrameProfiler.Add(WorldFrameProfiler.Phase.LightSchedule, scanStart);
+                long processStart = WorldFrameProfiler.Begin();
+                SpinMs(5);
+                WorldFrameProfiler.Add(WorldFrameProfiler.Phase.MeshProcess, processStart);
+                WorldFrameProfiler.EndFrame();
+
+                ok &= Check("LastFrameLightMs == merge + stagingDrain + failsafe + schedule",
+                    Math.Abs(WorldFrameProfiler.LastFrameLightMs -
+                             (WorldFrameProfiler.LastFrameLightMergeMs +
+                              WorldFrameProfiler.LastFrameLightStagingDrainMs +
+                              WorldFrameProfiler.LastFrameLightFailSafeScanMs +
+                              WorldFrameProfiler.LastFrameLightScheduleMs)) < 1e-9);
+                ok &= Check("LastFrameMeshMs == process + schedule",
+                    Math.Abs(WorldFrameProfiler.LastFrameMeshMs -
+                             (WorldFrameProfiler.LastFrameMeshProcessMs +
+                              WorldFrameProfiler.LastFrameMeshScheduleMs)) < 1e-9);
+
+                // Disabled: no timestamp is even read, and the published values FREEZE rather than zero —
+                // BeginFrame and EndFrame are both no-ops, so the last enabled frame's numbers persist.
+                // Asserted rather than assumed: a reader could reasonably expect either behaviour, and the
+                // fold in RecordFrame is only safe because it gates on Enabled rather than on these values.
+                double frozenSchedule = WorldFrameProfiler.LastFrameLightScheduleMs;
+                double frozenProcess = WorldFrameProfiler.LastFrameMeshProcessMs;
+
+                WorldFrameProfiler.Enabled = false;
+                WorldFrameProfiler.BeginFrame();
+                long disabledStart = WorldFrameProfiler.Begin();
+                SpinMs(5);
+                WorldFrameProfiler.Add(WorldFrameProfiler.Phase.LightMerge, disabledStart);
+                WorldFrameProfiler.EndFrame();
+
+                ok &= Check("disabled: Begin returns 0 (no Stopwatch read at all)", disabledStart == 0L);
+                ok &= Check("disabled: published values FREEZE at the last enabled frame, they do not zero",
+                    WorldFrameProfiler.LastFrameLightScheduleMs == frozenSchedule &&
+                    WorldFrameProfiler.LastFrameMeshProcessMs == frozenProcess &&
+                    frozenSchedule > 0 && frozenProcess > 0);
+
+                // --- The false-green guard: an unmeasured phase must NOT render as 0.0 ms. ---
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = true;
+                WorldFrameProfiler.Enabled = false;
+                PipelineTelemetry.BeginPhase("unprofiled", "P9-0", 4096);
+                PipelineTelemetry.RecordFrame(0, 0, 0, 0, 0, true);
+                PipelineTelemetry.EndPhase();
+
+                PipelinePhaseMetrics unprofiled = PipelineTelemetry.CompletedPhases[0];
+                ok &= Check("a phase captured without the profiler records 0 profiled frames",
+                    unprofiled.ProfiledFrameCount == 0);
+
+                StringBuilder sb = new StringBuilder();
+                PipelineReportSection.Append(sb, PipelineTelemetry.CompletedPhases);
+                string unprofiledText = sb.ToString();
+                ok &= Check("...and the report says NOT MEASURED rather than printing a table of zeros",
+                    unprofiledText.Contains("NOT MEASURED"));
+
+                // --- And a genuinely profiled phase must accumulate, and must NOT print the banner. ---
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = true;
+                WorldFrameProfiler.Enabled = true;
+                PipelineTelemetry.BeginPhase("profiled", "P9-0", 4096);
+
+                WorldFrameProfiler.BeginFrame();
+                long realStart = WorldFrameProfiler.Begin();
+                SpinMs(10);
+                WorldFrameProfiler.Add(WorldFrameProfiler.Phase.LightMerge, realStart);
+                WorldFrameProfiler.EndFrame();
+                PipelineTelemetry.RecordFrame(0, 0, 0, 0, 0, true);
+                PipelineTelemetry.EndPhase();
+
+                PipelinePhaseMetrics profiled = PipelineTelemetry.CompletedPhases[0];
+                ok &= Check("a profiled phase counts its frame", profiled.ProfiledFrameCount == 1);
+                ok &= Check("...and accumulates that frame's LightMerge cost",
+                    profiled.PassMsTotals[(int)WorldFrameProfiler.Phase.LightMerge] >= 8.0);
+
+                sb = new StringBuilder();
+                PipelineReportSection.Append(sb, PipelineTelemetry.CompletedPhases);
+                ok &= Check("...and the report renders the cost table, not the NOT MEASURED banner",
+                    !sb.ToString().Contains("NOT MEASURED"));
+
+                // Quota utilisation is recorded per pass and never conflated between passes.
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = true;
+                PipelineTelemetry.BeginPhase("quota", "P9-0", 4096);
+                PipelineTelemetry.RecordPassWork(PipelinePass.LightSchedule, 7, 24);
+                PipelineTelemetry.RecordPassWork(PipelinePass.MeshSchedule, 3, 11);
+                PipelineTelemetry.EndPhase();
+
+                PipelinePhaseMetrics quota = PipelineTelemetry.CompletedPhases[0];
+                ok &= Check("light schedule served 7 of 24 granted",
+                    quota.PassItemsServed[(int)PipelinePass.LightSchedule] == 7 &&
+                    quota.PassQuotaGranted[(int)PipelinePass.LightSchedule] == 24);
+                ok &= Check("mesh schedule served 3 of 11 granted, in its own slot",
+                    quota.PassItemsServed[(int)PipelinePass.MeshSchedule] == 3 &&
+                    quota.PassQuotaGranted[(int)PipelinePass.MeshSchedule] == 11);
+                ok &= Check("a pass that never reported has no work frames",
+                    quota.PassWorkFrames[(int)PipelinePass.MeshProcess] == 0);
+
+                // The utilisation DENOMINATOR rule (P9-0 review finding #2). Both scheduling passes must
+                // count the same kind of frame, or the two columns are not comparable — and comparing them
+                // is exactly what P9-1 does to judge whether the quota binds. An idle frame contributes a
+                // full quota and zero served, so including it on one pass and not the other silently makes
+                // that pass look starved. Pinned as an arithmetic identity over recorded counters.
+                //
+                // SCOPE, stated so it is not over-read: this pins the ACCUMULATION, not the call-site policy.
+                // Which frames call RecordPassWork is decided in World.Update — a play-mode path unreachable
+                // from edit mode — so re-adding the lighting call on idle frames would leave this scenario
+                // green. Same limitation B13 documents for StampUnloaded; the call sites stay review-guarded.
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = true;
+                PipelineTelemetry.BeginPhase("denominator", "P9-0", 4096);
+
+                // Two frames with work: served 5 of 24, then 24 of 24. One "idle" frame contributes nothing.
+                PipelineTelemetry.RecordPassWork(PipelinePass.LightSchedule, 5, 24);
+                PipelineTelemetry.RecordPassWork(PipelinePass.LightSchedule, 24, 24);
+                // Mesh: one drained frame plus one in-flight-cap frame, which serves 0 against a real quota.
+                PipelineTelemetry.RecordPassWork(PipelinePass.MeshSchedule, 8, 11);
+                PipelineTelemetry.RecordPassWork(PipelinePass.MeshSchedule, 0, 11);
+                PipelineTelemetry.EndPhase();
+
+                PipelinePhaseMetrics denom = PipelineTelemetry.CompletedPhases[0];
+                ok &= Check("work frames count only reported frames, per pass (2 light, 2 mesh)",
+                    denom.PassWorkFrames[(int)PipelinePass.LightSchedule] == 2 &&
+                    denom.PassWorkFrames[(int)PipelinePass.MeshSchedule] == 2);
+                ok &= Check("light utilisation = 29/48, i.e. granted accrues per REPORTED frame only",
+                    denom.PassItemsServed[(int)PipelinePass.LightSchedule] == 29 &&
+                    denom.PassQuotaGranted[(int)PipelinePass.LightSchedule] == 48);
+                ok &= Check("a 0-served frame still contributes its granted quota (mesh 8/22, not 8/11)",
+                    denom.PassItemsServed[(int)PipelinePass.MeshSchedule] == 8 &&
+                    denom.PassQuotaGranted[(int)PipelinePass.MeshSchedule] == 22);
+
+                return ok;
+            }
+            finally
+            {
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = wasEnabled;
+                WorldFrameProfiler.Enabled = profilerWasEnabled;
+            }
         }
     }
 }
