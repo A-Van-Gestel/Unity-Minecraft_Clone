@@ -77,6 +77,10 @@ namespace Benchmarks
             AppendLatency(sb, phase);
             AppendWaste(sb, phase);
             AppendAdmission(sb, phase);
+            AppendPassCosts(sb, phase);
+            AppendQuotaUtilisation(sb, phase);
+            AppendAmplification(sb, phase);
+            AppendParkedTime(sb, phase);
             AppendVerdict(sb, phase);
 
             sb.AppendLine();
@@ -252,6 +256,229 @@ namespace Benchmarks
 
             sb.AppendLine($"    Panic gate closed:  {phase.GateClosedFrames:N0} / {phase.FrameCount:N0} frames" +
                           (phase.FrameCount > 0 ? $" ({100.0 * phase.GateClosedFrames / phase.FrameCount:F1}%)" : ""));
+        }
+
+        /// <summary>
+        /// Renders per-pass main-thread cost (P9-0) — the attribution no capture before this one carried.
+        /// </summary>
+        /// <param name="sb">The report builder.</param>
+        /// <param name="phase">The phase being rendered.</param>
+        /// <remarks>
+        /// The zero-frame case prints NOT MEASURED rather than a table of zeros. A pass costing "0.0 ms"
+        /// is a claim — that the pipeline's scheduling is free — and it is the opposite of what every
+        /// capture to date suggests, so a profiler that silently failed to run must not be able to
+        /// manufacture it.
+        /// </remarks>
+        private static void AppendPassCosts(StringBuilder sb, PipelinePhaseMetrics phase)
+        {
+            sb.AppendLine();
+            sb.AppendLine("  Main-thread cost per pass (P9-0) — where the frame actually goes:");
+
+            if (phase.ProfiledFrameCount == 0)
+            {
+                sb.AppendLine("    ⚠ NOT MEASURED — WorldFrameProfiler did not run for this phase, so no");
+                sb.AppendLine("      per-pass attribution exists. This is NOT a claim that the passes were");
+                sb.AppendLine("      free; treat every per-pass question as unanswered by this capture.");
+                return;
+            }
+
+            double wallMs = phase.DurationSeconds * 1000.0;
+            var table = new ReportTable("Pass", "total ms", "ms/frame", "ms/s", "% of wall");
+
+            double summed = 0;
+            for (int i = 0; i < WorldFrameProfiler.PhaseCount; i++)
+            {
+                double total = phase.PassMsTotals[i];
+                summed += total;
+                table.AddRow(((WorldFrameProfiler.Phase)i).ToString(),
+                    total.ToString("F1"),
+                    (total / phase.ProfiledFrameCount).ToString("F3"),
+                    phase.DurationSeconds > 0f ? (total / phase.DurationSeconds).ToString("F1") : "-",
+                    wallMs > 0 ? $"{100.0 * total / wallMs:F1}%" : "-");
+            }
+
+            table.AddRow("-- all timed regions --", summed.ToString("F1"),
+                (summed / phase.ProfiledFrameCount).ToString("F3"),
+                phase.DurationSeconds > 0f ? (summed / phase.DurationSeconds).ToString("F1") : "-",
+                wallMs > 0 ? $"{100.0 * summed / wallMs:F1}%" : "-");
+            table.AppendTo(sb);
+
+            sb.AppendLine($"    Profiled frames:    {phase.ProfiledFrameCount:N0} / {phase.FrameCount:N0}");
+            sb.AppendLine("    These regions are DISJOINT and cover only the instrumented interior of");
+            sb.AppendLine("    World.Update — the remainder of the wall clock is rendering, physics, other");
+            sb.AppendLine("    MonoBehaviours and any pipeline work no region brackets.");
+        }
+
+        /// <summary>
+        /// Renders what each scheduling pass was granted versus what it served (P9-0). The stop-reason table
+        /// above reports that a quota bound; this reports what the quota bought.
+        /// </summary>
+        /// <param name="sb">The report builder.</param>
+        /// <param name="phase">The phase being rendered.</param>
+        private static void AppendQuotaUtilisation(StringBuilder sb, PipelinePhaseMetrics phase)
+        {
+            sb.AppendLine();
+            sb.AppendLine("  Quota utilisation (P9-0) — items served vs quota granted:");
+
+            var table = new ReportTable("Pass", "frames", "granted", "served", "utilisation", "served/s");
+            for (int pass = 0; pass < PipelineTelemetry.PassCount; pass++)
+            {
+                int frames = phase.PassWorkFrames[pass];
+                if (frames == 0) continue;
+
+                long granted = phase.PassQuotaGranted[pass];
+                long served = phase.PassItemsServed[pass];
+                table.AddRow(((PipelinePass)pass).ToString(),
+                    frames.ToString("N0"),
+                    granted.ToString("N0"),
+                    served.ToString("N0"),
+                    granted > 0 ? $"{100.0 * served / granted:F1}%" : "-",
+                    phase.DurationSeconds > 0f ? (served / phase.DurationSeconds).ToString("F0") : "-");
+            }
+
+            table.AppendTo(sb);
+            sb.AppendLine("    Only the two budgeted SCHEDULING passes report a granted/served pair; the");
+            sb.AppendLine("    completion passes are bounded by a ms ceiling, not by a rate quota.");
+            sb.AppendLine("    'frames' counts only frames where the pass had WORK AVAILABLE — idle frames are");
+            sb.AppendLine("    excluded from both passes, so the two utilisations are computed over the same");
+            sb.AppendLine("    kind of population and can be compared directly. Mesh frames refused by the");
+            sb.AppendLine("    in-flight cap ARE included, at 0 served, since work existed and bought nothing.");
+        }
+
+        /// <summary>
+        /// Renders work amplification — quota units per delivered chunk — split at first delivery (§10 q1).
+        /// </summary>
+        /// <param name="sb">The report builder.</param>
+        /// <param name="phase">The phase being rendered.</param>
+        /// <remarks>
+        /// The split, not the total, is the load-bearing figure: it decides whether a deliver-then-refine
+        /// lever has anything to reorder. A large pre-delivery share means correctness work is serialized
+        /// ahead of visibility; a large post-delivery share means it is already happening afterwards.
+        /// </remarks>
+        private static void AppendAmplification(StringBuilder sb, PipelinePhaseMetrics phase)
+        {
+            sb.AppendLine();
+            sb.AppendLine("  Work amplification (P9-0) — quota units per delivered chunk, split at first delivery:");
+
+            int delivered = phase.DispositionCounts[(int)TraceDisposition.MeshApplied];
+            if (delivered == 0)
+            {
+                sb.AppendLine("    (no chunk reached MeshApplied — amplification undefined for this phase)");
+                return;
+            }
+
+            var table = new ReportTable("Quota unit", "pre-delivery", "per delivered chunk", "no live trace",
+                "on wasted chunks", "unresolved", "total", "pass served");
+            AppendAmplificationRow(table, "lighting schedules", delivered,
+                phase.PreDeliveryLightSchedules, phase.UntracedLightSchedules,
+                phase.WastedLightSchedules, phase.UnresolvedLightSchedules,
+                phase.PassItemsServed[(int)PipelinePass.LightSchedule]);
+            AppendAmplificationRow(table, "mesh schedules", delivered,
+                phase.PreDeliveryMeshSchedules, phase.UntracedMeshSchedules,
+                phase.WastedMeshSchedules, phase.UnresolvedMeshSchedules,
+                phase.PassItemsServed[(int)PipelinePass.MeshSchedule]);
+            table.AppendTo(sb);
+
+            sb.AppendLine($"    Delivered chunks (MeshApplied): {delivered:N0}");
+            sb.AppendLine("    'unresolved' is work on traces that ended without a verdict — superseded by a");
+            sb.AppendLine("    re-request, still in flight when the phase ended, or never admitted. Neither");
+            sb.AppendLine("    delivered nor wasted, but real quota spent.");
+
+            // The four buckets partition every schedule stamped, so they must reconcile with the count the
+            // quota table reports independently. A mismatch means one of the two paths lost events, and
+            // neither number carries any other symptom — so it is checked here rather than trusted.
+            AppendAmplificationReconciliation(sb, "lighting", phase.PreDeliveryLightSchedules,
+                phase.UntracedLightSchedules, phase.WastedLightSchedules, phase.UnresolvedLightSchedules,
+                phase.PassItemsServed[(int)PipelinePass.LightSchedule]);
+            AppendAmplificationReconciliation(sb, "mesh", phase.PreDeliveryMeshSchedules,
+                phase.UntracedMeshSchedules, phase.WastedMeshSchedules, phase.UnresolvedMeshSchedules,
+                phase.PassItemsServed[(int)PipelinePass.MeshSchedule]);
+            sb.AppendLine("    'no live trace' is dominated by POST-DELIVERY corrections (a trace closes at");
+            sb.AppendLine("    MeshApplied), but also absorbs schedules for never-traced or already-unloaded");
+            sb.AppendLine("    chunks — so it is an UPPER BOUND on correction work. Read it beside the");
+            sb.AppendLine("    saturation banner: an unsaturated phase makes the bound tight.");
+        }
+
+        /// <summary>Adds one amplification row, with the bucket total and the pass's independently-counted total.</summary>
+        /// <param name="table">Destination table.</param>
+        /// <param name="label">Row label.</param>
+        /// <param name="delivered">Chunks that reached <c>MeshApplied</c> (the per-chunk divisor).</param>
+        /// <param name="preDelivery">Units spent before first delivery.</param>
+        /// <param name="untraced">Units with no live trace.</param>
+        /// <param name="wasted">Units on chunks whose traces ended in waste.</param>
+        /// <param name="unresolved">Units on traces that ended without a verdict.</param>
+        /// <param name="passServed">Units the pass reported serving, counted independently per frame.</param>
+        private static void AppendAmplificationRow(ReportTable table, string label, int delivered,
+            long preDelivery, long untraced, long wasted, long unresolved, long passServed)
+        {
+            table.AddRow(label,
+                preDelivery.ToString("N0"),
+                ((double)preDelivery / delivered).ToString("F2"),
+                untraced.ToString("N0"),
+                wasted.ToString("N0"),
+                unresolved.ToString("N0"),
+                (preDelivery + untraced + wasted + unresolved).ToString("N0"),
+                passServed.ToString("N0"));
+        }
+
+        /// <summary>
+        /// Checks the four amplification buckets against the pass's own served count and reports any gap.
+        /// </summary>
+        /// <param name="sb">The report builder.</param>
+        /// <param name="label">Which pass is being reconciled.</param>
+        /// <param name="preDelivery">Units spent before first delivery.</param>
+        /// <param name="untraced">Units with no live trace.</param>
+        /// <param name="wasted">Units on chunks whose traces ended in waste.</param>
+        /// <param name="unresolved">Units on traces that ended without a verdict.</param>
+        /// <param name="passServed">Units the pass reported serving.</param>
+        /// <remarks>
+        /// Two independent paths count the same events — one per scheduled item, one per frame — so they
+        /// must agree. Silence here is the evidence that the amplification split covers everything the
+        /// quota bought; a gap means one path dropped events and would otherwise leave no trace at all,
+        /// since a smaller-than-true numerator still prints as a plausible ratio.
+        /// </remarks>
+        private static void AppendAmplificationReconciliation(StringBuilder sb, string label,
+            long preDelivery, long untraced, long wasted, long unresolved, long passServed)
+        {
+            long bucketed = preDelivery + untraced + wasted + unresolved;
+            if (bucketed == passServed) return;
+
+            sb.AppendLine($"    ⚠ RECONCILIATION GAP ({label}) — buckets total {bucketed:N0} but the pass");
+            sb.AppendLine($"      reported serving {passServed:N0} ({bucketed - passServed:+#;-#;0}). The two are");
+            sb.AppendLine("      counted independently (per item vs per frame) and must agree, so one path");
+            sb.AppendLine("      lost events. Treat the amplification split as incomplete until explained.");
+        }
+
+        /// <summary>
+        /// Renders per-chunk parked time (§10 q4) — latency spent ineligible rather than un-served.
+        /// </summary>
+        /// <param name="sb">The report builder.</param>
+        /// <param name="phase">The phase being rendered.</param>
+        /// <remarks>
+        /// The stop-reason instrument cannot see this class at all: MT-2 moves a blocked chunk out of the
+        /// ready set, so it is never walked and never counted as an <c>AllDeclined</c> candidate. A phase
+        /// with an idle lighting pass and a multi-second populated→lit hop is the signature.
+        /// </remarks>
+        private static void AppendParkedTime(StringBuilder sb, PipelinePhaseMetrics phase)
+        {
+            sb.AppendLine();
+            sb.AppendLine("  Parked time per delivered chunk (P9-0, §10 q4) — time flagged but INELIGIBLE:");
+
+            var table = new ReportTable("Measure", "n", "min", "p50", "p95", "p99", "max");
+            AppendHopRow(table, "parked (lighting waiting set)", phase.ParkedTicksSamples);
+            table.AppendTo(sb);
+
+            sb.AppendLine("    Compare against populated→lit above: parking is neither a throughput ceiling,");
+            sb.AppendLine("    an admission stall nor a budget, so any part of that hop it explains is");
+            sb.AppendLine("    unreachable by quota or gate work.");
+            sb.AppendLine("    ⚠ This is a LOWER BOUND on ineligibility, biased against the longest waiters:");
+            sb.AppendLine("      · only chunks that reached MeshApplied contribute, so a chunk that waited and");
+            sb.AppendLine("        was then unloaded is absent from every percentile above;");
+            sb.AppendLine("      · the ~1 Hz fail-safe promotes the whole parked set at once, and a chunk the");
+            sb.AppendLine("        scan does not reach before breaking sits in the READY set accruing nothing —");
+            sb.AppendLine("        that time shows up as ReadyCount and a Quota/Ceiling stop, not as parked.");
+            sb.AppendLine("    A wait spanning a phase boundary IS counted (the interval is keyed by chunk, not");
+            sb.AppendLine("    by trace), and is credited in full to the phase it ends in.");
         }
 
         private static void AppendVerdict(StringBuilder sb, PipelinePhaseMetrics phase)

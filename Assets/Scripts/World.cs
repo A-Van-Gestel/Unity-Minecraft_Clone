@@ -1997,9 +1997,9 @@ public class World : MonoBehaviour, IMeshDrainHost
         // Prevent normal generation logic from interfering with the startup coroutine
         if (!_isWorldLoaded) return;
 
-        // Reset the opt-in sub-phase profiler's per-frame accumulators (no-op unless a fluid stress capture has
-        // enabled it). Bookends the four timed regions below (Apply / Light / Mesh / Tick); EndFrame() publishes
-        // them at the bottom of Update for the stress-pass collector to read.
+        // Reset the opt-in sub-phase profiler's per-frame accumulators (no-op unless a fluid stress pass or a
+        // flight capture has enabled it). Bookends the timed regions below — one per budgeted pass plus the
+        // three unbudgeted lighting regions; EndFrame() publishes them at the bottom of Update.
         WorldFrameProfiler.BeginFrame();
 
         PlayerChunkCoord = WorldOrigin.UnityToChunk(_playerTransform.position);
@@ -2055,9 +2055,11 @@ public class World : MonoBehaviour, IMeshDrainHost
         //    P-4 §3.4: time-budgeted — un-processed completed jobs stay enrolled for next frame (the
         //    same retry contract as the pass's structure-mods budget). The startup coroutine calls the
         //    pass without a window and stays unbudgeted.
+        long genProcessStart = WorldFrameProfiler.Begin();
         JobManager.ProcessGenerationJobs(settings.enablePipelineTimeBudgets
             ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.genProcessBudgetMs, ceilingScaleInterval))
             : default);
+        WorldFrameProfiler.Add(WorldFrameProfiler.Phase.GenerationProcess, genProcessStart);
 
         // 1b. Admit queued generation requests under the in-flight cap (P-4 §3.1). Runs after the drain
         //     above so completions this frame free headroom for new admissions immediately.
@@ -2075,8 +2077,12 @@ public class World : MonoBehaviour, IMeshDrainHost
         WorldFrameProfiler.Add(WorldFrameProfiler.Phase.Apply, applyStart);
 
         // 3. Process completed lighting jobs from the PREVIOUS frame.
-        long lightStart = WorldFrameProfiler.Begin();
+        //    P9-0: timed in its own slot. This merge takes no budget window, so it reports no stop reason and
+        //    was invisible to every capture to date — the gap that forced the P9-0a analysis to attribute its
+        //    unexplained frame cost by a fitted model rather than a measurement.
+        long lightMergeStart = WorldFrameProfiler.Begin();
         JobManager.ProcessLightingJobs();
+        WorldFrameProfiler.Add(WorldFrameProfiler.Phase.LightMerge, lightMergeStart);
 
         // 4. Schedule lighting jobs from the ready set (only chunks whose gates can plausibly pass —
         //    parked chunks re-enter via promotion events or the fail-safe scan; see LightWorkScheduler).
@@ -2091,9 +2097,17 @@ public class World : MonoBehaviour, IMeshDrainHost
         {
             // Drain the thread-safe staging queue into the main-thread ready set.
             // Background deserialization threads may enqueue positions here.
+            long lightStagingStart = WorldFrameProfiler.Begin();
             _lightWork.DrainStaging();
+            WorldFrameProfiler.Add(WorldFrameProfiler.Phase.LightStagingDrain, lightStagingStart);
 
             int lightJobsScheduled = 0;
+
+            // P9-0: the ~1 s full-world walk below gets its OWN slot rather than joining the schedule pass.
+            // It runs outside the ms ceiling by design (the window starts after it), and its cost scales with
+            // resident chunks rather than with scheduled work, so charging it to LightSchedule would both
+            // overstate that pass against its own 8 ms budget and hide a view-distance-dependent cost.
+            long lightFailSafeStart = WorldFrameProfiler.Begin();
 
             // Fail-safe: periodic full scan to catch any chunks whose dirty-set registration
             // was missed (e.g., from a code path that set a flag before the callback was registered).
@@ -2125,6 +2139,12 @@ public class World : MonoBehaviour, IMeshDrainHost
                 if (failSafePromoted > 0 && settings.enableDiagnosticLogs)
                     Debug.Log($"[LIGHTING] Fail-safe promoted {failSafePromoted.ToString()} parked chunk(s) to the ready set.");
             }
+
+            WorldFrameProfiler.Add(WorldFrameProfiler.Phase.LightFailSafeScan, lightFailSafeStart);
+
+            // P9-0: from here to the end of the block is the pass the 8 ms ceiling actually governs, so the
+            // milliseconds recorded for LightSchedule are directly comparable to lightScheduleBudgetMs.
+            long lightScanStart = WorldFrameProfiler.Begin();
 
             // P-4 §3.4: the throttle is a rate quota (cap × frame duration × 60 — constant jobs/sec
             // instead of constant jobs/frame, so throughput no longer collapses with FPS) bounded by a
@@ -2158,11 +2178,18 @@ public class World : MonoBehaviour, IMeshDrainHost
             bool lightCeilingExpired = false;
             bool lightCapReached = false;
 
+            // P9-0: how much work the pass had to choose from, captured before the pooled list goes back.
+            // Utilisation is only meaningful over frames where work EXISTED — an idle frame contributes a
+            // full quota and zero served, and the generation pass is idle on ~92 % of frames, which would
+            // drown the signal P9-1 reads to decide whether the quota binds.
+            int lightWorkAvailable = 0;
+
             // Snapshot the ready set into a pooled list to allow safe modification during iteration.
             List<Vector2Int> readySnapshot = ListPool<Vector2Int>.Get();
             try
             {
                 _lightWork.SnapshotReady(readySnapshot);
+                lightWorkAvailable = readySnapshot.Count;
 
                 foreach (Vector2Int pos in readySnapshot)
                 {
@@ -2247,6 +2274,10 @@ public class World : MonoBehaviour, IMeshDrainHost
                                 if (action == LightingScanDecision.ScanAction.ScheduleInitial)
                                     chunkData.NeedsInitialLighting = false;
                                 lightJobsScheduled++;
+
+                                // P9-0: one quota unit spent. Counted here rather than at completion — the
+                                // §3.1 rate ceiling is consumed by the schedule, not by the merge.
+                                PipelineTelemetry.StampLightScheduled(chunkCoord);
                                 _lightWork.Remove(pos);
                             }
                             else
@@ -2287,31 +2318,49 @@ public class World : MonoBehaviour, IMeshDrainHost
             PipelineTelemetry.RecordPassStop(PipelinePass.LightSchedule, PipelinePassBudget.ClassifyStop(
                 lightJobsScheduled, lightCandidatesSeen, lightQuotaSpent, lightCeilingExpired, lightCapReached));
 
+            // P9-0: what the quota was and what it bought. The stop reason alone cannot say — a Quota stop
+            // reports that the cap bound, never how many items it admitted. Recorded only when the pass had
+            // work available, matching the mesh drain's population so the two utilisations are comparable.
+            if (lightWorkAvailable > 0)
+                PipelineTelemetry.RecordPassWork(PipelinePass.LightSchedule, lightJobsScheduled, lightQuota);
+
             // Panic-gate signal sample (§3.5): taken AFTER the scan so this frame's transient
             // promotions (notably the ~1s PromoteAll of the parked frontier ring) have been re-parked
             // and only genuinely un-served schedulable work is counted. Read by next frame's
             // DrainGenerationRequests.
             _readyCountAfterScan = _lightWork.ReadyCount;
-        }
 
-        WorldFrameProfiler.Add(WorldFrameProfiler.Phase.Light, lightStart);
+            WorldFrameProfiler.Add(WorldFrameProfiler.Phase.LightSchedule, lightScanStart);
+        }
 
         // 5. Process completed mesh jobs from the PREVIOUS frame.
         //    P-4 §3.4: time-budgeted — deferred completions stay enrolled (buffers held one more frame,
         //    bounded by the in-flight cap).
-        long meshStart = WorldFrameProfiler.Begin();
+        long meshProcessStart = WorldFrameProfiler.Begin();
         JobManager.ProcessMeshJobs(settings.enablePipelineTimeBudgets
             ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.meshApplyBudgetMs, ceilingScaleInterval))
             : default);
+        WorldFrameProfiler.Add(WorldFrameProfiler.Phase.MeshProcess, meshProcessStart);
 
         // 6. Schedule NEW mesh jobs for chunks that now need them.
         //    NOTE: If too many mesh jobs are already in flight, pause scheduling new ones to let the
         //          Job System catch up. The cap is device-calibrated (OM-1) — see Settings.maxInFlightMeshJobs.
+        long meshScheduleStart = WorldFrameProfiler.Begin();
         int inFlightMeshCap = Mathf.Max(1, settings.maxInFlightMeshJobs);
+
+        // P-4 §3.4: rate quota, same shape as the lighting throttle above. Derived HERE rather than inside
+        // the drain arm only because P9-0's utilisation needs the granted quota on every frame that had work
+        // — including the in-flight-cap arm, where work existed and none of it was served. Pure arithmetic
+        // with no side effect (unlike StartWindow, which timestamps and therefore stays in the drain arm).
+        int meshQuota = settings.enablePipelineTimeBudgets
+            ? PipelinePassBudget.ComputeQuota(settings.maxMeshRebuildsPerFrame, Time.unscaledDeltaTime)
+            : settings.maxMeshRebuildsPerFrame;
+
         if (_meshBuildQueue.Count == 0)
         {
             // FP-2: the pass is skipped, but "no work queued" is a real, healthy outcome — record it rather
             // than letting the frame default to NotRun, which would hide an idle pipeline from the histogram.
+            // No work-record: an idle frame has no utilisation to report, only a stop reason.
             PipelineTelemetry.RecordPassStop(PipelinePass.MeshSchedule, PassStopReason.OutOfWork);
         }
         else if (JobManager.MeshJobs.Count >= inFlightMeshCap)
@@ -2320,17 +2369,17 @@ public class World : MonoBehaviour, IMeshDrainHost
             // must be recorded as one. Left to fall through it would read as NotRun, silently dropping an
             // admission-bound signal from the capture (design §5.1).
             PipelineTelemetry.RecordPassStop(PipelinePass.MeshSchedule, PassStopReason.InFlightCap);
+
+            // P9-0: work existed and the quota bought nothing — a real 0 % utilisation frame. Omitting it
+            // would flatter the mesh pass by counting only frames it was allowed to serve.
+            PipelineTelemetry.RecordPassWork(PipelinePass.MeshSchedule, 0, meshQuota);
         }
         else
         {
-            // P-4 §3.4: rate quota + ms ceiling, same shape as the lighting throttle above. The break
-            // (inside MeshDrainPolicy) leaves un-served chunks queued in place — legacy semantics. The
-            // RAM-scaled in-flight cap is untouched (OM-1 memory bound, not a throughput budget). The
+            // The break (inside MeshDrainPolicy) leaves un-served chunks queued in place — legacy semantics.
+            // The RAM-scaled in-flight cap is untouched (OM-1 memory bound, not a throughput budget). The
             // drain loop itself lives in MeshDrainPolicy so the meshing suite can replay this exact
             // policy (MP-2); the budget math stays here and is derived per frame.
-            int meshQuota = settings.enablePipelineTimeBudgets
-                ? PipelinePassBudget.ComputeQuota(settings.maxMeshRebuildsPerFrame, Time.unscaledDeltaTime)
-                : settings.maxMeshRebuildsPerFrame;
             PipelinePassBudget.Window meshWindow = settings.enablePipelineTimeBudgets
                 ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.meshScheduleBudgetMs, ceilingScaleInterval))
                 : default;
@@ -2341,13 +2390,14 @@ public class World : MonoBehaviour, IMeshDrainHost
             // FP-2: the reason comes FROM the policy, never re-derived here — re-reading the limits after
             // the loop cannot tell a quota break from a window that expired in the meantime (design §5.2).
             PipelineTelemetry.RecordPassStop(PipelinePass.MeshSchedule, meshDrain.Reason);
+            PipelineTelemetry.RecordPassWork(PipelinePass.MeshSchedule, meshDrain.Scheduled, meshQuota);
         }
+
+        WorldFrameProfiler.Add(WorldFrameProfiler.Phase.MeshSchedule, meshScheduleStart);
 
         // MP-6: there is no step 8. The load animation is triggered by the mesh completion pass (step 5)
         // the instant a chunk's mesh is applied, so no queue of Chunk references survives a frame — the
         // stage that used to hold them could act on a recycled slot's NEW lifecycle (finding F4).
-
-        WorldFrameProfiler.Add(WorldFrameProfiler.Phase.Mesh, meshStart);
 
 
         // Run Pool Cleanup
@@ -2366,7 +2416,8 @@ public class World : MonoBehaviour, IMeshDrainHost
             CheckViewDistance();
         }
 
-        // Publish the four sub-phase accumulators (no-op unless a fluid stress capture is running).
+        // Publish the per-frame sub-phase accumulators (no-op unless a capture has enabled the profiler).
+        // Must precede PipelineTelemetry.RecordFrame below, which folds these values into the phase totals.
         WorldFrameProfiler.EndFrame();
 
         // FP-2: close the telemetry frame — queue depths + panic-gate state, committing this frame's
@@ -2645,7 +2696,18 @@ public class World : MonoBehaviour, IMeshDrainHost
 
     /// <summary><see cref="IMeshDrainHost.TrySchedule"/>: forwards to <see cref="WorldJobManager.ScheduleMeshing"/>
     /// (true → dequeue; false → leave queued for a later frame).</summary>
-    bool IMeshDrainHost.TrySchedule(Chunk chunk) => JobManager.ScheduleMeshing(chunk);
+    /// <remarks>
+    /// P9-0 counts a mesh-quota unit here, on the success arm only — a declined chunk costs no quota
+    /// (<see cref="MeshDrainPolicy"/> increments nothing), and amplification must stay a measure of repeated
+    /// <i>work</i> rather than repeated looking.
+    /// </remarks>
+    bool IMeshDrainHost.TrySchedule(Chunk chunk)
+    {
+        if (!JobManager.ScheduleMeshing(chunk)) return false;
+
+        PipelineTelemetry.StampMeshScheduled(chunk.Coord);
+        return true;
+    }
 
     /// <summary>
     /// Verifies that all 8 horizontal neighbors (cardinal + diagonal) of a chunk exist,

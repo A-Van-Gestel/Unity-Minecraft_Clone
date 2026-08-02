@@ -211,6 +211,12 @@ namespace Benchmarks
             PipelineTelemetry.BeginRun();
             PipelineTelemetry.Enabled = true;
 
+            // P9-0: the flight capture now drives the sub-phase profiler too, which it never did before — the
+            // reason no capture could say where the pipeline's main-thread milliseconds went. Cost is one
+            // Stopwatch pair per timed region (single digits per frame), against phases whose frames run
+            // 6-30 ms; cleared in OnDestroy so an aborted run cannot leave it on for ordinary play.
+            WorldFrameProfiler.Enabled = true;
+
             // FP-11a: start crediting tour coverage HERE rather than at the ensure pass, so terrain the
             // generation phases already produced counts — it is on disk by the time the loading pass asks
             // for it, which is the only property the ensure sweep exists to guarantee.
@@ -275,6 +281,7 @@ namespace Benchmarks
             // a play-mode restart, but not returning to the main menu within one session.
             PipelineTelemetry.EndPhase();
             PipelineTelemetry.Enabled = false;
+            WorldFrameProfiler.Enabled = false;
 
             // Same reasoning for the coverage tracker: a run aborted before the freeze would otherwise stay
             // armed for the rest of the session, charging every ordinary world session a lookup per populated

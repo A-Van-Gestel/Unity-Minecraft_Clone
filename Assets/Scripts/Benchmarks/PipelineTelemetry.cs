@@ -91,6 +91,30 @@ namespace Benchmarks
         /// <summary>Lighting jobs this chunk consumed (the edge-check cascade makes this &gt; 1 routinely).</summary>
         public int LightingPasses;
 
+        /// <summary>
+        /// Lighting jobs <b>scheduled</b> for this chunk (P9-0). Distinct from <see cref="LightingPasses"/>,
+        /// which counts completions: the two differ by whatever is in flight, and the quota is spent at
+        /// schedule time, so this is the one that divides into the §3.1 rate ceiling.
+        /// </summary>
+        public int LightSchedules;
+
+        /// <summary>Mesh jobs scheduled for this chunk (P9-0). The mesh-quota half of work amplification.</summary>
+        public int MeshSchedules;
+
+        /// <summary>
+        /// Total ticks this chunk spent parked in the lighting <i>waiting</i> set — flagged for work but
+        /// ineligible pending a neighbor state change (§10 q4). MT-2 removes parked chunks from the ready
+        /// set, so they can never be counted as an <c>AllDeclined</c> candidate: this is the only measure of
+        /// a class of latency the stop-reason instrument is blind to by construction.
+        /// </summary>
+        /// <remarks>
+        /// Only the accumulated total lives here. The <i>open</i> interval is held in a coord-keyed side
+        /// table, because park state belongs to <c>LightWorkScheduler</c>'s waiting set and outlives any one
+        /// trace: a chunk stays parked across both a re-request and a phase boundary, and a per-trace
+        /// timestamp is destroyed by either.
+        /// </remarks>
+        public long ParkedTicks;
+
         /// <summary>How this trace ended.</summary>
         public TraceDisposition Disposition;
     }
@@ -213,8 +237,75 @@ namespace Benchmarks
         /// <summary>End-to-end enqueue → mesh-applied latencies in Stopwatch ticks.</summary>
         public readonly List<long> RequestToMeshAppliedTicks = new List<long>();
 
+        /// <summary>Parked-time totals per delivered chunk, in Stopwatch ticks (§10 q4).</summary>
+        public readonly List<long> ParkedTicksSamples = new List<long>();
+
         /// <summary>The bounded rolling window of recent per-frame samples (oldest entries overwritten).</summary>
         public readonly List<AdmissionSample> RecentFrames = new List<AdmissionSample>();
+
+        #region P9-0 attribution
+
+        /// <summary>
+        /// Main-thread milliseconds summed over the phase, one slot per <see cref="WorldFrameProfiler.Phase"/>.
+        /// Divide by <see cref="ProfiledFrameCount"/> for ms/frame, or by <see cref="DurationSeconds"/> for
+        /// ms/second — the latter is the figure comparable across legs at different frame rates.
+        /// </summary>
+        public readonly double[] PassMsTotals = new double[WorldFrameProfiler.PhaseCount];
+
+        /// <summary>
+        /// Frames in which <see cref="WorldFrameProfiler"/> contributed. <b>Zero means the per-pass costs were
+        /// never measured</b> — a distinction the report must draw explicitly, because a phase that reports
+        /// 0.0 ms per pass reads as "the passes are free", the opposite of the truth and a conclusion pointing
+        /// the reader away from the cost centre.
+        /// </summary>
+        public int ProfiledFrameCount;
+
+        /// <summary>Items each pass actually served, summed over the phase, indexed by <see cref="PipelinePass"/>.</summary>
+        public readonly long[] PassItemsServed = new long[PipelineTelemetry.PassCount];
+
+        /// <summary>Quota granted to each pass, summed over the phase. Served ÷ granted is quota utilisation.</summary>
+        public readonly long[] PassQuotaGranted = new long[PipelineTelemetry.PassCount];
+
+        /// <summary>Frames in which each pass reported its served/granted pair (the utilisation denominator).</summary>
+        public readonly int[] PassWorkFrames = new int[PipelineTelemetry.PassCount];
+
+        /// <summary>Lighting schedules spent on chunks that went on to reach <c>MeshApplied</c>, counted before first delivery.</summary>
+        public long PreDeliveryLightSchedules;
+
+        /// <summary>Mesh schedules spent on chunks that went on to reach <c>MeshApplied</c>, counted before first delivery.</summary>
+        public long PreDeliveryMeshSchedules;
+
+        /// <summary>Lighting schedules spent on chunks whose traces ended in waste (unloaded mid-flight).</summary>
+        public long WastedLightSchedules;
+
+        /// <summary>Mesh schedules spent on chunks whose traces ended in waste.</summary>
+        public long WastedMeshSchedules;
+
+        /// <summary>
+        /// Lighting schedules on traces that ended without a verdict — <c>Rerequested</c> (superseded
+        /// mid-flight), <c>InFlightAtPhaseEnd</c> (the capture stopped first) or
+        /// <c>AbandonedBeforeAdmission</c> (no stage ran, so always 0). Neither delivered nor wasted, but
+        /// real quota units: without this bucket they leave the accounting entirely, and the amplification
+        /// columns silently stop summing to the schedules the quota table reports.
+        /// </summary>
+        public long UnresolvedLightSchedules;
+
+        /// <summary>Mesh schedules on traces that ended without a verdict; see <see cref="UnresolvedLightSchedules"/>.</summary>
+        public long UnresolvedMeshSchedules;
+
+        /// <summary>
+        /// Lighting schedules with no live trace. Predominantly <b>post-delivery corrections</b> — the trace
+        /// closes at <c>MeshApplied</c>, so any later schedule for that coord lands here — which makes
+        /// pre-delivery ÷ this the split §10 q1 asks for. ⚠ It also absorbs schedules for chunks that were
+        /// never traced (trace-table saturation) or already closed by an unload, so it is an upper bound on
+        /// correction work; read it beside <see cref="TracesSaturated"/>.
+        /// </summary>
+        public long UntracedLightSchedules;
+
+        /// <summary>Mesh schedules with no live trace; see <see cref="UntracedLightSchedules"/> for what this population contains.</summary>
+        public long UntracedMeshSchedules;
+
+        #endregion
 
         /// <summary>
         /// True when the trace table hit its capacity and later chunks went untraced. Every number derived
@@ -327,6 +418,21 @@ namespace Benchmarks
         private static readonly Dictionary<ChunkCoord, ChunkTrace> s_traces =
             new Dictionary<ChunkCoord, ChunkTrace>(MIN_TRACE_CAPACITY);
 
+        /// <summary>
+        /// Open park intervals, keyed by chunk: the timestamp at which each currently-parked chunk entered
+        /// <c>LightWorkScheduler</c>'s waiting set (§10 q4).
+        /// </summary>
+        /// <remarks>
+        /// Deliberately <b>not</b> cleared by <see cref="BeginPhase"/>, and deliberately not stored on the
+        /// trace. Park state is a property of the scheduler's set, which survives both a flush-and-restart
+        /// (the trace is replaced) and a phase boundary (every trace is dropped) — a chunk is routinely
+        /// parked across either. Holding the open interval on the trace made both cases report zero parked
+        /// time for waits that really happened, and the affected population is exactly the one §10 q4 asks
+        /// about: un-populated placeholders parked pending neighbour terrain. Bounded by the size of the
+        /// waiting set, since every exit path from that set stamps an unpark.
+        /// </remarks>
+        private static readonly Dictionary<ChunkCoord, long> s_parkStart = new Dictionary<ChunkCoord, long>();
+
         private static readonly List<PipelinePhaseMetrics> s_completedPhases = new List<PipelinePhaseMetrics>(16);
 
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -347,6 +453,12 @@ namespace Benchmarks
 
         /// <summary>Whether a phase is currently recording.</summary>
         public static bool IsPhaseActive => s_activePhase != null;
+
+        /// <summary>
+        /// Open park intervals currently held. Diagnostic/test accessor: the side table outlives phases by
+        /// design, so a leak here would accumulate silently across a whole run.
+        /// </summary>
+        public static int OpenParkIntervals => s_parkStart.Count;
 
         /// <summary>Converts Stopwatch ticks to milliseconds.</summary>
         /// <param name="ticks">A tick count or tick delta.</param>
@@ -383,6 +495,7 @@ namespace Benchmarks
             // "tidy" the body into a helper without re-checking the analyzer.
             Enabled = false;
             s_traces.Clear();
+            s_parkStart.Clear();
             s_completedPhases.Clear();
             s_activePhase = null;
             s_phaseStartTime = 0f;
@@ -472,6 +585,7 @@ namespace Benchmarks
             s_activePhase.PopulatedToLitTicks.Capacity = INITIAL_SAMPLE_CAPACITY;
             s_activePhase.LitToMeshAppliedTicks.Capacity = INITIAL_SAMPLE_CAPACITY;
             s_activePhase.RequestToMeshAppliedTicks.Capacity = INITIAL_SAMPLE_CAPACITY;
+            s_activePhase.ParkedTicksSamples.Capacity = INITIAL_SAMPLE_CAPACITY;
 
             s_phaseStartTime = Time.realtimeSinceStartup;
         }
@@ -531,6 +645,9 @@ namespace Benchmarks
                 // is the design's re-request / wave-front-churn metric.
                 existing.Disposition = TraceDisposition.Rerequested;
                 CloseTrace(existing);
+
+                // NOTE: an open park interval needs no handling here. It lives in s_parkStart, keyed by
+                // coord, so it survives this trace swap untouched and is credited to the replacement.
             }
             else if (s_traces.Count >= s_traceCapacity)
             {
@@ -657,7 +774,110 @@ namespace Benchmarks
 
         #endregion
 
+        #region Work amplification and parked time (P9-0 hook targets)
+
+        /// <summary>
+        /// Counts one lighting job scheduled for a chunk — a quota unit spent. Called from the schedule
+        /// success arm, not from completion: the §3.1 rate ceiling is spent at schedule time.
+        /// </summary>
+        /// <param name="coord">The chunk whose lighting job was scheduled.</param>
+        public static void StampLightScheduled(ChunkCoord coord)
+        {
+            if (!Enabled || s_activePhase == null) return;
+
+            if (!s_traces.TryGetValue(coord, out ChunkTrace trace))
+            {
+                // No live trace: the chunk has already been delivered (the trace closes at MeshApplied), or
+                // was never traced / already closed. Bucketed rather than dropped — this population IS the
+                // post-delivery half of the §10 q1 split.
+                s_activePhase.UntracedLightSchedules++;
+                return;
+            }
+
+            trace.LightSchedules++;
+            s_traces[coord] = trace;
+        }
+
+        /// <summary>Counts one mesh job scheduled for a chunk — a mesh-quota unit spent.</summary>
+        /// <param name="coord">The chunk whose mesh job was scheduled.</param>
+        public static void StampMeshScheduled(ChunkCoord coord)
+        {
+            if (!Enabled || s_activePhase == null) return;
+
+            if (!s_traces.TryGetValue(coord, out ChunkTrace trace))
+            {
+                s_activePhase.UntracedMeshSchedules++;
+                return;
+            }
+
+            trace.MeshSchedules++;
+            s_traces[coord] = trace;
+        }
+
+        /// <summary>
+        /// Marks a chunk entering the lighting waiting set (§10 q4). Idempotent: a chunk already parked keeps
+        /// its original entry timestamp, so a repeated park cannot reset the interval and under-report the
+        /// wait — the failure mode that would make a permanently-blocked chunk look busy.
+        /// </summary>
+        /// <param name="pos">Voxel-origin position of the parked chunk.</param>
+        public static void StampParked(Vector2Int pos)
+        {
+            // No trace and no active phase required: the chunk may be parked before it is traced, or between
+            // phases, and the interval must still start — that is the whole point of keying this by coord.
+            if (!Enabled) return;
+
+            ChunkCoord coord = ChunkCoord.FromVoxelOrigin(pos);
+            if (s_parkStart.ContainsKey(coord)) return;
+
+            s_parkStart[coord] = Stopwatch.GetTimestamp();
+        }
+
+        /// <summary>
+        /// Closes an open park interval, folding it into the chunk's parked total. A no-op for a chunk that
+        /// was not parked, so promotion paths may call it unconditionally.
+        /// </summary>
+        /// <param name="pos">Voxel-origin position of the promoted (or forgotten) chunk.</param>
+        public static void StampUnparked(Vector2Int pos)
+        {
+            if (!Enabled) return;
+
+            ChunkCoord coord = ChunkCoord.FromVoxelOrigin(pos);
+            if (!s_parkStart.TryGetValue(coord, out long startTicks)) return;
+
+            // The interval ends whether or not anything is recording it — leaving it open would let a wait
+            // that finished during an untraced gap be credited to some later, unrelated journey.
+            s_parkStart.Remove(coord);
+
+            if (s_activePhase == null) return;
+            if (!s_traces.TryGetValue(coord, out ChunkTrace trace)) return;
+
+            // Credited in full, including any part of the wait that elapsed under a previous trace: the
+            // chunk was ineligible for that whole span, and a re-request is a bookkeeping event in this
+            // layer rather than a physical reset of the stall §10 q4 is asking about.
+            trace.ParkedTicks += Stopwatch.GetTimestamp() - startTicks;
+            s_traces[coord] = trace;
+        }
+
+        #endregion
+
         #region Per-frame admission pressure (FP-2 hook targets)
+
+        /// <summary>
+        /// Records what a budgeted scheduling pass was allowed and what it actually served this frame (P9-0).
+        /// Paired with <see cref="RecordPassStop"/>, which says only <i>why</i> a pass stopped: a
+        /// <c>Quota</c> stop tells you the pass hit its cap, never how much that cap bought.
+        /// </summary>
+        /// <param name="pass">The pass reporting.</param>
+        /// <param name="served">Items the pass scheduled this frame.</param>
+        /// <param name="quotaGranted">The frame's rate quota for that pass.</param>
+        public static void RecordPassWork(PipelinePass pass, int served, int quotaGranted)
+        {
+            if (!Enabled || s_activePhase == null) return;
+
+            s_activePhase.PassItemsServed[(int)pass] += served;
+            s_activePhase.PassQuotaGranted[(int)pass] += quotaGranted;
+            s_activePhase.PassWorkFrames[(int)pass]++;
+        }
 
         /// <summary>
         /// Records why a budgeted pass stopped this frame. Tallied exactly (never windowed) and folded into
@@ -749,6 +969,17 @@ namespace Benchmarks
             s_activePhase.FrameCount++;
             if (!gateOpen) s_activePhase.GateClosedFrames++;
 
+            // P9-0: fold this frame's per-pass main-thread cost into the phase totals. Safe to read here
+            // because World.Update calls WorldFrameProfiler.EndFrame immediately before this — the values are
+            // this frame's, already published. Guarded on the profiler's own flag rather than assumed on:
+            // ProfiledFrameCount staying 0 is what lets the report say "not measured" instead of "0.0 ms".
+            if (WorldFrameProfiler.Enabled)
+            {
+                s_activePhase.ProfiledFrameCount++;
+                for (int i = 0; i < WorldFrameProfiler.PhaseCount; i++)
+                    s_activePhase.PassMsTotals[i] += WorldFrameProfiler.LastFrameMs((WorldFrameProfiler.Phase)i);
+            }
+
             List<AdmissionSample> window = s_activePhase.RecentFrames;
             if (window.Count < FRAME_WINDOW_CAPACITY)
             {
@@ -775,7 +1006,44 @@ namespace Benchmarks
         {
             s_activePhase.DispositionCounts[(int)trace.Disposition]++;
 
+            // P9-0: attribute the quota units this chunk consumed, split by how its journey ended. Work spent
+            // on a chunk that was unloaded mid-flight is amplification too, but it bought nothing — folding it
+            // into the delivered ratio would understate the true cost per delivered chunk.
+            // The three arms PARTITION every disposition: delivered, wasted, or ended without a verdict.
+            // Leaving a disposition out of all three drops its quota units from the accounting entirely,
+            // and the report's reconciliation line below would then never sum.
+            if (trace.Disposition == TraceDisposition.MeshApplied)
+            {
+                s_activePhase.PreDeliveryLightSchedules += trace.LightSchedules;
+                s_activePhase.PreDeliveryMeshSchedules += trace.MeshSchedules;
+            }
+            else if (PipelineRegimeVerdict.IsWaste(trace.Disposition))
+            {
+                s_activePhase.WastedLightSchedules += trace.LightSchedules;
+                s_activePhase.WastedMeshSchedules += trace.MeshSchedules;
+            }
+            else
+            {
+                s_activePhase.UnresolvedLightSchedules += trace.LightSchedules;
+                s_activePhase.UnresolvedMeshSchedules += trace.MeshSchedules;
+            }
+
             if (trace.Disposition != TraceDisposition.MeshApplied) return;
+
+            // A chunk delivered while STILL parked keeps an open interval. Credit what has elapsed, then
+            // restart the interval rather than closing it — the chunk is still in the waiting set, so the
+            // remainder of its wait belongs to whatever traces it next, and crediting the same span twice
+            // is the one outcome a shared side table makes easy.
+            long parkedTicks = trace.ParkedTicks;
+            ChunkCoord coord = new ChunkCoord(trace.X, trace.Z);
+            if (s_parkStart.TryGetValue(coord, out long openStart))
+            {
+                long now = Stopwatch.GetTimestamp();
+                parkedTicks += now - openStart;
+                s_parkStart[coord] = now;
+            }
+
+            AddSampleValue(s_activePhase.ParkedTicksSamples, parkedTicks);
 
             // Only fully-stamped chains yield latencies. A chunk can reach MeshApplied without a Lit stamp
             // when lighting is disabled, so each hop is contributed independently rather than all-or-nothing.
@@ -796,13 +1064,27 @@ namespace Benchmarks
         {
             if (fromTicks <= 0 || toTicks < fromTicks) return;
 
+            AddSampleValue(samples, toTicks - fromTicks);
+        }
+
+        /// <summary>
+        /// Appends one already-computed sample, flagging saturation rather than silently dropping past the
+        /// cap. Split out from <see cref="AddSample"/> so the parked-time total — an accumulated duration
+        /// with no from/to pair — shares the same cap and the same saturation flag as the hop latencies.
+        /// </summary>
+        /// <param name="samples">The destination sample list.</param>
+        /// <param name="value">The sample value in Stopwatch ticks (0 is meaningful: never parked).</param>
+        private static void AddSampleValue(List<long> samples, long value)
+        {
+            if (value < 0) return;
+
             if (samples.Count >= MAX_LATENCY_SAMPLES)
             {
                 s_activePhase.SamplesSaturated = true;
                 return;
             }
 
-            samples.Add(toTicks - fromTicks);
+            samples.Add(value);
         }
     }
 }
