@@ -708,28 +708,39 @@ item has already paid for.
   file (§7.1), a left-over experimental cap silently contaminates every later capture and appears in
   no diff. Always re-read the values from the run's own settings block rather than trusting the file.
 
-### 7.0 Pre-flight, added after the 2026-08-02 P9-2 capture ran at the wrong cap
+### 7.0 Pre-flight, added after the 2026-08-02 P9-2 capture
 
-Three defects were found by checking the OFF legs *before* the ON legs were spent. All three are cheap to
-prevent and expensive to discover afterwards, so they are now preconditions rather than advice.
+Two standing items, plus one deferred. Both standing items were found by checking the OFF legs *before* the
+ON legs were spent, which is itself the practice worth keeping: **read the first run's settings block and
+validity gates before spending the rest of the matrix.**
 
-1. **Build into a FRESH output folder.** The 2026-08-02 capture inherited P9-0a's leftover
-   `maxLightJobsPerFrame = 48` from the build folder's `settings.json` — a file that lives outside the repo
-   and appears in no diff. The tell was that `maxMeshRebuildsPerFrame` was correct at 11, since P9-0a only
-   ever changed the light cap. A fresh folder lets OM-1 recalibrate; **then read the caps back from run 1's
-   own settings block before spending runs 2–8.**
-   ⚠ The cost of getting this wrong is not a small offset: at cap 48 the light schedule goes **`Ceiling`-bound**
-   (`Quota` ≈ 0, utilisation ≈ 50 %), so `cap × 60` stops being the operative rate and **criterion Q3c —
-   which is built on that identity — cannot be scored at all.**
-2. **The report must print every rollback flag under test.** The settings block prints the quotas, ceilings,
-   in-flight caps and P-8's `scalePanicGateThresholdsWithResidency`, but *not*
-   `enableConvergentEdgeCheckCascade`. A capture that cannot show its own flag state is not
-   self-verifying, and the failure is silent in the worst direction: an ON leg whose flag never took is
-   indistinguishable from a lever that does not work. Note also that a `settings.json` written by an older
-   build will not contain a newly-added field at all, so the key must be **added**, not edited.
-3. **Clear Q6 at vd 26/32 before scoring them.** Both failed again (98.0 % / 97.4 %, against 98.3 % / 97.8 %
-   in P9-1), each flagged "the loading pass GENERATED the remainder". Run the ensure sweep twice at those
-   view distances, or pre-generate the tour once and reuse it.
+1. **Copying `settings.json` between build folders is CORRECT — reset the experimental values when you do.**
+   The 2026-08-02 capture ran at `maxLightJobsPerFrame` 48 because the operator deliberately copied the
+   previous build's `settings.json` so the **OM-1 calibration values would match across captures** — good
+   practice, since a fresh folder recalibrates and can silently produce a *different* baseline — but left
+   P9-0a's experimental light cap in it. The tell was that `maxMeshRebuildsPerFrame` was correct at 11,
+   since P9-0a only ever changed the light cap.
+   ⚠ **This is not a small offset.** At cap 48 the light schedule goes **`Ceiling`-bound** (`Quota` ≈ 0,
+   utilisation ≈ 50 %), so `cap × 60` stops being the operative rate and **criterion Q3c — which is built on
+   that identity — cannot be scored at all.** The frame-time axis is void too: P9-2 §F5 measured the same
+   per-second work repacked into 2.2× fewer, 2.2× longer frames, reproducing P9-1 §F4 on a third build.
+   The existing §7 bullet already says to re-read the caps from the run's own settings block; **do that
+   before run 2, not after run 8.**
+2. **The report must print every rollback flag under test.** ✅ **Fixed 2026-08-02** —
+   `PipelineSettingsSnapshot` now prints an `Edge-check cascade: CONVERGENT / LEGACY` line beside the
+   lighting-engine line. Before that, a capture could not show its own flag state, and the failure was
+   silent in the worst direction: an ON leg whose flag never took is indistinguishable from a lever that
+   does not work. The P9-2 capture escaped only because its amplification shift was too large to be
+   anything else. ⚠ Note also that a `settings.json` written by an older build will not contain a
+   newly-added field at all, so the key must be **added**, not edited.
+3. **Q6 coverage at vd 26/32 — DEFERRED to a pre-generation command.** Both failed again (98.0 % / 97.4 %,
+   against 98.3 % / 97.8 % in P9-1), each flagged "the loading pass GENERATED the remainder", and those two
+   ensure phases also hit `TRACE BUFFER SATURATED`. Running the ensure sweep twice is a workaround, not a
+   fix. **The real fix is a `pre-generate-region` command** — take a radius around a point, or four corner
+   coordinates, and programmatically drive every chunk in that region to fully generated; the benchmark
+   harness then calls it instead of flying a sweep and hoping. Filed as its own item needing a
+   `create-implementation-plan` pass (2026-08-02); until it exists, treat vd 26/32 coverage as a known
+   validity gap rather than something a capture can clear.
 
 ### 7.1 How a capture actually gets its settings (verified, and it corrects a standing belief)
 

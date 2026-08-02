@@ -106,6 +106,13 @@ namespace Benchmarks
         /// </summary>
         public readonly bool LightingEnabled;
 
+        /// <summary>
+        /// Whether P9-2's convergent edge-check cascade is active for this run. Printed because a capture
+        /// that cannot show its own rollback-flag state is not self-verifying: an ON leg whose flag failed
+        /// to take is otherwise indistinguishable from a lever that does not work (§7.0 defect 2).
+        /// </summary>
+        public readonly bool ConvergentEdgeCheckCascade;
+
         #endregion
 
         /// <summary>
@@ -164,6 +171,7 @@ namespace Benchmarks
             PanicGateReopenThreshold = settings.panicGateReopenThreshold;
             ScalePanicGateWithResidency = settings.scalePanicGateThresholdsWithResidency;
             LightingEnabled = settings.enableLighting;
+            ConvergentEdgeCheckCascade = settings.enableConvergentEdgeCheckCascade;
 
             // Through the same helper the gate itself calls, never a re-derivation here: a report that
             // computed its own version of the thresholds could disagree with the run it describes.
@@ -194,6 +202,7 @@ namespace Benchmarks
             sb.AppendLine($"Load distance:       {LoadDistance} chunks  " +
                           $"({ResidentWidth}x{ResidentWidth} = {ResidentChunks:N0} resident)");
             sb.AppendLine($"Lighting engine:     {(LightingEnabled ? "ON" : "OFF")}");
+            sb.AppendLine($"Edge-check cascade:  {(ConvergentEdgeCheckCascade ? "CONVERGENT (P9-2, default)" : "LEGACY (rollback)")}");
             sb.AppendLine();
 
             sb.AppendLine("  Per-frame quotas -> 'Quota' stop reason (rate = cap x frame duration x 60):");
