@@ -410,15 +410,18 @@ public class Settings
 
     /// <summary>
     /// P9-2 (Option B1): re-arm the post-generation edge-check cascade only when a lighting pass actually
-    /// changed light, instead of on every stable completion. Default-OFF pending its IL2CPP capture; it is
-    /// listed in <see cref="OverlayBenchmarkSettingsFromDisk"/> so a cold-cache benchmark launch can A/B it.
+    /// changed light, instead of on every stable completion. **Default-ON since the 2026-08-02 GO** — the
+    /// capture cut lighting amplification 6.12 → 1.86 per delivered chunk at vd 32 and met the visibility
+    /// budget at every view distance. Retained as a rollback lever, and listed in
+    /// <see cref="OverlayBenchmarkSettingsFromDisk"/> so a cold-cache benchmark launch can still A/B it.
     /// </summary>
     [SettingField(SettingsTab.Performance, Label = "Convergent Edge-Check Cascade", Order = 9)]
-    [Tooltip("Skips the post-generation edge-check round (and its neighbour triggers) when the lighting " +
+    [Tooltip("Skips the post-generation edge-check round (and its neighbor triggers) when the lighting " +
              "pass that would have armed it changed nothing.\n\n" +
-             TooltipTags.Performance + "Removes lighting work that recomputes an unchanged result. " +
-             "Experimental — off by default.")]
-    public bool enableConvergentEdgeCheckCascade = false;
+             TooltipTags.Performance + "Removes lighting work that recomputes an unchanged result — " +
+             "roughly 3x less lighting work per delivered chunk. Turn off only to diagnose a lighting " +
+             "convergence problem.")]
+    public bool enableConvergentEdgeCheckCascade = true;
 
     /// <summary>
     /// The maximum number of structure-related VoxelMods that can be expanded in a single frame.
