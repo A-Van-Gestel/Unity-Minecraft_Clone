@@ -1,8 +1,10 @@
 # P-9 — Schedule-Quota Throughput Ceiling
 
-**Version:** 1.5
-**Date:** 2026-08-01
-**Status:** Proposed design — not implemented.
+**Version:** 1.6b
+**Date:** 2026-08-02
+**Status:** Partly implemented — **P9-0a and P9-0 are done**; the attribution instrument ships and is
+guarded by baselines B20–B22, but **has not yet been used for a capture**. P9-1 is the next phase and
+every §6 lever remains proposed.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The chunk pipeline delivers a near-constant 5 658–6 803 chunks per 30 s phase from view distance 10
@@ -375,12 +377,17 @@ Two consequences, and they cut in opposite directions:
 | Caps                                | `maxMeshRebuildsPerFrame` 10 / `maxLightJobsPerFrame` 32 in `SettingsManager.cs:399,409`, **overwritten at runtime by OM-1** (`DeviceCalibration`) |
 | ms ceilings                         | `lightScheduleBudgetMs` 8 / `meshScheduleBudgetMs` 6 (`SettingsManager.cs:514,527`), FPS-cap-scaled only (`ScaleCeilingMs`)                   |
 | In-flight bounds                    | `maxInFlightLightingJobs` 64, `maxInFlightMeshJobs` 20 — memory bounds, not throughput; `InFlightCap` dominates no phase in any P-8 run       |
-| Per-pass main-thread ms             | **Not measured.** `WorldFrameProfiler` splits `World.Update` into Tick/Apply/Mesh/Light, but only `FluidStressController` enables it — the flight capture never does |
-| Quota utilisation / amplification   | **Not measured.** `PipelineTelemetry` records a stop *reason* per pass per frame, never items served or work-per-delivered-chunk              |
+| Per-pass main-thread ms             | ✅ **Instrumented by P9-0** (not yet captured). `WorldFrameProfiler`'s phases are now one slot per budgeted pass **plus the three unbudgeted lighting regions — `LightMerge`, `LightStagingDrain` and `LightFailSafeScan`**. Each of the three runs outside the schedule pass's budget window, so keeping them separate is what leaves `LightSchedule`'s milliseconds directly comparable to `lightScheduleBudgetMs`. `BenchmarkController` enables the profiler; `LastFrameLightMs`/`LastFrameMeshMs` remain derived sums, so the fluid-stress collector is unchanged |
+| Quota utilisation / amplification   | ✅ **Instrumented by P9-0** (not yet captured). `PipelineTelemetry.RecordPassWork` records served vs granted per pass, **over frames where that pass had work available** — idle frames are excluded from *both* scheduling passes so the two utilisations are computed over the same kind of population and can be compared; a mesh frame refused by the in-flight cap counts at 0 served, since work existed and bought nothing. `StampLightScheduled`/`StampMeshScheduled` count quota units per chunk, split pre-delivery / no-live-trace / wasted |
+| Parked time per chunk               | ✅ **Instrumented by P9-0** (not yet captured, §10 q4). `LightWorkScheduler`'s park/promote transitions accumulate per-chunk waiting-set time onto the trace — the class the stop-reason instrument is blind to by construction |
 | Benchmark A/B surface               | `OverlayBenchmarkSettingsFromDisk` (`SettingsManager.cs:1116`) copies four benchmark fields + `scalePanicGateThresholdsWithResidency` only    |
 
-The two "not measured" rows are the whole reason P-9 opens with attribution: the instrument reports
-*that* the pass stopped on quota, and nothing about what the quota bought or what it cost.
+Those three rows were the whole reason P-9 opened with attribution: the instrument reported *that* the
+pass stopped on quota, and nothing about what the quota bought or what it cost. **P9-0 closed the
+instrument gap on 2026-08-02; it has not yet been pointed at a capture, which is P9-1.** Note what the
+new instrument still does *not* separate: `LightMerge` is timed as a whole pass, so it confirms or kills
+§F4's attribution to the merge without sizing the merge's internals — if P-3 needs a finer breakdown,
+that is a further step.
 
 ---
 
@@ -575,8 +582,8 @@ settings alone can go:
 | Phase                                     | Scope                                                                                                                                                                                                                    | Effort | Depends on |
 |-------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|------------|
 | ~~**P9-0a — Cap-sweep probe (zero code)**~~ ✅ **DONE 2026-08-02** | Ran as two settings-only legs at vd 32 (24 → 48 light jobs) on the P-8 build. **Identity confirmed, Option A′ closed**: gate 95.1 % → 62.6 % closed, `enqueue→populated` −28.9 %, completions +20.9 %, at ×4.79 CPU / ×0.61 min FPS (Q2 fail). Binding limit moved to the **8 ms ceiling**, not a higher quota. [Capture](../Performance/CHUNK_PIPELINE_P9_0A_CAP_SWEEP_IL2CPP_2026-08-02_BENCHMARK.md). Planned vd 26 legs were made redundant by the size of the vd 32 failure |   🟢   | —          |
-| **P9-0 — Attribution instrument**         | Report, per phase: main-thread ms for each budgeted pass (light schedule, mesh schedule, distinct from the process/apply passes); items served vs quota granted; and **work amplification** — lighting schedules and mesh schedules per `MeshApplied` chunk, **split by *first* delivery vs subsequent corrections** (the split §3.4 turns on). Extends `WorldFrameProfiler` (already Stopwatch-based and IL2CPP-valid) and `PipelineTelemetry`; wire it into `BenchmarkController`, which today never enables the profiler. **No production behaviour change.** Rider: correct the overstated remark at `SettingsManager.cs:1108–1115` (§7.1). |   🟡   | P9-0a      |
-| **P9-1 — Capture and decide**             | Fresh same-build baseline at vd 10/20/26/32 per §7, reported per `perf-benchmark`. Answers: how many ms do the passes cost, and what is amplification really? **Selects the lever** and may trigger §2's kill condition.                                                                                                              |   🟢   | P9-0       |
+| ~~**P9-0 — Attribution instrument**~~ ✅ **DONE 2026-08-02** | Shipped, no production behaviour change. `WorldFrameProfiler` now carries one slot per budgeted pass **plus `LightMerge` and `LightFailSafeScan`** — the two unbudgeted regions, and the reason §F4 had to be modelled; `LastFrameLightMs`/`LastFrameMeshMs` survive as derived sums so the fluid-stress collector and its past captures are unaffected. `PipelineTelemetry` gains `RecordPassWork` (served vs granted), per-chunk schedule counts split **pre-delivery / no-live-trace / wasted**, and per-chunk **parked time** (§10 q4) hooked at `LightWorkScheduler`'s park/promote transitions. `BenchmarkController` enables the profiler and clears it in `OnDestroy`. Report prints **NOT MEASURED** rather than 0.0 ms when the profiler did not run. Guarded by **B20–B22**, each prove-red-verified to redden exactly itself (370 baselines, `Validate All` green with telemetry enabled *and* disabled). The §7.1 `SettingsManager` remark rider was already discharged at `7eabda7b`. **Amended the same day after code review** — seven measurement defects found and six fixed *before* any capture ran, since a capture on the flawed instrument would have had to be re-run: the staging drain got its own slot (it sits outside the budget window, so charging it to `LightSchedule` broke that slot's ceiling-comparability); the two passes' utilisation denominators were made the same population; the park interval now survives a flush-and-restart and `LightWorkScheduler.Clear()`; and B21's wall-clock assertions now compare against *measured* spin durations, so an editor hitch can no longer redden a baseline. The seventh — the fail-safe promote-to-rescan gap — is **deliberately left unfixed** and documented in §10 q4 instead |   🟡   | P9-0a      |
+| **P9-1 — Capture and decide** ⬅ **NEXT**  | Fresh same-build baseline at vd 10/20/26/32 per §7, **plus a vd-32 `maxLightJobsPerFrame` 48 leg on that same build**. The sweep alone measures the decomposition only at the shipping cap, whereas §F4's model was fitted *across* 24 and 48 — so the extra leg is what actually confirms or kills the attribution that promoted P-3 to gating. Reported per `perf-benchmark`. **Selects the lever** and may trigger §2's kill condition. ⚠ Restore the caps to OM-1's 24/11 afterwards (§7) |   🟢   | P9-0       |
 | **P9-2 — Deliver-then-refine** (Option B2) | **The lead fix.** Decouples mesh delivery from settled lighting; corrections converge in place (Q7). Behind a default-OFF rollback flag, listed in the benchmark overlay for cold-cache robustness. ⚠️ Touches the mesh readiness contract — **`chunk-lifecycle` skill mandatory**, and Q7 needs a validation baseline with a prove-red, not a capture alone. |   🔴   | P9-1       |
 | **P9-2b — Delete redundancy** (Option B1) | Only what P9-1 proves is recomputing an unchanged result. Scoped after the fact; **may legitimately be empty**.                                                                                                                                                                                                                       |   🟡   | P9-1       |
 | **P9-3 — Re-tune the rate** (Option A′)   | ⛔ **BLOCKED by P9-0a.** The ms headroom it was gated on does not exist: at ×2 the ceiling binds, the cap goes inert, and the cost is ×4.79 CPU / ×0.61 min FPS. Re-openable **only after per-item cost falls (P-3)**, at which point the same 8 ms buys more items. Do not attempt before then.                                                                                                                                          |   🟡   | **P-3**, P9-1 |
@@ -626,9 +633,19 @@ enabled *and* disabled after each phase.
    score (`p + v × t_lead`) would answer this question and its own in one mechanism — worth
    revisiting if the two items are ever scheduled together.
 1. **Is amplification real, and how much of it is pre-delivery?** §3.3's ~7.6 lighting schedules per
-   delivered chunk is inferred from two ratios. P9-0 measures it *and* splits it at first delivery —
-   the split, not the total, is what decides whether Option B2 has anything to reorder. If the
-   multiplier lands near 1, both B options are dead and the lead passes to A′ or C.
+   delivered chunk is inferred from two ratios. The split, not the total, is what decides whether
+   Option B2 has anything to reorder. If the multiplier lands near 1, both B options are dead and the
+   lead passes to A′ or C. **P9-0 now measures both (2026-08-02); the question stays open until P9-1
+   runs a capture.**
+
+   Two properties of the instrument to carry into reading it. The post-delivery half is recorded as
+   "schedules with no live trace", which is an **upper bound** — it also absorbs schedules for chunks
+   that were never traced (saturation) or already closed by an unload, so it must be read beside the
+   phase's saturation flag. And the four buckets — pre-delivery, no-live-trace, wasted, and
+   **unresolved** (superseded by a re-request, or still in flight when the phase ended) —
+   **partition every schedule stamped**. The report checks their sum against the quota table's
+   independently-counted total and flags any gap, which is the guard against the failure this kind of
+   split makes easy: a bucket quietly missing a population still prints a perfectly plausible ratio.
 2. ~~**How much of amplification is P-7's ordering problem wearing a different hat?**~~ **Resolved as
    a scoping decision, 2026-08-01.** It may well be partly ordering, and P9-0's split will say so —
    but it no longer changes what P-9 does. Under §3.4 the fix is to stop gating visibility on
@@ -660,6 +677,33 @@ enabled *and* disabled after each phase.
    is neither redundancy nor pre-delivery correctness work but pure latency. P9-0's attribution
    should count **parked-time per chunk**, not only pass costs. May belong to the lighting async
    roadmap (`AS-*`) rather than to P-9 — decide once it is measured rather than inferred.
+
+   **✅ Instrumented 2026-08-02 (P9-0), still unanswered.** Per-chunk parked time is now accumulated
+   across `LightWorkScheduler`'s park/promote transitions and reported as percentiles beside the hop
+   latencies, so P9-1 can compare it directly against `populated→lit`.
+
+   ⚠ **The measure is a LOWER BOUND on ineligibility, and every bias runs the same way — against the
+   chunks that waited longest**, which are the ones this question is about. Three scope limits, all
+   stated before the numbers arrive so none of them can be discovered as a convenient explanation
+   afterwards:
+
+   - **Delivered chunks only.** The sample is emitted when a trace closes as `MeshApplied`, so a chunk
+     that parked and was then unloaded contributes to no percentile.
+   - *(Not a limit — recorded because it was one.)* A wait spanning a **re-request or a phase boundary**
+     *is* counted, and in full. The open interval is keyed by chunk in a side table rather than held on
+     the trace, precisely because a chunk stays parked across both events while its trace does not
+     survive either; holding it on the trace reported zero for exactly the population this question is
+     about. The wait is credited to the phase it ends in.
+   - **The lighting waiting set only.** A chunk stalled in the mesh queue on readiness surfaces as
+     `AllDeclined` or queue depth, never as parked time.
+   - **The promote-to-rescan gap is not counted.** The ~1 Hz fail-safe promotes the whole parked set at
+     once, but a chunk only re-parks when the scan actually *reaches* it — and the scan breaks on quota
+     or ceiling. A promoted-but-unreached chunk therefore sits in the ready set accruing nothing.
+     **Deliberately not fixed:** that time is already visible as `ReadyCount` plus a `Quota`/`Ceiling`
+     stop, so counting it as parked would double-count against a signal the same report carries. Note
+     the gap is near zero in the regime this question actually asks about — at 10 m/s `LightSchedule`
+     reports `OutOfWork` on ~92 % of frames, so the scan is idle and reaches promoted chunks within a
+     frame — and widest in the congested high-view-distance regime.
 
 ---
 
@@ -701,8 +745,49 @@ enabled *and* disabled after each phase.
   (**P-3**, the unbudgeted lighting merge) from parallel to gating; §3.4's B2 weakened as a throughput
   lever while its product rationale stands. §8: P9-0a done, P9-3 blocked behind P-3.
 
+* **v1.6** - **P9-0 implemented** (2026-08-02), no production behaviour change and no capture yet.
+  `WorldFrameProfiler`'s phase set is split one-per-budgeted-pass and, critically, gives the two
+  **unbudgeted** regions their own slots — `LightMerge` (the §F4 suspect) and `LightFailSafeScan` (the
+  ~1 Hz full-world walk, which would otherwise have reproduced the same unattributed-cost gap in a new
+  place). `LastFrameLightMs`/`LastFrameMeshMs` become derived sums, so the fluid-stress collector and
+  captures taken before the split are unaffected. `PipelineTelemetry` gains served-vs-granted per pass,
+  per-chunk schedule counts split pre-delivery / no-live-trace / wasted (§10 q1), and per-chunk parked
+  time (§10 q4). The report prints **NOT MEASURED** rather than a table of zeros when the profiler did
+  not run — a zero would read as "scheduling is free", the opposite of the truth. §5's two "not
+  measured" rows are retired and a third (parked time) added; §8's P9-0 row closes and **P9-1 gains a
+  vd-32 cap-48 leg**, because §F4's model was fitted across two caps and a single-cap sweep cannot test
+  its slope. Guarded by B20–B22, each prove-red-verified.
+* **v1.6a** - Code review of the v1.6 instrument, same day, **before any capture**. Six of seven findings
+  fixed, all of them measurement-correctness rather than production behaviour: the **staging drain** gets
+  its own unbudgeted slot (it runs before the budget window, so charging it to `LightSchedule` silently
+  broke that slot's comparability with `lightScheduleBudgetMs` — the very property the split was for);
+  the two scheduling passes' **utilisation denominators** were computed over different frame populations,
+  which would have made lighting read as starved against a mesh figure counted only over frames it was
+  allowed to serve; **parked time** now survives a flush-and-restart (a re-requested chunk previously
+  recorded zero however long it had waited) and `LightWorkScheduler.Clear()`; two stale comments; and
+  B21's wall-clock bounds now compare against **measured** spin durations rather than literals, so an
+  editor hitch cannot redden a baseline while the ~10 ms discrimination each assertion needs survives.
+  The seventh — the fail-safe promote-to-rescan gap — is **deliberately not fixed**, because that time is
+  already carried by `ReadyCount` plus the `Quota`/`Ceiling` stop reasons and counting it as parked would
+  double-count; §10 q4 now states it alongside the other two biases, all of which run the same direction.
+* **v1.6b** - Second review round, still before any capture. Four findings, all fixed. **(1)** The
+  amplification buckets did not partition the schedules: `Rerequested` and `InFlightAtPhaseEnd` traces
+  hit neither the delivered nor the wasted arm, so their quota units left the accounting entirely and the
+  columns silently stopped summing to what the quota table reported. Adds an **unresolved** bucket plus a
+  **reconciliation check** — two independently-counted paths (per item, per frame) that must agree, with a
+  banner on any gap, because a bucket missing a population still prints a plausible ratio. **(2)** Park
+  state moves from the trace to a **coord-keyed side table** that phase boundaries do not clear. A chunk
+  stays parked across both a re-request and a speed-tier boundary while its trace survives neither, so
+  the per-trace timestamp reported **zero** for waits that really happened — on exactly the population
+  §10 q4 asks about. This also retires v1.6a's carry-forward heuristic, which could only ever patch one
+  of the two boundaries, and changes the semantics to credit the **whole** wait: the chunk was ineligible
+  throughout, and a re-request is bookkeeping in this layer rather than a physical reset. **(3)** A
+  comment claiming unloaded chunks' waits are "kept counted" when `CloseTrace` discards them. **(4)** A
+  baseline whose label asserted more than it tested, and falsely — the disabled profiler *freezes* its
+  published values rather than zeroing them, which is now pinned rather than mis-described.
+
 ---
 
 **Last Updated:** 2026-08-02
-**Next Review:** when P9-0 (attribution) starts — it confirms or kills the P9-0a §F4 model that
-promoted P-3 to the gating lever
+**Next Review:** when P9-1 (capture) runs — it confirms or kills the P9-0a §F4 model that promoted
+P-3 to the gating lever, using the instrument P9-0 just shipped
