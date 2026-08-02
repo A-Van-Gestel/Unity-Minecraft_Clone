@@ -26,7 +26,13 @@ namespace Editor.Dev
     /// statement about redundancy but is <b>not</b> the same unit as the per-schedule multiplier (6.28) that
     /// P9-1 measured. Do not quote the two as if they were.</para>
     /// <para><b>Not a validation suite</b> — it reports numbers, it does not pass or fail, and it is not
-    /// registered with <c>Validate All</c>. Delete it once P9-2 has its verdict.</para>
+    /// registered with <c>Validate All</c>.</para>
+    /// <para><b>KEEP (decided 2026-08-02).</b> An earlier version of this docstring said "delete once P9-2
+    /// has its verdict". P9-2 has its verdict — it shipped — and this probe is the reproducible evidence
+    /// behind design doc §3.3b, which is the only place the redundancy claim is demonstrated rather than
+    /// asserted. It is also the cheapest way to re-test the premise if the cascade is ever changed again:
+    /// run it, and a healthy engine should still report a high no-op fraction. Delete it only alongside
+    /// §3.3b itself.</para>
     /// </summary>
     public static class EdgeCheckRedundancyProbe
     {

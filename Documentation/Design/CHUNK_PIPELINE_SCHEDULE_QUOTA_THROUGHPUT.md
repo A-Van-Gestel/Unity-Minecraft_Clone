@@ -1,10 +1,17 @@
 # P-9 — Schedule-Quota Throughput Ceiling
 
-**Version:** 1.7a
+**Version:** 2.0
 **Date:** 2026-08-02
-**Status:** **Measurement complete — P9-0a, P9-0 and P9-1 are all done.** The instrument ships,
-guarded by baselines B20–B22, and has been used for a five-run capture that re-ranks §6 and corrects
-§3.3's inferences. **No fix has been written**; every remaining lever is proposed.
+**Status:** ✅ **THE CORE QUESTION IS CLOSED. P9-0a, P9-0, P9-1 and P9-2 are all done, and P9-2 SHIPPED.**
+The lead lever (§6 Option B1, the convergent edge-check cascade) is live and **default-ON** as
+`Settings.enableConvergentEdgeCheckCascade`, guarded by B97–B100. It cut lighting amplification
+**6.12 → 1.86** per delivered chunk, met the visibility budget (Q1) at **every** view distance for the
+first time since P-8, and — the result that closes this document's premise — **took the rate quota out of
+the binding position** (`Quota`-bound frames 94.3 % → 8.3 %). §3.1's `cap × 60` identity is confirmed and
+still true; the pipeline simply no longer operates against it at vd 32.
+⚠️ **Read §3's inferences as history, not as current state** — the 6.28 figures they build on describe the
+pre-P9-2 engine (see §3.3b's closing note). The remaining levers (C, A′) are **optional and need
+re-ranking**, not scheduling: see the Next Review note at the foot of this document.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The chunk pipeline delivers a near-constant 5 658–6 803 chunks per 30 s phase from view distance 10
@@ -382,7 +389,21 @@ rule would have skipped *that actually changed* — is **0 everywhere**.
 3. **Harness fixtures, not live generated terrain.**
 
 It establishes that the redundancy exists and is large, not its precise in-game magnitude — which is what
-the pending IL2CPP A/B measures, in the units §2.1's Q3c actually scores (amplification and delivered/s).
+the IL2CPP A/B measured, in the units §2.1's Q3c scores (amplification and delivered/s).
+
+> ⚠️ **EVERY AMPLIFICATION FIGURE ABOVE THIS LINE IS HISTORICAL.** §3.3, §3.3b and §5 describe the engine
+> **before** P9-2 shipped. The 6.26–7.41 totals, the ~3.9 pre-delivery split and the 6.6–6.8 generation-pass
+> figures were all measured with the cascade re-arming unconditionally, which is no longer how the engine
+> runs. **Shipped state as of 2026-08-02: total ≈ 1.86, pre-delivery ≈ 1.09 per delivered chunk**
+> ([P9-2 capture](../Performance/CHUNK_PIPELINE_P9_2_CASCADE_IL2CPP_2026-08-02_BENCHMARK.md)). Do not open
+> a new item against the old numbers without re-measuring — they are kept because they are the evidence the
+> fix was built on, not because they describe the pipeline you would profile today.
+>
+> ⚠️ **Column-format trap when re-deriving from raw benchmark logs.** P9-1's tables above present *every*
+> amplification column as a **ratio per delivered chunk**. The raw log's own table prints `pre-delivery` and
+> the bucket columns as **absolute counts**, with only the `per delivered chunk` column as a ratio. Divide
+> the `total` column by `Delivered chunks (MeshApplied)` to reproduce the totals quoted here; reading the
+> log's bucket counts as ratios silently inflates everything by three to four orders of magnitude.
 
 ### 3.4 The multiplier is spent *before* first visibility — and that is a product decision
 

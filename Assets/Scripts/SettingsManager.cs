@@ -414,6 +414,13 @@ public class Settings
     /// capture cut lighting amplification 6.12 → 1.86 per delivered chunk at vd 32 and met the visibility
     /// budget at every view distance. Retained as a rollback lever, and listed in
     /// <see cref="OverlayBenchmarkSettingsFromDisk"/> so a cold-cache benchmark launch can still A/B it.
+    /// <para>
+    /// ⚠ <b>`World.prefab` carries a stale serialized `0` for this field and that is harmless</b> — it was
+    /// serialized while the default was still false. `World` overwrites its whole `settings` reference from
+    /// <see cref="LoadSettings"/> at startup, so the prefab value never reaches the pipeline. Do not "fix"
+    /// the prefab by hand (project rule: let the editor own .prefab serialization) and do not read it as
+    /// evidence that the feature is off.
+    /// </para>
     /// </summary>
     [SettingField(SettingsTab.Performance, Label = "Convergent Edge-Check Cascade", Order = 9)]
     [Tooltip("Skips the post-generation edge-check round (and its neighbor triggers) when the lighting " +
