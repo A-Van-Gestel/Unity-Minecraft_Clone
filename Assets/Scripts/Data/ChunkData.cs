@@ -1162,17 +1162,31 @@ namespace Data
         /// <param name="jobLightMap">The job's computed light map (section-contiguous, full chunk).</param>
         /// <param name="blockTypes">Block palette for section count recalculation, or null to recompute
         /// the non-air count only (the harness passes null — counts are meshing-only, light-irrelevant).</param>
-        public void ApplyJobLightMap(NativeArray<uint> jobVoxelMap, NativeArray<ushort> jobLightMap,
+        /// <returns>True if any voxel's effective light value differs from its pre-merge value. P9-2 uses
+        /// this to re-arm the edge-check cascade on effect rather than on stability; a pass that returns
+        /// false left every border byte-identical to what the neighbors already read.</returns>
+        public bool ApplyJobLightMap(NativeArray<uint> jobVoxelMap, NativeArray<ushort> jobLightMap,
             [CanBeNull] BlockType[] blockTypes)
         {
             int indexOffset = 0;
             const int sectionVolume = ChunkMath.SECTION_VOLUME;
+            bool changedAnyLight = false;
 
             for (int s = 0; s < sections.Length; s++)
             {
                 ChunkSection section = sections[s];
                 bool sectionHasData = false;
                 bool isNewSection = false;
+
+                // P9-2: the section's EFFECTIVE pre-merge light, captured before the compact flag is
+                // cleared below. A compacted section reads as its uniform sky level whether or not the
+                // section object survived compaction (GetLightData shadows LightData with it), so the
+                // comparison has to apply the same precedence rather than trusting LightData.
+                byte oldUniformSky = SectionUniformSkyLevel[s];
+                bool oldIsUniform = oldUniformSky != UNIFORM_SKY_NONE;
+                ushort oldUniformLight = oldIsUniform
+                    ? LightBitMapping.PackLightData(oldUniformSky, 0, 0, 0)
+                    : (ushort)0;
 
                 // Clear any stale compact flag — the lighting job will provide fresh data.
                 SectionUniformSkyLevel[s] = UNIFORM_SKY_NONE;
@@ -1195,6 +1209,11 @@ namespace Data
                         sections[s] = section;
                         isNewSection = true;
                     }
+                    else if (oldUniformLight != 0)
+                    {
+                        // Stays absent, so every voxel now reads 0 — a change iff it read non-zero before.
+                        changedAnyLight = true;
+                    }
                 }
 
                 if (section != null)
@@ -1205,6 +1224,16 @@ namespace Data
                     {
                         // Overwrite the ushort light array with the job's computed values.
                         ushort lightVal = jobLightMap[indexOffset + i];
+
+                        // A freshly rented section read as 0 (or as the uniform level) before this merge;
+                        // its pooled LightData contents are not the pre-merge state.
+                        ushort oldVal = oldIsUniform
+                            ? oldUniformLight
+                            : isNewSection
+                                ? (ushort)0
+                                : section.LightData[i];
+                        if (oldVal != lightVal) changedAnyLight = true;
+
                         section.LightData[i] = lightVal;
 
                         if (section.voxels[i] != 0) sectionHasData = true;
@@ -1228,6 +1257,8 @@ namespace Data
 
                 indexOffset += sectionVolume;
             }
+
+            return changedAnyLight;
         }
 
         /// <summary>

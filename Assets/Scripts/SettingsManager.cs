@@ -409,6 +409,18 @@ public class Settings
     public int maxLightJobsPerFrame = 32;
 
     /// <summary>
+    /// P9-2 (Option B1): re-arm the post-generation edge-check cascade only when a lighting pass actually
+    /// changed light, instead of on every stable completion. Default-OFF pending its IL2CPP capture; it is
+    /// listed in <see cref="OverlayBenchmarkSettingsFromDisk"/> so a cold-cache benchmark launch can A/B it.
+    /// </summary>
+    [SettingField(SettingsTab.Performance, Label = "Convergent Edge-Check Cascade", Order = 9)]
+    [Tooltip("Skips the post-generation edge-check round (and its neighbour triggers) when the lighting " +
+             "pass that would have armed it changed nothing.\n\n" +
+             TooltipTags.Performance + "Removes lighting work that recomputes an unchanged result. " +
+             "Experimental — off by default.")]
+    public bool enableConvergentEdgeCheckCascade = false;
+
+    /// <summary>
     /// The maximum number of structure-related VoxelMods that can be expanded in a single frame.
     /// Prevents lag spikes when generating massive structures.
     /// </summary>
@@ -1141,6 +1153,10 @@ public static class SettingsManager
             // here because the re-test it is retained for needs to switch legs without a rebuild — a
             // rebuilt leg would not be the same build, which is the whole point of running one.
             defaults.scalePanicGateThresholdsWithResidency = saved.scalePanicGateThresholdsWithResidency;
+
+            // P9-2's opt-in lever, default-OFF until its capture scores Q1/Q2. Listed for the same reason
+            // as P-8's: the A/B legs have to be the same build, so the flag must survive a cold cache.
+            defaults.enableConvergentEdgeCheckCascade = saved.enableConvergentEdgeCheckCascade;
         }
         catch (Exception)
         {

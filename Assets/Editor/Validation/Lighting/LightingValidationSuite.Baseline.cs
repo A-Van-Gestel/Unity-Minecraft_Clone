@@ -127,6 +127,12 @@ namespace Editor.Validation.Lighting
             // self-registers here. ---
             AddBandDecisionBaselineScenarios(scenarios);
 
+            // --- P9-2 outcome-conditional edge-check cascade (B97-B99): the pure
+            // EdgeCheckCascadeDecision predicate (incl. its flag-off reduction to the legacy rule) and the
+            // ChunkData.ApplyJobLightMap change signal it consumes, across the uniform-sky compaction
+            // boundary. Lives in Baselines/LightingValidationSuite.Baseline.P92Cascade.cs. ---
+            AddP92CascadeBaselineScenarios(scenarios);
+
             // --- LI-2 band differential gate (B75-B78): identical world scripts run banded vs full
             // height must produce bit-identical fields with equal round counts; B78 is the gate's
             // prove-red (a headroom-stripped band must be caught). Lives in
@@ -207,6 +213,10 @@ namespace Editor.Validation.Lighting
         /// <summary>Hook for the LI-2 band-derivation baselines (implemented in Baselines/LightingValidationSuite.Baseline.BandDecision.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddBandDecisionBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the P9-2 edge-check-cascade baselines (Baselines/…Baseline.P92Cascade.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddP92CascadeBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the LI-2 band differential gate baselines (implemented in Baselines/LightingValidationSuite.Baseline.BandDifferential.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>

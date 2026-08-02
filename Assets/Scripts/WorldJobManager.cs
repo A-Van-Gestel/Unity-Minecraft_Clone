@@ -1627,9 +1627,15 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
         bool isChunkStable = jobData.IsStable[0];
         bool hasRealCrossChunkMods = false;
+
+        // P9-2: whether this pass actually moved light in this chunk (design §6, Option B1). Initialized
+        // TRUE so every arm that does not measure it falls back to legacy behavior — a chunk that is
+        // non-null but not populated skips the merge below and still reaches the cascade decision, so a
+        // false here would silently start declining its cascades.
+        bool lightChanged = true;
         if (chunkData != null && chunkData.IsPopulated)
         {
-            ApplyLightingJobResult(chunkData, jobData);
+            lightChanged = ApplyLightingJobResult(chunkData, jobData);
 
             // Apply mods other chunks' jobs deferred for THIS chunk while its job was in
             // flight — now that the merge is done they can no longer be overwritten
@@ -1736,9 +1742,29 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             // stabilize with stale data from each other need iterative convergence:
             // round 1 fixes the immediate frontier, round 2 reconciles any remaining
             // discrepancies after neighbors have run their own edge checks.
-            if (chunkData != null && chunkData.RemainingEdgeCheckRounds > 0)
+            // P9-2 (design §6, Option B1): the cascade propagates on EFFECT, not on stability — `IsStable`
+            // only means no work is pending, which a pass that wrote nothing also satisfies. The rule lives
+            // in the shared decision so the validation suite exercises the exact production predicate;
+            // flag-off never yields SpendOnly and so reduces to the legacy form.
+            EdgeCheckCascadeDecision.CascadeOutcome cascade = chunkData != null
+                ? EdgeCheckCascadeDecision.Evaluate(
+                    _world.settings.enableConvergentEdgeCheckCascade,
+                    chunkData.RemainingEdgeCheckRounds,
+                    lightChanged,
+                    chunkData.HasLightChangesToProcess)
+                : EdgeCheckCascadeDecision.CascadeOutcome.None;
+
+            if (cascade != EdgeCheckCascadeDecision.CascadeOutcome.None)
             {
+                // The round is spent whether or not the pass propagates. Only the flags below buy lighting
+                // schedules; the counter buys none — and letting a converged chunk hoard budget would break
+                // the premise ModifyVoxel's Bug-05 top-up rests on (post-generation the rounds are spent)
+                // and arm cascades on ordinary edits that legacy never armed.
                 chunkData.RemainingEdgeCheckRounds--;
+            }
+
+            if (cascade == EdgeCheckCascadeDecision.CascadeOutcome.SpendAndRearm)
+            {
                 LastEdgeRecycleJobCount++;
 
                 // Self-edge-check: re-examine this chunk's own borders with the
@@ -2025,7 +2051,10 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// The full-LightMap overwrite is safe against cross-chunk mods: mods targeting a chunk with an
     /// in-flight job are deferred and drained right after this merge (the Bug 08 path-2 fix).
     /// </summary>
-    private void ApplyLightingJobResult(ChunkData chunkData, LightingJobData jobData)
+    /// <param name="chunkData">The chunk receiving the merge.</param>
+    /// <param name="jobData">The completed job's data.</param>
+    /// <returns>True if the merge changed any voxel's effective light value (P9-2's cascade signal).</returns>
+    private bool ApplyLightingJobResult(ChunkData chunkData, LightingJobData jobData)
     {
         // LI-1: the job wrote light only into the center [2,18) region of the padded volume — extract it
         // back into the section-contiguous center LightMap, then merge through the same ApplyJobLightMap.
@@ -2033,7 +2062,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         // the correct merge reference. LI-2: only the job's gathered band rows are extracted; above them
         // LightMap keeps its schedule-time snapshot, which the job provably did not change.
         ChunkMath.ExtractCenterLight(jobData.PaddedLight, jobData.LightMap, jobData.BandMinY, jobData.BandHeight);
-        chunkData.ApplyJobLightMap(jobData.Map, jobData.LightMap, _world.BlockTypes);
+        return chunkData.ApplyJobLightMap(jobData.Map, jobData.LightMap, _world.BlockTypes);
     }
 
     #region IDisposable

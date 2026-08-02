@@ -74,6 +74,7 @@ MonoBehaviour:
     maxInitialLoadRadius: 10
     maxMeshRebuildsPerFrame: 10
     maxLightJobsPerFrame: 32
+    enableConvergentEdgeCheckCascade: 0
     maxStructureModsPerFrame: 5000
     maxInFlightMeshJobs: 20
     maxInFlightGenerationJobs: 32
