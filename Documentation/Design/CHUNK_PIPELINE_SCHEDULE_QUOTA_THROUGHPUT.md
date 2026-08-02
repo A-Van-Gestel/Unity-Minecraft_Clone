@@ -1,6 +1,6 @@
 # P-9 — Schedule-Quota Throughput Ceiling
 
-**Version:** 1.7
+**Version:** 1.7a
 **Date:** 2026-08-02
 **Status:** **Measurement complete — P9-0a, P9-0 and P9-1 are all done.** The instrument ships,
 guarded by baselines B20–B22, and has been used for a five-run capture that re-ranks §6 and corrects
@@ -81,7 +81,7 @@ are 32 % of the frame). Consequences: §6 re-ranked to **B1 → C → A′**, B2
 and re-filed as a product item, P-3 demoted from gating to enabler.
 
 **Audited:** 2026-08-01, at commit `c7bea678` (branch `feat/world-scaling`).
-Findings are from static review of `World.cs:2078–2345` (the lighting ready-set scan and the mesh
+Findings are from static review of `World.cs:2079–2400` (the lighting ready-set scan and the mesh
 schedule/apply passes), `Helpers/PipelinePassBudget.cs` (`ComputeQuota`, `ScaleCeilingMs`,
 `ClassifyStop`, `Window`), `Helpers/MeshDrainPolicy.cs`, `Helpers/LightWorkScheduler.cs`,
 `SettingsManager.cs` (budget fields + `OverlayBenchmarkSettingsFromDisk`),
@@ -285,15 +285,15 @@ necessarily wasted**. The v1.0 draft framed amplification as redundancy to delet
 that. Known contributors visible in the code:
 
 - **Re-scheduling.** A chunk leaves the lighting ready set on a successful schedule
-  (`World.cs:2243`) but re-enters via its completion's flag callback, `PromoteNeighborhood`, and the
-  ~1 s `PromoteAll` fail-safe (`World.cs:2121`). Edge checks re-flag neighbours, so one delivered
+  (`World.cs:2281`) but re-enters via its completion's flag callback, `PromoteNeighborhood`, and the
+  ~1 s `PromoteAll` fail-safe (`World.cs:2135`). Edge checks re-flag neighbours, so one delivered
   chunk legitimately drives several lighting jobs — but nothing today distinguishes *necessary*
   re-lighting from redundant re-lighting.
 - **Re-meshing.** `MeshDrainPolicy.Drain` spends a quota unit per `TrySchedule` that succeeds; a
   chunk whose neighbours light up after it meshed is re-queued and spends another. ~3 mesh builds
   per delivered chunk is a plausible ordering artefact (P-7's territory) *or* a real dependency
   requirement — and again, unmeasured.
-- **Declined candidates cost no quota** (the quota increments only on success, `World.cs:2242`,
+- **Declined candidates cost no quota** (the quota increments only on success, `World.cs:2276`,
   `MeshDrainPolicy.cs:124`), so amplification is genuinely repeated *work*, not repeated *looking*.
   This is a good property and the design must preserve it.
 
@@ -392,7 +392,7 @@ P-8 loosened a limit without establishing what it bounded. The answer for the qu
 Every unit of light quota buys a `JobManager.ScheduleLightingUpdate`, which performs the
 neighbourhood gather this analysis's §1 identifies as the pipeline's largest main-thread cost
 centre (per-job full-volume copies; ~11 pooled buffers rented per job, per the `maxInFlightLightingJobs`
-docstring at `World.cs:2144`). Every unit of mesh quota buys a `TrySchedule` with its own neighbour
+docstring at `World.cs:2169`). Every unit of mesh quota buys a `TrySchedule` with its own neighbour
 gather. The readiness predicates (`AreNeighborsDataReady` / `AreNeighborsReadyAndLit`) run per
 *candidate*, not per scheduled item, so they are outside the quota's control entirely.
 
@@ -407,7 +407,7 @@ Each budgeted pass has a second limit — a Stopwatch ms ceiling (`lightSchedule
 measurement says the ceiling is **not** what stops these passes:
 
 - `ClassifyStop` receives at most one true break flag per frame (the loops `break` on the first
-  limit hit — `World.cs:2173–2189`, `MeshDrainPolicy.cs:87–107`), so the reasons partition the
+  limit hit — `World.cs:2202–2189`, `MeshDrainPolicy.cs:87–107`), so the reasons partition the
   frames.
 - `Quota` holds 99.3 % of `LightSchedule` frames at vd 32. Therefore `CeilingExpired` accounts for
   **≤ 0.7 %** of them.
@@ -435,8 +435,8 @@ Two consequences, and they cut in opposite directions:
 
 | Area                                | State                                                                                                                                     |
 |-------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
-| Light schedule quota                | `World.cs:2135` — `ComputeQuota(maxLightJobsPerFrame, unscaledDeltaTime)`; break at `World.cs:2173` leaves the remainder READY (§9.1 semantics) |
-| Mesh schedule quota                 | `World.cs:2331` → `MeshDrainPolicy.Drain`; break at `MeshDrainPolicy.cs:87` leaves chunks queued in place                                     |
+| Light schedule quota                | `World.cs:2156` — `ComputeQuota(maxLightJobsPerFrame, unscaledDeltaTime)`; break at `World.cs:2202` leaves the remainder READY (§9.1 semantics) |
+| Mesh schedule quota                 | `World.cs:2387` → `MeshDrainPolicy.Drain`; break at `MeshDrainPolicy.cs:87` leaves chunks queued in place                                     |
 | Caps                                | `maxMeshRebuildsPerFrame` 10 / `maxLightJobsPerFrame` 32 in `SettingsManager.cs:399,409`, **overwritten at runtime by OM-1** (`DeviceCalibration`) |
 | ms ceilings                         | `lightScheduleBudgetMs` 8 / `meshScheduleBudgetMs` 6 (`SettingsManager.cs:514,527`), FPS-cap-scaled only (`ScaleCeilingMs`)                   |
 | In-flight bounds                    | `maxInFlightLightingJobs` 64, `maxInFlightMeshJobs` 20 — memory bounds, not throughput; `InFlightCap` dominates no phase in any P-8 run       |
@@ -829,6 +829,24 @@ enabled *and* disabled after each phase.
      reports `OutOfWork` on ~92 % of frames, so the scan is idle and reaches promoted chunks within a
      frame — and widest in the congested high-view-distance regime.
 
+5. **Is the regime this document optimises even a shipping regime?** ⬅ **new, from P9-1 — and it
+   governs whether P-9 restarts at all.** `Settings.viewDistance` defaults to **5**
+   (`SettingsManager.cs:168`), and P9-1 measured **vd 10 meeting the visibility budget** (813 ms
+   against 800 ms). Every failure this document is built on lives at **vd ≥ 20**: the 1.4–1.5×
+   shortfalls, the 91 % closed gate, the ×2.71 CPU cost of raising the cap. P-9 was promoted to top
+   pipeline item on P-8's **vd 32** numbers — a configuration a default-settings player never enters.
+
+   This is *not* an argument that the work was wasted: the rate identity, the per-pass attribution and
+   the instrument are permanent, and they apply at every view distance. It is an argument that the
+   **priority** was set by a stress point rather than by a shipping configuration, and nobody has
+   decided which vd 32 is. The same question FP-10 left open about vd 32's 5 GB peak.
+
+   **Decide it before P-9 restarts after P9-2.** If vd 32 is a supported configuration, the remaining
+   levers are worth their cost; if it is a stress point, P-9's honest disposition after P9-2 is
+   *parked*, and the pipeline's real backlog is P-7 (which is scoped to low view distance and therefore
+   to the default) plus the correctness items. Whoever answers this should also state where the
+   supported ceiling is, since `viewDistance` is `[Range]`-editable up to a value no capture defends.
+
 ---
 
 ## Document History
@@ -924,6 +942,13 @@ enabled *and* disabled after each phase.
   lighting alone ~49 %. §6 re-ranked to **B1 → C → A′**, with **P-3 demoted from gating to enabler**
   because the schedule pass is `Quota`-bound on ~98 % of frames, so cheaper items buy frame time and no
   extra chunks. §8: P9-1 closes, P9-2 becomes B1, P9-2b withdrawn.
+* **v1.7a** - Handoff-audit pass. **New §10 open question 5**, which had existed only in conversation:
+  `viewDistance` defaults to **5** and P9-1 measured **vd 10 meeting the budget**, so every failure this
+  document is built on lives at vd ≥ 20 — a configuration a default player never enters. It asks whether
+  vd 32 is a supported config or a stress point, and makes that the gate on P-9 restarting after P9-2.
+  Also corrects **eight stale `World.cs` line references** in the audit header, §3.3, §4.1, §5 and §9.1:
+  the P9-0 commit (`b5808a56`) added ~55 lines to the instrumented region, so every citation drifted by
+  10–56 lines and would have sent a cold session to the wrong code.
 
 ---
 
