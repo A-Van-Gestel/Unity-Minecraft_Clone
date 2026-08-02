@@ -190,12 +190,45 @@ the same 560 m, which is where ordering does have headroom. This is an independe
 | **Q1**  | **Visibility budget met** ⭐     | all levers | p50 `enqueue→MeshApplied` **≤ `vd × 16 ÷ speed`** at vd 20, 26 and 32; partial credit if the shortfall ratio improves ≥ ×1.3 | The table above: currently missed by 1.4–1.6× at every high vd. Matches independent visual observation (FP-4) and P-7's target |
 | **Q2**  | **Frame time holds** ⚠️         | all levers | Loading-pass **min FPS ≥ ×0.95** and **avg CPU frame time ≤ ×1.05** vs the same-build OFF leg, at vd 20, 26 **and** 32     | The arm P-8 failed (−37 % / −32 % min FPS). **A Q2 failure is a NO-GO regardless of every other criterion**               |
 | **Q3a** | **Rate lever moved the ceiling** | P9-0a, P9-3 | `LightSchedule` `Quota` share falls below **90 %** of frames at vd 32 (from 99.3 % / 99.5 %), **and** completions ≥ ×1.35   | For a rate change, throughput and quota share must move together; if `Quota` stays at 99 % while the cap rose, §3.1 is wrong |
-| **Q3b** | **Refine lever moved latency**   | P9-2       | Q1 improves **while** `Quota` share and completions/s may legitimately stay flat                                          | Deliver-then-refine reorders work rather than adding rate. **Scoring it on Q3a would fail a success** — see §3.4          |
+| **Q3b** | **Refine lever moved latency**   | ~~P9-2~~ — **withdrawn with B2** | Q1 improves **while** `Quota` share and completions/s may legitimately stay flat                                          | Deliver-then-refine reorders work rather than adding rate. **Scoring it on Q3a would fail a success** — see §3.4. Applied to P9-2 only while P9-2 meant **B2**; B2 left P-9, so this row now scores nothing |
+| **Q3c** | **Amplification lever moved the divisor** ⭐ | **P9-2 (B1)** | **(a)** lighting schedules/s stays flat (within ±5 % of the OFF leg); **(b)** total lighting quota units per delivered chunk **falls**; **(c)** delivered chunks/s **rises by the reciprocal factor**, within ±5 %; **(d)** the §3.1 closure `delivered/s = rate ÷ amplification` holds in **both** legs | B1 does not touch the rate — it divides the same rate by a smaller multiplier, so its signature is the *opposite* of Q3a's. **Scoring B1 on Q3a would fail a success:** Q3a demands the `Quota` share fall below 90 %, and a correct B1 leaves the pass `Quota`-bound at ~98 % by construction. (a) is the guard against crediting B1 for something that actually moved the rate; (d) is the guard against a bookkeeping change that flatters the ratio without delivering a chunk |
 | **Q4**  | **Memory holds**               | all levers | Peak total memory ≤ **×1.10**                                                                                             | P-8's G3, unchanged — more in-flight work rents more pooled buffers                                                       |
 | **Q5**  | **Waste is not scored**        | all levers | Recorded, not charged                                                                                                     | Delivering more work through an unfixed ordering stage raises discard; P-7 owns it (P-8 G5 precedent)                     |
 | **Q6**  | **Coverage**                   | all levers | Tour coverage ≥ 99 %, else the loading pass is partly measuring generation                                                | P-8's G4, which went marginal at vd 26/32 — carried forward as a validity gate                                            |
 | **Q7**  | **Corrections still converge** | P9-2       | Every provisionally-delivered chunk reaches correct lighting; no permanently-wrong mesh, and the correction is not merely deferred | The explicit condition on the §3.4 decision: showing early must not become never fixing. Guarded by a validation baseline, not only by capture |
 | **Q8**  | **Quality is not traded away** ⭐ | P9-2       | Report **% of chunks fully lit at first visibility**. Must stay ≈ 100 % at vd 10, and the provisional fraction at vd 26/32 must be *below* the fraction currently missing the budget | §3.4's preference 1. Without this the design optimises void-avoidance and quietly degrades the common case; the vd 10 arm proves the trigger is conditional, not blanket |
+
+### 2.1 P9-2's capture matrix (pre-committed, 2026-08-02)
+
+Eight runs, one build, `enableConvergentEdgeCheckCascade` OFF/ON paired **adjacent in time** at each view
+distance so thermal and background drift cannot masquerade as the effect.
+
+| Leg | vd | flag | Purpose |
+|-----|----|------|---------|
+| A1 / A2 | **10** | OFF / ON | Closest to the **intended default** (§10 q5: 12–15). Must show no regression in the regime that already meets the budget |
+| B1 / B2 | **20** | OFF / ON | First failing view distance (Q1 currently ×1.42) |
+| C1 / C2 | **26** | OFF / ON | **Mandatory** — worst point on every frame-cost axis in the P-8 sweep (§7) |
+| D1 / D2 | **32** | OFF / ON | The configuration P-9 was opened on; also the Q4 memory case |
+
+Each run is the standard `BenchmarkController` tour. **The scored phase is the loading pass @ 200 m/s**
+(as P-8, P9-0a, P9-1) — but for B1 the **generation pass @ 10 m/s must also be read**, because that is
+where P9-1 measured amplification highest (6.6–6.8 vs 3.8–4.0) and therefore where this lever's effect
+should be **largest**. A matrix that scores only the loading phase under-weights the regime under test.
+
+**Per-run extraction:** Q1 p50 `enqueue→MeshApplied` vs `vd × 16 ÷ 200`; Q2 loading min wall FPS + avg
+CPU frame; Q3c's four quantities in both regimes; Q4 peak memory; Q5 waste (recorded, not charged);
+Q6 tour coverage; plus `populated→lit` p50 on the 10 m/s pass, the hop the cascade's serialized rounds
+live in.
+
+**Pre-committed prediction, so the result cannot be re-narrated afterwards.** If the §3.3b finding
+transfers to production, total lighting amplification falls from **6.28** toward **~4.3–5.0** on the
+loading pass (one of two self rounds plus its fan-out removed) and further in the 10 m/s generation
+regime; delivered chunks/s rises by the reciprocal (**~228 → ~270–300**); and per-second main-thread cost
+is **flat or slightly down**, since B1 spends no extra main thread by construction and pays for fewer
+merges. **The honest falsifier:** if amplification does *not* fall, the harness result did not transfer —
+most likely because production's interleaving (an edge check fires when *that* chunk stabilizes, while
+neighbours still churn) means its rounds genuinely do change things in-game. That is precisely the
+limitation §3.3b states, and it would return P9-2 to an empty result at the production level.
 
 **Kill condition.** If phase P9-0's attribution shows the two scheduling passes already consume a
 majority of the main-thread frame at vd ≥ 26, then the rate ceiling *is* the frame-time bound, every
@@ -296,6 +329,59 @@ that. Known contributors visible in the code:
 - **Declined candidates cost no quota** (the quota increments only on success, `World.cs:2276`,
   `MeshDrainPolicy.cs:124`), so amplification is genuinely repeated *work*, not repeated *looking*.
   This is a good property and the design must preserve it.
+
+### 3.3b Where the 6.28 actually come from (P9-2, measured 2026-08-02)
+
+P9-1 sized the multiplier; this section attributes it. Static enumeration of every site that can set a
+lighting flag, plus a deterministic harness probe, gives:
+
+| Mechanism | Can it spend a lighting quota unit? | Count per chunk |
+|-----------|-------------------------------------|-----------------|
+| **Initial lighting** (`NeedsInitialLighting`) | yes | exactly 1 |
+| **Self edge-check rounds** (`RemainingEdgeCheckRounds = 2`) | yes | exactly 2 |
+| **Neighbour edge triggers** (`TriggerNeighborEdgeChecks`) | yes | up to 4 neighbours × 2 rounds = 8 flag-sets, coalescing into 1–3 schedules |
+| **Unstable re-flag / cross-chunk mods** | yes | data-dependent, genuine convergence |
+| **`PromoteNeighborhood` / the ~1 s `PromoteAll` fail-safe** | **no** | **0** |
+
+**The fail-safe is closed as a source, structurally.** Promotion only moves a chunk from the waiting set
+to the ready set; it sets no flag. A promoted chunk with no flags takes `LightingScanDecision`'s `Remove`
+arm and the scan explicitly *un-counts* it (FP-7c). It cannot contribute to the 6.28 by construction.
+
+That leaves 1 + 2 + (1–3) ≈ **4–6 schedules from the edge-check cascade alone**, against a measured 3.92
+pre-delivery / 6.28 total — **the cascade is the amplification.**
+
+**And it re-arms on the wrong condition.** `MergeCompletedLightingJob` re-arms the self round *and* the 4
+neighbour triggers whenever the job reports `IsStable` — which means "no work left pending", a condition a
+pass that wrote **nothing** also satisfies. Measured over real harness rounds, diffing every chunk's light
+field around each round (grid 5×5, superflat plus 12 seeded dense-canopy worlds):
+
+| Fixture | round 1 no-op | round 2 no-op | rounds 3–4 | skipped-but-changed |
+|---------|---------------|---------------|------------|---------------------|
+| Superflat, settled | 100 % | 100 % | 100 % | 0 |
+| Dense canopy, settled | 100 % | 100 % | 100 % | 0 |
+| Dense canopy, **unsettled** (positive control) | **95.7 %** (13/300 chunks, 159 voxels) | 100 % | 100 % | 0 |
+
+The unsettled family is the instrument's positive control — it reports non-zero change, so the 100 % rows
+are a property of the field and not a broken probe. **Production's round 2 recomputed an unchanged result
+in every chunk of every fixture**, and the counterfactual column — chunk-rounds the outcome-conditional
+rule would have skipped *that actually changed* — is **0 everywhere**.
+
+⚠️ **Three honest limits.**
+
+1. **The unit is a flagging wave, not a lighting schedule.** Each probe round flags every chunk and then
+   runs the grid to quiescence, so one tallied "chunk-round" folds in an unbounded number of production
+   passes; production instead flags only the cardinal neighbours of chunks that actually stabilized,
+   bounded by `RemainingEdgeCheckRounds`, which the probe ignores entirely. A no-op round is therefore a
+   sound statement about redundancy — nothing in that wave changed anything — but it is **not** the same
+   unit as the per-schedule 6.28 multiplier, and the two must not be quoted against each other. The
+   fraction is biased high relative to the per-schedule quantity.
+2. **No interleaving.** The probe drives rounds grid-wide, so it does not reproduce production's ordering
+   (an edge check fires when *that* chunk stabilizes, while neighbours may still be churning) nor the
+   neighbour fan-out's exact coalescing.
+3. **Harness fixtures, not live generated terrain.**
+
+It establishes that the redundancy exists and is large, not its precise in-game magnitude — which is what
+the pending IL2CPP A/B measures, in the units §2.1's Q3c actually scores (amplification and delivered/s).
 
 ### 3.4 The multiplier is spent *before* first visibility — and that is a product decision
 
@@ -524,7 +610,14 @@ question is only which one leads.
 numbers and scored by Q2. If it ever ships it needs the ms ceilings re-tuned as *steady-state*
 budgets in the same change, since they are currently sized as hitch guards.
 
-### Option B1 — Delete redundant amplification ✅ **CHOSEN (LEADS, per P9-1)**
+### Option B1 — Delete redundant amplification ✅ **CHOSEN (LEADS, per P9-1) — redundancy FOUND and removed behind a flag (P9-2)**
+
+> **✅ The condition this option was always contingent on is now discharged.** §6 and P9-1 both said B1
+> "remains conditional on finding work that recomputes an unchanged result". **It was found**: the
+> post-generation edge-check cascade re-arms on `IsStable`, which a pass that wrote nothing also satisfies,
+> and production's second round was measured as a no-op in **100 %** of chunk-rounds across every fixture
+> (§3.3b). The fix is `Settings.enableConvergentEdgeCheckCascade`, default-OFF pending its A/B.
+> ⚠️ The throughput gain is **not yet measured** — Q1/Q2/Q3a need a same-build IL2CPP capture (§7).
 
 Remove quota units that buy nothing: lighting schedules and re-meshes that recompute an unchanged
 result. Precedent: MT-2 (`LightWorkScheduler`'s ready/waiting split) removed *declined* candidates
@@ -682,7 +775,7 @@ settings alone can go:
 | ~~**P9-0a — Cap-sweep probe (zero code)**~~ ✅ **DONE 2026-08-02** | Ran as two settings-only legs at vd 32 (24 → 48 light jobs) on the P-8 build. **Identity confirmed, Option A′ closed**: gate 95.1 % → 62.6 % closed, `enqueue→populated` −28.9 %, completions +20.9 %, at ×4.79 CPU / ×0.61 min FPS (Q2 fail). Binding limit moved to the **8 ms ceiling**, not a higher quota. [Capture](../Performance/CHUNK_PIPELINE_P9_0A_CAP_SWEEP_IL2CPP_2026-08-02_BENCHMARK.md). Planned vd 26 legs were made redundant by the size of the vd 32 failure |   🟢   | —          |
 | ~~**P9-0 — Attribution instrument**~~ ✅ **DONE 2026-08-02** | Shipped, no production behaviour change. `WorldFrameProfiler` now carries one slot per budgeted pass **plus `LightMerge` and `LightFailSafeScan`** — the two unbudgeted regions, and the reason §F4 had to be modelled; `LastFrameLightMs`/`LastFrameMeshMs` survive as derived sums so the fluid-stress collector and its past captures are unaffected. `PipelineTelemetry` gains `RecordPassWork` (served vs granted), per-chunk schedule counts split **pre-delivery / no-live-trace / wasted**, and per-chunk **parked time** (§10 q4) hooked at `LightWorkScheduler`'s park/promote transitions. `BenchmarkController` enables the profiler and clears it in `OnDestroy`. Report prints **NOT MEASURED** rather than 0.0 ms when the profiler did not run. Guarded by **B20–B22**, each prove-red-verified to redden exactly itself (370 baselines, `Validate All` green with telemetry enabled *and* disabled). The §7.1 `SettingsManager` remark rider was already discharged at `7eabda7b`. **Amended the same day after code review** — seven measurement defects found and six fixed *before* any capture ran, since a capture on the flawed instrument would have had to be re-run: the staging drain got its own slot (it sits outside the budget window, so charging it to `LightSchedule` broke that slot's ceiling-comparability); the two passes' utilisation denominators were made the same population; the park interval now survives a flush-and-restart and `LightWorkScheduler.Clear()`; and B21's wall-clock assertions now compare against *measured* spin durations, so an editor hitch can no longer redden a baseline. The seventh — the fail-safe promote-to-rescan gap — is **deliberately left unfixed** and documented in §10 q4 instead |   🟡   | P9-0a      |
 | ~~**P9-1 — Capture and decide**~~ ✅ **DONE 2026-08-02** | Five same-build IL2CPP runs (vd 10/20/26/32 at the OM-1 caps + a vd-32 cap-48 A/B leg). [Capture](../Performance/CHUNK_PIPELINE_P9_1_ATTRIBUTION_IL2CPP_2026-08-02_BENCHMARK.md). **Identity confirmed within 4 %**; §F4's model half-confirmed and corrected (0.15 ms schedule + 0.18 ms merge; the merge is 39 % of the ×2-cap growth); **§3.3's mesh multiplier refuted** (pre-delivery = 1.00); §10 q4 answered (parking = 43–48 % of the idle-pass hop). **Kill condition NOT triggered.** Lever order → **B1 → C → A′**; B2 leaves P-9 |   🟢   | P9-0       |
-| **P9-2 — Delete redundant amplification** (Option B1) ⬅ **NEXT** | **The lead fix.** Target: 6.28 lighting schedules per delivered chunk (3.9 pre-delivery, ~1.9 post-delivery corrections, ~0.4 on chunks later discarded). Find and remove schedules that recompute an unchanged result — raising delivery at zero frame-time cost. **Starts with an investigation, not a patch:** P9-1 sizes the multiplier but does not show any of it is redundant, and §3.3 shows it varies by regime. **May legitimately come back empty**, in which case the lead passes to C → A′. ⚠️ Touches the lighting convergence model — `chunk-lifecycle` skill mandatory |   🟡   | P9-1       |
+| **P9-2 — Delete redundant amplification** (Option B1) 🟨 **CODE + BASELINES DONE 2026-08-02, capture pending** | **Investigation returned NON-empty.** Static attribution (§3.5) puts essentially all of the 6.28 in the **edge-check cascade**, and closes the fail-safe as a source (`PromoteAll`/`PromoteNeighborhood` set no flag, so they cannot spend a quota unit — a promoted chunk with no flags takes the `Remove` arm and is un-counted). The redundancy is that `MergeCompletedLightingJob` re-arms on `IsStable`, which a pass that **wrote nothing** also satisfies. Measured with a deterministic harness probe: **production's round 2 was a no-op in 100 % of chunk-rounds in every fixture**, and round 1 in 95.7 % of the adversarial unsettled case; the counterfactual "skipped a round that would have changed something" was **0 everywhere**. Fix shipped **default-OFF** as `enableConvergentEdgeCheckCascade` (listed in `OverlayBenchmarkSettingsFromDisk`), routed through the shared `EdgeCheckCascadeDecision.Evaluate` (`None` / `SpendOnly` / `SpendAndRearm` — **the round is spent either way**, since only the flags buy schedules and a hoarded budget would break the Bug-05 top-up's premise) and fed by `ChunkData.ApplyJobLightMap`'s new change signal. Guarded by **B97–B100**, each prove-red-verified. ⏳ **Q1/Q2/Q3c still need a same-build IL2CPP A/B** before the flag can flip on |   🟡   | P9-1       |
 | ~~**P9-2b — Deliver-then-refine** (Option B2)~~ ⛔ **WITHDRAWN from P-9 2026-08-02** | Refuted as a throughput/visibility lever by P9-1 (§3.4): pre-delivery mesh amplification is exactly 1.00 so there is no pre-delivery mesh work to skip, and the hops it can reach total 16 % of a 42 % gap. **Re-filed as a standalone product item** — "a dark chunk beats void" is still worth wanting, it just does not close the visibility budget |   —    | —          |
 | **P9-3 — Re-tune the rate** (Option A′)   | ⛔ **BLOCKED, and P9-1 re-confirmed it on a second independent build** (×2.71 CPU, ×0.66 min FPS). At ×2 the ceiling binds *completely* — **one `Quota` stop in 930 frames**, utilisation collapsing to 58.5 % — so the cap is inert past that point and the same work is merely repacked into 3.2× fewer, 3.2× longer frames. Re-openable **only after per-item cost falls (P-3)**, at which point the same 8 ms buys more items. Do not attempt before then.                                                                                                                                          |   🟡   | **P-3**, P9-1 |
 
@@ -847,6 +940,34 @@ enabled *and* disabled after each phase.
    to the default) plus the correctness items. Whoever answers this should also state where the
    supported ceiling is, since `viewDistance` is `[Range]`-editable up to a value no capture defends.
 
+   > **✅ ANSWERED by the product owner, 2026-08-02: large view distances ARE supported, vd 32 included,
+   > and 32+ is a stated future goal.** The `viewDistance = 5` default is **legacy** — it dates from a
+   > period when the engine could not hold larger distances and it persists as an editor-build testing
+   > convenience, not as a statement about the supported range. The intended default is **12–15** once it
+   > is re-set.
+   >
+   > **Four consequences, and they run the opposite way to the "parked" branch this question offered.**
+   >
+   > 1. **P-9 does not park after P9-2.** The vd ≥ 20 failures this document is built on are product
+   >    defects in a supported configuration, so the remaining levers (C, then A′ behind it) keep their
+   >    priority. The premise that made P-9 the top pipeline item survives.
+   > 2. **vd 10–15 is promoted from "anchor" to the shipping-relevant band.** Every capture's vd 10 leg
+   >    stops being a control that proves no regression in a regime nobody uses and becomes the leg
+   >    closest to the intended default. It should be *added* to future matrices, never trimmed for time.
+   > 3. **P-7's scoping argument needs re-examining, but not re-opening here.** P-7 was scoped to low
+   >    view distance partly on the grounds that low vd *is* the default; if the default moves to 12–15,
+   >    that overlaps the band where FP-10 measured ordering-boundness decaying (36.6 % at vd 10 → 19.5 %
+   >    at vd 15). This does not change P-7's rank — it changes which vd it should be tuned against.
+   >    Filed as a note on P-7's row, not acted on in P-9.
+   > 4. **FP-10's vd-32 memory question is now load-bearing.** A 5 GB peak in a *supported* configuration
+   >    is a shipping constraint rather than a stress-test curiosity, and it bounds how far vd 32+ can go.
+   >    It belongs to whoever picks up the memory item, and criterion Q4 (≤ ×1.10 peak) stays a hard part
+   >    of every P-9 verdict for that reason.
+   >
+   > **The supported ceiling is still unstated.** "32, and 32+ later" is a direction, not a bound; no
+   > capture defends any specific maximum, and `viewDistance` remains `[Range]`-editable past every value
+   > ever measured. That sub-question stays open.
+
 ---
 
 ## Document History
@@ -952,7 +1073,53 @@ enabled *and* disabled after each phase.
 
 ---
 
+* **v1.8** - **P9-2 investigated, and it did not come back empty.** New **§3.3b** attributes the 6.28:
+  the edge-check cascade accounts for essentially all of it (1 initial + 2 self rounds + 1–3 coalesced
+  neighbour triggers), and the ~1 s `PromoteAll` fail-safe is **closed as a source structurally** — promotion
+  sets no flag, so a promoted flag-less chunk takes the `Remove` arm and is un-counted, and it cannot spend a
+  quota unit at all. The redundancy is that `MergeCompletedLightingJob` re-arms on `IsStable`, which a pass
+  that wrote **nothing** also satisfies; a deterministic harness probe measured production's round 2 as a
+  no-op in **100 % of chunk-rounds in every fixture** (round 1 in 95.7 % of the adversarial unsettled case),
+  with **zero** counterfactual skips of a round that would have changed something. Fix shipped **default-OFF**
+  as `enableConvergentEdgeCheckCascade` — the shared `EdgeCheckCascadeDecision` predicate plus a
+  change signal returned by `ChunkData.ApplyJobLightMap` (compaction-aware: a uniform-sky section reads as its
+  level whether or not the section object survived, so comparing `ChunkSection.LightData` would have produced
+  false negatives). Guarded by **B97–B99**, each prove-red-verified to redden exactly itself. §6's Option B1
+  discharges its standing contingency. **Q1/Q2/Q3a remain unmeasured** — the flag cannot flip on without a
+  same-build IL2CPP A/B (§7).
+
+* **v1.9** - **§10 q5 ANSWERED by the product owner: large view distances are supported, vd 32 included,
+  and 32+ is a future goal** — the `viewDistance = 5` default is legacy (an editor-build testing
+  convenience from a period when the engine could not hold more), and the intended default is **12–15**.
+  So **P-9 does not park after P9-2**: the vd ≥ 20 failures are product defects in a supported
+  configuration and the remaining levers keep their priority. Three riders: the vd 10–15 leg is promoted
+  from anchor to the shipping-relevant band and must not be trimmed from future matrices; P-7's *tuning*
+  view distance (not its rank) needs revisiting against a 12–15 default; and FP-10's vd-32 5 GB peak
+  becomes a shipping constraint, which is why Q4 stays a hard part of every verdict. The supported
+  *ceiling* remains unstated. Adds **§2.1, P9-2's pre-committed 8-run capture matrix**, and a new
+  criterion **Q3c** — B1's mechanism check, which is the *opposite* of Q3a's shape: a correct B1 leaves
+  the pass `Quota`-bound at ~98 % and moves the **divisor**, so scoring it on Q3a would fail a success.
+  **Q3b is withdrawn** from P9-2 — it was written for B2, which has left P-9.
+* **v1.9a** - Code review of the P9-2 change, six findings, all addressed. The substantive one: **declining
+  to spend an edge-check round was wrong**, because it left converged chunks hoarding budget for their whole
+  residency — which invalidates the premise `ChunkData.ModifyVoxel`'s Bug-05 top-up is built on ("after
+  generation both edge-check rounds are already spent") and would arm cascades on ordinary post-generation
+  edits that the legacy rule never armed. The decision now returns **`None` / `SpendOnly` / `SpendAndRearm`**:
+  the round is spent exactly as before and only the *propagation* is conditional, which costs nothing because
+  the flags — not the counter — buy the lighting schedules. **B98 pins `SpendOnly` explicitly**, so the
+  regression cannot return silently, and new **B100** characterizes the signal's remaining known limitation:
+  `ApplyJobLightMap` answers "did THIS merge change light", not "has this border changed since the neighbours
+  last read it", so a main-thread cross-chunk write landing between two merges is invisible to it. Whether
+  that is reachable end-to-end is left **open and unasserted** — the symmetry argument against it (the same
+  wake-up node makes the job re-spread and emit a cross-chunk mod under the same condition the far
+  neighbour's add-only edge check would have gained) is recorded in B100's docstring. §3.3b also gains the
+  **unit caveat**: a probe "chunk-round" is a flagging wave run to quiescence, not a lighting schedule, so
+  its no-op fraction is biased high against the per-schedule 6.28 and the two must not be quoted together.
+
+---
+
 **Last Updated:** 2026-08-02
-**Next Review:** when P9-2 (delete redundant amplification) starts — its first job is to establish
-whether *any* of the measured 6.28 lighting schedules per delivered chunk recomputes an unchanged
-result. If none does, P-9's remaining path is C → A′ and this document should say so
+**Next Review:** when P9-2's IL2CPP A/B is captured. The code and its baselines are in;
+what is missing is the verdict — `enableConvergentEdgeCheckCascade` ON vs OFF, same build, vd 20/26/32,
+scored on Q1 (visibility budget), Q2 (frame time, hard gate) and Q3a. Note §10 q5 governs whether that
+capture is worth its cost at all

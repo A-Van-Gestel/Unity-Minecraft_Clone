@@ -168,7 +168,7 @@ Back on the main thread:
     - **Sunlight mods** degrade to affected column coordinates in `LightingStateManager` (`pending_lighting.bin`) — the column recalculation is authoritative for the sky channel.
     - **Blocklight mods** are persisted in full (local position + RGB + removal flag, `pending_blocklight.bin`) and replayed through `CrossChunkLightModApplier` when the chunk loads from disk — a column recalc cannot restore RGB data, so without this, removals (broken lamps) would leave permanent ghost light in the saved neighbor.
 5. **Stability check:**
-    - If `IsStable`: request mesh rebuild for this chunk and neighbors, and — while `RemainingEdgeCheckRounds > 0` — re-arm the iterative edge-check rounds on this chunk and its cardinal neighbors (§3.6). Stability is first passed through `LightingJobProcessor.IsEffectivelyStable`, which treats a chunk as stable when its only outstanding mods target out-of-world positions.
+    - If `IsStable`: request mesh rebuild for this chunk and neighbors, and — while `RemainingEdgeCheckRounds > 0`, and (P9-2, flag-gated) while the merge actually changed light — re-arm the iterative edge-check rounds on this chunk and its cardinal neighbors (§3.6). Stability is first passed through `LightingJobProcessor.IsEffectivelyStable`, which treats a chunk as stable when its only outstanding mods target out-of-world positions.
     - If not stable: set `HasLightChangesToProcess = true` for another pass next frame.
 
 ### 3.5 Readiness Gates
@@ -201,6 +201,19 @@ After a chunk's initial lighting stabilizes, its border voxels may have incorrec
    therefore tops `RemainingEdgeCheckRounds` back up to `BORDER_EDIT_EDGE_CHECK_ROUNDS` (= 1) on an
    opacity edit in a border column (local x/z in {0,15}), so this same stabilization machinery re-runs
    the reconciling border check. Add-only and bounded by the counter, so it cannot livelock.
+   **Outcome-conditional re-arm (P9-2, August 2026 — behind `Settings.enableConvergentEdgeCheckCascade`,
+   default OFF):** `IsStable` means only that the job left no work pending, which is also true of a pass
+   that wrote *nothing* — so the re-arm above fires on converged chunks and recomputes an unchanged
+   result. With the flag on, the round is spent (and the neighbors triggered) only when the merge actually
+   changed light — `ChunkData.ApplyJobLightMap`'s return, or `HasLightChangesToProcess` for the post-merge
+   writers (the deferred cross-chunk drain, the pull-back verification). The rule is the shared
+   `EdgeCheckCascadeDecision.Evaluate`, returning `None` / `SpendOnly` / `SpendAndRearm`; flag-off never
+   yields `SpendOnly` and so reduces to the budget-only test above. **A skipped re-arm still spends its
+   round** — only the flags buy lighting schedules, so declining the round saves nothing, while a converged
+   chunk that hoarded budget would break point 2's post-generation premise and arm cascades on ordinary
+   edits this system never armed. Safety rests on
+   the fact that a pass which wrote nothing leaves every border byte-identical to what the neighbors
+   already read; the measurement behind it is the design doc's §6 Option B1.
 2. In the main update loop, `NeedsEdgeCheck` is checked after initial lighting but before regular updates. It requires `AreNeighborsReadyAndLit` to fire on the primary path, with a fallback under the weaker `AreNeighborsDataReady` gate when `HasLightChangesToProcess` is also set (see [CHUNK_LIFECYCLE_PIPELINE.md](CHUNK_LIFECYCLE_PIPELINE.md) §7).
 3. `WorldJobManager.ScheduleLightingUpdate` reads `chunkData.NeedsEdgeCheck` into the job's `PerformEdgeCheck` flag and clears it.
 4. The job's edge check runs as "Pass -1" before the normal BFS seeding.
