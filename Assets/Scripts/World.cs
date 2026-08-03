@@ -25,7 +25,6 @@ using Spawn;
 using UI;
 using Unity.Collections;
 using Unity.Jobs;
-using Unity.Mathematics;
 using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Pool;
@@ -3968,39 +3967,14 @@ public class World : MonoBehaviour, IMeshDrainHost
                         break;
                 }
 
-                if (!blockType.collisionBounds.HasCustomBounds)
-                {
-                    localBounds = new Bounds(localBlockOrigin + new Vector3(0.5f, 0.5f, 0.5f), Vector3.one);
-                }
-                else
-                {
-                    float3x3 rotMatrix = BurstCustomMeshRotationUtility.GetRotationMatrix(
-                        blockType.metadataSchema, BurstVoxelDataBitMapping.GetMeta(packedData), blockType.defaultMetadata);
-                    localBounds = GetRotatedLocalBounds(localBlockOrigin, blockType.collisionBounds, rotMatrix);
-                }
+                localBounds = BlockCollisionBoundsUtility.GetBounds(
+                    blockType, BurstVoxelDataBitMapping.GetMeta(packedData), localBlockOrigin);
 
                 boundsToDraw.Add(new CollisionBoundsVisualization(localBounds, color));
             }
         }
     }
 
-    private static Bounds GetRotatedLocalBounds(Vector3 blockOrigin, BlockCollisionBounds bounds, float3x3 rotationMatrix)
-    {
-        // Shift bounds to origin (-0.5 to 0.5)
-        Vector3 localCenter = (bounds.min + bounds.max) * 0.5f - new Vector3(0.5f, 0.5f, 0.5f);
-        Vector3 extents = (bounds.max - bounds.min) * 0.5f;
-
-        // Apply rotation to extents (AABB after rotation)
-        Vector3 newExtents = new Vector3(
-            Mathf.Abs(rotationMatrix.c0.x * extents.x) + Mathf.Abs(rotationMatrix.c1.x * extents.y) + Mathf.Abs(rotationMatrix.c2.x * extents.z),
-            Mathf.Abs(rotationMatrix.c0.y * extents.x) + Mathf.Abs(rotationMatrix.c1.y * extents.y) + Mathf.Abs(rotationMatrix.c2.y * extents.z),
-            Mathf.Abs(rotationMatrix.c0.z * extents.x) + Mathf.Abs(rotationMatrix.c1.z * extents.y) + Mathf.Abs(rotationMatrix.c2.z * extents.z)
-        );
-
-        Vector3 newCenter = math.mul(rotationMatrix, localCenter);
-
-        return new Bounds(blockOrigin + new Vector3(0.5f, 0.5f, 0.5f) + newCenter, newExtents * 2f);
-    }
 
     /// <summary>
     /// Gathers the positions and colors of voxels to be visualized for a given chunk,
@@ -4402,20 +4376,7 @@ public class World : MonoBehaviour, IMeshDrainHost
 
                     Vector3Int voxelPos = new Vector3Int(x, y, z);
                     BlockType blockType = voxel.Properties;
-                    Bounds blockBounds;
-
-                    if (!blockType.collisionBounds.HasCustomBounds)
-                    {
-                        // Fast path: Full 1x1x1 cube
-                        blockBounds = new Bounds(voxelPos + new Vector3(0.5f, 0.5f, 0.5f), Vector3.one);
-                    }
-                    else
-                    {
-                        // Slow path: Get rotated bounds
-                        float3x3 rotMatrix = BurstCustomMeshRotationUtility.GetRotationMatrix(
-                            blockType.metadataSchema, voxel.Meta, blockType.defaultMetadata);
-                        blockBounds = GetRotatedWorldBounds(voxelPos, blockType.collisionBounds, rotMatrix);
-                    }
+                    Bounds blockBounds = BlockCollisionBoundsUtility.GetBounds(blockType, voxel.Meta, voxelPos);
 
                     // AABB overlap test
                     bool overlaps = entityBounds.min.x < blockBounds.max.x
@@ -4487,39 +4448,6 @@ public class World : MonoBehaviour, IMeshDrainHost
         }
 
         return hitAnything;
-    }
-
-    /// <summary>
-    /// Helper to rotate local collision bounds into world space.
-    /// </summary>
-    private static Bounds GetRotatedWorldBounds(Vector3Int blockOrigin, BlockCollisionBounds bounds, float3x3 rotationMatrix)
-    {
-        // 1. Shift [0,1] local bounds to center at (0,0,0) for rotation
-        Vector3 localCenter = (bounds.min + bounds.max) * 0.5f - new Vector3(0.5f, 0.5f, 0.5f);
-        Vector3 localExtents = (bounds.max - bounds.min) * 0.5f;
-
-        float3 lc = new float3(localCenter.x, localCenter.y, localCenter.z);
-        float3 e = new float3(localExtents.x, localExtents.y, localExtents.z);
-
-        // 8 corners, computed and rotated inline to avoid GC allocations in FixedUpdate
-        float3 c0 = math.mul(rotationMatrix, lc + new float3(e.x, e.y, e.z));
-        float3 c1 = math.mul(rotationMatrix, lc + new float3(e.x, e.y, -e.z));
-        float3 c2 = math.mul(rotationMatrix, lc + new float3(e.x, -e.y, e.z));
-        float3 c3 = math.mul(rotationMatrix, lc + new float3(e.x, -e.y, -e.z));
-        float3 c4 = math.mul(rotationMatrix, lc + new float3(-e.x, e.y, e.z));
-        float3 c5 = math.mul(rotationMatrix, lc + new float3(-e.x, e.y, -e.z));
-        float3 c6 = math.mul(rotationMatrix, lc + new float3(-e.x, -e.y, e.z));
-        float3 c7 = math.mul(rotationMatrix, lc + new float3(-e.x, -e.y, -e.z));
-
-        float3 minF = math.min(c0, math.min(c1, math.min(c2, math.min(c3, math.min(c4, math.min(c5, math.min(c6, c7)))))));
-        float3 maxF = math.max(c0, math.max(c1, math.max(c2, math.max(c3, math.max(c4, math.max(c5, math.max(c6, c7)))))));
-
-        Vector3 min = new Vector3(minF.x, minF.y, minF.z);
-        Vector3 max = new Vector3(maxF.x, maxF.y, maxF.z);
-
-        // Shift back to world space block origin + center
-        Vector3 worldCenter = min + (max - min) * 0.5f + blockOrigin + new Vector3(0.5f, 0.5f, 0.5f);
-        return new Bounds(worldCenter, max - min);
     }
 
     /// <summary>
