@@ -9,10 +9,12 @@ This document outlines **open** bugs related to the player controller and intera
 > `PlacementTagMigration.cs`, `WORLD_SCALING_FLOATING_ORIGIN.md` and `FLUID_BUGS.md`. Reusing the number
 > would silently redirect all of those. New entries continue from `§04`.
 >
-> **Validation suite:** none yet — the physics/collision solver is the largest system in the engine with no
-> automated guard. Tracked as **`NS-4`** in
-> [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md); §04
-> below is a motivating repro candidate for it.
+> **Validation suite:** `Minecraft Clone/Dev/Validate Physics Solver`
+> (`Assets/Editor/Validation/PhysicsSolver/`) — the **`NS-4`** suite shipped 2026-08-03 with 17 baselines over the
+> real `VoxelRigidbody` + `World.CheckPhysicsCollision`, closing the "largest system with no automated guard" gap
+> (see [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md)). It is
+> the vehicle for §04's repro: the suite deliberately does **not** pin `IsGrounded` after a high-speed landing or a
+> horizontal-only resolve, because that verdict is what §04 is about.
 
 ---
 
@@ -73,8 +75,28 @@ softly. Reported as intermittent ("sometimes"), and **correlated with higher fal
 triggers differ (§01 is tight spaces / flying through caves; §04 is a high-speed landing on open ground).
 Do not assume they are one bug until instrumented.
 
-**Route:** `voxel-debugging` (instrument first, fix second). Once a deterministic repro exists, it is a
-prime candidate to be the first scenario of the **`NS-4`** physics suite, per
-`validation-driven-bugfix` — prove-red before trusting any fix.
+**Observed while building the `NS-4` suite (2026-08-03) — harness observation, NOT an in-game diagnosis:**
+
+- Several baselines had to leave `IsGrounded` unasserted because the solver reports **`false` immediately after a
+  resolve that leaves the body flush on a surface**. Two shapes were seen in the harness: a horizontal-only resolve
+  (`movement.y == 0`, which routes to the zero-vertical-movement branch), and the *tail* substeps of a high-speed
+  landing, where the first substep lands and the remainder run with `movement.y` at or near zero.
+- This is consistent with §04's fall-speed correlation and with the `Narrowing` notes above, and it sharpens the
+  question for instrumentation: *what does `IsGrounded` end a tick as, and which of the four write sites decided
+  it?* It is **not** confirmation — nothing has been instrumented in the running game, and the harness cannot
+  observe the frame-to-frame momentum sequence a real fall produces.
+- **Second observation, found by accident while authoring a baseline:** once the body's AABB overlaps a block it is
+  *inside*, a horizontal resolve can eject it by roughly a whole block. `CheckPhysicsCollision` aggregates by
+  **largest absolute correction**, and for the containing cell the far-face correction is nearly the full cell width,
+  so it dominates the genuine near-face contact. Measured in the harness: a body with its feet 0.1 below a half-slab's
+  top, pushed +0.2 along X, resolved to **−0.9** — a metre backwards. Correct behavior for the aggregation rule as
+  specified (§3.3), which assumes the body is *outside* the geometry; embedded bodies violate that assumption. This
+  is a plausible shared mechanism with **§01** ("collision gets stuck / flaky in tight spaces") and worth
+  instrumenting alongside §04, since §04's symptom *is* an embedded body.
+
+**Route:** `voxel-debugging` (instrument first, fix second) — confirm or refute the observation above rather than
+building on it. The **`NS-4`** suite now exists (`Minecraft Clone/Dev/Validate Physics Solver`), so the repro lands
+there as a `K`-scenario per `validation-driven-bugfix` — prove-red before trusting any fix, then promote to a
+baseline after in-game confirmation.
 
 ---
