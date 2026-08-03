@@ -17,6 +17,7 @@
 | 2026-04-30 | Revision 4 (Codex): direction-specific multi-contact aggregation, step-up preserves horizontal velocity, substepping-only tunneling guard (removed union-scan from API), fixed stale pseudocode signatures                                                                             |
 | 2026-05-01 | Implementation status update: core runtime/editor system is implemented; document wording moved to present tense and remaining gaps called out explicitly.                                                                                                                             |
 | 2026-05-01 | Implementation Complete: runtime `DebugVisualizationMode.CollisionBounds` implementation finished and optimized. All features (except automated tests) are complete.                                                                                                                   |
+| 2026-08-03 | §7: recorded the bounds-blind interaction raycast as an explicit limitation (a half-slab collides at half height but targets as a full cube) and cross-linked the deferred work to the master backlog — `VQ-3` (raycast narrow phase) and `VQ-4` (compound bounds).                     |
 
 ## 1. Executive Summary
 
@@ -541,7 +542,13 @@ The Block Editor provides a **Collision Bounds** section with:
 
 ## 7. Limitations & Future Work
 
-- **Single AABB per block type (Phase 6 scope)**: Phase 6 explicitly targets rectangular sub-blocks only (half-slabs, quarter-slabs, pillars). Complex shapes require compound collision:
+- **The interaction raycast is bounds-blind (Phase 6 scope)**: §3.3 keeps "API 2: Raycast Hit Detection"
+  unchanged, so `World.IsRayHit` decides on id/tags/`fluidType`/`isSolid` only. A half-slab therefore
+  *collides* at half height but *targets, highlights and breaks* as a full cube — it can be mined by aiming
+  at the empty air above it. Tracked as **`VQ-3`** in
+  [`../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md`](../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md); the fix is
+  a narrow-phase slab test behind the existing `VoxelRayDDA` traversal, on the single-AABB model below.
+- **Single AABB per block type (Phase 6 scope)**: Phase 6 explicitly targets rectangular sub-blocks only (half-slabs, quarter-slabs, pillars). Tracked as **`VQ-4`**. Complex shapes require compound collision:
     - **Stairs**: 2 AABBs (bottom tread + top tread). Future `CompoundCollisionBounds` with `NativeArray<BlockCollisionBounds>`.
     - **Wedges**: AABB approximation only (the diagonal is not representable). Accept over-sized collision or implement OBB/triangle queries.
     - **L-shapes**: 2+ AABBs.
