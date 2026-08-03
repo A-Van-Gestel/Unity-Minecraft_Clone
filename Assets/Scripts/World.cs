@@ -4289,8 +4289,30 @@ public class World : MonoBehaviour, IMeshDrainHost
     }
 
     /// <summary>
-    /// The shared hit classification behind both <c>CheckForVoxel</c> overloads: decides whether a resolved voxel
-    /// stops a ray, given the caller's fluid / non-solid / skip-tag policy.
+    /// Ray-hit test that also hands back the resolved voxel — the overload for callers that must inspect the block
+    /// they just hit, notably the placement ray's sub-voxel narrow phase, which needs
+    /// <see cref="VoxelState.Meta"/> to resolve the block's collision bounds rotation.
+    /// </summary>
+    /// <param name="x">Absolute voxel X.</param>
+    /// <param name="y">Absolute voxel Y.</param>
+    /// <param name="z">Absolute voxel Z.</param>
+    /// <param name="includeFluids">If true, fluids will also count as a hit.</param>
+    /// <param name="includeNonSolid">If true, non-solid interactable blocks (excluding Air and
+    /// blocks with <see cref="BlockTags.IGNORE_RAYCAST"/>) will also count as a hit.</param>
+    /// <param name="skipTags">Block tags the ray passes through.</param>
+    /// <param name="voxel">The resolved voxel (valid only when the method returns true).</param>
+    /// <returns>True if the voxel should be treated as a hit; otherwise, false.</returns>
+    public bool TryGetRayHit(int x, int y, int z, bool includeFluids, bool includeNonSolid, BlockTags skipTags,
+        out VoxelState voxel)
+    {
+        return worldData.TryGetVoxel(x, y, z, out voxel) &&
+               IsRayHit(voxel, includeFluids, includeNonSolid, skipTags);
+    }
+
+    /// <summary>
+    /// The shared hit classification behind the <c>CheckForVoxel</c> / <see cref="TryGetRayHit"/> overloads:
+    /// decides whether a resolved voxel stops a ray, given the caller's fluid / non-solid / skip-tag policy.
+    /// Cell-level only — sub-voxel geometry is the caller's narrow phase (VQ-3).
     /// </summary>
     private bool IsRayHit(VoxelState voxel, bool includeFluids, bool includeNonSolid, BlockTags skipTags)
     {

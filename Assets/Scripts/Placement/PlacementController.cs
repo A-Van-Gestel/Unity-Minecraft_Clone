@@ -84,8 +84,10 @@ namespace Placement
 
         /// <summary>
         /// The geometric half of a placement probe: traverses the ray's cells in order (exactly, via
-        /// <see cref="VoxelRayDDA"/> — no cell is skipped) and reports the first non-skipped voxel it hits, the face
-        /// it entered through, and the cell adjacent to that face. The lower-level seam shared by
+        /// <see cref="VoxelRayDDA"/> — no cell is skipped) and reports the first voxel it actually hits, the face
+        /// it entered through, and the cell adjacent to that face. A block carrying sub-voxel
+        /// <see cref="BlockCollisionBounds"/> only stops the ray where its real volume does, so the traversal
+        /// continues past a cell whose block the ray merely passed by. The lower-level seam shared by
         /// <see cref="Probe"/> (which adds the replace/placeable decision) and <c>PlayerInteraction.RaycastForVoxel</c>
         /// (which needs the raw hit with an explicit skip mask). Allocation-free.
         /// </summary>
@@ -107,12 +109,30 @@ namespace Placement
             // The traversal itself stays in Unity space (small floats near the render origin); only the cell it
             // lands on converts, so the query never adds a large float to a small one.
             VoxelRayDDA traversal = VoxelRayDDA.Create(rayOrigin, rayDir, reach);
+            float3 origin = new float3(rayOrigin.x, rayOrigin.y, rayOrigin.z);
+            float3 direction = new float3(rayDir.x, rayDir.y, rayDir.z);
 
             while (traversal.MoveNext(out int3 cell, out int3 enteredFace))
             {
-                if (!_world.CheckForVoxel(cell.x + originVoxel.x, cell.y + originVoxel.y, cell.z + originVoxel.z,
-                        includeFluids, includeNonSolid: true, skipTags: skipTags))
+                if (!_world.TryGetRayHit(cell.x + originVoxel.x, cell.y + originVoxel.y, cell.z + originVoxel.z,
+                        includeFluids, includeNonSolid: true, skipTags: skipTags, out VoxelState voxel))
                     continue;
+
+                // VQ-3 narrow phase: the cell is occupied, but a sub-voxel block only stops the ray where its
+                // actual volume does — aiming over a half-slab's empty top must reach whatever is behind it.
+                BlockType hitProperties = voxel.Properties;
+                if (hitProperties.collisionBounds.HasCustomBounds)
+                {
+                    Bounds blockBounds = BlockCollisionBoundsUtility.GetBounds(
+                        hitProperties, voxel.Meta, new Vector3(cell.x, cell.y, cell.z));
+
+                    if (!RayBoundsIntersection.TryIntersect(origin, direction, blockBounds, reach,
+                            out float _, out int3 slabFace))
+                        continue;
+
+                    // A ray that starts inside the volume crosses no face, and keeps the traversal's own answer.
+                    if (math.any(slabFace != int3.zero)) enteredFace = slabFace;
+                }
 
                 hitCell = new Vector3Int(cell.x, cell.y, cell.z);
                 hitNormal = enteredFace;
