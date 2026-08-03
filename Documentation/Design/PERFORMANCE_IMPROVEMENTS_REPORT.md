@@ -2,7 +2,7 @@
 
 **Version:** 1.0
 **Date:** 2026-07-26
-**Status:** **Open backlog.** 33 items open, 26 complete. Completed items keep their ✅ row in the master
+**Status:** **Open backlog.** 32 items open, 27 complete. Completed items keep their ✅ row in the master
 summary table; their detail sections live in
 [`../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md`](../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md).
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -22,6 +22,11 @@ summary table; their detail sections live in
 `Framework/ValidationSuiteRunner` + `ValidationRunResult`, six suites + `ChunkRelativePositionTests`
 migrated with unchanged verdicts; `VoxelMetadataUtilityTests`/`FastNoiseLiteTests` left as a tracked follow-up. VS-2/VS-3 now build on the runner's result object. **Implementation status synced:** 2026-07-12 — `WS-1` (chunk-math shift/mask centralization) shipped on `feat/world-scaling`: Burst-safe `ChunkMath` voxel↔chunk↔region helpers + all ~11 chunk-math call sites migrated, guarded by the "Chunk Math" suite; byte-identical over the reachable range (no save bump). Audit correction folded in: the V2 codec truncation was latent-but-unreachable, not a
 live bug.
+**Implementation status synced:** 2026-08-03 — `VQ-3` (sub-voxel-aware interaction raycast) shipped on
+`feat/world-scaling` and in-game confirmed: a shared `Helpers/BlockCollisionBoundsUtility` (physics + debug
+visualization migrated onto it, guarded by a `CheckPhysicsCollision` golden master because physics has no
+suite), a `Helpers/RayBoundsIntersection` narrow phase behind `VoxelRayDDA`, and highlight/place-preview
+boxes shaped to the block's volume. `VQ-4` (compound bounds for stairs/L-shapes) stays open.
 **Implementation status synced:** 2026-08-03 — `VQ-2` (exact DDA placement ray traversal) shipped on
 `feat/world-scaling`: reusable `Helpers/VoxelRayDDA`, `FaceNormal` heuristic and `checkIncrement` both retired,
 guarded by four new oblique-ray scenarios in the Placement suite (authored red-first — the suite's pre-existing
@@ -217,7 +222,7 @@ plus the standalone test files (`VoxelMetadataUtilityTests`, `FastNoiseLiteTests
 |------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
 | VQ-1 ✅ | **SHIPPED 2026-07-12** — integer `TryGetVoxel` fast path (one chunk-coord, no float/nullable) + one-entry last-chunk cache; `GetVoxelState(Vector3)` kept as wrapper; physics/placement/mod consumers migrated. **Contract narrowed 2026-07-27** (Fluid §18): resolves `IsPopulated` chunks only — checked live *after* the cache, so a placeholder that generates later resolves on the next query |   🟡   |  🟡  |   🟡    |  ✅  |  ✅  |
 | VQ-2 ✅ | **SHIPPED 2026-08-03** — placement ray march replaced by an exact Amanatides–Woo traversal (`Helpers/VoxelRayDDA`); no cell is skipped, the entered face is the stepped axis (the fractional-offset `FaceNormal` heuristic is deleted), and `checkIncrement` is retired as a setting. ~159 → ≤15 queries per probe at `reach = 8` |   🟡   |  🟡  |   ⚪    |  ✅  |  ✅  |
-| VQ-3 | Interaction raycast ignores sub-voxel `collisionBounds` — a half-slab targets as a full cube                                                                                                                       |   🟡   |  🟢  |   ⚪⁶   |  ✅  |  ✅  |
+| VQ-3 ✅ | **SHIPPED 2026-08-03** — the interaction ray gained a sub-voxel narrow phase (`Helpers/RayBoundsIntersection` behind `VoxelRayDDA`'s broad phase, via the shared `BlockCollisionBoundsUtility`): a half-slab now stops the ray only where its volume is, the reported face is the block's rather than the cell's, and the highlight / place-preview boxes hug that volume |   🟡   |  🟢  |   ⚪⁶   |  ✅  |  ✅  |
 | VQ-4 | Single AABB per block type cannot express stairs / L-shapes (`SUB_VOXEL_COLLISION_SYSTEM.md` §7 deferred)                                                                                                          |   🔴   |  🟡  |   ⚪⁶   |  ✅  |  ✅  |
 | PH-1 | Collision solver re-queries the same voxel neighborhood across up to 7 sweeps × substeps/tick                                                                                                                     |   🟡   |  🟡  |   ⚪⁵   |  ✅  |  ✅  |
 
@@ -827,67 +832,6 @@ and take the snapshot at **dequeue** time inside the bounded writer's main-threa
 > placement probe, pending-mod application, and the managed grass tick (TG-1's residual) — funnels
 > through one query API. TG-1/TG-4 fixed this *for the fluid tick* by bypassing it; the API itself
 > and its remaining consumers were never audited until this fourth pass.
-
-### VQ-3. Interaction raycast ignores sub-voxel `collisionBounds`
-
-**Observed:** the engine already models sub-voxel geometry — `BlockType.collisionBounds`
-(`BlockCollisionBounds`: a per-block AABB in block-local `[0,1]³`, rotated at query time through
-`BurstCustomMeshRotationUtility.GetRotationMatrix`) — and both existing consumers honour it: the physics
-solver (`World.CheckPhysicsCollision`) and the collision-bounds debug visualization
-(`World.GetCollisionBoundsDataForVisualization`), which since 2026-08-03 share one resolver,
-`Helpers/BlockCollisionBoundsUtility`. The **interaction ray** does not: `World.IsRayHit`
-(`World.cs:4321`) decides purely on block id, tags, `fluidType` and `isSolid`, so
-`PlacementController.MarchRay` stops at the first *occupied cell* regardless of whether the ray actually
-crossed the block's volume. `Stone Half Slab` (id 17, `MatchVisualMesh`, `max.y = 0.5`, schema
-`Facing6Roll2`) therefore collides at half height but targets, highlights, and breaks as a full cube — you
-can mine it by aiming at empty air above it. This was a deliberate Phase-6 scope boundary, not an
-oversight: `SUB_VOXEL_COLLISION_SYSTEM.md` §3.3 lists "API 2: Raycast Hit Detection (unchanged)" and its
-caller-migration table marks `World.CheckForVoxel` untouched — but §7 never recorded the resulting gap.
-
-**Recommendation:** keep `VoxelRayDDA` as the broad phase (its cell order is already a correct hit order,
-since each cell owns a disjoint, ordered `t`-interval and bounds are confined to `[0,1]³`) and add a
-**narrow phase** inside `MarchRay`: for a cell whose block `HasCustomBounds`, slab-test the ray against the
-rotated world AABB; on a miss, continue the traversal instead of reporting a hit. The entered face then
-comes from the slab entry plane rather than the cell face — exact for interior faces such as a bottom
-slab's top at `y = 0.5`. `FullBlock` blocks keep the existing fast path untouched, so ordinary terrain pays
-nothing. Placement arithmetic is **unaffected**: the normal is still an outward unit face, so
-`adjacentCell = hitCell + normal` still names the cell above for a slab-top hit. Needs a `World` API that
-returns the resolved `VoxelState` (the narrow phase needs `Meta` for rotation), the highlight/place cubes
-scaled to the hit and held block's bounds, and a custom-bounds block added to the placement suite's
-synthetic palette. **Slab merging** (placing a slab into a slab's free half) is explicitly *not* part of
-this — that is placement policy, and a separate feature.
-
-**Progress:** the shared-resolver prerequisite is **done** (2026-08-03) — `BlockCollisionBoundsUtility`
-extracted and both existing consumers migrated, deleting `World.GetRotatedLocalBounds` /
-`GetRotatedWorldBounds`. The two had *different* formulas (abs-matrix extent projection vs. 8 rotated
-corners); they were proven equivalent over 12,288 combinations (4 schemas × 4 bound shapes × 3 origins ×
-256 metadata values, worst delta `0.000E+000`) and unified on the 8-corner form. Because physics has no
-validation suite, the migration was gated on a `CheckPhysicsCollision` golden master (1950 probes / 1776
-hits) that matched bit-for-bit before and after.
-
-The **narrow phase itself is also done** (2026-08-03): `Helpers/RayBoundsIntersection` (closed-form slab
-test, deliberately not shared with the placement suite's fuzz oracle so the two cannot share a failure
-mode), `World.TryGetRayHit` returning the resolved `VoxelState` for its `Meta`, and `MarchRay` continuing
-the traversal past a cell whose block the ray merely passed by. Guarded by 5 scenarios in
-`PlacementValidationSuite.SubVoxel.cs` on a synthetic half-slab; 3 of them were proven red against the
-disabled narrow phase — including one where a block placed against a slab's top landed *beside* it rather
-than on it. Placement 28/28, Validate All 385/385, and the physics golden master re-checked unchanged now
-that the ray shares the resolver. **In-game confirmed** — placement follows the slab's shape.
-**Remaining:** the highlight and place-preview cubes still draw a full 1×1×1 box over a half-slab, so
-targeting is exact while the highlight around a sub-voxel block is not. That is the whole of what is left.
-
-> **Impact Analysis:**
-> - **Effort:** 🟡 Medium — contained narrow phase; the traversal and the (now shared) bounds resolver
->   are both untouched by the remaining work.
-> - **Risk:** 🟢 Low — one shipping block has custom bounds, `FullBlock` stays on the bit-identical fast
->   path, and the placement suite's 23 baselines guard the unchanged behaviour. ⚠️ Note for whoever picks
->   this up: physics still has **no standing validation suite** (`VALIDATION_SUITE_COVERAGE_ROADMAP.md`
->   `NS-*`) — the golden master above was a one-off in-session check, not a committed regression guard.
-> - **Benefit:** ⚪ No frame-time change — the win is that sub-voxel blocks become a usable block *category*
->   (slabs, panes, pillars) instead of colliding correctly but targeting wrongly.
-> - **Seed/Save:** ✅ / ✅ — `collisionBounds` lives on `BlockDatabase.asset`, not in world saves.
-
----
 
 ### VQ-4. Single AABB per block type cannot express stairs / L-shapes
 

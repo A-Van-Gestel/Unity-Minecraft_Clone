@@ -922,6 +922,76 @@ showed **zero diffs** (so no baseline had encoded a sampling artifact, contrary 
 
 ---
 
+### VQ-3. Interaction raycast ignores sub-voxel `collisionBounds`
+
+✅ **SHIPPED 2026-08-03** (`feat/world-scaling`), in-game confirmed across break highlight, place highlight,
+full blocks, half slabs, and slab rotation.
+
+**Observed:** the engine already models sub-voxel geometry — `BlockType.collisionBounds`
+(`BlockCollisionBounds`: a per-block AABB in block-local `[0,1]³`, rotated at query time through
+`BurstCustomMeshRotationUtility.GetRotationMatrix`) — and both existing consumers honour it: the physics
+solver (`World.CheckPhysicsCollision`) and the collision-bounds debug visualization
+(`World.GetCollisionBoundsDataForVisualization`), which since 2026-08-03 share one resolver,
+`Helpers/BlockCollisionBoundsUtility`. The **interaction ray** does not: `World.IsRayHit`
+(`World.cs:4321`) decides purely on block id, tags, `fluidType` and `isSolid`, so
+`PlacementController.MarchRay` stops at the first *occupied cell* regardless of whether the ray actually
+crossed the block's volume. `Stone Half Slab` (id 17, `MatchVisualMesh`, `max.y = 0.5`, schema
+`Facing6Roll2`) therefore collides at half height but targets, highlights, and breaks as a full cube — you
+can mine it by aiming at empty air above it. This was a deliberate Phase-6 scope boundary, not an
+oversight: `SUB_VOXEL_COLLISION_SYSTEM.md` §3.3 lists "API 2: Raycast Hit Detection (unchanged)" and its
+caller-migration table marks `World.CheckForVoxel` untouched — but §7 never recorded the resulting gap.
+
+**Shipped in three steps.**
+
+*1 — a shared bounds resolver.* `Helpers/BlockCollisionBoundsUtility` (space-agnostic: the returned bounds
+sit in whatever space the caller's `blockOrigin` is in), with the physics solver and the debug
+visualization migrated onto it and `World.GetRotatedLocalBounds` / `GetRotatedWorldBounds` deleted. Those
+two had *different* formulas — abs-matrix extent projection vs. 8 rotated corners — proven equivalent over
+12,288 combinations (4 schemas × 4 bound shapes × 3 origins × 256 metadata values, worst delta
+`0.000E+000`) and unified on the 8-corner form.
+
+*2 — the narrow phase.* `Helpers/RayBoundsIntersection` (closed-form slab test) behind `VoxelRayDDA`'s
+broad phase, `World.TryGetRayHit` returning the resolved `VoxelState` for its `Meta`, and `MarchRay`
+continuing the traversal past a cell whose block the ray merely passed by. The entered face comes from the
+slab entry plane, so it is exact for interior faces such as a bottom slab's top at `y = 0.5`. Placement
+arithmetic needed **no change**: the normal is still an outward unit face, so `adjacentCell = hitCell +
+normal` still names the cell above for a slab-top hit.
+
+*3 — the highlight boxes.* Both the break highlight and the place preview shape their mesh child to the
+block's volume; the preview resolves the held block's orientation through the same private
+`ComputePlacementMeta` the real placement uses, so a slab previews as a slab. Each box's authored child
+scale is kept as a per-box multiplier rather than assumed — they ship with *different* values (the break
+outline is inflated 1.01 to beat z-fighting against the surface it hugs; the place preview is 1.0, drawn in
+open air).
+
+**Verification:** 5 scenarios in `PlacementValidationSuite.SubVoxel.cs` on a synthetic half-slab, **3 of
+them proven red** against the disabled narrow phase — including one where a block placed against a slab's
+top landed *beside* it rather than on it. A straight-down ray onto a bottom slab turned out **not** to
+discriminate (cell face and block face are both `+Y`); the discriminating case is an oblique ray entering
+the cell through `-X` above the slab and descending onto its top. Highlight parity was checked over 9,472
+full-block cases (every shipping block × all 256 metadata values) at **zero drift** — every full-cube block
+reproduces its authored transform exactly. Placement 28/28, Validate All 385/385, and the physics golden
+master re-checked unchanged once the ray began sharing the resolver.
+
+**Deliberately excluded:** *slab merging* (placing a slab into a slab's free half) — that is placement
+policy, not ray geometry, and nobody asked for it. Compound shapes remain `VQ-4`.
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — three contained steps; roughly half the work was the resolver extraction and
+>   its equivalence proof, not the ray itself.
+> - **Risk:** 🟢 Low as shipped — one block has custom bounds, `FullBlock` stayed on a bit-identical fast
+>   path, and the placement baselines guarded the unchanged behaviour. ⚠️ For whoever touches this next:
+>   physics still has **no standing validation suite** (`VALIDATION_SUITE_COVERAGE_ROADMAP.md` `NS-*`) —
+>   the golden master above was a one-off in-session check and is **not committed**. Re-derive it before
+>   changing `CheckPhysicsCollision` or the shared resolver.
+> - **Benefit:** ⚪ No frame-time change — the win is that sub-voxel blocks became a usable block *category*
+>   (slabs, panes, pillars) instead of colliding correctly but targeting wrongly.
+> - **Seed/Save:** ✅ / ✅ — `collisionBounds` lives on `BlockDatabase.asset`, not in world saves.
+
+---
+
+---
+
 ---
 
 ## Validation Suites
