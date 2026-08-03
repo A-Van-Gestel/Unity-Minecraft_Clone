@@ -1,4 +1,5 @@
 using Data;
+using UnityEngine;
 
 namespace Editor.Validation.Placement.Framework
 {
@@ -35,6 +36,13 @@ namespace Editor.Validation.Placement.Framework
 
             /// <summary>A non-solid <see cref="BlockTags.REQUIRES_SUPPORT"/> plant (the "grass blades" stand-in) — needs a solid block beneath it.</summary>
             public const ushort SupportNeeding = 5;
+
+            /// <summary>
+            /// A solid block occupying only the lower half of its cell (the "stone half slab" stand-in), so the
+            /// upper half is empty space a ray must pass through. Rotatable via
+            /// <see cref="MetadataSchema.Facing6Roll2"/>, matching the shipping slab.
+            /// </summary>
+            public const ushort HalfSlab = 6;
         }
 
         /// <summary>
@@ -46,7 +54,7 @@ namespace Editor.Validation.Placement.Framework
             BlockTags.REPLACEABLE | BlockTags.LIQUID;
 
         /// <summary>Length of the palette array.</summary>
-        public const int Count = Id.SupportNeeding + 1;
+        public const int Count = Id.HalfSlab + 1;
 
         /// <summary>Builds the controlled baseline palette.</summary>
         /// <returns>A <see cref="BlockType"/> array indexed by <see cref="Id"/>.</returns>
@@ -116,6 +124,26 @@ namespace Editor.Validation.Placement.Framework
                 worldGenCanReplaceTags = SanePlayerCanReplace,
                 placementCanReplaceTags = SanePlayerCanReplace,
                 fluidType = FluidType.None,
+            };
+
+            // Mirrors Stone Half Slab (id 17): a solid block whose authored volume fills only the lower half of the
+            // cell, so the upper half is empty space the ray must pass through. Facing6Roll2 lets a scenario rotate
+            // it into a top slab, which is how the shipping block expresses its flipped variant.
+            palette[Id.HalfSlab] = new BlockType
+            {
+                blockName = "TestHalfSlab",
+                isSolid = true,
+                tags = BlockTags.SOLID | BlockTags.ROCK,
+                worldGenCanReplaceTags = SanePlayerCanReplace,
+                placementCanReplaceTags = SanePlayerCanReplace,
+                fluidType = FluidType.None,
+                metadataSchema = MetadataSchema.Facing6Roll2,
+                collisionBounds = new BlockCollisionBounds
+                {
+                    mode = CollisionBoundsMode.CustomAABB,
+                    min = new Vector3(0f, 0f, 0f),
+                    max = new Vector3(1f, 0.5f, 1f),
+                },
             };
 
             return palette;

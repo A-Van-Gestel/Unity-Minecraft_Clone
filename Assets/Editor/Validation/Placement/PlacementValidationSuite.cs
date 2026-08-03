@@ -50,6 +50,7 @@ namespace Editor.Validation.Placement
             AddWorldOriginScenarios(scenarios);
             AddBorderScenarios(scenarios);
             AddRayMarchScenarios(scenarios);
+            AddSubVoxelScenarios(scenarios);
             AddKnownBugScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Placement", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
@@ -85,6 +86,9 @@ namespace Editor.Validation.Placement
 
         /// <summary>Registers the VQ-2 ray-march geometry guards (implemented in PlacementValidationSuite.RayMarch.cs).</summary>
         static partial void AddRayMarchScenarios(List<Scenario> scenarios);
+
+        /// <summary>Registers the VQ-3 sub-voxel narrow-phase guards (implemented in PlacementValidationSuite.SubVoxel.cs).</summary>
+        static partial void AddSubVoxelScenarios(List<Scenario> scenarios);
 
         /// <summary>Registers expected-red known-bug reproductions (implemented in PlacementValidationSuite.KnownBugs.cs).</summary>
         static partial void AddKnownBugScenarios(List<Scenario> scenarios);
