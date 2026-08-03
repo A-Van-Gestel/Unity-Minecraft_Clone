@@ -103,6 +103,7 @@ what this document ranks.
 ## NS-4. Physics / collision-solver suite — **Priority 4**
 
 - **Failure class guarded:** player-facing movement regressions (fall-through, wall snag, broken step-up) — subtle, playtest-only today. `SUB_VOXEL_COLLISION_SYSTEM.md`'s own status line says **"Automated Tests Pending — automated regression tests remain outstanding."** This suite is that outstanding item.
+- **Live bugs it would already have caught:** [`../Bugs/PLAYER_BUGS.md`](../Bugs/PLAYER_BUGS.md) **§04** (player embeds in a block after a fast landing and `IsGrounded` never recovers, so jumps are refused until flight/noclip rescues them — **High**, the player is stranded) and **§01** (collision sticks in tight spaces). §04 is the natural *first* scenario: its symptom is a single boolean (`IsGrounded`) on a solver whose grounded state is written in only four places, so it reduces to an assertable end-state rather than a feel judgement.
 - **Backlog items it gates:** `PH-1` (gather-once solver refactor), `VQ-1` (integer query path under the solver), collision-bounds authoring changes (Block Editor).
 - **Scope sketch:** deterministic scenarios on fixture voxel fields, asserting final position/velocity/`IsGrounded` within tolerance: flat-ground grounding, wall slide, corner snag (the `COLLISION_EPSILON`/jitter-tolerance edges), step-up onto slab and full block, sub-voxel bounds (quarter slabs, rotated custom bounds), ceiling bump, and **substep consistency** (one large displacement vs N substeps → same endpoint). The scenario table in
   `SUB_VOXEL_COLLISION_SYSTEM.md` §2 is the ready-made baseline list.
@@ -157,6 +158,9 @@ using the §2 scenario table as its baseline list.
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* *(2026-08-03)* - `NS-4` linked to the live bugs it would guard: `PLAYER_BUGS` **§04** (fast-landing embed →
+  `IsGrounded` never recovers → jumps refused; filed the same day) and **§01**. §04 is named as the suite's
+  natural first scenario because its symptom reduces to a single boolean rather than a feel judgement.
 * *(2026-08-03)* - **Census refreshed: 350 → 385 baselines** across the same 16 suites. Lighting 88→92,
   Behavior 12→16, Placement 17→28, Chunk Math 46→47, Pipeline Backpressure 7→22; every other suite unchanged.
   Only the Placement delta is attributed here (VQ-2 + VQ-3 added those eleven); the rest accumulated across
