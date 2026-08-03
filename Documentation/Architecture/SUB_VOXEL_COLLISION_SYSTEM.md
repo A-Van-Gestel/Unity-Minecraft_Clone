@@ -16,6 +16,7 @@
 | 2026-05-01 | Implementation status update: core runtime/editor system is implemented; document wording moved to present tense and remaining gaps called out explicitly.                                                                                                                                                                                                                                                                                                                                                                       |
 | 2026-05-01 | Implementation Complete: runtime `DebugVisualizationMode.CollisionBounds` implementation finished and optimized. All features (except automated tests) are complete.                                                                                                                                                                                                                                                                                                                                                             |
 | 2026-08-03 | §7: recorded the bounds-blind interaction raycast as an explicit limitation (a half-slab collides at half height but targets as a full cube) and cross-linked the deferred work to the master backlog — `VQ-3` (raycast narrow phase) and `VQ-4` (compound bounds).                                                                                                                                                                                                                                                              |
+| 2026-08-03 | **Phase 6c drift cleanup**: §3.3's caller-migration table named four call sites that no longer exist — the three `VoxelRigidbody` point-probe methods Phase 6c *deleted* (collapsed into one `ResolveMovement`, which issues all nine `CheckPhysicsCollision` calls) and `PlayerInteraction.cs:260`, whose occupancy check moved to `PlacementController.CanPlaceAt`. Every row now names its present-day home with the old name in parentheses. §5's six unchecked Phase 6c regression tests and §7's pending-tests bullet are cross-linked to `NS-4`, with the consequence stated: the solver has **no standing regression guard**. |
 | 2026-08-03 | **`VQ-3` sync**: §7's raycast limitation marked CLOSED; §3.3's "API 2 — unchanged / no changes needed" replaced with the broad+narrow phase composition and `TryGetRayHit`; §3.2's `GetRotatedWorldBounds` sketch replaced by the shared `BlockCollisionBoundsUtility.GetBounds` (it and `GetRotatedLocalBounds` were unified after being proven equivalent); §3.2 now flags the 90°-permutation property as load-bearing for the ray's hit ordering; caller-migration row and §5 phase entries annotated rather than rewritten. |
 
 ## 1. Executive Summary
@@ -306,16 +307,20 @@ public struct CollisionContact
 }
 ```
 
-**Caller migration** — a record of the Phase 6 move, so the *Caller* column names the **pre-migration** methods.
-`VoxelRigidbody.CheckDownSpeed` / `CheckUpSpeed` / `CheckHorizontalCollision` no longer exist: the Phase 6c solver rewrite (§3.4) replaced the point-probe pattern outright.
+**Caller migration.** The *Caller* column names where each query lives **today**, with the pre-migration name
+in parentheses — the old names are gone, so a reader who greps for them finds nothing. Phase 6c did not merely
+re-point the three point-probe methods: it **deleted** them and folded their work into one
+`VoxelRigidbody.ResolveMovement(ref Vector3 movement)`, which issues all nine `CheckPhysicsCollision` calls
+(step-up pre-pass, per-axis horizontal resolve, vertical resolve + ground snap) in the fixed Z → X → Y order
+described in §3.4. There is no longer a method per axis.
 
-| Caller                                    | Previous API               | Implemented API                                                                                        | Reason                                                                                |
-|-------------------------------------------|----------------------------|--------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------|
-| `VoxelRigidbody.CheckDownSpeed`           | `CheckForCollision(point)` | `CheckPhysicsCollision(bounds, 1, -1)`                                                                 | Y-down: resolve against block top face                                                |
-| `VoxelRigidbody.CheckUpSpeed`             | `CheckForCollision(point)` | `CheckPhysicsCollision(bounds, 1, +1)`                                                                 | Y-up: resolve against block bottom face                                               |
-| `VoxelRigidbody.CheckHorizontalCollision` | `CheckForCollision(point)` | `CheckPhysicsCollision(bounds, 0/2, ±1)`                                                               | Per-axis X or Z with movement sign                                                    |
-| `PlayerInteraction.cs:260` (placement)    | `CheckForCollision(pos)`   | `IsCellOccupiedForPlacement(pos)`                                                                      | Coarse grid-occupancy (see API 1 remarks)                                             |
-| `World.CheckForVoxel` (raycast)           | unchanged                  | unchanged in Phase 6; **VQ-3** added `TryGetRayHit` + a narrow phase in `PlacementController.MarchRay` | Cell-level classification stayed; sub-voxel geometry became the caller's narrow phase |
+| Caller (today)                                                              | Previous API               | Implemented API                                                                                        | Reason                                                                                |
+|-----------------------------------------------------------------------------|----------------------------|--------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------|
+| `VoxelRigidbody.ResolveMovement` — vertical resolve + ground snap *(was `CheckDownSpeed`)* | `CheckForCollision(point)` | `CheckPhysicsCollision(bounds, 1, -1)`                                                                 | Y-down: resolve against block top face                                                |
+| `VoxelRigidbody.ResolveMovement` — ceiling resolve *(was `CheckUpSpeed`)*    | `CheckForCollision(point)` | `CheckPhysicsCollision(bounds, 1, +1)`                                                                 | Y-up: resolve against block bottom face                                               |
+| `VoxelRigidbody.ResolveMovement` — per-axis resolve + step-up pre-pass *(was `CheckHorizontalCollision`)* | `CheckForCollision(point)` | `CheckPhysicsCollision(bounds, 0/2, ±1)`                                                               | Per-axis X or Z with movement sign                                                    |
+| `PlacementController.CanPlaceAt` *(was `PlayerInteraction.cs:260`)*          | `CheckForCollision(pos)`   | `IsCellOccupiedForPlacement(pos)`                                                                      | Coarse grid-occupancy (see API 1 remarks); the whole placement decision moved out of `PlayerInteraction` into `PlacementController` |
+| `PlacementController.MarchRay` (raycast) *(was `World.CheckForVoxel` direct)* | unchanged                  | unchanged in Phase 6; **VQ-3** added `TryGetRayHit` + a narrow phase                                    | Cell-level classification stayed; sub-voxel geometry became the caller's narrow phase |
 
 ### 3.4. VoxelRigidbody Physics Solver
 
@@ -549,6 +554,12 @@ The Block Editor provides a **Collision Bounds** section with:
 - [ ] Regression test: step-up from half-slab to full block correctly finds support
 - [x] Extensive playtesting of movement scenarios
 
+> The six unchecked items above are tracked as **`NS-4`** (physics / collision-solver suite) in
+> [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md), which
+> names this document's §2 scenario table as its ready-made baseline list. Until it exists, **the solver has no
+> automated guard at all** — VQ-3's shared-resolver extraction had to be gated on a throwaway
+> `CheckPhysicsCollision` golden master built for that one change and not committed.
+
 ### Phase 6d — Editor & Debug Tooling
 
 - [x] Block Editor collision wireframe preview overlay
@@ -577,4 +588,4 @@ The Block Editor provides a **Collision Bounds** section with:
     - **L-shapes**: 2+ AABBs.
 - **No per-voxel collision variation**: All instances of a block type share the same collision shape (modulo rotation). Blocks that change shape based on neighbors (e.g., fence posts connecting) would need runtime collision computation.
 - **No mesh-based collision**: We intentionally avoid using the visual mesh as collision geometry. The per-frame AABB-overlap pattern is incompatible with arbitrary triangle meshes at voxel density. For blocks needing precise collision, the AABB can be oversized with visual details protruding — an acceptable trade-off.
-- **Automated collision regression tests are pending**: core behavior has been playtested, but the AABB query and movement edge cases listed in §5 still need test coverage.
+- **Automated collision regression tests are pending**: core behavior has been playtested, but the AABB query and movement edge cases listed in §5 still need test coverage. Tracked as **`NS-4`** in [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md). Consequence to weigh before touching the solver or the shared bounds resolver: **there is no standing regression guard**, so a change there is only as safe as the ad-hoc check written alongside it.

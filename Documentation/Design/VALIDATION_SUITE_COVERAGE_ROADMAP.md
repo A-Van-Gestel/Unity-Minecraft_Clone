@@ -106,7 +106,7 @@ what this document ranks.
 - **Backlog items it gates:** `PH-1` (gather-once solver refactor), `VQ-1` (integer query path under the solver), collision-bounds authoring changes (Block Editor).
 - **Scope sketch:** deterministic scenarios on fixture voxel fields, asserting final position/velocity/`IsGrounded` within tolerance: flat-ground grounding, wall slide, corner snag (the `COLLISION_EPSILON`/jitter-tolerance edges), step-up onto slab and full block, sub-voxel bounds (quarter slabs, rotated custom bounds), ceiling bump, and **substep consistency** (one large displacement vs N substeps → same endpoint). The scenario table in
   `SUB_VOXEL_COLLISION_SYSTEM.md` §2 is the ready-made baseline list.
-- **Building blocks:** `PlacementTestWorld` proves the concrete-`World` stubbing pattern (`ValidationReflection`); the solver needs its `World.CheckPhysicsCollision` dependency injectable or the stub world populated with real voxel data.
+- **Building blocks:** `PlacementTestWorld` proves the concrete-`World` stubbing pattern (`ValidationReflection`). The "or the stub world populated with real voxel data" option is **verified, not hypothetical**: VQ-3 (2026-08-03) drove `World.CheckPhysicsCollision` through an unmodified `PlacementTestWorld` seeded with the real `BlockDatabase` for a 1950-probe sweep, so **no dependency injection is required** to stand this suite up. ⚠️ One trap that sweep hit first: `CheckPhysicsCollision` reads the `WorldOrigin` **static**, which survives play sessions (it is reset only on play-mode entry), so a fixture must `WorldOrigin.ResetToIdentity()` and restore — otherwise every lookup lands far from the seeded blocks and the sweep silently returns **zero hits**, passing vacuously. Assert a non-zero hit count before trusting any such sweep.
 - **Effort:** 🟡.
 
 ---
@@ -165,6 +165,9 @@ contemporaneous notes.*
   meshing tip advanced to **B40** as MH-13's neighbor light maps were closed.
 * *(2026-07-25, `e788db9e` · `d3012337` · `ff3b14b6`)* - Census refreshed across the MP-* arc: the
   CrossChunk/Scheduling/Completion partials added, the `RunAll` → `Execute` registration corrected.
+* *(2026-08-03)* - `NS-4`'s **Building blocks** upgraded from hypothesis to verified fact: VQ-3 drove
+  `World.CheckPhysicsCollision` through an unmodified `PlacementTestWorld` (1950 probes), so the suite needs no
+  dependency injection — and the `WorldOrigin` static trap that makes such a sweep pass vacuously is recorded.
 * *(2026-07-22 – 2026-07-23, `51553999` · `72c8b9d9`)* - **`NS-5` completed** and **`NS-1` seeded** by the
   CP-2/CP-3 phases — the first two items to move off "proposal".
 * *(2026-07-08, `8ca99ab7`)* - `VS-1`'s shared runner shipped, becoming the mandated landing pattern for
