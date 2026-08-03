@@ -863,9 +863,18 @@ extracted and both existing consumers migrated, deleting `World.GetRotatedLocalB
 corners); they were proven equivalent over 12,288 combinations (4 schemas × 4 bound shapes × 3 origins ×
 256 metadata values, worst delta `0.000E+000`) and unified on the 8-corner form. Because physics has no
 validation suite, the migration was gated on a `CheckPhysicsCollision` golden master (1950 probes / 1776
-hits) that matched bit-for-bit before and after. **Remaining:** the ray narrow phase itself, the
-`World` API returning the resolved `VoxelState`, the highlight/place-preview scaling, and the suite
-scenarios.
+hits) that matched bit-for-bit before and after.
+
+The **narrow phase itself is also done** (2026-08-03): `Helpers/RayBoundsIntersection` (closed-form slab
+test, deliberately not shared with the placement suite's fuzz oracle so the two cannot share a failure
+mode), `World.TryGetRayHit` returning the resolved `VoxelState` for its `Meta`, and `MarchRay` continuing
+the traversal past a cell whose block the ray merely passed by. Guarded by 5 scenarios in
+`PlacementValidationSuite.SubVoxel.cs` on a synthetic half-slab; 3 of them were proven red against the
+disabled narrow phase — including one where a block placed against a slab's top landed *beside* it rather
+than on it. Placement 28/28, Validate All 385/385, and the physics golden master re-checked unchanged now
+that the ray shares the resolver. **In-game confirmed** — placement follows the slab's shape.
+**Remaining:** the highlight and place-preview cubes still draw a full 1×1×1 box over a half-slab, so
+targeting is exact while the highlight around a sub-voxel block is not. That is the whole of what is left.
 
 > **Impact Analysis:**
 > - **Effort:** 🟡 Medium — contained narrow phase; the traversal and the (now shared) bounds resolver
