@@ -18,16 +18,16 @@ are re-verified against a real `Validate All` run each time they are touched.
 > NS-5 is ✅ complete (CP-2 close-out, 2026-07-22) — see the per-item status lines; the rest are
 > proposals.
 
-**Existing coverage (for contrast, counts verified 2026-07-26 against a `Validate All` run — 350 baselines / 16 suites):** Lighting (88), Meshing (40, tip B40 — now including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
-**light** maps), Behavior/fluid tick (12 + determinism gates), Placement (17), MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (46), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (7), Save Durability (13), Deserialization Robustness (7), Spawn (10), Command Console (54), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` / `ChunkRelativePosition` tests.
+**Existing coverage (for contrast, counts verified 2026-08-03 against a `Validate All` run — 385 baselines / 16 suites):** Lighting (92), Meshing (40, tip B40 — now including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
+**light** maps), Behavior/fluid tick (16, incl. determinism gates), Placement (28 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (47), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (7), Spawn (10), Command Console (54), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` / `ChunkRelativePosition` tests.
 
 **Build protocol for every suite below:** the `validation-driven-bugfix` skill (deterministic repro first, prove-red before trusting green, promote repros to baselines). New suites should land on the shared `ValidationSuiteRunner` (`VS-1`, ✅ shipped 2026-07-08): register `Scenario`s and return its `ValidationRunResult` from a headless `Execute()`, with a thin `[MenuItem]` wrapper. All suites stay on the custom validation framework: migrating to the Unity Test Framework was evaluated 2026-07-02 and rejected (see the status header in
 [`../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md`](../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md)); the CI/coverage/XML gaps close via the VS-2 extensions instead.
 
 
 
-**Audited:** 2026-07-02 (seventh-pass audit), counts re-verified 2026-07-26 against a `Validate All`
-run — **350 baselines / 16 suites**. The audit found the then-six suites architecturally sound, so the
+**Audited:** 2026-07-02 (seventh-pass audit), counts re-verified 2026-08-03 against a `Validate All`
+run — **385 baselines / 16 suites**. The audit found the then-six suites architecturally sound, so the
 `VS-*` items it produced are operational only; the residual risk it identified is *coverage*, which is
 what this document ranks.
 
@@ -157,6 +157,13 @@ using the §2 scenario table as its baseline list.
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* *(2026-08-03)* - **Census refreshed: 350 → 385 baselines** across the same 16 suites. Lighting 88→92,
+  Behavior 12→16, Placement 17→28, Chunk Math 46→47, Pipeline Backpressure 7→22; every other suite unchanged.
+  Only the Placement delta is attributed here (VQ-2 + VQ-3 added those eleven); the rest accumulated across
+  the P-*/lighting work since the last census and are recorded as counts, not provenance.
+* *(2026-08-03)* - `NS-4`'s **Building blocks** upgraded from hypothesis to verified fact: VQ-3 drove
+  `World.CheckPhysicsCollision` through an unmodified `PlacementTestWorld` (1950 probes), so the suite needs no
+  dependency injection — and the `WorldOrigin` static trap that makes such a sweep pass vacuously is recorded.
 * **v1.0** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Status`/`Target`, an `Audited`
   line carrying the re-verified 350/16 counts, and a relationship list — including the distinction that
   keeps this document from overlapping the fidelity docs (**no suite at all** vs **blind spots in an
@@ -165,9 +172,6 @@ contemporaneous notes.*
   meshing tip advanced to **B40** as MH-13's neighbor light maps were closed.
 * *(2026-07-25, `e788db9e` · `d3012337` · `ff3b14b6`)* - Census refreshed across the MP-* arc: the
   CrossChunk/Scheduling/Completion partials added, the `RunAll` → `Execute` registration corrected.
-* *(2026-08-03)* - `NS-4`'s **Building blocks** upgraded from hypothesis to verified fact: VQ-3 drove
-  `World.CheckPhysicsCollision` through an unmodified `PlacementTestWorld` (1950 probes), so the suite needs no
-  dependency injection — and the `WorldOrigin` static trap that makes such a sweep pass vacuously is recorded.
 * *(2026-07-22 – 2026-07-23, `51553999` · `72c8b9d9`)* - **`NS-5` completed** and **`NS-1` seeded** by the
   CP-2/CP-3 phases — the first two items to move off "proposal".
 * *(2026-07-08, `8ca99ab7`)* - `VS-1`'s shared runner shipped, becoming the mandated landing pattern for
@@ -177,6 +181,6 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-07-26 (header completed; counts verified at 350 baselines / 16 suites)
+**Last Updated:** 2026-08-03 (census refreshed; counts verified at 385 baselines / 16 suites)
 **Next Review:** whenever a suite is added or a `Validate All` count changes — the existing-coverage
 paragraph is the one part of this document that goes stale silently.
