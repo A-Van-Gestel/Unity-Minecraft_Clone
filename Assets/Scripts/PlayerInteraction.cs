@@ -34,6 +34,9 @@ public class PlayerInteraction : MonoBehaviour
     /// <summary>Authored scale of <see cref="_placeCube"/>, preserved as a multiplier (see <c>CacheHighlightCube</c>).</summary>
     private Vector3 _placeCubeBias;
 
+    /// <summary>A whole cell, in cell-local space — the outline's shape when the targeted block cannot be resolved.</summary>
+    private static readonly Bounds s_fullCellBounds = new Bounds(new Vector3(0.5f, 0.5f, 0.5f), Vector3.one);
+
     /// <summary>
     /// Is current placeable block not inside the player, other solid block, outside the world and current itemSlot is not empty.
     /// </summary>
@@ -283,14 +286,20 @@ public class PlayerInteraction : MonoBehaviour
         // VQ-3: both boxes hug the block's real volume, not its cell — targeting a half-slab is exact, so a
         // full-cube outline around it would read as a bug. The place preview uses the metadata the block would
         // actually be placed with, so a slab previews as a slab on the correct half.
+        // The outline is shaped on every path, including the one where the block cannot be resolved: it is shown
+        // unconditionally below, so a skipped update would leave the previous block's silhouette on screen.
         Vector3Int hitVoxel = ToVoxelMod(probe.HitCell);
-        if (_world.TryGetVoxel(hitVoxel.x, hitVoxel.y, hitVoxel.z, out VoxelState hitVoxelState))
-            ShapeHighlight(_highlightCube, _highlightCubeBias, _world.BlockTypes[hitVoxelState.ID],
-                hitVoxelState.Meta);
+        Bounds hitBounds = _world.TryGetVoxel(hitVoxel.x, hitVoxel.y, hitVoxel.z, out VoxelState hitVoxelState)
+            ? BlockCollisionBoundsUtility.GetBounds(_world.BlockTypes[hitVoxelState.ID], hitVoxelState.Meta,
+                Vector3.zero)
+            : s_fullCellBounds;
+        ShapeHighlight(_highlightCube, _highlightCubeBias, hitBounds);
 
+        // The preview needs no such fallback: an empty hand leaves heldBlock null, which also clears
+        // _blockPlaceable below and hides the box entirely, so its shape is never seen while stale.
         if (heldBlock != null)
-            ShapeHighlight(_placeCube, _placeCubeBias, heldBlock,
-                ComputePlacementMeta(heldBlock, probe.HitNormal));
+            ShapeHighlight(_placeCube, _placeCubeBias, BlockCollisionBoundsUtility.GetBounds(
+                heldBlock, ComputePlacementMeta(heldBlock, probe.HitNormal), Vector3.zero));
 
         // The controller already decided world placeability (bounds + occupancy + support). The player-AABB overlap
         // is player-entity state, so it stays here as a final veto: the placed block must not intersect the player.
@@ -306,19 +315,17 @@ public class PlayerInteraction : MonoBehaviour
     }
 
     /// <summary>
-    /// Shapes a highlight box's mesh child to a block's collision volume. The block's bounds are resolved in
-    /// cell-local space (the parent already sits on the cell corner), so a full-cube block reproduces the authored
-    /// center and scale exactly and only sub-voxel blocks move.
+    /// Shapes a highlight box's mesh child to a block volume expressed in cell-local space — the parent already
+    /// sits on the cell corner, so a full-cube block reproduces the authored center and scale exactly and only
+    /// sub-voxel blocks move.
     /// </summary>
     /// <param name="cube">The mesh child to shape; ignored when null.</param>
     /// <param name="bias">The child's authored scale, applied on top of the block's size.</param>
-    /// <param name="blockType">The block whose volume the box should hug.</param>
-    /// <param name="meta">The metadata selecting that block's rotation.</param>
-    private static void ShapeHighlight(Transform cube, Vector3 bias, BlockType blockType, byte meta)
+    /// <param name="localBounds">The volume to hug, in cell-local space.</param>
+    private static void ShapeHighlight(Transform cube, Vector3 bias, Bounds localBounds)
     {
         if (cube == null) return;
 
-        Bounds localBounds = BlockCollisionBoundsUtility.GetBounds(blockType, meta, Vector3.zero);
         cube.localPosition = localBounds.center;
         cube.localScale = Vector3.Scale(localBounds.size, bias);
     }

@@ -57,7 +57,8 @@ namespace Placement
         /// <param name="rayDir">Ray direction (the player camera forward).</param>
         /// <param name="heldBlock">The held block, or <c>null</c> for an empty hand.</param>
         /// <param name="includeFluids">Whether the ray treats fluids as hittable surfaces.</param>
-        /// <param name="reach">Maximum ray distance (in blocks) the player can target.</param>
+        /// <param name="reach">Maximum ray distance the player can target, measured in units of
+        /// <paramref name="rayDir"/>'s length — blocks for the unit camera forward production passes.</param>
         /// <param name="originVoxel">The floating-origin offset separating Unity space from voxel space, pinned for
         /// the whole probe (see the class remarks).</param>
         /// <returns>The resolved <see cref="PlacementProbe"/>, or <see cref="PlacementProbe.Miss"/> when nothing is in reach.</returns>
@@ -95,7 +96,8 @@ namespace Placement
         /// <param name="rayDir">Ray direction (the player camera forward).</param>
         /// <param name="includeFluids">Whether the ray treats fluids as hittable surfaces.</param>
         /// <param name="skipTags">Block tags the ray passes through (e.g. the held block's replaceable set).</param>
-        /// <param name="reach">Maximum ray distance (in blocks) the player can target.</param>
+        /// <param name="reach">Maximum ray distance the player can target, measured in units of
+        /// <paramref name="rayDir"/>'s length — blocks for the unit camera forward production passes.</param>
         /// <param name="originVoxel">The floating-origin offset separating Unity space from voxel space, pinned for
         /// the whole march so every step resolves in one coordinate frame (see the class remarks).</param>
         /// <param name="hitCell">The cell the ray stopped on (valid only when the method returns true).</param>
