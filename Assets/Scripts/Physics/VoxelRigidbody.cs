@@ -19,6 +19,13 @@ namespace Physics
         private const float COLLISION_EPSILON = 0.001f;
         private const float COLLISION_JITTER_TOLERANCE = 0.001f;
 
+        // How far below the feet the grounded check looks. The overlap test in World.CheckPhysicsCollision is strict,
+        // so a body resting on a surface — which the vertical resolve parks COLLISION_EPSILON above it — does NOT
+        // overlap that surface. Probing the un-extended AABB therefore only ever detects an *embedded* body, and a
+        // correctly-standing one reads as airborne. Must stay above COLLISION_EPSILON (or it cannot span the
+        // stand-off) and far below the thinnest collision volume (0.25) so it never grounds a genuinely falling body.
+        private const float GROUND_PROBE_SKIN = COLLISION_EPSILON * 2f;
+
         [Tooltip("The padding added to the player bounds to avoid snagging flush walls.")]
         [Min(0.1f)]
         public float collisionWidthX = 0.8f;
@@ -427,9 +434,16 @@ namespace Physics
             }
             else
             {
-                // Explicitly check ground when vertical movement is 0
-                _world.CheckPhysicsCollision(verticalFutureAABB, axis: 1, -1, out var groundContact);
-                if (groundContact.Hit && groundContact.Correction > -0.01f)
+                // Explicitly check ground when vertical movement is 0, probing GROUND_PROBE_SKIN below the feet so a
+                // body already resting on a surface registers — flush contact is not overlap, so an un-extended probe
+                // would only ever find ground under a body embedded in it.
+                Bounds groundProbeAABB = verticalFutureAABB;
+                groundProbeAABB.SetMinMax(
+                    new Vector3(verticalFutureAABB.min.x, verticalFutureAABB.min.y - GROUND_PROBE_SKIN,
+                        verticalFutureAABB.min.z),
+                    verticalFutureAABB.max);
+
+                if (_world.CheckPhysicsCollision(groundProbeAABB, axis: 1, -1, out _))
                     IsGrounded = true;
             }
         }

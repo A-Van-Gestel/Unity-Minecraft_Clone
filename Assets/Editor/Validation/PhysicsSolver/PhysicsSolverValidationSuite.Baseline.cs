@@ -36,6 +36,12 @@ namespace Editor.Validation.PhysicsSolver
     /// boundary at a half → <b>B10, B11, B13</b>. This is what proves B11's blocked half is real: with the volume no
     /// longer reaching the entity's feet it walks straight through. The engine mutations above cannot show that,
     /// because they change the correction rather than the volume's extent.</item>
+    /// <item>Inflate <c>GROUND_PROBE_SKIN</c> from 0.002 to 0.2 → <b>B18</b>, and only B18.</item>
+    /// <item>Latch <c>IsGrounded</c> across the tick (<c>IsGrounded |= groundedByStep</c>) instead of reassigning it —
+    /// the fix shape <c>PLAYER_BUGS</c> §04 deliberately rejected → <b>B18, B19</b>.</item>
+    /// <item><b>B20–B23 need no mutation</b>: they shipped as §04's known-bug reproductions and were observed red
+    /// against the unfixed solver, which is the strongest form of this evidence. Promoted August 2026 after the fix
+    /// was confirmed in game.</item>
     /// </list>
     /// <b>B1 is the one baseline no mutation reds</b>, by design: it is the fixture-integrity guard, and it is
     /// two-sided (a seeded AABB must hit <i>and</i> an open-air AABB must not), so it cannot pass vacuously itself.
@@ -44,10 +50,9 @@ namespace Editor.Validation.PhysicsSolver
     /// size.
     /// </para>
     /// <para>
-    /// <b>Deliberately not asserted:</b> <c>IsGrounded</c> after a <i>high-speed</i> landing (B6) or after a
-    /// horizontal-only resolve (B3, B11, B16). The grounded verdict in those cases is the subject of
-    /// <c>PLAYER_BUGS</c> §04 and is owned by that entry's repro, not pinned here — pinning today's answer would
-    /// encode the bug as a baseline.
+    /// <b>Where the grounded verdict is pinned:</b> <b>B18–B23</b> own it, and the geometry baselines (B3, B6, B11,
+    /// B16) deliberately stay silent about it — duplicating a state assertion across them would only make several
+    /// baselines fail for one reason.
     /// </para>
     /// </summary>
     public static partial class PhysicsSolverValidationSuite
@@ -106,6 +111,16 @@ namespace Editor.Validation.PhysicsSolver
                 InsideCornerSettles));
             scenarios.Add(new Scenario("B17: the same landing resolves at a shifted floating origin",
                 ShiftedFloatingOrigin));
+            scenarios.Add(new Scenario("B18: a body hovering above a surface is not grounded", HoveringIsNotGrounded));
+            scenarios.Add(new Scenario("B19: leaving support mid-tick ends not grounded", LeavingSupportEndsAirborne));
+            scenarios.Add(new Scenario("B20: a substepped high-speed landing ends grounded",
+                FastLandingEndsGrounded));
+            scenarios.Add(new Scenario("B21: grounded state survives the ticks after a high-speed landing",
+                GroundedSurvivesAfterFastLanding));
+            scenarios.Add(new Scenario("B22: a jump is accepted after a high-speed landing",
+                JumpAcceptedAfterFastLanding));
+            scenarios.Add(new Scenario("B23: a horizontal-only resolve on flat ground stays grounded",
+                HorizontalResolveStaysGrounded));
         }
 
         /// <summary>Builds a fixture over the controlled solver palette at the identity origin.</summary>
@@ -655,6 +670,183 @@ namespace Editor.Validation.PhysicsSolver
                 $"the fixture must restore the previous anchor on dispose, got {WorldOrigin.OriginChunk}");
             return ok;
         }
+
+        /// <summary>
+        /// The upper bound on how generous the ground verdict may be: a body clearly airborne above a surface must
+        /// read not-grounded, or it can jump in mid-air. Paired with <see cref="LeavingSupportEndsAirborne"/> these
+        /// are the tripwires for <c>PLAYER_BUGS</c> §04's fix, which necessarily makes the ground probe reach
+        /// <i>slightly</i> below the body's feet — this pins how far "slightly" may go.
+        /// <para>
+        /// The hover gap is two orders of magnitude above the solver's landing stand-off and two below the thinnest
+        /// collision volume, so it sits in neither's noise.
+        /// </para>
+        /// </summary>
+        private static bool HoveringIsNotGrounded()
+        {
+            const float HOVER_GAP = 0.05f;
+
+            using PhysicsTestWorld world = NewFixture();
+            world.FillLayer(GROUND_Y, Id.Ground);
+            world.PlaceEntity(new Vector3(8.5f, GROUND_TOP + HOVER_GAP, 8.5f));
+            world.SetGrounded(true);
+
+            world.Resolve(new Vector3(0.05f, 0f, 0f));
+
+            return Expect(!world.IsGrounded,
+                $"a body hovering {HOVER_GAP} above the surface must not read grounded");
+        }
+
+        /// <summary>
+        /// The grounded verdict must describe where the body <i>ended</i> the tick, not the best moment within it. A
+        /// body that walks off a one-block ledge fast enough to substep is over support for the early substeps and
+        /// over nothing for the last, and must end airborne.
+        /// <para>
+        /// This is the tripwire against "fix the substep chain by latching the verdict across it": a latch would keep
+        /// the early substeps' grounded verdict and hand the player a mid-air jump window.
+        /// </para>
+        /// </summary>
+        private static bool LeavingSupportEndsAirborne()
+        {
+            const int SUPPORT_X = 8;
+            const int SUPPORT_Z = 8;
+            // Fast enough for two things at once: the tick's displacement must exceed the solver's substep threshold
+            // (so the walk off the ledge splits across several resolves — the only way this scenario can see a latch),
+            // and it must clear the whole footprint off the one-cell support within that single tick.
+            const float LEDGE_WALK_SPEED = 60f;
+
+            using PhysicsTestWorld world = NewFixture();
+            world.SetBlock(SUPPORT_X, GROUND_Y, SUPPORT_Z, Id.Ground);
+            world.PlaceEntity(new Vector3(SUPPORT_X + 0.5f, GROUND_TOP, SUPPORT_Z + 0.5f));
+            world.SetGrounded(true);
+            world.Body.walkSpeed = LEDGE_WALK_SPEED;
+            world.SetMovementIntent(Vector3.right);
+
+            world.Tick();
+
+            bool ok = Expect(world.Position.x - PhysicsTestWorld.EntityHalfWidthX > SUPPORT_X + 1f,
+                "precondition: the tick must actually carry the whole footprint past the ledge, got feet-min X " +
+                $"{Format(world.Position.x - PhysicsTestWorld.EntityHalfWidthX)}");
+            ok &= Expect(!world.IsGrounded, "a body that left its support during the tick must end airborne");
+            return ok;
+        }
+
+        #region PLAYER_BUGS §04 regression guards (promoted from K04a–K04d, fixed August 2026)
+
+        // These four shipped as known-bug reproductions, were observed red against the unfixed solver, and were
+        // promoted here after the fix was confirmed in game. They are the only baselines in this suite with a
+        // documented red observation from the engine's real defect rather than from a deliberate mutation.
+
+        /// <summary>
+        /// Gap between the entity's feet and the surface at the start of the landing tick, chosen to sit inside one
+        /// substep length at terminal fall speed (<c>|gravity| * fixedDeltaTime / substeps</c>) so contact happens on
+        /// the <i>first</i> substep and two substeps remain after it. This was the measured trigger window for §04:
+        /// contact any later in the chain left the verdict correct even before the fix, which is why the in-game report
+        /// was intermittent.
+        /// </summary>
+        private const float STUCK_TRIGGER_GAP = 0.05f;
+
+        /// <summary>
+        /// Builds the §04 trigger: a body one sub-substep above flat ground, falling at the gravity clamp so the
+        /// tick's displacement is large enough to substep.
+        /// </summary>
+        /// <param name="world">The fixture to seed and position.</param>
+        private static void ArrangeFastLanding(PhysicsTestWorld world)
+        {
+            world.FillLayer(GROUND_Y, Id.Ground);
+            world.PlaceEntity(new Vector3(8.5f, GROUND_TOP + STUCK_TRIGGER_GAP, 8.5f));
+            world.SetGrounded(false);
+            // At or past the clamp, gravity leaves the momentum alone, so this is an exact fall speed.
+            world.SetVerticalMomentum(PhysicsTestWorld.EntityGravity);
+        }
+
+        /// <summary>
+        /// One full tick that lands the body must leave it grounded — <c>ResolveMovement</c> runs once per substep and
+        /// reassigns the verdict each time, so the substeps that trail a landing must not clear what the landing
+        /// substep set. The body's <i>position</i> is asserted too: the §04 defect left the geometry correct and only
+        /// the state wrong, so a future regression must not "pass" by moving where the body rests.
+        /// </summary>
+        private static bool FastLandingEndsGrounded()
+        {
+            using PhysicsTestWorld world = NewFixture();
+            ArrangeFastLanding(world);
+
+            world.Tick();
+
+            bool ok = ExpectApprox(world.Position.y, GROUND_TOP, "rest height after a high-speed landing");
+            ok &= Expect(world.IsGrounded,
+                "the solver must report grounded after a substepped landing (the tail substeps must not clear the " +
+                "verdict the landing substep set)");
+            return ok;
+        }
+
+        /// <summary>
+        /// The verdict must also survive the ticks that follow, and the momentum assertion is what makes this more
+        /// than a repeat of <see cref="FastLandingEndsGrounded"/>: a not-grounded body never gets
+        /// <c>_verticalMomentum</c> zeroed, so it keeps re-entering the substep path. A resting body whose fall speed
+        /// is still pinned at the gravity clamp is the machinery that made §04 permanent rather than a one-tick blip.
+        /// </summary>
+        private static bool GroundedSurvivesAfterFastLanding()
+        {
+            const int SETTLE_TICKS = 8;
+
+            using PhysicsTestWorld world = NewFixture();
+            ArrangeFastLanding(world);
+
+            world.Tick();
+            for (int i = 0; i < SETTLE_TICKS; i++)
+                world.Tick();
+
+            bool ok = ExpectApprox(world.Position.y, GROUND_TOP, "rest height after settling");
+            ok &= Expect(world.IsGrounded, $"the solver must still report grounded {SETTLE_TICKS} ticks after landing");
+            ok &= Expect(world.VerticalMomentum > PhysicsTestWorld.EntityGravity + 1f,
+                "a resting body's vertical momentum must not stay pinned at the gravity clamp " +
+                $"({PhysicsTestWorld.EntityGravity}), got {Format(world.VerticalMomentum)}");
+            return ok;
+        }
+
+        /// <summary>
+        /// §04's user-visible symptom, through the real public entry point: <c>RequestJump</c> is a pure gate on
+        /// <c>IsGrounded</c>, so a wrong verdict <b>refuses</b> the jump rather than applying and losing it.
+        /// </summary>
+        private static bool JumpAcceptedAfterFastLanding()
+        {
+            using PhysicsTestWorld world = NewFixture();
+            ArrangeFastLanding(world);
+
+            world.Tick();
+            world.Body.RequestJump();
+
+            return Expect(world.JumpRequested,
+                "a jump requested while resting on the ground must be accepted, not refused");
+        }
+
+        /// <summary>
+        /// The same grounded question with substepping removed entirely: a body the solver itself landed, then moved
+        /// horizontally with no vertical component. The zero-vertical-movement branch owns the verdict here, and it
+        /// must recognise the surface the body is standing on even though flush contact is not overlap.
+        /// <para>
+        /// The body is landed by a resolve rather than placed at a literal stand-off height on purpose — the solver's
+        /// <c>COLLISION_EPSILON</c> is private and this suite does not mirror its value.
+        /// </para>
+        /// </summary>
+        private static bool HorizontalResolveStaysGrounded()
+        {
+            using PhysicsTestWorld world = NewFixture();
+            world.FillLayer(GROUND_Y, Id.Ground);
+            world.PlaceEntity(new Vector3(8.5f, GROUND_TOP + 1f, 8.5f));
+            world.SetGrounded(false);
+            world.Step(new Vector3(0f, -1.5f, 0f));
+
+            bool ok = Expect(world.IsGrounded, "precondition: the landing resolve must ground the body");
+
+            world.Resolve(new Vector3(0.05f, 0f, 0f));
+
+            ok &= Expect(world.IsGrounded,
+                "a horizontal-only resolve must not drop the grounded verdict for a body resting on a surface");
+            return ok;
+        }
+
+        #endregion
 
         #region Shared fixture geometry
 

@@ -49,8 +49,7 @@ namespace Editor.Validation.PhysicsSolver
         /// <returns>The categorized, timed result of the run.</returns>
         public static ValidationRunResult Execute(bool logToConsole = true, bool showProgress = true)
         {
-            // Known-bug scenarios: none registered yet. PLAYER_BUGS §04's repro lands here as a `K`-scenario (add an
-            // `AddKnownBugScenarios` partial alongside it) — the runner already supports the expected-red category.
+            // Known-bug scenarios: none open.
             List<Scenario> scenarios = new List<Scenario>();
             AddBaselineScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Physics Solver", scenarios, KnownBugChannel.Bug, logToConsole,

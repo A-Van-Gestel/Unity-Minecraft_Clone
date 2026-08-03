@@ -104,6 +104,13 @@ namespace Editor.Validation.PhysicsSolver.Framework
         /// <summary>The solver's accumulated vertical momentum (m/s) — the fall speed a scenario pins.</summary>
         public float VerticalMomentum => (float)ValidationReflection.GetInstanceField(_body, "_verticalMomentum");
 
+        /// <summary>
+        /// Whether the solver latched the last <c>VoxelRigidbody.RequestJump</c> call. That method is a pure gate on
+        /// <see cref="IsGrounded"/>, so this is how a scenario observes a jump being <i>refused</i> rather than merely
+        /// being ineffective — the distinction <c>PLAYER_BUGS</c> §04 turns on.
+        /// </summary>
+        public bool JumpRequested => (bool)ValidationReflection.GetInstanceField(_body, "_jumpRequest");
+
         /// <summary>The fixed timestep the solver integrates with, read from the project rather than assumed.</summary>
         public static float FixedDeltaTime => Time.fixedDeltaTime;
 
