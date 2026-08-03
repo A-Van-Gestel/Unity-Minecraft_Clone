@@ -3,6 +3,7 @@ using Data;
 using Editor.Validation.Framework;
 using Jobs.BurstData;
 using Placement;
+using Unity.Mathematics;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
@@ -38,7 +39,8 @@ namespace Editor.Validation.Placement.Framework
         public readonly bool Placeable;
 
         /// <summary>Initializes a placement outcome.</summary>
-        public PlacementOutcome(bool didHit, Vector3Int hitCell, bool replaces, Vector3Int placeCell, bool placeable)
+        public PlacementOutcome(bool didHit, Vector3Int hitCell, bool replaces, Vector3Int placeCell,
+            bool placeable)
         {
             DidHit = didHit;
             HitCell = hitCell;
@@ -85,9 +87,6 @@ namespace Editor.Validation.Placement.Framework
 
         /// <summary>Reach for the harness probe — generous enough to march the full 0-127 column from any start Y.</summary>
         private const float PROBE_REACH = 256f;
-
-        /// <summary>Ray-march step; matches the production <c>checkIncrement</c> default.</summary>
-        private const float PROBE_INCREMENT = 0.05f;
 
         /// <summary>The palette backing <c>World.Instance.BlockTypes</c> — exposed so scenarios can read tag data by id.</summary>
         public BlockType[] Palette => _palette;
@@ -186,14 +185,50 @@ namespace Editor.Validation.Placement.Framework
         /// <returns>The resolved <see cref="PlacementOutcome"/>.</returns>
         public PlacementOutcome ResolveTopDownPlacement(ushort? heldId, int x, int z, int startY = DefaultStartY)
         {
+            // "Player looking straight down the column" — the axis-aligned special case of an arbitrary probe ray.
+            Vector3 origin = new Vector3(x + 0.5f, startY + 0.5f, z + 0.5f);
+            return ResolveDirectionalPlacement(heldId, origin, Vector3.down);
+        }
+
+        /// <summary>
+        /// Resolves a placement attempt along an <b>arbitrary</b> ray by running the real
+        /// <see cref="PlacementController.Probe"/> — the general form of <see cref="ResolveTopDownPlacement"/>.
+        /// Needed because every axis-aligned probe traverses one cell per axis step, which makes fixed-increment
+        /// sampling and an exact voxel traversal indistinguishable; only an oblique ray exercises the march geometry.
+        /// </summary>
+        /// <param name="heldId">The held block id, or <c>null</c> for an empty hand.</param>
+        /// <param name="rayOrigin">Ray start, in <b>Unity space</b> (the harness's small cell coordinates).</param>
+        /// <param name="rayDir">Ray direction; need not be normalized (<paramref name="rayDir"/> scales the reach
+        /// parameter exactly as it does in production).</param>
+        /// <returns>The resolved <see cref="PlacementOutcome"/>.</returns>
+        public PlacementOutcome ResolveDirectionalPlacement(ushort? heldId, Vector3 rayOrigin, Vector3 rayDir)
+        {
             BlockType held = heldId.HasValue ? _palette[heldId.Value] : null;
 
-            // "Player looking straight down the column" — feed the real production probe a downward ray.
-            Vector3 origin = new Vector3(x + 0.5f, startY + 0.5f, z + 0.5f);
-            PlacementProbe probe = _controller.Probe(origin, Vector3.down, held, includeFluids: false, PROBE_REACH,
-                PROBE_INCREMENT, _originVoxel);
+            PlacementProbe probe = _controller.Probe(rayOrigin, rayDir, held, includeFluids: false, PROBE_REACH,
+                _originVoxel);
 
-            return new PlacementOutcome(probe.DidHit, probe.HitCell, probe.Replaces, probe.PlaceCell, probe.WorldPlaceable);
+            return new PlacementOutcome(probe.DidHit, probe.HitCell, probe.Replaces, probe.PlaceCell,
+                probe.WorldPlaceable);
+        }
+
+        /// <summary>
+        /// Runs the geometric half of the probe only (<see cref="PlacementController.MarchRay"/>), bypassing the
+        /// held-block replace/placeability decision. The seam the ray-march scenarios assert against: with an empty
+        /// skip mask every seeded block stops the ray, so a traversal defect cannot be masked — or manufactured — by
+        /// tag policy.
+        /// </summary>
+        /// <param name="rayOrigin">Ray start, in <b>Unity space</b>.</param>
+        /// <param name="rayDir">Ray direction; need not be normalized.</param>
+        /// <param name="hitCell">The cell the ray stopped on (valid only when the method returns true).</param>
+        /// <param name="hitNormal">The entered face normal (valid only when the method returns true).</param>
+        /// <param name="adjacentCell">The cell adjacent to the hit face.</param>
+        /// <returns>True if a voxel was hit within reach.</returns>
+        public bool MarchRay(Vector3 rayOrigin, Vector3 rayDir, out Vector3Int hitCell, out int3 hitNormal,
+            out Vector3Int adjacentCell)
+        {
+            return _controller.MarchRay(rayOrigin, rayDir, includeFluids: false, BlockTags.NONE, PROBE_REACH,
+                _originVoxel, out hitCell, out hitNormal, out adjacentCell);
         }
 
         /// <summary>

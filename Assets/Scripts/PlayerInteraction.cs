@@ -37,9 +37,6 @@ public class PlayerInteraction : MonoBehaviour
     /// </summary>
     private Vector3Int _lastProbeOrigin;
 
-    [Tooltip("Distance between each ray-cast check, lower value means better accuracy")]
-    public float checkIncrement = 0.05f;
-
     [Tooltip("Maximum distance the player can interact with blocks.")]
     public float reach = 8f;
 
@@ -195,7 +192,8 @@ public class PlayerInteraction : MonoBehaviour
 
     /// <summary>
     /// Centralized method to cast a ray from the player's camera to find a voxel.
-    /// Uses mathematical fractional offsets to accurately determine the placed block face.
+    /// The reported face is the one the traversal crossed to enter the hit cell, not a derivation from the hit
+    /// point — so it stays exact on corner hits, where the placed block's orientation metadata depends on it.
     /// </summary>
     /// <param name="overrideInteractWithFluids">If set, overrides the component's interactWithFluids toggle.</param>
     /// <param name="skipTags">Block tags the ray should pass through (derived from the held block's canReplaceTags).</param>
@@ -208,7 +206,7 @@ public class PlayerInteraction : MonoBehaviour
 
         // Read the origin fresh — never cached — so a re-anchor takes effect on the very next raycast.
         if (_placement.MarchRay(_playerCamera.position, _playerCamera.forward, checkFluids, skipTags, reach,
-                checkIncrement, WorldOrigin.OriginVoxel,
+                WorldOrigin.OriginVoxel,
                 out Vector3Int hitCell, out int3 hitNormal, out Vector3Int adjacentCell))
         {
             return new VoxelRaycastResult
@@ -237,7 +235,7 @@ public class PlayerInteraction : MonoBehaviour
         // Read the origin fresh each frame — never cached at construction — so a re-anchor takes effect immediately.
         _lastProbeOrigin = WorldOrigin.OriginVoxel;
         PlacementProbe probe = _placement.Probe(_playerCamera.position, _playerCamera.forward, heldBlock,
-            interactWithFluids, reach, checkIncrement, _lastProbeOrigin);
+            interactWithFluids, reach, _lastProbeOrigin);
         _lastProbe = probe;
 
         if (!probe.DidHit)

@@ -319,7 +319,6 @@ MonoBehaviour:
   interactWithFluids: 0
   highlightBlock: {fileID: 1989252701}
   placeBlock: {fileID: 1073421876}
-  checkIncrement: 0.05
   reach: 8
   toolbar: {fileID: 154747212}
 --- !u!114 &151001800
