@@ -865,7 +865,8 @@ shapes for free when this lands.
 
 ### PH-1. Collision solver re-queries the same voxel neighborhood across sweeps and substeps
 
-**Observed:** `VoxelRigidbody.ResolveMovement` (`VoxelRigidbody.cs` ~line 224) calls
+**Observed:** `VoxelRigidbody.ResolveMovement` (`VoxelRigidbody.cs` ~line 276 — nine static
+`CheckPhysicsCollision` call sites, of which up to ~7 run per resolve) calls
 `World.CheckPhysicsCollision` up to ~7 times per resolve (horizontal pre-pass ×2, step-up probe ×2
 
 + downward sweep, per-axis resolve ×2, vertical/ground check), and each call independently rescans the entity's AABB voxel range (typically 12–18 cells) through the full VQ-1 float path — nullable unwrap, managed `BlockType` deref, and (for custom-bounds blocks) a rotation-matrix computation per cell *per sweep*. Fast movement multiplies the whole resolve by up to
