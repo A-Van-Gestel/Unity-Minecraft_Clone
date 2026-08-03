@@ -49,6 +49,7 @@ namespace Editor.Validation.Placement
             AddRegressionScenarios(scenarios);
             AddWorldOriginScenarios(scenarios);
             AddBorderScenarios(scenarios);
+            AddRayMarchScenarios(scenarios);
             AddKnownBugScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Placement", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
@@ -81,6 +82,9 @@ namespace Editor.Validation.Placement
 
         /// <summary>Registers the TF-14 world-border edit-gate guards (implemented in PlacementValidationSuite.Border.cs).</summary>
         static partial void AddBorderScenarios(List<Scenario> scenarios);
+
+        /// <summary>Registers the VQ-2 ray-march geometry guards (implemented in PlacementValidationSuite.RayMarch.cs).</summary>
+        static partial void AddRayMarchScenarios(List<Scenario> scenarios);
 
         /// <summary>Registers expected-red known-bug reproductions (implemented in PlacementValidationSuite.KnownBugs.cs).</summary>
         static partial void AddKnownBugScenarios(List<Scenario> scenarios);
