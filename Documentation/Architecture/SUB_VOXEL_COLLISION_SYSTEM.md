@@ -1,23 +1,22 @@
 # Sub-Voxel Collision System
 
-**Status:** Implemented (Automated Tests Pending) — core runtime collision, placement API separation, Block Editor authoring, editor preview, and in-game collision-bounds debug visualization are fully implemented and playtested. Automated regression tests remain outstanding.
-**Target Engine:** Unity 6.4+  
+**Status:** Implemented (Automated Tests Pending) — core runtime collision, placement API separation, Block Editor authoring, editor preview, and in-game collision-bounds debug visualization are fully implemented and playtested. Automated regression tests remain outstanding. **Target Engine:** Unity 6.4+  
 **Dependencies:** Phase 4 Custom Mesh Rotation (`BurstCustomMeshRotationUtility`)  
-**Related:** `VoxelRigidbody.cs`, `World.CheckPhysicsCollision()`, `World.IsCellOccupiedForPlacement()`, `BlockType`, Block Editor
-**Last Reviewed:** May 2026
+**Related:** `VoxelRigidbody.cs`, `World.CheckPhysicsCollision()`, `World.IsCellOccupiedForPlacement()`, `World.TryGetRayHit()`, `Helpers.BlockCollisionBoundsUtility`, `Helpers.RayBoundsIntersection`, `PlacementController.MarchRay`, `BlockType`, Block Editor **Last Reviewed:** August 2026 (VQ-3 sync)
 
 ## Revision History
 
-| Date       | Change                                                                                                                                                                                                                                                                                 |
-|------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 2026-04-30 | Initial draft                                                                                                                                                                                                                                                                          |
-| 2026-04-30 | Revision 1 (Codex): separated occupancy vs physics APIs, replaced point-probe solver with AABB-vs-AABB contact queries, narrowed scope to rectangular sub-blocks, added `CollisionBoundsMode` enum, fixed Burst marshaling                                                             |
-| 2026-04-30 | Revision 2 (Codex): axis-specific contact queries, swept AABB tunneling guard, corrected step-up logic, schema-aware rotation path, placement API semantics, `IsEffectivelyFullBlock` validation, `BlockTypeJobData` consumer clarification, 90° permutation matrix terminology        |
-| 2026-04-30 | Revision 3 (Codex): direction-aware physics query, downward sweep for step-up, dynamic tunneling threshold from min collision thickness, coarse placement API disclaimer, replaceable tag gap noted, deferred `BlockTypeJobData` collision fields, corrected rotated component wording |
-| 2026-04-30 | Revision 4 (Codex): direction-specific multi-contact aggregation, step-up preserves horizontal velocity, substepping-only tunneling guard (removed union-scan from API), fixed stale pseudocode signatures                                                                             |
-| 2026-05-01 | Implementation status update: core runtime/editor system is implemented; document wording moved to present tense and remaining gaps called out explicitly.                                                                                                                             |
-| 2026-05-01 | Implementation Complete: runtime `DebugVisualizationMode.CollisionBounds` implementation finished and optimized. All features (except automated tests) are complete.                                                                                                                   |
-| 2026-08-03 | §7: recorded the bounds-blind interaction raycast as an explicit limitation (a half-slab collides at half height but targets as a full cube) and cross-linked the deferred work to the master backlog — `VQ-3` (raycast narrow phase) and `VQ-4` (compound bounds).                     |
+| Date       | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+|------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 2026-04-30 | Initial draft                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 2026-04-30 | Revision 1 (Codex): separated occupancy vs physics APIs, replaced point-probe solver with AABB-vs-AABB contact queries, narrowed scope to rectangular sub-blocks, added `CollisionBoundsMode` enum, fixed Burst marshaling                                                                                                                                                                                                                                                                                                       |
+| 2026-04-30 | Revision 2 (Codex): axis-specific contact queries, swept AABB tunneling guard, corrected step-up logic, schema-aware rotation path, placement API semantics, `IsEffectivelyFullBlock` validation, `BlockTypeJobData` consumer clarification, 90° permutation matrix terminology                                                                                                                                                                                                                                                  |
+| 2026-04-30 | Revision 3 (Codex): direction-aware physics query, downward sweep for step-up, dynamic tunneling threshold from min collision thickness, coarse placement API disclaimer, replaceable tag gap noted, deferred `BlockTypeJobData` collision fields, corrected rotated component wording                                                                                                                                                                                                                                           |
+| 2026-04-30 | Revision 4 (Codex): direction-specific multi-contact aggregation, step-up preserves horizontal velocity, substepping-only tunneling guard (removed union-scan from API), fixed stale pseudocode signatures                                                                                                                                                                                                                                                                                                                       |
+| 2026-05-01 | Implementation status update: core runtime/editor system is implemented; document wording moved to present tense and remaining gaps called out explicitly.                                                                                                                                                                                                                                                                                                                                                                       |
+| 2026-05-01 | Implementation Complete: runtime `DebugVisualizationMode.CollisionBounds` implementation finished and optimized. All features (except automated tests) are complete.                                                                                                                                                                                                                                                                                                                                                             |
+| 2026-08-03 | §7: recorded the bounds-blind interaction raycast as an explicit limitation (a half-slab collides at half height but targets as a full cube) and cross-linked the deferred work to the master backlog — `VQ-3` (raycast narrow phase) and `VQ-4` (compound bounds).                                                                                                                                                                                                                                                              |
+| 2026-08-03 | **`VQ-3` sync**: §7's raycast limitation marked CLOSED; §3.3's "API 2 — unchanged / no changes needed" replaced with the broad+narrow phase composition and `TryGetRayHit`; §3.2's `GetRotatedWorldBounds` sketch replaced by the shared `BlockCollisionBoundsUtility.GetBounds` (it and `GetRotatedLocalBounds` were unified after being proven equivalent); §3.2 now flags the 90°-permutation property as load-bearing for the ray's hit ordering; caller-migration row and §5 phase entries annotated rather than rewritten. |
 
 ## 1. Executive Summary
 
@@ -141,12 +140,16 @@ The collision bounds are defined in the block's **canonical (unrotated) local sp
 
 **Obtaining the rotation matrix**: The physics path MUST use the same schema-aware dispatch as rendering. This means calling `BurstCustomMeshRotationUtility.GetRotationMatrix(schema, meta, defaultMeta)` — NOT `VoxelState.Orientation`, which returns `0` for `Axis3` blocks. The `schema` and `defaultMeta` come from `BlockType`/`BlockTypeJobData`, and `meta` is decoded from the packed voxel data via `BurstVoxelDataBitMapping.GetMeta(packedData)`.
 
+Since **VQ-3** this lives in one place — `Helpers.BlockCollisionBoundsUtility.GetBounds(BlockType, byte meta,
+Vector3 blockOrigin)` — shared by the physics solver, the debug visualization, and the interaction ray, and **space-agnostic**: the returned bounds sit in whatever space `blockOrigin` is expressed in, so a Unity-space caller passes a Unity-space cell corner and the chunk-local visualizer passes a chunk-local one. It replaced two divergent private helpers in `World` (`GetRotatedWorldBounds`, 8-corner; `GetRotatedLocalBounds`, abs-matrix extent projection) that were proven to agree exactly before being unified. The sketch below shows the shape of the
+computation:
+
 ```csharp
 /// <summary>
-/// Returns the world-space AABB of a block's collision shape after rotation.
+/// Returns the AABB of a block's collision shape after rotation, in the caller's space.
 /// </summary>
-public static Bounds GetRotatedWorldBounds(
-    Vector3Int blockOrigin, BlockCollisionBounds localBounds,
+public static Bounds GetBounds(
+    Vector3 blockOrigin, BlockCollisionBounds localBounds,
     float3x3 rotationMatrix)
 {
     float3 center = new float3(0.5f, 0.5f, 0.5f);
@@ -179,6 +182,13 @@ public static Bounds GetRotatedWorldBounds(
 ```
 
 Since all rotation matrices are **90° signed permutation matrices** (not merely orthogonal — they are specifically axis-aligned 90° rotations with det=+1), the rotated AABB components are always **exact permutations/reflections of the authored bounds values** — no irrational values or floating-point drift. For a half-slab `(0,0,0)→(1,0.5,1)`, rotating 90° around X produces `(0,0,0)→(1,1,0.5)` exactly.
+
+> ⚠️ **This property is load-bearing for VQ-3, not just a precision nicety.** Because a 90° permutation maps
+> `[0,1]³` onto itself, a rotated sub-box can never escape the cell that owns it — which is what makes the
+> interaction ray's *hit ordering* sound: `VoxelRayDDA` visits cells in order, each cell owns a disjoint
+> `t`-interval, so the first cell whose sub-box the ray meets is the true nearest hit. Introducing a rotation
+> that is not an axis-aligned 90° multiple would let a volume spill into a neighbouring cell and silently break
+> that ordering — the ray would report a farther block as the hit. Any such change must revisit §3.3's ray path.
 
 ### 3.3. Separated Collision APIs
 
@@ -219,9 +229,22 @@ public bool IsCellOccupiedForPlacement(Vector3 pos)
     return props.isSolid && props.fluidType == FluidType.None;
 }
 
-// === API 2: Raycast Hit Detection (unchanged) ===
-// World.CheckForVoxel(Vector3, includeFluids, includeNonSolid) — already has
-// the correct fluid/non-solid semantics. No changes needed.
+// === API 2: Raycast Hit Detection (sub-voxel aware since VQ-3) ===
+// World.CheckForVoxel(...) / World.TryGetRayHit(..., out VoxelState) classify a
+// voxel at CELL level only — id, tags, fluidType, isSolid. Sub-voxel geometry is
+// deliberately NOT their job: it is the caller's narrow phase.
+//
+// PlacementController.MarchRay composes the two halves:
+//   broad phase  Helpers.VoxelRayDDA        — exact cell traversal, skips no cell
+//   narrow phase Helpers.RayBoundsIntersection — closed-form ray/AABB slab test
+// For a cell whose block HasCustomBounds it slab-tests the rotated volume and,
+// on a miss, CONTINUES the traversal rather than reporting a hit — so aiming over
+// a half-slab's empty top reaches whatever is behind it. The reported face comes
+// from the slab entry plane, so it is exact for interior faces (a bottom slab's
+// top at y = 0.5). FullBlock blocks skip the narrow phase entirely.
+//
+// TryGetRayHit exists because the narrow phase needs the resolved VoxelState's
+// Meta to pick the rotation; CheckForVoxel returns only a bool.
 
 // === API 3: Physics Collision (sub-voxel aware, axis + direction) ===
 
@@ -246,8 +269,9 @@ public bool CheckPhysicsCollision(
     //    this method only tests the provided AABB as-is.
     // 2. For each occupied solid cell:
     //    a. Full-block fast path: test entity AABB vs full 1×1×1 cube
-    //    b. Custom bounds: get rotated world AABB via GetRotatedWorldBounds
-    //       using BurstCustomMeshRotationUtility.GetRotationMatrix(schema, meta, defaultMeta)
+    //    b. Custom bounds: get the rotated AABB via
+    //       BlockCollisionBoundsUtility.GetBounds(blockType, meta, cellOrigin),
+    //       which applies BurstCustomMeshRotationUtility.GetRotationMatrix internally
     //    c. Compute penetration on the requested axis + direction only
     //       e.g., axis=1 dir=-1: correction = blockBounds.max.y - entityBounds.min.y
     //             axis=1 dir=+1: correction = blockBounds.min.y - entityBounds.max.y
@@ -282,15 +306,16 @@ public struct CollisionContact
 }
 ```
 
-**Caller migration:**
+**Caller migration** — a record of the Phase 6 move, so the *Caller* column names the **pre-migration** methods.
+`VoxelRigidbody.CheckDownSpeed` / `CheckUpSpeed` / `CheckHorizontalCollision` no longer exist: the Phase 6c solver rewrite (§3.4) replaced the point-probe pattern outright.
 
-| Caller                                    | Previous API               | Implemented API                          | Reason                                    |
-|-------------------------------------------|----------------------------|------------------------------------------|-------------------------------------------|
-| `VoxelRigidbody.CheckDownSpeed`           | `CheckForCollision(point)` | `CheckPhysicsCollision(bounds, 1, -1)`   | Y-down: resolve against block top face    |
-| `VoxelRigidbody.CheckUpSpeed`             | `CheckForCollision(point)` | `CheckPhysicsCollision(bounds, 1, +1)`   | Y-up: resolve against block bottom face   |
-| `VoxelRigidbody.CheckHorizontalCollision` | `CheckForCollision(point)` | `CheckPhysicsCollision(bounds, 0/2, ±1)` | Per-axis X or Z with movement sign        |
-| `PlayerInteraction.cs:260` (placement)    | `CheckForCollision(pos)`   | `IsCellOccupiedForPlacement(pos)`        | Coarse grid-occupancy (see API 1 remarks) |
-| `World.CheckForVoxel` (raycast)           | unchanged                  | unchanged                                | Already has fluid/non-solid parameters    |
+| Caller                                    | Previous API               | Implemented API                                                                                        | Reason                                                                                |
+|-------------------------------------------|----------------------------|--------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------|
+| `VoxelRigidbody.CheckDownSpeed`           | `CheckForCollision(point)` | `CheckPhysicsCollision(bounds, 1, -1)`                                                                 | Y-down: resolve against block top face                                                |
+| `VoxelRigidbody.CheckUpSpeed`             | `CheckForCollision(point)` | `CheckPhysicsCollision(bounds, 1, +1)`                                                                 | Y-up: resolve against block bottom face                                               |
+| `VoxelRigidbody.CheckHorizontalCollision` | `CheckForCollision(point)` | `CheckPhysicsCollision(bounds, 0/2, ±1)`                                                               | Per-axis X or Z with movement sign                                                    |
+| `PlayerInteraction.cs:260` (placement)    | `CheckForCollision(pos)`   | `IsCellOccupiedForPlacement(pos)`                                                                      | Coarse grid-occupancy (see API 1 remarks)                                             |
+| `World.CheckForVoxel` (raycast)           | unchanged                  | unchanged in Phase 6; **VQ-3** added `TryGetRayHit` + a narrow phase in `PlacementController.MarchRay` | Cell-level classification stayed; sub-voxel geometry became the caller's narrow phase |
 
 ### 3.4. VoxelRigidbody Physics Solver
 
@@ -499,11 +524,11 @@ The Block Editor provides a **Collision Bounds** section with:
 
 - [x] Add `World.IsCellOccupiedForPlacement(Vector3)` — coarse grid-only check (document limitation vs `BlockTags.REPLACEABLE`)
 - [x] Migrate `PlayerInteraction.cs` placement check to `IsCellOccupiedForPlacement`
-- [x] Preserve existing `World.CheckForVoxel` (raycast) unchanged
+- [x] Preserve existing `World.CheckForVoxel` (raycast) unchanged *(Phase 6 scope; superseded by **VQ-3**, which made the ray sub-voxel aware — see §3.3)*
 - [x] Add `CollisionContact` struct with `Hit`, `Correction`, and `ContactFace`
 - [x] Implement `World.CheckPhysicsCollision(Bounds, axis, directionSign, out CollisionContact)` — direction-aware
 - [x] Implement direction-specific multi-contact aggregation (largest absolute correction resolves all overlaps)
-- [x] Implement `GetRotatedWorldBounds` using `BurstCustomMeshRotationUtility.GetRotationMatrix`
+- [x] Implement `GetRotatedWorldBounds` using `BurstCustomMeshRotationUtility.GetRotationMatrix` *(since replaced by `Helpers.BlockCollisionBoundsUtility.GetBounds` — see §3.2)*
 - [x] Full-block fast path (skip rotation for `FullBlock` mode and `IsEffectivelyFullBlock`)
 - [ ] Unit tests: AABB overlap for unrotated and rotated bounds, occupancy vs physics separation
 
@@ -542,12 +567,10 @@ The Block Editor provides a **Collision Bounds** section with:
 
 ## 7. Limitations & Future Work
 
-- **The interaction raycast is bounds-blind (Phase 6 scope)**: §3.3 keeps "API 2: Raycast Hit Detection"
-  unchanged, so `World.IsRayHit` decides on id/tags/`fluidType`/`isSolid` only. A half-slab therefore
-  *collides* at half height but *targets, highlights and breaks* as a full cube — it can be mined by aiming
-  at the empty air above it. Tracked as **`VQ-3`** in
-  [`../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md`](../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md); the fix is
-  a narrow-phase slab test behind the existing `VoxelRayDDA` traversal, on the single-AABB model below.
+- ~~**The interaction raycast is bounds-blind (Phase 6 scope)**~~ — ✅ **CLOSED by `VQ-3`, 2026-08-03.**
+  Phase 6 left the ray at cell level, so a half-slab *collided* at half height but *targeted, highlighted and broke* as a full cube — it could be mined by aiming at the empty air above it. The ray now runs a narrow phase (`Helpers.RayBoundsIntersection` behind `VoxelRayDDA`, via the shared
+  `Helpers.BlockCollisionBoundsUtility`), reports the block's face rather than the cell's, and shapes both highlight boxes to the block's volume — see §3.3. In-game confirmed. Detail record in
+  [`../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md`](../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md).
 - **Single AABB per block type (Phase 6 scope)**: Phase 6 explicitly targets rectangular sub-blocks only (half-slabs, quarter-slabs, pillars). Tracked as **`VQ-4`**. Complex shapes require compound collision:
     - **Stairs**: 2 AABBs (bottom tread + top tread). Future `CompoundCollisionBounds` with `NativeArray<BlockCollisionBounds>`.
     - **Wedges**: AABB approximation only (the diagonal is not representable). Accept over-sized collision or implement OBB/triangle queries.
