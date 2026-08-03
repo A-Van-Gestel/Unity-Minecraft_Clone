@@ -876,6 +876,52 @@ remains a floor-then-delegate wrapper (float `IsVoxelInWorld` preserved for exac
 
 ---
 
+### VQ-2. Placement ray marches by fixed increment instead of DDA
+
+✅ **SHIPPED 2026-08-03** (`feat/world-scaling`), in-game confirmed (targeting feel unchanged for ordinary aim).
+
+**Observed:** `PlacementController.MarchRay` sampled the ray at fixed `checkIncrement` (0.05) steps, calling
+`World.CheckForVoxel` per step — ~159 queries per call at the shipping `reach = 8`, and
+`PlayerInteraction.PlaceCursorBlocks` probes **every frame**. Fixed-step sampling also had two correctness
+edges: a step could skip a cell clipped diagonally (block-corner misses at any increment), and the entered-face
+normal was *derived after the fact* from the hit point's fractional offsets (`FaceNormal`), which could name the
+wrong face on near-corner hits — not cosmetic, since `PlayerInteraction.ComputePlacementMeta` feeds that normal
+to `Facing6FromHitNormal`, so a wrong face wrote wrong orientation metadata into a **persisted** `VoxelMod`.
+
+**Shipped:** a reusable Amanatides–Woo traversal, `Helpers/VoxelRayDDA` — an allocation-free `struct` stepper
+(`Create` + `MoveNext`) that visits exactly the cells the ray crosses, in order, skipping none, and yields the
+entered face as the stepped axis negated. `MarchRay` drives it; `FaceNormal`/`CoordinateOffset` are deleted.
+Query count at `reach = 8`: **~159 → ≤15** (bound is `reach × (|dx|+|dy|+|dz|)/|d| + 1`). `checkIncrement` is
+retired from `PlayerInteraction`, from the `MarchRay`/`Probe` signatures, and from the `World.unity` scene
+entry. The traversal is space-agnostic, so the probe still marches in Unity space and converts only the
+resulting cell (WS-4). A ray starting **inside** a hittable block crosses no face, so the first cell reports the
+face it would have entered through coming from outside — its dominant travel axis negated — chosen because a
+zero normal is silently folded to North by `Facing6FromHitNormal`.
+
+**Verification:** the pre-existing placement scenarios **could not gate this change** — all of them probe
+straight down through cell centres via `ResolveTopDownPlacement`, and any traversal advancing one cell per axis
+step is correct by construction there; `PlacementOutcome` did not even carry the normal. (The original entry
+named "the placement validation suite's 13 baselines" as the gate — an accurate count when it was written in the
+2026-07-02 audit, grown to 17 by implementation time via the WS-4a and TF-14 additions, but the count was never
+the point: none of those scenarios, at either size, could distinguish the two implementations.) Four oblique-ray scenarios were therefore
+authored first and **proven red** against the fixed-increment march — corner-graze skip, a seeded 500-ray fuzz
+checking no earlier cell on the ray is hittable, per-face entered-normal, and the ray-starts-inside case — plus
+a normal/adjacency invariant that held before and after. All four flipped green with the DDA; the original 17
+showed **zero diffs** (so no baseline had encoded a sampling artifact, contrary to the entry's warning).
+`Validate All`: 375/375 baselines across 16 suites.
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — a contained, well-known algorithm; the decision layer above is untouched.
+>   Roughly ⅔ of the work was the new oblique-ray coverage, not the traversal.
+> - **Risk:** 🟡 Medium — player-facing targeting feel; corner-case behavior changes by design.
+> - **Benefit:** ⚪ Low as pure perf (one ray/frame — the query reduction is not measurable in frame
+>   time, and no benchmark was captured). The delivered win is correctness + removing a tuning knob;
+>   perf becomes real if rays multiply (mobs, projectiles), which is why the traversal is a reusable
+>   helper rather than private to the controller.
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
 ---
 
 ## Validation Suites

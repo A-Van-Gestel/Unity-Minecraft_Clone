@@ -2,7 +2,7 @@
 
 **Version:** 1.0
 **Date:** 2026-07-26
-**Status:** **Open backlog.** 32 items open, 25 complete. Completed items keep their ✅ row in the master
+**Status:** **Open backlog.** 31 items open, 26 complete. Completed items keep their ✅ row in the master
 summary table; their detail sections live in
 [`../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md`](../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md).
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -22,6 +22,12 @@ summary table; their detail sections live in
 `Framework/ValidationSuiteRunner` + `ValidationRunResult`, six suites + `ChunkRelativePositionTests`
 migrated with unchanged verdicts; `VoxelMetadataUtilityTests`/`FastNoiseLiteTests` left as a tracked follow-up. VS-2/VS-3 now build on the runner's result object. **Implementation status synced:** 2026-07-12 — `WS-1` (chunk-math shift/mask centralization) shipped on `feat/world-scaling`: Burst-safe `ChunkMath` voxel↔chunk↔region helpers + all ~11 chunk-math call sites migrated, guarded by the "Chunk Math" suite; byte-identical over the reachable range (no save bump). Audit correction folded in: the V2 codec truncation was latent-but-unreachable, not a
 live bug.
+**Implementation status synced:** 2026-08-03 — `VQ-2` (exact DDA placement ray traversal) shipped on
+`feat/world-scaling`: reusable `Helpers/VoxelRayDDA`, `FaceNormal` heuristic and `checkIncrement` both retired,
+guarded by four new oblique-ray scenarios in the Placement suite (authored red-first — the suite's pre-existing
+scenarios are all axis-aligned and could not distinguish the two implementations). Audit correction folded in:
+that entry named the suite's "13 baselines" as its gate — the count was right when written and had grown to 17,
+but no scenario at either size could gate a ray-march change. Validate All 375/375; no save bump.
 `VQ-1` (integer `TryGetVoxel` fast path — WS-1's runtime-API half) shipped 2026-07-12 on the same branch: one-chunk-coord integer query + one-entry last-chunk cache, `GetVoxelState(Vector3)` kept as a floor-then-delegate wrapper, physics/placement/mod-apply consumers migrated; guarded by a float↔int decomposition-parity sweep in the "Chunk Math" suite; Placement suite + Validate All green (no save bump). **Third-pass audit:** 2026-07-02, at commit `99c3e6e` — added `WG-1..3`, `LI-2`, `GS-6`, `WS-1`; re-scoped `P-1` (see the pipeline table note).
 **Fourth-pass audit:** 2026-07-02, at commit `99c3e6e` — added `SL-1..4` (serialization save/load),
 `VQ-1..2` + `PH-1` (voxel query layer, interaction, physics), `SU-1..2` (startup/world load): the last previously-unaudited runtime systems. **Fifth-pass audit:** 2026-07-02, at commit `99c3e6e` — added `DT-1..4` (debug tooling: voxel visualizer modes, debug screen / perf HUD, terrain-gen overlay), lifting the fourth pass's debug-tooling exemption. **Sixth-pass audit:** 2026-07-02, at commit `99c3e6e` — added `ET-1..4` (editor tooling, deep pass on `Assets/Editor/WorldTools/` + quick pass on the remaining editor tools). **Seventh-pass audit:**
@@ -210,7 +216,7 @@ plus the standalone test files (`VoxelMetadataUtilityTests`, `FastNoiseLiteTests
 | ID   | Finding                                                                                                                                                                                                           | Effort | Risk | Benefit | Seed | Save |
 |------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
 | VQ-1 ✅ | **SHIPPED 2026-07-12** — integer `TryGetVoxel` fast path (one chunk-coord, no float/nullable) + one-entry last-chunk cache; `GetVoxelState(Vector3)` kept as wrapper; physics/placement/mod consumers migrated. **Contract narrowed 2026-07-27** (Fluid §18): resolves `IsPopulated` chunks only — checked live *after* the cache, so a placeholder that generates later resolves on the next query |   🟡   |  🟡  |   🟡    |  ✅  |  ✅  |
-| VQ-2 | Placement ray uses fixed-increment sampling (~reach/step queries per frame) instead of DDA                                                                                                                        |   🟡   |  🟡  |   ⚪    |  ✅  |  ✅  |
+| VQ-2 ✅ | **SHIPPED 2026-08-03** — placement ray march replaced by an exact Amanatides–Woo traversal (`Helpers/VoxelRayDDA`); no cell is skipped, the entered face is the stepped axis (the fractional-offset `FaceNormal` heuristic is deleted), and `checkIncrement` is retired as a setting. ~159 → ≤15 queries per probe at `reach = 8` |   🟡   |  🟡  |   ⚪    |  ✅  |  ✅  |
 | PH-1 | Collision solver re-queries the same voxel neighborhood across up to 7 sweeps × substeps/tick                                                                                                                     |   🟡   |  🟡  |   ⚪⁵   |  ✅  |  ✅  |
 
 > ⁵ VQ-2/PH-1 benefits are ⚪ with a single player entity — but `VoxelRigidbody` is the collision
@@ -814,23 +820,6 @@ and take the snapshot at **dequeue** time inside the bounded writer's main-threa
 > placement probe, pending-mod application, and the managed grass tick (TG-1's residual) — funnels
 > through one query API. TG-1/TG-4 fixed this *for the fluid tick* by bypassing it; the API itself
 > and its remaining consumers were never audited until this fourth pass.
-
-### VQ-2. Placement ray marches by fixed increment instead of DDA
-
-**Observed:** `PlacementController.MarchRay` (`PlacementController.cs` ~line 88) samples the ray at fixed `checkIncrement` steps, calling `World.CheckForVoxel` → `GetVoxelState` per step —
-~reach/checkIncrement queries per call, and `PlayerInteraction.PlaceCursorBlocks` probes **every frame**. Fixed-step sampling also has two correctness edges: a step can skip a cell clipped diagonally (block-corner misses at any increment), and the entered-face normal is *derived after the fact* from the hit point's fractional offsets (`FaceNormal`), which can name the wrong face on near-corner hits.
-
-**Recommendation:** Replace the march with a DDA voxel traversal (Amanatides–Woo): visits exactly the cells the ray crosses (≤ ~3 × reach queries instead of reach/increment), never skips a cell, and yields the entered face as a byproduct (deleting the `FaceNormal` fractional heuristic).
-`checkIncrement` disappears as a setting. ⚠ This intentionally *changes* behavior on the edge cases (more correct hits); the placement validation suite's 13 baselines gate the change, and any baseline that encoded a sampling artifact needs re-derivation with eyes on it — treat baseline diffs as findings, not failures.
-
-> **Impact Analysis:**
-> - **Effort:** 🟡 Medium — a contained, well-known algorithm; the decision layer above is untouched.
-> - **Risk:** 🟡 Medium — player-facing targeting feel; corner-case behavior changes by design.
-> - **Benefit:** ⚪ Low as pure perf (one ray/frame) — the win is correctness + removing a tuning
->   knob; perf becomes real if rays multiply (mobs, projectiles).
-> - **Seed/Save:** ✅ / ✅.
-
----
 
 ### PH-1. Collision solver re-queries the same voxel neighborhood across sweeps and substeps
 
