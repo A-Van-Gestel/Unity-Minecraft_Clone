@@ -50,6 +50,15 @@ namespace Editor.Validation.PhysicsSolver
     /// size.
     /// </para>
     /// <para>
+    /// <b>⚠️ Known coverage gap — horizontal multi-cell aggregation is unguarded.</b> The first-contact-wins
+    /// mutation above reds only <b>B7</b>, which is a <i>vertical</i> support case; no baseline puts two cells with
+    /// <i>different blocking faces</i> on one horizontal axis (e.g. a full cube at <c>x = 10.0</c> beside an
+    /// east-half slab at <c>x = 10.5</c>, where the body must stop at the nearer face, <c>10.00</c>). B3 is a uniform
+    /// wall plane, B12/B13 vary rotation rather than depth, and B16 spans two axes. Measured correct on 2026-08-03
+    /// during the <c>PLAYER_BUGS</c> §05 analysis but never pinned — close this before <b>PH-1</b> re-orders the
+    /// gather, since that refactor could regress it while the suite stays green.
+    /// </para>
+    /// <para>
     /// <b>Where the grounded verdict is pinned:</b> <b>B18–B23</b> own it, and the geometry baselines (B3, B6, B11,
     /// B16) deliberately stay silent about it — duplicating a state assertion across them would only make several
     /// baselines fail for one reason.

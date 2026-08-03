@@ -886,7 +886,11 @@ shapes for free when this lands.
 >   `Minecraft Clone/Dev/Validate Physics Solver` (23 baselines) — built *before* this item precisely so it has
 >   something to fail against. `B8`/`B9` (step-up) are the ones that catch a gather sized to the un-lifted AABB;
 >   `B15` catches a broken substep chain, and `B18`–`B23` pin the grounded verdict a re-ordered gather could break.
->   All 23 must stay green.
+>   All 23 must stay green. ⚠️ **One gate gap to close first:** no baseline pins *horizontal* multi-cell aggregation
+>   by depth (two cells whose blocking faces differ on one axis → stop at the nearer). The first-contact-wins mutation
+>   reds only `B7`, a vertical case, so a gather that re-orders horizontal contacts could regress silently. Measured
+>   correct 2026-08-03 (full cube at `x = 10.0` beside an east-half slab at `x = 10.5` → stops at `10.00`); add it as
+>   this item's step 0. Details in `PhysicsSolverValidationSuite.Baseline.cs`'s class docstring.
 > - **Benefit:** ⚪ Low with one player — linear with future entity count; this is the solver every
 >   mob/item will run.
 > - **Seed/Save:** ✅ / ✅.
