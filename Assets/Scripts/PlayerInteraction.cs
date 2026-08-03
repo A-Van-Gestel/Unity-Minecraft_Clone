@@ -22,6 +22,18 @@ public class PlayerInteraction : MonoBehaviour
     public Transform placeBlock;
     private Transform _highlightBlocksParent;
 
+    /// <summary>Mesh child of <see cref="highlightBlock"/>, shaped to the targeted block's collision volume.</summary>
+    private Transform _highlightCube;
+
+    /// <summary>Mesh child of <see cref="placeBlock"/>, shaped to the held block's collision volume.</summary>
+    private Transform _placeCube;
+
+    /// <summary>Authored scale of <see cref="_highlightCube"/>, preserved as a multiplier (see <c>CacheHighlightCube</c>).</summary>
+    private Vector3 _highlightCubeBias;
+
+    /// <summary>Authored scale of <see cref="_placeCube"/>, preserved as a multiplier (see <c>CacheHighlightCube</c>).</summary>
+    private Vector3 _placeCubeBias;
+
     /// <summary>
     /// Is current placeable block not inside the player, other solid block, outside the world and current itemSlot is not empty.
     /// </summary>
@@ -55,6 +67,25 @@ public class PlayerInteraction : MonoBehaviour
         _input = InputManager.Instance;
         _highlightBlocksParent = GameObject.Find("HighlightBlocks").GetComponent<Transform>();
         _placement = new PlacementController(_world);
+
+        CacheHighlightCube(highlightBlock, out _highlightCube, out _highlightCubeBias);
+        CacheHighlightCube(placeBlock, out _placeCube, out _placeCubeBias);
+    }
+
+    /// <summary>
+    /// Caches a highlight box's mesh child and its authored scale. The parent sits on the targeted cell's minimum
+    /// corner and the child carries the centring offset, so shaping a highlight to a sub-voxel block drives the
+    /// child. Its authored scale is kept as a per-box multiplier rather than assumed: the two boxes ship with
+    /// different values (the block outline is inflated slightly to beat z-fighting against the surface it hugs, the
+    /// placement preview is not, since it is drawn in open air).
+    /// </summary>
+    /// <param name="box">The highlight box root, positioned on the cell corner.</param>
+    /// <param name="cube">The mesh child to shape, or null when the box has none.</param>
+    /// <param name="bias">The child's authored scale, applied on top of the block's size.</param>
+    private static void CacheHighlightCube(Transform box, out Transform cube, out Vector3 bias)
+    {
+        cube = box != null && box.childCount > 0 ? box.GetChild(0) : null;
+        bias = cube != null ? cube.localScale : Vector3.one;
     }
 
     private void Update()
@@ -249,6 +280,18 @@ public class PlayerInteraction : MonoBehaviour
         highlightBlock.position = probe.HitCell;
         placeBlock.position = probe.PlaceCell;
 
+        // VQ-3: both boxes hug the block's real volume, not its cell — targeting a half-slab is exact, so a
+        // full-cube outline around it would read as a bug. The place preview uses the metadata the block would
+        // actually be placed with, so a slab previews as a slab on the correct half.
+        Vector3Int hitVoxel = ToVoxelMod(probe.HitCell);
+        if (_world.TryGetVoxel(hitVoxel.x, hitVoxel.y, hitVoxel.z, out VoxelState hitVoxelState))
+            ShapeHighlight(_highlightCube, _highlightCubeBias, _world.BlockTypes[hitVoxelState.ID],
+                hitVoxelState.Meta);
+
+        if (heldBlock != null)
+            ShapeHighlight(_placeCube, _placeCubeBias, heldBlock,
+                ComputePlacementMeta(heldBlock, probe.HitNormal));
+
         // The controller already decided world placeability (bounds + occupancy + support). The player-AABB overlap
         // is player-entity state, so it stays here as a final veto: the placed block must not intersect the player.
         _blockPlaceable =
@@ -260,6 +303,24 @@ public class PlayerInteraction : MonoBehaviour
         _highlightBlocksParent.gameObject.SetActive(showHighlightBlocks);
         highlightBlock.gameObject.SetActive(true);
         placeBlock.gameObject.SetActive(_blockPlaceable);
+    }
+
+    /// <summary>
+    /// Shapes a highlight box's mesh child to a block's collision volume. The block's bounds are resolved in
+    /// cell-local space (the parent already sits on the cell corner), so a full-cube block reproduces the authored
+    /// center and scale exactly and only sub-voxel blocks move.
+    /// </summary>
+    /// <param name="cube">The mesh child to shape; ignored when null.</param>
+    /// <param name="bias">The child's authored scale, applied on top of the block's size.</param>
+    /// <param name="blockType">The block whose volume the box should hug.</param>
+    /// <param name="meta">The metadata selecting that block's rotation.</param>
+    private static void ShapeHighlight(Transform cube, Vector3 bias, BlockType blockType, byte meta)
+    {
+        if (cube == null) return;
+
+        Bounds localBounds = BlockCollisionBoundsUtility.GetBounds(blockType, meta, Vector3.zero);
+        cube.localPosition = localBounds.center;
+        cube.localScale = Vector3.Scale(localBounds.size, bias);
     }
 
     /// <summary>
