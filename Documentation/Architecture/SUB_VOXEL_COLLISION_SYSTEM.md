@@ -1,6 +1,6 @@
 # Sub-Voxel Collision System
 
-**Status:** Implemented (Automated Tests Pending) — core runtime collision, placement API separation, Block Editor authoring, editor preview, and in-game collision-bounds debug visualization are fully implemented and playtested. Automated regression tests remain outstanding. **Target Engine:** Unity 6.4+  
+**Status:** Implemented — core runtime collision, placement API separation, Block Editor authoring, editor preview, and in-game collision-bounds debug visualization are fully implemented and playtested, and the solver is guarded by the **`NS-4`** physics validation suite (`Minecraft Clone/Dev/Validate Physics Solver`, 17 baselines) as of 2026-08-03. **Target Engine:** Unity 6.4+  
 **Dependencies:** Phase 4 Custom Mesh Rotation (`BurstCustomMeshRotationUtility`)  
 **Related:** `VoxelRigidbody.cs`, `World.CheckPhysicsCollision()`, `World.IsCellOccupiedForPlacement()`, `World.TryGetRayHit()`, `Helpers.BlockCollisionBoundsUtility`, `Helpers.RayBoundsIntersection`, `PlacementController.MarchRay`, `BlockType`, Block Editor **Last Reviewed:** August 2026 (VQ-3 sync)
 
@@ -17,6 +17,7 @@
 | 2026-05-01 | Implementation Complete: runtime `DebugVisualizationMode.CollisionBounds` implementation finished and optimized. All features (except automated tests) are complete.                                                                                                                                                                                                                                                                                                                                                             |
 | 2026-08-03 | §7: recorded the bounds-blind interaction raycast as an explicit limitation (a half-slab collides at half height but targets as a full cube) and cross-linked the deferred work to the master backlog — `VQ-3` (raycast narrow phase) and `VQ-4` (compound bounds).                                                                                                                                                                                                                                                              |
 | 2026-08-03 | **Phase 6c drift cleanup**: §3.3's caller-migration table named four call sites that no longer exist — the three `VoxelRigidbody` point-probe methods Phase 6c *deleted* (collapsed into one `ResolveMovement`, which issues all nine `CheckPhysicsCollision` calls) and `PlayerInteraction.cs:260`, whose occupancy check moved to `PlacementController.CanPlaceAt`. Every row now names its present-day home with the old name in parentheses. §5's six unchecked Phase 6c regression tests and §7's pending-tests bullet are cross-linked to `NS-4`, with the consequence stated: the solver has **no standing regression guard**. |
+| 2026-08-03 | **`NS-4` shipped**: the status line's "Automated Tests Pending" and §7's pending-tests bullet are retired — the solver now has a standing regression guard (`Minecraft Clone/Dev/Validate Physics Solver`, 17 baselines over the real `VoxelRigidbody` + real `CheckPhysicsCollision`). §5's six unchecked Phase 6c regression tests and Phase 6b's unit-test item are ticked with their scenario ids; §2.2's failure table maps to `B10`–`B13`. Two residual gaps are stated rather than hidden: the grounded verdict after a high-speed landing belongs to `PLAYER_BUGS` §04 (open) and is deliberately unpinned, and compound bounds stay with `VQ-4`. |
 | 2026-08-03 | **`VQ-3` sync**: §7's raycast limitation marked CLOSED; §3.3's "API 2 — unchanged / no changes needed" replaced with the broad+narrow phase composition and `TryGetRayHit`; §3.2's `GetRotatedWorldBounds` sketch replaced by the shared `BlockCollisionBoundsUtility.GetBounds` (it and `GetRotatedLocalBounds` were unified after being proven equivalent); §3.2 now flags the 90°-permutation property as load-bearing for the ray's hit ordering; caller-migration row and §5 phase entries annotated rather than rewritten. |
 
 ## 1. Executive Summary
@@ -535,7 +536,7 @@ The Block Editor provides a **Collision Bounds** section with:
 - [x] Implement direction-specific multi-contact aggregation (largest absolute correction resolves all overlaps)
 - [x] Implement `GetRotatedWorldBounds` using `BurstCustomMeshRotationUtility.GetRotationMatrix` *(since replaced by `Helpers.BlockCollisionBoundsUtility.GetBounds` — see §3.2)*
 - [x] Full-block fast path (skip rotation for `FullBlock` mode and `IsEffectivelyFullBlock`)
-- [ ] Unit tests: AABB overlap for unrotated and rotated bounds, occupancy vs physics separation
+- [x] Unit tests: AABB overlap for unrotated (`B2`, `B3`) and rotated (`B12`, `B13`) bounds; the occupancy-vs-physics separation is asserted from both sides — `B11` proves a slab cell does **not** collide in its empty half, while the Placement suite's sub-voxel scenarios prove the same cell still reads as *occupied* for placement
 
 ### Phase 6c — VoxelRigidbody Solver Rewrite
 
@@ -546,19 +547,23 @@ The Block Editor provides a **Collision Bounds** section with:
 - [x] Add `stepHeight` parameter and step-up BEFORE horizontal commit (preserve velocity on success)
 - [x] Add caller-side tunneling substep with `MIN_COLLISION_THICKNESS`-derived maxStep
 - [x] Handle edge cases through the implemented solver: slab-to-full transitions, adjacent rotated slabs, falling onto slabs
-- [ ] Regression test: verify existing full-block movement is unchanged
-- [ ] Regression test: verify "sweep across full entity height" bug (#526) does not reappear
-- [ ] Regression test: verify no tunneling through quarter-slabs at max flying speed
-- [ ] Regression test: multi-contact aggregation (entity on two half-slabs at different heights)
-- [ ] Regression test: horizontal velocity preserved after successful step-up
-- [ ] Regression test: step-up from half-slab to full block correctly finds support
+- [x] Regression test: verify existing full-block movement is unchanged — `B2` (landing), `B3` (wall stop + no cross-axis push), `B4` (ceiling)
+- [x] Regression test: verify "sweep across full entity height" bug (#526) does not reappear — `B5` (obstacle at head height only)
+- [x] Regression test: verify no tunneling through quarter-slabs at max flying speed — `B6`
+- [x] Regression test: multi-contact aggregation (entity on two half-slabs at different heights) — `B7`, which runs two geometries: a half-slab beside a full cube, and a bottom half-slab beside a rotated **top** half-slab (two custom volumes, both resolved through the rotation path)
+- [x] Regression test: horizontal velocity preserved after successful step-up — `B8`
+- [x] Regression test: step-up from half-slab to full block correctly finds support — `B9`
 - [x] Extensive playtesting of movement scenarios
 
-> The six unchecked items above are tracked as **`NS-4`** (physics / collision-solver suite) in
-> [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md), which
-> names this document's §2 scenario table as its ready-made baseline list. Until it exists, **the solver has no
-> automated guard at all** — VQ-3's shared-resolver extraction had to be gated on a throwaway
-> `CheckPhysicsCollision` golden master built for that one change and not committed.
+> The six regression tests above shipped as the **`NS-4`** physics / collision-solver suite
+> (`Minecraft Clone/Dev/Validate Physics Solver`, `Assets/Editor/Validation/PhysicsSolver/`, baselines `B1`–`B17`),
+> tracked in [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md).
+> §2.2's failure table is covered by `B10`–`B13`, and the suite adds substep invariance (`B15`), the corner
+> settling case (`B16`), fluid exclusion (`B14`), floating-origin handling (`B17`) and a fixture-integrity guard
+> (`B1`). It drives the real `VoxelRigidbody` against the real `World.CheckPhysicsCollision`; every baseline except
+> `B1` has been observed red under a deliberate engine mutation (the mutation → red-set map is in the suite's
+> `.Baseline.cs` docstring). The solver therefore now **has** a standing regression guard, replacing the throwaway
+> `CheckPhysicsCollision` golden master VQ-3 had to build and could not commit.
 
 ### Phase 6d — Editor & Debug Tooling
 
@@ -588,4 +593,5 @@ The Block Editor provides a **Collision Bounds** section with:
     - **L-shapes**: 2+ AABBs.
 - **No per-voxel collision variation**: All instances of a block type share the same collision shape (modulo rotation). Blocks that change shape based on neighbors (e.g., fence posts connecting) would need runtime collision computation.
 - **No mesh-based collision**: We intentionally avoid using the visual mesh as collision geometry. The per-frame AABB-overlap pattern is incompatible with arbitrary triangle meshes at voxel density. For blocks needing precise collision, the AABB can be oversized with visual details protruding — an acceptable trade-off.
-- **Automated collision regression tests are pending**: core behavior has been playtested, but the AABB query and movement edge cases listed in §5 still need test coverage. Tracked as **`NS-4`** in [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md). Consequence to weigh before touching the solver or the shared bounds resolver: **there is no standing regression guard**, so a change there is only as safe as the ad-hoc check written alongside it.
+- ~~**Automated collision regression tests are pending**~~ — ✅ **CLOSED by `NS-4`, 2026-08-03.** The solver now has a standing regression guard: `Minecraft Clone/Dev/Validate Physics Solver` (17 baselines, `Assets/Editor/Validation/PhysicsSolver/`), which drives the real `VoxelRigidbody` against the real `CheckPhysicsCollision` over synthetic voxel fields — see §5's Phase 6b/6c checklists for the per-item mapping. Residual gaps, both deliberate: the grounded verdict after a high-speed landing or a horizontal-only resolve is **not** pinned (it belongs to
+  [`../Bugs/PLAYER_BUGS.md`](../Bugs/PLAYER_BUGS.md) §04, still open), and compound bounds are out of scope until **`VQ-4`**.

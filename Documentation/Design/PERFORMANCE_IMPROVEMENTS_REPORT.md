@@ -855,8 +855,9 @@ shapes for free when this lands.
 
 > **Impact Analysis:**
 > - **Effort:** 🔴 High — data model + editor authoring + both query paths; multi-session.
-> - **Risk:** 🟡 Medium — touches the physics hot path and block-asset serialization; needs the physics
->   suite (`NS-*`) in place first, which VQ-3's golden-master sweep would partially seed.
+> - **Risk:** 🟡 Medium — touches the physics hot path and block-asset serialization; needed the physics suite
+>   (`NS-4`) in place first, which ✅ **shipped 2026-08-03** (`Minecraft Clone/Dev/Validate Physics Solver`). Its
+>   sub-voxel baselines `B10`–`B13` are the single-AABB behavior compound bounds must not regress.
 > - **Benefit:** ⚪ No frame-time change — unlocks stairs/L-shapes as buildable blocks.
 > - **Seed/Save:** ✅ / ✅ — `BlockDatabase.asset` is a ScriptableObject; adding a box list is a Unity
 >   serialization change, **not** a world-save format change, so no AOT migration is required.
@@ -881,6 +882,10 @@ shapes for free when this lands.
 > - **Risk:** 🟡 Medium — the step-up sweep reads *lifted* AABBs (cells outside the initial range —
 >   the gather must cover the step-height envelope); physics feel regressions are subtle, so
 >   verify with the sub-voxel collision doc's test scenarios (`SUB_VOXEL_COLLISION_SYSTEM.md`).
+>   **Gate now exists (2026-08-03):** those scenarios are automated as the `NS-4` suite,
+>   `Minecraft Clone/Dev/Validate Physics Solver` (17 baselines) — built *before* this item precisely so it has
+>   something to fail against. `B8`/`B9` (step-up) are the ones that catch a gather sized to the un-lifted AABB;
+>   `B15` catches a broken substep chain. All 17 must stay green.
 > - **Benefit:** ⚪ Low with one player — linear with future entity count; this is the solver every
 >   mob/item will run.
 > - **Seed/Save:** ✅ / ✅.

@@ -2,9 +2,9 @@
 
 **Version:** 1.0
 **Date:** 2026-07-02
-**Status:** **Living backlog.** `NS-5` is ✅ complete (CP-2 close-out) and `NS-1` is partially seeded
-(CP-3's robustness slice); `NS-2`, `NS-3`, `NS-4` and `NS-6` remain proposals. Existing-coverage counts
-are re-verified against a real `Validate All` run each time they are touched.
+**Status:** **Living backlog.** `NS-4` and `NS-5` are ✅ complete (NS-4 2026-08-03; NS-5 at the CP-2 close-out) and
+`NS-1` is partially seeded (CP-3's robustness slice); `NS-2`, `NS-3` and `NS-6` remain proposals. Existing-coverage
+counts are re-verified against a real `Validate All` run each time they are touched.
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > Which systems currently have **no validation suite** and deserve one, ranked most → least
@@ -14,12 +14,12 @@ are re-verified against a real `Validate All` run each time they are touched.
 > architecturally excellent (`VS-*` items are operational only) — the remaining risk is *coverage*,
 > and it is concentrated in the systems below.
 >
-> Status: **Living backlog.** NS-1 is partially seeded (CP-3's robustness slice, 2026-07-22) and
-> NS-5 is ✅ complete (CP-2 close-out, 2026-07-22) — see the per-item status lines; the rest are
-> proposals.
+> Status: **Living backlog.** NS-1 is partially seeded (CP-3's robustness slice, 2026-07-22), NS-5 is ✅
+> complete (CP-2 close-out, 2026-07-22) and NS-4 is ✅ complete (2026-08-03) — see the per-item status
+> lines; the rest are proposals.
 
-**Existing coverage (for contrast, counts verified 2026-08-03 against a `Validate All` run — 385 baselines / 16 suites):** Lighting (92), Meshing (40, tip B40 — now including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
-**light** maps), Behavior/fluid tick (16, incl. determinism gates), Placement (28 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (47), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (7), Spawn (10), Command Console (54), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` / `ChunkRelativePosition` tests.
+**Existing coverage (for contrast, counts verified 2026-08-03 against a `Validate All` run — 402 baselines / 17 suites):** Lighting (92), Meshing (40, tip B40 — now including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
+**light** maps), Behavior/fluid tick (16, incl. determinism gates), Placement (28 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (17 — NS-4, new)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (47), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (7), Spawn (10), Command Console (54), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` / `ChunkRelativePosition` tests.
 
 **Build protocol for every suite below:** the `validation-driven-bugfix` skill (deterministic repro first, prove-red before trusting green, promote repros to baselines). New suites should land on the shared `ValidationSuiteRunner` (`VS-1`, ✅ shipped 2026-07-08): register `Scenario`s and return its `ValidationRunResult` from a headless `Execute()`, with a thin `[MenuItem]` wrapper. All suites stay on the custom validation framework: migrating to the Unity Test Framework was evaluated 2026-07-02 and rejected (see the status header in
 [`../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md`](../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md)); the CI/coverage/XML gaps close via the VS-2 extensions instead.
@@ -27,7 +27,7 @@ are re-verified against a real `Validate All` run each time they are touched.
 
 
 **Audited:** 2026-07-02 (seventh-pass audit), counts re-verified 2026-08-03 against a `Validate All`
-run — **385 baselines / 16 suites**. The audit found the then-six suites architecturally sound, so the
+run — **402 baselines / 17 suites**. The audit found the then-six suites architecturally sound, so the
 `VS-*` items it produced are operational only; the residual risk it identified is *coverage*, which is
 what this document ranks.
 
@@ -100,15 +100,34 @@ what this document ranks.
 
 ---
 
-## NS-4. Physics / collision-solver suite — **Priority 4**
+## NS-4. Physics / collision-solver suite — **Priority 4** — ✅ **COMPLETE (2026-08-03)**
 
-- **Failure class guarded:** player-facing movement regressions (fall-through, wall snag, broken step-up) — subtle, playtest-only today. `SUB_VOXEL_COLLISION_SYSTEM.md`'s own status line says **"Automated Tests Pending — automated regression tests remain outstanding."** This suite is that outstanding item.
+- **Failure class guarded:** player-facing movement regressions (fall-through, wall snag, broken step-up) — subtle and playtest-only until this suite landed. It is the item `SUB_VOXEL_COLLISION_SYSTEM.md` carried as "Automated Tests Pending — automated regression tests remain outstanding" from Phase 6 until 2026-08-03; that status line now reads "Implemented", guarded by this suite.
 - **Live bugs it would already have caught:** [`../Bugs/PLAYER_BUGS.md`](../Bugs/PLAYER_BUGS.md) **§04** (player embeds in a block after a fast landing and `IsGrounded` never recovers, so jumps are refused until flight/noclip rescues them — **High**, the player is stranded) and **§01** (collision sticks in tight spaces). §04 is the natural *first* scenario: its symptom is a single boolean (`IsGrounded`) on a solver whose grounded state is written in only four places, so it reduces to an assertable end-state rather than a feel judgement.
 - **Backlog items it gates:** `PH-1` (gather-once solver refactor), `VQ-1` (integer query path under the solver), collision-bounds authoring changes (Block Editor).
 - **Scope sketch:** deterministic scenarios on fixture voxel fields, asserting final position/velocity/`IsGrounded` within tolerance: flat-ground grounding, wall slide, corner snag (the `COLLISION_EPSILON`/jitter-tolerance edges), step-up onto slab and full block, sub-voxel bounds (quarter slabs, rotated custom bounds), ceiling bump, and **substep consistency** (one large displacement vs N substeps → same endpoint). The scenario table in
   `SUB_VOXEL_COLLISION_SYSTEM.md` §2 is the ready-made baseline list.
 - **Building blocks:** `PlacementTestWorld` proves the concrete-`World` stubbing pattern (`ValidationReflection`). The "or the stub world populated with real voxel data" option is **verified, not hypothetical**: VQ-3 (2026-08-03) drove `World.CheckPhysicsCollision` through an unmodified `PlacementTestWorld` seeded with the real `BlockDatabase` for a 1950-probe sweep, so **no dependency injection is required** to stand this suite up. ⚠️ One trap that sweep hit first: `CheckPhysicsCollision` reads the `WorldOrigin` **static**, which survives play sessions (it is reset only on play-mode entry), so a fixture must `WorldOrigin.ResetToIdentity()` and restore — otherwise every lookup lands far from the seeded blocks and the sweep silently returns **zero hits**, passing vacuously. Assert a non-zero hit count before trusting any such sweep.
 - **Effort:** 🟡.
+- **Status (2026-08-03): ✅ COMPLETE** — shipped as `Minecraft Clone/Dev/Validate Physics Solver`
+  (`Assets/Editor/Validation/PhysicsSolver/`, 17 baselines `B1`–`B17`). The harness drives the **real**
+  `VoxelRigidbody` (a live component with `_world` injected; `ResolveMovement` for an exact displacement,
+  `CalculateVelocity` + translate for the substep chain) against the **real** `World.CheckPhysicsCollision`, over the
+  `PlacementTestWorld` stub-world recipe as predicted above — no dependency injection was needed. Coverage:
+  `SUB_VOXEL_COLLISION_SYSTEM.md` §5 Phase 6c's six regression tests (`B2`–`B9`) and Phase 6b's unit-test item, §2.2's
+  failure table (`B10`–`B13`), substep invariance (`B15`), the corner/jitter edge (`B16`), fluid exclusion (`B14`),
+  the WS-4 origin offset (`B17`), and the `WorldOrigin` vacuous-pass guard as `B1` (two-sided: a seeded AABB must hit
+  **and** an open-air AABB must not).
+    - **Prove-red is recorded, not assumed.** These baselines were authored against shipped code, so nine engine
+      mutations were applied in isolation to observe each one red; the mutation → red-set map lives in the suite's
+      `.Baseline.cs` docstring. Every baseline except `B1` (fixture-integrity, red by construction) has been observed
+      failing. Two findings worth carrying: `B15` does **not** detect the absence of substepping (`B6` owns that — it
+      guards the loop's composition instead), and the solver's `fluidType != None` filter has **no** coverage from
+      real data (every shipping fluid is already non-solid), so the fixture carries a deliberately solid-flagged fluid
+      to exercise it.
+    - **Deliberately not pinned:** the `IsGrounded` verdict after a high-speed landing or a horizontal-only resolve.
+      That is exactly [`../Bugs/PLAYER_BUGS.md`](../Bugs/PLAYER_BUGS.md) **§04**, which remains open — pinning today's
+      answer would encode the bug as a baseline. §04's repro is the suite's next scenario.
 
 ---
 
@@ -147,8 +166,9 @@ No suites proposed for: **UI/menus and input** (event-driven, low blast radius, 
 
 ## Sequencing summary
 
-`NS-1` (core, parts 1–5) and `NS-2` first — they guard the two irreversible failure classes (data loss, seed breaks) and unblock the most queued work (`SL-*`, `WG-3`, `ET-2`). `NS-5`/`NS-6` are 🟢-sized and should simply ride along with the work that triggers them (WS-1/VQ-1 and the next new pool, respectively). `NS-3` is the biggest investment — start it as repro fixtures for the three historical deadlocks and grow it scenario-wise, ideally before `P-4`/`OM-2` rework the scheduling invariants it guards. `NS-4` lands whenever `PH-1`/`VQ-1` get scheduled,
-using the §2 scenario table as its baseline list.
+`NS-1` (core, parts 1–5) and `NS-2` first — they guard the two irreversible failure classes (data loss, seed breaks) and unblock the most queued work (`SL-*`, `WG-3`, `ET-2`). `NS-5`/`NS-6` are 🟢-sized and should simply ride along with the work that triggers them (WS-1/VQ-1 and the next new pool, respectively). `NS-3` is the biggest investment — start it as repro fixtures for the three historical deadlocks and grow it scenario-wise, ideally before `P-4`/`OM-2` rework the scheduling invariants it guards. ~~`NS-4` lands whenever `PH-1`/`VQ-1` get scheduled,
+using the §2 scenario table as its baseline list.~~ — `NS-4` ✅ **landed 2026-08-03**, deliberately built *before*
+`PH-1` rather than alongside it, so `PH-1`'s "subtle physics-feel regression" risk has a gate it can fail against.
 
 ---
 
@@ -158,6 +178,12 @@ using the §2 scenario table as its baseline list.
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* *(2026-08-03)* - **`NS-4` COMPLETE** — the physics / collision-solver suite shipped (17 baselines,
+  `Minecraft Clone/Dev/Validate Physics Solver`), built ahead of `PH-1` so that refactor has a gate. **Census
+  refreshed: 385 → 402 baselines across 17 suites** (the +17 is entirely this suite; every other per-suite count
+  re-verified unchanged). The item's status bullet records the nine-mutation prove-red map, the two coverage findings
+  it surfaced (`B15` does not detect missing substepping; the `fluidType` filter has no real-data coverage), and the
+  one thing the suite deliberately does **not** pin — the `IsGrounded` verdict owned by `PLAYER_BUGS` §04.
 * *(2026-08-03)* - `NS-4` linked to the live bugs it would guard: `PLAYER_BUGS` **§04** (fast-landing embed →
   `IsGrounded` never recovers → jumps refused; filed the same day) and **§01**. §04 is named as the suite's
   natural first scenario because its symptom reduces to a single boolean rather than a feel judgement.
@@ -185,6 +211,6 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-03 (census refreshed; counts verified at 385 baselines / 16 suites)
+**Last Updated:** 2026-08-03 (`NS-4` complete; census verified at 402 baselines / 17 suites)
 **Next Review:** whenever a suite is added or a `Validate All` count changes — the existing-coverage
 paragraph is the one part of this document that goes stale silently.
