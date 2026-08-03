@@ -18,8 +18,8 @@ counts are re-verified against a real `Validate All` run each time they are touc
 > complete (CP-2 close-out, 2026-07-22) and NS-4 is ✅ complete (2026-08-03) — see the per-item status
 > lines; the rest are proposals.
 
-**Existing coverage (for contrast, counts verified 2026-08-03 against a `Validate All` run — 402 baselines / 17 suites):** Lighting (92), Meshing (40, tip B40 — now including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
-**light** maps), Behavior/fluid tick (16, incl. determinism gates), Placement (28 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (17 — NS-4, new)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (47), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (7), Spawn (10), Command Console (54), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` / `ChunkRelativePosition` tests.
+**Existing coverage (for contrast, counts verified 2026-08-03 against a `Validate All` run — 408 baselines / 17 suites):** Lighting (92), Meshing (40, tip B40 — now including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
+**light** maps), Behavior/fluid tick (16, incl. determinism gates), Placement (28 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (23 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19 and its promoted repro B20–B23)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (47), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (7), Spawn (10), Command Console (54), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` / `ChunkRelativePosition` tests.
 
 **Build protocol for every suite below:** the `validation-driven-bugfix` skill (deterministic repro first, prove-red before trusting green, promote repros to baselines). New suites should land on the shared `ValidationSuiteRunner` (`VS-1`, ✅ shipped 2026-07-08): register `Scenario`s and return its `ValidationRunResult` from a headless `Execute()`, with a thin `[MenuItem]` wrapper. All suites stay on the custom validation framework: migrating to the Unity Test Framework was evaluated 2026-07-02 and rejected (see the status header in
 [`../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md`](../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md)); the CI/coverage/XML gaps close via the VS-2 extensions instead.
@@ -27,7 +27,7 @@ counts are re-verified against a real `Validate All` run each time they are touc
 
 
 **Audited:** 2026-07-02 (seventh-pass audit), counts re-verified 2026-08-03 against a `Validate All`
-run — **402 baselines / 17 suites**. The audit found the then-six suites architecturally sound, so the
+run — **408 baselines / 17 suites**. The audit found the then-six suites architecturally sound, so the
 `VS-*` items it produced are operational only; the residual risk it identified is *coverage*, which is
 what this document ranks.
 
@@ -110,7 +110,8 @@ what this document ranks.
 - **Building blocks:** `PlacementTestWorld` proves the concrete-`World` stubbing pattern (`ValidationReflection`). The "or the stub world populated with real voxel data" option is **verified, not hypothetical**: VQ-3 (2026-08-03) drove `World.CheckPhysicsCollision` through an unmodified `PlacementTestWorld` seeded with the real `BlockDatabase` for a 1950-probe sweep, so **no dependency injection is required** to stand this suite up. ⚠️ One trap that sweep hit first: `CheckPhysicsCollision` reads the `WorldOrigin` **static**, which survives play sessions (it is reset only on play-mode entry), so a fixture must `WorldOrigin.ResetToIdentity()` and restore — otherwise every lookup lands far from the seeded blocks and the sweep silently returns **zero hits**, passing vacuously. Assert a non-zero hit count before trusting any such sweep.
 - **Effort:** 🟡.
 - **Status (2026-08-03): ✅ COMPLETE** — shipped as `Minecraft Clone/Dev/Validate Physics Solver`
-  (`Assets/Editor/Validation/PhysicsSolver/`, 17 baselines `B1`–`B17`). The harness drives the **real**
+  (`Assets/Editor/Validation/PhysicsSolver/`, 17 baselines `B1`–`B17` at ship; **23** today after the retired
+  `PLAYER_BUGS` §04's fix added `B18`–`B23`). The harness drives the **real**
   `VoxelRigidbody` (a live component with `_world` injected; `ResolveMovement` for an exact displacement,
   `CalculateVelocity` + translate for the substep chain) against the **real** `World.CheckPhysicsCollision`, over the
   `PlacementTestWorld` stub-world recipe as predicted above — no dependency injection was needed. Coverage:
@@ -178,6 +179,12 @@ using the §2 scenario table as its baseline list.~~ — `NS-4` ✅ **landed 202
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* *(2026-08-03)* - **`NS-4`'s first bug fixed through it** — `PLAYER_BUGS` §04 (fast landing → `IsGrounded` stuck
+  false → jumps refused) is fixed, confirmed in game, and archived. Its repro `K04a`–`K04d` was observed red against
+  the unfixed solver and promoted to `B20`–`B23`, plus two tripwire baselines `B18`/`B19` that bound the fix from the
+  other side: **census 402 → 408 baselines across the same 17 suites** (Physics Solver 17 → 23). Instrumentation refuted two premises the entry carried: the trigger is the residual gap at
+  the landing tick's start rather than fall speed as such, and the body is never literally embedded — that symptom is
+  now its own entry, `PLAYER_BUGS` §05 (largest-correction ejection of an embedded body), still open.
 * *(2026-08-03)* - **`NS-4` COMPLETE** — the physics / collision-solver suite shipped (17 baselines,
   `Minecraft Clone/Dev/Validate Physics Solver`), built ahead of `PH-1` so that refactor has a gate. **Census
   refreshed: 385 → 402 baselines across 17 suites** (the +17 is entirely this suite; every other per-suite count
@@ -211,6 +218,6 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-03 (`NS-4` complete; census verified at 402 baselines / 17 suites)
+**Last Updated:** 2026-08-03 (`NS-4` complete; `PLAYER_BUGS` §04 fixed, confirmed and archived; census verified at 408 baselines / 17 suites)
 **Next Review:** whenever a suite is added or a `Validate All` count changes — the existing-coverage
 paragraph is the one part of this document that goes stale silently.

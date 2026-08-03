@@ -1183,6 +1183,92 @@ coordinate before handing off constraints to the `Structure` generator.
 
 ---
 
+### ~~08. Player embeds in a block after landing and can no longer jump~~
+
+**Severity:** High — the player is stranded; escape requires a debug capability (flight/noclip)
+**Fixed:** August 2026
+**Status:** Resolved — confirmed in game 2026-08-03. *Confirmation caveat: the in-game session was short (a minute or two of repeated falls) against a bug that fired on roughly a third of fast landings, so the durable evidence is the deterministic harness repro, not the play session.*
+**Guarded by:** `B20`–`B23` in the `NS-4` suite (`Minecraft Clone/Dev/Validate Physics Solver`), promoted from the `K04a`–`K04d` reproductions; `B18`/`B19` bound the fix from the other side.
+**Files:** `Assets/Scripts/Physics/VoxelRigidbody.cs` (`ResolveMovement`), `World.CheckPhysicsCollision`
+
+**Description (user-observed in game, 2026-08-03):**
+After landing from a fall the player can end up **stuck inside a block**. While stuck, **jump input is
+refused** — not merely ineffective. The only known escape is to enable flight/noclip, fly up, and land
+softly. Reported as intermittent ("sometimes"), and **correlated with higher fall speed**.
+
+**Reproduction Steps (in game):**
+
+1. Fall from a height — the higher the fall speed, the more often it triggers.
+2. Land on solid ground.
+3. Occasionally the player settles embedded in the block rather than on top of it.
+4. Press jump — nothing happens, repeatedly.
+5. Enable flight/noclip, ascend, disable flight, land gently → normal behavior returns.
+
+**Deterministic repro:** `B20`–`B23` (`PhysicsSolverValidationSuite.Baseline.cs`), red against the unfixed solver. The trigger condition is the
+gap remaining between the feet and the surface at the *start* of the landing tick: under one substep length it sticks,
+at or above it does not. Measured at terminal fall speed, gaps of 0.02 / 0.05 / 0.08 stick and 0.086 upward do not —
+roughly a third of fast landings, which is the reported "sometimes".
+
+**Root cause (confirmed by harness instrumentation, 2026-08-03).** Three shipped behaviors in a chain:
+
+1. `World.CheckPhysicsCollision`'s overlap test is **strict** (`min.y < blockMax.y`), so a body the vertical resolve
+   has snapped *flush* onto a surface does not overlap it.
+2. Therefore `ResolveMovement`'s zero-vertical-movement branch — which probed the un-extended AABB downward — could
+   only ever ground an **embedded** body. A correctly-resting body read as airborne. Measured: the flush AABB's
+   down-probe returns `Hit = false`; the same AABB extended 0.002 returns `Hit = true, correction = 0.000999`.
+3. `CalculateVelocity` calls `ResolveMovement` once per substep and every call **reassigns** `IsGrounded`, so the
+   tick's verdict is whatever the *last* substep decided. After contact, the next substep resolves to exactly zero
+   (which latches `subMove.y` to zero), and each substep after that takes the branch from (2) and clears the verdict.
+
+Self-sustaining, hence "never recovers": a not-grounded body never gets `_verticalMomentum` zeroed
+(`CalculateVelocity`'s `IsGrounded && _verticalMomentum < 0` guard), so momentum stays pinned at the gravity clamp, so
+every later tick is large enough to substep and re-enters the same pattern. A *gentle* landing is a single
+un-substepped resolve, which grounds correctly — that is why the reported flight escape works.
+
+**Fix:** the zero-vertical-movement branch now probes `GROUND_PROBE_SKIN` (`2 × COLLISION_EPSILON`) below the feet, so
+a resting body registers the surface it is standing on. Each substep still evaluates the body's real current position,
+so a body that leaves its support mid-tick correctly ends airborne (`B19` guards that; `B18` guards the probe depth
+against grounding a hovering body). The `Correction > -0.01f` guard was dropped: for a downward Y query the correction
+is positive whenever the AABB overlaps, so the test was unreachable.
+
+**Narrowing (the original static-analysis leads, kept for the record — see the confirmations/refutations below):**
+
+- `VoxelRigidbody.RequestJump()` is the **only** jump entry point and gates solely on
+  `IsGrounded && !isFlying`. "Jump refused" therefore means **`IsGrounded == false`** while the player is
+  visually at rest. This is a solver *state* problem, not an input-layer one.
+- `IsGrounded` is written in only four places, all in the vertical resolve at the end of `ResolveMovement`
+  (`IsGrounded = groundedByStep`, the `ySign < 0` hit, and the zero-vertical-movement branch) plus the
+  `FixedUpdate` reset. That is a small, tractable surface to instrument.
+- The zero-vertical-movement branch grounds on `groundContact.Hit && groundContact.Correction > -0.01f` —
+  a bare threshold worth logging alongside the actual correction when the bug fires.
+- Fall speed as the aggravator points at the substepping / tunneling guard
+  (`SUB_VOXEL_COLLISION_SYSTEM.md` §3.4.4, `MIN_COLLISION_THICKNESS`-derived max step): a displacement
+  large enough to need substeps is exactly the high-speed case.
+- The workaround restoring normal behavior (rather than a reload being required) suggests **transient
+  solver state**, not corrupted world data.
+
+**What instrumentation confirmed and refuted (harness, 2026-08-03):**
+
+- ✅ **Confirmed:** jump refusal is `IsGrounded == false`, a solver *state* problem, not input-layer. `RequestJump`
+  was driven directly and refused to latch.
+- ✅ **Confirmed:** the zero-vertical-movement branch is the deciding write site, and the substep chain is how a fast
+  landing reaches it. Per-substep dump: substep 0 lands (`grounded = true`), substep 1 resolves to exactly `0`
+  (`grounded = true`, latches `subMove.y`), substep 2 takes the zero-branch (`grounded = false`).
+- ✅ **Confirmed:** transient solver state, not world data — a single gentle tick restores the verdict.
+- ❌ **Refuted:** "the higher the fall speed, the more often" is not the whole story. What matters is the *residual
+  gap* at the landing tick's start, not the speed as such; speed only widens the window by adding substeps.
+- ❌ **Refuted: the player is never literally embedded by this mechanism.** Across every run the body settled at the
+  solver's stand-off *above* the surface (`feet − top = +0.001`), never below it. §04 is a grounded-**state** defect;
+  the wording "embeds in a block" describes how the refusal feels, not the geometry. If a genuinely sunken body is
+  ever observed in game, that is `PLAYER_BUGS.md` §05 or §01, not this entry.
+
+**Relationship to the still-open `PLAYER_BUGS.md` entries:** this and §01 are both "collision gets stuck", but they
+are now known to be different mechanisms — this one was a state defect on open ground with correct geometry, while §01
+is geometric and triggers in tight spaces. §05 (embedded-body ejection) is the better candidate for a shared root cause
+with §01.
+
+---
+
 ## Architecture & Configuration
 
 ### ~~01. Settings logic is duplicated and tightly coupled to World.cs~~

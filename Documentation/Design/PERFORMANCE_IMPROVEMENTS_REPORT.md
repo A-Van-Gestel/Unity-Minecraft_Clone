@@ -883,9 +883,10 @@ shapes for free when this lands.
 >   the gather must cover the step-height envelope); physics feel regressions are subtle, so
 >   verify with the sub-voxel collision doc's test scenarios (`SUB_VOXEL_COLLISION_SYSTEM.md`).
 >   **Gate now exists (2026-08-03):** those scenarios are automated as the `NS-4` suite,
->   `Minecraft Clone/Dev/Validate Physics Solver` (17 baselines) — built *before* this item precisely so it has
+>   `Minecraft Clone/Dev/Validate Physics Solver` (23 baselines) — built *before* this item precisely so it has
 >   something to fail against. `B8`/`B9` (step-up) are the ones that catch a gather sized to the un-lifted AABB;
->   `B15` catches a broken substep chain. All 17 must stay green.
+>   `B15` catches a broken substep chain, and `B18`–`B23` pin the grounded verdict a re-ordered gather could break.
+>   All 23 must stay green.
 > - **Benefit:** ⚪ Low with one player — linear with future entity count; this is the solver every
 >   mob/item will run.
 > - **Seed/Save:** ✅ / ✅.
