@@ -37,30 +37,120 @@ When increasing the player movement speed, the horizontal speed is still increas
 
 ---
 
-## 05. An embedded body is ejected about a whole block by a horizontal resolve
+## 05. Resolving an overlap the body is *inside* ejects it along the movement axis — jumping while embedded drops the player through the floor
 
-**Severity:** Bug — no known stranding, but it teleports the player and is a candidate root cause for §01
-**Status:** Open — found in the harness, **not yet observed in game**
-**Files:** `World.CheckPhysicsCollision` (the aggregation rule), `Assets/Scripts/Physics/VoxelRigidbody.cs`
+**Severity:** Bug — **high consequence, hard to reach.** The usual outcome is a harmless auto-correction onto the
+surface; the bad outcome is falling out of a one-block-thick floor into a cave or the void. Reachable today with
+console commands only (see triggers), and observed in game exactly once. Also the path any future non-player
+`VoxelRigidbody` will meet, since **the player is currently the only one that moves**.
+**Status:** Open — mechanism confirmed in the harness and in game (2026-08-03); the *entry* condition is not yet
+fully pinned (below)
+**Files:** `Assets/Scripts/Physics/VoxelRigidbody.cs` (`ResolveMovement`), `World.CheckPhysicsCollision`
 
-**Description (found while authoring an `NS-4` baseline, 2026-08-03):**
-Once the body's AABB overlaps a block it is *inside*, a horizontal resolve can eject it by roughly a whole block in the
-**wrong direction**. `CheckPhysicsCollision` aggregates contacts by **largest absolute correction**; for the containing
-cell the far-face correction is nearly the full cell width, so it dominates the genuine near-face contact. Measured in
-the harness: a body with its feet 0.1 below a half-slab's top, pushed +0.2 along X, resolved to **−0.9** — a metre
-backwards.
+**One rule, three outcomes.** §3.3 resolves a contact by "the correction that fully resolves ALL overlaps on this
+axis". For a body *inside* a cell that means leaving the cell along the movement axis, and the cost depends on which
+way it was moving. Harness measurements, body embedded 0.8 into a one-block floor (feet 4.200, head 6.000, floor cell
+`y = 4`):
 
-This is correct behavior *for the rule as specified* (`SUB_VOXEL_COLLISION_SYSTEM.md` §3.3), which assumes the body is
-**outside** the geometry. Embedded bodies violate that assumption, and nothing currently prevents one: a block placed
-into the player's cell, a chunk loading around them, or a teleport can all produce one.
+| Tick's movement | `dir` | Correction | Outcome |
+|---|---|---|---|
+| **Downward** (gravity, standing) | −1 | `+0.80` (`blockTop − feet`) | feet → **5.001**, on top of the block, grounded — a clean auto-recovery |
+| **Upward** (jump, momentum = `jumpForce`) | +1 | **`−2.00`** (`blockBottom − head`) | feet → **2.199**: shoved down by the whole collider height plus the embed depth, **through the floor**, still falling |
+| **Upward, solid rock below** | +1 | `−2.00` | down to 2.199, then the downward recovery walks it back to 5.001 over the next ticks |
+| **Horizontal, `IsGrounded == false`** | ±1 | `∓0.90` | input reversed into a ~1-block backward hop |
+| **Horizontal, `IsGrounded == true`** | — | — | ✅ no ejection: the **step-up pre-pass** lifts the body out and preserves the input exactly |
 
-**Why it is filed separately from §04:** §04 was instrumented and found to leave the body correctly *on* the surface —
-so this is not §04's mechanism, and fixing §04 does not touch it. Its trigger (a body already inside geometry) matches
-§01 ("collision gets stuck / flaky in tight spaces") far better.
+**Why it is almost never seen:** gravity makes nearly every tick a *downward* one, and the downward case resolves the
+right way — onto the surface. In-game attempts to provoke it (`/teleport ~ ~-1 ~` into ground, `/teleport ~-1 ~ ~`
+into a tree, `/setblock ~ ~1 ~ stone` inside the player) were auto-corrected onto the block roughly 9 times in 10.
+The one failure was a `/teleport ~ ~-1 ~` that left the player embedded *without* the upward correction firing,
+followed by a jump: the body dropped through the block into the cave below.
 
-**Route:** needs an in-game repro before a fix — the aggregation rule is on every sweep the engine performs, so
-changing it (e.g. prefer the nearest exit face, or the face opposing the movement direction) needs its own `NS-4`
-scenarios and a `SUB_VOXEL_COLLISION_SYSTEM.md` §3.3 update. Related: **VQ-4** (compound collision bounds) touches the
-same aggregation code.
+**The unpinned half — how a body stays embedded long enough to jump.** Remaining embedded requires a tick whose
+`movement.y` is *exactly* zero, because the zero-vertical-movement branch reads the ground but never corrects
+position. Two candidates, neither confirmed: flying with no vertical intent (`_verticalMomentum` is assigned a hard
+`0`), and `IsTeleportHeld` suspending `FixedUpdate` for an arrival hold. Worth instrumenting before designing a fix,
+since a fix aimed at the wrong entry path would leave the reachable one open. Note the §04 fix did **not** widen
+this: the previous code also reported grounded for an embedded body (a positive correction satisfies its
+`> -0.01f` test), so jumping from inside a block was already permitted.
+
+**What this is NOT** (an earlier filing of this entry claimed otherwise, corrected by measurement 2026-08-03):
+
+- It is **not** a far face wrongly dominating a nearer one. For the containing cell there is no nearer blocking face:
+  a 0.8-wide collider centred in a 1.0 cell is 0.9 from clearing it in *either* direction (`dir=+1` → `−0.9`,
+  `dir=−1` → `+0.9`). "Prefer the nearest exit face" therefore fixes nothing.
+- It is **not** depth-dependent on the horizontal axis: embeds of 0.1 and 0.4 both resolve to `−0.9`.
+- The largest-absolute-correction rule is **not** itself the defect and must not simply be replaced: for a
+  non-embedded body approaching two cells whose blocking faces differ (a full cube at `x = 10.0` beside an east-half
+  slab at `x = 10.5`) it correctly stops at the nearer face, `10.00`.
+
+**§3.3 documents the rule two ways that only agree outside the geometry:** "choose LOWEST `blockBounds.min`
+(*nearest blocking face*)" and "always pick the contact that produces the *LARGEST absolute correction*, which fully
+resolves ALL overlaps". For an embedded body those are different instructions, and the code implements the second.
+
+**How a body reaches the embedded state** (placement cannot do it — `PlaceCellOverlapsPlayer` refuses):
+`/teleport` into geometry, `/setblock` into the player's cell, disabling noclip while inside a block (the documented
+escape route from the former §04), or a chunk generating/loading around the player. All are rare or admin-only for a
+player; none would be rare for a spawned entity.
+
+**Relationship to §01:** stronger than first recorded. §01's trigger is "single-block-wide tunnels **or when flying
+through caves**", and flying means `IsGrounded == false` — precisely the state that turns the un-stick into a
+backward hop. §01 remains the in-game symptom to chase for a repro.
+
+**The upward correction is surface-seeking, not a local un-stick** (measured 2026-08-03). Each tick it raises the
+body to the top of the **highest solid cell its AABB overlaps**, and it repeats every tick:
+
+| Setup | Outcome |
+|---|---|
+| Buried at `y = 20.5` in solid stone, surface top `y = 60`, gravity only | **Reaches the surface in 20 ticks (~0.4 s)** — about 2.5 blocks per tick |
+| Same column with a 2-block air pocket at `y = 30` | Stops at `30.001` — the first pocket tall enough wins |
+| Same column with a **fluid** pocket at `y = 30–32` | Stops at `30.001` — the sweep skips fluids, so the body surfaces *into* the lava/water and stays there |
+| Shallow embeds of 0.05 / 0.25 / 0.50 / 0.95 in a one-block floor | Moves `+0.051 / +0.251 / +0.501 / +0.951` — exactly the embed depth, a proportional nudge |
+
+The last row is the important one: **the same rule is well-behaved for a shallow embed and pathological for a buried
+body**, and the only difference is how many solid cells the AABB spans. So the design lever is the correction's
+**magnitude**, not its direction.
+
+**Why this stops being latent soon:** burial is currently near-unreachable, which is the only reason it has never
+been hit. Falling blocks (gravel/sand) would make burial a routine gameplay event, so the behavior should be settled
+before they land.
+
+**Design options (brainstorm 2026-08-03, NOT decided — do not implement from this list):**
+
+1. **Cap the un-stick correction.** Below the cap, nudge the body out (identical to today's shallow behavior); above
+   it, apply nothing and leave the body stuck to dig itself out. Naturally splits the two cases above at their real
+   boundary, is the genre-standard answer to being inside a block, and needs no change to
+   `CheckPhysicsCollision`. Open question: the cap value, and whether it is expressed in blocks or as a fraction of
+   the collider height.
+2. **Direction from the entity's own movement / nearest exit.** For a shallow embed the nearest exit already *is*
+   upward and equals the embed depth, so this converges with option 1 in the common case; for a buried body there is
+   no near exit at all, which again means "stay stuck". Mostly a restatement of option 1 in directional terms.
+3. **A very tiny constant push.** ⚠️ Does not work alone: a per-tick nudge still accumulates (0.05/tick is 2.5
+   blocks per second), so it reproduces the surfacing behavior in slow motion and is harder to notice. Needs option
+   1's cap or a gate regardless.
+4. **Flag the uncapped upward ejection for dropped entities only.** Reasonable for future falling-block entities,
+   which have no gameplay stake in their position, while players keep the capped behavior.
+
+**Fix the source too, not only the solver.** For falling blocks the correct primary fix is refusing to settle a block
+into an entity's AABB (drop it as an item, or delay it); the solver's un-stick should be a last-resort fail-safe that
+is explicitly not permitted to teleport. That argues for a cap independently of which option above is chosen.
+
+**Superseded recommendation:** an earlier revision of this entry proposed "always eject an embedded body upward,
+whatever the movement direction". The measurements above withdraw it — that would have made the surface-seeking
+behavior universal instead of incidental.
+
+**Route:** repro exists in game (jump while embedded over a cave) and in the harness; what is missing is the entry condition above and a decision, because the desired behavior is a
+**design decision, not an obvious correction** — which is also why no `K`-scenario is filed yet: a known-bug scenario
+must assert the correct behavior, and that has not been chosen. The two candidates, neither costed:
+
+1. The magnitude-capped family in the **Design options** block above (currently the most promising direction).
+2. **Resolve only against cells the body is entering** — ignore cells it already overlaps at the start of the resolve,
+   so an embedded body walks out rather than being pushed out. Closer to how most voxel engines behave, but it changes
+   every horizontal sweep in the engine and would need `SUB_VOXEL_COLLISION_SYSTEM.md` §3.3 rewritten plus new `NS-4`
+   scenarios; the C-case measurement above is the baseline it must not regress.
+
+Whichever is picked, the §3.3 wording divergence noted above should be resolved in the same change. Related:
+**VQ-4** (compound collision bounds) touches the same aggregation code, and **PH-1** restructures the queries this
+path issues.
 
 ---

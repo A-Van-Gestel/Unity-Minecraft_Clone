@@ -285,6 +285,14 @@ public bool CheckPhysicsCollision(
     //    - dir=+1 (horiz):     choose LOWEST  blockBounds.min  (nearest blocking face)
     //    i.e., always pick the contact that produces the LARGEST absolute correction,
     //    which fully resolves ALL overlaps on this axis, not just the shallowest one.
+    // NOTE: "nearest blocking face" and "largest absolute correction" are the same face only
+    //    while the entity is OUTSIDE the geometry. For a body already inside a cell they diverge,
+    //    and the code implements the latter — see PLAYER_BUGS.md §05 (open) for the consequence
+    //    and the measurements. The horizontal un-stick for an embedded body is the step-up
+    //    pre-pass in VoxelRigidbody, which only runs when the body is grounded.
+    //    The sharpest case is axis=1 dir=+1: an embedded body that JUMPS resolves against the
+    //    containing block's BOTTOM face, so the correction is -(collider height + embed depth)
+    //    and the body is ejected downward — through a one-block floor if nothing is below it.
 }
 ```
 
@@ -594,4 +602,4 @@ The Block Editor provides a **Collision Bounds** section with:
     - **L-shapes**: 2+ AABBs.
 - **No per-voxel collision variation**: All instances of a block type share the same collision shape (modulo rotation). Blocks that change shape based on neighbors (e.g., fence posts connecting) would need runtime collision computation.
 - **No mesh-based collision**: We intentionally avoid using the visual mesh as collision geometry. The per-frame AABB-overlap pattern is incompatible with arbitrary triangle meshes at voxel density. For blocks needing precise collision, the AABB can be oversized with visual details protruding — an acceptable trade-off.
-- ~~**Automated collision regression tests are pending**~~ — ✅ **CLOSED by `NS-4`, 2026-08-03.** The solver now has a standing regression guard: `Minecraft Clone/Dev/Validate Physics Solver` (23 baselines, `Assets/Editor/Validation/PhysicsSolver/`), which drives the real `VoxelRigidbody` against the real `CheckPhysicsCollision` over synthetic voxel fields — see §5's Phase 6b/6c checklists for the per-item mapping. The grounded verdict after a high-speed landing or a horizontal-only resolve is now covered too, by `B18`–`B23` — the retired `PLAYER_BUGS` §04's repro, fixed and confirmed in game 2026-08-03 and promoted to baselines (entry archived as `_FIXED_BUGS.md` Player & Input §08). Residual gaps: compound bounds stay out of scope until **`VQ-4`**, and the aggregation rule's behavior for a body that is already *inside* geometry is unguarded — §3.3 assumes it is outside, and the consequence is filed as `PLAYER_BUGS` §05 (open).
+- ~~**Automated collision regression tests are pending**~~ — ✅ **CLOSED by `NS-4`, 2026-08-03.** The solver now has a standing regression guard: `Minecraft Clone/Dev/Validate Physics Solver` (23 baselines, `Assets/Editor/Validation/PhysicsSolver/`), which drives the real `VoxelRigidbody` against the real `CheckPhysicsCollision` over synthetic voxel fields — see §5's Phase 6b/6c checklists for the per-item mapping. The grounded verdict after a high-speed landing or a horizontal-only resolve is now covered too, by `B18`–`B23` — the retired `PLAYER_BUGS` §04's repro, fixed and confirmed in game 2026-08-03 and promoted to baselines (entry archived as `_FIXED_BUGS.md` Player & Input §08). Residual gaps: compound bounds stay out of scope until **`VQ-4`**, and the aggregation rule's behavior for a body that is already *inside* geometry is unguarded — §3.3 assumes it is outside, and the consequence is filed as `PLAYER_BUGS` §05 (open). §05 also records that the embedded-body un-stick is the **step-up pre-pass** and therefore only covers *grounded* bodies: an embedded airborne body has its horizontal input reversed, and an embedded body that jumps is ejected **downward** by its full collider height (confirmed in game — it falls through a one-block floor into a cave).
