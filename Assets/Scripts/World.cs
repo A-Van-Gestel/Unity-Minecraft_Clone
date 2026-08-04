@@ -4400,71 +4400,10 @@ public class World : MonoBehaviour, IMeshDrainHost
                     BlockType blockType = voxel.Properties;
                     Bounds blockBounds = BlockCollisionBoundsUtility.GetBounds(blockType, voxel.Meta, voxelPos);
 
-                    // AABB overlap test
-                    bool overlaps = entityBounds.min.x < blockBounds.max.x
-                                    && entityBounds.max.x > blockBounds.min.x
-                                    && entityBounds.min.y < blockBounds.max.y
-                                    && entityBounds.max.y > blockBounds.min.y
-                                    && entityBounds.min.z < blockBounds.max.z
-                                    && entityBounds.max.z > blockBounds.min.z;
-
-                    if (overlaps)
-                    {
-                        hitAnything = true;
-
-                        // Calculate penetration correction for the requested axis
-                        float correction = 0f;
-                        float face = 0f;
-
-                        if (axis == 0) // X
-                        {
-                            if (directionSign < 0)
-                            {
-                                correction = blockBounds.max.x - entityBounds.min.x;
-                                face = blockBounds.max.x;
-                            }
-                            else
-                            {
-                                correction = blockBounds.min.x - entityBounds.max.x;
-                                face = blockBounds.min.x;
-                            }
-                        }
-                        else if (axis == 1) // Y
-                        {
-                            if (directionSign < 0)
-                            {
-                                correction = blockBounds.max.y - entityBounds.min.y;
-                                face = blockBounds.max.y;
-                            }
-                            else
-                            {
-                                correction = blockBounds.min.y - entityBounds.max.y;
-                                face = blockBounds.min.y;
-                            }
-                        }
-                        else if (axis == 2) // Z
-                        {
-                            if (directionSign < 0)
-                            {
-                                correction = blockBounds.max.z - entityBounds.min.z;
-                                face = blockBounds.max.z;
-                            }
-                            else
-                            {
-                                correction = blockBounds.min.z - entityBounds.max.z;
-                                face = blockBounds.min.z;
-                            }
-                        }
-
-                        // Aggregate by largest absolute correction
-                        if (Mathf.Abs(correction) > Mathf.Abs(maxCorrection))
-                        {
-                            maxCorrection = correction;
-                            contact.Hit = true;
-                            contact.Correction = correction;
-                            contact.ContactFace = face;
-                        }
-                    }
+                    // Overlap test + largest-absolute-correction aggregation, shared with PH-1's gathered path so
+                    // the two cannot resolve a cell differently.
+                    hitAnything |= PhysicsCollisionCells.AccumulateContact(entityBounds, blockBounds, axis,
+                        directionSign, ref maxCorrection, ref contact);
                 }
             }
         }
