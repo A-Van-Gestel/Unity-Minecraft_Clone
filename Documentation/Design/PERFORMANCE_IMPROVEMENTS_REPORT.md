@@ -2,7 +2,7 @@
 
 **Version:** 1.0
 **Date:** 2026-07-26
-**Status:** **Open backlog.** 33 items open, 27 complete. Completed items keep their ✅ row in the master
+**Status:** **Open backlog.** 32 items open, 28 complete. Completed items keep their ✅ row in the master
 summary table; their detail sections live in
 [`../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md`](../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md).
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -224,7 +224,7 @@ plus the standalone test files (`VoxelMetadataUtilityTests`, `FastNoiseLiteTests
 | VQ-2 ✅ | **SHIPPED 2026-08-03** — placement ray march replaced by an exact Amanatides–Woo traversal (`Helpers/VoxelRayDDA`); no cell is skipped, the entered face is the stepped axis (the fractional-offset `FaceNormal` heuristic is deleted), and `checkIncrement` is retired as a setting. ~159 → ≤15 queries per probe at `reach = 8` |   🟡   |  🟡  |   ⚪    |  ✅  |  ✅  |
 | VQ-3 ✅ | **SHIPPED 2026-08-03** — the interaction ray gained a sub-voxel narrow phase (`Helpers/RayBoundsIntersection` behind `VoxelRayDDA`'s broad phase, via the shared `BlockCollisionBoundsUtility`): a half-slab now stops the ray only where its volume is, the reported face is the block's rather than the cell's, and the highlight / place-preview boxes hug that volume |   🟡   |  🟢  |   ⚪⁶   |  ✅  |  ✅  |
 | VQ-4 | Single AABB per block type cannot express stairs / L-shapes (`SUB_VOXEL_COLLISION_SYSTEM.md` §7 deferred)                                                                                                          |   🔴   |  🟡  |   ⚪⁶   |  ✅  |  ✅  |
-| PH-1 | Collision solver re-queries the same voxel neighborhood across up to 7 sweeps × substeps/tick                                                                                                                     |   🟡   |  🟡  |   ⚪⁵   |  ✅  |  ✅  |
+| PH-1 ✅ | **SHIPPED 2026-08-04** — gather once per substep into a per-entity `PhysicsCellBuffer`; all nine sweeps read it, with a direct-scan fallback for sweeps that escape the envelope. Identical by construction (shadow pass: 0 mismatches / 142 sweeps). **2.08× fewer cell reads per FixedUpdate**, 0 fallbacks over 32,555 gathers |   🟡   |  🟡  |   ⚪⁵   |  ✅  |  ✅  |
 | PH-2 | Substep chain writes `transform.position` twice per substep to stage the next substep's read                                                                                                                      |   🟢   |  🟡  |   ⚪⁵   |  ✅  |  ✅  |
 
 > ⁶ VQ-3/VQ-4 are **correctness/capability** items, not frame-time ones — filed here because `VQ-*` is
@@ -865,40 +865,6 @@ shapes for free when this lands.
 
 ---
 
-### PH-1. Collision solver re-queries the same voxel neighborhood across sweeps and substeps
-
-**Observed:** `VoxelRigidbody.ResolveMovement` (`VoxelRigidbody.cs` ~line 276 — nine static
-`CheckPhysicsCollision` call sites, of which up to ~7 run per resolve) calls
-`World.CheckPhysicsCollision` up to ~7 times per resolve (horizontal pre-pass ×2, step-up probe ×2
-
-+ downward sweep, per-axis resolve ×2, vertical/ground check), and each call independently rescans the entity's AABB voxel range (typically 12–18 cells) through the full VQ-1 float path — nullable unwrap, managed `BlockType` deref, and (for custom-bounds blocks) a rotation-matrix computation per cell *per sweep*. Fast movement multiplies the whole resolve by up to
-  `ceil(displacement / 0.125)` substeps (`CalculateVelocity`), each also writing
-  `transform.position` twice. Worst case is a few hundred voxel queries per FixedUpdate for one entity.
-
-**Recommendation:** Gather once, sweep many: at the top of `ResolveMovement` (or once per substep chain over the union AABB), collect the overlapped cells into a stack buffer of
-`(blockBounds, isSolid)` entries — computing each cell's custom-bounds rotation exactly once — and run all sweeps against that buffer. Combine with VQ-1's integer path for the gather itself. ~~The substep transform writes can accumulate into a local and apply once.~~ — **split out as `PH-2` (2026-08-04)** and deliberately **not** part of this item: it changes `ResolveMovement`'s signature (breaking the `NS-4` harness's reflection seam) and the float accumulation order, which would forfeit this item's provably-neutral behavior. See `PH-2` for the reasoning.
-
-> **Impact Analysis:**
-> - **Effort:** 🟡 Medium — restructures the solver's query pattern; the resolution math is untouched.
-> - **Risk:** 🟡 Medium — the step-up sweep reads *lifted* AABBs (cells outside the initial range —
->   the gather must cover the step-height envelope); physics feel regressions are subtle, so
->   verify with the sub-voxel collision doc's test scenarios (`SUB_VOXEL_COLLISION_SYSTEM.md`).
->   **Gate now exists (2026-08-03):** those scenarios are automated as the `NS-4` suite,
->   `Minecraft Clone/Dev/Validate Physics Solver` (**24 baselines** since 2026-08-04) — built *before* this item
->   precisely so it has something to fail against. `B8`/`B9` (step-up) are the ones that catch a gather sized to the
->   un-lifted AABB; `B15` catches a broken substep chain, and `B18`–`B23` pin the grounded verdict a re-ordered
->   gather could break. All 24 must stay green. ✅ **Gate gap closed 2026-08-04 (this item's step 0):** `B24` now
->   pins *horizontal* multi-cell aggregation by depth — a full cube at `x = 10.0` beside an east-half slab at
->   `x = 10.5`, body must stop at the nearer face `10.00` — in **both** Z orderings, so a gather that re-orders
->   horizontal contacts can no longer regress it silently. Proven red under the first-contact-wins mutation (which
->   reds `B7` and `B24` and nothing else) before the mutation was reverted. Details in
->   `PhysicsSolverValidationSuite.Baseline.cs`'s class docstring.
-> - **Benefit:** ⚪ Low with one player — linear with future entity count; this is the solver every
->   mob/item will run.
-> - **Seed/Save:** ✅ / ✅.
-
----
-
 ### PH-2. Substep chain stages each substep on `transform.position` instead of a local
 
 **Observed:** `VoxelRigidbody.CalculateVelocity`'s substep loop (`VoxelRigidbody.cs` ~lines 254–272)
@@ -939,8 +905,9 @@ existing `transform.Translate(Velocity)`. The substep loop keeps its per-axis ca
 > **Sequencing:** deliberately **split out of `PH-1`** (2026-08-04) rather than folded into it. `PH-1`'s
 > gather-once refactor is provably behavior-neutral — same cell set, order-independent aggregation — and
 > keeping a signature change and an accumulation-order change out of it preserves that property, so a
-> physics-feel regression during `PH-1` cannot be ambiguous about which change caused it. Land this after
-> `PH-1` closes.
+> physics-feel regression during `PH-1` cannot be ambiguous about which change caused it. `PH-1` **closed
+> 2026-08-04**, so this is now unblocked — and it inherits a better gate than it would have had, since the
+> solver's query path is settled and `B25` pins the gather envelope.
 
 ---
 

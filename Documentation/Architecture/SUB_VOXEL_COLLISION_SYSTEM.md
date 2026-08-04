@@ -19,6 +19,7 @@
 | 2026-08-03 | **Phase 6c drift cleanup**: §3.3's caller-migration table named four call sites that no longer exist — the three `VoxelRigidbody` point-probe methods Phase 6c *deleted* (collapsed into one `ResolveMovement`, which issues all nine `CheckPhysicsCollision` calls) and `PlayerInteraction.cs:260`, whose occupancy check moved to `PlacementController.CanPlaceAt`. Every row now names its present-day home with the old name in parentheses. §5's six unchecked Phase 6c regression tests and §7's pending-tests bullet are cross-linked to `NS-4`, with the consequence stated: the solver has **no standing regression guard**. |
 | 2026-08-03 | **`NS-4` shipped**: the status line's "Automated Tests Pending" and §7's pending-tests bullet are retired — the solver now has a standing regression guard (`Minecraft Clone/Dev/Validate Physics Solver`, 17 baselines over the real `VoxelRigidbody` + real `CheckPhysicsCollision`). §5's six unchecked Phase 6c regression tests and Phase 6b's unit-test item are ticked with their scenario ids; §2.2's failure table maps to `B10`–`B13`. Two residual gaps are stated rather than hidden: the grounded verdict after a high-speed landing belongs to `PLAYER_BUGS` §04 and is deliberately unpinned by the baselines, and compound bounds stay with `VQ-4`. |
 | 2026-08-03 | `PLAYER_BUGS` §04 **fixed in code** (awaiting in-game confirmation): `ResolveMovement`'s zero-vertical-movement branch now probes `GROUND_PROBE_SKIN` (2 x `COLLISION_EPSILON`) below the feet, because the strict overlap test in §3.3 means a body resting flush on a surface does not overlap it — the un-extended probe could only ground an *embedded* body. §7 records the two new residual gaps; the embedded-body aggregation behavior is now `PLAYER_BUGS` §05. |
+| 2026-08-04 | **`PH-1` shipped** — §3.4.1's flow sketch and §6's grid-scan row now describe the gathered query pattern: the nine sweeps read a per-entity `PhysicsCellBuffer` filled once per substep, falling back to `CheckPhysicsCollision` only when a sweep escapes the gathered envelope. The aggregation rule and resolution math are untouched (one shared `PhysicsCollisionCells.AccumulateContact`), and a shadow-compare pass observed 0 mismatches over 142 sweeps. Measured 2.08× fewer cell reads per tick, 0 fallbacks over 32,555 gathers; in-game confirmed. Suite 24 → 25 (`B25` guards the envelope). |
 | 2026-08-04 | **`PH-1` step 0** — §3.3's aggregation rule gains its missing *horizontal* guard: `B24` pins two cells whose blocking faces differ on one horizontal axis (a full cube at `x = 10.0` beside an east-half slab at `x = 10.5` → the body stops at the nearer face, `10.00`), in both scan orderings. Until it landed the first-contact-wins mutation reddened only `B7`, a vertical support case, so the aggregation `PH-1`'s gather-once refactor re-orders was unobserved. Suite 23 → 24 baselines; no behavior change (test-only). |
 | 2026-08-03 | **`VQ-3` sync**: §7's raycast limitation marked CLOSED; §3.3's "API 2 — unchanged / no changes needed" replaced with the broad+narrow phase composition and `TryGetRayHit`; §3.2's `GetRotatedWorldBounds` sketch replaced by the shared `BlockCollisionBoundsUtility.GetBounds` (it and `GetRotatedLocalBounds` were unified after being proven equivalent); §3.2 now flags the 90°-permutation property as load-bearing for the ray's hit ordering; caller-migration row and §5 phase entries annotated rather than rewritten. |
 
@@ -347,16 +348,28 @@ The base fallback resolution order is **preserved**: Z → X → Y. Step-up is a
 VoxelRigidbody.CalculateVelocity()
   ├── Substep if displacement > maxStep (§3.4.4)
   ├── Build entity AABB from position + extents
+  ├── GatherCells() → World.GatherPhysicsCells(envelope, PhysicsCellBuffer)   ← PH-1, once per substep
+  │     └── envelope = body ∪ destination, +stepHeight above, +GROUND_PROBE_SKIN below
   ├── Predict future AABB (position + velocity)
   ├── TryStepUp() → if X or Z would block, test at +stepHeight FIRST (see §3.4.3)
-  ├── ResolveAxis(Z) → CheckPhysicsCollision(futureAABB, 2, zSign) → apply correction
-  ├── ResolveAxis(X) → CheckPhysicsCollision(futureAABB, 0, xSign) → apply correction
-  └── ResolveAxis(Y) → CheckPhysicsCollision(futureAABB, 1, ySign) → apply correction
-        └── World.CheckPhysicsCollision(Bounds, axis, directionSign, out CollisionContact)
-              ├── Grid scan: which voxel cells does the AABB overlap?
-              ├── Per cell: full-block fast path or rotated AABB overlap test
-              └── Aggregate: pick contact that fully resolves ALL overlaps on this axis
+  ├── ResolveAxis(Z) → Probe(futureAABB, 2, zSign) → apply correction
+  ├── ResolveAxis(X) → Probe(futureAABB, 0, xSign) → apply correction
+  └── ResolveAxis(Y) → Probe(futureAABB, 1, ySign) → apply correction
+        └── VoxelRigidbody.Probe(Bounds, axis, directionSign, out CollisionContact)
+              ├── PhysicsCellBuffer.TryQuery — replays the gathered cells, restricted to
+              │     THIS sweep's own floor-range, so the cell set matches a direct scan exactly
+              └── on miss (sweep escaped the envelope) → World.CheckPhysicsCollision, as before
+                    ├── Grid scan: which voxel cells does the AABB overlap?
+                    ├── Per cell: full-block fast path or rotated AABB overlap test
+                    └── Aggregate: pick contact that fully resolves ALL overlaps on this axis
 ```
+
+> **PH-1 (2026-08-04).** The nine sweeps no longer each rescan the neighbourhood: the cells are resolved **once
+> per substep** and replayed. Both paths share
+> `Physics.PhysicsCollisionCells.AccumulateContact`, so the aggregation rule below has exactly one implementation.
+> The result is identical for any envelope, because the replay re-applies the sweep's own cell range and because
+> the aggregation is order-independent (overlap fixes the correction's sign per direction, so equal magnitudes are
+> equal contacts). Envelope size is therefore a performance knob, not a correctness one; `B25` guards it.
 
 Each axis query returns only the correction needed **on that specific axis+direction**. When multiple blocks overlap the entity on the same axis, the query aggregates by picking the contact that produces the **largest absolute correction** — this ensures ALL overlaps on that axis are resolved in one pass (e.g., standing on two adjacent half-slabs at different heights, the entity rests on the tallest one). The solver never picks a "global deepest" contact across axes — each axis is independent.
 
@@ -586,7 +599,7 @@ The Block Editor provides a **Collision Bounds** section with:
 | Concern                               | Mitigation                                                                                                                                                                                                 |
 |---------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | AABB overlap per candidate voxel cell | Full-block fast path (majority of blocks) skips rotation and uses integer grid check. Sub-voxel AABB test only for blocks with `HasCustomBounds`.                                                          |
-| Grid scan range                       | Entity AABB typically spans 2-4 voxel cells per axis. Maximum ~64 cells for a 4×4×4 scan — trivial.                                                                                                        |
+| Grid scan range                       | Entity AABB typically spans 2-4 voxel cells per axis. Maximum ~64 cells for a 4×4×4 scan — trivial. **Since `PH-1` the scan runs once per substep** (gather) rather than once per sweep: measured 9.5 cells per gather serving 2.48 sweeps, i.e. **19.5 cell reads per `FixedUpdate` instead of 40.7**. |
 | Rotated AABB computation              | Inline 8-corner rotation + min/max avoids managed allocations in the physics path. For 90° multiples, result is exact integers/halves. Could pre-cache per block-type × orientation if profiling warrants. |
 | Solver call frequency                 | `FixedUpdate` at 50Hz, 1 entity. AABB tests are branchless arithmetic — negligible.                                                                                                                        |
 | Tunneling substeps                    | At 50Hz with max flying speed ~20m/s, displacement ≈ 0.4m/frame. With `maxStep=0.125m`, worst case = 4 substeps. Negligible.                                                                               |

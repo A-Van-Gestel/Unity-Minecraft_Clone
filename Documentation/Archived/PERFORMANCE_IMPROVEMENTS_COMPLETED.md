@@ -990,6 +990,64 @@ policy, not ray geometry, and nobody asked for it. Compound shapes remain `VQ-4`
 
 ---
 
+### PH-1. Collision solver re-queries the same voxel neighborhood across sweeps and substeps
+
+✅ **SHIPPED 2026-08-04** (`feat/world-scaling`), in-game confirmed (walls, step-ups, jumps, sprinting, fast
+flight, falls from height and a one-block gap all reported as feeling unchanged).
+
+**Observed:** `VoxelRigidbody.ResolveMovement` issues **nine** `World.CheckPhysicsCollision` call sites — step-up
+pre-pass ×2, step-up clearance ×2, the downward support sweep, per-axis horizontal resolve ×2, the vertical
+resolve, and the zero-vertical ground probe — and each one independently rescanned the entity's AABB cell range
+through the full per-cell path: `TryGetVoxel`, the solid/fluid filter, and (for custom-bounds blocks) an 8-corner
+rotation **per cell per sweep**. `CalculateVelocity` multiplies the whole resolve by `ceil(displacement / 0.125)`
+substeps.
+
+**Shipped:** gather once, sweep many — **per substep**, not per substep chain.
+`World.GatherPhysicsCells(Bounds, PhysicsCellBuffer)` resolves the overlapped cells once into a per-entity
+`Physics/PhysicsCellBuffer` (fixed capacity, allocated at construction, never regrown), and all nine sites go
+through `VoxelRigidbody.Probe`, which reads the buffer. The per-cell math moved to
+`Physics/PhysicsCollisionCells.AccumulateContact`, shared with `CheckPhysicsCollision` so the two paths cannot
+drift. The envelope is body ∪ destination, extended by `stepHeight` above (the step-up sweeps read *lifted* boxes)
+and `GROUND_PROBE_SKIN` below.
+
+**Identical by construction, not by argument.** Two properties carry it, both documented in the code:
+
+1. `TryQuery` re-derives *the sweep's own* floor-range and skips gathered cells outside it, so the considered cell
+   set matches the direct scan **for any envelope** — envelope size is a performance knob, never a correctness
+   one.
+2. Overlap fixes the correction's sign per direction (`dir < 0` → positive, `dir > 0` → negative), so two contacts
+   of equal magnitude are equal outright and the strict `>` tie-break cannot depend on visit order.
+
+A sweep that escapes the envelope — an embedded body's block-sized correction (`PLAYER_BUGS` §05) — falls back to
+the direct scan, which is what preserves that path exactly rather than approximately. **`PLAYER_BUGS` §05 behavior
+is unchanged**, as required.
+
+**Verification:** a temporary shadow-compare pass ran *both* paths on every sweep asserting exact float equality
+of `hit`/`Correction`/`ContactFace` — **0 mismatches over 142 sweeps** — then was removed. Two `NS-4` baselines
+were added and each proven red under its own mutation: **`B24`** (step 0) pins horizontal multi-cell aggregation
+by depth, closing the gap where first-contact-wins reddened only the vertical `B7`; **`B25`** pins the gather
+envelope. `Validate All`: **410 baselines across 17 suites**, Physics Solver 25/25.
+
+**Measured** ([benchmark](../Performance/PHYSICS_PH1_2026-08-04_BENCHMARK.md)): **2.08× fewer voxel cell reads per
+`FixedUpdate`** (40.66 → 19.51), **0 fallbacks over 32,555 gathers**, across 15,851 ticks of real gameplay. Frame
+time was deliberately not measured — ⚪ with one entity.
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — as estimated; the resolution math was untouched.
+> - **Risk:** 🟡 Medium as estimated, but retired cheaply: the shadow-compare pass turned "physics feel
+>   regressions are subtle" into a mechanical check.
+> - **Benefit:** ⚪ Low with one player, **and the realistic ceiling is ~2.5×, not the ~7× the "up to 7 sweeps"
+>   framing suggests** — measured 2.48 sweeps per gather, because the step-up pre-pass and its follow-ups only run
+>   when horizontal movement is blocked *and* the body is grounded. Scales linearly with entity count; the
+>   worst-case shape belongs to mobs pathing into geometry.
+> - **Seed/Save:** ✅ / ✅.
+>
+> **Left for `PH-2`:** the substep chain still stages each substep on `transform.position`. Split out deliberately
+> so this item's provable behavior-neutrality was not compromised by a signature change and an altered float
+> accumulation order.
+
+---
+
 ---
 
 ---
