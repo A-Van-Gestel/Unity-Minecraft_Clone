@@ -2,7 +2,7 @@
 
 **Version:** 1.0
 **Date:** 2026-07-26
-**Status:** **Open backlog.** 32 items open, 27 complete. Completed items keep their ✅ row in the master
+**Status:** **Open backlog.** 33 items open, 27 complete. Completed items keep their ✅ row in the master
 summary table; their detail sections live in
 [`../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md`](../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md).
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -225,14 +225,15 @@ plus the standalone test files (`VoxelMetadataUtilityTests`, `FastNoiseLiteTests
 | VQ-3 ✅ | **SHIPPED 2026-08-03** — the interaction ray gained a sub-voxel narrow phase (`Helpers/RayBoundsIntersection` behind `VoxelRayDDA`'s broad phase, via the shared `BlockCollisionBoundsUtility`): a half-slab now stops the ray only where its volume is, the reported face is the block's rather than the cell's, and the highlight / place-preview boxes hug that volume |   🟡   |  🟢  |   ⚪⁶   |  ✅  |  ✅  |
 | VQ-4 | Single AABB per block type cannot express stairs / L-shapes (`SUB_VOXEL_COLLISION_SYSTEM.md` §7 deferred)                                                                                                          |   🔴   |  🟡  |   ⚪⁶   |  ✅  |  ✅  |
 | PH-1 | Collision solver re-queries the same voxel neighborhood across up to 7 sweeps × substeps/tick                                                                                                                     |   🟡   |  🟡  |   ⚪⁵   |  ✅  |  ✅  |
+| PH-2 | Substep chain writes `transform.position` twice per substep to stage the next substep's read                                                                                                                      |   🟢   |  🟡  |   ⚪⁵   |  ✅  |  ✅  |
 
 > ⁶ VQ-3/VQ-4 are **correctness/capability** items, not frame-time ones — filed here because `VQ-*` is
 > where the interaction and voxel-query layer is tracked, and there is no feature-report counterpart for
 > interaction (`TF-*` is worldgen, `RF-*` is lighting/rendering). Read their ⚪ as "no measurable frame-time
 > change expected", the same sense VQ-2's ⚪ carried.
 >
-> ⁵ VQ-2/PH-1 benefits are ⚪ with a single player entity — but `VoxelRigidbody` is the collision
-> solver any future entity (mobs, items) will reuse, and both scale linearly with entity count.
+> ⁵ VQ-2/PH-1/PH-2 benefits are ⚪ with a single player entity — but `VoxelRigidbody` is the collision
+> solver any future entity (mobs, items) will reuse, and all three scale linearly with entity count.
 > VQ-1 is 🟡 because every per-frame consumer funnels through it.
 
 ### Startup & World Load
@@ -875,7 +876,7 @@ shapes for free when this lands.
   `transform.position` twice. Worst case is a few hundred voxel queries per FixedUpdate for one entity.
 
 **Recommendation:** Gather once, sweep many: at the top of `ResolveMovement` (or once per substep chain over the union AABB), collect the overlapped cells into a stack buffer of
-`(blockBounds, isSolid)` entries — computing each cell's custom-bounds rotation exactly once — and run all sweeps against that buffer. Combine with VQ-1's integer path for the gather itself. The substep transform writes can accumulate into a local and apply once.
+`(blockBounds, isSolid)` entries — computing each cell's custom-bounds rotation exactly once — and run all sweeps against that buffer. Combine with VQ-1's integer path for the gather itself. ~~The substep transform writes can accumulate into a local and apply once.~~ — **split out as `PH-2` (2026-08-04)** and deliberately **not** part of this item: it changes `ResolveMovement`'s signature (breaking the `NS-4` harness's reflection seam) and the float accumulation order, which would forfeit this item's provably-neutral behavior. See `PH-2` for the reasoning.
 
 > **Impact Analysis:**
 > - **Effort:** 🟡 Medium — restructures the solver's query pattern; the resolution math is untouched.
@@ -895,6 +896,51 @@ shapes for free when this lands.
 > - **Benefit:** ⚪ Low with one player — linear with future entity count; this is the solver every
 >   mob/item will run.
 > - **Seed/Save:** ✅ / ✅.
+
+---
+
+### PH-2. Substep chain stages each substep on `transform.position` instead of a local
+
+**Observed:** `VoxelRigidbody.CalculateVelocity`'s substep loop (`VoxelRigidbody.cs` ~lines 254–272)
+communicates the running position to the next substep **through the transform**: each iteration does
+`transform.position += currentSubMove` — a native get plus a native set that dirties the transform — and
+`ResolveMovement` then re-reads `transform.position` at its top (~line 285). That is two gets and one set
+per substep, plus one final `transform.position -= totalDisplacement` to undo the staging, because the
+caller still expects `transform.Translate(Velocity)` to run later. Substep count is
+`ceil(displacement / 0.125)` and `flyingSpeed` is unbounded (`IncrementFlyingSpeed`), so the loop is not
+bounded by a small constant at high speed.
+
+Two consequences beyond the per-write cost:
+
+- The transform holds a **staged, not-yet-final** position for the duration of the tick. Anything that
+  reads the player transform inside the same `FixedUpdate` ordering — another component, a debug
+  visualizer — observes an intermediate substep rather than the resolved position.
+- The revert makes the tick's net transform write a difference of two accumulations, so the staging is
+  paid twice: once to build it, once to take it back out.
+
+**Recommendation:** Accumulate the running position in a local and thread it into `ResolveMovement`
+(which currently reads `transform.position` itself), leaving the transform untouched until the caller's
+existing `transform.Translate(Velocity)`. The substep loop keeps its per-axis carry-over logic unchanged.
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — a local plus a parameter; the resolution math is untouched.
+> - **Risk:** 🟡 Medium, and the risk is *not* in the arithmetic. Two specific hazards:
+>   1. `ResolveMovement`'s **signature changes**, and `NS-4`'s harness drives it by reflection with a
+>      one-argument `Invoke` (`PhysicsTestWorld.Resolve`, `Framework/PhysicsTestWorld.cs`). The harness
+>      must be updated in the same commit or every scenario in the suite throws rather than fails.
+>   2. Float **accumulation order** changes from `pos + a + b …` to `pos + (a + b …)`. `B15` (substep
+>      invariance) compares the two orders at `EXACT_TOLERANCE` (1e-4), which should absorb it — but that
+>      must be *observed*, not asserted: run `B15`, `B6`, and `B20`–`B23` and report the measured deltas.
+> - **Benefit:** ⚪ Low with one player — the win is a handful of native transform accesses per tick, and
+>   like `PH-1` it scales with entity count. Also removes the staged-transform observability wart above,
+>   which is arguably the better reason to do it.
+> - **Seed/Save:** ✅ / ✅.
+>
+> **Sequencing:** deliberately **split out of `PH-1`** (2026-08-04) rather than folded into it. `PH-1`'s
+> gather-once refactor is provably behavior-neutral — same cell set, order-independent aggregation — and
+> keeping a signature change and an accumulation-order change out of it preserves that property, so a
+> physics-feel regression during `PH-1` cannot be ambiguous about which change caused it. Land this after
+> `PH-1` closes.
 
 ---
 
