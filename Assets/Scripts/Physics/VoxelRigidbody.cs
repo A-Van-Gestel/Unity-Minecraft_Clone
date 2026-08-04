@@ -92,6 +92,12 @@ namespace Physics
         private bool _jumpRequest;
         private float _lastMoveSpeed;
 
+        /// <summary>
+        /// PH-1: this body's gathered voxel neighbourhood, refilled once per resolve and read by every sweep.
+        /// Per-instance rather than shared, so entities do not clobber each other's gather.
+        /// </summary>
+        private readonly PhysicsCellBuffer _cellBuffer = new PhysicsCellBuffer();
+
         private World _world;
 
         private void Start()
@@ -294,6 +300,8 @@ namespace Physics
                 new Vector3(pos.x + extX, pos.y + h, pos.z + extZ)
             );
 
+            GatherCells(currentAABB, movement);
+
             // Predict horizontal future AABB (NO Y movement, slightly shrunk on Y to avoid floor/ceiling snags)
             Bounds horizontalFutureAABB = currentAABB;
             horizontalFutureAABB.SetMinMax(
@@ -311,13 +319,13 @@ namespace Physics
             if (movement.z != 0f)
             {
                 zSign = movement.z > 0 ? 1 : -1;
-                zBlocked = _world.CheckPhysicsCollision(horizontalFutureAABB, axis: 2, zSign, out _);
+                zBlocked = Probe(horizontalFutureAABB, axis: 2, zSign, out _);
             }
 
             if (movement.x != 0f)
             {
                 xSign = movement.x > 0 ? 1 : -1;
-                xBlocked = _world.CheckPhysicsCollision(horizontalFutureAABB, axis: 0, xSign, out _);
+                xBlocked = Probe(horizontalFutureAABB, axis: 0, xSign, out _);
             }
 
             bool horizontalBlocked = zBlocked || xBlocked;
@@ -330,9 +338,9 @@ namespace Physics
 
                 bool clearsAtStep = true;
                 if (movement.x != 0f)
-                    clearsAtStep &= !_world.CheckPhysicsCollision(liftedAABB, axis: 0, xSign, out _);
+                    clearsAtStep &= !Probe(liftedAABB, axis: 0, xSign, out _);
                 if (movement.z != 0f)
-                    clearsAtStep &= !_world.CheckPhysicsCollision(liftedAABB, axis: 2, zSign, out _);
+                    clearsAtStep &= !Probe(liftedAABB, axis: 2, zSign, out _);
 
                 if (clearsAtStep)
                 {
@@ -341,7 +349,7 @@ namespace Physics
                     sweepAABB.Expand(new Vector3(0, stepHeight, 0));
                     sweepAABB.center -= new Vector3(0, stepHeight * 0.5f, 0);
 
-                    if (_world.CheckPhysicsCollision(sweepAABB, axis: 1, -1, out var groundContact))
+                    if (Probe(sweepAABB, axis: 1, -1, out var groundContact))
                     {
                         // Found support
                         float newY = groundContact.ContactFace;
@@ -375,7 +383,7 @@ namespace Physics
                 if (movement.z != 0f)
                 {
                     sweepAABB.center += new Vector3(0, 0, movement.z);
-                    _world.CheckPhysicsCollision(sweepAABB, axis: 2, zSign, out var zContact);
+                    Probe(sweepAABB, axis: 2, zSign, out var zContact);
                     if (zContact.Hit)
                     {
                         float epsilon = Mathf.Sign(zContact.Correction) * COLLISION_EPSILON;
@@ -390,7 +398,7 @@ namespace Physics
                 if (movement.x != 0f)
                 {
                     sweepAABB.center += new Vector3(movement.x, 0, 0);
-                    _world.CheckPhysicsCollision(sweepAABB, axis: 0, xSign, out var xContact);
+                    Probe(sweepAABB, axis: 0, xSign, out var xContact);
                     if (xContact.Hit)
                     {
                         float epsilon = Mathf.Sign(xContact.Correction) * COLLISION_EPSILON;
@@ -412,7 +420,7 @@ namespace Physics
             if (movement.y != 0f)
             {
                 int ySign = movement.y > 0 ? 1 : -1;
-                _world.CheckPhysicsCollision(verticalFutureAABB, axis: 1, ySign, out var yContact);
+                Probe(verticalFutureAABB, axis: 1, ySign, out var yContact);
 
                 if (yContact.Hit)
                 {
@@ -443,9 +451,63 @@ namespace Physics
                         verticalFutureAABB.min.z),
                     verticalFutureAABB.max);
 
-                if (_world.CheckPhysicsCollision(groundProbeAABB, axis: 1, -1, out _))
+                if (Probe(groundProbeAABB, axis: 1, -1, out _))
                     IsGrounded = true;
             }
+        }
+
+        /// <summary>
+        /// PH-1: resolves the voxel neighbourhood this resolve's sweeps will read, <b>once</b>, instead of letting
+        /// each of the nine sweeps rescan it.
+        /// </summary>
+        /// <param name="currentAABB">The body's AABB before this resolve's movement.</param>
+        /// <param name="movement">The intended displacement being resolved.</param>
+        private void GatherCells(Bounds currentAABB, Vector3 movement)
+        {
+            Bounds destination = currentAABB;
+            destination.center += movement;
+
+            Bounds envelope = currentAABB;
+            envelope.Encapsulate(destination);
+
+            // The body's own box is not enough: the step-up pre-pass reads LIFTED boxes and the ground probe reads
+            // BELOW the feet. Upward, stepHeight bounds it — the lifted box must be clear for the step to proceed,
+            // so the support its downward sweep then finds sits at or below that lift, and the post-step-up box
+            // cannot rise further. The stand-offs are added because the solver parks bodies an epsilon off contact.
+            envelope.SetMinMax(
+                new Vector3(envelope.min.x, envelope.min.y - GROUND_PROBE_SKIN, envelope.min.z),
+                new Vector3(envelope.max.x, envelope.max.y + stepHeight + collisionPadding + COLLISION_EPSILON,
+                    envelope.max.z));
+
+            _world.GatherPhysicsCells(envelope, _cellBuffer);
+        }
+
+        /// <summary>
+        /// Issues one collision sweep, answered from <see cref="_cellBuffer"/> when it covers the sweep and by a
+        /// direct world scan when it does not.
+        /// <para>
+        /// <b>The fallback is a correctness device, not an optimization.</b> A horizontal correction can shift the
+        /// cumulative sweep box outside the gathered envelope — most sharply for a body resolving from inside
+        /// geometry (<c>PLAYER_BUGS</c> §05, corrections of a block or more). Falling back there is what makes the
+        /// gathered path's result identical to the direct scan's for every input, rather than only for the inputs
+        /// the envelope happens to bound.
+        /// </para>
+        /// </summary>
+        /// <param name="bounds">The sweep's entity AABB.</param>
+        /// <param name="axis">The movement axis to resolve (0=X, 1=Y, 2=Z).</param>
+        /// <param name="directionSign">+1 for positive movement, -1 for negative.</param>
+        /// <param name="contact">The resolved contact, when the sweep hits.</param>
+        /// <returns>True if the AABB overlaps solid collision geometry on that axis.</returns>
+        private bool Probe(Bounds bounds, int axis, int directionSign, out CollisionContact contact)
+        {
+            if (_cellBuffer.TryQuery(bounds, axis, directionSign, out contact, out bool hitAnything))
+            {
+                PhysicsQueryStats.CountSweep(false);
+                return hitAnything;
+            }
+
+            PhysicsQueryStats.CountSweep(true);
+            return _world.CheckPhysicsCollision(bounds, axis, directionSign, out contact);
         }
 
 

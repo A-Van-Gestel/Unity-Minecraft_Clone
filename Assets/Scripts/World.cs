@@ -4385,6 +4385,9 @@ public class World : MonoBehaviour, IMeshDrainHost
         int originX = WorldOrigin.OriginVoxel.x;
         int originZ = WorldOrigin.OriginVoxel.z;
 
+        PhysicsQueryStats.CountDirectScan(
+            (maxVoxel.x - minVoxel.x + 1) * (maxVoxel.y - minVoxel.y + 1) * (maxVoxel.z - minVoxel.z + 1));
+
         for (int x = minVoxel.x; x <= maxVoxel.x; x++)
         {
             for (int y = minVoxel.y; y <= maxVoxel.y; y++)
@@ -4409,6 +4412,61 @@ public class World : MonoBehaviour, IMeshDrainHost
         }
 
         return hitAnything;
+    }
+
+    /// <summary>
+    /// Resolves every solid, non-fluid cell overlapping <paramref name="envelope"/> into
+    /// <paramref name="buffer"/> — the gather half of <c>PH-1</c>. A resolve calls this once and answers all of
+    /// its sweeps from the buffer, instead of re-running the scan above (and the per-cell rotation it performs)
+    /// for every sweep.
+    /// </summary>
+    /// <param name="envelope">The <b>Unity-space</b> AABB bounding every sweep this resolve will issue.</param>
+    /// <param name="buffer">The buffer to fill; its previous contents are discarded.</param>
+    /// <remarks>
+    /// Shares the scan shape, the WS-4 origin offset and the solid/non-fluid filter with
+    /// <see cref="CheckPhysicsCollision"/> deliberately — the two must agree cell-for-cell. If the envelope holds
+    /// more solid cells than the buffer can take, the buffer marks itself uncovered and the caller's sweeps fall
+    /// back to the direct scan, so an under-sized buffer costs performance and never correctness.
+    /// </remarks>
+    public void GatherPhysicsCells(Bounds envelope, PhysicsCellBuffer buffer)
+    {
+        Vector3Int minVoxel = new Vector3Int(
+            Mathf.FloorToInt(envelope.min.x),
+            Mathf.FloorToInt(envelope.min.y),
+            Mathf.FloorToInt(envelope.min.z));
+        Vector3Int maxVoxel = new Vector3Int(
+            Mathf.FloorToInt(envelope.max.x),
+            Mathf.FloorToInt(envelope.max.y),
+            Mathf.FloorToInt(envelope.max.z));
+
+        buffer.BeginGather(minVoxel, maxVoxel);
+
+        int originX = WorldOrigin.OriginVoxel.x;
+        int originZ = WorldOrigin.OriginVoxel.z;
+
+        PhysicsQueryStats.CountGather(
+            (maxVoxel.x - minVoxel.x + 1) * (maxVoxel.y - minVoxel.y + 1) * (maxVoxel.z - minVoxel.z + 1));
+
+        for (int x = minVoxel.x; x <= maxVoxel.x; x++)
+        {
+            for (int y = minVoxel.y; y <= maxVoxel.y; y++)
+            {
+                for (int z = minVoxel.z; z <= maxVoxel.z; z++)
+                {
+                    // VQ-1 integer fast path, same as the direct scan's.
+                    if (!worldData.TryGetVoxel(x + originX, y, z + originZ, out VoxelState voxel) ||
+                        !voxel.Properties.isSolid || voxel.Properties.fluidType != FluidType.None)
+                        continue; // Empty, unloaded, or fluid
+
+                    Vector3Int voxelPos = new Vector3Int(x, y, z);
+                    Bounds blockBounds =
+                        BlockCollisionBoundsUtility.GetBounds(voxel.Properties, voxel.Meta, voxelPos);
+
+                    if (!buffer.Add(voxelPos, blockBounds))
+                        return; // Full: the buffer is now uncovered and every sweep will fall back.
+                }
+            }
+        }
     }
 
     /// <summary>
