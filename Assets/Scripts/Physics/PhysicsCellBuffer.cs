@@ -13,7 +13,7 @@ namespace Physics
     }
 
     /// <summary>
-    /// The solver's gathered voxel neighbourhood (<c>PH-1</c>): the solid, non-fluid cells overlapping one
+    /// The solver's gathered voxel neighborhood (<c>PH-1</c>): the solid, non-fluid cells overlapping one
     /// envelope, each with its collision volume resolved <b>once</b>, so a resolve can answer all of its sweeps
     /// without re-reading the same cells per sweep.
     /// <para>
@@ -25,7 +25,7 @@ namespace Physics
     /// correctness one: too small merely costs a fallback, never a wrong contact.
     /// </para>
     /// <para>
-    /// Instance-owned rather than static: each entity gathers its own neighbourhood, which is the whole point of
+    /// Instance-owned rather than static: each entity gathers its own neighborhood, which is the whole point of
     /// the item (the win scales with entity count).
     /// </para>
     /// </summary>

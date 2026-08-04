@@ -93,7 +93,7 @@ namespace Physics
         private float _lastMoveSpeed;
 
         /// <summary>
-        /// PH-1: this body's gathered voxel neighbourhood, refilled once per resolve and read by every sweep.
+        /// PH-1: this body's gathered voxel neighborhood, refilled once per resolve and read by every sweep.
         /// Per-instance rather than shared, so entities do not clobber each other's gather.
         /// </summary>
         private readonly PhysicsCellBuffer _cellBuffer = new PhysicsCellBuffer();
@@ -196,6 +196,10 @@ namespace Physics
             float clampedX = Mathf.Clamp(pos.x, minX, maxX);
             float clampedZ = Mathf.Clamp(pos.z, minZ, maxZ);
 
+            // Exact comparison is intended: Mathf.Clamp returns the value itself when it is in range, so this asks
+            // "did the clamp change anything" to skip a redundant transform write. A tolerance here would swallow
+            // small-but-real clamps right at the border line.
+            // ReSharper disable once CompareOfFloatsByEqualityOperator
             if (clampedX != pos.x || clampedZ != pos.z)
                 transform.position = new Vector3(clampedX, pos.y, clampedZ);
         }
@@ -458,7 +462,7 @@ namespace Physics
         }
 
         /// <summary>
-        /// PH-1: resolves the voxel neighbourhood this resolve's sweeps will read, <b>once</b>, instead of letting
+        /// PH-1: resolves the voxel neighborhood this resolve's sweeps will read, <b>once</b>, instead of letting
         /// each of the nine sweeps rescan it.
         /// </summary>
         /// <param name="currentAABB">The body's AABB before this resolve's movement.</param>
