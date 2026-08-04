@@ -102,6 +102,33 @@ namespace Physics
 
         private World _world;
 
+#if UNITY_EDITOR
+
+        #region PH-2 shadow compare counters — TEMPORARY, delete with the shadow pass in CalculateVelocity
+
+        /// <summary>Substepped ticks on which both the old staging path and the new local accumulation ran.</summary>
+        public static int ShadowComparisons;
+
+        /// <summary>Shadow comparisons whose resolved displacement or solver state differed. Must stay 0.</summary>
+        public static int ShadowMismatches;
+
+        /// <summary>
+        /// Zeroes the shadow counters on play-mode entry (domain reload is disabled in this project, so a field
+        /// initializer would not run). They live here rather than on <see cref="PhysicsQueryStats"/> deliberately:
+        /// <c>B25</c> calls <c>PhysicsQueryStats.Reset()</c> mid-suite, which would wipe the comparison count and
+        /// leave "0 mismatches" passing vacuously.
+        /// </summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        public static void ResetShadowCompare()
+        {
+            ShadowComparisons = 0;
+            ShadowMismatches = 0;
+        }
+
+        #endregion
+
+#endif
+
         private void Start()
         {
             _world = World.Instance;
@@ -263,6 +290,44 @@ namespace Physics
                     Vector3 remainingDisplacement = Velocity;
                     Vector3 subMove = remainingDisplacement / substeps;
 
+#if UNITY_EDITOR
+                    // ================= PH-2 SHADOW COMPARE — TEMPORARY =================
+                    // Runs the PRE-PH-2 staging path first, from this tick's exact starting state, so the tick's net
+                    // displacement can be compared against the new accumulation on identical inputs. PH-1's
+                    // shadow-compare is the precedent; like it, this is deleted once the item closes.
+                    // NOTE: while this is in, every stat below is DOUBLE-COUNTED (two gathers per substep), so the
+                    // PH-2 measurement must come from a shadow-free session.
+                    Vector3 shadowStartPos = transform.position;
+                    bool shadowStartGrounded = IsGrounded;
+                    float shadowStartMomentum = _verticalMomentum;
+
+                    Vector3 shadowTotal = Vector3.zero;
+                    Vector3 shadowSubMove = remainingDisplacement / substeps;
+                    for (int s = 0; s < substeps; s++)
+                    {
+                        Vector3 shadowSub = shadowSubMove;
+                        // The old code read transform.position inside ResolveMovement; passing it here reproduces
+                        // that read exactly, staged write for staged write.
+                        ResolveMovement(ref shadowSub, transform.position);
+                        transform.position += shadowSub;
+                        shadowTotal += shadowSub;
+
+                        if (shadowSub.x == 0) shadowSubMove.x = 0;
+                        if (shadowSub.y == 0) shadowSubMove.y = 0;
+                        if (shadowSub.z == 0) shadowSubMove.z = 0;
+                    }
+
+                    // The old revert (`transform.position -= shadowTotal`) is deliberately omitted: the assignment
+                    // below restores the start position exactly, and the revert never fed shadowTotal anyway.
+                    bool shadowGrounded = IsGrounded;
+                    float shadowMomentum = _verticalMomentum;
+
+                    transform.position = shadowStartPos;
+                    IsGrounded = shadowStartGrounded;
+                    _verticalMomentum = shadowStartMomentum;
+                    // =============== END PH-2 SHADOW COMPARE (part 1 of 2) ===============
+#endif
+
                     // PH-2: the running position is a local, not the transform. Each substep must resolve against
                     // where the previous one left the body, but staging that on the transform would leave it holding
                     // a not-yet-final position mid-tick — and a throw inside the loop would leave it there for good,
@@ -283,6 +348,31 @@ namespace Physics
                         if (currentSubMove.y == 0) subMove.y = 0;
                         if (currentSubMove.z == 0) subMove.z = 0;
                     }
+
+#if UNITY_EDITOR
+                    // ============= PH-2 SHADOW COMPARE (part 2 of 2) — TEMPORARY =============
+                    // Exact float equality, not a tolerance: the player is a root transform, so the old staged read
+                    // and the new local are the same float chain. Anything non-zero here is a real divergence.
+                    ShadowComparisons++;
+                    bool shadowMatches = shadowTotal.x == totalDisplacement.x
+                                         && shadowTotal.y == totalDisplacement.y
+                                         && shadowTotal.z == totalDisplacement.z
+                                         && shadowGrounded == IsGrounded
+                                         && shadowMomentum == _verticalMomentum;
+                    if (!shadowMatches)
+                    {
+                        ShadowMismatches++;
+                        Debug.LogError(
+                            $"[PH-2 SHADOW] mismatch #{ShadowMismatches} over " +
+                            $"{ShadowComparisons} comparisons — substeps={substeps} " +
+                            $"start={shadowStartPos:F6}\n" +
+                            $"  displacement: staged={shadowTotal:F8} local={totalDisplacement:F8} " +
+                            $"delta={(shadowTotal - totalDisplacement):F8}\n" +
+                            $"  grounded: staged={shadowGrounded} local={IsGrounded} | " +
+                            $"momentum: staged={shadowMomentum:F8} local={_verticalMomentum:F8}");
+                    }
+                    // =================== END PH-2 SHADOW COMPARE ===================
+#endif
 
                     Velocity = totalDisplacement;
                 }
