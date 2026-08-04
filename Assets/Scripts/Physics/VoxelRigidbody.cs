@@ -245,6 +245,7 @@ namespace Physics
             // COLLISION (Sub-voxel AABB physics solver)
             if (!isNoclipping)
             {
+                PhysicsQueryStats.CountTick();
                 const float MIN_COLLISION_THICKNESS = 0.25f; // Quarter-slab
                 const float maxStep = MIN_COLLISION_THICKNESS * 0.5f; // 0.125m
 

@@ -33,6 +33,17 @@ namespace Physics
         public static int Fallbacks;
 
         /// <summary>
+        /// The <b>counterfactual</b>: cells the solver would have read if every sweep still ran its own scan, summed
+        /// from each sweep's own cell range. Measured in the same run as
+        /// <see cref="CellsScannedByGather"/> so a before/after comparison needs no second build and carries no
+        /// A/B drift — this is the number <c>PH-1</c> is judged on.
+        /// </summary>
+        public static int CellsScannedIfUngathered;
+
+        /// <summary>Physics ticks that ran collision (one per <c>CalculateVelocity</c>), for per-tick averages.</summary>
+        public static int Ticks;
+
+        /// <summary>
         /// Zeroes every counter. Also the play-mode entry reset: with domain reload disabled these statics would
         /// otherwise carry the previous session's totals into the next one.
         /// </summary>
@@ -44,6 +55,22 @@ namespace Physics
             CellsScannedDirectly = 0;
             SweepQueries = 0;
             Fallbacks = 0;
+            CellsScannedIfUngathered = 0;
+            Ticks = 0;
+        }
+
+        /// <summary>Records one physics tick that ran collision resolution.</summary>
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+        public static void CountTick() => Ticks++;
+
+        /// <summary>Records what one sweep's own scan range would have cost before the gather existed.</summary>
+        /// <param name="cellsInSweepRange">Cells in this sweep's own floor-range.</param>
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+        public static void CountCounterfactual(int cellsInSweepRange)
+        {
+            CellsScannedIfUngathered += cellsInSweepRange;
         }
 
         /// <summary>Records one gather pass.</summary>

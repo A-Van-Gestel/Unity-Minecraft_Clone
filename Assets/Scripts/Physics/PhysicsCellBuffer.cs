@@ -122,6 +122,11 @@ namespace Physics
                 maxVoxel.x > _gatheredMax.x || maxVoxel.y > _gatheredMax.y || maxVoxel.z > _gatheredMax.z)
                 return false;
 
+            // This range is exactly what a pre-PH-1 direct scan would have read for this sweep — recorded here so
+            // the before/after comparison comes out of one run rather than two builds.
+            PhysicsQueryStats.CountCounterfactual(
+                (maxVoxel.x - minVoxel.x + 1) * (maxVoxel.y - minVoxel.y + 1) * (maxVoxel.z - minVoxel.z + 1));
+
             float maxCorrection = 0f;
             for (int i = 0; i < _count; i++)
             {
