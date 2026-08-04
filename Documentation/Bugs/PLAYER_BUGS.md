@@ -207,6 +207,16 @@ translation stands out. A build that stepped *both* would read as lower frame ra
 Five conditions, rated **blind** (the settings behind each were withheld until all five were done). Only
 `Time.fixedDeltaTime` and `Application.targetFrameRate` were touched, both runtime-only.
 
+> **Methodology note — what these conditions do and do not control for.** They were run in **editor play
+> mode**, where the display path is not characterised: the Game View is a composited child window, and
+> `QualitySettings.vSyncCount` reads `0` in edit mode but `1` in play mode, so what actually governs
+> presentation is unverified. **The conclusions below deliberately do not rest on it.** The load-bearing
+> comparison is **4 vs 5**, which ran at the *same* 100 fps cap and therefore presented identically — the only
+> difference was the CPU-side tick rate, and they were rated differently. No display or compositor behavior can
+> produce a difference between two conditions that present the same way. The **3 vs 4** pair closes the other
+> direction: their frame rates *did* differ (140 vs 100) and they were rated the *same*. Anything that needs the
+> display path itself characterised must be re-run in a **standalone build**.
+
 | # | Physics | Render | Frames per step | Observed |
 |---|---|---|---:|---|
 | 1 | **100 Hz** | ~117 uncapped | 1.17 | walking "kinda smoother"; **jump/collisions broke** — see §07 |
