@@ -1,6 +1,6 @@
 # Sub-Voxel Collision System
 
-**Status:** Implemented — core runtime collision, placement API separation, Block Editor authoring, editor preview, and in-game collision-bounds debug visualization are fully implemented and playtested, and the solver is guarded by the **`NS-4`** physics validation suite (`Minecraft Clone/Dev/Validate Physics Solver`, 25 baselines) as of 2026-08-04. **Target Engine:** Unity 6.4+  
+**Status:** Implemented — core runtime collision, placement API separation, Block Editor authoring, editor preview, and in-game collision-bounds debug visualization are fully implemented and playtested, and the solver is guarded by the **`NS-4`** physics validation suite (`Minecraft Clone/Dev/Validate Physics Solver`, 26 baselines) as of 2026-08-04. **Target Engine:** Unity 6.4+  
 **Dependencies:** Phase 4 Custom Mesh Rotation (`BurstCustomMeshRotationUtility`)  
 **Related:** `VoxelRigidbody.cs`, `World.CheckPhysicsCollision()`, `World.IsCellOccupiedForPlacement()`, `World.TryGetRayHit()`, `Helpers.BlockCollisionBoundsUtility`, `Helpers.RayBoundsIntersection`, `PlacementController.MarchRay`, `BlockType`, Block Editor **Last Reviewed:** August 2026 (VQ-3 sync)
 
@@ -20,6 +20,7 @@
 | 2026-08-03 | **`NS-4` shipped**: the status line's "Automated Tests Pending" and §7's pending-tests bullet are retired — the solver now has a standing regression guard (`Minecraft Clone/Dev/Validate Physics Solver`, 17 baselines over the real `VoxelRigidbody` + real `CheckPhysicsCollision`). §5's six unchecked Phase 6c regression tests and Phase 6b's unit-test item are ticked with their scenario ids; §2.2's failure table maps to `B10`–`B13`. Two residual gaps are stated rather than hidden: the grounded verdict after a high-speed landing belongs to `PLAYER_BUGS` §04 and is deliberately unpinned by the baselines, and compound bounds stay with `VQ-4`. |
 | 2026-08-03 | `PLAYER_BUGS` §04 **fixed in code** (awaiting in-game confirmation): `ResolveMovement`'s zero-vertical-movement branch now probes `GROUND_PROBE_SKIN` (2 x `COLLISION_EPSILON`) below the feet, because the strict overlap test in §3.3 means a body resting flush on a surface does not overlap it — the un-extended probe could only ground an *embedded* body. §7 records the two new residual gaps; the embedded-body aggregation behavior is now `PLAYER_BUGS` §05. |
 | 2026-08-04 | **`PH-1` shipped** — §3.4.1's flow sketch and §6's grid-scan row now describe the gathered query pattern: the nine sweeps read a per-entity `PhysicsCellBuffer` filled once per substep, falling back to `CheckPhysicsCollision` only when a sweep escapes the gathered envelope. The aggregation rule and resolution math are untouched (one shared `PhysicsCollisionCells.AccumulateContact`), and a shadow-compare pass observed 0 mismatches over 142 sweeps. Measured 2.08× fewer cell reads per tick, 0 fallbacks over 32,555 gathers; in-game confirmed. Suite 24 → 25 (`B25` guards the envelope). |
+| 2026-08-04 | **`PH-2` shipped** — §3.4.4's substepping sketch now threads the running position through a local and passes it to `ResolveMovement(ref movement, pos)`; `CalculateVelocity` no longer writes the transform, so the staged per-substep write and its trailing revert are gone and the body moves once in `FixedUpdate`. Behavior-neutral by measurement (shadow-compare at exact float equality: 0 mismatches over 5,846 substepped ticks, 1,960 harness + 3,886 in-game), in-game confirmed. Suite 25 → 26 (`B26` pins that the transform is untouched, via `Transform.hasChanged` — proven red by restoring the staged writes, which reddened **only** B26). |
 | 2026-08-04 | **`PH-1` step 0** — §3.3's aggregation rule gains its missing *horizontal* guard: `B24` pins two cells whose blocking faces differ on one horizontal axis (a full cube at `x = 10.0` beside an east-half slab at `x = 10.5` → the body stops at the nearer face, `10.00`), in both scan orderings. Until it landed the first-contact-wins mutation reddened only `B7`, a vertical support case, so the aggregation `PH-1`'s gather-once refactor re-orders was unobserved. Suite 23 → 24 baselines; no behavior change (test-only). |
 | 2026-08-03 | **`VQ-3` sync**: §7's raycast limitation marked CLOSED; §3.3's "API 2 — unchanged / no changes needed" replaced with the broad+narrow phase composition and `TryGetRayHit`; §3.2's `GetRotatedWorldBounds` sketch replaced by the shared `BlockCollisionBoundsUtility.GetBounds` (it and `GetRotatedLocalBounds` were unified after being proven equivalent); §3.2 now flags the 90°-permutation property as load-bearing for the ray's hit ordering; caller-migration row and §5 phase entries annotated rather than rewritten. |
 
@@ -495,21 +496,44 @@ float displacement = velocity.magnitude * Time.fixedDeltaTime;
 if (displacement > maxStep)
 {
     int substeps = Mathf.CeilToInt(displacement / maxStep);
-    Vector3 subVelocity = velocity / substeps;
+    Vector3 subMove = velocity / substeps;
+
+    // PH-2: the running position is a LOCAL. The transform is not written here at all.
+    Vector3 runningPos = transform.position;
+    Vector3 totalDisplacement = Vector3.zero;
+
     for (int i = 0; i < substeps; i++)
     {
-        // Each substep runs the full TryStepUp → Z → X → Y resolution
-        // with the fractional velocity. Position is accumulated between substeps.
-        ResolveMovement(subVelocity);
+        // Each substep runs the full TryStepUp → Z → X → Y resolution with the
+        // fractional displacement, resolved from where the previous substep left off.
+        Vector3 currentSubMove = subMove;
+        ResolveMovement(ref currentSubMove, runningPos);
+        runningPos += currentSubMove;
+        totalDisplacement += currentSubMove;
+
+        // Carry-over: an axis stopped by a substep stays stopped for the rest of the chain.
+        if (currentSubMove.x == 0) subMove.x = 0;
+        if (currentSubMove.y == 0) subMove.y = 0;
+        if (currentSubMove.z == 0) subMove.z = 0;
     }
+    velocity = totalDisplacement;
 }
 else
 {
-    ResolveMovement(velocity);
+    ResolveMovement(ref velocity, transform.position);
 }
 ```
 
 This ensures thin sub-voxel shapes are never skipped, even at high velocities. The `CheckPhysicsCollision` API remains simple (single AABB in, contact out).
+
+> **PH-2 (2026-08-04).** The chain used to communicate the running position **through the transform** —
+> `transform.position += currentSubMove` per substep, `ResolveMovement` re-reading `transform.position`, and a
+> final `transform.position -= totalDisplacement` to undo the staging. It now threads a local and takes the
+> position as a parameter, so **`CalculateVelocity` never writes the transform**; the body moves once, in
+> `FixedUpdate`'s `transform.Translate(Velocity)`. Behavior is unchanged — the per-substep read is the same float
+> chain, verified by a shadow-compare at exact float equality over 5,846 substepped ticks with 0 mismatches — and
+> the invariant is pinned by **`B26`**. The concrete defect this removes: a throw inside the loop used to leave the
+> body teleported by the staged partial sum, because the revert never ran.
 
 ### 3.5. Data Ownership
 
@@ -579,7 +603,7 @@ The Block Editor provides a **Collision Bounds** section with:
 - [x] Extensive playtesting of movement scenarios
 
 > The six regression tests above shipped as the **`NS-4`** physics / collision-solver suite
-> (`Minecraft Clone/Dev/Validate Physics Solver`, `Assets/Editor/Validation/PhysicsSolver/`, baselines `B1`–`B25`),
+> (`Minecraft Clone/Dev/Validate Physics Solver`, `Assets/Editor/Validation/PhysicsSolver/`, baselines `B1`–`B26`),
 > tracked in [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md).
 > §2.2's failure table is covered by `B10`–`B13`, and the suite adds substep invariance (`B15`), the corner
 > settling case (`B16`), fluid exclusion (`B14`), floating-origin handling (`B17`) and a fixture-integrity guard
@@ -616,4 +640,4 @@ The Block Editor provides a **Collision Bounds** section with:
     - **L-shapes**: 2+ AABBs.
 - **No per-voxel collision variation**: All instances of a block type share the same collision shape (modulo rotation). Blocks that change shape based on neighbors (e.g., fence posts connecting) would need runtime collision computation.
 - **No mesh-based collision**: We intentionally avoid using the visual mesh as collision geometry. The per-frame AABB-overlap pattern is incompatible with arbitrary triangle meshes at voxel density. For blocks needing precise collision, the AABB can be oversized with visual details protruding — an acceptable trade-off.
-- ~~**Automated collision regression tests are pending**~~ — ✅ **CLOSED by `NS-4`, 2026-08-03.** The solver now has a standing regression guard: `Minecraft Clone/Dev/Validate Physics Solver` (25 baselines, `Assets/Editor/Validation/PhysicsSolver/`), which drives the real `VoxelRigidbody` against the real `CheckPhysicsCollision` over synthetic voxel fields — see §5's Phase 6b/6c checklists for the per-item mapping. The grounded verdict after a high-speed landing or a horizontal-only resolve is now covered too, by `B18`–`B23` — the retired `PLAYER_BUGS` §04's repro, fixed and confirmed in game 2026-08-03 and promoted to baselines (entry archived as `_FIXED_BUGS.md` Player & Input §08). Residual gaps: compound bounds stay out of scope until **`VQ-4`**, and the aggregation rule's behavior for a body that is already *inside* geometry is unguarded — §3.3 assumes it is outside, and the consequence is filed as `PLAYER_BUGS` §05 (open). §05 also records that the embedded-body un-stick is the **step-up pre-pass** and therefore only covers *grounded* bodies: an embedded airborne body has its horizontal input reversed, and an embedded body that jumps is ejected **downward** by its full collider height (confirmed in game — it falls through a one-block floor into a cave).
+- ~~**Automated collision regression tests are pending**~~ — ✅ **CLOSED by `NS-4`, 2026-08-03.** The solver now has a standing regression guard: `Minecraft Clone/Dev/Validate Physics Solver` (26 baselines, `Assets/Editor/Validation/PhysicsSolver/`), which drives the real `VoxelRigidbody` against the real `CheckPhysicsCollision` over synthetic voxel fields — see §5's Phase 6b/6c checklists for the per-item mapping. The grounded verdict after a high-speed landing or a horizontal-only resolve is now covered too, by `B18`–`B23` — the retired `PLAYER_BUGS` §04's repro, fixed and confirmed in game 2026-08-03 and promoted to baselines (entry archived as `_FIXED_BUGS.md` Player & Input §08). Residual gaps: compound bounds stay out of scope until **`VQ-4`**, and the aggregation rule's behavior for a body that is already *inside* geometry is unguarded — §3.3 assumes it is outside, and the consequence is filed as `PLAYER_BUGS` §05 (open). §05 also records that the embedded-body un-stick is the **step-up pre-pass** and therefore only covers *grounded* bodies: an embedded airborne body has its horizontal input reversed, and an embedded body that jumps is ejected **downward** by its full collider height (confirmed in game — it falls through a one-block floor into a cave).

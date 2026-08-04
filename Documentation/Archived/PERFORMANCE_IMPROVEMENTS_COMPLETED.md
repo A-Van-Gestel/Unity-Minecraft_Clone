@@ -1048,6 +1048,74 @@ time was deliberately not measured — ⚪ with one entity.
 
 ---
 
+### PH-2. Substep chain stages each substep on `transform.position` instead of a local
+
+✅ **SHIPPED 2026-08-04** (`feat/world-scaling`), in-game confirmed ("doesn't feel any different from before").
+
+**Observed:** `VoxelRigidbody.CalculateVelocity`'s substep loop communicated the running position to the next
+substep **through the transform** — `transform.position += currentSubMove` each iteration (a native get plus a
+native set that dirties the transform), with `ResolveMovement` re-reading `transform.position` at its top, plus a
+final `transform.position -= totalDisplacement` to undo the staging because the caller still runs
+`transform.Translate(Velocity)` later.
+
+**Shipped:** the loop advances a local `runningPos`, and `ResolveMovement(ref Vector3 movement, Vector3 pos)` takes
+the position to resolve from as an argument. The transform is untouched by `CalculateVelocity`; the body moves once,
+in `FixedUpdate`. The per-axis carry-over logic, the aggregation rule, the resolution math and the Z → X → Y order
+are unchanged.
+
+**Behavior-neutral, and shown to be rather than argued to be.** The per-substep read is the *same float chain*
+either way — the player is a root transform (`m_Father: {fileID: 0}` in `World.unity`, and nothing reparents it),
+so a `transform.position` get-after-set returns the bits written. A temporary shadow-compare pass ran the **old
+staging path first** from each tick's exact starting state, restored position / `IsGrounded` / `_verticalMomentum`,
+then ran the new accumulation and compared at **exact float equality**: **0 mismatches over 5,846 substepped ticks**
+(1,960 harness + 3,886 in-game), then was removed. Two-sided — under a dropped-accumulation mutation the same
+instrument reported 6 mismatches in 6 comparisons.
+
+**Verification:** the mutation map in `PhysicsSolverValidationSuite.Baseline.cs` records a widened red set for
+"drop the per-substep position accumulation": **B6, B15, B19, B20**, not the B6/B15 previously recorded. **`B19` is
+the instructive one** — its resolved displacement is *identical* under the mutation and only the grounded verdict
+diverges, which is why the shadow compared solver state and not just the displacement vector. One baseline added:
+**`B26`** pins the invariant this item creates — `CalculateVelocity` resolves the substep chain **without writing
+the transform** — via `Transform.hasChanged` rather than a before/after position compare, because the old path
+*reverts* what it writes and the two positions can compare equal by luck (`B25`'s cell-granularity blind spot in
+value form). Proven red by restoring the staged writes: **1 of 26 red, and only B26**, since re-staging is
+behavior-neutral and nothing else can see it. `Validate All`: **411 baselines across 17 suites**, Physics Solver
+26/26.
+
+**Measured** (shadow-free session, 8,241 ticks): **2.477 substeps per tick**, so the elision removes ≈ **5.95
+staged native transform accesses per tick** (2.477 gets + 2.477 sets + 1 revert) — **49,073** over the session.
+Frame time was deliberately **not** measured and not looked for: ⚪ with one entity. No separate benchmark
+document was written — unlike `PH-1` there is no before/after quantity to compare, only a count of avoided
+accesses.
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — as estimated: a local, a parameter, and the harness seam.
+> - **Risk:** 🟡 Medium as estimated, and both named hazards behaved as predicted. The reflection seam
+>   (`PhysicsTestWorld.Resolve`) was updated in the same commit, so a green 25/25 *was* the proof it landed — a
+>   stale seam throws rather than fails. The accumulation-order hazard turned out to be **narrower than the entry
+>   claimed**: only the transform's final value changes (old `((p ⊕ Σstaged) ⊖ total) ⊕ total` vs new `p ⊕ total`,
+>   a ≤1-ulp difference, the new one more accurate), because the sweep inputs are bit-identical. `EXACT_TOLERANCE`
+>   stayed at 1e-4, well under `COLLISION_EPSILON`.
+> - **Benefit:** ⚪ Low with one player, scaling linearly with entity count — as filed.
+> - **Seed/Save:** ✅ / ✅.
+>
+> **Correction to this entry's original "observability" claim.** It said anything reading the player transform
+> "inside the same `FixedUpdate` ordering" would observe an intermediate substep. That is **not reachable**:
+> `CalculateVelocity` is synchronous inside `VoxelRigidbody.FixedUpdate` and reverted before returning, no other
+> `MonoBehaviour` can interleave, and `World.CheckPhysicsCollision` / `GatherPhysicsCells` take only a `Bounds` and
+> read no player transform. The real defect the removal fixes is narrower and worse: **a throw inside the substep
+> loop left the player teleported by the staged partial sum**, because the revert never ran.
+>
+> **`PLAYER_BUGS` §05 is unchanged**, as required — the ejection corrections are computed from identical inputs.
+>
+> **One observation logged against `PH-1`'s record:** a session that mixed heavy fast flight with the shadow pass
+> showed **2 fallbacks** over 96,583 gathers, where `PH-1`'s benchmark reported 0 over 32,555. The clean
+> shadow-free session showed **0 over 20,416**. Not attributable to `PH-2` (which changes no envelope derivation),
+> and not cleanly attributable between the two variables — recorded so `PH-1`'s "zero fallbacks" is not read as an
+> absolute.
+
+---
+
 ---
 
 ---

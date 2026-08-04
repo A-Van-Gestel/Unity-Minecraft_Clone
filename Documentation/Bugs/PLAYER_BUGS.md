@@ -12,7 +12,7 @@ This document outlines **open** bugs related to the player controller and intera
 > coverage roadmap. Reusing either number would silently redirect all of those. New entries continue from `§06`.
 >
 > **Validation suite:** `Minecraft Clone/Dev/Validate Physics Solver`
-> (`Assets/Editor/Validation/PhysicsSolver/`) — the **`NS-4`** suite shipped 2026-08-03 with 25 baselines over the
+> (`Assets/Editor/Validation/PhysicsSolver/`) — the **`NS-4`** suite shipped 2026-08-03 with 26 baselines over the
 > real `VoxelRigidbody` + `World.CheckPhysicsCollision`, closing the "largest system with no automated guard" gap
 > (see [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md)). `B18`–`B23`
 > pin the grounded verdict (the retired §04's territory); §05 below is the one solver defect still open there.

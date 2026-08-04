@@ -2,7 +2,7 @@
 
 **Version:** 1.0
 **Date:** 2026-07-26
-**Status:** **Open backlog.** 32 items open, 28 complete. Completed items keep their ✅ row in the master
+**Status:** **Open backlog.** 31 items open, 29 complete. Completed items keep their ✅ row in the master
 summary table; their detail sections live in
 [`../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md`](../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md).
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -225,7 +225,7 @@ plus the standalone test files (`VoxelMetadataUtilityTests`, `FastNoiseLiteTests
 | VQ-3 ✅ | **SHIPPED 2026-08-03** — the interaction ray gained a sub-voxel narrow phase (`Helpers/RayBoundsIntersection` behind `VoxelRayDDA`'s broad phase, via the shared `BlockCollisionBoundsUtility`): a half-slab now stops the ray only where its volume is, the reported face is the block's rather than the cell's, and the highlight / place-preview boxes hug that volume |   🟡   |  🟢  |   ⚪⁶   |  ✅  |  ✅  |
 | VQ-4 | Single AABB per block type cannot express stairs / L-shapes (`SUB_VOXEL_COLLISION_SYSTEM.md` §7 deferred)                                                                                                          |   🔴   |  🟡  |   ⚪⁶   |  ✅  |  ✅  |
 | PH-1 ✅ | **SHIPPED 2026-08-04** — gather once per substep into a per-entity `PhysicsCellBuffer`; all nine sweeps read it, with a direct-scan fallback for sweeps that escape the envelope. Identical by construction (shadow pass: 0 mismatches / 142 sweeps). **2.08× fewer cell reads per FixedUpdate**, 0 fallbacks over 32,555 gathers |   🟡   |  🟡  |   ⚪⁵   |  ✅  |  ✅  |
-| PH-2 | Substep chain writes `transform.position` twice per substep to stage the next substep's read                                                                                                                      |   🟢   |  🟡  |   ⚪⁵   |  ✅  |  ✅  |
+| PH-2 ✅ | **SHIPPED 2026-08-04** — the substep loop advances a local `runningPos` and `ResolveMovement` takes the position to resolve from as an argument; `CalculateVelocity` no longer writes the transform at all, so the staged position and its trailing revert are gone. Behavior-neutral by measurement (shadow pass: 0 mismatches / 5,846 substepped ticks); `B26` pins the invariant. ≈5.95 staged transform accesses elided per tick at 2.477 substeps/tick |   🟢   |  🟡  |   ⚪⁵   |  ✅  |  ✅  |
 
 > ⁶ VQ-3/VQ-4 are **correctness/capability** items, not frame-time ones — filed here because `VQ-*` is
 > where the interaction and voxel-query layer is tracked, and there is no feature-report counterpart for
@@ -862,58 +862,6 @@ shapes for free when this lands.
 > - **Benefit:** ⚪ No frame-time change — unlocks stairs/L-shapes as buildable blocks.
 > - **Seed/Save:** ✅ / ✅ — `BlockDatabase.asset` is a ScriptableObject; adding a box list is a Unity
 >   serialization change, **not** a world-save format change, so no AOT migration is required.
-
----
-
-### PH-2. Substep chain stages each substep on `transform.position` instead of a local
-
-**Observed:** `VoxelRigidbody.CalculateVelocity`'s substep loop (`VoxelRigidbody.cs` ~lines 260–282 after
-`PH-1`; locate by symbol, not by line)
-communicates the running position to the next substep **through the transform**: each iteration does
-`transform.position += currentSubMove` — a native get plus a native set that dirties the transform — and
-`ResolveMovement` then re-reads `transform.position` at its top (~line 296). That is two gets and one set
-per substep, plus one final `transform.position -= totalDisplacement` to undo the staging, because the
-caller still expects `transform.Translate(Velocity)` to run later. Substep count is
-`ceil(displacement / 0.125)` and `flyingSpeed` is unbounded (`IncrementFlyingSpeed`), so the loop is not
-bounded by a small constant at high speed.
-
-Two consequences beyond the per-write cost:
-
-- The transform holds a **staged, not-yet-final** position for the duration of the tick. Anything that
-  reads the player transform inside the same `FixedUpdate` ordering — another component, a debug
-  visualizer — observes an intermediate substep rather than the resolved position.
-- The revert makes the tick's net transform write a difference of two accumulations, so the staging is
-  paid twice: once to build it, once to take it back out.
-
-**Recommendation:** Accumulate the running position in a local and thread it into `ResolveMovement`
-(which currently reads `transform.position` itself), leaving the transform untouched until the caller's
-existing `transform.Translate(Velocity)`. The substep loop keeps its per-axis carry-over logic unchanged.
-
-> **Impact Analysis:**
-> - **Effort:** 🟢 Low — a local plus a parameter; the resolution math is untouched.
-> - **Risk:** 🟡 Medium, and the risk is *not* in the arithmetic. Two specific hazards:
->   1. `ResolveMovement`'s **signature changes**, and `NS-4`'s harness drives it by reflection with a
->      one-argument `Invoke` (`PhysicsTestWorld.Resolve`, `Framework/PhysicsTestWorld.cs`). The harness
->      must be updated in the same commit or every scenario in the suite throws rather than fails.
->   2. Float **accumulation order** changes from `pos + a + b …` to `pos + (a + b …)`. `B15` (substep
->      invariance) compares the two orders at `EXACT_TOLERANCE` (1e-4), which should absorb it — but that
->      must be *observed*, not asserted: run `B15`, `B6`, and `B20`–`B23` and report the measured deltas.
-> - **Benefit:** ⚪ Low with one player — the win is a handful of native transform accesses per tick, and
->   like `PH-1` it scales with entity count. Also removes the staged-transform observability wart above,
->   which is arguably the better reason to do it.
->   **Sized from measurement** ([PH-1 benchmark](../Performance/PHYSICS_PH1_2026-08-04_BENCHMARK.md) §3):
->   ordinary movement runs **2.05 substeps per tick**, so the elision removes roughly *two* staged
->   get/set pairs plus the final revert — single-digit native transform accesses per tick. Do not expect a
->   frame-time signal, and do not go looking for one; `PhysicsQueryStats.Gathers / Ticks` is the honest way
->   to state the count, since gathers and substeps are one-to-one.
-> - **Seed/Save:** ✅ / ✅.
->
-> **Sequencing:** deliberately **split out of `PH-1`** (2026-08-04) rather than folded into it. `PH-1`'s
-> gather-once refactor is provably behavior-neutral — same cell set, order-independent aggregation — and
-> keeping a signature change and an accumulation-order change out of it preserves that property, so a
-> physics-feel regression during `PH-1` cannot be ambiguous about which change caused it. `PH-1` **closed
-> 2026-08-04**, so this is now unblocked — and it inherits a better gate than it would have had, since the
-> solver's query path is settled and `B25` pins the gather envelope.
 
 ---
 
