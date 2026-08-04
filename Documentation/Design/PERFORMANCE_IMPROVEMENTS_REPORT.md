@@ -867,10 +867,11 @@ shapes for free when this lands.
 
 ### PH-2. Substep chain stages each substep on `transform.position` instead of a local
 
-**Observed:** `VoxelRigidbody.CalculateVelocity`'s substep loop (`VoxelRigidbody.cs` ~lines 254–272)
+**Observed:** `VoxelRigidbody.CalculateVelocity`'s substep loop (`VoxelRigidbody.cs` ~lines 260–282 after
+`PH-1`; locate by symbol, not by line)
 communicates the running position to the next substep **through the transform**: each iteration does
 `transform.position += currentSubMove` — a native get plus a native set that dirties the transform — and
-`ResolveMovement` then re-reads `transform.position` at its top (~line 285). That is two gets and one set
+`ResolveMovement` then re-reads `transform.position` at its top (~line 296). That is two gets and one set
 per substep, plus one final `transform.position -= totalDisplacement` to undo the staging, because the
 caller still expects `transform.Translate(Velocity)` to run later. Substep count is
 `ceil(displacement / 0.125)` and `flyingSpeed` is unbounded (`IncrementFlyingSpeed`), so the loop is not
@@ -900,6 +901,11 @@ existing `transform.Translate(Velocity)`. The substep loop keeps its per-axis ca
 > - **Benefit:** ⚪ Low with one player — the win is a handful of native transform accesses per tick, and
 >   like `PH-1` it scales with entity count. Also removes the staged-transform observability wart above,
 >   which is arguably the better reason to do it.
+>   **Sized from measurement** ([PH-1 benchmark](../Performance/PHYSICS_PH1_2026-08-04_BENCHMARK.md) §3):
+>   ordinary movement runs **2.05 substeps per tick**, so the elision removes roughly *two* staged
+>   get/set pairs plus the final revert — single-digit native transform accesses per tick. Do not expect a
+>   frame-time signal, and do not go looking for one; `PhysicsQueryStats.Gathers / Ticks` is the honest way
+>   to state the count, since gathers and substeps are one-to-one.
 > - **Seed/Save:** ✅ / ✅.
 >
 > **Sequencing:** deliberately **split out of `PH-1`** (2026-08-04) rather than folded into it. `PH-1`'s
