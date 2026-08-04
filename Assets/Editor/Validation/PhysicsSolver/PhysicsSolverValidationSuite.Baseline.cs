@@ -25,8 +25,10 @@ namespace Editor.Validation.PhysicsSolver
     /// baselines that assert the sweep spans the entity's whole height.</item>
     /// <item>Remove the substep chain from <c>CalculateVelocity</c> → <b>B6</b>.</item>
     /// <item>Remove the step-up pre-pass from <c>ResolveMovement</c> → <b>B8, B9</b>.</item>
-    /// <item>Aggregate the <i>first</i> contact instead of the largest correction → <b>B7</b>, and only B7 — with
-    /// <i>both</i> of its geometries (half-slab + cube, and two custom volumes) failing independently.</item>
+    /// <item>Aggregate the <i>first</i> contact instead of the largest correction → <b>B7, B24</b>. B7 reds with
+    /// <i>both</i> of its geometries (half-slab + cube, and two custom volumes) failing independently; B24 reds on
+    /// its slab-first ordering only, since the scan reaches cells in ascending Z and the cube-first ordering hands
+    /// the mutation the right answer by accident — which is why B24 runs both.</item>
     /// <item>Drop the per-substep <c>transform.position</c> accumulation → <b>B6, B15</b>.</item>
     /// <item>Drop the <see cref="WorldOrigin"/> offset from the scan's voxel lookup → <b>B17</b>, and only B17.</item>
     /// <item>Drop the <c>fluidType != None</c> filter → <b>B14</b>, and only B14.</item>
@@ -50,13 +52,15 @@ namespace Editor.Validation.PhysicsSolver
     /// size.
     /// </para>
     /// <para>
-    /// <b>⚠️ Known coverage gap — horizontal multi-cell aggregation is unguarded.</b> The first-contact-wins
-    /// mutation above reds only <b>B7</b>, which is a <i>vertical</i> support case; no baseline puts two cells with
-    /// <i>different blocking faces</i> on one horizontal axis (e.g. a full cube at <c>x = 10.0</c> beside an
-    /// east-half slab at <c>x = 10.5</c>, where the body must stop at the nearer face, <c>10.00</c>). B3 is a uniform
-    /// wall plane, B12/B13 vary rotation rather than depth, and B16 spans two axes. Measured correct on 2026-08-03
-    /// during the <c>PLAYER_BUGS</c> §05 analysis but never pinned — close this before <b>PH-1</b> re-orders the
-    /// gather, since that refactor could regress it while the suite stays green.
+    /// <b>Horizontal multi-cell aggregation — the coverage gap B24 closed (2026-08-04).</b> Before it, the
+    /// first-contact-wins mutation reddened only <b>B7</b>, a <i>vertical</i> support case, and no baseline put two
+    /// cells with <i>different blocking faces</i> on one horizontal axis: B3 is a uniform wall plane, B12/B13 vary
+    /// rotation rather than depth, B16 spans two axes at equal faces. <b>PH-1</b>'s gather-once refactor could
+    /// therefore have re-ordered horizontal contacts while the suite stayed green. What <b>B24</b> was observed to
+    /// do under that mutation: its <i>slab-first</i> ordering stopped the body at the farther slab face — 10.10
+    /// instead of 9.60, off by 0.50 — while its slab-only fixture check and its <i>cube-first</i> ordering stayed
+    /// green, because the scan reaches cells in ascending Z and that ordering hands the mutation the right answer by
+    /// accident. Both orderings run for exactly that reason.
     /// </para>
     /// <para>
     /// <b>Where the grounded verdict is pinned:</b> <b>B18–B23</b> own it, and the geometry baselines (B3, B6, B11,
@@ -130,6 +134,8 @@ namespace Editor.Validation.PhysicsSolver
                 JumpAcceptedAfterFastLanding));
             scenarios.Add(new Scenario("B23: a horizontal-only resolve on flat ground stays grounded",
                 HorizontalResolveStaysGrounded));
+            scenarios.Add(new Scenario("B24: horizontal multi-cell aggregation stops at the nearer blocking face",
+                HorizontalAggregationPicksNearerFace));
         }
 
         /// <summary>Builds a fixture over the controlled solver palette at the identity origin.</summary>
@@ -832,7 +838,7 @@ namespace Editor.Validation.PhysicsSolver
         /// <summary>
         /// The same grounded question with substepping removed entirely: a body the solver itself landed, then moved
         /// horizontally with no vertical component. The zero-vertical-movement branch owns the verdict here, and it
-        /// must recognise the surface the body is standing on even though flush contact is not overlap.
+        /// must recognize the surface the body is standing on even though flush contact is not overlap.
         /// <para>
         /// The body is landed by a resolve rather than placed at a literal stand-off height on purpose — the solver's
         /// <c>COLLISION_EPSILON</c> is private and this suite does not mirror its value.
@@ -853,6 +859,125 @@ namespace Editor.Validation.PhysicsSolver
             ok &= Expect(world.IsGrounded,
                 "a horizontal-only resolve must not drop the grounded verdict for a body resting on a surface");
             return ok;
+        }
+
+        #endregion
+
+        #region Horizontal multi-cell aggregation (B24)
+
+        /// <summary>Feet-center X the depth-pairing push starts from — half a cell west of the obstacle column.</summary>
+        private const float DEPTH_START_X = WALL_X - 0.5f;
+
+        /// <summary>The east-half slab's blocking face: the <i>farther</i> of the pairing's two faces.</summary>
+        private const float DEPTH_SLAB_FACE = WALL_X + 0.5f;
+
+        /// <summary>Feet-center Z of the depth pairing — chosen so the footprint spans cells 8 and 9.</summary>
+        private const float DEPTH_Z = 9f;
+
+        /// <summary>How far past the farther face the push carries the body's leading edge.</summary>
+        private const float DEPTH_OVERSHOOT = 0.1f;
+
+        /// <summary>
+        /// Push distance for the depth pairing. It must carry the body's leading face past the <b>farther</b> volume
+        /// (the slab's), because a push that only reaches the nearer cube's face leaves the slab un-overlapped and
+        /// the scenario degenerates into <see cref="WallStopsOneAxisOnly"/>. Derived from the pinned collider so a
+        /// retune of the entity's width cannot silently under-shoot it.
+        /// </summary>
+        private const float DEPTH_PUSH =
+            DEPTH_SLAB_FACE - (DEPTH_START_X + PhysicsTestWorld.EntityHalfWidthX) + DEPTH_OVERSHOOT;
+
+        /// <summary>
+        /// Multi-contact aggregation on a <b>horizontal</b> axis, discriminated by <i>depth</i>: with the footprint
+        /// spanning two cells whose blocking faces differ on X — a full cube at <c>x = 10.0</c> beside an east-half
+        /// slab at <c>x = 10.5</c> — the body must stop at the nearer face, <c>10.00</c>. Stopping at the slab's
+        /// face instead would leave the body half a block inside the cube.
+        /// <para>
+        /// <b>Why this exists.</b> Until it landed, the first-contact-wins mutation reddened only <b>B7</b>, a
+        /// <i>vertical</i> support case: <see cref="WallStopsOneAxisOnly"/> is a uniform wall plane,
+        /// <see cref="RotatedWallSlabBlocksOneSide"/> / <see cref="AdjacentRotatedSlabsFillSpace"/> vary rotation
+        /// rather than depth, and <see cref="InsideCornerSettles"/> spans two axes at equal faces — so no baseline
+        /// observed the horizontal aggregation <c>PH-1</c>'s gather re-orders. Measured correct 2026-08-03 during the
+        /// <c>PLAYER_BUGS</c> §05 analysis; this pins it.
+        /// </para>
+        /// <para>
+        /// <b>Three parts, and the third is not redundant.</b> The slab-only run establishes that the two faces
+        /// really are half a cell apart and that the slab is reachable at all — without it, "stopped at 10.00" could
+        /// mean the slab was never in the sweep. The pairing then runs in <b>both Z orderings</b>: the scan visits
+        /// cells in ascending Z, so only the slab-first ordering reds under first-contact-wins, and the swapped run
+        /// is what keeps this baseline meaningful if the traversal order ever changes — which is exactly what
+        /// <c>PH-1</c>'s gather-once refactor does.
+        /// </para>
+        /// </summary>
+        private static bool HorizontalAggregationPicksNearerFace()
+        {
+            BlockType[] probe = TestPhysicsBlockPalette.Create();
+            if (!TestPhysicsBlockPalette.TryFindMeta(probe[Id.HalfSlab], OccupiesEastHalf, out byte eastMeta))
+                return Expect(false, "fixture: no Facing6Roll2 metadata rotates the slab into the cell's +X half");
+
+            // Part 1: the slabs alone. Their face is half a cell farther out than the cube's, so the pairing below
+            // has something to discriminate — and a body that reaches this face reaches both volumes.
+            bool ok;
+            using (PhysicsTestWorld world = NewDepthFixture())
+            {
+                world.SetBlock(WALL_X, GROUND_Y + 1, 8, Id.HalfSlab, eastMeta);
+                world.SetBlock(WALL_X, GROUND_Y + 1, 9, Id.HalfSlab, eastMeta);
+
+                world.Step(new Vector3(DEPTH_PUSH, 0f, 0f));
+                ok = ExpectApprox(world.Position.x, DEPTH_SLAB_FACE - PhysicsTestWorld.EntityHalfWidthX,
+                    "fixture: against the rotated slabs alone the body must stop at their +X-half face — if it does " +
+                    "not, the pairing below is not testing two different faces");
+            }
+
+            // Parts 2 and 3: one cell of the pair becomes a full cube, in both scan orderings.
+            ok &= DepthPairingStopsAtCube(eastMeta, cubeZ: 9, slabZ: 8,
+                "with the slab visited first, the deeper cube's face must still win the aggregation");
+            ok &= DepthPairingStopsAtCube(eastMeta, cubeZ: 8, slabZ: 9,
+                "the same pairing in the opposite scan order must resolve identically — aggregation must not " +
+                "depend on which cell the sweep reaches first");
+            return ok;
+        }
+
+        /// <summary>
+        /// Runs one ordering of the depth pairing: a full cube and an east-half slab in the same obstacle column,
+        /// one cell apart on Z, both under the body's footprint.
+        /// </summary>
+        /// <param name="eastMeta">Metadata rotating the slab into its cell's +X half.</param>
+        /// <param name="cubeZ">Cell Z of the full cube.</param>
+        /// <param name="slabZ">Cell Z of the rotated slab.</param>
+        /// <param name="what">What this ordering asserts (logged on failure).</param>
+        /// <returns>True when the body stopped at the cube's face.</returns>
+        private static bool DepthPairingStopsAtCube(byte eastMeta, int cubeZ, int slabZ, string what)
+        {
+            using PhysicsTestWorld world = NewDepthFixture();
+            world.SetBlock(WALL_X, GROUND_Y + 1, cubeZ, Id.Ground);
+            world.SetBlock(WALL_X, GROUND_Y + 1, slabZ, Id.HalfSlab, eastMeta);
+
+            world.Step(new Vector3(DEPTH_PUSH, 0f, 0f));
+
+            return ExpectApprox(world.Position.x, WALL_X - PhysicsTestWorld.EntityHalfWidthX, what);
+        }
+
+        /// <summary>
+        /// Builds the depth-pairing fixture: flat ground, and the entity placed astride cells 8 and 9 with the
+        /// grounded flag cleared so the step-up pre-pass cannot lift it over the obstacles instead of resolving
+        /// against them (the same precaution <see cref="WalkThroughEmptySlabTop"/> takes).
+        /// </summary>
+        /// <returns>A fixture the caller owns and must dispose, ready for the obstacle column to be seeded.</returns>
+        private static PhysicsTestWorld NewDepthFixture()
+        {
+            PhysicsTestWorld world = new PhysicsTestWorld(TestPhysicsBlockPalette.Create());
+            try
+            {
+                world.FillLayer(GROUND_Y, Id.Ground);
+                world.PlaceEntity(new Vector3(DEPTH_START_X, GROUND_TOP, DEPTH_Z));
+                world.SetGrounded(false);
+                return world;
+            }
+            catch
+            {
+                world.Dispose();
+                throw;
+            }
         }
 
         #endregion
