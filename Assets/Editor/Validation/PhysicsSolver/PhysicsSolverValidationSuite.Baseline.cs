@@ -44,6 +44,10 @@ namespace Editor.Validation.PhysicsSolver
     /// <item><b>B20–B23 need no mutation</b>: they shipped as §04's known-bug reproductions and were observed red
     /// against the unfixed solver, which is the strongest form of this evidence. Promoted August 2026 after the fix
     /// was confirmed in game.</item>
+    /// <item>Shrink <c>PH-1</c>'s gather envelope in <c>VoxelRigidbody.GatherCells</c> to the un-lifted body (drop
+    /// the <c>stepHeight</c> head-room) → <b>B25</b>, and only B25 — 3 of its 4 sweeps fell back to a direct scan.
+    /// <b>B8/B9 stayed green</b> despite being the step-up baselines, and that is the point: see B25's docstring
+    /// for why their geometry cannot observe it.</item>
     /// </list>
     /// <b>B1 is the one baseline no mutation reds</b>, by design: it is the fixture-integrity guard, and it is
     /// two-sided (a seeded AABB must hit <i>and</i> an open-air AABB must not), so it cannot pass vacuously itself.
@@ -136,6 +140,8 @@ namespace Editor.Validation.PhysicsSolver
                 HorizontalResolveStaysGrounded));
             scenarios.Add(new Scenario("B24: horizontal multi-cell aggregation stops at the nearer blocking face",
                 HorizontalAggregationPicksNearerFace));
+            scenarios.Add(new Scenario("B25: the gather covers the step-height envelope (step-up from flat ground)",
+                StepUpFromFlatGroundGathersLiftedCells));
         }
 
         /// <summary>Builds a fixture over the controlled solver palette at the identity origin.</summary>
@@ -362,17 +368,24 @@ namespace Editor.Validation.PhysicsSolver
         /// <i>original</i> desired position, so on success no horizontal correction is applied at all. The scenario
         /// also asserts the step actually fired, so a solver that silently stopped stepping cannot pass it by
         /// leaving the displacement untouched for the wrong reason.
+        /// <para>
+        /// Also carries half of <b>PH-1</b>'s envelope guard (see <see cref="ExpectGatherCovered"/>): the step-up
+        /// sweeps read <i>lifted</i> boxes, so this is one of the two scenarios where an envelope sized to the
+        /// un-lifted body would show up.
+        /// </para>
         /// </summary>
         private static bool StepUpPreservesHorizontal()
         {
             using PhysicsTestWorld world = BuildStepUpFixture();
 
+            PhysicsQueryStats.Reset();
             Vector3 resolved = world.Step(new Vector3(0.2f, 0f, 0f));
 
             bool ok = Expect(resolved.y > 0.1f,
                 $"fixture: the step-up must actually have fired (expected a vertical lift, got {resolved.y})");
             ok &= ExpectApprox(resolved.x, 0.2f, "horizontal displacement through a successful step-up",
                 EXACT_TOLERANCE);
+            ok &= ExpectGatherCovered("step-up (horizontal preservation)");
             return ok;
         }
 
@@ -380,16 +393,97 @@ namespace Editor.Validation.PhysicsSolver
         /// Phase 6c's "step-up from a half-slab to a full block correctly finds support": the downward sweep after
         /// the lift must land the entity on the target block's top face (not at the lifted height, and not back on
         /// the half-slab it came from).
+        /// <para>
+        /// Carries the other half of <b>PH-1</b>'s envelope guard (see <see cref="ExpectGatherCovered"/>). This is
+        /// the sharper of the two: the downward support sweep expands by <c>stepHeight</c> and shifts <i>down</i>,
+        /// so it reads the widest box of the whole resolve.
+        /// </para>
         /// </summary>
         private static bool StepUpFindsSupport()
         {
             using PhysicsTestWorld world = BuildStepUpFixture();
 
+            PhysicsQueryStats.Reset();
             world.Step(new Vector3(0.2f, 0f, 0f));
 
             bool ok = ExpectApprox(world.Position.y, GROUND_Y + 2f,
                 "the step-up's downward sweep must land the entity on the full block's top face");
             ok &= Expect(world.IsGrounded, "a step-up onto support must leave the entity grounded");
+            ok &= ExpectGatherCovered("step-up (support sweep)");
+            return ok;
+        }
+
+        /// <summary>
+        /// Asserts the resolve just measured was answered <b>entirely</b> from <c>PH-1</c>'s gathered cells, and
+        /// that the gather actually reached the step-height head-room the step-up sweeps read.
+        /// <para>
+        /// <b>Why this is not redundant with the geometry assertions beside it.</b> A sweep that escapes the
+        /// gathered envelope falls back to a direct world scan, which produces the <i>correct</i> contact — so an
+        /// under-sized envelope leaves every geometric assertion in this suite green while silently reverting the
+        /// item's entire benefit.
+        /// </para>
+        /// <para>
+        /// <b>Which scenario actually discriminates it</b> (measured 2026-08-04): containment is
+        /// <i>cell-granular</i>, so an envelope shortfall is only observable when it crosses a cell boundary — and
+        /// when it does not, it also costs nothing, so this is the exactly-right signal rather than a proxy. At
+        /// <see cref="BuildStepUpFixture"/>'s geometry the body stands at 5.5, its top face is 7.3 and the lifted
+        /// box reaches 7.8 — both cell 7 — so shrinking the envelope by the whole <c>stepHeight</c> changes no
+        /// gathered cell and B8/B9 stay green. <see cref="StepUpFromFlatGroundGathersLiftedCells"/> exists for that
+        /// reason: from flat ground the same lift spans cell 6 to cell 7 and the shortfall becomes visible.
+        /// </para>
+        /// <para>
+        /// Two-sided on purpose: a zero-fallback count is trivially satisfied when nothing ran at all, so the
+        /// gather count is asserted first.
+        /// </para>
+        /// </summary>
+        /// <param name="what">Which resolve is being checked (logged on failure).</param>
+        /// <returns>True when at least one gather ran and no sweep fell back.</returns>
+        private static bool ExpectGatherCovered(string what)
+        {
+            bool ok = Expect(PhysicsQueryStats.Gathers > 0,
+                $"{what}: no gather ran at all, so the zero-fallback assertion would pass vacuously");
+            ok &= Expect(PhysicsQueryStats.Fallbacks == 0,
+                $"{what}: {PhysicsQueryStats.Fallbacks} of {PhysicsQueryStats.SweepQueries} sweeps escaped the " +
+                "gathered envelope and fell back to a direct scan. The envelope must cover every box this " +
+                "resolve's sweeps read — the fallback keeps the RESULT correct, which is precisely why the " +
+                "geometry assertions beside this one cannot see the regression");
+            return ok;
+        }
+
+        /// <summary>
+        /// <b>PH-1's envelope guard.</b> Walking from flat ground onto a half-slab — the commonest step in the
+        /// game, and the one geometry in this suite where the step-up's lift crosses a cell boundary: the body
+        /// spans 5.0–6.8 (cells 5–6) and the lifted box reaches 7.299 (cell 7). An envelope sized to the un-lifted
+        /// body therefore fails to gather cell 7, and <b>3 of this scenario's 4 sweeps fell back</b> to a direct
+        /// scan when that was tried — while the step still resolved correctly, which is the whole problem.
+        /// <para>
+        /// <b>Why this scenario exists rather than an assertion on B8/B9</b> (measured 2026-08-04). Both step-up
+        /// baselines stand the body on a half-slab at 5.5, so its top face is 7.3 and the lifted box is 7.8 —
+        /// <i>both cell 7</i>. Containment is cell-granular, so dropping the entire <c>stepHeight</c> term changed
+        /// no gathered cell there and B8/B9 stayed green; they carry the zero-fallback assertion anyway, but they
+        /// cannot discriminate this. Standing on flat ground is what makes the shortfall cross a cell line.
+        /// </para>
+        /// <para>
+        /// The step itself is asserted too, so the coverage check cannot pass because nothing stepped.
+        /// </para>
+        /// </summary>
+        private static bool StepUpFromFlatGroundGathersLiftedCells()
+        {
+            using PhysicsTestWorld world = NewFixture();
+            world.FillLayer(GROUND_Y, Id.Ground);
+            for (int z = 0; z < ChunkMath.CHUNK_WIDTH; z++)
+                world.SetBlock(WALL_X, GROUND_Y + 1, z, Id.HalfSlab); // top at GROUND_TOP + 0.5 — exactly stepHeight
+
+            world.PlaceEntity(new Vector3(WALL_X - 0.5f, GROUND_TOP, 8.5f));
+            world.SetGrounded(true);
+
+            PhysicsQueryStats.Reset();
+            Vector3 resolved = world.Step(new Vector3(0.2f, 0f, 0f));
+
+            bool ok = ExpectApprox(world.Position.y, GROUND_TOP + TestPhysicsBlockPalette.HalfSlabHeight,
+                "the entity must step up onto the slab's authored top");
+            ok &= ExpectApprox(resolved.x, 0.2f, "horizontal displacement through the step-up", EXACT_TOLERANCE);
+            ok &= ExpectGatherCovered("step-up from flat ground");
             return ok;
         }
 

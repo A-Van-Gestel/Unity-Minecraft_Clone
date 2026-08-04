@@ -18,8 +18,8 @@ counts are re-verified against a real `Validate All` run each time they are touc
 > complete (CP-2 close-out, 2026-07-22) and NS-4 is ✅ complete (2026-08-03) — see the per-item status
 > lines; the rest are proposals.
 
-**Existing coverage (for contrast, counts verified 2026-08-04 against a `Validate All` run — 409 baselines / 17 suites):** Lighting (92), Meshing (40, tip B40 — now including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
-**light** maps), Behavior/fluid tick (16, incl. determinism gates), Placement (28 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (24 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19, its promoted repro B20–B23, and `PH-1`'s step-0 horizontal-aggregation guard B24)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (47), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (7), Spawn (10), Command Console (54), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` / `ChunkRelativePosition` tests.
+**Existing coverage (for contrast, counts verified 2026-08-04 against a `Validate All` run — 410 baselines / 17 suites):** Lighting (92), Meshing (40, tip B40 — now including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
+**light** maps), Behavior/fluid tick (16, incl. determinism gates), Placement (28 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (25 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19, its promoted repro B20–B23, `PH-1`'s step-0 horizontal-aggregation guard B24 and its gather-envelope guard B25)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (47), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (7), Spawn (10), Command Console (54), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` / `ChunkRelativePosition` tests.
 
 **Build protocol for every suite below:** the `validation-driven-bugfix` skill (deterministic repro first, prove-red before trusting green, promote repros to baselines). New suites should land on the shared `ValidationSuiteRunner` (`VS-1`, ✅ shipped 2026-07-08): register `Scenario`s and return its `ValidationRunResult` from a headless `Execute()`, with a thin `[MenuItem]` wrapper. All suites stay on the custom validation framework: migrating to the Unity Test Framework was evaluated 2026-07-02 and rejected (see the status header in
 [`../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md`](../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md)); the CI/coverage/XML gaps close via the VS-2 extensions instead.
@@ -27,7 +27,7 @@ counts are re-verified against a real `Validate All` run each time they are touc
 
 
 **Audited:** 2026-07-02 (seventh-pass audit), counts re-verified 2026-08-04 against a `Validate All`
-run — **409 baselines / 17 suites**. The audit found the then-six suites architecturally sound, so the
+run — **410 baselines / 17 suites**. The audit found the then-six suites architecturally sound, so the
 `VS-*` items it produced are operational only; the residual risk it identified is *coverage*, which is
 what this document ranks.
 
@@ -218,6 +218,6 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-04 (`PH-1` step 0: `B24` closes the horizontal-aggregation gate gap, proven red under the first-contact-wins mutation; census verified at 409 baselines / 17 suites, Physics Solver 23 → 24)
+**Last Updated:** 2026-08-04 (`PH-1`: `B24` closes the horizontal-aggregation gate gap and `B25` guards the gather envelope, each proven red under its own mutation; census verified at 410 baselines / 17 suites, Physics Solver 23 → 25)
 **Next Review:** whenever a suite is added or a `Validate All` count changes — the existing-coverage
 paragraph is the one part of this document that goes stale silently.
