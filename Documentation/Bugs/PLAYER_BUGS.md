@@ -9,7 +9,7 @@ This document outlines **open** bugs related to the player controller and intera
 > `PlacementValidationSuite*.cs`, `PlacementTagMigration.cs`, `WORLD_SCALING_FLOATING_ORIGIN.md` and
 > `FLUID_BUGS.md`; `§04` belonged to the stuck-`IsGrounded` bug (fixed August 2026, archived as Player & Input §08)
 > and is cited from `PhysicsSolverValidationSuite.Baseline.cs`, `SUB_VOXEL_COLLISION_SYSTEM.md` and the validation
-> coverage roadmap. Reusing either number would silently redirect all of those. New entries continue from `§06`.
+> coverage roadmap. Reusing either number would silently redirect all of those. New entries continue from `§07`.
 >
 > **Validation suite:** `Minecraft Clone/Dev/Validate Physics Solver`
 > (`Assets/Editor/Validation/PhysicsSolver/`) — the **`NS-4`** suite shipped 2026-08-03 with 26 baselines over the
@@ -155,5 +155,85 @@ must assert the correct behavior, and that has not been chosen. The two candidat
 Whichever is picked, the §3.3 wording divergence noted above should be resolved in the same change. Related:
 **VQ-4** (compound collision bounds) touches the same aggregation code, and **PH-1** restructures the queries this
 path issues.
+
+---
+
+## 06. Movement renders stepped at the physics rate — no interpolation between fixed steps
+
+**Severity:** Polish / feel — not a correctness bug. Constant, mild, and present since the original player
+controller (reported by the user 2026-08-04 as "slightly stuttery", long predating `PH-1`/`PH-2`).
+**Status:** Open — mechanism identified from the code and settings below; **not yet confirmed by the decisive
+in-game test** (see *Route*).
+**Files:** `Assets/Scripts/Physics/VoxelRigidbody.cs` (`FixedUpdate`), `Assets/Scripts/Player.cs` (`Update`),
+`Assets/Scenes/World.unity` (camera parenting), `ProjectSettings/TimeManager.asset`
+
+**The player's position advances only 50 times a second, but the frame renders more often than that, and nothing
+fills the gap.**
+
+- `VoxelRigidbody.FixedUpdate` is the **only** writer of the player's position — `transform.Translate(Velocity,
+  Space.World)` followed by `ClampToWorldBorder`. Nothing moves the player in `Update` or `LateUpdate`.
+- The fixed timestep is `2822399 / 141120000 s` = **0.0199999929 s → 50.00002 Hz** (`TimeManager.asset`).
+- **`Main Camera` is a child of the player transform** (`World.unity`: player root `&151001796` → children
+  `Main Camera` at local `y = 1.65` and `PlayerBody` at `y = 1`; the root's `m_Father` is `0`). So the camera's
+  *position* inherits the 50 Hz stepping.
+- `Player.Update` rotates the body yaw and the camera pitch **every rendered frame**.
+- There is **no interpolation layer**. `Rigidbody.interpolation` — Unity's built-in answer to exactly this — does
+  not apply, because this is a custom transform-driven body, not a `Rigidbody`.
+
+**Why it is visible rather than theoretical.** At a 60 Hz display (`vSyncCount: 1` on quality levels 2–4;
+levels 0, 1 and 5 are uncapped) against 50 Hz physics, 6 rendered frames span 5 physics steps: **one frame in six
+draws the previous position again**, a **10 Hz** beat. At walk speed the step is `3 m/s × 0.02 s` = **0.06 m**
+(sprint: 0.12 m), so the eye sees a ~6 cm hitch ten times a second. At an uncapped 144 Hz the ratio is 2.88
+frames per step, which is not an integer, so the repeat pattern is uneven (3, 3, 3, 2, …) — the same artifact,
+less regular.
+
+**The per-frame look rotation makes it worse, not better.** Because yaw/pitch update smoothly every frame while
+translation does not, the view gives the eye a continuously-moving reference against which the stepped
+translation stands out. A build that stepped *both* would read as lower frame rate rather than as stutter.
+
+**What this is NOT:**
+
+- **Not the substep chain.** Substeps all resolve inside one `FixedUpdate` and the net displacement is applied
+  once; the chain changes nothing about how often the transform moves.
+- **Not `PH-1` or `PH-2`.** Both were shown behavior-neutral by shadow-compare (0 mismatches over 142 sweeps and
+  5,846 substepped ticks respectively), and the symptom predates them by the whole life of the controller.
+  `PH-2` in fact *removes* transform writes; it cannot add stepping.
+- **Not main-thread hitching** from meshing/lighting/streaming. That is irregular and load-dependent; this is
+  periodic and reproducible at constant speed on flat ground with no chunks loading. If the stutter is instead
+  found to be irregular and to track chunk load, it is a different problem and belongs with `P-4`/`FP-*`.
+
+**Route — do the decisive test before designing anything.** The diagnosis above is read from code and settings,
+not measured. One cheap, non-invasive check discriminates it: **cap the render rate to the physics rate**
+(`QualitySettings.vSyncCount = 0; Application.targetFrameRate = 50`). If the stutter disappears, it is
+fixed-step aliasing and nothing else; if it survives, the cause is elsewhere and this entry is wrong. Worth
+running at 50 (match) and at 100 (exact 2:1 multiple, which also removes the beat) before touching code.
+
+**Fix options (NOT decided — do not implement from this list):**
+
+1. **Interpolate the visual at render time** — the industry-standard answer. Keep physics authoritative at 50 Hz;
+   in `Update`/`LateUpdate` place the *rendered* transform at `lerp(previousFixedPos, currentFixedPos, alpha)`
+   with `alpha = (Time.time - Time.fixedTime) / Time.fixedDeltaTime`. ⚠️ Two consequences to settle first: it
+   adds **up to one physics step (20 ms) of visual latency**, and it **decouples the camera from the collider** —
+   `PlacementController`'s interaction ray originates at the camera, so the ray would be cast from an
+   interpolated position that is not where the body is. Either the ray keeps using the physics position, or the
+   discrepancy is accepted and bounded.
+2. **Extrapolate instead of interpolate** — no added latency, but the frame in which the body hits a wall
+   overshoots into it and snaps back. Usually worse for a game where the player is constantly against geometry.
+3. **Raise the physics rate** (e.g. 0.01 s / 100 Hz). Cheapest to try and made cheaper by `PH-1`, but it
+   *reduces* the aliasing rather than removing it — a variable or unknown display rate never divides evenly. Note
+   the `NS-4` suite derives its expectations from `Time.fixedDeltaTime` rather than assuming 50 Hz, so the
+   baselines follow a retune correctly; the substep counts and `PH-1`/`PH-2`'s measured per-tick figures would
+   shift and need re-recording.
+4. **Integrate movement in `Update` with a variable delta** — ⚠️ deliberately listed last. The tunneling model in
+   `SUB_VOXEL_COLLISION_SYSTEM.md` §3.4.4 is built on a bounded per-step displacement, and while substepping
+   would absorb a long frame, `IsGrounded`, jump height and step-up timing all become frame-rate dependent. That
+   is a much larger change than the symptom warrants.
+
+**No validation baseline is proposed.** `NS-4` drives ticks directly with no render loop, so the suite
+structurally cannot observe a rendering-cadence artifact — a green suite says nothing here either way, and a
+baseline that pretended otherwise would be a false green. Verification for this entry is in-game only.
+
+**Applies to future entities too:** any `VoxelRigidbody` will render stepped for the same reason, so whatever is
+chosen should live in the body or a shared visual-follow component rather than in `Player`.
 
 ---
