@@ -1,3 +1,5 @@
+// ReSharper disable CompareOfFloatsByEqualityOperator
+
 using System;
 using Helpers;
 using UnityEngine;
@@ -199,7 +201,6 @@ namespace Physics
             // Exact comparison is intended: Mathf.Clamp returns the value itself when it is in range, so this asks
             // "did the clamp change anything" to skip a redundant transform write. A tolerance here would swallow
             // small-but-real clamps right at the border line.
-            // ReSharper disable once CompareOfFloatsByEqualityOperator
             if (clampedX != pos.x || clampedZ != pos.z)
                 transform.position = new Vector3(clampedX, pos.y, clampedZ);
         }
@@ -262,13 +263,19 @@ namespace Physics
                     Vector3 remainingDisplacement = Velocity;
                     Vector3 subMove = remainingDisplacement / substeps;
 
+                    // PH-2: the running position is a local, not the transform. Each substep must resolve against
+                    // where the previous one left the body, but staging that on the transform would leave it holding
+                    // a not-yet-final position mid-tick — and a throw inside the loop would leave it there for good,
+                    // since the revert that used to undo the staging could never run.
+                    Vector3 runningPos = transform.position;
+
                     for (int i = 0; i < substeps; i++)
                     {
                         // Use the corrected subMove from the previous step as a baseline,
                         // but re-evaluate against current world position.
                         Vector3 currentSubMove = subMove;
-                        ResolveMovement(ref currentSubMove);
-                        transform.position += currentSubMove; // Move temporarily to test next substeps accurately
+                        ResolveMovement(ref currentSubMove, runningPos);
+                        runningPos += currentSubMove;
                         totalDisplacement += currentSubMove;
 
                         // Carry over velocity blocks (if an axis stopped, it stays stopped)
@@ -277,23 +284,27 @@ namespace Physics
                         if (currentSubMove.z == 0) subMove.z = 0;
                     }
 
-                    // Revert the temporary position changes because `VoxelRigidbody`
-                    // expects `transform.Translate(Velocity)` to be called externally later.
-                    transform.position -= totalDisplacement;
                     Velocity = totalDisplacement;
                 }
                 else
                 {
                     Vector3 tempVelocity = Velocity;
-                    ResolveMovement(ref tempVelocity);
+                    ResolveMovement(ref tempVelocity, transform.position);
                     Velocity = tempVelocity;
                 }
             }
         }
 
-        private void ResolveMovement(ref Vector3 movement)
+        /// <summary>
+        /// Resolves one displacement against the voxel world — the step-up pre-pass, the per-axis horizontal
+        /// resolve in Z → X order, and the vertical resolve that sets <see cref="IsGrounded"/>.
+        /// </summary>
+        /// <param name="movement">The intended displacement, corrected in place.</param>
+        /// <param name="pos">The feet-center position to resolve from. Passed in rather than read from the
+        /// transform so the substep chain can advance it in a local (<c>PH-2</c>); callers resolving a single
+        /// displacement pass <c>transform.position</c>.</param>
+        private void ResolveMovement(ref Vector3 movement, Vector3 pos)
         {
-            Vector3 pos = transform.position;
             float extX = CollisionHalfWidthX - collisionPadding; // Keeping slight inset to avoid snagging flush walls
             float extZ = CollisionHalfDepthZ - collisionPadding;
             float h = collisionHeight;

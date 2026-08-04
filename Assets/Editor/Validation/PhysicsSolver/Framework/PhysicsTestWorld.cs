@@ -267,12 +267,17 @@ namespace Editor.Validation.PhysicsSolver.Framework
         /// Runs one collision resolve for an explicit displacement — the solver's <c>ResolveMovement</c>, which
         /// owns the step-up pre-pass, the per-axis horizontal resolve, the vertical/ground snap and
         /// <see cref="IsGrounded"/>. The entity is <b>not</b> moved; use <see cref="Step"/> for that.
+        /// <para>
+        /// Since <c>PH-2</c> the solver takes the position to resolve from as a second argument instead of reading
+        /// the transform itself, so this passes the entity's current position — exactly what the solver used to
+        /// read, which is what keeps every scenario's meaning unchanged across that refactor.
+        /// </para>
         /// </summary>
         /// <param name="displacement">The intended displacement for this resolve, in Unity space.</param>
         /// <returns>The displacement the solver resolved to.</returns>
         public Vector3 Resolve(Vector3 displacement)
         {
-            object[] args = { displacement };
+            object[] args = { displacement, _entityGo.transform.position };
             _resolveMovement.Invoke(_body, args);
             return (Vector3)args[0];
         }
