@@ -303,11 +303,34 @@ namespace Editor.Validation.PhysicsSolver.Framework
         /// <returns>The total displacement applied this tick.</returns>
         public Vector3 Tick()
         {
-            _calculateVelocity.Invoke(_body, null);
-            Vector3 velocity = _body.Velocity;
+            Vector3 velocity = CalculateVelocityOnly();
             _entityGo.transform.Translate(velocity, Space.World);
             return velocity;
         }
+
+        /// <summary>
+        /// Runs <c>CalculateVelocity</c> <b>without</b> the translate that follows it in <c>FixedUpdate</c> — so a
+        /// scenario can observe what the solver did to the transform on its own, before the legitimate move lands.
+        /// </summary>
+        /// <returns>The displacement the solver resolved for this tick.</returns>
+        public Vector3 CalculateVelocityOnly()
+        {
+            _calculateVelocity.Invoke(_body, null);
+            return _body.Velocity;
+        }
+
+        /// <summary>
+        /// Clears the entity transform's dirty flag, so a following <see cref="TransformChanged"/> read reports only
+        /// writes made after this point.
+        /// </summary>
+        public void ClearTransformChanged() => _entityGo.transform.hasChanged = false;
+
+        /// <summary>
+        /// Whether anything wrote the entity's transform since <see cref="ClearTransformChanged"/>. Unity latches
+        /// this on any write and a later revert does <b>not</b> clear it, which is what makes it a sound guard
+        /// against a write-then-undo (<c>B26</c>) where comparing positions would not be.
+        /// </summary>
+        public bool TransformChanged => _entityGo.transform.hasChanged;
 
         /// <summary>
         /// Issues a raw collision query against the seeded world — the seam under the solver. Used by the

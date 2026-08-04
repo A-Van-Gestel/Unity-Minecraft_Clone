@@ -29,7 +29,14 @@ namespace Editor.Validation.PhysicsSolver
     /// <i>both</i> of its geometries (half-slab + cube, and two custom volumes) failing independently; B24 reds on
     /// its slab-first ordering only, since the scan reaches cells in ascending Z and the cube-first ordering hands
     /// the mutation the right answer by accident — which is why B24 runs both.</item>
-    /// <item>Drop the per-substep <c>transform.position</c> accumulation → <b>B6, B15</b>.</item>
+    /// <item>Drop the per-substep position accumulation — before <c>PH-2</c> the staged
+    /// <c>transform.position += currentSubMove</c>, since <c>PH-2</c> the local <c>runningPos += currentSubMove</c>
+    /// in <c>CalculateVelocity</c> → <b>B6, B15, B19, B20</b>. The first recording of this mutation named only B6
+    /// and B15; re-running it against the <c>PH-2</c> mechanism (2026-08-04) reddened <b>four</b> baselines, so the
+    /// wider set is what was observed, not a prediction. <b>B19 is the interesting one</b>: its resolved
+    /// displacement is <i>identical</i> either way (1.20 on X) and only the grounded verdict diverges — every
+    /// substep re-resolving from the same start never leaves the support, so the body reports grounded when it
+    /// should be airborne. A differential that compared displacement alone would not have seen it.</item>
     /// <item>Drop the <see cref="WorldOrigin"/> offset from the scan's voxel lookup → <b>B17</b>, and only B17.</item>
     /// <item>Drop the <c>fluidType != None</c> filter → <b>B14</b>, and only B14.</item>
     /// <item>Halve the reported correction → <b>B2, B3, B4, B5, B6, B7, B10, B12, B13, B15, B16, B17</b>, i.e. every
@@ -48,6 +55,11 @@ namespace Editor.Validation.PhysicsSolver
     /// the <c>stepHeight</c> head-room) → <b>B25</b>, and only B25 — 3 of its 4 sweeps fell back to a direct scan.
     /// <b>B8/B9 stayed green</b> despite being the step-up baselines, and that is the point: see B25's docstring
     /// for why their geometry cannot observe it.</item>
+    /// <item>Restore <c>PH-2</c>'s staged <c>transform.position</c> writes in <c>CalculateVelocity</c> (the
+    /// per-substep <c>+=</c> plus the trailing revert) → <b>B26</b>, and <i>only</i> B26 — 25 of 26 stayed green.
+    /// That is the whole reason it exists: re-staging is <b>behavior-neutral</b>, so no assertion about position,
+    /// displacement or grounded state can see it. A shadow-compare running alongside confirmed it directly —
+    /// 7 comparisons, 0 mismatches, while B26 was red.</item>
     /// </list>
     /// <b>B1 is the one baseline no mutation reds</b>, by design: it is the fixture-integrity guard, and it is
     /// two-sided (a seeded AABB must hit <i>and</i> an open-air AABB must not), so it cannot pass vacuously itself.
@@ -142,6 +154,8 @@ namespace Editor.Validation.PhysicsSolver
                 HorizontalAggregationPicksNearerFace));
             scenarios.Add(new Scenario("B25: the gather covers the step-height envelope (step-up from flat ground)",
                 StepUpFromFlatGroundGathersLiftedCells));
+            scenarios.Add(new Scenario("B26: CalculateVelocity resolves the substep chain without touching the transform",
+                CalculateVelocityLeavesTransformUntouched));
         }
 
         /// <summary>Builds a fixture over the controlled solver palette at the identity origin.</summary>
@@ -484,6 +498,51 @@ namespace Editor.Validation.PhysicsSolver
                 "the entity must step up onto the slab's authored top");
             ok &= ExpectApprox(resolved.x, 0.2f, "horizontal displacement through the step-up", EXACT_TOLERANCE);
             ok &= ExpectGatherCovered("step-up from flat ground");
+            return ok;
+        }
+
+        /// <summary>
+        /// <b>PH-2's invariant.</b> <c>CalculateVelocity</c> resolves the whole substep chain without touching the
+        /// transform: the running position is a local, and the body is moved exactly once, by the caller's
+        /// <c>transform.Translate(Velocity)</c>. Before <c>PH-2</c> the loop staged each substep on the transform and
+        /// subtracted the sum afterwards, so the transform held a not-yet-final position for the duration of the tick
+        /// — and a throw inside the loop left the body teleported by the partial sum, because the revert never ran.
+        /// <para>
+        /// <b>Why <see cref="Transform.hasChanged"/> and not a before/after position compare.</b> The staging path
+        /// <i>reverts</i> what it wrote, so the two positions can come out exactly equal by luck — the same
+        /// blind spot <c>B25</c> documents for cell granularity, in value form, and it would make this baseline a
+        /// false green. The dirty flag latches on any write and a revert does not clear it, so it reds against the
+        /// staging path whatever the arithmetic does.
+        /// </para>
+        /// <para>
+        /// The fall is through open air and fast enough that the <i>resolved</i> displacement still exceeds
+        /// <c>maxStep</c>, and that is asserted first: below the threshold the tick takes the single-resolve branch,
+        /// which never wrote the transform even before <c>PH-2</c>, and the guard would pass without exercising the
+        /// chain at all.
+        /// </para>
+        /// </summary>
+        private static bool CalculateVelocityLeavesTransformUntouched()
+        {
+            // The solver's tunneling threshold: MIN_COLLISION_THICKNESS (0.25) * 0.5.
+            const float MAX_STEP = 0.125f;
+
+            using PhysicsTestWorld world = NewFixture();
+            world.FillLayer(GROUND_Y, Id.Ground);
+            // Far above the ground, so the fall resolves against open air and the resolved displacement is the
+            // intended one — no correction can shrink it back under the threshold.
+            world.PlaceEntity(new Vector3(8.5f, GROUND_TOP + 30f, 8.5f));
+            world.SetGrounded(false);
+            world.SetVerticalMomentum(-(PhysicsTestWorld.EntityHeight + 0.5f) / PhysicsTestWorld.FixedDeltaTime);
+
+            world.ClearTransformChanged();
+            Vector3 resolved = world.CalculateVelocityOnly();
+
+            bool ok = Expect(Mathf.Abs(resolved.y) > MAX_STEP,
+                $"this guard only means something if the tick ran the SUBSTEP chain: the resolved |dy| " +
+                $"{Mathf.Abs(resolved.y)} must exceed maxStep {MAX_STEP}");
+            ok &= Expect(!world.TransformChanged,
+                "CalculateVelocity must not write the entity transform — PH-2 accumulates the substep chain's " +
+                "running position in a local, and the body is moved once by the caller's transform.Translate");
             return ok;
         }
 
