@@ -1,6 +1,6 @@
 # Performance Improvements Report
 
-**Version:** 1.0
+**Version:** 1.1
 **Date:** 2026-07-26
 **Status:** **Open backlog.** 31 items open, 29 complete. Completed items keep their ✅ row in the master
 summary table; their detail sections live in
@@ -757,6 +757,15 @@ a fixed small number of writer workers (1–2; region files are lock-serialized 
 **Recommendation:** Extend `SerializationBufferPool` with a length-aware rent for the read payload (`Deserialize` already takes `ReadOnlySpan<byte>`, so a pooled oversized buffer slices for free); read the heightmap via the existing `ReadBulkData` span path into a pooled/stack buffer; replace
 `Enum.IsDefined` with a range check against the known enum values; keep a static zero-pad buffer; write the two 4-byte headers via stackalloc spans (`Stream.Write(ReadOnlySpan<byte>)`).
 
+> **Corroborated 2026-08-05** by [`THIRD_PARTY_LIBRARY_IDEAS_REPORT.md`](THIRD_PARTY_LIBRARY_IDEAS_REPORT.md)
+> §TP-1: an independent evaluation of Cysharp's `NativeMemoryArray` (`IBufferWriter<byte>` /
+> pooled-buffer model) arrives at this same design, and confirms it needs no third-party package.
+> That report also re-verified the load-side allocations at commit `1a5fc107`
+> (`RegionFile.cs:137,167`) and the save side's existing pooling
+> (`ChunkStorageManager.cs:230,292,687`). Adjacent: its `TP-4` covers the `async Task`
+> state-machine/`Task` allocation this item touches on via "the `Task.Run` closure" — action both
+> in one pass over `ChunkStorageManager` if scheduled.
+
 > **Impact Analysis:**
 > - **Effort:** 🟡 Medium — mechanical, but spread across three files and both directions.
 > - **Risk:** 🟡 Medium — save-system code (bytes must stay identical — verify with a
@@ -1188,6 +1197,11 @@ inherit a one-click `Validate All` that also flags stale-code runs automatically
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.1** - `SL-1` annotated with a corroboration note pointing at the new
+  [`THIRD_PARTY_LIBRARY_IDEAS_REPORT.md`](THIRD_PARTY_LIBRARY_IDEAS_REPORT.md) (2026-08-05): an
+  independent evaluation of Cysharp's `NativeMemoryArray` converges on `SL-1`'s pooled-buffer
+  recommendation and needs no third-party package; that report also re-verified `SL-1`'s load-side
+  allocations at commit `1a5fc107`. No finding, rating, or scope changed.
 * **v1.0** - Mandatory header completed **and the completed/open split executed** (2026-07-26). The
   document had grown to 2,100 lines while its own header promised that implemented items are archived —
   roughly a third of it described finished work. **25 completed items' detail sections moved** to
@@ -1215,6 +1229,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-07-26 (header completed; completed items archived, 2,100 → 1,126 lines)
+**Last Updated:** 2026-08-05 (`SL-1` corroboration note; 2026-07-26: header completed, completed
+items archived, 2,100 → 1,126 lines)
 **Next Review:** on the next implementation wave — move each newly-finished item's detail section to the
 archive and leave its ✅ row behind. A fresh audit pass is also due: the last one was 2026-07-02.
