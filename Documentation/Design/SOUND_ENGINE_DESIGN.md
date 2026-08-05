@@ -1,10 +1,10 @@
 # Sound Engine Design
 
-**Version:** 1.0
-**Date:** 2026-07-03
+**Version:** 1.0  
+**Date:** 2026-07-03  
 **Status:** **Proposed design — not implemented.** No audio code exists in the project yet: there is no
 `SoundMaterial` channel on `BlockType`, no emitter or mixer plumbing, and no `Validate Sound Engine`
-suite. The design is complete enough to build against as-is.
+suite. The design is complete enough to build against as-is.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > Design for the VoxelEngine's audio system: block sounds (break / place / step), fluid and
@@ -507,7 +507,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-07-26 (header completed; still unimplemented)
+**Last Updated:** 2026-07-26 (header completed; still unimplemented)  
 **Next Review:** when the sound engine is scheduled — re-verify the §Audited findings against
 `BlockType`/`BlockDatabase` and the fluid tick path first, since the tick was re-architected by the
 TG-4 arc after this was written (see

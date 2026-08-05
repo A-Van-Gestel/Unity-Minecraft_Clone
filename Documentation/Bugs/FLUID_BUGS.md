@@ -95,8 +95,8 @@ while preserving natural waterfall edge pull via `GetEffectiveFluidHeight`. The 
 
 ## 17. Naturally-Generated Fluids Don't Reactivate on Neighbor Break at Far Coordinates
 
-**Severity:** Low (far-lands only; normal-play range unaffected)
-**Status:** Open — logged 2026-07-19 during the PLAYER_BUGS 03 far-coordinate re-test (fresh world, editor/Mono).
+**Severity:** Low (far-lands only; normal-play range unaffected)  
+**Status:** Open — logged 2026-07-19 during the PLAYER_BUGS 03 far-coordinate re-test (fresh world, editor/Mono).  
 **Files:** suspected `Chunk.cs` (`OnDataPopulated` / active-voxel registration), `World.cs` (`ApplyModifications` neighbor re-activation), `BlockBehavior.cs`
 
 **Description:**

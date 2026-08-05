@@ -1,7 +1,7 @@
 # OM-1 — Device Calibration of Throughput & Memory Budgets
 
-**Version:** 1.1
-**Date:** 2026-06-27
+**Version:** 1.1  
+**Date:** 2026-06-27  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > **Status: Implemented (2026-06-27); player-build verified + reference re-anchored (2026-06-28) —
@@ -496,7 +496,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-07-26 (header completed; outstanding calibration pass made explicit)
+**Last Updated:** 2026-07-26 (header completed; outstanding calibration pass made explicit)  
 **Next Review:** when the known-good-budget playtest is run — capture each non-anchor device's smooth
 budget, compute the implied slices, and settle single-anchor-linear vs piecewise-linear (§3.3). Once
 that lands this document is promotable to `Architecture/`.

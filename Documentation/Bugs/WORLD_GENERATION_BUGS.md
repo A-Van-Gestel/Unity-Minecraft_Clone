@@ -28,8 +28,8 @@ This document outlines **open** bugs related to world generation, seed handling,
 
 ## 04. Large integer seeds silently degrade float-precision noise offsets (biome dithering)
 
-**Severity:** Bug (visual / generation quality)
-**Confidence:** Medium-High (mechanism verified by inspection; in-game visual impact not yet reproduced)
+**Severity:** Bug (visual / generation quality)  
+**Confidence:** Medium-High (mechanism verified by inspection; in-game visual impact not yet reproduced)  
 **Files:** `StandardChunkGenerationJob.cs` — surface biome dithering (lines ~238–241); any other site that adds `BaseSeed` directly to a float noise coordinate
 
 > [!CAUTION]
@@ -46,8 +46,8 @@ collapse to a constant → biome boundary dithering is effectively **disabled** 
 
 ## 05. Generation pipeline truncates block IDs to `byte` (latent 255-block ceiling)
 
-**Severity:** Latent constraint (not currently triggerable — block database is far below 255 entries)
-**Confidence:** High
+**Severity:** Latent constraint (not currently triggerable — block database is far below 255 entries)  
+**Confidence:** High  
 **Files:** `StandardChunkGenerationJob.cs` — `voxelValue` (byte), `StandardBiomeAttributesJobData` / `StandardTerrainLayerJobData` / `StandardLodeJobData` block ID fields, `WorldJobManager.GetVoxel` (returns `byte`), `IChunkGenerator.GetVoxel`
 
 The packed voxel format reserves a full `ushort` for block IDs (`BurstVoxelDataBitMapping.GetId` returns `ushort`), but the generation job pipeline carries IDs as `byte` (`byte voxelValue`, `(byte)BlockIDs.Air` casts, byte-typed job-data fields, `byte GetVoxel(...)`). The moment the block database passes ID 255, generation (and the per-voxel `BlockTypes[voxelValue]` lookups) silently truncates IDs — placing wrong blocks with no error. Worth fixing opportunistically (mechanical `byte` → `ushort` sweep through the generator data structs) before the
@@ -57,8 +57,8 @@ database grows; it does not affect the save format.
 
 ## 06. Section bitmask and serializer assume ≤ 32 sections (blocks world-height scaling)
 
-**Severity:** Latent constraint (fine at ChunkHeight 128 = 8 sections)
-**Confidence:** High
+**Severity:** Latent constraint (fine at ChunkHeight 128 = 8 sections)  
+**Confidence:** High  
 **Files:** `ChunkSerializer.cs` — `int sectionBitmask` / `1 << i`, `WORLD_SCALING_ANALYSIS.md` (design)
 
 `WriteChunkInternal`/`ReadChunkInternal` encode section presence in a single `int` bitmask via `1 << i`. At 16-block sections this caps `ChunkHeight` at 512 (32 sections); beyond that, `1 << i` wraps around (C# masks the shift count) and the format corrupts silently. If the world-height scaling explored in `Documentation/Design/WORLD_SCALING_ANALYSIS.md` ever raises the height, this needs a `long` bitmask or variable-length encoding **plus a chunk-format version bump and AOT migration step**.

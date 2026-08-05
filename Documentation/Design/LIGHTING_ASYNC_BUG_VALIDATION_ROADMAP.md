@@ -1,7 +1,7 @@
 # Lighting Async-Bug Validation Roadmap (AS-1 … AS-5)
 
-**Version:** 1.0
-**Date:** 2026-07-03
+**Version:** 1.0  
+**Date:** 2026-07-03  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > **Status:** In progress — **AS-1 CLOSED 2026-07-04** (Bugs 13 + 14 both reproduced, fixed, confirmed
@@ -11,11 +11,11 @@
 > fixed + confirmed in-game + archived `_FIXED_BUGS.md` #20, promoted to baseline **B64**; suite at B70,
 > 62 baselines). **AS-2 DONE 2026-07-06** (Phases 1–3 + HF-4 #1/#2 — scheduler mode + shared scan-arm +
 > completion-pass skeleton; fidelity B6 & B7 CLOSED; B65 fault-isolation + B66–B70 scheduler-mode).
-> AS-3 … AS-5 remain proposals; only Bug 09 open.
-> **Created:** 2026-07-03 (async-testability analysis session, repo @ `a458173`)
+> AS-3 … AS-5 remain proposals; only Bug 09 open.  
+> **Created:** 2026-07-03 (async-testability analysis session, repo @ `a458173`)  
 > **Scope:** making the async-flavored open lighting bugs (**Bug 05 / Bug 09 / Bug 13**,
 > [LIGHTING_BUGS.md](../Bugs/LIGHTING_BUGS.md)) testable, and closing the async surfaces the
-> synchronous lighting validation suite does not model.
+> synchronous lighting validation suite does not model.  
 > **Companion docs:**
 > [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md)
 > (findings B3 / B6 / C8 reference this file),
@@ -529,6 +529,6 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-07-26 (header completed)
+**Last Updated:** 2026-07-26 (header completed)  
 **Next Review:** when Bug 09 is picked up — it is the last open bug in scope, and still has no faithful
 synchronous repro. AS-3…AS-5 remain proposals.

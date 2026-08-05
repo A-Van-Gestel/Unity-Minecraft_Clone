@@ -1,6 +1,6 @@
 # Unity Test Framework Implementation Guide  `[ARCHIVED]`
 
-> **Archived:** 2026-07-26
+> **Archived:** 2026-07-26  
 > **Reason:** The decision this document records has held. The project's own editor validation
 > framework (`Assets/Editor/Validation/`) is the testing system of record and has since grown to
 > 16 registered suites — with the shared `ValidationSuiteRunner` (VS-1), the `Validate All`
@@ -48,7 +48,7 @@ All runtime scripts currently reside within the predefined `Assembly-CSharp.dll`
 
 ### 1. The Runtime Assembly
 
-An Assembly Definition file must be created to encapsulate the core game logic:
+An Assembly Definition file must be created to encapsulate the core game logic:  
 **Path:** `Assets/Scripts/MinecraftClone.Runtime.asmdef`
 
 ```json
@@ -74,7 +74,7 @@ An Assembly Definition file must be created to encapsulate the core game logic:
 
 ### 2. The Test Assembly
 
-A dedicated Assembly Definition file must be created to house the test suite:
+A dedicated Assembly Definition file must be created to house the test suite:  
 **Path:** `Assets/Scripts/Tests/EditMode/MinecraftClone.Tests.asmdef`
 
 ```json

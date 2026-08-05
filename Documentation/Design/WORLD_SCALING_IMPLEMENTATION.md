@@ -1,9 +1,9 @@
 # World Scaling — Implementation Roadmap (Tier B: unbounded XZ)
 
-**Version:** 2.4
-**Date:** 2026-07-20
+**Version:** 2.4  
+**Date:** 2026-07-20  
 **Status:** **Tier B COMPLETE. WS-2 + WS-3 SHIPPED (2026-07-13) — XZ fully unbounded, both signs. WS-4a + WS-4b + WS-4c SHIPPED (2026-07-17/18, all in-game confirmed) — far travel is stable, saved player position chunk-relative (level.dat v13), `/teleport` live. The v2 noise rider is SHIPPED + IN-GAME CONFIRMED (2026-07-20, terrain normal even at the ±2³¹ integer-limit world border — FNL `Precise64` double coordinate pipeline behind the global "Far Lands" setting, default precise): generation is artifact-free to the world edge with the classic float
-pipeline preserved bit-identically as the opt-in Far Lands mode. The world-scaling track is fully closed. OQ-1..7 all resolved in code.**
+pipeline preserved bit-identically as the opt-in Far Lands mode. The world-scaling track is fully closed. OQ-1..7 all resolved in code.**  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The decided execution path for scaling the world horizontally. Analysis (`WORLD_SCALING_ANALYSIS.md`)
@@ -211,7 +211,7 @@ Compile check = Unity compiler (`RequestScriptCompilation` → `IsCompiling == f
       > negative-quadrant prove-red baseline + negative V2 codec pin, parity-mirror/`ChunkCoord`-doc/§3-rationale
       > sync; then spawn→origin + minimap floor-wall removal. **In-game confirmed:** fresh world spawned at (0,0),
       > negative chunks generated correctly, flew to ≈(−10 000, −10 000) with block/lava edits + fluid sim, and
-      > negative-region files persist (`r.-20.-18.bin`). Suites: Chunk Math 26/26, Validate All 197/0.
+      > negative-region files persist (`r.-20.-18.bin`). Suites: Chunk Math 26/26, Validate All 197/0.  
       > **Limitation:** no automated negative-quadrant *generation-parity* scenario (no generation suite exists to
       > extend) — negative terrain determinism is verified in-game only.
 >
@@ -436,6 +436,6 @@ semantics — accepted as the permanent world limit.
 
 ---
 
-**Last Updated:** 2026-07-18
+**Last Updated:** 2026-07-18  
 **Next Review:** when the v2 noise rider (§6) or `/teleport` (CMD-2) is scheduled, or when Bug 04 / the
 seed-hygiene fix is. *(TF-14 world border shipped 2026-07-13; WS-4a+b+c shipped 2026-07-17 — Tier B is complete.)*

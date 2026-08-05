@@ -19,16 +19,16 @@ added **parallel-vs-serial determinism gates** (`FluidParallelDeterminismValidat
 **`Minecraft Clone/Dev/Validate Fluid Parallel Determinism`** + **`… (Cross-Chunk Halo)`** + **`… (Cross-Chunk Halo,
 Y-band)`**) — N concurrent pooled tickers byte-identical to the serial baseline + run-to-run, interior and over a 3×3
 distinct-chunk grid. **BH-4 (Tier-2 cross-chunk) is CLOSED** (2026-06-24); the **Y-band is SHIPPED** (2026-06-27) with
-its `BH-4-SPLIT-Y` (vertically-split) + `BH-4-BAND-EDGE` (section-boundary) fixtures.
-**Created:** 2026-06-20 (as a Design draft) · **Promoted:** 2026-06-21 · **BH-D1 + parallel gates built:** 2026-06-23/24
+its `BH-4-SPLIT-Y` (vertically-split) + `BH-4-BAND-EDGE` (section-boundary) fixtures.  
+**Created:** 2026-06-20 (as a Design draft) · **Promoted:** 2026-06-21 · **BH-D1 + parallel gates built:** 2026-06-23/24  
 **Author intent:** the parity guard that lets the **TG-4** (per-behavior native collections) and **TG-5**
 (Burst function-pointer dispatch) optimizations in
 [PERFORMANCE_IMPROVEMENTS_REPORT.md](../../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) claim *behavior-preserving* —
-the same role the Meshing suite plays for `MR-*` and the Lighting suite plays for the lighting engine.
+the same role the Meshing suite plays for `MR-*` and the Lighting suite plays for the lighting engine.  
 **Scope:** `Assets/Editor/Validation/Behavior/` — the `BehaviorValidationSuite` (+ `.Baseline`) +
 `BehaviorTestWorld` + `BehaviorSnapshot` + `TestBehaviorBlockPalette`, atop the shared
 `Editor.Validation.Framework.{GoldenMaster,ValidationReflection}` helpers, menu item
-**`Minecraft Clone/Dev/Validate Behavior`**.
+**`Minecraft Clone/Dev/Validate Behavior`**.  
 **Siblings (same document shape & conventions):**
 [MESHING_VALIDATION_HARNESS_FIDELITY.md](MESHING_VALIDATION_HARNESS_FIDELITY.md),
 [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](LIGHTING_VALIDATION_HARNESS_FIDELITY.md).

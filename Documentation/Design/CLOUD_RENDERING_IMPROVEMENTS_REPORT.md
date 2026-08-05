@@ -1,8 +1,8 @@
 # Cloud Rendering Improvements Report
 
-**Version:** 1.7
-**Date:** 2026-07-20
-**Status:** Open backlog. Items are removed (archived) when implemented and verified.
+**Version:** 1.7  
+**Date:** 2026-07-20  
+**Status:** Open backlog. Items are removed (archived) when implemented and verified.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The backlog for making the **cloud layer feel alive** — slow shape evolution, a volumetric
@@ -284,5 +284,5 @@ too); pairs naturally with CL-5 where the slab shader gives the effect for free 
 
 ---
 
-**Last Updated:** 2026-07-20
+**Last Updated:** 2026-07-20  
 **Next Review:** when CL-4 or CL-7 starts (re-verify `Clouds.cs`/`CloudPatternJob.cs`/`CloudShader.shader` against the v1.4 baseline) or on the next RF-7 design pass (wind/weather seam)

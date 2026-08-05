@@ -1,6 +1,6 @@
 # Lighting Frame Simulator
 
-**Status:** Implemented (June 2026)
+**Status:** Implemented (June 2026)  
 **Purpose:** Deterministic reproduction of orchestration-layer lighting timing — the frame-loop scheduling decisions in `World.Update` / `WorldJobManager` (job in-flight guard, per-frame budget, mid-flight voxel edits, completion order) that the `LightingTestWorld` algebra harness alone cannot model. Built to hunt Bug 09 (cross-chunk blocklight race), which remains open/unreproduced; see §4 for current status.
 
 ---

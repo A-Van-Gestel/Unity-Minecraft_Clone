@@ -42,11 +42,11 @@ The Benchmark tab in the Settings UI could serve as this setup screen with a "St
 
 ## 04. Console Input Field Destroyed During Heavy Chunk Churn (far-lands teleport / render-distance change)
 
-**Severity:** Bug (intermittent) — **mitigated** (self-heal + `LateUpdate` guard shipped); root cause not yet pinned
+**Severity:** Bug (intermittent) — **mitigated** (self-heal + `LateUpdate` guard shipped); root cause not yet pinned  
 **Status:** **Mitigated; tripwire live for root-cause capture** — the confirmed failure mode is understood and
 the console now self-heals, so the bug is no longer user-visible. The exact destroyer is still unidentified
 (not statically findable — no project code destroys the field); the `[UIBUG04]` instrumentation + an
-input-field death sentinel stay in to capture the destroyer's frame on the next natural occurrence.
+input-field death sentinel stay in to capture the destroyer's frame on the next natural occurrence.  
 **Files:** `ConsoleUI.cs` (fix + sentinel); investigation touched `WorldUIManager.cs`, `PauseMenuController.cs`,
 `SettingsUIGenerator.cs`, `World.cs` (teleport / `ShiftOrigin`), `CommandEngine.cs` — all exonerated as direct destroyers.
 

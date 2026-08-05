@@ -1,11 +1,11 @@
 # Lighting & Rendering Feature Improvements Report
 
-**Version:** 1.1
-**Date:** 2026-07-20
+**Version:** 1.1  
+**Date:** 2026-07-20  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified. Owns lighting
 and rendering *features* (`RF-*`); the *performance* counterparts (`LI-*`, `GS-*`) live in
 [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md), and the combined ranked
-roadmap lives at the end of the sibling worldgen report.
+roadmap lives at the end of the sibling worldgen report.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The master backlog for **lighting and rendering features** in the VoxelEngine — the
@@ -16,24 +16,24 @@ roadmap lives at the end of the sibling worldgen report.
 >
 > Status: **Open backlog.** Items are removed (archived) when implemented and verified.
 
-**Audited:** 2026-07-02, at commit `a458173` (branch `main`).
+**Audited:** 2026-07-02, at commit `a458173` (branch `main`).  
 **Amended:** 2026-07-03 — second gap sweep added RF-7 (weather), alongside TF-10..TF-14 in the
-sibling worldgen report.
+sibling worldgen report.  
 **Amended:** 2026-07-03 — RF-1 extended with the effective-light query layer + subtractive shader
 parity (§9–§10, `SkyDarken` model): stored skylight is time-invariant *sky exposure*; gameplay
 reads derived effective light, never raw storage. Second pass: §3 gained the blue-moonlight
 authoring rules (global sky tint is exact, brightness-in-curve/color-in-gradient split) and §4's
-event tint changed from multiply to lerp/replace.
+event tint changed from multiply to lerp/replace.  
 **Amended:** 2026-07-19 — cross-linked the new `CLOUD_RENDERING_IMPROVEMENTS_REPORT.md` (`CL-*`):
-CL-2 absorbs RF-2 §5 (clouds tint); RF-7 §4's cloud knobs are received by CL-4.
+CL-2 absorbs RF-2 §5 (clouds tint); RF-7 §4's cloud knobs are received by CL-4.  
 **Amended:** 2026-07-19 (later) — cross-linked the new `FOLIAGE_LIVELINESS_IMPROVEMENTS_REPORT.md`
 (`FL-*`): FL-1/FL-2 foliage sway reads the shared wind vector RF-7 will own; the RF-3 §2 vertex-
 channel allocation (`Color32` = TF-11 RGB + RF-3 emissive) is complemented by FL's claim on the
-spare `uv.zw` half2; RF-1 gates FL-6's fireflies.
+spare `uv.zw` half2; RF-1 gates FL-6's fireflies.  
 **Amended:** 2026-07-20 — cross-linked the new
 `VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md` (`VX-*`): RF-6's "revisit only alongside a future
 lighting overhaul" deferral now has a home (VX-6, experimental-tier voxel-traced GI); RF-2 §4's
-distance fog stays the default-tier fog under VX-2's experimental volumetric fog.
+distance fog stays the default-tier fog under VX-2's experimental volumetric fog.  
 **Amended:** 2026-07-20 (later) — the VX gap sweep's non-volumetric ideas were routed here:
 RF-2 gained §6 (sky ambience content v2 — aurora, shooting stars, sun flare), RF-3 gained §5
 (vignette/DoF/motion-blur overrides), RF-7 gained §6 (lightning v2 sketch), and **RF-8 (animated
@@ -333,7 +333,7 @@ correctly with a skybox behind transparents. Seed/Save ✅.
    via `Unity_Camera_Capture` before adopting).
 2. **HDR emissive path for blocks** (what makes bloom worth it): emitter *faces* need output > 1.
    The meshing job knows the block type per face, so bake an emissive flag/strength per vertex
-   and boost in the fragment shader (`finalColor += albedo * emissiveStrength * k`, k ≈ 2–4).
+   and boost in the fragment shader (`finalColor += albedo * emissiveStrength * k`, k ≈ 2–4).  
    **Vertex-format constraint:** the MR-2 packed 32-byte layout is the contract —
    `SectionRenderer.Layout` is the single source of truth for vertex streams; any new attribute
    or repurposed bits must be coordinated there (and with the meshing validation suite's B-series
@@ -622,7 +622,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-07-26 (header completed)
+**Last Updated:** 2026-07-26 (header completed)  
 **Next Review:** when RF-1 (day/night cycle) is scheduled — it ranks #1 on the combined roadmap and its
 §9/§10 amendments are the most intricate part of this document; re-verify them against the shipped
 lighting storage before building.

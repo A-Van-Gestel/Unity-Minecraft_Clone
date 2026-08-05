@@ -1,10 +1,10 @@
 # Performance Improvements Report
 
-**Version:** 1.1
-**Date:** 2026-07-26
+**Version:** 1.1  
+**Date:** 2026-07-26  
 **Status:** **Open backlog.** 31 items open, 29 complete. Completed items keep their ✅ row in the master
 summary table; their detail sections live in
-[`../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md`](../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md).
+[`../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md`](../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md).  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The single master backlog for **all open runtime performance improvements** in the VoxelEngine.
@@ -21,19 +21,19 @@ summary table; their detail sections live in
 **Last audited:** 2026-06-12, at commit `39c92ef` (branch `feat/Modular-World-Generation-&-World-Types`). **Implementation status synced:** 2026-06-20, at commit `ea2aec0` — all Meshing & Rendering items except MR-8 (greedy meshing) are now closed and in-game confirmed (MR-1 through MR-7, MR-9). **Implementation status synced:** 2026-07-08 — `VS-1` (shared validation-suite runner) shipped:
 `Framework/ValidationSuiteRunner` + `ValidationRunResult`, six suites + `ChunkRelativePositionTests`
 migrated with unchanged verdicts; `VoxelMetadataUtilityTests`/`FastNoiseLiteTests` left as a tracked follow-up. VS-2/VS-3 now build on the runner's result object. **Implementation status synced:** 2026-07-12 — `WS-1` (chunk-math shift/mask centralization) shipped on `feat/world-scaling`: Burst-safe `ChunkMath` voxel↔chunk↔region helpers + all ~11 chunk-math call sites migrated, guarded by the "Chunk Math" suite; byte-identical over the reachable range (no save bump). Audit correction folded in: the V2 codec truncation was latent-but-unreachable, not a
-live bug.
+live bug.  
 **Implementation status synced:** 2026-08-03 — `VQ-3` (sub-voxel-aware interaction raycast) shipped on
 `feat/world-scaling` and in-game confirmed: a shared `Helpers/BlockCollisionBoundsUtility` (physics + debug
 visualization migrated onto it, guarded by a `CheckPhysicsCollision` golden master because physics has no
 suite), a `Helpers/RayBoundsIntersection` narrow phase behind `VoxelRayDDA`, and highlight/place-preview
-boxes shaped to the block's volume. `VQ-4` (compound bounds for stairs/L-shapes) stays open.
+boxes shaped to the block's volume. `VQ-4` (compound bounds for stairs/L-shapes) stays open.  
 **Implementation status synced:** 2026-08-03 — `VQ-2` (exact DDA placement ray traversal) shipped on
 `feat/world-scaling`: reusable `Helpers/VoxelRayDDA`, `FaceNormal` heuristic and `checkIncrement` both retired,
 guarded by four new oblique-ray scenarios in the Placement suite (authored red-first — the suite's pre-existing
 scenarios are all axis-aligned and could not distinguish the two implementations). Audit correction folded in:
 that entry named the suite's "13 baselines" as its gate — the count was right when written and had grown to 17,
 but no scenario at either size could gate a ray-march change. Validate All 375/375; no save bump.
-`VQ-1` (integer `TryGetVoxel` fast path — WS-1's runtime-API half) shipped 2026-07-12 on the same branch: one-chunk-coord integer query + one-entry last-chunk cache, `GetVoxelState(Vector3)` kept as a floor-then-delegate wrapper, physics/placement/mod-apply consumers migrated; guarded by a float↔int decomposition-parity sweep in the "Chunk Math" suite; Placement suite + Validate All green (no save bump). **Third-pass audit:** 2026-07-02, at commit `99c3e6e` — added `WG-1..3`, `LI-2`, `GS-6`, `WS-1`; re-scoped `P-1` (see the pipeline table note).
+`VQ-1` (integer `TryGetVoxel` fast path — WS-1's runtime-API half) shipped 2026-07-12 on the same branch: one-chunk-coord integer query + one-entry last-chunk cache, `GetVoxelState(Vector3)` kept as a floor-then-delegate wrapper, physics/placement/mod-apply consumers migrated; guarded by a float↔int decomposition-parity sweep in the "Chunk Math" suite; Placement suite + Validate All green (no save bump). **Third-pass audit:** 2026-07-02, at commit `99c3e6e` — added `WG-1..3`, `LI-2`, `GS-6`, `WS-1`; re-scoped `P-1` (see the pipeline table note).  
 **Fourth-pass audit:** 2026-07-02, at commit `99c3e6e` — added `SL-1..4` (serialization save/load),
 `VQ-1..2` + `PH-1` (voxel query layer, interaction, physics), `SU-1..2` (startup/world load): the last previously-unaudited runtime systems. **Fifth-pass audit:** 2026-07-02, at commit `99c3e6e` — added `DT-1..4` (debug tooling: voxel visualizer modes, debug screen / perf HUD, terrain-gen overlay), lifting the fourth pass's debug-tooling exemption. **Sixth-pass audit:** 2026-07-02, at commit `99c3e6e` — added `ET-1..4` (editor tooling, deep pass on `Assets/Editor/WorldTools/` + quick pass on the remaining editor tools). **Seventh-pass audit:**
 2026-07-02 — added `VS-1..3` (editor validation suites), completing the audit coverage: every system in the repository has now had at least one audit pass. **Review sync:** 2026-07-10 — branch code review of `feat/async-lighting-validation-suite` added
@@ -1230,6 +1230,6 @@ contemporaneous notes.*
 ---
 
 **Last Updated:** 2026-08-05 (`SL-1` corroboration note; 2026-07-26: header completed, completed
-items archived, 2,100 → 1,126 lines)
+items archived, 2,100 → 1,126 lines)  
 **Next Review:** on the next implementation wave — move each newly-finished item's detail section to the
 archive and leave its ✅ row behind. A fresh audit pass is also due: the last one was 2026-07-02.

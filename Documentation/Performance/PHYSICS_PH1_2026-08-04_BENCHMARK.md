@@ -1,8 +1,8 @@
 # PH-1 — Gather-once collision sweeps
 
-**Date:** 2026-08-04
-**Branch:** `feat/world-scaling`
-**Item:** `PERFORMANCE_IMPROVEMENTS_REPORT.md` → `PH-1`
+**Date:** 2026-08-04  
+**Branch:** `feat/world-scaling`  
+**Item:** `PERFORMANCE_IMPROVEMENTS_REPORT.md` → `PH-1`  
 **Verdict:** ✅ **GO** — 2.08× fewer voxel cell reads per `FixedUpdate`, zero fallbacks, behavior unchanged.
 
 ---

@@ -1,10 +1,10 @@
 # Advanced Visibility Culling (Graph Connectivity)
 
-**Version:** 1.0
-**Date:** 2026-07-26
+**Version:** 1.0  
+**Date:** 2026-07-26  
 **Status:** **Proposed design — not implemented.** Phases 0 **and 0.5** are complete — the §7.3 renderer
 ownership split, the last hard prerequisite, shipped 2026-07-25 as MP-5 — but the culler itself
-(Phases 1–3: connectivity masks, BFS traversal, integration) is unbuilt.
+(Phases 1–3: connectivity masks, BFS traversal, integration) is unbuilt.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > How to stop rendering sealed-off underground geometry that frustum culling cannot reject. **The
@@ -280,6 +280,6 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-07-26 (header completed; Phases 1–3 still open)
+**Last Updated:** 2026-07-26 (header completed; Phases 1–3 still open)  
 **Next Review:** when `GS-5` Phase 1 is scheduled — re-verify §5's contract first (Phase 0.5 is closed,
 and §4.3's single apply site is now also the load-animation trigger point).

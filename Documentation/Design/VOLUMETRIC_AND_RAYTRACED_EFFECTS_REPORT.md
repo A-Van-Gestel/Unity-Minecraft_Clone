@@ -1,8 +1,8 @@
 # Volumetric & Ray-Traced Effects Report
 
-**Version:** 1.2
-**Date:** 2026-07-20
-**Status:** Open backlog. Items are removed (archived) when implemented and verified.
+**Version:** 1.2  
+**Date:** 2026-07-20  
+**Status:** Open backlog. Items are removed (archived) when implemented and verified.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production), URP 17.5
 
 > The backlog for **volumetric and ray-traced rendering effects** — volumetric fog/god rays,
@@ -21,7 +21,7 @@ Findings are from static review of the URP configuration
 the shader stack (`VoxelLighting.hlsl`, `VoxelCommon.hlsl`, `LiquidCore.hlsl`, the three block
 shaders, `CloudShader.shader`), `ProjectSettings.asset` graphics APIs, `SettingsManager.cs` +
 `SettingFieldAttribute.cs`, and the sibling design reports (`RF-*`, `CL-*`, `FL-*`, `GS-*`).
-Runtime state was **verified in code, not assumed** — see each item's "What exists today".
+Runtime state was **verified in code, not assumed** — see each item's "What exists today".  
 **Amended:** 2026-07-20 — second gap sweep added VX-8 (per-fragment voxel lighting — the item
 that unblocks MR-8's smooth-lighting constraint), VX-9 (heat-haze distortion), VX-10
 (interactive water ripples).
@@ -600,5 +600,5 @@ but v2+ is best scheduled after RF-1 ships.
 
 ---
 
-**Last Updated:** 2026-07-20
+**Last Updated:** 2026-07-20  
 **Next Review:** when VX-0 or VX-4 starts (re-verify `SettingsManager`/`SettingFieldAttribute` and the lighting-suite baseline count) or on the next RF/CL gap sweep

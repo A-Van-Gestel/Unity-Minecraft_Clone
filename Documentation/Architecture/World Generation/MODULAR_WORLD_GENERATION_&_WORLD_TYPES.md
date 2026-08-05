@@ -1184,13 +1184,13 @@ The Burst-compatible `FastNoiseLite` port at `Assets/Scripts/Libraries/FastNoise
 
 #### A. Remove `[BurstCompile]` from Struct Declaration (Low Priority)
 
-**Location:** `FastNoiseLite.cs:13`
-**Issue:** `[BurstCompile]` on a plain struct (not an `IJob*`) is a no-op. It only affects job structs and static methods. Its presence is misleading.
+**Location:** `FastNoiseLite.cs:13`  
+**Issue:** `[BurstCompile]` on a plain struct (not an `IJob*`) is a no-op. It only affects job structs and static methods. Its presence is misleading.  
 **Action:** Remove the attribute. The struct is Burst-compatible by virtue of being blittable — the attribute is not what makes it so.
 
 #### B. Extract Duplicate Constants (Low Priority, Readability)
 
-**Issue:** Constants like `SQRT3`, `F2`, and `R3` are redefined locally within multiple methods (e.g., `TransformNoiseCoordinate`, `SingleOpenSimplex2`, domain warp methods).
+**Issue:** Constants like `SQRT3`, `F2`, and `R3` are redefined locally within multiple methods (e.g., `TransformNoiseCoordinate`, `SingleOpenSimplex2`, domain warp methods).  
 **Action:** Extract to private struct-level constants for clarity:
 
 ```csharp
@@ -1203,17 +1203,17 @@ private const float R3 = 2.0f / 3.0f;
 
 #### C. GCHandle Lifetime (No Action Needed)
 
-**Issue:** The 4 `GCHandle` objects in `Lookup` (lines 1887-1890) are never freed with `.Free()`.
+**Issue:** The 4 `GCHandle` objects in `Lookup` (lines 1887-1890) are never freed with `.Free()`.  
 **Assessment:** This is intentional and correct. The `Lookup` class is static and lives for the entire application lifetime. Freeing handles would cause Burst worker threads to access invalid memory. No action needed.
 
 #### D. Seed Overflow in Fractal Loops (No Action Needed)
 
-**Issue:** Fractal methods increment `seed++` per octave (e.g., line 624). If `mSeed` is `int.MaxValue`, this overflows.
+**Issue:** Fractal methods increment `seed++` per octave (e.g., line 624). If `mSeed` is `int.MaxValue`, this overflows.  
 **Assessment:** Extremely unlikely in practice (max 16 octaves). C# `unchecked` integer arithmetic wraps safely. The original FastNoiseLite C++ library has the same behavior. No action needed.
 
 #### E. Consider `readonly struct` (Low Priority, Future)
 
-**Issue:** The struct is not marked `readonly`. Adding `readonly` would provide stronger guarantees about no-mutation and enable the compiler to avoid defensive copies when passed by `in` reference.
+**Issue:** The struct is not marked `readonly`. Adding `readonly` would provide stronger guarantees about no-mutation and enable the compiler to avoid defensive copies when passed by `in` reference.  
 **Consideration:** Many setter methods (`SetSeed`, `SetFrequency`, etc.) mutate the struct, so marking it `readonly` would require refactoring the API to use `Create()` with all parameters or a builder pattern. **Not recommended for this phase.** Revisit when/if the API
 stabilizes.
 
@@ -1393,7 +1393,7 @@ The 3D noise only needs to "push" the density across zero near the surface to cr
 **Performance:** The band evaluation is the same "Sky Skip" optimization from Section 10.2.A. Blocks outside the band skip 3D noise entirely. With a typical band of 30 blocks (20 below + 10 above surface) out of 128 total height, ~75% of blocks skip 3D evaluation. This is
 actually **faster** than the legacy system's approach of looping all 128 Y levels with 2D noise per level.
 
-**Affects:** `StandardChunkGenerationJob.Execute()` only. The `GlobalCaveNoise` field already exists in the job definition (Section 4.2). Optionally add `int CaveDepth` and `int OverhangHeight` to `StandardBiomeAttributesJobData` for per-biome control.
+**Affects:** `StandardChunkGenerationJob.Execute()` only. The `GlobalCaveNoise` field already exists in the job definition (Section 4.2). Optionally add `int CaveDepth` and `int OverhangHeight` to `StandardBiomeAttributesJobData` for per-biome control.  
 **Difficulty:** Low — ~15 lines of density math in `Execute()`, plus optional per-biome band parameters. No interface changes.
 
 #### B. Domain-Warped Terrain
@@ -1402,7 +1402,7 @@ actually **faster** than the legacy system's approach of looping all 128 Y level
 
 **How:** Add a `FastNoiseConfig DomainWarpConfig` to `StandardBiomeAttributesJobData`. In the job, construct a warp instance and call `warpNoise.DomainWarp(ref wx, ref wz)` before `terrainNoise.GetNoise(wx, wz)`.
 
-**Affects:** `StandardBiomeAttributesJobData` + `StandardBiomeAttributes` (new field), `StandardChunkGenerationJob.Execute()` (read warp, apply).
+**Affects:** `StandardBiomeAttributesJobData` + `StandardBiomeAttributes` (new field), `StandardChunkGenerationJob.Execute()` (read warp, apply).  
 **Difficulty:** Low — FastNoiseLite's `DomainWarp` API is already available and Burst-safe.
 
 #### C. Continental Landmass Scale
@@ -1412,7 +1412,7 @@ actually **faster** than the legacy system's approach of looping all 128 Y level
 **How:** Add a `FastNoiseConfig ContinentalNoiseConfig` to `StandardBiomeAttributesJobData` (or as a global field on the job). Evaluate at very low frequency (e.g., `0.0005f`). Use the 0–1 output as a multiplier on terrain height. Values near 0 produce ocean floor; values near 1
 produce full-height terrain.
 
-**Affects:** `StandardBiomeAttributesJobData` or `StandardChunkGenerationJob` (new field), `Execute()` (evaluate + multiply).
+**Affects:** `StandardBiomeAttributesJobData` or `StandardChunkGenerationJob` (new field), `Execute()` (evaluate + multiply).  
 **Difficulty:** Low — single additional noise evaluation per column.
 
 #### D. River Carving
@@ -1421,7 +1421,7 @@ produce full-height terrain.
 
 **How:** Configure a `FastNoiseLite` instance with `NoiseType.Cellular` and `CellularReturnType.Distance`. The distance value represents proximity to cell edges — where distance is low, carve the terrain down to water level. `CellularJitter` controls how winding the rivers are.
 
-**Affects:** `StandardChunkGenerationJob.Execute()` (add a river noise evaluation per column), potentially a new `FastNoiseConfig RiverNoiseConfig` on the biome or job.
+**Affects:** `StandardChunkGenerationJob.Execute()` (add a river noise evaluation per column), potentially a new `FastNoiseConfig RiverNoiseConfig` on the biome or job.  
 **Difficulty:** Medium — requires careful integration with the heightmap to avoid floating blocks at river banks.
 
 #### E. Terrain Erosion & Weathering
@@ -1467,7 +1467,7 @@ Combined with the 3D density band from Section 12.1.A, this produces:
 | `FractalType.PingPong` + low frequency                    | Terraced hillsides, stepped erosion patterns |
 | `FractalType.FBm` + `Frequency 0.005` + low amplitude     | Gentle rolling hills with subtle weathering  |
 
-**Affects:** `StandardBiomeAttributesJobData` (new `FastNoiseConfig ErosionNoiseConfig` + `FastNoiseConfig ErosionWarpConfig` + `float ErosionStrength`), `StandardBiomeAttributes` (matching authoring fields), `StandardChunkGenerationJob.Execute()` (evaluate + subtract).
+**Affects:** `StandardBiomeAttributesJobData` (new `FastNoiseConfig ErosionNoiseConfig` + `FastNoiseConfig ErosionWarpConfig` + `float ErosionStrength`), `StandardBiomeAttributes` (matching authoring fields), `StandardChunkGenerationJob.Execute()` (evaluate + subtract).  
 **Difficulty:** Low — two additional noise evaluations per column plus one domain warp. All Burst-compatible. No interface changes.
 
 ##### E.2. True Hydraulic Erosion Simulation (Future Experimental)
@@ -1509,8 +1509,8 @@ return new GenerationJobData { Handle = erosionHandle, ... };
 - Skipping erosion for runtime-loaded chunks and using the noise-based fake erosion (E.1) as a fallback.
 - Making erosion iteration count configurable per world type (e.g., "Standard" = 0 iterations, "Eroded" = 5000 iterations).
 
-**Affects:** New `ErosionSimulationJob` struct, `StandardChunkGenerator.ScheduleGeneration()` (job chaining), optionally new `ErosionConfig` fields on `WorldTypeDefinition` or `StandardBiomeAttributesJobData`.
-**Difficulty:** High — new job struct, cross-chunk boundary handling, performance tuning. No interface changes (job chaining is internal to `ScheduleGeneration()`).
+**Affects:** New `ErosionSimulationJob` struct, `StandardChunkGenerator.ScheduleGeneration()` (job chaining), optionally new `ErosionConfig` fields on `WorldTypeDefinition` or `StandardBiomeAttributesJobData`.  
+**Difficulty:** High — new job struct, cross-chunk boundary handling, performance tuning. No interface changes (job chaining is internal to `ScheduleGeneration()`).  
 **Status:** Future experimental. Implement E.1 (noise-based) first for immediate visual improvement at near-zero cost.
 
 ### 12.2. Lode / Ore Improvements
@@ -1521,7 +1521,7 @@ return new GenerationJobData { Handle = erosionHandle, ... };
 
 **How:** Configure `StandardLode.noiseConfig` with `NoiseType.Cellular` and `CellularReturnType.Distance2Sub` or `Distance2Div`. This produces thin, vein-like patterns along cell boundaries. `CellularJitter` controls vein spacing.
 
-**Affects:** `StandardLode` Inspector tuning only — no code changes needed if the lode evaluation already uses `FastNoiseLite` from the config.
+**Affects:** `StandardLode` Inspector tuning only — no code changes needed if the lode evaluation already uses `FastNoiseLite` from the config.  
 **Difficulty:** None (configuration only, once the Standard lode system is implemented).
 
 #### B. Depth-Weighted Density
@@ -1531,7 +1531,7 @@ return new GenerationJobData { Handle = erosionHandle, ... };
 **How:** Add a `float DepthDensityMultiplier` field to `StandardLode`/`StandardLodeJobData`. In the lode evaluation loop, multiply the noise threshold by a linear or curve-based depth factor:
 `adjustedThreshold = baseThreshold * lerp(1.0, DepthDensityMultiplier, (maxHeight - y) / (maxHeight - minHeight))`.
 
-**Affects:** `StandardLode` + `StandardLodeJobData` (new field), lode evaluation in `StandardChunkGenerationJob.Execute()`.
+**Affects:** `StandardLode` + `StandardLodeJobData` (new field), lode evaluation in `StandardChunkGenerationJob.Execute()`.  
 **Difficulty:** Low — single multiply per lode per block.
 
 #### C. Multi-Block Veins
@@ -1540,7 +1540,7 @@ return new GenerationJobData { Handle = erosionHandle, ... };
 
 **How:** Add `byte SecondaryBlockID` and `float SecondaryRatio` to `StandardLode`/`StandardLodeJobData`. When a lode check passes, use a second noise evaluation or `Unity.Mathematics.Random` to choose between primary and secondary block.
 
-**Affects:** `StandardLode` + `StandardLodeJobData` (new fields), lode evaluation loop.
+**Affects:** `StandardLode` + `StandardLodeJobData` (new fields), lode evaluation loop.  
 **Difficulty:** Low.
 
 ### 12.3. Flora & Decoration Improvements
@@ -1551,7 +1551,7 @@ return new GenerationJobData { Handle = erosionHandle, ... };
 
 **How:** Add `byte[] FloraIndices` and `float[] FloraWeights` arrays to `StandardBiomeAttributes`. The `StandardChunkGenerationJob` selects a flora type from the weighted list using `Unity.Mathematics.Random`. The `ExpandFlora()` method maps flora index to structure generator.
 
-**Affects:** `StandardBiomeAttributes` (new array fields), `StandardBiomeAttributesJobData` (flattened index range, similar to lode pattern), `StandardChunkGenerator.ExpandFlora()` (multi-type dispatch).
+**Affects:** `StandardBiomeAttributes` (new array fields), `StandardBiomeAttributesJobData` (flattened index range, similar to lode pattern), `StandardChunkGenerator.ExpandFlora()` (multi-type dispatch).  
 **Difficulty:** Medium — requires flattening variable-length arrays into NativeArrays using the same start-index/count pattern as lodes.
 
 #### B. Multi-Structure Flora Types
@@ -1560,7 +1560,7 @@ return new GenerationJobData { Handle = erosionHandle, ... };
 
 **How:** Add new cases to `StandardChunkGenerator.ExpandFlora()`. Each case produces a different `IEnumerable<VoxelMod>` pattern. The flora index in the `VoxelMod` dispatches to the correct case.
 
-**Affects:** `StandardChunkGenerator.ExpandFlora()` only. No interface changes.
+**Affects:** `StandardChunkGenerator.ExpandFlora()` only. No interface changes.  
 **Difficulty:** Low per structure type.
 
 #### C. Neighbor-Aware Decoration Pass
@@ -1570,7 +1570,7 @@ return new GenerationJobData { Handle = erosionHandle, ... };
 **How:** Add a second decoration pass in `ProcessGenerationJobs()` that fires only when a chunk and all 8 neighbors have completed generation. The `IChunkGenerator` interface could gain an optional
 `ExpandDeferredStructures(ChunkCoord coord, Func<ChunkCoord, ChunkData> neighborLookup)` method.
 
-**Affects:** `IChunkGenerator` (new optional method), `WorldJobManager.ProcessGenerationJobs()` (state tracking for neighbor completion).
+**Affects:** `IChunkGenerator` (new optional method), `WorldJobManager.ProcessGenerationJobs()` (state tracking for neighbor completion).  
 **Difficulty:** High — requires state machine tracking "generated but not decorated" vs. "fully decorated" per chunk.
 
 ### 12.4. New World Type Ideas

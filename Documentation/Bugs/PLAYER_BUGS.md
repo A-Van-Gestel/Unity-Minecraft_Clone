@@ -24,7 +24,7 @@ This document outlines **open** bugs related to the player controller and intera
 
 ## 01. Collision Issues in Tight Spaces
 
-**Severity:** Bug
+**Severity:** Bug  
 **Files:** Player Controller
 
 Player collision can get stuck / flaky in tight spaces (eg: single block wide tunnels or when flying trough caves).
@@ -33,7 +33,7 @@ Player collision can get stuck / flaky in tight spaces (eg: single block wide tu
 
 ## 02. Movement Speed Reset on Fly Mode Toggle
 
-**Severity:** Bug
+**Severity:** Bug  
 **Files:** Player Controller
 
 When increasing the player movement speed, the horizontal speed is still increased when the player is falling after turning fly mode off. The movement should be "reset" back to the standard player movement speed. The actual movement speed override itself should be saved in the game-state however for when the player turns fly mode back on.
@@ -45,9 +45,9 @@ When increasing the player movement speed, the horizontal speed is still increas
 **Severity:** Bug — **high consequence, hard to reach.** The usual outcome is a harmless auto-correction onto the
 surface; the bad outcome is falling out of a one-block-thick floor into a cave or the void. Reachable today with
 console commands only (see triggers), and observed in game exactly once. Also the path any future non-player
-`VoxelRigidbody` will meet, since **the player is currently the only one that moves**.
+`VoxelRigidbody` will meet, since **the player is currently the only one that moves**.  
 **Status:** Open — mechanism confirmed in the harness and in game (2026-08-03); the *entry* condition is not yet
-fully pinned (below)
+fully pinned (below)  
 **Files:** `Assets/Scripts/Physics/VoxelRigidbody.cs` (`ResolveMovement`), `World.CheckPhysicsCollision`
 
 **One rule, three outcomes.** §3.3 resolves a contact by "the correction that fully resolves ALL overlaps on this
@@ -161,9 +161,9 @@ path issues.
 ## 06. Movement renders stepped at the physics rate — no interpolation between fixed steps
 
 **Severity:** Polish / feel — not a correctness bug. Constant, mild, and present since the original player
-controller (reported by the user 2026-08-04 as "slightly stuttery", long predating `PH-1`/`PH-2`).
+controller (reported by the user 2026-08-04 as "slightly stuttery", long predating `PH-1`/`PH-2`).  
 **Status:** Open — **mechanism CONFIRMED in game 2026-08-04** by the five-condition test in *Measurements* below.
-The cause is the inter-step position freeze; frame-rate caps and timestep retunes are both **ruled out** as fixes.
+The cause is the inter-step position freeze; frame-rate caps and timestep retunes are both **ruled out** as fixes.  
 **Files:** `Assets/Scripts/Physics/VoxelRigidbody.cs` (`FixedUpdate`), `Assets/Scripts/Player.cs` (`Update`),
 `Assets/Scenes/World.unity` (camera parenting), `ProjectSettings/TimeManager.asset`
 
@@ -284,9 +284,9 @@ chosen should live in the body or a shared visual-follow component rather than i
 ## 07. Solver behavior is not tick-rate invariant — halving `fixedDeltaTime` breaks jumping and collisions
 
 **Severity:** Bug — latent at the shipped 50 Hz, but it **blocks any physics-rate change** and would surface on
-any platform or setting that retunes the timestep.
+any platform or setting that retunes the timestep.  
 **Status:** Open — **reproduced in game 2026-08-04**, in both directions, twice each. **Not root-caused**; the
-mechanisms below are hypotheses, deliberately labelled as such.
+mechanisms below are hypotheses, deliberately labelled as such.  
 **Files:** `Assets/Scripts/Physics/VoxelRigidbody.cs` (`CalculateVelocity`, `ResolveMovement`),
 `ProjectSettings/TimeManager.asset`
 

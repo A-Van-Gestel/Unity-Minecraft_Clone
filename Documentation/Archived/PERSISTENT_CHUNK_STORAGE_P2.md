@@ -1,7 +1,7 @@
 # P-2 — Worker-Thread Gather & (optional) Persistent Native Chunk Storage  `[ARCHIVED]`
 
-**Version:** 1.2
-**Date:** 2026-06-22
+**Version:** 1.2  
+**Date:** 2026-06-22  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > **Archived:** 2026-07-26.
@@ -345,7 +345,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-07-26 (archived; Layer 1 shipped, Layer 2 shelved)
+**Last Updated:** 2026-07-26 (archived; Layer 1 shipped, Layer 2 shelved)  
 **Next Review:** none scheduled. Layer 2 is **not** waiting on a profiler capture — it is waiting on a
 consumer, and it has none. If one ever appears, re-establish the demand case first; §5–§7's layout,
 lifetime and consistency analysis is the starting point, but its risk ratings predate the snapshot-model

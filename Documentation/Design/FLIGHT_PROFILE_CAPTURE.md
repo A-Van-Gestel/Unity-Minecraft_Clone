@@ -78,6 +78,7 @@ vd ≥ 8 and dominant from vd ≥ 15.** Per-phase status is in §7.
 > ([report](../Performance/CHUNK_PIPELINE_FP8_FLIGHT_PROFILE_IL2CPP_2026-07-31_BENCHMARK.md)) is correct on
 > its own terms but ran the pre-FP-9b route; its numbers are **not** continued by FP-10, which reproduces the
 > curve's shape rather than extending its values.  
+
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > A telemetry layer that answers **one question the existing benchmark cannot**: when chunks appear
@@ -1106,7 +1107,7 @@ whether they inherit them *knowingly*.
   only **11.6 %** at the viewDistance 20 this capture ran, which is the mechanism behind the 96.4 % closure
   rate. A hysteresis band pinned to an absolute count cannot mean the same thing across a setting that moves
   the guarded population by 7.6×; that is a design gap needing its own pass, and it is now second in the
-  report's ranked follow-ups.
+  report's ranked follow-ups.  
   **Capture caveats:** the run used **viewDistance 20 (4× default)**, so the *severity* figures are
   stress-configuration magnitudes while the *regime* conclusion is the robust part — the report carries a
   Generality table separating the two, and a viewDistance-5 leg is the cheapest confirmation available. The
@@ -1171,7 +1172,7 @@ whether they inherit them *knowingly*.
   Also records the as-built buffering split: exact unbounded tallies vs a rolling frame window, which is
   what makes §7.2's "full tallies, never truncated" promise implementable.
 * **v1.2** - Implementation-planning amendment (2026-07-27) — folds the FP-0…FP-4 planning session's
-  decisions into the design so a cold session inherits them from the doc rather than from a transcript.
+  decisions into the design so a cold session inherits them from the doc rather than from a transcript.  
   **New §4.1:** `ChunkCoord` is not unique within a phase (the loading pass revisits by design), so the
   side table would have silently overwritten traces — resolved by **flush-and-restart**, which doubles as
   §1 goal 3's re-request metric; plus the two hook-safety constraints it implies (indexer never `Add`;

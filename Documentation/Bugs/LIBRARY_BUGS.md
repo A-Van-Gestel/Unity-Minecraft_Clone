@@ -8,8 +8,8 @@ This document outlines **open** bugs and architectural improvements related to t
 
 ## NativeCompressions (LZ4) — Version pinned to 0.6.0
 
-**Severity:** Critical version constraint
-**Status:** Pinned / monitoring upstream
+**Severity:** Critical version constraint  
+**Status:** Pinned / monitoring upstream  
 **Files:** `Assets/packages.config`, `Assets/Scripts/Serialization/CompressionFactory.cs`
 
 **Do NOT upgrade `NativeCompressions.LZ4.*` past 0.6.0.** Version 0.6.1's `LZ4Stream` is

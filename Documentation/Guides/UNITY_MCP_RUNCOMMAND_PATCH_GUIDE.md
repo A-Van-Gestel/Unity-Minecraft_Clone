@@ -146,7 +146,7 @@ pointing back to this guide.
     threw, so the MCP layer surfaced `UNEXPECTED_ERROR: Command was executed partially...` even though
     the command ran fully — a constant false-failure for agents, since Unity code legitimately logs
     warnings (deprecations, validation notes). The predicate now checks only `Error`/`Exception`,
-    matching the read-only sibling `RunReadOnlyCommandTool`; warnings still surface in `ExecutionLogs`.
+    matching the read-only sibling `RunReadOnlyCommandTool`; warnings still surface in `ExecutionLogs`.  
     **Verify (repro doubles as the regression check):** a command calling `result.LogWarning(...)`
     returns success with the warning in the logs; a command calling `result.LogError(...)` still fails.
 

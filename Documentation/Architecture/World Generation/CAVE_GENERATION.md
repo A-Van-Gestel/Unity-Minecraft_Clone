@@ -4,8 +4,8 @@
 > arc and the lessons that shaped the current (implemented) two-tier worm + noise design.
 > Promoted from a Design draft on 2026-06-16 once the full system shipped.
 
-**Created:** 2026-05-26
-**Status:** Implemented (2026-06-16)
+**Created:** 2026-05-26  
+**Status:** Implemented (2026-06-16)  
 **Related:** [PROCEDURAL_TERRAIN_GENERATION.md](PROCEDURAL_TERRAIN_GENERATION.md) (terrain shape + the generation job this carving runs inside), [MODULAR_WORLD_GENERATION_&_WORLD_TYPES.md](MODULAR_WORLD_GENERATION_&_WORLD_TYPES.md) (world-type / biome plumbing).
 
 ---

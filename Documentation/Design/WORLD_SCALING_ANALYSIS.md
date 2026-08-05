@@ -1,11 +1,11 @@
 # World Scaling Analysis — Height/Depth Increase, Negative Quadrants, Cubic Chunks & Floating Origin
 
-**Version:** 1.0
-**Date:** 2026-06-12
+**Version:** 1.0  
+**Date:** 2026-06-12  
 **Status:** **Analysis / reference — superseded for execution.** Tier B shipped in full via
 [`WORLD_SCALING_IMPLEMENTATION.md`](WORLD_SCALING_IMPLEMENTATION.md); §3.2's floor-div audit shipped as
 `WS-1`+`VQ-1`. This document remains the **"what breaks per tier"** reference, and Tiers A and C are
-still unbuilt.
+still unbuilt.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > Architectural analysis of what it takes to scale the world beyond its current hard-coded bounds,
@@ -325,6 +325,6 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-07-26 (header completed; Tier B recorded as shipped elsewhere)
+**Last Updated:** 2026-07-26 (header completed; Tier B recorded as shipped elsewhere)  
 **Next Review:** if Tier A (taller worlds) or Tier C (cubic chunks) is ever scheduled — re-verify the
 per-tier breakage lists against HEAD first, since Tier B's execution changed much of the code they name.

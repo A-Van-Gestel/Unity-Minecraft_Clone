@@ -1,8 +1,8 @@
 # Codebase Improvement Backlog
 
-**Version:** 1.0
-**Date:** 2026-07-26
-**Status:** **Open backlog.** Items are removed (archived) when implemented and verified.
+**Version:** 1.0  
+**Date:** 2026-07-26  
+**Status:** **Open backlog.** Items are removed (archived) when implemented and verified.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > Open **non-performance** improvement items for the VoxelEngine codebase — API modernization and
@@ -13,7 +13,7 @@
 > [`../Archived/CODEBASE_IMPROVEMENTS_COMPLETED.md`](../Archived/CODEBASE_IMPROVEMENTS_COMPLETED.md);
 > performance findings live in the separate master backlog (see below).
 
-**Last audited:** 2026-07-02 (added §2.1 `World.cs` decomposition; §1 items re-confirmed still open).
+**Last audited:** 2026-07-02 (added §2.1 `World.cs` decomposition; §1 items re-confirmed still open).  
 **Facts re-verified:** 2026-07-26, at commit `3f579e44` (branch `feat/world-scaling`) — §1.2's five
 `GameObject.Find` call sites all still present; §1.3's `Camera.main` list **corrected** (three more
 files than recorded); §2.1's `World.cs` line count **corrected** 3,184 → 4,615; §2.2 confirmed resolved
@@ -154,7 +154,7 @@ Document History convention, so they record what the commits changed, not contem
 
 ---
 
-**Last Updated:** 2026-07-26 (header added; §2.1 line count and §1.3 file list corrected)
+**Last Updated:** 2026-07-26 (header added; §2.1 line count and §1.3 file list corrected)  
 **Next Review:** when §2.1 is scheduled — re-measure `World.cs` first, since the figure has drifted
 badly twice now. A genuine re-audit for *new* non-performance findings is also overdue; the last one
 was 2026-07-02.

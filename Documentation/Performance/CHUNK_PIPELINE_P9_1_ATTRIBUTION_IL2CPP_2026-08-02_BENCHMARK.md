@@ -168,7 +168,7 @@ unbudgeted merge. Measured, on the R4 → R5 pair:
 | **all timed**   | 6.824       | 24.076      | **+17.252**| —                               |
 
 **What §F4 got right:** it sized the schedule pass almost exactly (predicted +6.8 ms, measured
-+5.9 ms), and it correctly identified the merge as the largest single unattributed cost.
++5.9 ms), and it correctly identified the merge as the largest single unattributed cost.  
 **What it got wrong:** the merge is ~39 % of the growth, not ~70 %. The residual is spread across
 the mesh passes and the behaviour tick, which the model had no term for.
 

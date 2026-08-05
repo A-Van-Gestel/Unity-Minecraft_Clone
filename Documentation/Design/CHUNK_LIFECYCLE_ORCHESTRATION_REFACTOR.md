@@ -590,7 +590,7 @@ is touched (CP-4 does not touch its rule logic, but run it anyway: cheap);
 > chunk-boundary crossings, so the drain is per-frame in `Update`.
 >
 > **Prove-red done (mechanical):** routing the `Failed` arm's snapshot back to the pool (pre-fix shape)
-> reds exactly B2–B7 ("chunk missing on disk" = the silently-lost edit); B1/B8 stay green. Reverted.
+> reds exactly B2–B7 ("chunk missing on disk" = the silently-lost edit); B1/B8 stay green. Reverted.  
 > **Verification:** both csproj clean; Save Durability 8/8 green against fresh DLLs; **Validate All
 > 304/304 across all 13 suites** (Lighting 88/88, Meshing 23/23, Mesh Build Queue 9/9 — B7 zero-alloc
 > inconclusive on editor Mono, as always). **In-game F5 injection + durability run CONFIRMED

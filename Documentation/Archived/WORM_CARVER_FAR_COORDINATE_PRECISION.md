@@ -1,9 +1,9 @@
 # Worm Carver Far-Coordinate Precision Design  `[ARCHIVED]`
 
-**Version:** 2.1
+**Version:** 2.1  
 **Date:** 2026-07-20
 
-> **Archived:** 2026-07-26.
+> **Archived:** 2026-07-26.  
 > **Reason:** shipped, and its *architectural* content was merged into
 > [`../Architecture/World Generation/CAVE_GENERATION.md`](../Architecture/World%20Generation/CAVE_GENERATION.md)
 > §3.1.5 — which is now the **live home** for the cell-local simulation frame: the problem, the shipped
@@ -25,7 +25,7 @@
 **Original status:** ✅ **Implemented** (WC-0/WC-1/WC-2 shipped 2026-07-20; in-game confirmed — worm caves
 generate correctly with the fix to the ±2³¹ world border, Classic32 "Far Lands" path preserved).
 The §9 open questions were all resolved by the user before implementation; their answers are
-recorded inline in §9 and drove §5's verdict (Option A, Precise64-gated).
+recorded inline in §9 and drove §5's verdict (Option A, Precise64-gated).  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The v2 noise rider (shipped 2026-07-20) made `FastNoiseLite` exact to ±2³¹, but the worm
@@ -406,6 +406,6 @@ guards the classic path — no second simulation path was needed. The explicit r
 
 ---
 
-**Last Updated:** 2026-07-20
+**Last Updated:** 2026-07-20  
 **Next Review:** when WC-0 is scheduled (answer §9 Q1–Q4 first), or if far worm caves are
 visually surveyed before then (fold observations into §2/§3.3).

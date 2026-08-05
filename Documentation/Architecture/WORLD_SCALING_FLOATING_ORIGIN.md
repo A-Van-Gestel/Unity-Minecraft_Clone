@@ -1,14 +1,14 @@
 # World Scaling — WS-4 Floating Origin
 
-**Version:** 1.17
-**Date:** 2026-07-26
+**Version:** 1.17  
+**Date:** 2026-07-26  
 **Status:** **Implemented (Stable)** — promoted from `Design/` 2026-07-26; the WS-4 phase plan (§10) and
 extension roadmap are retained as as-built records. Every WS-4 phase is shipped and in-game confirmed: WS-4a (origin plumbing),
 WS-4b (the shift), WS-4c persistence (`ChunkRelativePosition` player position, level.dat v13), and WS-4c
 tooling (`/teleport` = CMD-2, 2026-07-18). The v2 noise rider is **shipped + in-game confirmed 2026-07-20**
 (terrain normal even at the ±2³¹ edge) — see the extension roadmap and `WORLD_SCALING_IMPLEMENTATION.md` §6.
 (Lighting Bug 19 — the far-lands lighting crash logged there — was fixed
-independently 2026-07-19 via integer column routing, in-game confirmed and archived as `_FIXED_BUGS.md` #24.)
+independently 2026-07-19 via integer column routing, in-game confirmed and archived as `_FIXED_BUGS.md` #24.)  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The far-travel precision phase of the world-scaling track. Unity render space and voxel world
@@ -778,6 +778,6 @@ graduate to work items).
 
 ---
 
-**Last Updated:** 2026-07-19
+**Last Updated:** 2026-07-19  
 **Next Review:** when `/teleport` (CMD-2) is scheduled — it needs CMD-1 first — or when the v2 noise rider is,
 whose harness it was always meant to be. WS-4's own work is otherwise complete.

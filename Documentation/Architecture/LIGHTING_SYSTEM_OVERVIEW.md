@@ -194,7 +194,7 @@ After a chunk's initial lighting stabilizes, its border voxels may have incorrec
 **Lifecycle (iterative):** Edge checks now run as a small fixed number of *rounds* rather than once, because two adjacent chunks that both stabilize against each other's stale snapshot need more than one reconciliation pass.
 
 1. Each `ChunkData` starts with `RemainingEdgeCheckRounds = 2` (a `[NonSerialized]` counter, reset by `ChunkData.Reset()`). When a lighting job reports `IsStable` (`ProcessLightingJobs`) and rounds remain, the chunk decrements the counter and re-arms its own `NeedsEdgeCheck` + `HasLightChangesToProcess`, then propagates `NeedsEdgeCheck` to its 4 cardinal neighbors via `TriggerNeighborEdgeChecks` (only neighbors that are populated and past initial lighting). Round 1 fixes the immediate frontier; round 2 reconciles the remainder after neighbors have run
-   their own edge checks. Chunks loaded from disk with stable lighting also start with `NeedsEdgeCheck = true`.
+   their own edge checks. Chunks loaded from disk with stable lighting also start with `NeedsEdgeCheck = true`.  
    **Post-generation re-grant (Bug 05 fix, July 2026):** once generation spends both rounds, a later
    *border-column* opacity edit can leave a cross-seam voxel under-bright with no round left to reconcile
    it (edge checks are the only corrector for under-bright border light, §3.7). `ChunkData.ModifyVoxel`
@@ -257,49 +257,49 @@ This section documents how our lighting engine compares to the Starlight referen
 
 #### Dual-Phase BFS (Removal → Spreading)
 
-**Starlight:** `performLightDecrease()` runs before `performLightIncrease()`.
-**Our system:** Same. All darkness removal completes before light spreading begins, for both channels.
+**Starlight:** `performLightDecrease()` runs before `performLightIncrease()`.  
+**Our system:** Same. All darkness removal completes before light spreading begins, for both channels.  
 **Status:** Implemented correctly.
 
 #### Vertical Sky Light No-Attenuation Rule
 
-**Starlight:** Sky light at level 15 traveling downward through fully transparent blocks stays at 15.
-**Our system:** Same rule in `PropagateLight` (`NeighborhoodLightingJob.cs`).
+**Starlight:** Sky light at level 15 traveling downward through fully transparent blocks stays at 15.  
+**Our system:** Same rule in `PropagateLight` (`NeighborhoodLightingJob.cs`).  
 **Status:** Implemented correctly.
 
 #### Heightmap-Driven Column Optimization
 
-**Starlight:** Uses `heightMapBlockChange[]` to track the lowest Y that needs updating per column.
-**Our system:** Uses `heightMap[]` in `RecalculateSunlightForColumn` to skip air above the highest opaque block.
+**Starlight:** Uses `heightMapBlockChange[]` to track the lowest Y that needs updating per column.  
+**Our system:** Uses `heightMap[]` in `RecalculateSunlightForColumn` to skip air above the highest opaque block.  
 **Status:** Implemented correctly.
 
 #### TOCTOU-Safe Light Merge
 
-**Starlight:** Uses SWMR (Single-Writer Multi-Reader) nibble arrays to separate updating and visible light data.
-**Our system:** `ApplyLightingJobResult` merges only light bits, preserving block changes made during job execution.
+**Starlight:** Uses SWMR (Single-Writer Multi-Reader) nibble arrays to separate updating and visible light data.  
+**Our system:** `ApplyLightingJobResult` merges only light bits, preserving block changes made during job execution.  
 **Status:** Implemented correctly, different mechanism but same safety guarantee.
 
 #### Opacity-Based Light Attenuation
 
-**Starlight:** `targetLevel = propagatedLevel - max(1, opacity)`.
+**Starlight:** `targetLevel = propagatedLevel - max(1, opacity)`.  
 **Our system:** `targetLevel = sourceLight - max(1, neighborOpacity)`.
-Every attenuation site now funnels through the single shared `LightAttenuation.Attenuate` helper (`max(0, s - max(1, opacity))`): the BFS (`PropagateLight`), column recalculation (`RecalculateSunlightForColumn`), the edge check (`CheckEdgeVoxel`), the cross-chunk sunlight removal veto (`InChunkSunlightSupport`), and the validation oracle. Sharing one definition guarantees the formula cannot drift between paths (semi-transparent blocks such as water attenuate identically everywhere).
+Every attenuation site now funnels through the single shared `LightAttenuation.Attenuate` helper (`max(0, s - max(1, opacity))`): the BFS (`PropagateLight`), column recalculation (`RecalculateSunlightForColumn`), the edge check (`CheckEdgeVoxel`), the cross-chunk sunlight removal veto (`InChunkSunlightSupport`), and the validation oracle. Sharing one definition guarantees the formula cannot drift between paths (semi-transparent blocks such as water attenuate identically everywhere).  
 **Status:** Implemented correctly.
 
 #### Edge Checking on Chunk Load
 
-**Starlight:** Has a dedicated `checkChunkEdges()` method that runs on chunk load. It iterates every block on the 4 horizontal chunk borders and validates that each block's light level is consistent with its neighbors.
-**Our system:** Implemented as a `PerformEdgeCheck` flag on `NeighborhoodLightingJob` with a `NeedsEdgeCheck` lifecycle flag on `ChunkData`. Runs for a fixed number of iterative rounds (`RemainingEdgeCheckRounds`, default 2) after each lighting stabilization — re-armed on the chunk and its cardinal neighbors — and once for chunks loaded from disk. See Section 3.6 for details.
-**Difference from Starlight:** Our edge check only adds missing light (placement queue), never removes stale light. Starlight's `checkChunkEdges` does both. This is a deliberate constraint — removal during edge checks risks false darkness when neighbor data is incomplete.
+**Starlight:** Has a dedicated `checkChunkEdges()` method that runs on chunk load. It iterates every block on the 4 horizontal chunk borders and validates that each block's light level is consistent with its neighbors.  
+**Our system:** Implemented as a `PerformEdgeCheck` flag on `NeighborhoodLightingJob` with a `NeedsEdgeCheck` lifecycle flag on `ChunkData`. Runs for a fixed number of iterative rounds (`RemainingEdgeCheckRounds`, default 2) after each lighting stabilization — re-armed on the chunk and its cardinal neighbors — and once for chunks loaded from disk. See Section 3.6 for details.  
+**Difference from Starlight:** Our edge check only adds missing light (placement queue), never removes stale light. Starlight's `checkChunkEdges` does both. This is a deliberate constraint — removal during edge checks risks false darkness when neighbor data is incomplete.  
 **Status:** Implemented (placement-only variant).
 
 #### BFS Chunk Boundary Confinement
 
-**Starlight:** Uses a bounded 5x5 chunk cache. Propagation naturally stops when the cache boundary is reached.
+**Starlight:** Uses a bounded 5x5 chunk cache. Propagation naturally stops when the cache boundary is reached.  
 **Our system:** The BFS reads from the 3x3 neighbor grid but is explicitly confined to the center chunk via `IsInCenterChunk()` guards on all queue enqueue operations. Neighbor voxels have their light *written* (via `CrossChunkLightMods`) but are never enqueued for further BFS
-propagation.
+propagation.  
 **Why this is critical:** Without this guard, the BFS exits the center chunk, travels through neighbor data (which may be all-zeros for unloaded chunks — appearing as a void of air), and re-enters the center chunk underground.
-This creates vertical walls of light leaking through solid terrain at chunk borders facing unloaded chunks.
+This creates vertical walls of light leaking through solid terrain at chunk borders facing unloaded chunks.  
 **Status:** Implemented correctly.
 
 ### 4.2 Missing Techniques (Applicable Improvements)

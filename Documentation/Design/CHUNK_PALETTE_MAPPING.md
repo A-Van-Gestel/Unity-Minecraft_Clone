@@ -1,12 +1,12 @@
 # Design Document: Chunk Palette Mapping
 
-**Version:** 1.2
-**Date:** 2026-07-26
+**Version:** 1.2  
+**Date:** 2026-07-26  
 **Status:** **Draft — unscheduled.** Nothing here is built: `BlockType` has no `uniqueId` field anywhere
 in the codebase, and chunks still store raw global `ushort` IDs. Before implementation starts, re-verify
 the items listed under *Re-verify first* below — the serialization layer has moved since this was
-drafted.
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production, Burst/DOTS Compatible)
+drafted.  
+**Target:** Unity 6.5 (Mono for dev; IL2CPP for production, Burst/DOTS Compatible)  
 **Context:** Voxel Engine Serialization & Data Architecture
 
 > Decouple save files from `BlockDatabase` array order by giving each chunk a **local palette** mapping
@@ -156,7 +156,7 @@ the changes below are dated rather than versioned.*
 
 ---
 
-**Last Updated:** 2026-07-26 (header added; "not implemented" re-verified in code)
+**Last Updated:** 2026-07-26 (header added; "not implemented" re-verified in code)  
 **Next Review:** before implementation — work the **Re-verify first** list above, then re-confirm the
 current chunk format version and migration-step chain. Also revisit whether the §6 variable-bit-width
 packing should land in the *same* format bump rather than a second one, since both rewrite the voxel

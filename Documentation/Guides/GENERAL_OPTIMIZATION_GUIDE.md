@@ -94,7 +94,7 @@ The CPU retrieves data from RAM in "cache lines." It loves reading data sequenti
 
 ### Loop Order (Cache Locality)
 
-To prevent "Cache Misses," your loops must strictly follow the memory layout.
+To prevent "Cache Misses," your loops must strictly follow the memory layout.  
 **Rule:** The **innermost** loop must match the variable with the *smallest multiplier* in your index formula.
 
 * **If Index = `x + (z * Width) + ...`**:

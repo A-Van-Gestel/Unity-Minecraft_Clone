@@ -113,7 +113,7 @@ cross-chunk BFS modifications that evaluate a non-zero sunlight level *must neve
 
 ### ~~09. Diagonal Shadow Artifacts on Smooth-Lit Legacy Rotated Blocks~~
 
-**Severity:** Low (cosmetic)
+**Severity:** Low (cosmetic)  
 **Fixed:** June 2026 **Status:** Resolved
 
 **Description:**
@@ -131,9 +131,9 @@ also: [Architecture doc Section 2.5.4](../Architecture/SMOOTH_AND_RGB_LIGHTING.m
 
 ### ~~10. Blocklight leaks into opaque volumes (woken surface-lit opaque voxels become BFS sources)~~
 
-**Severity:** Medium (visual-only inside solid terrain, but corrupted saved light data and compounded with every nearby edit)
-**Fixed:** June 2026 (was Bug 09 in `LIGHTING_BUGS.md`)
-**Status:** Resolved — confirmed in-game via the BlockLight `VoxelDebugVisualization`; guarded by validation suite baseline **B9** (promoted from known-bug repro scenario K09)
+**Severity:** Medium (visual-only inside solid terrain, but corrupted saved light data and compounded with every nearby edit)  
+**Fixed:** June 2026 (was Bug 09 in `LIGHTING_BUGS.md`)  
+**Status:** Resolved — confirmed in-game via the BlockLight `VoxelDebugVisualization`; guarded by validation suite baseline **B9** (promoted from known-bug repro scenario K09)  
 **Files:** `NeighborhoodLightingJob.cs` — `PropagateLightRGB`; `ChunkData.cs` — `ModifyVoxel` neighbor wake-up (~lines 497–512, wakes lit neighbors without an opacity check)
 
 **History:** Suspected since the original multithreaded/job-based lighting rewrite (visible in the BlockLight `VoxelDebugVisualization` mode), but never documented because lava was the only blocklight source and work focused on sky lighting. First captured deterministically by the validation suite's K07 oracle diffs (light stamped multiple voxels deep into the stone floor), then isolated as an independent defect.
@@ -154,7 +154,7 @@ the whole grid); it deliberately did not run a full oracle compare because the s
 
 ### ~~11. Cross-chunk emissive sources produce a hard cut-off (or flicker) at the chunk border~~
 
-**Severity:** High **Fixed:** June 2026 (was Bug 07 in `LIGHTING_BUGS.md`)
+**Severity:** High **Fixed:** June 2026 (was Bug 07 in `LIGHTING_BUGS.md`)  
 **Status:** Resolved — confirmed in-game (the hard cut-off no longer reproduces in a new world; the flicker required the cut-off defect, so it is resolved with it). Guarded by validation suite baselines **B10/B11/B12** (promoted from known-bug repro scenarios K07a/K07b/K07c); tripwire baseline **B7** (the blocklight removal race that depended on the old force-clear) stayed green through the fix. **Confidence:** Confirmed — the harness reproduced all three reported symptoms through the real job + the shared mod-apply logic, including light corruption
 stamped into opaque floor voxels during the ping-pong. **Files:** `NeighborhoodLightingJob.cs` — `Execute` (BlocklightBfsQueue seeding), `PropagateDarknessRGB`, `PropagateDarkness`, `PropagateLightRGB`, `CheckEdgeVoxelRGB`; `Helpers/CrossChunkLightModApplier.cs` — `ComputeBlocklight`; `WorldJobManager.cs` — `ProcessLightingJobs` (blocklight mod application)
 
@@ -181,8 +181,8 @@ channels owned by an independent source the emitting job never saw.
 
 ### ~~12. Broken emissive blocks leave permanent "ghost" blocklight (cross-chunk removal loss)~~
 
-**Severity:** Medium–High (ghost values got baked into saved region data — permanent world corruption until manually disturbed)
-**Fixed:** June 2026 (was Bug 08 in `LIGHTING_BUGS.md`)
+**Severity:** Medium–High (ghost values got baked into saved region data — permanent world corruption until manually disturbed)  
+**Fixed:** June 2026 (was Bug 08 in `LIGHTING_BUGS.md`)  
 **Status:** Resolved — path 2 (in-flight overwrite race) confirmed in-game via flowing lava at a chunk border while constant water updates kept the neighboring chunk's lighting jobs in flight, plus deterministic suite repro; guarded by validation suite baseline **B13** (promoted from known-bug scenario K08a) with tripwire **B7** (the blocklight twin of the race) green throughout. Path 1 (unloaded-neighbor degradation) is verified by code inspection only — no in-game repro is practical without command support (requires breaking a border lamp while its
 neighbor is unloaded), and the harness has no unload/save/load mirror. **Files:** `WorldJobManager.cs` — `ProcessLightingJobs` (defer/drain, per-channel dropped-mod handling), `ApplyCrossChunkLightMod`, `DrainDeferredCrossChunkMods`, `DegradeDeferredCrossChunkMods`; `Serialization/LightingStateManager.cs` — pending-blocklight store + `pending_blocklight.bin`; `World.cs` — `LoadOrGenerateChunk` replay; `Editor/Validation/Lighting/Framework/LightingTestWorld.cs` — defer/drain mirror
 
@@ -205,7 +205,7 @@ Breaking an emissive block sometimes left its light behind permanently; no later
 
 ### ~~13. Generated emissive blocks never seed the blocklight BFS (initial lighting)~~
 
-**Severity:** Medium **Fixed:** June 2026 (was Bug 06 in `LIGHTING_BUGS.md`)
+**Severity:** Medium **Fixed:** June 2026 (was Bug 06 in `LIGHTING_BUGS.md`)  
 **Status:** Resolved — confirmed in-game in a freshly generated world (the red-debug-lamp-as-forest-surface setup: generated lamps now illuminate their surroundings immediately at generation time). Guarded by validation suite baseline **B14** (promoted from known-bug repro scenario K06). ⚠️ *Old-world caveat:* worlds saved BEFORE this fix already carry the stamped-but-unpropagated lamp voxels in their light data, so the fix's trigger (stored light below emission) never fires for them — those lamps stay dark until a nearby block update wakes them, exactly
 the pre-fix behavior. Only newly generated chunks are healed. **Confidence:** Confirmed — reproduced in-game (June 2026) by setting the forest biome's surface block to the red debug lamp: no block lighting was generated at all (the masking by fluid-simulation light updates only applies to flowing lava). **Files:** `NeighborhoodLightingJob.cs` — `SyncEmissionToLightArray`, `Execute` (queue seeding); `Chunk.cs` — `OnDataPopulated`; `World.cs` — initial lighting scheduling (`RecalculateSunLightLight`)
 
@@ -221,7 +221,7 @@ path, keeping the scan linear.
 
 ### ~~14. Cross-chunk edge check leaks light out of opaque border blocks~~
 
-**Severity:** Low-Medium **Fixed:** June 2026 (was Bug 10 in `LIGHTING_BUGS.md`)
+**Severity:** Low-Medium **Fixed:** June 2026 (was Bug 10 in `LIGHTING_BUGS.md`)  
 **Status:** Resolved — confirmed via the validation suite (repros flipped red→green, all baselines green). Promoted to validation baselines **B43** (sunlight) and **B44** (blocklight) from known-bug repros K10a/K10b. **Confidence:** Confirmed by the validation framework; not separately reproduced in-game, but **no regression observed in-game** after the fix. Likely in-game manifestation: the diagonal over-bright / light-decrease band seen along chunk borders **at world height** in the ChunkBorder debug VoxelVisualization mode (the opaque heightmap
 surface sits exactly on the borders there, so its surface light leaked one voxel across each border — producing the cross-border diagonal pattern). **Found by:** the Bug-05 dense-canopy geometry fuzz (`LightingValidationSuite.Bug05Canopy.cs`), whose opaque under-canopy dividers sit on chunk borders and triggered the leak — the fuzz did not reproduce Bug 05 but surfaced this distinct defect. **Files:** `NeighborhoodLightingJob.cs` — `CheckEdgeVoxel`, `CheckEdgeVoxelRGB` (+ call sites in `CheckEdges` and `PropagateDarkness`)
 
@@ -241,7 +241,7 @@ Voxels just inside a chunk border ended up **over-bright** (more light than the 
 
 ### ~~15. Initial-load sunlight removal/re-placement oscillation across chunk seams (reload non-convergence)~~
 
-**Severity:** Medium-High **Fixed:** June 2026 (was Bug 11 in `LIGHTING_BUGS.md`)
+**Severity:** Medium-High **Fixed:** June 2026 (was Bug 11 in `LIGHTING_BUGS.md`)  
 **Status:** Resolved — confirmed in-game (the world that stalled now loads quickly with no stuck-light logging) AND via the validation suite (repro flipped red→green, all baselines green). Promoted to validation baseline **B48** from known-bug repro K11a. **Confidence:** Confirmed in-game and by the validation framework. **Found by:** a user-reported `ForceCompleteDataJobsCoroutine exceeded max iterations` error on reloading a recently-played world; root-caused with the gated `[LightingDiag]` startup-convergence instrumentation added to
 `World.ForceCompleteDataJobsCoroutine` / `WorldJobManager.ProcessLightingJobs`. **Files:** `CrossChunkLightModApplier.cs` (`ComputeSunlight`, new `InChunkSunlightSupport`), `WorldJobManager.cs` (`ApplyCrossChunkLightMod` apply site + diagnostics), `World.cs` (startup convergence diagnostics).
 
@@ -270,7 +270,7 @@ production `WorldJobManager.ApplyCrossChunkLightMod` and harness `LightingTestWo
 
 ### ~~16. Over-bright cross-seam sunlight loop survives source removal~~
 
-**Severity:** Medium **Fixed:** June 2026 (was Bug 12 in `LIGHTING_BUGS.md`)
+**Severity:** Medium **Fixed:** June 2026 (was Bug 12 in `LIGHTING_BUGS.md`)  
 **Status:** Resolved — confirmed via the validation suite (repro flipped red→green, all baselines green). Promoted to validation baseline **B53** from known-bug repro K12a, with over-correction tripwire **B50** and completeness baselines **B51** (asymmetric two-shaft) / **B52** (multi-hop ring), grouped in `Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug12.cs`. **Confidence:** Oracle-confirmed (validation framework). **Never observed in-game** — the artifact was identified from a harness oracle mismatch, not a player
 report — so confirmation rests on the borderless oracle rather than an in-game sighting. **Found by:** a harness oracle mismatch while building baseline **B49** (code-review finding 3): the end-to-end source-removal scenario could not isolate the opacity guard *because* this loop swallowed the removal, so B49 was implemented as a direct decision-logic test instead. **Files:** `NeighborhoodLightingJob.cs` (`PropagateDarkness` cross-seam removal emit + `IsVerticallySkyLit`, `EmitCrossChunkSunlightRemoval`, `LocalToGlobal`, per-job dedup); adjudicated by
 the reused Bug-11 veto `CrossChunkLightModApplier.ComputeSunlight` / `InChunkSunlightSupport`.
@@ -316,7 +316,7 @@ via `SetSunlight`'s cross-chunk path). These are pinned as completeness baseline
 
 ### ~~17. Large suspended opaque slab never settles (oscillating cross-chunk skylight)~~
 
-**Severity:** Medium **Fixed:** July 2026 (was Bug 13 in `LIGHTING_BUGS.md`)
+**Severity:** Medium **Fixed:** July 2026 (was Bug 13 in `LIGHTING_BUGS.md`)  
 **Status:** Resolved — confirmed in-game (fluid-stress run with an opaque `BlockIDs.Stone` floor at
 `REGION_CHUNKS ≥ 3`: the previously-endless flashing between the placed floor and fluid slabs is gone, the substrate settle completes, and higher region counts no longer hang) and via the validation suite (repro flipped red→green with all baselines green). Promoted to baselines **B56–B59** from known-bug repros K13a–K13d, grouped in
 `Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug13Slab.cs` (B58 dynamic-stamp is the primary fix tripwire — the deterministic pre-fix live-lock). **Found by:** player report from the fluid-stress benchmark; first faithful repro built as roadmap item **AS-1**
@@ -342,9 +342,9 @@ field, not the initial wave. Post-fix: all four green with every prior baseline 
 
 ### ~~18. Stale-snapshot cross-chunk sunlight ghost light survives dynamic multi-chunk darkening~~
 
-**Severity:** Medium **Fixed:** July 2026 (was Bug 14 in `LIGHTING_BUGS.md`)
+**Severity:** Medium **Fixed:** July 2026 (was Bug 14 in `LIGHTING_BUGS.md`)  
 **Status:** Resolved — confirmed in-game (fluid-stress run with an opaque Stone floor: the under-slab shadows begin patchy while the slab chunks are being stamped but now converge to correct shadow **before** the water cap is placed — previously they stayed patchy until that later edit rescued them) and via the validation suite (repro flipped red→green, all baselines green). Promoted to baselines **B60/B61** in
-`Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug14Ghost.cs` (B61 = the promoted K14a seed-1 repro; B60 = the halo-node claim-contract guard from the hotfix), and the B59 sweep was upgraded to assert the borderless oracle across its full 75-seed space (previously termination-only because of this bug). **Found by:** the Bug 13 (AS-1) seeded sweep — the same slab repro's terminating over-bright exit — and observed in-game during Bug 13's fix confirmation (patchy under-slab shadows that only settled after a later mass edit).
+`Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug14Ghost.cs` (B61 = the promoted K14a seed-1 repro; B60 = the halo-node claim-contract guard from the hotfix), and the B59 sweep was upgraded to assert the borderless oracle across its full 75-seed space (previously termination-only because of this bug). **Found by:** the Bug 13 (AS-1) seeded sweep — the same slab repro's terminating over-bright exit — and observed in-game during Bug 13's fix confirmation (patchy under-slab shadows that only settled after a later mass edit).  
 **Files:** `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` (`PullBackClaim` + the recording pull-back in
 `PropagateDarkness`), `Assets/Scripts/WorldJobManager.cs` (`VerifyPullBackClaims`, `LastStalePullBacksCleared`),
 `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs` (`PullBackClaimStillSupported`), mirrored in
@@ -377,7 +377,7 @@ budget 2, cadence 1, shuffled completion — settled ~57.6k voxels over-bright p
 
 ### ~~19. Cross-chunk sunlight surface stamp permanently lost after a border-column edit~~
 
-**Severity:** Medium **Fixed:** July 2026 (was Bug 15 in `LIGHTING_BUGS.md`)
+**Severity:** Medium **Fixed:** July 2026 (was Bug 15 in `LIGHTING_BUGS.md`)  
 **Status:** Resolved — confirmed in-game (hand-built 2-thick seam wall whose face voxels' only air exposure is across the boundary: in the pre-fix build the cap placement dropped the stored face values to 0 — visible in the F3 readout and as black columns in the F7 `VoxelDebugVisualization` sky view — while the fixed build holds 14, with 13 on faces fed by a dimmed 14-column, exactly the spec) and via the validation suite (K15b/K15c red→green, fuzz stamp seeds 0/9/12/19 green, all baselines green). Promoted to baselines **B62/B63** in
 `Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug15Stamp.cs`. **Found by:** the HF-3 border-heightmap fuzz (K15a), on its very first seed. The fuzz's one remaining red (seed 14) is **Bug 05's edge-round exhaustion**, a different mechanism — see the Bug 05 entry in
 `LIGHTING_BUGS.md` for the first faithful synchronous repro this fuzz also produced. **Files:** `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` (`CheckEdgeVoxel`, `CheckEdgeVoxelRGB`, BFS seeding,
@@ -409,7 +409,7 @@ flipped red→green and were promoted to **B62/B63**; the border-heightmap fuzz 
 
 ### ~~20. Persistent chunk-border shadow patches in dense biomes (post-edit edge-round exhaustion)~~
 
-**Severity:** Medium **Fixed:** July 2026 (was Bug 05 in `LIGHTING_BUGS.md` — the oldest open lighting bug)
+**Severity:** Medium **Fixed:** July 2026 (was Bug 05 in `LIGHTING_BUGS.md` — the oldest open lighting bug)  
 **Status:** Resolved — confirmed in-game (a freshly generated dense-forest world no longer shows the persistent dark patches under overlapping canopies near freshly-generated chunk borders that previously needed a world reload to clear) and via the validation suite (K15a seed 14 red→green, all baselines green). Promoted from known-bug repro **K15a** to baseline **B64**
 (`Assets/Editor/Validation/Lighting/LightingValidationSuite.BorderHeightFuzz.cs`). **Found by:** long-standing player-reported symptom (dense forest biomes); the first faithful synchronous repro was the HF-3 border-heightmap fuzz's seed 14 (2026-07-05), after the geometry-axis fuzzes (B8 diagonal well, B42 dense-canopy) both converged and the "not synchronously reproducible" verdict had stood since June
 
@@ -442,8 +442,8 @@ neutering the re-grant re-reds seed 14 and only seed 14. All 56 baselines green.
 
 ### ~~21. Runaway lighting job loop → OOM after breaking a blocklight source near a chunk border~~
 
-**Severity:** High (editor/game/OS crash via out-of-memory)
-**Fixed:** July 2026 (was Bug 16 in `LIGHTING_BUGS.md`; found, root-caused, fixed and confirmed 2026-07-11)
+**Severity:** High (editor/game/OS crash via out-of-memory)  
+**Fixed:** July 2026 (was Bug 16 in `LIGHTING_BUGS.md`; found, root-caused, fixed and confirmed 2026-07-11)  
 **Status:** Resolved — confirmed in-game (20+ RGB blocklight place/break cycles in the same world and location where the OOM originally struck, no freeze/memory growth/`[LightingJob DIAG]` errors) and via the validation suite. Promoted from known-bug repro **K16a** to baseline **B87**, alongside the simple-form guard/over-correction tripwire **B86**
 (`Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug16Runaway.cs`).
 
@@ -477,8 +477,8 @@ BFS queues without bound inside one `Execute()` (Editor.log: Burst-job NREs at t
 
 ### ~~22. Sourceless RGB ghost-light island survives interrupted cross-seam removal (no RGB removal veto)~~
 
-**Severity:** Low-Medium (visual artifact: a faint sourceless color tint — observed R ≤ 3/15 — near chunk seams after rapid lamp place/break; stable, but self-heals on any full relight, e.g. save/reload)
-**Fixed:** July 2026 (was Bug 17 in `LIGHTING_BUGS.md`; found 2026-07-11 as Bug 16's post-fix residue, fixed and oracle-confirmed 2026-07-12)
+**Severity:** Low-Medium (visual artifact: a faint sourceless color tint — observed R ≤ 3/15 — near chunk seams after rapid lamp place/break; stable, but self-heals on any full relight, e.g. save/reload)  
+**Fixed:** July 2026 (was Bug 17 in `LIGHTING_BUGS.md`; found 2026-07-11 as Bug 16's post-fix residue, fixed and oracle-confirmed 2026-07-12)  
 **Status:** Resolved — confirmed via the validation suite (repro K17a flipped red→green, all baselines green); oracle-only confirmation (never knowingly observed in-game — in-game footprint would be a faint colored tint near a seam that disappears on reload, per the Bug 12 archive precedent, #16). Promoted from known-bug repro **K17a** to baseline **B88** (`Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug16Runaway.cs`, which shares the Bug 16 geometry + cycling recipe); B87's plain oracle compare restored in the same
 change.
 
@@ -504,9 +504,9 @@ with no orphan. (An opaque neighbor contributes only its own emission, mirroring
 
 ### ~~23. Sourceless RGB blocklight loop survives when equal-color seam sources are removed in the same wave~~
 
-**Severity:** Medium (visual artifact: a stable, sourceless over-bright colored residue straddling a chunk seam after equal-color lamps are removed together; self-heals on any full relight — the RGB mirror of Bug 12's sky loop)
+**Severity:** Medium (visual artifact: a stable, sourceless over-bright colored residue straddling a chunk seam after equal-color lamps are removed together; self-heals on any full relight — the RGB mirror of Bug 12's sky loop)  
 **Fixed:** July 2026 (was Bug 18 in `LIGHTING_BUGS.md`; predicted by the post-Bug-17 sky↔RGB parity audit
-[fidelity finding C10], then reproduced deterministically, fixed, and oracle-confirmed 2026-07-12)
+[fidelity finding C10], then reproduced deterministically, fixed, and oracle-confirmed 2026-07-12)  
 **Status:** Resolved — confirmed via the validation suite (repro K18a flipped red→green, all baselines green, prove-red confirms only the guard reds when the initiator is neutered). Oracle-only confirmation (the borderless
 `LightingOracle` is trusted as ground truth; never knowingly observed in-game, per the Bug 12/17 colored-residue precedent). Promoted from known-bug repro **K18a** to baseline **B90**
 (`Assets/Editor/Validation/Lighting/LightingValidationSuite.C10RgbLoop.cs`).
@@ -532,9 +532,9 @@ clears. No apply-side change was needed (that infra shipped with Bug 17). The Bu
 
 ### ~~24. Far-Lands sunlight column recalc crash — negative heightmap index beyond ±2²⁴~~
 
-**Severity:** Low (only reachable past the noise-degradation threshold)
-**Files:** `WorldData.cs`, `WorldJobManager.cs`, `Helpers/SunlightColumnRouting.cs` (new), `ChunkCoord.cs`, `World.cs`
-**Reported:** July 2026 (logged 2026-07-18 during CMD-2 `/teleport` far verification, ±2×10⁷)
+**Severity:** Low (only reachable past the noise-degradation threshold)  
+**Files:** `WorldData.cs`, `WorldJobManager.cs`, `Helpers/SunlightColumnRouting.cs` (new), `ChunkCoord.cs`, `World.cs`  
+**Reported:** July 2026 (logged 2026-07-18 during CMD-2 `/teleport` far verification, ±2×10⁷)  
 **Fixed:** July 2026 (2026-07-19, in-game confirmed same day — including at the ±2³¹ edge)
 
 **Symptom:** Teleporting beyond ±2²⁴ voxels produced repeated Burst `IndexOutOfRangeException`s from
@@ -765,7 +765,7 @@ Sections are walked whole, so an all-air span costs one null check rather than 2
 ### ~~01. `ChunkCoord` integer division truncates negative coordinates incorrectly~~
 
 **Severity:** Bug (latent)  
-**Files:** `Chunk.cs` — `ChunkCoord`
+**Files:** `Chunk.cs` — `ChunkCoord`  
 **Fixed:** March 2026
 
 **Root Cause:** `FromVoxelOrigin` and `FromWorldPosition` used raw integer division (`pos.x / VoxelData.ChunkWidth`) without `Mathf.FloorToInt`. In C#, integer division truncates toward zero instead of stepping down to the correct negative grid coordinate.
@@ -824,7 +824,7 @@ Sections are walked whole, so an all-air span costs one null check rather than 2
 
 ### ~~06. Chunk load animation adds `GetComponent` on every activation and loops on modify~~
 
-**Severity:** Improvement (performance) & Bug **Files:** `Chunk.cs` — `PlayChunkLoadAnimation`, `ChunkLoadAnimation.cs`
+**Severity:** Improvement (performance) & Bug **Files:** `Chunk.cs` — `PlayChunkLoadAnimation`, `ChunkLoadAnimation.cs`  
 **Fixed:** March 2026
 
 **Root Cause:** `GetComponent<ChunkLoadAnimation>()` was called on each pool activation. A primitive boolean flag was previously attempted, but it could become stale if the component were destroyed. Furthermore, applying animations from the pool caused a 1-frame visual flash, and subsequent chunk modifications re-triggered the upward animation natively since it hooked into mesh generation.
@@ -839,8 +839,8 @@ Sections are walked whole, so an all-air span costs one null check rather than 2
 
 ### ~~07. `_chunksToBuildMesh` uses `List.Remove()` / `Insert(0)` / `RemoveAt(i)` which are O (n)~~
 
-**Severity:** Improvement (performance)
-**Files:** `World.cs` — `RequestChunkMeshRebuild`, mesh scheduling loop, `CheckViewDistance`, `UnloadChunks`; new `Helpers/MeshBuildQueue.cs`
+**Severity:** Improvement (performance)  
+**Files:** `World.cs` — `RequestChunkMeshRebuild`, mesh scheduling loop, `CheckViewDistance`, `UnloadChunks`; new `Helpers/MeshBuildQueue.cs`  
 **Fixed:** July 2026 (MT-1)
 
 **Root Cause:** The mesh-rebuild queue was a `List<Chunk>` used as a priority queue. Front-insertion for immediate requests (`Insert(0)`), mid-list removal in the scheduling drain (`RemoveAt(i)`), and by-value removal on unload (`Remove(chunk)`) are all O (n) shifts/scans. Under a large meshing backlog (rapid player movement, streaming) the per-frame drain went quadratic. The companion `HashSet` only made *duplicate detection* O (1); the ordered list operations stayed slow.
@@ -970,9 +970,9 @@ which also tags solid Oak Leaves (every genuinely replaceable plant is also `REP
 
 ### ~~03. Far-Lands Voxel Modification Broken — Placement/Breaking Fail Near the ±2³¹ Edge~~
 
-**Severity:** Low (far-lands only; normal-play range unaffected)
-**Files:** `PlacementController.cs`, `PlayerInteraction.cs`, `World.cs` (`ApplyModifications`), `Commands/` (`/setblock`)
-**Reported:** July 2026 (logged 2026-07-19 during the Bug 19 far-coordinate verification session, BEFORE commit `ed8cb69` landed)
+**Severity:** Low (far-lands only; normal-play range unaffected)  
+**Files:** `PlacementController.cs`, `PlayerInteraction.cs`, `World.cs` (`ApplyModifications`), `Commands/` (`/setblock`)  
+**Reported:** July 2026 (logged 2026-07-19 during the Bug 19 far-coordinate verification session, BEFORE commit `ed8cb69` landed)  
 **Fixed:** July 2026 (resolved by `ed8cb69`; re-test confirmed 2026-07-19 — no code change of its own)
 
 **Symptom (observed pre-`ed8cb69`):** Near the ±2³¹ voxel edge (possibly earlier): the placement highlight never rendered (only the breakage highlight), breaking did nothing, placing decremented the hotbar without changing the world (the `VoxelMod` enqueued at interaction time, then misrouted at apply time), and `/setblock` placed its block at a drifted cell.
@@ -989,7 +989,7 @@ end-to-end). The original observations may also have been compounded by chunks p
 
 ### ~~02. `ProcessGenerationJobs` always uses `biomes[0]` for flora generation~~
 
-**Severity:** Bug **Files:** `WorldJobManager.cs` -> (Now handled by `IChunkGenerator.ExpandFlora`)
+**Severity:** Bug **Files:** `WorldJobManager.cs` -> (Now handled by `IChunkGenerator.ExpandFlora`)  
 **Fixed:** April 2026
 
 **Symptom:** In a multi-biome world, trees in non-default biomes received incorrect height distributions because the code hardcoded `_world.biomes[0].minHeight`. **Root Cause:** During chunk generation, tree flora placement logic always evaluated the 0-th index biome definition rather than checking the local biome at the tree's physical coordinates. **Fix:** Resolved during the Modular World Generation refactor. `WorldJobManager` now delegates this to `IChunkGenerator.ExpandFlora()`, which internally resolves the correctly mapped biome per local
@@ -1032,7 +1032,7 @@ coordinate before handing off constraints to the `Structure` generator.
 ### ~~06. `WorldData.GetLocalVoxelPositionInChunk` uses `(int)` cast instead of `FloorToInt`~~
 
 **Severity:** Bug (latent)  
-**Files:** `WorldData.cs` — `GetLocalVoxelPositionInChunk`
+**Files:** `WorldData.cs` — `GetLocalVoxelPositionInChunk`  
 **Fixed:** March 2026
 
 **Symptom:** Yielded incorrect chunk boundary voxel references for negative world coordinates. **Root Cause:** The method used an `(int)` cast which truncates toward zero, producing wrong results for negative coordinates. **Fix:** Both `x` and `z` components now use `Mathf.FloorToInt()`. The `y` component retains the `(int)` cast since Y is always non-negative.
@@ -1111,7 +1111,7 @@ coordinate before handing off constraints to the `Structure` generator.
 ### ~~01. Collision only checks at two height levels (feet and +1)~~
 
 **Severity:** Bug  
-**Files:** `Player.cs`, `Physics/VoxelRigidbody.cs`
+**Files:** `Player.cs`, `Physics/VoxelRigidbody.cs`  
 **Fixed:** March 2026
 
 **Root Cause:** The horizontal collision properties only checked at two Y levels. **Fix:** Encapsulated player physics into `VoxelRigidbody` and implemented dynamic AABB sweeping across the entity's full `entityHeight`.
@@ -1121,7 +1121,7 @@ coordinate before handing off constraints to the `Structure` generator.
 ### ~~02. Collision checks don't account for player width in the cross-axis~~
 
 **Severity:** Bug  
-**Files:** `Player.cs`, `Physics/VoxelRigidbody.cs`
+**Files:** `Player.cs`, `Physics/VoxelRigidbody.cs`  
 **Fixed:** March 2026
 
 **Root Cause:** Each directional collision check sampled a single line, causing clipping on diagonal movement. **Fix:** `VoxelRigidbody` now sweeps an axis-aligned bounding box face dynamically.
@@ -1131,7 +1131,7 @@ coordinate before handing off constraints to the `Structure` generator.
 ### ~~03. Raycast-based block placement can be incorrect on exact voxel edges~~
 
 **Severity:** Bug (latent)  
-**Files:** `PlayerInteraction.cs` — `RaycastForVoxel`
+**Files:** `PlayerInteraction.cs` — `RaycastForVoxel`  
 **Fixed:** March 2026
 
 **Root Cause:** The block placement used modulo `% 1` which failed on negative coordinates. **Fix:** Rewrote `RaycastForVoxel` to use a robust previous-step integer coordinate tracking method.
@@ -1141,7 +1141,7 @@ coordinate before handing off constraints to the `Structure` generator.
 ### ~~04. Block placement overlap check only covers 2 voxels of player height~~
 
 **Severity:** Bug  
-**Files:** `PlayerInteraction.cs` — `PlaceCursorBlocks`
+**Files:** `PlayerInteraction.cs` — `PlaceCursorBlocks`  
 **Fixed:** March 2026
 
 **Root Cause:** The placement validity check only checked `y` and `y+1`, ignoring actual `playerHeight`. **Fix:** Replaced hardcoded checks with a dynamic AABB intersection check against the placed voxel's bounds.
@@ -1185,10 +1185,10 @@ coordinate before handing off constraints to the `Structure` generator.
 
 ### ~~08. Player embeds in a block after landing and can no longer jump~~
 
-**Severity:** High — the player is stranded; escape requires a debug capability (flight/noclip)
-**Fixed:** August 2026
-**Status:** Resolved — confirmed in game 2026-08-03. *Confirmation caveat: the in-game session was short (a minute or two of repeated falls) against a bug that fired on roughly a third of fast landings, so the durable evidence is the deterministic harness repro, not the play session.*
-**Guarded by:** `B20`–`B23` in the `NS-4` suite (`Minecraft Clone/Dev/Validate Physics Solver`), promoted from the `K04a`–`K04d` reproductions; `B18`/`B19` bound the fix from the other side.
+**Severity:** High — the player is stranded; escape requires a debug capability (flight/noclip)  
+**Fixed:** August 2026  
+**Status:** Resolved — confirmed in game 2026-08-03. *Confirmation caveat: the in-game session was short (a minute or two of repeated falls) against a bug that fired on roughly a third of fast landings, so the durable evidence is the deterministic harness repro, not the play session.*  
+**Guarded by:** `B20`–`B23` in the `NS-4` suite (`Minecraft Clone/Dev/Validate Physics Solver`), promoted from the `K04a`–`K04d` reproductions; `B18`/`B19` bound the fix from the other side.  
 **Files:** `Assets/Scripts/Physics/VoxelRigidbody.cs` (`ResolveMovement`), `World.CheckPhysicsCollision`
 
 **Description (user-observed in game, 2026-08-03):**
@@ -1338,8 +1338,8 @@ frame API or switching to `K4os.Compression.LZ4`; any world saved while 0.6.1 wa
 
 ### ~~04. `ChunkSerializer.Serialize` throws `ObjectDisposedException` with `CompressionAlgorithm.None` (worlds on None could never save)~~
 
-**Severity:** Bug (total save failure for one supported setting)
-**Files:** `ChunkSerializer.cs` — `Serialize`, `CompressionFactory.cs` — `CreateOutputStream`
+**Severity:** Bug (total save failure for one supported setting)  
+**Files:** `ChunkSerializer.cs` — `Serialize`, `CompressionFactory.cs` — `CreateOutputStream`  
 **Fixed:** 2026-07-22 (found by the CP-3 `Validate Deserialization Robustness` suite's first run)
 
 **Symptom:** Every chunk save with `saveCompression = None` threw

@@ -1,11 +1,11 @@
 # Block Behavior Tick Architecture
 
-**Version:** 2.0
-**Date:** 2026-07-26
+**Version:** 2.0  
+**Date:** 2026-07-26  
 **Status:** **Implemented (Stable)** — the whole TG-4 arc (Phases 0–4b + the Y-band optimization) is shipped,
 in-game confirmed, and its rollback flags were retired in the 2026-07-23 cleanup, so the parallel Y-band halo
 tick is now the **only** tick path. Promoted from `Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md` 2026-07-26 and
-restructured to describe the system as built; the phase-by-phase execution record is preserved in **Appendix A**.
+restructured to describe the system as built; the phase-by-phase execution record is preserved in **Appendix A**.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > How **active-voxel block behaviors** (fluids and grass) are stored, ticked, and drained in the voxel engine.
@@ -624,7 +624,7 @@ the ones any future tick-path change must address.*
 
 ---
 
-**Last Updated:** 2026-07-26 (promoted to `Architecture/` and restructured as an as-built system description)
+**Last Updated:** 2026-07-26 (promoted to `Architecture/` and restructured as an as-built system description)  
 **Next Review:** if a third behavior family is added (§7 — the collection layout assumes exactly Grass + Fluid), if a
 profile ever shows grass costing a frame (§2.3), or if P-2 Layer 2 is built for the lighting/meshing/world-scaling
 reasons and this tick path could be simplified onto it (§3.2).

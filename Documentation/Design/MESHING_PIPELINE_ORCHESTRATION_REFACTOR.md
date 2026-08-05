@@ -693,7 +693,7 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 >   testable was cheapest here and nowhere else. `MeshCompletionDriver` moved out of `WorldJobManager` into
 >   `Helpers/MeshCompletionDriver.cs` as a **public** class (the editor assembly cannot see `Assembly-CSharp`
 >   internals) taking an `IMeshCompletionHost`; `WorldJobManager` implements the host on `this` (the
->   `IMeshDrainHost`/`World` pattern), and the ctor line is unchanged.
+>   `IMeshDrainHost`/`World` pattern), and the ctor line is unchanged.  
 >   **The probes deliberately did NOT move onto the interface:** an interface member cannot be
 >   `[Conditional]`, so routing `CountMeshMerge` through the host would have resurrected exactly the machinery
 >   the 2026-07-25 review round removed from release builds. It stays inside the production `TryApplyMesh`
@@ -851,7 +851,7 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 >   behind an explicit `INeighborMapSource` on `WorldJobManager` (explicit keeps the `ChunkCoord` wrappers out
 >   of the class's overload set and undiscoverable on a `World.Instance.JobManager` reference — it prevents
 >   accidents, not misuse: the interface is public, so a cast still reaches a pooled rent).
->   B39 asserts all 16 slots with a marker-per-coordinate fake.
+>   B39 asserts all 16 slots with a marker-per-coordinate fake.  
 >   **Prove-red doubles as the gap's proof:** transposing N/S reds only B39, with the other 38 meshing
 >   baselines *and all 88 lighting baselines* green.
 > - `Validate Meshing` 36 → **39**, `Mesh Build Queue` 9/9, **`Validate All` 346 → 349/349** (16 suites).

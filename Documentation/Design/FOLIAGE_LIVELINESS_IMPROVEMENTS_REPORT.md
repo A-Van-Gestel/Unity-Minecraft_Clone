@@ -1,11 +1,11 @@
 # Foliage & Flora Liveliness Improvements Report
 
-**Version:** 1.2
-**Date:** 2026-07-19
+**Version:** 1.2  
+**Date:** 2026-07-19  
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.
 Shipped and archived so far: **FL-1 wind sway** (v1.1) and **FL-2 leaf shimmer + the coherent
 traveling-wave sway model** (v1.2), both 2026-07-19, in-game verified — the "What exists today"
-table below is the substrate every remaining sway item (FL-8) builds on.
+table below is the substrate every remaining sway item (FL-8) builds on.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The master backlog for making the **grass / foliage layer feel alive** in the VoxelEngine —
@@ -346,5 +346,5 @@ RF-1 effective-light queries; TG-4 cleanup (pending) touches the same scheduler.
 
 ---
 
-**Last Updated:** 2026-07-19
+**Last Updated:** 2026-07-19  
 **Next Review:** when FL-4 starts (re-verify the shipped-substrate table against `VoxelMeshHelper`/`VoxelCommon.hlsl`) or on the next gap sweep

@@ -1,7 +1,7 @@
 # Third-Party Library Ideas Report
 
-**Version:** 1.0
-**Date:** 2026-08-05
+**Version:** 1.0  
+**Date:** 2026-08-05  
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.
 
 > Techniques harvested from an evaluation of the Cysharp library suite (ZString, ZLinq,
@@ -350,6 +350,6 @@ update it if the batch output format changes. `VALIDATION_SUITE_COVERAGE_ROADMAP
 
 ---
 
-**Last Updated:** 2026-08-05
+**Last Updated:** 2026-08-05  
 **Next Review:** When a profiler capture is next taken on the chunk streaming path (gates `TP-1`
 and `TP-4`), or when the settings/HUD binding layer grows enough to revisit R3 (§2).

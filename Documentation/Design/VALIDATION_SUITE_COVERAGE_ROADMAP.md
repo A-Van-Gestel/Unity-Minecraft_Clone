@@ -1,10 +1,10 @@
 # Validation Suite Coverage Roadmap — Uncovered Systems, Ranked
 
-**Version:** 1.0
-**Date:** 2026-07-02
+**Version:** 1.0  
+**Date:** 2026-07-02  
 **Status:** **Living backlog.** `NS-4` and `NS-5` are ✅ complete (NS-4 2026-08-03; NS-5 at the CP-2 close-out) and
 `NS-1` is partially seeded (CP-3's robustness slice); `NS-2`, `NS-3` and `NS-6` remain proposals. Existing-coverage
-counts are re-verified against a real `Validate All` run each time they are touched.
+counts are re-verified against a real `Validate All` run each time they are touched.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > Which systems currently have **no validation suite** and deserve one, ranked most → least
@@ -218,6 +218,6 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-04 (`PH-2`: `B26` pins that `CalculateVelocity` resolves the substep chain without writing the transform — proven red by restoring the staged writes, which reddened **only** B26 because re-staging is behavior-neutral; census verified at 411 baselines / 17 suites, Physics Solver 25 → 26)
+**Last Updated:** 2026-08-04 (`PH-2`: `B26` pins that `CalculateVelocity` resolves the substep chain without writing the transform — proven red by restoring the staged writes, which reddened **only** B26 because re-staging is behavior-neutral; census verified at 411 baselines / 17 suites, Physics Solver 25 → 26)  
 **Next Review:** whenever a suite is added or a `Validate All` count changes — the existing-coverage
 paragraph is the one part of this document that goes stale silently.

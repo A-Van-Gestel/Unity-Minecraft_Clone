@@ -35,8 +35,8 @@ The `_fileLock` works correctly to prevent save data corruption but adds massive
 
 ## 04. Fixed 256 KB serialization buffer can overflow on dense chunks with large pending light queues
 
-**Severity:** Bug (silent data loss)
-**Confidence:** High (mechanism verified by code inspection; likelihood in normal play is low–medium)
+**Severity:** Bug (silent data loss)  
+**Confidence:** High (mechanism verified by code inspection; likelihood in normal play is low–medium)  
 **Files:** `SerializationBufferPool.cs` (BUFFER_SIZE), `ChunkSerializer.cs` — `Serialize`, `WriteChunkInternal`, `WriteLightQueue`, `ChunkStorageManager.cs` — `SaveChunk` / `SaveChunkAsync`
 
 `ChunkSerializer.Serialize` writes into a **non-expandable** `MemoryStream(outputBuffer)` over a pooled fixed 256 KB buffer. The worst-case uncompressed chunk payload is ~197 KB (8 sections × flag 0x01 = voxels 16 KB + LightData 8 KB each, plus header/heightmap/bitmask), leaving only ~65 KB of headroom. The pending BFS light queues are serialized **without any count cap** at 16 bytes per node — roughly **4,000 queued nodes across both queues exhaust the buffer**. When that happens, `MemoryStream` throws `NotSupportedException`, the exception is caught
@@ -52,8 +52,8 @@ Most realistic trigger: chunks at the edge of the load area accumulate queue ent
 
 ## 05. `WriteChunkInternal` "snapshot" of `SectionUniformSkyLevel` is a reference copy, not a value copy
 
-**Severity:** Latent race condition (currently unreachable in normal flow)
-**Confidence:** Medium (race window verified, but current call patterns avoid it)
+**Severity:** Latent race condition (currently unreachable in normal flow)  
+**Confidence:** Medium (race window verified, but current call patterns avoid it)  
 **Files:** `ChunkSerializer.cs` — `WriteChunkInternal` (line ~135), `ChunkStorageManager.cs` — `SaveChunk`, `WorldJobManager.cs` — `TryCompactSectionLight`
 
 `WriteChunkInternal` contains `byte[] skyLevels = data.SectionUniformSkyLevel;` with a comment claiming a *"value copy is safe for the background thread"* — but this copies the **array reference**, not the values. If the main thread mutates `SectionUniformSkyLevel` (e.g. `TryCompactSectionLight` after a lighting job, or `PromoteCompactSection` on a block edit) while a background thread serializes the **live** `ChunkData`, the bitmask phase and the section-write phase can observe different values. Worst case: a slot is included in the bitmask as a compact
@@ -67,8 +67,8 @@ light-only section (`safeSections[i] == null`, sky set), then the sky level flip
 
 ## 06. Deserialization failure leaks pooled objects
 
-**Severity:** Minor (pool churn, no crash)
-**Confidence:** High
+**Severity:** Minor (pool churn, no crash)  
+**Confidence:** High  
 **Files:** `ChunkSerializer.cs` — `ReadChunkInternal`, `ReadSectionWithFlag`
 
 When `ReadChunkInternal` throws mid-read (corrupt/truncated chunk), the `ChunkData` obtained from `World.Instance.ChunkPool.GetChunkData(...)` and all **sections already read into it** are abandoned — `Deserialize` catches the exception and returns null without returning them to the pool. The per-section `try/catch` in `ReadSectionWithFlag` only returns the section currently being read. The objects are GC-reclaimed, so this is pool-efficiency churn rather than a leak, but on a save with many corrupt chunks it defeats the pooling.
@@ -79,8 +79,8 @@ When `ReadChunkInternal` throws mid-read (corrupt/truncated chunk), the `ChunkDa
 
 ## 07. RegionFile robustness niggles (grouped)
 
-**Severity:** Minor / Robustness
-**Confidence:** High (verified by inspection); each item is low impact
+**Severity:** Minor / Robustness  
+**Confidence:** High (verified by inspection); each item is low impact  
 **Files:** `RegionFile.cs`
 
 1. **Partial reads treated as corruption:** `LoadChunkData` issues single `_fileStream.Read(...)` calls and returns null when fewer bytes than requested arrive. `FileStream` on local disks practically always fills the buffer, but a read-exact loop (like `ChunkSerializer.ReadBulkData`) would make this airtight.
@@ -92,8 +92,8 @@ When `ReadChunkInternal` throws mid-read (corrupt/truncated chunk), the `ChunkDa
 
 ## 08. `LightingStateManager.AddPending` logs invalid columns but stores them anyway
 
-**Severity:** Minor
-**Confidence:** High
+**Severity:** Minor  
+**Confidence:** High  
 **Files:** `LightingStateManager.cs` — `AddPending` (lines ~38–57)
 
 The validation loop only `Debug.LogError`s out-of-range local columns; the subsequent add loop inserts **all** columns including invalid ones. On `Save()` they are byte-truncated (`(byte)col.x`), and on `Load()` the truncated values may pass validation and queue sunlight recalcs for the wrong columns. Fix: `continue`/skip invalid columns in the add loop (or validate-and-skip in one pass).
@@ -102,8 +102,8 @@ The validation loop only `Debug.LogError`s out-of-range local columns; the subse
 
 ## 09. Loading a world with an unreadable `level.dat` has no failure contract — the player spawns unplaced
 
-**Severity:** Minor (edge case) / Missing failure contract
-**Confidence:** High (found by static reading during the SP-1 refactor; not observed in-game)
+**Severity:** Minor (edge case) / Missing failure contract  
+**Confidence:** High (found by static reading during the SP-1 refactor; not observed in-game)  
 **Files:** `World.cs` — `StartWorld` load block; `Spawn/SpawnResolution.cs` — `Classify`
 
 `StartWorld` guards the metadata read (`if (metadata != null)`) but the spawn classification does not: a world opened

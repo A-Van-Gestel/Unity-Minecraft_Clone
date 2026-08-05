@@ -1,9 +1,9 @@
 # Architectural Analysis: Region File Thread Safety & Concurrency
 
-**Version:** 1.0
-**Date:** 2026-07-26
+**Version:** 1.0  
+**Date:** 2026-07-26  
 **Status:** **Proposed design — not implemented.** `RegionFile` still serializes *all* I/O behind one
-exclusive lock; none of the strategies below has been built.
+exclusive lock; none of the strategies below has been built.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > Why `RegionFile`'s single global lock is a load-path bottleneck, and the options for relaxing it
@@ -62,7 +62,7 @@ If we want to allow concurrent writes to different parts of the region file, we 
 
 ### 3. The Hybrid Approach: Concurrent Reads + Queued/Serialized Writes (Best Balance)
 
-Given that writes involve metadata updates (Sector map, offsets table) and potentially expanding the file's length, fully concurrent writes are highly complex and prone to edge-case corruption (e.g., two chunks requesting free sectors simultaneously).
+Given that writes involve metadata updates (Sector map, offsets table) and potentially expanding the file's length, fully concurrent writes are highly complex and prone to edge-case corruption (e.g., two chunks requesting free sectors simultaneously).  
 **The most robust solution:**
 
 - **Reads:** Fully concurrent using a pool of `FileStream` objects (or `FileOptions.Asynchronous` with `RandomAccess` in newer .NET versions).
@@ -109,7 +109,7 @@ Document History convention, so they record what the commits changed, not contem
 
 ---
 
-**Last Updated:** 2026-07-26 (header added; premise re-verified against `RegionFile.cs`)
+**Last Updated:** 2026-07-26 (header added; premise re-verified against `RegionFile.cs`)  
 **Next Review:** when `SL-4` is scheduled — re-verify the §Background lock inventory against
 `RegionFile.cs` first, and confirm whether `System.IO.RandomAccess` is actually available on the
 project's API compatibility level (§4 assumes it may be, and never confirmed it).

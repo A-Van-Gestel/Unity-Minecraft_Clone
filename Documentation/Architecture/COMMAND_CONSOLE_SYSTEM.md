@@ -1,8 +1,8 @@
 # Command Console System
 
-**Version:** 1.13
-**Date:** 2026-07-26
-**Status:** **Implemented (Stable)** — the v1 arc (CMD-0..3), **CMD-4 relative `~` coordinates** (§8.2), and **CMD-5 tab autocomplete + PowerShell-style inline ghost suggestion** (§8.3) are all shipped and in-game confirmed. Guarded by the `Validate Command Console` suite (**54** baselines; see [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md) for live aggregate counts). Promoted from `Design/` 2026-07-26. §7 and §8.1–§8.3 are retained as **as-built records**; §8's table is the live extension roadmap — the remaining v2/v3+ rows (selectable/copyable output, chat, entity selectors, permissions) are deferred wishes, each owed a design pass when it becomes concrete.
+**Version:** 1.13  
+**Date:** 2026-07-26  
+**Status:** **Implemented (Stable)** — the v1 arc (CMD-0..3), **CMD-4 relative `~` coordinates** (§8.2), and **CMD-5 tab autocomplete + PowerShell-style inline ghost suggestion** (§8.3) are all shipped and in-game confirmed. Guarded by the `Validate Command Console` suite (**54** baselines; see [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md) for live aggregate counts). Promoted from `Design/` 2026-07-26. §7 and §8.1–§8.3 are retained as **as-built records**; §8's table is the live extension roadmap — the remaining v2/v3+ rows (selectable/copyable output, chat, entity selectors, permissions) are deferred wishes, each owed a design pass when it becomes concrete.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > An in-game command console (Minecraft-chat-style: `T` opens a left-anchored panel with
@@ -664,5 +664,5 @@ argument-completion tests — confirmed (reused by B50/B52).
 
 ---
 
-**Last Updated:** 2026-07-21
+**Last Updated:** 2026-07-21  
 **Next Review:** the whole planned CMD arc (CMD-0..5) has shipped. The remaining §8 items (selectable/copyable output, chat on the unprefixed namespace, entity selectors, `/fill`, and the deferred long-line ghost-alignment guard) each still need their own design pass before scheduling.

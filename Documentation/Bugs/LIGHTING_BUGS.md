@@ -15,7 +15,7 @@ This document outlines **open** bugs related to the current lighting implementat
 
 ## Bug 09: Cross-Chunk Blocklight Lost on Rapid Place/Break at Chunk Border
 
-**Severity:** Medium-High
+**Severity:** Medium-High  
 **Status:** Open
 
 **Description:**

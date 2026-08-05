@@ -12,6 +12,7 @@
 > underscored class name §5's example shows. And §6's "do not set the version field inside `MigrateLevelDat`" is
 > sound advice that **every shipped step violates** — harmlessly, since the manager re-stamps it afterwards, but do
 > not be surprised by it. `MigrationManager._steps` (§3) is the real registration list.
+
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)  
 **Context:** Infinite Voxel Engine Serialization (Region-Based)
 

@@ -1,11 +1,11 @@
 # World Generation Feature Improvements Report
 
-**Version:** 1.2
-**Date:** 2026-07-20
+**Version:** 1.2  
+**Date:** 2026-07-20  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified. **TF-14 (world
 border) shipped 2026-07-13/17** and the combined ranked TF/RF roadmap lives at the end of this document.
 Several items here are *deliberately* seed-breaking — acceptable while the Standard world type is WIP;
-see §"Seed-stability note".
+see §"Seed-stability note".  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The master backlog for **terrain & world-generation features and design changes** in the
@@ -19,19 +19,19 @@ see §"Seed-stability note".
 >
 > Status: **Open backlog.** Items are removed (archived) when implemented and verified.
 
-**Audited:** 2026-07-02, at commit `a458173` (branch `main`).
+**Audited:** 2026-07-02, at commit `a458173` (branch `main`).  
 **Amended:** 2026-07-03 — second gap sweep added TF-10..TF-14 (structures, climate surface
 effects, per-world generation options, worldgen versioning, world border) plus RF-7 (weather) in
 the sibling report, and folded minor notes into TF-3 (sub-biome variants) and TF-9 (bedrock,
-pre-generation tool).
+pre-generation tool).  
 **Amended:** 2026-07-13 — TF-14 decision taken (Tier B unbounded XZ is now scheduled as WS-2, see
 `WORLD_SCALING_IMPLEMENTATION.md`): skip the interim hard-wall treatment; TF-14 becomes the
 **per-world configurable border** (gameplay fence, terrain generates past it). Save flips ✅ → ⚠️
-(level.dat field, rides the TF-12/TF-13 v12 wave).
+(level.dat field, rides the TF-12/TF-13 v12 wave).  
 **Amended:** 2026-07-13 (later) — TF-14 **fully shipped** (Phase 1 persistence + player clamp + minimap;
 Phase 2 `Minecraft/BorderWall` shader + `BorderWallRenderer`). Landed as a **standalone level.dat
 v11 → v12** `borderRadius` (int; 0 = disabled) — *not* the TF-12/13 wave — with existing worlds
-upgrading border-disabled. Item is complete and ready to archive from the open backlog.
+upgrading border-disabled. Item is complete and ready to archive from the open backlog.  
 **Amended:** 2026-07-20 — combined roadmap gained #22 **RF-8** (animated block textures), added
 to the sibling RF report during the `VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md` (`VX-*`) gap
 sweep; no TF-* changes.
@@ -1112,7 +1112,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-07-26 (header completed)
+**Last Updated:** 2026-07-26 (header completed)  
 **Next Review:** when the next TF item is scheduled, or when the Standard world type stabilizes — at
 that point the seed-stability note's "deliberately seed-breaking is acceptable" premise expires and
 every remaining ⚠️ Seed item needs re-rating.

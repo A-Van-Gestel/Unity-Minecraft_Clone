@@ -1,6 +1,6 @@
 # Performance Improvements — Completed
 
-> **Archived:** 2026-07-26
+> **Archived:** 2026-07-26  
 > **Reason:** `Design/PERFORMANCE_IMPROVEMENTS_REPORT.md` states that items are removed
 > (archived) when implemented and verified, but the completed entries had accumulated in it —
 > roughly a third of a 2,100-line document described finished work. Their **detail sections**
@@ -792,7 +792,7 @@ into `JobDataManagerFactory.Create` (`JobDataManagerFactory.cs`) — the shared 
 
 **Recommendation:** `Dictionary<VoxelMeshData, int>` mapping mesh → index; O (1) both ways.
 
-> **Impact Analysis:** Effort 🟢 / Risk 🟢 / Benefit ⚪ (startup-only, scales with block DB growth).
+> **Impact Analysis:** Effort 🟢 / Risk 🟢 / Benefit ⚪ (startup-only, scales with block DB growth).  
 > **Seed/Save:** ✅ / ✅.
 
 ---
@@ -813,7 +813,7 @@ into `JobDataManagerFactory.Create` (`JobDataManagerFactory.cs`, Step 3). The fo
 
 **Recommendation:** Allocate the `NativeArray` at `list.Count` and fill via `CopyFrom`/loop, or build in a `NativeList<T>` from the start.
 
-> **Impact Analysis:** Effort 🟢 / Risk 🟢 / Benefit ⚪ (startup-only).
+> **Impact Analysis:** Effort 🟢 / Risk 🟢 / Benefit ⚪ (startup-only).  
 > **Seed/Save:** ✅ / ✅.
 
 ---
@@ -1132,7 +1132,7 @@ accesses.
 > `Execute()` returning the result; `[MenuItem] RunAll()` is a thin `void` wrapper. The six suites and
 > `ChunkRelativePositionTests` were migrated (shared `Scenario` pulled in per-file via
 > `using Scenario = …Framework.Scenario;`) and re-verified to report identical baseline/known-bug
-> counts before/after (62/21/15/13/9/9 baselines; ChunkMath now 14, previously a bare pass/fail bool).
+> counts before/after (62/21/15/13/9/9 baselines; ChunkMath now 14, previously a bare pass/fail bool).  
 > **Remaining (tracked follow-up):** `VoxelMetadataUtilityTests` and `FastNoiseLiteTests` — their
 > granular `AssertEqual`/golden-value harnesses don't map cleanly to one-bool-per-scenario. The result
 > object was designed to also feed VS-2 (CI exit code + NUnit-XML) and VS-3 (stale-assembly preamble).
@@ -1254,7 +1254,7 @@ accesses.
 > The pure `Decide(...)` is guarded by **6 self-test scenarios** in the Validation Framework suite
 > (fresh / compiling / source-newer / within-tolerance / disk-newer-than-loaded / unresolved-inconclusive),
 > bringing that suite to 16 and the aggregate to **159 baselines**. Live-proven: touching a source file's
-> mtime into the future (no recompile) fired exactly one stale warning through a real aggregate run.
+> mtime into the future (no recompile) fired exactly one stale warning through a real aggregate run.  
 > **Scope:** warn-only everywhere (the report's diagnostic intent) — the headless/CI exit code stays driven by
 > baseline results, not by the staleness heuristic. Two-assembly scope: a future `.asmdef` split would need
 > its new assembly added to the guard's list.

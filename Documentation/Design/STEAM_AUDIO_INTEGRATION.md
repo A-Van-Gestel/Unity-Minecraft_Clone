@@ -1,10 +1,10 @@
 # Steam Audio Integration (Physical Acoustics)
 
-**Version:** 1.0
-**Date:** 2026-07-03
+**Version:** 1.0  
+**Date:** 2026-07-03  
 **Status:** **Draft — far-horizon (sound engine v3+).** Not scheduled, and gated on the base sound
 engine (S0–S3) shipping first — which has not started. SDK specifics MUST be re-verified against the
-then-current Steam Audio release before any implementation work; see §8.
+then-current Steam Audio release before any implementation work; see §8.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > **Draft** exploration of integrating Valve's **Steam Audio** SDK as the v3+ acoustics extension
@@ -275,7 +275,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-07-26 (header completed; still a far-horizon draft)
+**Last Updated:** 2026-07-26 (header completed; still a far-horizon draft)  
 **Next Review:** only when [`SOUND_ENGINE_DESIGN.md`](SOUND_ENGINE_DESIGN.md) S0–S3 have shipped. At
 that point re-verify every SDK claim against the current Steam Audio release before trusting any
 section — the §8 checklist exists for exactly that pass.

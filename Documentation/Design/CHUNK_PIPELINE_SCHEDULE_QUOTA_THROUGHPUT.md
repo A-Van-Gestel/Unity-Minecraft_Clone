@@ -1,7 +1,7 @@
 # P-9 — Schedule-Quota Throughput Ceiling
 
-**Version:** 2.0
-**Date:** 2026-08-02
+**Version:** 2.0  
+**Date:** 2026-08-02  
 **Status:** ✅ **THE CORE QUESTION IS CLOSED. P9-0a, P9-0, P9-1 and P9-2 are all done, and P9-2 SHIPPED.**
 The lead lever (§6 Option B1, the convergent edge-check cascade) is live and **default-ON** as
 `Settings.enableConvergentEdgeCheckCascade`, guarded by B97–B100. It cut lighting amplification
@@ -11,7 +11,7 @@ the binding position** (`Quota`-bound frames 94.3 % → 8.3 %). §3.1's `cap × 
 still true; the pipeline simply no longer operates against it at vd 32.
 ⚠️ **Read §3's inferences as history, not as current state** — the 6.28 figures they build on describe the
 pre-P9-2 engine (see §3.3b's closing note). The remaining levers (C, A′) are **optional and need
-re-ranking**, not scheduling: see the Next Review note at the foot of this document.
+re-ranking**, not scheduling: see the Next Review note at the foot of this document.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The chunk pipeline delivers a near-constant 5 658–6 803 chunks per 30 s phase from view distance 10
@@ -976,7 +976,7 @@ enabled *and* disabled after each phase.
      `AllDeclined` or queue depth, never as parked time.
    - **The promote-to-rescan gap is not counted.** The ~1 Hz fail-safe promotes the whole parked set at
      once, but a chunk only re-parks when the scan actually *reaches* it — and the scan breaks on quota
-     or ceiling. A promoted-but-unreached chunk therefore sits in the ready set accruing nothing.
+     or ceiling. A promoted-but-unreached chunk therefore sits in the ready set accruing nothing.  
      **Deliberately not fixed:** that time is already visible as `ReadyCount` plus a `Quota`/`Ceiling`
      stop, so counting it as parked would double-count against a signal the same report carries. Note
      the gap is near zero in the regime this question actually asks about — at 10 m/s `LightSchedule`
@@ -1196,7 +1196,7 @@ enabled *and* disabled after each phase.
 
 ---
 
-**Last Updated:** 2026-08-02
+**Last Updated:** 2026-08-02  
 **Next Review:** P-9's remaining levers are now optional rather than gating — see §6.
 **C (P-3)** stays worth doing on frame-time grounds; **A′ (P9-3) is arguably moot**, since the cap it would
 raise is no longer the binding constraint at vd 32. Re-rank before scheduling either. The code and its baselines are in;
