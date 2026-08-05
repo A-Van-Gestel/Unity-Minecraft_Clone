@@ -78,7 +78,10 @@ Rules:
       blank line between them, lazy continuation swallows the field *into* the quote. Put a
       blank line there instead.
   Do not extend this to ordinary prose — these docs wrap at ~100 chars precisely so the
-  renderer rejoins them.
+  renderer rejoins them. Two repo settings keep the spaces alive once written: `.editorconfig`
+  (`[*.md] trim_trailing_whitespace = false`) and `.gitattributes`
+  (`*.md whitespace=-blank-at-eol`, which stops `git apply --whitespace=fix` stripping them).
+  Verify a doc with `python Tools/Python/check_markdown_breaks.py` (add `--fix` to repair).
 - **Status taxonomy** (exact strings, bold in place):
     - `Draft — <horizon>` — direction captured, not scheduled; must name what to re-verify
       before implementation starts.
