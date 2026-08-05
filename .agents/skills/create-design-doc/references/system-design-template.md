@@ -1,8 +1,12 @@
 # <System Name> Design
 
-**Version:** 1.0
-**Date:** <YYYY-MM-DD>
-**Status:** Proposed design — not implemented. <!-- or: Draft — far-horizon (<gate>). Not scheduled. -->
+<!-- The field lines below end in TWO TRAILING SPACES (invisible, easily stripped by an editor).
+     Without them Markdown joins Version/Date/Status/Target into one run-on line. Same in the
+     footer. Rule: two trailing spaces on any line whose NEXT line starts a new **Label:** field
+     — never on ordinary wrapped prose, which is meant to rejoin. See the skill's Step 3. -->
+**Version:** 1.0  
+**Date:** <YYYY-MM-DD>  
+**Status:** Proposed design — not implemented. <!-- or: Draft — far-horizon (<gate>). Not scheduled. -->  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production) <!-- optional; keep for engine-touching designs -->
 
 > One-paragraph blockquote summary: what the system is, and the single most important
@@ -138,5 +142,5 @@ instead title this "Verification checklist (MUST re-verify before implementation
 
 ---
 
-**Last Updated:** <YYYY-MM-DD>
+**Last Updated:** <YYYY-MM-DD>  
 **Next Review:** <event trigger, e.g. "when <P>0 starts" / "on promotion to Architecture">

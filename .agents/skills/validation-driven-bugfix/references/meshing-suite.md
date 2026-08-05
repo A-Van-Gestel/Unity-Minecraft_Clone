@@ -48,7 +48,7 @@ Namespace: suite = `Editor.Validation.Meshing`, framework = `Editor.Validation.M
 > MR-5 landed; MR-3/MR-4 added postconditions **B15** (no-reassign) + **B16** (constant-cell-bounds) → baselines
 > **B1–B16**. **MR-* Wave 2 (2026-06-20):** MR-2 (32 B/vertex) + MR-6 (pre-size + pool the `MeshDataJobOutput`
 > buffers) landed; MR-6's build-alongside guard **MH-2** closed as **B17** (a pooled output reused across two
-> scenes == a fresh buffer, via `MeshOutputPool` + `MeshingTestWorld.Run(reuseOutput:)`) → baselines **B1–B17**.
+> scenes == a fresh buffer, via `MeshOutputPool` + `MeshingTestWorld.Run(reuseOutput:)`) → baselines **B1–B17**.  
 > **Since then the suite grew past the job harness — tip is now B40 (40 baselines, 2026-07-26):** B18–B21
 > (cross-chunk culling), B22/B23 (FL sway), and the **MP-\* orchestration arc** B24–B27 (schedule decision,
 > drain policy, in-flight fix, completion skeleton — none of which use `MeshingTestWorld`) plus MP-5's

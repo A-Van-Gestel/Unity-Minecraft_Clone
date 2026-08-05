@@ -1,7 +1,11 @@
 # <Area> Feature Improvements Report <!-- or: <Area> <Analysis|Validation> Report -->
 
-**Version:** 1.0
-**Date:** <YYYY-MM-DD>
+<!-- The three field lines below end in TWO TRAILING SPACES (invisible, easily stripped by an
+     editor). Without them Markdown joins Version/Date/Status into one run-on line. Same in the
+     footer. Rule: two trailing spaces on any line whose NEXT line starts a new **Label:** field
+     — never on ordinary wrapped prose, which is meant to rejoin. See the skill's Step 3. -->
+**Version:** 1.0  
+**Date:** <YYYY-MM-DD>  
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.
 
 > The master backlog for **<area>** in the VoxelEngine — <one line on scope>. Sibling report to
@@ -71,5 +75,5 @@ an explicit verdict when a real choice exists.>
 
 ---
 
-**Last Updated:** <YYYY-MM-DD>
+**Last Updated:** <YYYY-MM-DD>  
 **Next Review:** <event trigger, e.g. "next gap sweep" / "after <ID>-1 ships">

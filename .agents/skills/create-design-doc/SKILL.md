@@ -45,9 +45,9 @@ Every doc starts with this block (full example in the templates):
 ```markdown
 # <Title>
 
-**Version:** 1.0
-**Date:** <YYYY-MM-DD>
-**Status:** <see taxonomy below>
+**Version:** 1.0  
+**Date:** <YYYY-MM-DD>  
+**Status:** <see taxonomy below>  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)   <!-- optional, engine-touching docs -->
 
 > One-blockquote summary: what the doc covers and its single most important
@@ -64,6 +64,21 @@ verified in code, not assumed.>
 
 Rules:
 
+- **Hard line breaks between stacked fields (easy to get wrong — the spaces are invisible).**
+  Markdown joins consecutive lines into one paragraph, so `**Version:**` / `**Date:**` /
+  `**Status:**` / `**Target:**` render as a single run-on line unless each is terminated with
+  **two trailing spaces**. The rule generalizes: *end a line with two spaces whenever the next
+  line starts a new `**Label:**` field.* Corollaries:
+    - The **last** field in a block needs none (a blank line follows it).
+    - When a field's value wraps over several lines, the two spaces go on its **last** line
+      only — the wrapped lines are meant to join.
+    - Same rule in the footer (`**Last Updated:**` → `**Next Review:**`) and in any other
+      field stack (bug entries' `**Reported:**` / `**Fixed:**` / `**Status:**`).
+    - A field line that directly follows a **blockquote** cannot be fixed this way: without a
+      blank line between them, lazy continuation swallows the field *into* the quote. Put a
+      blank line there instead.
+  Do not extend this to ordinary prose — these docs wrap at ~100 chars precisely so the
+  renderer rejoins them.
 - **Status taxonomy** (exact strings, bold in place):
     - `Draft — <horizon>` — direction captured, not scheduled; must name what to re-verify
       before implementation starts.
@@ -102,7 +117,10 @@ Use the patterns that fit; the templates show each in place. The recurring ones:
 
 Style rules (match the rest of `Documentation/`):
 
-- ~100-char line width for prose; tables may exceed it.
+- ~100-char line width for prose; tables may exceed it. Wrapped prose lines are *meant* to be
+  rejoined by the renderer — so never add trailing spaces to them. The one place a hard break
+  is required is before a new `**Label:**` field (Step 3), including the `**Amended:**` lines
+  below and the Step 5 footer.
 - Markdown tables **pre-aligned** (padded pipes) — the repo linter aligns them anyway;
   authoring aligned avoids diff churn.
 - Write the doc as a continuous design. Do **not** ship "Open questions → resolved same day"
@@ -123,7 +141,7 @@ Style rules (match the rest of `Documentation/`):
 
 ---
 
-**Last Updated:** <YYYY-MM-DD>
+**Last Updated:** <YYYY-MM-DD>  
 **Next Review:** <trigger — an event, not a date, e.g. "when S0 starts" / "on promotion to Architecture">
 ```
 

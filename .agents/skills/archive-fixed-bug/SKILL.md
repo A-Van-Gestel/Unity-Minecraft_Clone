@@ -57,7 +57,7 @@ Moving an entry like:
 ```markdown
 ### Chunk meshing deadlock on neighbor edge check
 
-**Reported:** March 2026
+**Reported:** March 2026  
 **Status:** Intermittent — reproduces under load with view distance 16+.
 
 - Symptoms: chunks at render edge never mesh, neighbors all Populated.
@@ -69,10 +69,15 @@ Becomes in `_FIXED_BUGS.md`:
 ```markdown
 ### Chunk meshing deadlock on neighbor edge check
 
-**Reported:** March 2026
-**Fixed:** April 2026
+**Reported:** March 2026  
+**Fixed:** April 2026  
 **Status:** Resolved
 
 - Symptoms: chunks at render edge never mesh, neighbors all Populated.
 - Root cause: NeedsEdgeCheck never clearing when ScheduleLightingUpdate skipped.
 ```
+
+> **Preserve the hard line breaks.** `**Reported:**` / `**Fixed:**` / `**Status:**` each end in
+> **two trailing spaces** (invisible above); the last one in the stack does not. Drop them and
+> the renderer joins the whole stack into one run-on line. When you insert `**Fixed:**`, add the
+> two spaces to it *and* to the `**Reported:**` line above it.

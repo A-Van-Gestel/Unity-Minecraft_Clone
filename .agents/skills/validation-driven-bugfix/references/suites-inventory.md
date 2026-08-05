@@ -55,7 +55,7 @@ non-vacuity), and the BH-D1 old-vs-new differential. `Framework/BehaviorTestWorl
 production tick driver with selectable `TickDriver` (`Legacy` single-set vs `SplitFamily`
 per-behavior buckets); `Framework/BehaviorSnapshot` records each tick;
 `Framework/BehaviorDifferential` compares drivers under the TG-4 §4.3 canonicalization
-(same-voxel writes order-sensitive, independent mods position-canonicalized).
+(same-voxel writes order-sensitive, independent mods position-canonicalized).  
 **Palette caveat:** `Framework/TestBehaviorBlockPalette` is indexed by the **REAL `BlockIDs`
 values** — behavior code hardcodes block identities, so slots must match production IDs (unlike
 the lighting/meshing palettes). Fidelity doc:
