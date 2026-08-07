@@ -14,3 +14,66 @@
 # Convention + rationale: .agents/skills/create-design-doc/SKILL.md (Step 3).
 # Verify with: python Tools/Python/check_markdown_breaks.py
 *.md whitespace=-blank-at-eol
+
+# NOTE ON SYNTAX (verified 2026-08-07, the hard way): every line is `pattern attr...` with
+# exactly ONE pattern. Grouping patterns — `*.png *.jpg binary` — does not merely fail for the
+# later patterns, it discards the WHOLE line: git rejects `*.jpg` as an invalid attribute name,
+# so even `*.png` comes back `binary: unspecified`. Silent no-op. Keep one pattern per line.
+
+# --- Diff hunk headers (built-in drivers; verified 2026-08-05) -------------------
+*.cs    diff=csharp
+*.md    diff=markdown
+
+# --- Binary safety net ----------------------------------------------------------
+# Git guesses binary from NUL bytes in the first 8 KB; a file that looks textual can be
+# misdetected and EOL-mangled. `binary` == `-diff -merge -text`.
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.tga           binary
+*.psd           binary
+*.tif           binary
+*.tiff          binary
+*.exr           binary
+*.hdr           binary
+*.fbx           binary
+*.blend         binary
+*.obj           binary
+*.dae           binary
+*.3ds           binary
+*.wav           binary
+*.mp3           binary
+*.ogg           binary
+*.aiff          binary
+*.aif           binary
+*.ttf           binary
+*.ttc           binary
+*.otf           binary
+*.dll           binary
+*.so            binary
+*.dylib         binary
+*.a             binary
+*.bundle        binary
+*.pdb           binary
+*.mdb           binary
+*.unitypackage  binary
+*.pdf           binary
+*.cubemap       binary
+
+# --- Unity YAML smart merge -----------------------------------------------------
+# Safe to declare before configuring the driver: an UNDEFINED merge driver falls back to git's
+# default text merge with normal conflict markers (verified in a sandbox repo). Wiring
+# merge.unityyamlmerge.driver to Unity's UnityYAMLMerge.exe is a separate, per-machine step.
+#
+# These are YAML, NOT binary — asset serialization is Force Text (m_SerializationMode: 2).
+# NEVER give *.unity/*.prefab/*.asset/*.meta the `binary` or `-text` attribute: it destroys
+# their diffs and makes scene/prefab merge conflicts unresolvable. That is the real corruption
+# risk with these types — not their mere presence in this file.
+*.unity           merge=unityyamlmerge
+*.prefab          merge=unityyamlmerge
+*.asset           merge=unityyamlmerge
+*.mat             merge=unityyamlmerge
+*.anim            merge=unityyamlmerge
+*.controller      merge=unityyamlmerge
+*.physicMaterial  merge=unityyamlmerge
