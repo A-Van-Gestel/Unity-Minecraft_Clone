@@ -3,6 +3,8 @@
         "unity-api": {
             "command": "uvx",
             "args": [
+                "--with",
+                "mcp[cli]<2",
                 "unity-api-mcp"
             ],
             "env": {
