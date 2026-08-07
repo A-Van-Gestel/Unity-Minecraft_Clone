@@ -29,11 +29,11 @@ namespace Editor.Validation.Lighting.Framework
         /// </summary>
         /// <param name="worldPos">The world-space voxel position.</param>
         /// <param name="blockId">The palette block ID to write.</param>
-        public void SetBlock(Vector3Int worldPos, ushort blockId)
+        public void SetBlock(Vector3Int worldPos, ushort blockId, byte meta = 0)
         {
             TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
             chunk.Data.SetVoxel(localPos.x, localPos.y, localPos.z,
-                BurstVoxelDataBitMapping.PackVoxelData(blockId, 0));
+                BurstVoxelDataBitMapping.PackVoxelData(blockId, meta));
         }
 
         /// <summary>
@@ -105,12 +105,16 @@ namespace Editor.Validation.Lighting.Framework
         /// </summary>
         /// <param name="worldPos">The world-space voxel position.</param>
         /// <param name="blockId">The palette block ID to place (use <see cref="TestBlockPalette.Air"/> to break).</param>
-        public void PlaceBlock(Vector3Int worldPos, ushort blockId)
+        /// <param name="meta">Raw metadata byte. Only meaningful for blocks whose
+        /// <see cref="MetadataSchema"/> uses it — for <see cref="TestBlockPalette.HalfSlab"/> it selects
+        /// which faces the partial volume covers, which is the whole point of the VO-* directional
+        /// occlusion scenarios. Defaults to 0, so every pre-VO-2 call site is unchanged.</param>
+        public void PlaceBlock(Vector3Int worldPos, ushort blockId, byte meta = 0)
         {
             TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
 
             uint oldPackedData = chunk.Data.GetVoxel(localPos.x, localPos.y, localPos.z);
-            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(blockId, 0);
+            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(blockId, meta);
             if (oldPackedData == newPackedData)
                 return;
 

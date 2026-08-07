@@ -48,8 +48,21 @@ namespace Editor.Validation.Lighting.Framework
         /// slightly attenuates light passing through (matching production water properties).</summary>
         public const ushort Water = 10;
 
+        /// <summary>
+        /// Half-slab partial block (VO-2): opaque (opacity 15) like the production <c>Stone Half Slab</c>,
+        /// but occupying only the lower half of its cell via <see cref="BlockCollisionBounds.BottomHalfSlab"/>
+        /// on the <see cref="MetadataSchema.Facing6Roll2"/> schema, so its metadata byte rotates that volume
+        /// through all 24 orientations.
+        /// <para>
+        /// The whole point of this entry is that <b>which faces block light depends on the metadata</b> —
+        /// unrotated it is a floor that stops daylight, rotated upright (<c>meta 0x03</c>) it is a wall whose
+        /// open half must let daylight past. See <c>VOXEL_OCCLUSION_REFACTOR.md</c> §2.3.
+        /// </para>
+        /// </summary>
+        public const ushort HalfSlab = 11;
+
         /// <summary>Total number of block types in the palette.</summary>
-        public const int Count = 11;
+        public const int Count = 12;
 
         /// <summary>
         /// Builds the palette as managed <see cref="BlockType"/> instances and converts them to the
@@ -71,6 +84,11 @@ namespace Editor.Validation.Lighting.Framework
             jobData[LampBlue] = ToJobData(MakeBlock("TestLampBlue", opacity: 15, emission: 15, Color.blue));
             jobData[Torch] = ToJobData(MakeBlock("TestTorch", opacity: 0, emission: 14, Color.white, isSolid: false));
             jobData[Water] = ToJobData(MakeBlock("TestWater", opacity: 2, emission: 0, Color.white, isSolid: false));
+            BlockType halfSlab = MakeBlock("TestHalfSlab", opacity: 15, emission: 0, Color.white);
+            halfSlab.collisionBounds = BlockCollisionBounds.BottomHalfSlab;
+            halfSlab.metadataSchema = MetadataSchema.Facing6Roll2;
+            halfSlab.renderShape = RenderShape.CustomMesh;
+            jobData[HalfSlab] = ToJobData(halfSlab);
             return jobData;
         }
 

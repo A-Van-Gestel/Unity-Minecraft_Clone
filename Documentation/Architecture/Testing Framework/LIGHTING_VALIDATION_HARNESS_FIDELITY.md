@@ -226,6 +226,13 @@ conversion on the production mod path would not be caught in-harness (guarded in
   Validation Framework scenarios (16→18) pin the predicate and the scope's trip via a `Feed` seam (a real marker log would bubble through the global
   `Application.logMessageReceived` into the self-test's own scope); the force-fail was also proven end-to-end (a tagged-error scenario returning `true` is marked failed). `Validate All` green at 181 baselines.
 
+### B9 — No partial (sub-cell) block, and no way to author metadata · **CLOSED (2026-08-07, VO-2)**
+
+- **Was blind:** `TestBlockPalette` held only full-cell blocks, and `SetBlock`/`PlaceBlock` hard-coded metadata `0`. Between them the harness could not express a block that occupies part of its cell, nor the *orientation* that decides which faces it covers — so the whole directional-occlusion class (`LIGHTING_BUGS.md` Bug 20) was unreachable.
+- **Closed by:** palette entry `TestBlockPalette.HalfSlab` (id 11, `Count` 11 → 12) — opacity 15 like the production `Stone Half Slab`, `BlockCollisionBounds.BottomHalfSlab`, `MetadataSchema.Facing6Roll2` — plus an optional `meta` parameter on `SetBlock`/`PlaceBlock` (default `0`, so every pre-existing call site is byte-identical).
+- **Consumers:** baselines **B101–B103** and the known-bug repro **K20a** in `LightingValidationSuite.PartialBlocks.cs` (VO-2 of [`../../Design/VOXEL_OCCLUSION_REFACTOR.md`](../../Design/VOXEL_OCCLUSION_REFACTOR.md)). K20a is expected-red until VO-3.
+- **Note for scenario authors:** these deliberately assert *behaviour* (did light reach the probe) rather than comparing to `LightingOracle`, because **A4** applies in full here — the oracle calls the same `LightAttenuation` as the engine, so it cannot arbitrate a change to the attenuation model itself. The oracle learns directional occlusion in VO-3, alongside the engine.
+
 ---
 
 ## 4. Coverage gaps (scenario authoring, not harness limits)

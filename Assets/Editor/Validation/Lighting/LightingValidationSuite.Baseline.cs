@@ -172,11 +172,23 @@ namespace Editor.Validation.Lighting
             // pre-fix float round-trip that crashed sunlight recalcs past ±2²⁴. Lives in
             // Baselines/LightingValidationSuite.Baseline.Bug19FarColumns.cs and self-registers here. ---
             AddBug19FarColumnsBaselineScenarios(scenarios);
+
+            // --- VO-2 partial-block directional occlusion: baselines B101 (a floor slab still blocks
+            // daylight) + B102/B103 (full-cube and open-shaft controls), all green today and tripwires
+            // against VO-3 making slabs transparent, PLUS the known-bug repro K20a (a vertical slab must
+            // pass daylight through its open half) which is EXPECTED RED until VO-3 lands. K20a goes to
+            // the known-bug channel deliberately: it asserts behaviour the engine does not have yet, so it
+            // must not mark the suite red. Lives in LightingValidationSuite.PartialBlocks.cs. ---
+            AddPartialBlockOcclusionScenarios(scenarios);
         }
 
         /// <summary>Hook for the Bug-19 far-coordinate column-routing baselines B95-B96 (implemented in Baselines/LightingValidationSuite.Baseline.Bug19FarColumns.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddBug19FarColumnsBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the VO-2 partial-block directional occlusion baselines B101-B104 (implemented in LightingValidationSuite.PartialBlocks.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddPartialBlockOcclusionScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the C13 mixed-channel cross-seam removal baseline B94 (implemented in LightingValidationSuite.C13RgbMixedChannel.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>

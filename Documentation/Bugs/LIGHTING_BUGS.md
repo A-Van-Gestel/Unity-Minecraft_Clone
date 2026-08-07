@@ -113,10 +113,14 @@ its cell" that keeps such a block out of the `IsOpaque` fast paths and gives it 
 sketches — is a strictly larger change and is **not** required to fix the artifact above. A non-directional partial-block
 opacity is sufficient; per-face occlusion remains a follow-up.
 
-**Repro scenario:** TBD (lighting suite) — authored by
-[`VOXEL_OCCLUSION_REFACTOR.md`](../Design/VOXEL_OCCLUSION_REFACTOR.md) **VO-2**, which adds the
-partial-block palette entry the lighting harness currently lacks. Baselines claim numbers from the
-current suite tip (B100).
+**Repro scenario:** **`K20a`** (lighting suite, `LightingValidationSuite.PartialBlocks.cs`) — landed
+2026-08-07 by VO-2 and **red for the documented reason**. A two-deep shaft in a superflat floor capped
+by a half slab at metadata `0x03` (vertical): daylight must reach the voxel below the slab's open half,
+and reads sky 0 today. Asserted as reach / no-reach rather than an exact level, so it does not restate
+the cost formula. Shipped with three tripwire baselines that must stay green through the fix — **B101**
+(an *unrotated* slab still blocks daylight below it — the guard against "fix this by making slabs
+transparent"), **B102** (full opaque cube blocks), **B103** (an uncapped shaft is lit, so the other
+three cannot pass vacuously).
 
 **Fix phases:** that same plan — **VO-3** (directional occlusion in the BFS) and **VO-4** (the
 directional cross-chunk support/veto that VO-3 is not shippable without), with **VO-7** owning the

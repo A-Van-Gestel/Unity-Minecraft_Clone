@@ -1,8 +1,8 @@
 # Directional Per-Face Voxel Occlusion (VO-*)
 
-**Version:** 1.2  
+**Version:** 1.4  
 **Date:** 2026-08-07  
-**Status:** Proposed design — VO-0 and VO-1 implemented; VO-2…VO-7 pending.  
+**Status:** Proposed design — VO-0, VO-1 and VO-2 implemented; VO-3…VO-7 pending.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > The engine gained partial blocks (`Stone Half Slab`) without the lighting model gaining a notion
@@ -67,7 +67,7 @@ code. Results, which later phases cite:
   — the custom-mesh blind spot it records is now partly closed (see §2.4); MH-3's "AO values are
   un-modelled" note is what VO-5 must extend.
 - [`LIGHTING_VALIDATION_HARNESS_FIDELITY.md`](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md)
-  — the lighting harness gains a partial-block palette entry in VO-2.
+  — VO-2 closed its gap **B9** (no partial block, no metadata authoring); see that entry for why these scenarios avoid oracle comparison.
 - [`AOT_WORLD_MIGRATION_SYSTEM.md`](../Architecture/AOT_WORLD_MIGRATION_SYSTEM.md) — VO-7's relight
   migration runs through it.
 
@@ -234,21 +234,44 @@ This is what `LIGHTING_SYSTEM_OVERVIEW.md` sketches and what Starlight does.
 
 ### D2 — Occlusion representation
 
-**Option A — binary (occludes / does not) (rejected).** Simplest and cheapest, but throws away the
-coverage fraction, so a slab's side faces would have to round to either "full blocker" (today's bug,
-just directional) or "free" (light leaks along the slab plane). It also cannot express the ±Y half
-case in §2.3's vertical row, which is precisely the requested behaviour.
+> **⚠️ REVERSED 2026-08-07 at the start of VO-2 (v1.3).** v1.0–v1.2 of this section chose the graded
+> model below and rejected binary. **That was a correctness error**, caught by working the actual light
+> values through before writing VO-2's baselines. The verdicts are now swapped; the arithmetic is in
+> Option B. This is not a taste re-litigation — the previously-chosen model fails §1.1 goal 2.
 
-**Option B — graded coverage folded into the existing opacity cost (✅ **CHOSEN**).**
-`cost(block, meta, d) = max(1, round(opacity × occlusionFraction(block, meta, d)))`, with a fully
-un-occluding face costing the air minimum of 1.
+**Option A — binary: a face occludes iff it is *fully* covered (✅ **CHOSEN**).**
+`occludes(block, meta, d) = coverage(block, meta, d) >= 1 − ε`. A non-occluding face charges the air
+minimum of 1; an occluding face charges the block's `opacity` exactly as today.
 
-- ✅ Reuses `Attenuate`'s existing shape (`max(0, source − cost)`) — the formula's *structure* is
-  unchanged, only the cost's derivation.
-- ✅ Degenerates exactly to today's behaviour for full cubes (coverage 1 on every face → `opacity`),
-  which is what makes a "no behaviour change for full blocks" prove-red possible.
-- ✅ Gives the slab's side faces `15 × 0.5 → 8`, a visible but non-black attenuation.
-- ⚠️ Rounding must be pinned once and shared by engine and oracle, or they diverge (F7).
+- ✅ **Delivers §1.1 goal 2.** The vertical slab's ±Y faces have coverage 0.5, so they do not occlude:
+  light passes down through the cell at air cost, and the cell can still qualify for rule 4's
+  vertical sky-column shortcut (`LIGHTING_SYSTEM_OVERVIEW.md:57`).
+- ✅ **Degenerates to today bit-identically for full cubes** — coverage is 1 on all six faces, so every
+  face occludes and the cost is `opacity`, unchanged. This is what makes the "no behaviour change for
+  full blocks" prove-red possible.
+- ✅ Keeps the upright slab floor blocking daylight (its −Y coverage is 1.0).
+- ✅ Matches Starlight's `VoxelShape.faceShapeOccludes()`, which
+  `LIGHTING_SYSTEM_OVERVIEW.md` §"Conditionally Opaque Blocks" already names as the model to adopt.
+- ⚠️ Light passing *along* a slab plane is all-or-nothing rather than dimmed. Accepted: a single
+  scalar per cell cannot represent a partially-open cross-section, and the visual cost of that
+  approximation is far smaller than the alternative (below).
+
+**Option B — graded coverage folded into the opacity cost (rejected).**
+`cost = max(1, round(opacity × coverage))`.
+
+- ❌ **Fatal: it does not deliver the motivating case.** Worked through for a 2-deep shaft capped by a
+  vertical slab, sky 15 above: entering the slab cell costs `max(1, round(15 × 0.5)) = 8` → cell = 7;
+  exiting downward costs 8 again → **0**. The pit stays dark. Because the cell is no longer 15, the
+  vertical sky-column rule cannot rescue it either.
+- ❌ The flaw is conceptual, not a tuning problem: one scalar per cell cannot represent "half the
+  cross-section is open", so *any* positive cost compounds across the two face crossings a traversal
+  makes. Lowering the coefficient only moves the depth at which light dies.
+- ⚠️ Would also have needed a rounding rule pinned identically in engine and oracle, or they diverge (F7).
+
+**Coverage is still graded where grading is the right question.** `GetFaceCoverage` keeps returning the
+fraction; the BFS thresholds it (this decision), while **VO-5's ambient occlusion consumes it directly**
+(D5). Light transport asks "can photons get past"; AO asks "how much of this corner is visually
+blocked". VO-1's utility serves both unchanged.
 
 ### D3 — Composing the two faces of a traversal
 
@@ -256,10 +279,27 @@ Light crossing A→B exits A through A's `+d` face and enters B through B's `−
 destination's opacity is charged ("charged the destination's opacity on entry",
 `LightAttenuation.cs:20-23`).
 
-✅ **CHOSEN:** `cost = max(exitCost(A, +d), entryCost(B, −d))`, i.e. the more occluding of the two
-faces governs. Rejected alternative — summing the two — double-charges two adjacent slabs and makes
-a slab corridor far darker than either slab alone; rejected alternative — keeping destination-only —
-lets light escape *out* of a sealed slab box through the slab's own solid face.
+✅ **CHOSEN (restated for D2's binary model, 2026-08-07):** a traversal is blocked by whichever of the
+two faces occludes, and charges that block's opacity:
+
+```
+occA = occludes(A, +d) ? opacity(A) : 0        // A's exit face
+occB = occludes(B, −d) ? opacity(B) : 0        // B's entry face
+cost = max(1, max(occA, occB))
+```
+
+Rejected — summing the two — double-charges two adjacent slabs and makes a slab corridor far darker
+than either slab alone. Rejected — keeping destination-only — lets light escape *out* of a sealed
+slab box through the slab's own solid face.
+
+> **Full-cube equivalence needs care (executor must verify).** For full cubes every face occludes, so
+> this reduces to `max(1, max(opacity(A), opacity(B)))`, whereas today's rule is destination-only:
+> `max(1, opacity(B))`. These differ when the **source** is a non-opaque attenuating block — water
+> (opacity 2) propagating into air would go from cost 1 to cost 2, which would move existing lighting
+> baselines. Note `PropagateLight` early-returns for *opaque* sources, so only the semi-transparent
+> range is affected. **VO-3 must either restrict the exit term to blocks with custom bounds, or prove
+> by baseline that no semi-transparent full block regresses.** Resolve this before touching the BFS —
+> it is the likeliest source of an accidental behaviour change in the whole arc.
 
 ### D4 — Migration strategy
 
@@ -297,7 +337,7 @@ decision whose *visual* outcome needs user sign-off (VO-5).
 |----------|--------------------------------------------------------------|--------|--------------|
 | ~~**VO-0**~~ | ✅ Probe: evidence for the model's assumptions            | 🟢     | —            |
 | ~~**VO-1**~~ | ✅ Burst-safe bounds mirror + shared occlusion utility    | 🟢     | VO-0         |
-| **VO-2** | Harness + oracle support for partial blocks (suite-only)     | 🟢     | VO-1         |
+| ~~**VO-2**~~ | ✅ Harness support for partial blocks (suite-only)        | 🟢     | VO-1         |
 | **VO-3** | Directional occlusion in the BFS                             | 🔴     | VO-2         |
 | **VO-4** | Directional cross-chunk support / veto                       | 🔴     | VO-3         |
 | **VO-5** | Fractional AO occlusion                                      | 🟡     | VO-1         |
@@ -374,20 +414,42 @@ for sky-exposed slabs (VO-6 packet).
   shared with lighting; `DATA_STRUCTURES.md` if `BlockTypeJobData`'s layout is documented there.
 - **Serialization:** none — `BlockTypeJobData` is built at load from the database, never persisted.
 
-### VO-2 — Harness + oracle support for partial blocks (🟢, suite-only)
+### VO-2 — Harness support for partial blocks (🟢, suite-only) · ✅ **EXECUTED 2026-08-07**
 
-- **Scope:** add a partial-block entry to the lighting harness palette (`TestBlockPalette`) and teach
-  `LightingOracle` the directional cost. **Author behaviour-pinning baselines, not formula
-  restatements** (F7): probe-reaches / probe-does-not-reach assertions around a slab in each
-  orientation, including the §1.2 motivating pit. Claim numbers from the lighting suite tip
-  (**B100** → B101+).
-- **Ordering:** before VO-3 — the baselines must exist and be *red* against the old engine for the
-  directional cases before the engine changes.
-- **Prove-red:** inherent — the new baselines are written against the target behaviour and start red
-  for the directional scenarios while staying green for full-cube ones.
-- **Acceptance:** universal gate; harness-green is the whole verification (suite-only phase).
-- **Testability gain:** the lighting suite can express partial blocks at all, which it cannot today.
-- **Doc-sync:** `LIGHTING_VALIDATION_HARNESS_FIDELITY.md` — new palette entry + coverage note.
+- **Scope (as executed):** `TestBlockPalette` gained `HalfSlab` (id 11, `Count` 11 → 12) — opacity 15
+  like production, `BlockCollisionBounds.BottomHalfSlab`, `Facing6Roll2`. `SetBlock`/`PlaceBlock`
+  gained an optional `meta` parameter (default 0, so every pre-VO-2 call site is untouched); without
+  it the harness could not express a slab's *orientation*, which is the entire variable under test.
+  Scenarios in `LightingValidationSuite.PartialBlocks.cs`.
+- **Taxonomy correction made during execution.** These were first written as four baselines
+  (B101–B104), which turned `Validate All` red — a *baseline* that fails is by definition a regression.
+  The scenario asserting behaviour the engine does not yet have belongs in the **known-bug** channel:
+  it is now **`K20a`** (tagged Bug 20), expected-red, suite stays green, and it flips to a cyan "fix
+  candidate" when VO-3 lands. The three that pass today stayed baselines **B101–B103**. Any future
+  phase adding "assert the target behaviour" scenarios must make the same split.
+- **Deviation from the original scope — `LightingOracle` was deliberately NOT changed.** The plan said
+  to teach it the directional cost here; doing so would put the oracle a phase ahead of the engine and
+  red every oracle comparison in any scenario containing a slab, isolating nothing. And per **F7** the
+  oracle shares `LightAttenuation` with the engine, so it can never arbitrate this model anyway. The
+  spec is therefore written down in the **baselines** (behaviour assertions), and the oracle changes in
+  **VO-3** alongside the engine.
+- **Ordering:** before VO-3. ✅
+- **Prove-red (executed):** the red/green split is exactly as designed —
+
+  | Scenario                       | Below the cap | Verdict                                  |
+  |--------------------------------|---------------|------------------------------------------|
+  | B103 open shaft (control)      | sky 15        | GREEN — fixture proven non-vacuous       |
+  | B102 full cube cap (control)   | sky 0         | GREEN                                    |
+  | B101 floor slab `0x00`         | sky 0         | GREEN — tripwire, must stay green        |
+  | **K20a vertical slab `0x03`**  | **sky 0**     | **RED (expected) — Bug 20, green in VO-3** |
+
+  The cap cell itself reads sky 15 in every case, re-confirming VO-0(c)'s surface stamp.
+  Note B101 is green *today for the wrong reason* (the current model blocks in every direction); its
+  value is entirely as a VO-3 tripwire against "fix Bug 20 by making slabs transparent".
+- **Acceptance:** ✅ universal gate — **Validate All: 419 baselines across 18 suites PASSED**, with
+  K20a reported as reproducing Bug 20 (expected).
+- **Testability gain:** the lighting suite can express partial blocks and their orientation at all.
+- **Doc-sync:** `LIGHTING_VALIDATION_HARNESS_FIDELITY.md` — new palette entry + `meta` API note.
 - **Serialization:** none.
 
 ### VO-3 — Directional occlusion in the BFS (🔴, behavior change — the F2 fix)
@@ -539,9 +601,11 @@ for sky-exposed slabs (VO-6 packet).
 
 * **v1.0** - Initial design
 * **v1.1** - VO-0 executed (no production code needed): blast radius is one block type, §2.3's bounds table confirmed, surface stamp confirmed (resolves open question 1 and unblocks VO-6 from VO-3), VO-7 version anchors pinned
+* **v1.4** - VO-2 executed: `TestBlockPalette.HalfSlab` + `meta` on `SetBlock`/`PlaceBlock`, baselines B101–B103 green and repro **K20a** red as designed (lighting harness gap **B9** closed); oracle deliberately left to VO-3
+* **v1.3** - **D2 REVERSED** at the start of VO-2: binary per-face occlusion (Starlight's `faceShapeOccludes`) replaces the graded opacity cost, which was proven by worked arithmetic to leave the motivating pit dark; D3 restated for it, with a full-cube-equivalence warning VO-3 must resolve
 * **v1.2** - VO-1 executed: Burst bounds mirror + shared `BurstOcclusionUtility` core + new Occlusion suite (5 baselines); §2.3's identity-row label corrected; new finding **F10** — `NS-4` does not guard the collision rotation, so VO-1's prove-red rests on occlusion `B2` alone
 
 ---
 
 **Last Updated:** 2026-08-07  
-**Next Review:** when VO-2 starts
+**Next Review:** when VO-3 starts
