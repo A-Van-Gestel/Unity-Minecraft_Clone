@@ -53,24 +53,35 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>
-        /// K20a — <b>the motivating case.</b> A two-deep shaft in a superflat floor, capped by a half slab
-        /// rotated upright (<see cref="SLAB_VERTICAL_META"/>). That orientation puts the slab's solid half
-        /// against the cell's +Z side, leaving its ±Y faces only half covered — so neither the top nor the
-        /// bottom face fully occludes, and daylight must reach the voxel below the slab.
+        /// K20a — <b>the motivating case.</b> A shaft in a superflat floor, capped by a half slab rotated
+        /// upright (<see cref="SLAB_VERTICAL_META"/>). That orientation puts the slab's solid half against
+        /// the cell's +Z side, leaving its ±Y faces only half covered — so the open half is a full-height
+        /// vertical channel and the sky column must pass through it <b>undimmed</b>.
         /// <para>
-        /// Asserted as reach / no-reach rather than an exact level, so it does not restate the cost formula
-        /// and stays valid whichever attenuation VO-3 settles on.
+        /// Asserted as a <b>differential against an uncapped shaft</b>, column for column: it pins the
+        /// degree of the effect without restating the cost formula. An earlier revision asserted only
+        /// "sky &gt; 0" below the slab; that was too weak — it passed while the column actually decayed
+        /// 15/14/13/… per block, a defect only found in game. Do not weaken it back.
         /// </para>
         /// </summary>
-        /// <returns>True when light reaches below the vertical slab.</returns>
+        /// <returns>True when the column below a vertical slab matches an uncapped shaft exactly.</returns>
         private static bool K20a_VerticalSlabPassesDaylight()
         {
-            byte below = ShaftLightBelowCap(TestBlockPalette.HalfSlab, SLAB_VERTICAL_META, out byte capCell);
-            return LightingAssert.IsTrue(below > 0,
-                "K20a: daylight passes a vertical half slab's open half",
-                $"expected sky > 0 below the slab, got {below} (slab cell itself = {capCell}). "
-                + "Until VO-3 the slab is treated as a full blocker in every direction, so this reads 0 — "
-                + "that is the documented LIGHTING_BUGS.md Bug 20 failure, not a regression.");
+            byte[] open = ShaftColumn(TestBlockPalette.Air, meta: 0);
+            byte[] slabbed = ShaftColumn(TestBlockPalette.HalfSlab, SLAB_VERTICAL_META);
+
+            StringBuilder diff = new StringBuilder();
+            for (int i = 0; i < open.Length; i++)
+            {
+                if (open[i] != slabbed[i])
+                    diff.Append($" y={FLOOR_TOP_Y - 1 - i}: open={open[i]} slabbed={slabbed[i]};");
+            }
+
+            return LightingAssert.IsTrue(diff.Length == 0,
+                "K20a: a vertical half slab's open half carries the sky column undimmed",
+                $"the column under a vertical slab must equal an uncapped shaft's, but differs at —{diff}. "
+                + "A decaying column (15/14/13/…) means the sky-column rule is still whole-block: the open "
+                + "half of a vertical slab is an unobstructed vertical channel and must not attenuate.");
         }
 
         /// <summary>
@@ -120,9 +131,56 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>
-        /// Builds the shared fixture: a superflat opaque floor with a two-deep shaft carved into it, capped
-        /// at the top by <paramref name="capBlock"/>, lit to convergence. Returns the sky light in the
-        /// voxel directly beneath the cap.
+        /// Depth of the shaft below the cap. Deep enough that a per-block decay is visible as a gradient
+        /// rather than a single value — the shape of defect K20a's original "sky &gt; 0" assertion missed.
+        /// </summary>
+        private const int SHAFT_DEPTH = 6;
+
+        /// <summary>
+        /// Returns the whole sky-light column beneath the cap, topmost voxel first, for the
+        /// uncapped-versus-capped differential K20a asserts.
+        /// </summary>
+        /// <param name="capBlock">Block placed at the top of the shaft (use Air to leave it open).</param>
+        /// <param name="meta">Raw metadata byte for the cap block — selects a partial block's orientation.</param>
+        /// <returns>Sky light per voxel, from just under the cap downwards.</returns>
+        private static byte[] ShaftColumn(ushort capBlock, byte meta)
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            BuildShaft(world, capBlock, meta);
+
+            ChunkData data = world.GetChunkData(new Vector2Int(1, 1));
+            byte[] column = new byte[SHAFT_DEPTH];
+            for (int i = 0; i < SHAFT_DEPTH; i++)
+                column[i] = LightBitMapping.GetSkyLight(data.GetLightData(8, FLOOR_TOP_Y - 1 - i, 8));
+            return column;
+        }
+
+        /// <summary>
+        /// Carves the shaft, places the cap, and lights the world to convergence — the geometry every
+        /// scenario in this file shares.
+        /// </summary>
+        /// <param name="world">The harness world to build into.</param>
+        /// <param name="capBlock">Block placed at the top of the shaft (use Air to leave it open).</param>
+        /// <param name="meta">Raw metadata byte for the cap block.</param>
+        private static void BuildShaft(LightingTestWorld world, ushort capBlock, byte meta)
+        {
+            world.FillSuperflatFloor(FLOOR_TOP_Y, TestBlockPalette.Stone);
+
+            // The cap sits at the floor surface with the shaft carved out beneath it.
+            Vector3Int capPos = new Vector3Int(24, FLOOR_TOP_Y, 24);
+            world.SetBlock(capPos, TestBlockPalette.Air);
+            for (int i = 1; i <= SHAFT_DEPTH; i++)
+                world.SetBlock(new Vector3Int(24, FLOOR_TOP_Y - i, 24), TestBlockPalette.Air);
+
+            if (capBlock != TestBlockPalette.Air)
+                world.SetBlock(capPos, capBlock, meta);
+
+            world.RecalculateHeightmaps();
+            world.RunInitialLighting();
+        }
+
+        /// <summary>
+        /// Builds the shared fixture and returns the sky light in the voxel directly beneath the cap.
         /// </summary>
         /// <param name="capBlock">Block placed at the top of the shaft (use Air to leave it open).</param>
         /// <param name="meta">Raw metadata byte for the cap block — selects a partial block's orientation.</param>
@@ -131,22 +189,11 @@ namespace Editor.Validation.Lighting
         private static byte ShaftLightBelowCap(ushort capBlock, byte meta, out byte capCellLight)
         {
             using LightingTestWorld world = new LightingTestWorld(3);
-            world.FillSuperflatFloor(FLOOR_TOP_Y, TestBlockPalette.Stone);
-
-            // A two-deep shaft: the cap sits at the floor surface, the probe one voxel below it.
-            Vector3Int capPos = new Vector3Int(24, FLOOR_TOP_Y, 24);
-            Vector3Int probePos = new Vector3Int(24, FLOOR_TOP_Y - 1, 24);
-            world.SetBlock(capPos, TestBlockPalette.Air);
-            world.SetBlock(probePos, TestBlockPalette.Air);
-            if (capBlock != TestBlockPalette.Air)
-                world.SetBlock(capPos, capBlock, meta);
-
-            world.RecalculateHeightmaps();
-            world.RunInitialLighting();
+            BuildShaft(world, capBlock, meta);
 
             ChunkData data = world.GetChunkData(new Vector2Int(1, 1));
-            capCellLight = LightBitMapping.GetSkyLight(data.GetLightData(8, capPos.y, 8));
-            return LightBitMapping.GetSkyLight(data.GetLightData(8, probePos.y, 8));
+            capCellLight = LightBitMapping.GetSkyLight(data.GetLightData(8, FLOOR_TOP_Y, 8));
+            return LightBitMapping.GetSkyLight(data.GetLightData(8, FLOOR_TOP_Y - 1, 8));
         }
     }
 }

@@ -487,6 +487,29 @@ blocks (i.e. "slabs are transparent") reds **B101 and only B101**, with its auth
 clean. The opposite sabotage needs no run: coverage-1-everywhere *is* the pre-VO-3 engine, measured in VO-2
 as K20a red / B101–B103 green.
 
+**Amended 2026-08-07 — first in-game report found a third site, and a weak assertion.** The user reported
+the horizontal slab correct (straight to 0 — B101 holding in game) but the column under a *vertical* slab
+decaying `15/14/13/…/0` instead of staying 15. Two whole-block tests had been left unconverted:
+
+- `isVerticalSunlight` (the unattenuated downward sky-column rule) gated on
+  `BlockTypeJobData.IsFullyTransparentToLight` — a whole-block `Opacity == 0` test that a slab fails, so
+  the column resumed attenuating below it. **Fixed** with `LightAttenuation.IsTransparentThroughFace`.
+- `IsLightObstructing` (`Opacity > 0`) still puts the **heightmap** at a vertical slab, so
+  `RecalculateSunlightForColumn` PASS 1 stops force-lighting there. **Deliberately NOT changed** — with
+  the rule above fixed, the BFS carries the undimmed column down anyway, so the field is correct; the
+  heightmap merely stays conservative (fast path off, slow path right). Changing `IsLightObstructing`
+  would touch `ChunkData` heightmap maintenance, generation, and the LI-2 band derivation, for no
+  correctness gain. Executor: revisit only if profiling shows the lost fast path matters.
+
+**The stricter definition matters.** `IsTransparentThroughFace` is "entry cost is **zero**", not "the face
+does not occlude" — otherwise water (opacity 2, occludes nothing) would have started extending the
+unattenuated column, a silent regression. Verified: water still dims `14/13/12/…`.
+
+**Assertion strengthened.** `K20a` originally asserted only `sky > 0` below the slab. That was too weak —
+it passed while the column decayed, which is why only in-game play caught it. It is now a **column-for-
+column differential against an uncapped shaft** over a 6-deep shaft, which pins the degree without
+restating the cost formula. Recorded in the scenario docstring as "do not weaken back".
+
 ⚠️ **This phase is not done until you confirm it in game.** Suite-green is necessary, not sufficient.
 
 - **Scope:** extend `LightAttenuation.Attenuate` to a directional form per D2/D3 and migrate the

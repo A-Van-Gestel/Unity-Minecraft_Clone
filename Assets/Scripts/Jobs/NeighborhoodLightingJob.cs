@@ -975,7 +975,13 @@ namespace Jobs
                 byte neighborMeta = BurstVoxelDataBitMapping.GetMeta(neighborPacked);
                 int entryFace = VoxelData.RevFaceChecksIndices[i];
 
-                bool isVerticalSunlight = sourceLight == 15 && sourceProps.IsFullyTransparentToLight && VoxelData.FaceChecks[i].y == -1 && neighborProps.IsFullyTransparentToLight;
+                // VO-3: the unattenuated downward sky column is a per-FACE question. A vertical slab's
+                // open half is a full-height channel, so the column must pass through it undimmed; a
+                // horizontal slab's solid underside still stops it. Water (opacity 2) keeps dimming the
+                // column because IsTransparentThroughFace tests entry COST, not merely "does not block".
+                bool isVerticalSunlight = sourceLight == 15 && VoxelData.FaceChecks[i].y == -1
+                                                            && LightAttenuation.IsTransparentThroughFace(in sourceProps, sourceMeta, i)
+                                                            && LightAttenuation.IsTransparentThroughFace(in neighborProps, neighborMeta, entryFace);
 
                 byte lightToPropagate;
 

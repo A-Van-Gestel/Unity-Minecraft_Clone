@@ -40,7 +40,7 @@ namespace Jobs.BurstData
         //
         // EVERY predicate short-circuits on HasCustomBounds, so a full-cube block takes a path that is
         // arithmetically identical to the pre-VO-3 rule. That is deliberate: it is what makes "no
-        // behaviour change for full blocks" provable rather than hoped for.
+        // behavior change for full blocks" provable rather than hoped for.
 
         /// <summary>
         /// Returns <see langword="true"/> when light cannot cross the given face of this block: it is
@@ -97,6 +97,27 @@ namespace Jobs.BurstData
         public static bool ExitBlocked(in BlockTypeJobData block, byte meta, int faceIndex)
         {
             return block.HasCustomBounds && FaceBlocksLight(in block, meta, faceIndex);
+        }
+
+        /// <summary>
+        /// Returns <see langword="true"/> when light crosses this face with no attenuation at all — the
+        /// directional form of <see cref="BlockTypeJobData.IsFullyTransparentToLight"/>, and the test the
+        /// vertical sky-light column rule uses.
+        /// <para>
+        /// Note this is <b>stricter than "does not block"</b>: a semi-transparent full block such as water
+        /// does not block light, but it does attenuate it, so it must not extend the unattenuated column.
+        /// Defining this as "entry cost is zero" rather than "face does not occlude" is what preserves
+        /// that. For a full cube it reduces exactly to <c>Opacity == 0</c>.
+        /// </para>
+        /// </summary>
+        /// <param name="block">The block being crossed.</param>
+        /// <param name="meta">The placed voxel's raw metadata byte.</param>
+        /// <param name="faceIndex">The face being crossed, in <c>VoxelData.FaceChecks</c> order.</param>
+        /// <returns><see langword="true"/> when crossing that face costs nothing.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsTransparentThroughFace(in BlockTypeJobData block, byte meta, int faceIndex)
+        {
+            return EntryOpacity(in block, meta, faceIndex) == 0;
         }
 
         /// <summary>Coverage at or above which a face counts as fully covered (absorbs float round-off).</summary>
