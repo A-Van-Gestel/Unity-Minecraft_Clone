@@ -288,6 +288,18 @@ namespace Editor.Validation.Lighting.Framework
             return BurstVoxelDataBitMapping.GetId(chunk.Data.GetVoxel(localPos.x, localPos.y, localPos.z));
         }
 
+        /// <summary>
+        /// Returns the raw metadata byte at the given world position. The oracle needs it alongside the
+        /// block id because a partial block's occlusion depends on its orientation (VO-3).
+        /// </summary>
+        /// <param name="worldPos">The world-space voxel position.</param>
+        /// <returns>The voxel's raw metadata byte.</returns>
+        public byte GetBlockMeta(Vector3Int worldPos)
+        {
+            TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
+            return BurstVoxelDataBitMapping.GetMeta(chunk.Data.GetVoxel(localPos.x, localPos.y, localPos.z));
+        }
+
         /// <summary>Returns the packed ushort light value at the given world position.</summary>
         /// <param name="worldPos">The world-space voxel position.</param>
         public ushort GetLightData(Vector3Int worldPos)

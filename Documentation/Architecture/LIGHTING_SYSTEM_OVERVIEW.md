@@ -373,10 +373,21 @@ The snapshot + merge approach is the idiomatic Unity solution and works correctl
 **Starlight:** Supports blocks that are transparent in some directions but opaque in others (e.g., stairs, slabs, glass panes). Uses `VoxelShape.faceShapeOccludes()` for per-face transparency checks.
 Queue entries carry `FLAG_HAS_SIDED_TRANSPARENT_BLOCKS` to enable the expensive check only when needed.
 
-**Our system:** Uses a single `opacity` value per block type. Blocks are either uniformly opaque or uniformly transparent — no per-face variation.
+**Our system (since `VO-3`, August 2026): implemented, derived from block shape rather than a flag.** Light crossing a face asks two questions instead of one boolean `IsOpaque`:
 
-**Why not applicable (currently):** We have no block types with directional transparency. If stairs, slabs, or other partial blocks are added in the future, this optimization would become relevant.
-At that point, adding a `hasDirectionalOpacity` flag to `BlockTypeJobData` and implementing per-face checks would be necessary.
+- **Does this face block?** `LightAttenuation.FaceBlocksLight(block, meta, face)` — true when the block is opaque **and** its volume fully covers that face. Coverage comes from `Jobs.BurstData.BurstOcclusionUtility`, which rotates the block's authored `BlockCollisionBounds` by its metadata (the *same* shape model physics, placement, and the interaction ray use — there is deliberately no second descriptor; see [`../Design/VOXEL_OCCLUSION_REFACTOR.md`](../Design/VOXEL_OCCLUSION_REFACTOR.md) §4 D1).
+- **What does entry cost?** `LightAttenuation.EntryOpacity(block, meta, face)` — the block's authored opacity on a face its volume covers, and **0 (air cost)** on a face it does not, because the light is travelling through the empty part of the cell.
+
+Occlusion is **binary, not graded** (Starlight's `faceShapeOccludes` semantics): a face either fully covers or it does not. §4 D2 of the design doc records why the graded alternative was rejected — worked through, it leaves a pit capped by a vertical slab completely dark, because a single scalar per cell cannot represent a half-open cross-section and any positive cost compounds across the two face crossings a traversal makes.
+
+Two consequences elsewhere in this document:
+
+- The propagation **source** guards now test `BlockTypeJobData.IsFullyOpaqueCell` (`IsOpaque && !HasCustomBounds`) rather than `IsOpaque`. A partial block is deliberately excluded: the open part of its cell holds a real light value it must re-propagate. Rule 5 ("opaque blocks receive surface light but never propagate it onward") is unchanged for blocks that actually fill their cell.
+- **Full cubes are arithmetically unchanged.** Every predicate short-circuits on `HasCustomBounds`, so a block without custom bounds takes a path identical to the pre-`VO-3` rule — that equivalence is what baselines B102/B103 and the untouched B1–B100 assert.
+
+**Still not applicable:** compound (multi-AABB) shapes — stairs, L-shapes, wedges. The shape model this reads is single-AABB only, so those inherit the limitation and are tracked under **`VQ-4`**.
+
+**Guarded by:** `K20a` (a vertical slab passes daylight) plus tripwire baselines `B101`–`B103` in `LightingValidationSuite.PartialBlocks.cs`. `B101` is the one that catches "fixed it by making slabs transparent" — verified red under a deliberate sabotage.
 
 #### Deferred Light Writes / `FLAG_WRITE_LEVEL`
 

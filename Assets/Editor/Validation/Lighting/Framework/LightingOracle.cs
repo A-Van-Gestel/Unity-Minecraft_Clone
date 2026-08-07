@@ -24,6 +24,9 @@ namespace Editor.Validation.Lighting.Framework
     /// </summary>
     public static class LightingOracle
     {
+        /// <summary>The +Y face index in VoxelData.FaceChecks order — the face a downward sky column enters through.</summary>
+        private const int TOP_FACE = 2;
+
         /// <summary>
         /// Computes the expected global light field for the world's current voxel contents.
         /// </summary>
@@ -38,17 +41,24 @@ namespace Editor.Validation.Lighting.Framework
 
             // Cache block IDs once — the solver reads each voxel many times.
             ushort[] ids = new ushort[width * height * width];
+            // VO-3: metadata is cached alongside the id because a partial block's occlusion depends on
+            // its orientation, so the spec cannot be evaluated from the block type alone.
+            byte[] metas = new byte[width * height * width];
             for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
             for (int z = 0; z < width; z++)
-                ids[field.Index(x, y, z)] = world.GetBlockId(new Vector3Int(x, y, z));
+            {
+                Vector3Int p = new Vector3Int(x, y, z);
+                ids[field.Index(x, y, z)] = world.GetBlockId(p);
+                metas[field.Index(x, y, z)] = world.GetBlockMeta(p);
+            }
 
-            SolveSky(field, ids, blockTypes);
-            SolveBlocklight(field, ids, blockTypes);
+            SolveSky(field, ids, metas, blockTypes);
+            SolveBlocklight(field, ids, metas, blockTypes);
             return field;
         }
 
-        private static void SolveSky(OracleLightField field, ushort[] ids, BlockTypeJobData[] blockTypes)
+        private static void SolveSky(OracleLightField field, ushort[] ids, byte[] metas, BlockTypeJobData[] blockTypes)
         {
             int width = field.Width;
             int height = field.Height;
@@ -78,7 +88,8 @@ namespace Editor.Validation.Lighting.Framework
                         int index = field.Index(x, y, z);
                         field.Sky[index] = lightFromSky;
                         if (lightFromSky == 0) continue;
-                        lightFromSky = Attenuate(lightFromSky, blockTypes[ids[index]].Opacity);
+                        lightFromSky = Attenuate(lightFromSky, LightAttenuation.EntryOpacity(
+                            blockTypes[ids[index]], metas[index], TOP_FACE));
                     }
                 }
             }
@@ -89,7 +100,7 @@ namespace Editor.Validation.Lighting.Framework
             for (int z = 0; z < width; z++)
             {
                 int index = field.Index(x, y, z);
-                if (field.Sky[index] > 0 && !blockTypes[ids[index]].IsOpaque)
+                if (field.Sky[index] > 0 && !blockTypes[ids[index]].IsFullyOpaqueCell)
                     queue.Enqueue(new Vector3Int(x, y, z));
             }
 
@@ -101,17 +112,20 @@ namespace Editor.Validation.Lighting.Framework
                 if (sourceLight == 0) continue;
 
                 BlockTypeJobData sourceProps = blockTypes[ids[srcIndex]];
-                if (sourceProps.IsOpaque) continue;
+                if (sourceProps.IsFullyOpaqueCell) continue;
 
                 for (int i = 0; i < 6; i++)
                 {
+                    if (LightAttenuation.ExitBlocked(sourceProps, metas[srcIndex], i)) continue;
+
                     Vector3Int neighborPos = pos + VoxelData.FaceChecks[i];
                     if (!field.IsInVolume(neighborPos)) continue;
 
                     int nIndex = field.Index(neighborPos.x, neighborPos.y, neighborPos.z);
                     BlockTypeJobData neighborProps = blockTypes[ids[nIndex]];
+                    int entryFace = VoxelData.RevFaceChecksIndices[i];
 
-                    if (neighborProps.IsOpaque)
+                    if (LightAttenuation.FaceBlocksLight(neighborProps, metas[nIndex], entryFace))
                     {
                         // Opaque blocks receive surface light but never propagate it.
                         byte surface = (byte)Mathf.Max(0, sourceLight - 1);
@@ -120,7 +134,8 @@ namespace Editor.Validation.Lighting.Framework
                     }
                     else
                     {
-                        byte propagated = Attenuate(sourceLight, neighborProps.Opacity);
+                        byte propagated = Attenuate(sourceLight,
+                            LightAttenuation.EntryOpacity(neighborProps, metas[nIndex], entryFace));
 
                         bool isVerticalSunlight = sourceLight == 15 && sourceProps.IsFullyTransparentToLight &&
                                                   VoxelData.FaceChecks[i].y == -1 && neighborProps.IsFullyTransparentToLight;
@@ -137,7 +152,7 @@ namespace Editor.Validation.Lighting.Framework
             }
         }
 
-        private static void SolveBlocklight(OracleLightField field, ushort[] ids, BlockTypeJobData[] blockTypes)
+        private static void SolveBlocklight(OracleLightField field, ushort[] ids, byte[] metas, BlockTypeJobData[] blockTypes)
         {
             int width = field.Width;
             int height = field.Height;
@@ -171,7 +186,7 @@ namespace Editor.Validation.Lighting.Framework
                 // never received surface light (matches the engine's opaque-source rule in PropagateLightRGB).
                 // Only seed-enqueued emissives can be opaque here — opaque receivers are never enqueued.
                 BlockTypeJobData srcProps = blockTypes[ids[srcIndex]];
-                if (srcProps.IsOpaque)
+                if (srcProps.IsFullyOpaqueCell)
                 {
                     srcR = srcProps.EmissionR;
                     srcG = srcProps.EmissionG;
@@ -182,13 +197,16 @@ namespace Editor.Validation.Lighting.Framework
 
                 for (int i = 0; i < 6; i++)
                 {
+                    if (LightAttenuation.ExitBlocked(srcProps, metas[srcIndex], i)) continue;
+
                     Vector3Int neighborPos = pos + VoxelData.FaceChecks[i];
                     if (!field.IsInVolume(neighborPos)) continue;
 
                     int nIndex = field.Index(neighborPos.x, neighborPos.y, neighborPos.z);
                     BlockTypeJobData neighborProps = blockTypes[ids[nIndex]];
+                    int entryFace = VoxelData.RevFaceChecksIndices[i];
 
-                    if (neighborProps.IsOpaque)
+                    if (LightAttenuation.FaceBlocksLight(neighborProps, metas[nIndex], entryFace))
                     {
                         // Opaque blocks receive surface light (source - 1) but never propagate it.
                         StampMax(field.R, nIndex, (byte)Mathf.Max(0, srcR - 1));
@@ -198,9 +216,10 @@ namespace Editor.Validation.Lighting.Framework
                     else
                     {
                         bool increased = false;
-                        increased |= StampMax(field.R, nIndex, Attenuate(srcR, neighborProps.Opacity));
-                        increased |= StampMax(field.G, nIndex, Attenuate(srcG, neighborProps.Opacity));
-                        increased |= StampMax(field.B, nIndex, Attenuate(srcB, neighborProps.Opacity));
+                        byte entryOpacity = LightAttenuation.EntryOpacity(neighborProps, metas[nIndex], entryFace);
+                        increased |= StampMax(field.R, nIndex, Attenuate(srcR, entryOpacity));
+                        increased |= StampMax(field.G, nIndex, Attenuate(srcG, entryOpacity));
+                        increased |= StampMax(field.B, nIndex, Attenuate(srcB, entryOpacity));
 
                         if (increased)
                             queue.Enqueue(neighborPos);

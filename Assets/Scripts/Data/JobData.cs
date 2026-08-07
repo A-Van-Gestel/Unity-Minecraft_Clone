@@ -302,6 +302,19 @@ namespace Data
         /// <summary>Authored maximum corner of the block's volume, block-local <c>[0,1]³</c>, unrotated.</summary>
         public readonly float3 BoundsMax;
 
+        /// <summary>
+        /// True when this block fills its whole cell with opaque material — the question the lighting
+        /// BFS's propagation-source guards ask. A *partial* opaque block (a slab) is deliberately NOT
+        /// this: the open part of its cell holds a real light value it must be able to propagate onward,
+        /// which is exactly what <c>LIGHTING_BUGS.md</c> Bug 20 is about. Use
+        /// <see cref="Jobs.BurstData.LightAttenuation.FaceBlocksLight"/> for per-face questions.
+        /// </summary>
+        public bool IsFullyOpaqueCell
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => IsOpaque && !HasCustomBounds;
+        }
+
         // Texture ID's
         public readonly int BackFaceTexture;
         public readonly int FrontFaceTexture;

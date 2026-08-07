@@ -1,8 +1,8 @@
 # Directional Per-Face Voxel Occlusion (VO-*)
 
-**Version:** 1.4  
+**Version:** 1.5  
 **Date:** 2026-08-07  
-**Status:** Proposed design — VO-0, VO-1 and VO-2 implemented; VO-3…VO-7 pending.  
+**Status:** Proposed design — VO-0…VO-3 implemented (VO-3 awaiting in-game confirmation); VO-4…VO-7 pending.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > The engine gained partial blocks (`Stone Half Slab`) without the lighting model gaining a notion
@@ -55,8 +55,9 @@ code. Results, which later phases cite:
 **Relationship to other documents:**
 
 - [`LIGHTING_SYSTEM_OVERVIEW.md`](../Architecture/LIGHTING_SYSTEM_OVERVIEW.md) — supplies the BFS
-  propagation rules this plan modifies; its "Conditionally Opaque Blocks" section already predicted
-  this work and is stale (it says no partial blocks exist). VO-3 corrects it.
+  propagation rules this plan modifies; its "Conditionally Opaque Blocks" section predicted this work
+  and was stale (it said no partial blocks exist). **VO-3 rewrote it** to document the implemented
+  binary per-face model, the `IsFullyOpaqueCell` source-guard change, and the full-cube equivalence.
 - [`SMOOTH_AND_RGB_LIGHTING.md`](../Architecture/SMOOTH_AND_RGB_LIGHTING.md) — §2.5.2 currently
   claims the custom-mesh path "correctly handles sub-block geometry"; VO-6 corrects that claim.
 - [`SUB_VOXEL_COLLISION_SYSTEM.md`](../Architecture/SUB_VOXEL_COLLISION_SYSTEM.md) — **owns the shape
@@ -338,7 +339,7 @@ decision whose *visual* outcome needs user sign-off (VO-5).
 | ~~**VO-0**~~ | ✅ Probe: evidence for the model's assumptions            | 🟢     | —            |
 | ~~**VO-1**~~ | ✅ Burst-safe bounds mirror + shared occlusion utility    | 🟢     | VO-0         |
 | ~~**VO-2**~~ | ✅ Harness support for partial blocks (suite-only)        | 🟢     | VO-1         |
-| **VO-3** | Directional occlusion in the BFS                             | 🔴     | VO-2         |
+| ~~**VO-3**~~ | ✅ Directional occlusion in the BFS (awaiting in-game)    | 🔴     | VO-2         |
 | **VO-4** | Directional cross-chunk support / veto                       | 🔴     | VO-3         |
 | **VO-5** | Fractional AO occlusion                                      | 🟡     | VO-1         |
 | **VO-6** | Sub-block face light sampling (closes Bug M01)               | 🟡     | VO-1 (VO-3 for the general case — see packet) |
@@ -452,7 +453,41 @@ for sky-exposed slabs (VO-6 packet).
 - **Doc-sync:** `LIGHTING_VALIDATION_HARNESS_FIDELITY.md` — new palette entry + `meta` API note.
 - **Serialization:** none.
 
-### VO-3 — Directional occlusion in the BFS (🔴, behavior change — the F2 fix)
+### VO-3 — Directional occlusion in the BFS (🔴, behavior change — the F2 fix) · ✅ **CODE COMPLETE 2026-08-07 — AWAITING IN-GAME CONFIRMATION**
+
+**How D3's full-cube-equivalence risk was resolved.** The packet warned that a two-face `max()` cost would
+regress semi-transparent full blocks (water into air: cost 1 → 2). Resolved by the first of the two options
+it offered — **every new predicate short-circuits on `HasCustomBounds`**, so a full cube's path is
+arithmetically identical to the pre-VO-3 rule and the destination-only charge is preserved. The
+equivalence is structural, not measured-and-hoped: three predicates in `LightAttenuation`, each returning
+the old value when `!HasCustomBounds`.
+
+- `FaceBlocksLight(block, meta, face)` — opaque **and** coverage ≥ 1. Replaces the `IsOpaque` test at the
+  traversal sites.
+- `EntryOpacity(block, meta, face)` — authored opacity on a covered face, **0 (air)** on an uncovered one.
+- `ExitBlocked(block, meta, face)` — partial blocks only; a full opaque cube is already stopped by the
+  source guard, so this must not fire for one or the guard would apply twice.
+
+Plus `BlockTypeJobData.IsFullyOpaqueCell` (`IsOpaque && !HasCustomBounds`) for the propagation-**source**
+guards, which ask "does this cell hold only surface light" — a partial block does not, and must
+re-propagate.
+
+**Sites migrated (sunlight + RGB propagation).** `PropagateLight` and `PropagateLightRGB`: source guard,
+per-direction exit test, and the neighbour opaque/attenuate branch. `LightingOracle` received the identical
+change plus a metadata channel (`LightingTestWorld.GetBlockMeta`) — the oracle previously cached only block
+ids and so could not evaluate an orientation-dependent spec.
+
+**Deliberately NOT migrated here — deferred to VO-4:** the cross-chunk edge-check seeding, the removal
+initiators, and the `CrossChunkLightModApplier` support/veto sites. They are the Bug 11/13/14/15 machinery
+and belong with VO-4's soak.
+
+**Results:** `K20a` flips to a cyan fix candidate (below a vertical slab: sky **0 → 14**); **Validate All:
+all 419 baselines across 18 suites PASSED**. Prove-red: forcing `FaceBlocksLight` to `false` for partial
+blocks (i.e. "slabs are transparent") reds **B101 and only B101**, with its authored diagnostic — restored
+clean. The opposite sabotage needs no run: coverage-1-everywhere *is* the pre-VO-3 engine, measured in VO-2
+as K20a red / B101–B103 green.
+
+⚠️ **This phase is not done until you confirm it in game.** Suite-green is necessary, not sufficient.
 
 - **Scope:** extend `LightAttenuation.Attenuate` to a directional form per D2/D3 and migrate the
   16 `IsOpaque` sites in `NeighborhoodLightingJob.cs`. Each site must be classified first — some are
@@ -601,6 +636,7 @@ for sky-exposed slabs (VO-6 packet).
 
 * **v1.0** - Initial design
 * **v1.1** - VO-0 executed (no production code needed): blast radius is one block type, §2.3's bounds table confirmed, surface stamp confirmed (resolves open question 1 and unblocks VO-6 from VO-3), VO-7 version anchors pinned
+* **v1.5** - VO-3 code complete: directional occlusion in the sky + RGB propagation paths and the oracle; D3's full-cube-equivalence risk resolved by short-circuiting every predicate on `HasCustomBounds`; K20a fixed (sky 0 → 14), 419 baselines green, B101 prove-red confirmed. Cross-chunk sites deferred to VO-4. AWAITING IN-GAME CONFIRMATION
 * **v1.4** - VO-2 executed: `TestBlockPalette.HalfSlab` + `meta` on `SetBlock`/`PlaceBlock`, baselines B101–B103 green and repro **K20a** red as designed (lighting harness gap **B9** closed); oracle deliberately left to VO-3
 * **v1.3** - **D2 REVERSED** at the start of VO-2: binary per-face occlusion (Starlight's `faceShapeOccludes`) replaces the graded opacity cost, which was proven by worked arithmetic to leave the motivating pit dark; D3 restated for it, with a full-cube-equivalence warning VO-3 must resolve
 * **v1.2** - VO-1 executed: Burst bounds mirror + shared `BurstOcclusionUtility` core + new Occlusion suite (5 baselines); §2.3's identity-row label corrected; new finding **F10** — `NS-4` does not guard the collision rotation, so VO-1's prove-red rests on occlusion `B2` alone
@@ -608,4 +644,4 @@ for sky-exposed slabs (VO-6 packet).
 ---
 
 **Last Updated:** 2026-08-07  
-**Next Review:** when VO-3 starts
+**Next Review:** when VO-3 is confirmed in game, then VO-4

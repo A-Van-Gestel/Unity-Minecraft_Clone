@@ -953,23 +953,33 @@ namespace Jobs
             byte sourceLight = LightBitMapping.GetSkyLight(GetLightData(pos));
             BlockTypeJobData sourceProps = BlockTypes[BurstVoxelDataBitMapping.GetId(sourcePacked)];
 
-            // An opaque block cannot propagate sunlight to its neighbors.
-            if (sourceProps.IsOpaque) return;
+            // A block that fills its cell with opaque material cannot propagate sunlight onward — it only
+            // stores surface light. A PARTIAL opaque block (a slab) is excluded from this guard on
+            // purpose: the open part of its cell holds a real value it must pass on (VO-3).
+            if (sourceProps.IsFullyOpaqueCell) return;
+
+            byte sourceMeta = BurstVoxelDataBitMapping.GetMeta(sourcePacked);
 
             for (int i = 0; i < 6; i++)
             {
+                // A partial block's solid side seals that direction; every other case falls through
+                // unchanged (a full opaque cube already returned above).
+                if (LightAttenuation.ExitBlocked(in sourceProps, sourceMeta, i)) continue;
+
                 Vector3Int neighborPos = pos + VoxelData.FaceChecks[i];
                 uint neighborPacked = GetPackedData(neighborPos);
                 if (neighborPacked == uint.MaxValue) continue;
 
                 byte neighborLight = LightBitMapping.GetSkyLight(GetLightData(neighborPos));
                 BlockTypeJobData neighborProps = BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)];
+                byte neighborMeta = BurstVoxelDataBitMapping.GetMeta(neighborPacked);
+                int entryFace = VoxelData.RevFaceChecksIndices[i];
 
                 bool isVerticalSunlight = sourceLight == 15 && sourceProps.IsFullyTransparentToLight && VoxelData.FaceChecks[i].y == -1 && neighborProps.IsFullyTransparentToLight;
 
                 byte lightToPropagate;
 
-                if (neighborProps.IsOpaque)
+                if (LightAttenuation.FaceBlocksLight(in neighborProps, neighborMeta, entryFace))
                 {
                     lightToPropagate = (byte)math.max(0, sourceLight - 1);
                     if (lightToPropagate > neighborLight)
@@ -979,7 +989,8 @@ namespace Jobs
                 }
                 else
                 {
-                    lightToPropagate = AttenuateLight(sourceLight, neighborProps.Opacity);
+                    lightToPropagate = AttenuateLight(sourceLight,
+                        LightAttenuation.EntryOpacity(in neighborProps, neighborMeta, entryFace));
 
                     if (isVerticalSunlight)
                     {
@@ -1021,8 +1032,10 @@ namespace Jobs
             // (fixed Bug 09), and an opaque lamp re-radiates light received from a brighter
             // adjacent source. Mirrors the IsOpaque source guard in the sunlight path.
             // Non-emissive opaque sources zero out entirely and exit via the all-zero return.
+            // VO-3: a PARTIAL opaque block is excluded — the open part of its cell carries real
+            // blocklight it must re-propagate, so it keeps its stored channels here.
             BlockTypeJobData sourceProps = BlockTypes[BurstVoxelDataBitMapping.GetId(sourcePacked)];
-            if (sourceProps.IsOpaque)
+            if (sourceProps.IsFullyOpaqueCell)
             {
                 srcR = sourceProps.EmissionR;
                 srcG = sourceProps.EmissionG;
@@ -1031,8 +1044,13 @@ namespace Jobs
 
             if (srcR == 0 && srcG == 0 && srcB == 0) return;
 
+            byte sourceMeta = BurstVoxelDataBitMapping.GetMeta(sourcePacked);
+
             for (int i = 0; i < 6; i++)
             {
+                // A partial block's solid side seals that direction (mirror of the sunlight path).
+                if (LightAttenuation.ExitBlocked(in sourceProps, sourceMeta, i)) continue;
+
                 Vector3Int neighborPos = pos + VoxelData.FaceChecks[i];
                 uint neighborPacked = GetPackedData(neighborPos);
                 if (neighborPacked == uint.MaxValue) continue;
@@ -1046,10 +1064,12 @@ namespace Jobs
                 byte nB = LightBitMapping.GetBlocklightB(neighborLight);
 
                 BlockTypeJobData neighborProps = BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)];
+                byte neighborMeta = BurstVoxelDataBitMapping.GetMeta(neighborPacked);
+                int entryFace = VoxelData.RevFaceChecksIndices[i];
 
-                if (neighborProps.IsOpaque)
+                if (LightAttenuation.FaceBlocksLight(in neighborProps, neighborMeta, entryFace))
                 {
-                    // Opaque blocks receive surface light (source - 1) but do not propagate further
+                    // Faces that block receive surface light (source - 1) but do not propagate further
                     byte propR = (byte)math.max(0, srcR - 1);
                     byte propG = (byte)math.max(0, srcG - 1);
                     byte propB = (byte)math.max(0, srcB - 1);
@@ -1065,9 +1085,10 @@ namespace Jobs
                 }
                 else
                 {
-                    byte propR = AttenuateLight(srcR, neighborProps.Opacity);
-                    byte propG = AttenuateLight(srcG, neighborProps.Opacity);
-                    byte propB = AttenuateLight(srcB, neighborProps.Opacity);
+                    byte entryOpacity = LightAttenuation.EntryOpacity(in neighborProps, neighborMeta, entryFace);
+                    byte propR = AttenuateLight(srcR, entryOpacity);
+                    byte propG = AttenuateLight(srcG, entryOpacity);
+                    byte propB = AttenuateLight(srcB, entryOpacity);
 
                     byte finalR = (byte)math.max(nR, (int)propR);
                     byte finalG = (byte)math.max(nG, (int)propG);

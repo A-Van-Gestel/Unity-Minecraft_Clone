@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Data;
 using Unity.Mathematics;
 
 namespace Jobs.BurstData
@@ -30,5 +31,75 @@ namespace Jobs.BurstData
         {
             return (byte)math.max(0, sourceLight - math.max(1, opacity));
         }
+
+        // ===== Directional occlusion (VO-3) =====
+        // A block that does not fill its cell blocks light only through the faces its volume actually
+        // covers. These three predicates are the whole of that model, and live here — beside Attenuate —
+        // so the BFS job, the borderless validation oracle, and the cross-chunk veto cannot drift apart.
+        // See Documentation/Design/VOXEL_OCCLUSION_REFACTOR.md §4 D2/D3.
+        //
+        // EVERY predicate short-circuits on HasCustomBounds, so a full-cube block takes a path that is
+        // arithmetically identical to the pre-VO-3 rule. That is deliberate: it is what makes "no
+        // behaviour change for full blocks" provable rather than hoped for.
+
+        /// <summary>
+        /// Returns <see langword="true"/> when light cannot cross the given face of this block: it is
+        /// opaque <b>and</b> its volume covers that face completely. A full cube covers every face, so
+        /// this reduces to <c>IsOpaque</c> for anything without custom bounds.
+        /// </summary>
+        /// <param name="block">The block being crossed.</param>
+        /// <param name="meta">The placed voxel's raw metadata byte (selects the volume's rotation).</param>
+        /// <param name="faceIndex">Face direction, in <c>VoxelData.FaceChecks</c> order.</param>
+        /// <returns><see langword="true"/> when that face blocks light.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool FaceBlocksLight(in BlockTypeJobData block, byte meta, int faceIndex)
+        {
+            if (!block.IsOpaque)
+                return false;
+            if (!block.HasCustomBounds)
+                return true;
+
+            return BurstOcclusionUtility.GetBlockFaceCoverage(in block, meta, faceIndex) >= FULL_COVERAGE_THRESHOLD;
+        }
+
+        /// <summary>
+        /// The opacity charged when light enters this block through the given face. For a partial block
+        /// this is 0 (air cost) on a face its volume does not fully cover — the light travels through the
+        /// empty part of the cell — and its authored opacity on a face that does. Full cubes always
+        /// return their authored opacity, exactly as before VO-3.
+        /// </summary>
+        /// <param name="block">The block being entered.</param>
+        /// <param name="meta">The placed voxel's raw metadata byte.</param>
+        /// <param name="faceIndex">The entry face, in <c>VoxelData.FaceChecks</c> order.</param>
+        /// <returns>The opacity to charge on entry.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte EntryOpacity(in BlockTypeJobData block, byte meta, int faceIndex)
+        {
+            if (!block.HasCustomBounds)
+                return block.Opacity;
+
+            return BurstOcclusionUtility.GetBlockFaceCoverage(in block, meta, faceIndex) >= FULL_COVERAGE_THRESHOLD
+                ? block.Opacity
+                : (byte)0;
+        }
+
+        /// <summary>
+        /// Returns <see langword="true"/> when light inside this block cannot leave through the given
+        /// face. Only ever true for partial blocks: a full opaque cube is rejected earlier by the
+        /// propagation source guard (it stores surface light but never re-propagates it), so this must
+        /// not fire for one or that guard would be applied twice.
+        /// </summary>
+        /// <param name="block">The block light is leaving.</param>
+        /// <param name="meta">The placed voxel's raw metadata byte.</param>
+        /// <param name="faceIndex">The exit face, in <c>VoxelData.FaceChecks</c> order.</param>
+        /// <returns><see langword="true"/> when light cannot exit through that face.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool ExitBlocked(in BlockTypeJobData block, byte meta, int faceIndex)
+        {
+            return block.HasCustomBounds && FaceBlocksLight(in block, meta, faceIndex);
+        }
+
+        /// <summary>Coverage at or above which a face counts as fully covered (absorbs float round-off).</summary>
+        private const float FULL_COVERAGE_THRESHOLD = 1f - 1e-4f;
     }
 }
