@@ -1,8 +1,8 @@
 # Directional Per-Face Voxel Occlusion (VO-*)
 
-**Version:** 1.5  
-**Date:** 2026-08-07  
-**Status:** Proposed design — VO-0…VO-3 implemented (VO-3 awaiting in-game confirmation); VO-4…VO-7 pending.  
+**Version:** 1.6  
+**Date:** 2026-08-08  
+**Status:** Proposed design — VO-0…VO-3 implemented and confirmed in game; VO-4…VO-6 pending; VO-7 descoped.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > The engine gained partial blocks (`Stone Half Slab`) without the lighting model gaining a notion
@@ -46,11 +46,11 @@ code. Results, which later phases cite:
 - **(c) A sky-exposed opaque cell DOES store a usable surface stamp.** Superflat Stone (opacity 15) floor
   to `y = 10`, after `RunInitialLighting`: the topmost stone at `y = 10` stores `sky = 15` while buried
   stone at `y ≤ 9` stores 0. **This resolves §8 open question 1** — see the revised VO-6 precondition.
-- **(d) Version anchors for VO-7.** The chunk binary version is
-  `ChunkSerializer.CURRENT_CHUNK_VERSION = 7` (`Assets/Scripts/Serialization/ChunkSerializer.cs:31`); the
-  *world* version ladder is separate and its highest registered step is
-  `Migration_v12_to_v13_PlayerChunkRelativePosition`, so VO-7 adds a `Migration_v13_to_v14_*` step.
-  (Executor confirms no v13→v14 step has since been added and locates the current-version constant.)
+- **(d) Version anchors** (gathered for VO-7, which was later **descoped** — kept because its tripwire
+  depends on them). The chunk binary version is `ChunkSerializer.CURRENT_CHUNK_VERSION = 7`
+  (`Assets/Scripts/Serialization/ChunkSerializer.cs:31`); the *world* version ladder is separate and its
+  highest registered step is `Migration_v12_to_v13_PlayerChunkRelativePosition`, so a relight step would
+  be `Migration_v13_to_v14_*` if the VO-7 tripwire ever fires.
 
 **Relationship to other documents:**
 
@@ -69,8 +69,8 @@ code. Results, which later phases cite:
   un-modelled" note is what VO-5 must extend.
 - [`LIGHTING_VALIDATION_HARNESS_FIDELITY.md`](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md)
   — VO-2 closed its gap **B9** (no partial block, no metadata authoring); see that entry for why these scenarios avoid oracle comparison.
-- [`AOT_WORLD_MIGRATION_SYSTEM.md`](../Architecture/AOT_WORLD_MIGRATION_SYSTEM.md) — VO-7's relight
-  migration runs through it.
+- [`AOT_WORLD_MIGRATION_SYSTEM.md`](../Architecture/AOT_WORLD_MIGRATION_SYSTEM.md) — would have hosted
+  VO-7's relight; **no longer touched by this arc** (VO-7 descoped 2026-08-08).
 
 ---
 
@@ -176,7 +176,7 @@ classification path and a v8→v9 migration precedent
 
 - The **format** does not change — still one `ushort` per voxel.
 - The **values** do: worlds saved under the old model carry light computed with boolean occlusion.
-- Consequence: this needs a **relight**, not a format migration. See D4 / VO-7.
+- Consequence: this would need a **relight**, not a format migration — but see D4, superseded 2026-08-08.
 
 ### 2.5 Harness state (this session's groundwork, already landed)
 
@@ -206,7 +206,7 @@ Not part of the phases below — recording it so a cold executor does not redo i
 | F7 | **The oracle shares the model under test.** `LightingOracle` calls the same `LightAttenuation.Attenuate` as the engine, so a directional change lands in both simultaneously and the suite cannot arbitrate correctness by itself. Baselines must be authored to pin *behaviour* (light reaches / does not reach a probe) rather than re-deriving the formula.                                | VO-2         |
 | F8 | **AO occlusion is boolean, not fractional.** `SampleCorner` skips the diagonal term only when `sideAOpaque && sideBOpaque`, and `SampleNeighborLight` substitutes hard zero. There is no representation for "half occluding", so even a correct shape model has nowhere to put a coverage fraction.                                                                                            | VO-5         |
 | F10 | **`NS-4` does not guard the collision rotation.** Discovered by VO-1's prove-red: with `math.transpose` applied to the shared rotation core, all **26** Physics Solver baselines stayed green. The plan (v1.0) had asserted `NS-4` was the guard that a collision-bounds refactor is behaviour-preserving; it is not — none of its scenarios distinguish a rotated custom-bounds volume from its inverse. This is a pre-existing coverage gap in `NS-4`, not something VO-1 introduced, and it means *any* future change to the rotation path needs the occlusion baselines (or new `NS-4` scenarios) to be safe. | Recorded here; VO-1's guard chain compensates. A dedicated `NS-4` rotated-bounds scenario is filed as a follow-up in §7. |
-| F9 | **Light values are serialized; the model is not versioned.** Nothing on disk records which occlusion model produced a chunk's `LightData`, so without an explicit version bump an upgraded client silently mixes old and new lighting per chunk. (Executor verifies the exact world-version constant — the grep for it returned nothing under `Serialization/`/`Data/`.)                       | VO-7         |
+| F9 | ⚠️ **CLOSED-AS-WONTFIX 2026-08-08 (see VO-7).** **Light values are serialized; the model is not versioned.** Nothing on disk records which occlusion model produced a chunk's `LightData`, so without an explicit version bump an upgraded client silently mixes old and new lighting per chunk. (Executor verifies the exact world-version constant — the grep for it returned nothing under `Serialization/`/`Data/`.)                       | ~~VO-7~~ — descoped |
 
 ---
 
@@ -304,9 +304,12 @@ slab box through the slab's own solid face.
 
 ### D4 — Migration strategy
 
-✅ **CHOSEN:** bump the world version and **relight** affected chunks on load; the on-disk *format*
-is untouched. Rejected: a value-rewriting migration (a migration cannot recompute a BFS without the
-neighbourhood, so it would have to relight anyway) and doing nothing (F9 — silently mixed models).
+~~✅ **CHOSEN:** bump the world version and **relight** affected chunks on load~~ — **SUPERSEDED
+2026-08-08: do nothing.** The "doing nothing" option was rejected here on the strength of F9's
+mixed-model risk; that risk turned out not to exist for this project (no released worlds, and stale
+light self-heals on block update). The full reasoning and its expiry condition are in the VO-7 packet.
+The on-disk *format* was never going to change either way, which is why this is a scope removal and not
+a redesign.
 
 ### D5 — AO occlusion weighting
 
@@ -330,9 +333,9 @@ decision whose *visual* outcome needs user sign-off (VO-5).
   before `dotnet build` reports truthfully, and the reliable readiness gate is the **DLL timestamp**,
   not `IsCompiling`. When a menu-suite result contradicts the analysis, re-run the scenario inline via
   `Unity_RunCommand` — that never gives a false green on a stale build.
-- **Serialization tripwire (every phase):** zero on-disk *format* change. Only VO-7 may touch the
-  world version, and if any other phase finds it wants a format change — stop, invoke
-  `serialization-migration`, and treat it as a scope change.
+- **Serialization tripwire (every phase):** zero on-disk *format* change **and no version bump** (VO-7
+  descoped). If any phase finds it wants either — stop, invoke `serialization-migration`, and treat it
+  as a scope change.
 
 | Phase    | Scope                                                        | Effort | Depends on   |
 |----------|--------------------------------------------------------------|--------|--------------|
@@ -343,7 +346,7 @@ decision whose *visual* outcome needs user sign-off (VO-5).
 | **VO-4** | Directional cross-chunk support / veto                       | 🔴     | VO-3         |
 | **VO-5** | Fractional AO occlusion                                      | 🟡     | VO-1         |
 | **VO-6** | Sub-block face light sampling (closes Bug M01)               | 🟡     | VO-1 (VO-3 for the general case — see packet) |
-| **VO-7** | World-version bump + relight migration                       | 🟡     | VO-3, VO-4   |
+| ~~**VO-7**~~ | ❌ World-version bump + relight — **DESCOPED**, see packet | —      | —            |
 
 **Minimal standalone-value set:** VO-0 → VO-1 → VO-5 → VO-6 delivers the *visual* fix (AO stops
 max-darkening, sub-block faces sample correctly) without touching the BFS — **confirmed viable by
@@ -561,8 +564,9 @@ scheduled.
 - **Doc-sync:** `LIGHTING_SYSTEM_OVERVIEW.md` — rewrite "Conditionally Opaque Blocks" from "not
   applicable" to the implemented model (F3); update the §1.3 propagation rules and the §3.4
   data-model gotcha note about opaque neighbours.
-- **Serialization:** format unchanged; **values change** — VO-7 owns the consequence. Do not ship
-  VO-3 to users without VO-7.
+- **Serialization:** format unchanged; **values change**. VO-7 was to own that consequence but was
+  **descoped 2026-08-08** — there are no released worlds and stale light self-heals on any block update.
+  See the VO-7 packet for the conditional tripwire.
 
 ### VO-4 — Directional cross-chunk support / veto (🔴, behavior change)
 
@@ -627,21 +631,30 @@ scheduled.
   geometry" claim (F4). Archive Bug M01 via `archive-fixed-bug` after confirmation.
 - **Serialization:** none.
 
-### VO-7 — World-version bump + relight migration (🟡, behavior change)
+### VO-7 — World-version bump + relight migration · ❌ **DESCOPED 2026-08-08 (user decision) — DO NOT IMPLEMENT**
 
-- **Precondition:** VO-3 + VO-4 landed.
-- **Scope:** bump the world version and flag chunks saved under the old model for relight on load,
-  through `AOT_WORLD_MIGRATION_SYSTEM`. Invoke `serialization-migration` before writing any of it.
-- **Ordering:** last. Ships with VO-3/VO-4 as one user-visible release.
-- **Prove-red:** a world saved pre-bump loads and relights to the same field a freshly-generated
-  world produces (round-trip equality). Prove the tripwire works by loading a pre-bump save *without*
-  the relight flag and confirming the field differs.
-- **Acceptance:** universal gate + in-game load of a genuinely old save + a save/quit/reload cycle.
-- **Testability gain:** the "which lighting model produced this chunk" question becomes answerable.
-- **Doc-sync:** `AOT_WORLD_MIGRATION_SYSTEM.md` migration table;
-  `INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md` version history.
-- **Serialization:** **this is the phase that owns it.** Format unchanged; version bumped; relight
-  path added.
+**Why it was dropped.** F9's premise was that an upgraded client would silently mix old and new lighting
+per chunk. That premise does not hold for this project's actual situation, which the owner confirmed:
+
+- The engine has **no released worlds**. The only saves carrying pre-`VO-3` light are the developer's own
+  local test worlds, so there is no population to migrate.
+- Stale light is **self-healing in practice** — any block update in a chunk re-runs its lighting, and the
+  owner confirmed affected chunks already re-lit correctly that way. The residue is limited to chunks that
+  are never touched again.
+- The remaining fix is a manual one-liner on a single local world, which is cheaper than a migration step
+  plus its round-trip test, its doc-sync, and its permanent presence in the version ladder.
+
+Building it anyway would add a migration step that no user will ever execute, and version ladders are
+append-only — the cost is permanent.
+
+**What replaces it:** nothing. `CURRENT_CHUNK_VERSION` stays 7 and the world ladder stays at v13.
+
+> ⚠️ **Tripwire — the decision is conditional, not absolute.** It rests entirely on "no released worlds".
+> If this engine ever ships, or a world that matters is saved before the arc completes, the reasoning
+> expires and the relight becomes necessary again. The anchors are preserved in VO-0(d) above:
+> `ChunkSerializer.CURRENT_CHUNK_VERSION = 7`, world ladder tops at
+> `Migration_v12_to_v13_PlayerChunkRelativePosition`, so the step would be `Migration_v13_to_v14_*`.
+> Re-open this phase — do not invent a new id — and route through `serialization-migration`.
 
 ---
 
@@ -653,7 +666,7 @@ scheduled.
 | `Assets/Scripts/Jobs/` is 100% Burst-compatible | VO-1's occlusion utility is a static struct-free function over `float3`/`float3x3` using only `Unity.Mathematics`; the bounds mirror is blittable floats. |
 | Sub-chunk (section) meshing                   | Untouched — no phase changes section partitioning.                                                                                                          |
 | Async BFS flood-fill lighting                 | VO-3 changes the *cost function*, not the queue/flag/scheduling contracts. `chunk-lifecycle` invariants explicitly preserved (VO-3 ordering note).           |
-| Region-based binary serialization             | Format unchanged in every phase; VO-7 bumps a version and relights. No `BinaryFormatter`/JSON anywhere.                                                      |
+| Region-based binary serialization             | Format unchanged in every phase; no version bump (VO-7 descoped). No `BinaryFormatter`/JSON anywhere.                                                        |
 | No LINQ / GC allocations in hot paths         | The occlusion function is allocation-free arithmetic; the rotation matrix comes from the existing precomputed LUTs. `GetRotatedBounds`'s existing inline-8-corner style (no arrays) is preserved. |
 | `BlockIDs` constants, never raw IDs           | No production code references block IDs; test palettes keep their documented test-local-index exemption.                                                     |
 
@@ -690,6 +703,7 @@ scheduled.
 
 * **v1.0** - Initial design
 * **v1.1** - VO-0 executed (no production code needed): blast radius is one block type, §2.3's bounds table confirmed, surface stamp confirmed (resolves open question 1 and unblocks VO-6 from VO-3), VO-7 version anchors pinned
+* **v1.6** - VO-3 confirmed in game (repro `K20a` promoted to permanent baseline **B104**); the sky-column rule found still whole-block in play and fixed via `IsTransparentThroughFace`; undimmed-column question settled with rationale; **VO-7 DESCOPED** (no released worlds, stale light self-heals on block update) with a conditional tripwire; F9 closed as wontfix and D4 superseded
 * **v1.5** - VO-3 code complete: directional occlusion in the sky + RGB propagation paths and the oracle; D3's full-cube-equivalence risk resolved by short-circuiting every predicate on `HasCustomBounds`; K20a fixed (sky 0 → 14), 419 baselines green, B101 prove-red confirmed. Cross-chunk sites deferred to VO-4. AWAITING IN-GAME CONFIRMATION
 * **v1.4** - VO-2 executed: `TestBlockPalette.HalfSlab` + `meta` on `SetBlock`/`PlaceBlock`, baselines B101–B103 green and repro **K20a** red as designed (lighting harness gap **B9** closed); oracle deliberately left to VO-3
 * **v1.3** - **D2 REVERSED** at the start of VO-2: binary per-face occlusion (Starlight's `faceShapeOccludes`) replaces the graded opacity cost, which was proven by worked arithmetic to leave the motivating pit dark; D3 restated for it, with a full-cube-equivalence warning VO-3 must resolve
@@ -697,5 +711,5 @@ scheduled.
 
 ---
 
-**Last Updated:** 2026-08-07  
-**Next Review:** when VO-3 is confirmed in game, then VO-4
+**Last Updated:** 2026-08-08  
+**Next Review:** when VO-4 starts
