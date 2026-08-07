@@ -73,7 +73,14 @@ baseline **B91**) is deliberately scoped to face-adjacent seams and excludes thi
 ## Bug 20: Partial Blocks Are Uniformly Opaque — Slabs Block All Light and Max-Darken AO
 
 **Severity:** Medium-High  
-**Status:** Open  
+**Status:** Fixed in code (August 2026) — **awaiting in-game confirmation.** The lighting half is done
+(`VO-3`, commit `f0d12ca2`): occlusion is now per-face, derived from the block's rotated
+`BlockCollisionBounds` via `LightAttenuation.FaceBlocksLight` / `EntryOpacity` / `ExitBlocked`, with
+propagation-source guards switched to `BlockTypeJobData.IsFullyOpaqueCell` so a partial block re-propagates
+the light held in the open part of its cell. `K20a` now passes (sky below a vertical slab **0 → 14**) and
+all 419 baselines stay green. **Two pieces remain before this can be archived:** the cross-chunk sites
+(edge-check seeding, removal initiators, `CrossChunkLightModApplier` support/veto) are deferred to `VO-4`,
+and the ambient-occlusion half of the artifact — partial blocks still darken AO at maximum — is `VO-5`.  
 **Related:** [`MESHING_BUGS.md`](./MESHING_BUGS.md) Bug M01 (the mesher-side half of the same visual artifact — fixing M01 requires this entry fixed first)
 
 **Description:**
