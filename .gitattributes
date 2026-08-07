@@ -30,6 +30,14 @@
 # The last matching line wins PER ATTRIBUTE, so putting `* text=auto` after `*.png binary`
 # overrides the macro's `-text` and leaves binaries at `text: auto` — back to content sniffing,
 # the exact misdetection the binary net exists to prevent. Above it, binaries keep `text: unset`.
+#
+# `text=auto` CAN SILENTLY SKIP A FILE: a single lone CR (a CR not part of a CRLF) makes git's
+# auto-detection classify the content as binary, after which it normalizes nothing. That is not
+# hypothetical — GenerationJobData.cs ended `}<CR>` with no trailing newline and was the sole
+# CRLF survivor of the 2026-08-07 conversion, reported by git as `i/-text w/-text` while every
+# other file converted. An explicit `diff=` driver still forces a readable diff for such a file,
+# so the only visible symptom is that its line endings never change. Audit with
+# `git ls-files --eol` and look for `-text` on anything that is not genuinely binary.
 * text=auto eol=lf
 
 # Windows batch files are the one format that genuinely needs CRLF. None exist today; this is a
@@ -94,3 +102,25 @@
 *.anim            merge=unityyamlmerge
 *.controller      merge=unityyamlmerge
 *.physicMaterial  merge=unityyamlmerge
+
+# --- Git LFS: deliberately absent — do NOT add filter=lfs entries here ----------
+# LFS was installed on this repo once and scrubbed on 2026-08-07. It never tracked a single
+# file: `git lfs ls-files` was empty, and no pointer was ever committed on any branch
+# (`git log --all -S 'version https://git-lfs.github.com'` and `git grep` in HEAD both empty).
+# The residue was purely local — 4 hooks, 2 `lfs.*` keys in .git/config, and 60 KB of lock
+# caches holding ZERO objects — so `git lfs uninstall --local` removed all of it. No
+# `git lfs migrate` and no history rewrite were needed then, and none would be needed now.
+#
+# The 4 `filter.lfs.*` keys in the machine's GLOBAL ~/.gitconfig were deliberately LEFT IN
+# PLACE: they are machine-wide and may serve other repositories. They are inert here precisely
+# because this file declares no `filter=lfs` pattern — adding one is what would wake them up.
+#
+# If a large-asset problem appears, solve it some other way. Re-adding LFS re-creates the
+# pre-push hook that aborts every push whenever git-lfs is off PATH, which is what it cost
+# last time.
+#
+# Verification trap: ANY `git lfs ...` command — including `git lfs ls-files`, the natural way
+# to check the scrub held — rewrites `lfs.repositoryformatversion=0` into .git/config as a side
+# effect. Seeing that key again does NOT mean LFS came back; it means someone ran a `git lfs`
+# command. It is inert on its own, and hooks and .git/lfs/ are NOT recreated. Check with
+# `git config --local --get-regexp '^lfs\.'` instead, which does not perturb what it measures.
