@@ -20,6 +20,23 @@
 # later patterns, it discards the WHOLE line: git rejects `*.jpg` as an invalid attribute name,
 # so even `*.png` comes back `binary: unspecified`. Silent no-op. Keep one pattern per line.
 
+# --- Line endings ---------------------------------------------------------------
+# The index already stores LF throughout (core.autocrlf=true normalized on every commit), so
+# this changes only what git writes at CHECKOUT. It makes the worktree consistent across clones
+# regardless of each machine's core.autocrlf, and matches both .editorconfig (end_of_line = lf)
+# and what Unity itself writes for YAML/.meta.
+#
+# ORDER IS LOAD-BEARING (verified 2026-08-07): this block must stay ABOVE the binary section.
+# The last matching line wins PER ATTRIBUTE, so putting `* text=auto` after `*.png binary`
+# overrides the macro's `-text` and leaves binaries at `text: auto` — back to content sniffing,
+# the exact misdetection the binary net exists to prevent. Above it, binaries keep `text: unset`.
+* text=auto eol=lf
+
+# Windows batch files are the one format that genuinely needs CRLF. None exist today; this is a
+# guard for future additions. Below the `*` line so the more specific rule wins.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
 # --- Diff hunk headers (built-in drivers; verified 2026-08-05) -------------------
 *.cs    diff=csharp
 *.md    diff=markdown
