@@ -9,16 +9,15 @@ using Scenario = Editor.Validation.Framework.Scenario;
 namespace Editor.Validation.Lighting
 {
     /// <summary>
-    /// VO-2 — directional occlusion baselines for <b>partial blocks</b> (half slabs), the behaviour
-    /// <c>Documentation/Design/VOXEL_OCCLUSION_REFACTOR.md</c> VO-3 implements and
-    /// <c>Documentation/Bugs/LIGHTING_BUGS.md</c> Bug 20 describes.
+    /// Directional occlusion baselines for <b>partial blocks</b> (half slabs) — the lighting half of
+    /// <c>Documentation/Bugs/LIGHTING_BUGS.md</c> Bug 20, implemented by <c>VO-3</c> of
+    /// <c>Documentation/Design/VOXEL_OCCLUSION_REFACTOR.md</c>.
     /// <para>
-    /// <b>Split across the two scenario channels, per the suite taxonomy.</b> The scenario that asserts
-    /// behaviour the engine does not yet have — daylight passing a vertical slab's open half — is a
-    /// <b>known-bug</b> scenario (<c>K20a</c>, tagged Bug 20): it is expected to fail, does not mark the
-    /// suite red, and flips to a cyan "fix candidate" the moment VO-3 lands. The other three are ordinary
-    /// <b>baselines</b> (B101–B103) that pass today and must keep passing through VO-3 — they are the
-    /// tripwires against "fix Bug 20 by making slabs transparent".
+    /// All four are baselines today. <b>B104</b> was authored by VO-2 as known-bug repro <c>K20a</c>
+    /// (expected-red, so a not-yet-implemented behaviour could not mark the suite red) and promoted here
+    /// on 2026-08-07 once VO-3 landed and it was confirmed in game. The other three passed from the start
+    /// and are the tripwires against "fix Bug 20 by making slabs transparent" — <b>B101</b> is the one that
+    /// catches it, verified red under a deliberate sabotage.
     /// </para>
     /// <para>
     /// <b>Why these assert behaviour, not the oracle (F7).</b> <see cref="LightingOracle"/> calls the
@@ -40,8 +39,7 @@ namespace Editor.Validation.Lighting
         private const int FLOOR_TOP_Y = 10;
 
         /// <summary>
-        /// Registers the VO-2 partial-block occlusion scenarios (called from the suite runner): three
-        /// baselines that must stay green, plus the <c>K20a</c> known-bug repro in the other channel.
+        /// Registers the partial-block directional-occlusion baselines (called from the suite runner).
         /// </summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddPartialBlockOcclusionScenarios(List<Scenario> scenarios)
@@ -49,11 +47,12 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B101: an UNROTATED half slab capping a shaft blocks daylight through its solid underside", B101_FloorSlabBlocksDaylight));
             scenarios.Add(new Scenario("B102: control — a full opaque cube capping a shaft blocks daylight", B102_FullCubeBlocksDaylight));
             scenarios.Add(new Scenario("B103: control — an uncapped shaft is fully lit", B103_OpenShaftIsLit));
-            scenarios.Add(new Scenario("K20a: a VERTICAL half slab capping a shaft lets daylight past its open half", K20a_VerticalSlabPassesDaylight, "20"));
+            scenarios.Add(new Scenario("B104: a VERTICAL half slab's open half carries the sky column undimmed", B104_VerticalSlabPassesDaylight));
         }
 
         /// <summary>
-        /// K20a — <b>the motivating case.</b> A shaft in a superflat floor, capped by a half slab rotated
+        /// B104 — <b>the motivating case</b>, promoted from repro <c>K20a</c> after in-game confirmation
+        /// (2026-08-07: "it's now indeed 15 all the way down"). A shaft in a superflat floor, capped by a half slab rotated
         /// upright (<see cref="SLAB_VERTICAL_META"/>). That orientation puts the slab's solid half against
         /// the cell's +Z side, leaving its ±Y faces only half covered — so the open half is a full-height
         /// vertical channel and the sky column must pass through it <b>undimmed</b>.
@@ -65,7 +64,7 @@ namespace Editor.Validation.Lighting
         /// </para>
         /// </summary>
         /// <returns>True when the column below a vertical slab matches an uncapped shaft exactly.</returns>
-        private static bool K20a_VerticalSlabPassesDaylight()
+        private static bool B104_VerticalSlabPassesDaylight()
         {
             byte[] open = ShaftColumn(TestBlockPalette.Air, meta: 0);
             byte[] slabbed = ShaftColumn(TestBlockPalette.HalfSlab, SLAB_VERTICAL_META);
@@ -78,7 +77,7 @@ namespace Editor.Validation.Lighting
             }
 
             return LightingAssert.IsTrue(diff.Length == 0,
-                "K20a: a vertical half slab's open half carries the sky column undimmed",
+                "B104: a vertical half slab's open half carries the sky column undimmed",
                 $"the column under a vertical slab must equal an uncapped shaft's, but differs at —{diff}. "
                 + "A decaying column (15/14/13/…) means the sky-column rule is still whole-block: the open "
                 + "half of a vertical slab is an unobstructed vertical channel and must not attenuate.");
@@ -127,18 +126,18 @@ namespace Editor.Validation.Lighting
             return LightingAssert.IsTrue(below > 0,
                 "B103 control: an uncapped shaft is lit",
                 $"expected sky > 0 at the bottom of an open shaft, got {below} — the fixture itself is "
-                + "broken, so B101, B102 and K20a prove nothing.");
+                + "broken, so B101, B102 and B104 prove nothing.");
         }
 
         /// <summary>
         /// Depth of the shaft below the cap. Deep enough that a per-block decay is visible as a gradient
-        /// rather than a single value — the shape of defect K20a's original "sky &gt; 0" assertion missed.
+        /// rather than a single value — the shape of defect B104's original "sky &gt; 0" assertion missed.
         /// </summary>
         private const int SHAFT_DEPTH = 6;
 
         /// <summary>
         /// Returns the whole sky-light column beneath the cap, topmost voxel first, for the
-        /// uncapped-versus-capped differential K20a asserts.
+        /// uncapped-versus-capped differential B104 asserts.
         /// </summary>
         /// <param name="capBlock">Block placed at the top of the shaft (use Air to leave it open).</param>
         /// <param name="meta">Raw metadata byte for the cap block — selects a partial block's orientation.</param>

@@ -510,7 +510,38 @@ it passed while the column decayed, which is why only in-game play caught it. It
 column differential against an uncapped shaft** over a 6-deep shaft, which pins the degree without
 restating the cost formula. Recorded in the scenario docstring as "do not weaken back".
 
-⚠️ **This phase is not done until you confirm it in game.** Suite-green is necessary, not sufficient.
+✅ **CONFIRMED IN GAME 2026-08-07** — "it's now indeed 15 all the way down", with the horizontal slab still
+blocking. Repro `K20a` promoted to permanent baseline **B104**.
+
+**Design question raised and settled at confirmation.** Should a vertical slab dim the column at all, given
+it physically blocks half the cross-section? **Decision: no — keep the undimmed column.** A voxel sky value
+is *intensity at a point*, not *flux through the cell*: a point in the slab's open half has an unobstructed
+line to the sky, exactly like a point in a doorway or beside a pillar. The decisive case is a **deep open
+shaft** — a vertical slab at the top of a 20-block shaft would leave the bottom pitch black under any
+per-step decay, because the slab's obstruction is *local* while a decay is *cumulative*. That is the same
+flaw that sank the graded cost model in D2. The "half obstructed" intuition is real but belongs to **ambient
+occlusion** (VO-5), which is local by nature and already has the 0.5 coverage available.
+
+Two alternatives were considered and rejected:
+
+- **A per-block authored flag** to opt blocks into decaying. Cost is negligible (`BlockTypeJobData` is
+  already fetched per neighbour), so this was rejected on *coherence*, not performance: it is the
+  "lie about your shape" override already deferred as a §7 v2 item, it has no principled default, and the
+  shape already answers the question. If it is ever wanted, note the distinction needs **no new field** —
+  `columnContinues = EntryOpacity == 0 && coverage >= 1` derives it from the shape alone, a one-`&&` change.
+- **A one-time "light cut"** (lose N levels at the slab, then propagate undimmed). Rejected as genuinely
+  requiring new per-column state: sky-light *removal* is authoritative through `RecalculateSunlightForColumn`,
+  whose PASS 1 writes a literal 15 above the heightmap, and `PropagateDarkness` unwinds light by following
+  exact `neighbor == old − cost` decrement chains. A column sitting flat below 15 has neither, and sky light
+  has no spare bits for the extra state.
+
+**Pre-existing limitation noted (not introduced here, not fixed here):** the same "obstruction is local but
+decay is permanent" shape applies to **semi-transparent full blocks**, most visibly leaves. Leaves are
+`opacity 1`, so `max(1, opacity)` makes them cost exactly what air costs *per step* — but they are
+`IsLightObstructing`, so they break the unattenuated column, and **nothing can re-enter it**. Light below a
+canopy therefore decays to 0 with distance even through clear air. Rarely visible in natural generation.
+Fixing it needs the same new per-column state the light-cut idea needs, so it is recorded here rather than
+scheduled.
 
 - **Scope:** extend `LightAttenuation.Attenuate` to a directional form per D2/D3 and migrate the
   16 `IsOpaque` sites in `NeighborhoodLightingJob.cs`. Each site must be classified first — some are
