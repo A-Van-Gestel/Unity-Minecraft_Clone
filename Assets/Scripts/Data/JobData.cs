@@ -288,6 +288,20 @@ namespace Data
         public readonly PlacementMetadataMode PlacementMetadataMode;
         public readonly byte DefaultMetadata;
 
+        // Block shape (VO-1) — the Burst-side mirror of BlockCollisionBounds, so jobs can ask what
+        // volume a block actually occupies. Read via Jobs.BurstData.BurstOcclusionUtility, which
+        // shares its rotation core with the managed Helpers.BlockCollisionBoundsUtility.
+
+        /// <summary>True when this block's volume differs from a full cell (mirrors <see cref="BlockCollisionBounds.HasCustomBounds"/>).</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public readonly bool HasCustomBounds;
+
+        /// <summary>Authored minimum corner of the block's volume, block-local <c>[0,1]³</c>, unrotated.</summary>
+        public readonly float3 BoundsMin;
+
+        /// <summary>Authored maximum corner of the block's volume, block-local <c>[0,1]³</c>, unrotated.</summary>
+        public readonly float3 BoundsMax;
+
         // Texture ID's
         public readonly int BackFaceTexture;
         public readonly int FrontFaceTexture;
@@ -311,6 +325,11 @@ namespace Data
             SwayStrength = blockType.swayStrength;
             RenderShape = blockType.renderShape;
             CustomMeshIndex = customMeshIdx;
+
+            // VO-1: mirror the authored collision volume so Burst jobs can derive per-face coverage.
+            HasCustomBounds = blockType.collisionBounds.HasCustomBounds;
+            BoundsMin = blockType.collisionBounds.min;
+            BoundsMax = blockType.collisionBounds.max;
 
             // Fluid properties
             FluidType = blockType.fluidType;

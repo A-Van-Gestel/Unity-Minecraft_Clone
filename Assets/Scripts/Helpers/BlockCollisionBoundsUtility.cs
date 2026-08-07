@@ -44,6 +44,11 @@ namespace Helpers
         /// Rotates authored block-local bounds about the cell center and returns the axis-aligned volume enclosing
         /// the result.
         /// </summary>
+        /// <remarks>
+        /// The rotation itself lives in <see cref="BurstOcclusionUtility.RotateLocalBounds"/> (VO-1), shared with
+        /// the lighting/meshing occlusion path so the engine has one answer for "where does this block's volume
+        /// sit". This method only re-spaces that block-local result onto the caller's cell.
+        /// </remarks>
         /// <param name="blockOrigin">The cell's minimum corner, in the caller's coordinate space.</param>
         /// <param name="bounds">The authored bounds, in block-local <c>[0,1]³</c>.</param>
         /// <param name="rotationMatrix">The block's metadata rotation.</param>
@@ -51,32 +56,15 @@ namespace Helpers
         private static Bounds GetRotatedBounds(Vector3 blockOrigin, BlockCollisionBounds bounds,
             float3x3 rotationMatrix)
         {
-            // Shift the [0,1] bounds to sit around (0,0,0) so the rotation pivots on the cell center.
-            Vector3 localCenter = (bounds.min + bounds.max) * 0.5f - s_cellCenterOffset;
-            Vector3 localExtents = (bounds.max - bounds.min) * 0.5f;
+            BurstOcclusionUtility.RotateLocalBounds(bounds.min, bounds.max, in rotationMatrix,
+                out float3 rotatedMin, out float3 rotatedMax);
 
-            float3 lc = new float3(localCenter.x, localCenter.y, localCenter.z);
-            float3 e = new float3(localExtents.x, localExtents.y, localExtents.z);
-
-            // 8 corners, computed and rotated inline to avoid GC allocations in FixedUpdate.
-            float3 c0 = math.mul(rotationMatrix, lc + new float3(e.x, e.y, e.z));
-            float3 c1 = math.mul(rotationMatrix, lc + new float3(e.x, e.y, -e.z));
-            float3 c2 = math.mul(rotationMatrix, lc + new float3(e.x, -e.y, e.z));
-            float3 c3 = math.mul(rotationMatrix, lc + new float3(e.x, -e.y, -e.z));
-            float3 c4 = math.mul(rotationMatrix, lc + new float3(-e.x, e.y, e.z));
-            float3 c5 = math.mul(rotationMatrix, lc + new float3(-e.x, e.y, -e.z));
-            float3 c6 = math.mul(rotationMatrix, lc + new float3(-e.x, -e.y, e.z));
-            float3 c7 = math.mul(rotationMatrix, lc + new float3(-e.x, -e.y, -e.z));
-
-            float3 minF = math.min(c0, math.min(c1, math.min(c2, math.min(c3, math.min(c4, math.min(c5, math.min(c6, c7)))))));
-            float3 maxF = math.max(c0, math.max(c1, math.max(c2, math.max(c3, math.max(c4, math.max(c5, math.max(c6, c7)))))));
-
-            Vector3 min = new Vector3(minF.x, minF.y, minF.z);
-            Vector3 max = new Vector3(maxF.x, maxF.y, maxF.z);
-
-            // Shift back onto the cell the block occupies.
-            Vector3 center = min + (max - min) * 0.5f + blockOrigin + s_cellCenterOffset;
-            return new Bounds(center, max - min);
+            // The shared core returns block-local [0,1] bounds; shift them onto the cell the block occupies.
+            float3 size = rotatedMax - rotatedMin;
+            float3 center = (rotatedMin + rotatedMax) * 0.5f;
+            return new Bounds(
+                new Vector3(center.x, center.y, center.z) + blockOrigin,
+                new Vector3(size.x, size.y, size.z));
         }
     }
 }

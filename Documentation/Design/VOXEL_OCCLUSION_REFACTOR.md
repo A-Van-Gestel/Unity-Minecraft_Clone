@@ -1,17 +1,19 @@
 # Directional Per-Face Voxel Occlusion (VO-*)
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-08-07  
-**Status:** Proposed design — not implemented.  
+**Status:** Proposed design — VO-0 and VO-1 implemented; VO-2…VO-7 pending.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > The engine gained partial blocks (`Stone Half Slab`) without the lighting model gaining a notion
 > of them, so a half slab is authored `opacity = 15` and behaves as a *full* light blocker: it stops
 > sky light entirely and contributes maximum ambient-occlusion darkening from every corner it
 > touches. **The single most important decision here is that this plan does NOT introduce a new
-> voxel-shape descriptor** — a rotation-aware per-block shape model already exists and is suite-guarded
-> (`BlockCollisionBounds` + `Helpers.BlockCollisionBoundsUtility`, guarded by `NS-4`), and per-face
-> occlusion is derivable from it arithmetically. The work is therefore mostly *plumbing an existing
+> voxel-shape descriptor** — a rotation-aware per-block shape model already exists
+> (`BlockCollisionBounds` + `Helpers.BlockCollisionBoundsUtility`), and per-face
+> occlusion is derivable from it arithmetically. (v1.0 of this doc called that model "suite-guarded by
+> `NS-4`"; VO-1's prove-red disproved it — see **F10**. It is guarded now, by the Occlusion suite this
+> arc added.) The work is therefore mostly *plumbing an existing
 > shape into Burst* and *replacing boolean opacity gates with directional ones*, not designing a shape
 > system. Headline defect: `LIGHTING_BUGS.md` Bug 20 and `MESHING_BUGS.md` Bug M01 are two halves of
 > one artifact, and Bug M01's repro (`KM01a`) is already red in the meshing suite and becomes this
@@ -148,16 +150,22 @@ For a block-local axis-aligned box `[min, max]` and a face direction `d`, with `
 Worked against the real slab (authored `min=(0,0,0)`, `max=(1,0.5,1)` — executor verifies the exact
 authored values in `BlockDatabase.asset`; the *shape* is confirmed by the mesh geometry):
 
-| Orientation                        | Face      | Touches | Coverage | Result                                        |
-|-------------------------------------|-----------|---------|----------|-----------------------------------------------|
-| Upright (`facing=Top`)              | −Y        | yes     | 1.0      | Full blocker — slab floor still blocks daylight |
-| Upright                             | +Y        | no      | 0        | Open                                          |
-| Upright                             | ±X, ±Z    | yes     | 0.5      | Half                                          |
-| **Vertical** (`facing=Bottom` roll 0) | −Z      | no      | 0        | **Open — the motivating case**                |
-| Vertical                            | +Z        | yes     | 1.0      | Full blocker                                  |
-| Vertical                            | ±Y        | yes     | 0.5      | Half — partial light propagates *downward*    |
+| Orientation                                | Face   | Touches | Coverage | Result                                          |
+|--------------------------------------------|--------|---------|----------|-------------------------------------------------|
+| Identity (`meta 0x00` — facing South, roll 0) | −Y     | yes     | 1.0      | Full blocker — slab floor still blocks daylight |
+| Identity                                   | +Y     | no      | 0        | Open (the mid-plane face)                       |
+| Identity                                   | ±X, ±Z | yes     | 0.5      | Half                                            |
+| **Vertical** (`meta 0x03` — facing Bottom, roll 0) | −Z     | no      | 0        | **Open — the motivating case**                  |
+| Vertical                                   | +Z     | yes     | 1.0      | Full blocker                                    |
+| Vertical                                   | ±Y     | yes     | 0.5      | Half — partial light propagates *downward*      |
 
 The vertical row is the whole reason this plan exists: it is unreachable by any scalar opacity value.
+
+> **Corrected 2026-08-07 (VO-1).** v1.0 of this table labelled the identity row "Upright (`facing=Top`)".
+> That label was wrong — under `Facing6Roll2` it is facing **South (0)** that is the identity matrix, and
+> `facing=Top` is a different rotation. The coverage *values* were correct and are now **measured, not
+> derived**: every row above is asserted by occlusion-suite baselines **B1** (identity) and **B2**
+> (vertical), and the remaining 22 orientations by **B4**'s structural invariant.
 
 ### 2.4 Serialization boundary
 
@@ -196,6 +204,7 @@ Not part of the phases below — recording it so a cold executor does not redo i
 | F6 | **Second-descriptor hazard.** A naive reading of F5 invites a fresh `VoxelShape` type for lighting, which would be the second rotation-aware shape descriptor in the codebase and would drift from the collision one. Explicitly rejected in D1.                                                                                                                                             | D1           |
 | F7 | **The oracle shares the model under test.** `LightingOracle` calls the same `LightAttenuation.Attenuate` as the engine, so a directional change lands in both simultaneously and the suite cannot arbitrate correctness by itself. Baselines must be authored to pin *behaviour* (light reaches / does not reach a probe) rather than re-deriving the formula.                                | VO-2         |
 | F8 | **AO occlusion is boolean, not fractional.** `SampleCorner` skips the diagonal term only when `sideAOpaque && sideBOpaque`, and `SampleNeighborLight` substitutes hard zero. There is no representation for "half occluding", so even a correct shape model has nowhere to put a coverage fraction.                                                                                            | VO-5         |
+| F10 | **`NS-4` does not guard the collision rotation.** Discovered by VO-1's prove-red: with `math.transpose` applied to the shared rotation core, all **26** Physics Solver baselines stayed green. The plan (v1.0) had asserted `NS-4` was the guard that a collision-bounds refactor is behaviour-preserving; it is not — none of its scenarios distinguish a rotated custom-bounds volume from its inverse. This is a pre-existing coverage gap in `NS-4`, not something VO-1 introduced, and it means *any* future change to the rotation path needs the occlusion baselines (or new `NS-4` scenarios) to be safe. | Recorded here; VO-1's guard chain compensates. A dedicated `NS-4` rotated-bounds scenario is filed as a follow-up in §7. |
 | F9 | **Light values are serialized; the model is not versioned.** Nothing on disk records which occlusion model produced a chunk's `LightData`, so without an explicit version bump an upgraded client silently mixes old and new lighting per chunk. (Executor verifies the exact world-version constant — the grep for it returned nothing under `Serialization/`/`Data/`.)                       | VO-7         |
 
 ---
@@ -286,8 +295,8 @@ decision whose *visual* outcome needs user sign-off (VO-5).
 
 | Phase    | Scope                                                        | Effort | Depends on   |
 |----------|--------------------------------------------------------------|--------|--------------|
-| **VO-0** | Probe: evidence for the model's assumptions                  | 🟢     | —            |
-| **VO-1** | Burst-safe bounds mirror + shared occlusion utility          | 🟢     | VO-0         |
+| ~~**VO-0**~~ | ✅ Probe: evidence for the model's assumptions            | 🟢     | —            |
+| ~~**VO-1**~~ | ✅ Burst-safe bounds mirror + shared occlusion utility    | 🟢     | VO-0         |
 | **VO-2** | Harness + oracle support for partial blocks (suite-only)     | 🟢     | VO-1         |
 | **VO-3** | Directional occlusion in the BFS                             | 🔴     | VO-2         |
 | **VO-4** | Directional cross-chunk support / veto                       | 🔴     | VO-3         |
@@ -322,24 +331,43 @@ for sky-exposed slabs (VO-6 packet).
 - **Doc-sync:** the `**Amended:**` line only. ✅ done.
 - **Serialization:** none.
 
-### VO-1 — Burst-safe bounds mirror + shared occlusion utility (🟢, no behavior change)
+### VO-1 — Burst-safe bounds mirror + shared occlusion utility (🟢, no behavior change) · ✅ **EXECUTED 2026-08-07**
 
-- **Precondition:** VO-0(a)/(b) recorded. If the slab's authored bounds are *not* a clean half-cell,
-  STOP and re-derive §2.3's table before proceeding.
-- **Scope:** add bounds fields to `BlockTypeJobData` (mirroring `BlockCollisionBounds`, populated in
-  `JobDataManagerFactory.Create` alongside `customMeshIndex`); add a new Burst-safe
+- **Precondition:** ✅ VO-0(a)/(b) recorded; the slab's authored bounds are a clean half-cell.
+- **Scope (as executed):** the bounds mirror landed on `BlockTypeJobData` (`HasCustomBounds`,
+  `BoundsMin`, `BoundsMax`) populated **in its own constructor**, not in `JobDataManagerFactory` as
+  the plan guessed — the constructor already receives the `BlockType`, so no factory change was
+  needed. New `Jobs/BurstData/BurstOcclusionUtility` implements §2.3's touches/coverage arithmetic
+  (`RotateLocalBounds`, `GetFaceCoverage`, `GetBlockFaceCoverage`); the managed
+  `BlockCollisionBoundsUtility.GetRotatedBounds` now delegates its 8-corner rotation to that core and
+  only re-spaces the result. New suite `Assets/Editor/Validation/Occlusion/` (menu
+  `Minecraft Clone/Dev/Validate Occlusion`, 5 baselines), registered in `ValidationSuiteRegistry`
+  (`ExpectedSuiteCount` 17 → 18). Nothing consumes the coverage function yet.
+- **Scope (original):** add bounds fields to `BlockTypeJobData` (mirroring `BlockCollisionBounds`);
+  add a new Burst-safe
   `Jobs/BurstData/BurstOcclusionUtility` implementing §2.3's touches/coverage arithmetic over a
   rotated AABB, sharing `BurstCustomMeshRotationUtility.GetRotationMatrix`. Re-express the managed
   `BlockCollisionBoundsUtility.GetRotatedBounds` in terms of the new shared core so there is exactly
   one rotation-to-AABB implementation (heuristic: consolidate, do not mint a twin). **Does NOT**
   change any caller's behaviour — nothing consumes the new occlusion function yet.
 - **Ordering:** before VO-2/VO-3/VO-5.
-- **Prove-red:** `NS-4` is the guard that the collision refactor is behaviour-preserving — sabotage
-  the shared rotation core (e.g. transpose the matrix) and confirm `NS-4` baselines go red and
-  **only** those, then restore. New unit baselines in the meshing or a new occlusion suite: assert
-  §2.3's six worked rows for the slab across all 24 `Facing6Roll2` orientations, plus a full-cube
-  control asserting coverage 1 on all six faces (so nothing passes vacuously).
-- **Acceptance:** universal gate. No in-game step (no behaviour change).
+- **Prove-red (executed — the plan's prediction was WRONG, see F10):** the sabotage was
+  `math.transpose` on the rotation inside `RotateLocalBounds`. Result:
+
+  | Guard                              | Under sabotage | Note                                                                                         |
+  |------------------------------------|----------------|-----------------------------------------------------------------------------------------------|
+  | `NS-4` Physics Solver (26)         | **all green**  | Does **not** discriminate the rotation core — the plan's assumed guard does not exist (F10).   |
+  | Occlusion `B5` (managed == core)   | green          | Both sides share the core, so an *agreement* test cannot see a core bug. Guards divergence only. |
+  | Occlusion `B4` (structural)        | green          | one-full/one-empty/opposite is transpose-invariant.                                            |
+  | Occlusion `B1` (identity)          | green          | Identity is its own transpose.                                                                 |
+  | **Occlusion `B2` (vertical)**      | **RED**        | The only guard that caught it: faces 0/1 swapped (transpose = inverse rotation), exactly the expected signature. |
+
+  Restored clean: 5/5 occlusion baselines green.  
+  **The evidence that VO-1 is behaviour-preserving is therefore a chain, not `NS-4`:** B1/B2 pin the
+  core's absolute output, and B5 pins managed == core. Do not weaken either half — dropping B2 for
+  "B4 covers all 24 orientations" would silently remove the only real guard.
+- **Acceptance:** ✅ universal gate — **Validate All: 416 baselines across 18 suites PASSED**. No
+  in-game step (no behaviour change).
 - **Testability gain:** "what does this block occlude in direction d" becomes a pure, unit-testable
   function callable from Burst — the precondition for every later phase.
 - **Doc-sync:** `SUB_VOXEL_COLLISION_SYSTEM.md` §3.2 gains a note that the rotation core is now
@@ -488,6 +516,7 @@ for sky-exposed slabs (VO-6 packet).
 | v2      | Authored per-face occlusion overrides                                | Escape hatch for a block whose visual and collision volumes intentionally differ (D1's accepted risk). |
 | v2      | Directional occlusion for fluids                                     | Fluid surfaces have their own height model; would need its own coverage derivation.          |
 | v3      | `FLAG_HAS_SIDED_TRANSPARENT_BLOCKS`-style queue flag                 | Starlight's optimization — only pay the directional check when a partial block is in range. Measure first (`perf-benchmark`); do not pre-optimize. |
+| —       | **Close the `NS-4` rotated-bounds gap (F10)**                        | Add a Physics Solver scenario that actually discriminates a rotated custom-bounds volume (e.g. land a body on a vertical slab and assert the rest height differs from the identity orientation). Owned by `SUB_VOXEL_COLLISION_SYSTEM.md` / `NS-4`, not by a VO phase — but every VO phase touching the rotation core is unguarded there until it exists. |
 
 ---
 
@@ -510,8 +539,9 @@ for sky-exposed slabs (VO-6 packet).
 
 * **v1.0** - Initial design
 * **v1.1** - VO-0 executed (no production code needed): blast radius is one block type, §2.3's bounds table confirmed, surface stamp confirmed (resolves open question 1 and unblocks VO-6 from VO-3), VO-7 version anchors pinned
+* **v1.2** - VO-1 executed: Burst bounds mirror + shared `BurstOcclusionUtility` core + new Occlusion suite (5 baselines); §2.3's identity-row label corrected; new finding **F10** — `NS-4` does not guard the collision rotation, so VO-1's prove-red rests on occlusion `B2` alone
 
 ---
 
 **Last Updated:** 2026-08-07  
-**Next Review:** when VO-1 starts
+**Next Review:** when VO-2 starts

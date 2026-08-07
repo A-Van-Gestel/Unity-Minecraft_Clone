@@ -9,6 +9,7 @@ using Editor.Validation.Lighting;
 using Editor.Validation.LightScheduler;
 using Editor.Validation.Meshing;
 using Editor.Validation.MeshQueue;
+using Editor.Validation.Occlusion;
 using Editor.Validation.Placement;
 using Editor.Validation.PhysicsSolver;
 using Editor.Validation.PipelineBackpressure;
@@ -53,7 +54,7 @@ namespace Editor.Validation.Framework
     public static class ValidationSuiteRegistry
     {
         /// <summary>The number of standard suites expected on the list — a floor the aggregate runner asserts against.</summary>
-        public const int ExpectedSuiteCount = 17;
+        public const int ExpectedSuiteCount = 18;
 
         /// <summary>The registered suites, in run/report order.</summary>
         public static readonly IReadOnlyList<RegisteredSuite> Suites = new[]
@@ -63,6 +64,7 @@ namespace Editor.Validation.Framework
             new RegisteredSuite("Behavior", BehaviorValidationSuite.Execute),
             new RegisteredSuite("Placement", PlacementValidationSuite.Execute),
             new RegisteredSuite("Physics Solver", PhysicsSolverValidationSuite.Execute),
+            new RegisteredSuite("Voxel Occlusion", OcclusionValidationSuite.Execute),
             new RegisteredSuite("Mesh Build Queue", MeshBuildQueueValidationSuite.Execute),
             new RegisteredSuite("Light Work Scheduler", LightWorkSchedulerValidationSuite.Execute),
             new RegisteredSuite("Chunk Math", ChunkMathValidationSuite.Execute),
