@@ -64,4 +64,4 @@ namespace Jobs.Data
             if (ActiveVoxels.IsCreated && !ActiveVoxelsFromPool) ActiveVoxels.Dispose();
         }
     }
-}
+}
