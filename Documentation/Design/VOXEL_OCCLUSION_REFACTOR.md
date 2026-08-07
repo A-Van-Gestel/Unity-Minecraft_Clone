@@ -1,6 +1,6 @@
 # Directional Per-Face Voxel Occlusion (VO-*)
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-08-07  
 **Status:** Proposed design — not implemented.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
@@ -29,6 +29,26 @@ Live editor state was queried via Unity MCP to read the real `BlockDatabase.asse
 properties, and the Bug M01 mechanism was confirmed numerically by an inline harness run
 (see §3, F1). Call-site counts were taken by exhaustive grep this session. Anything not verified
 in code this session is labeled "executor verifies".
+
+**Amended:** 2026-08-07 — **VO-0 executed.** It needed no production instrumentation after all: three of
+its four questions are static data reads and the fourth is a harness question, so it ran entirely through
+`Unity_RunCommand` against the real `BlockDatabase.asset` and the lighting harness, leaving zero production
+code. Results, which later phases cite:
+
+- **(a) The blast radius is one block type.** Of 38 block types in `BlockDatabase.asset`, exactly **one**
+  has `HasCustomBounds` — `Stone Half Slab`. Every behaviour-changing phase in this arc therefore alters
+  the appearance of a single block, which materially de-risks VO-3 and VO-5.
+- **(b) §2.3's worked table is confirmed exactly.** The slab is authored `mode = MatchVisualMesh`,
+  `min = (0.000, 0.000, 0.000)`, `max = (1.000, 0.500, 1.000)` — a clean half-cell. **VO-1's stop-condition
+  is satisfied.**
+- **(c) A sky-exposed opaque cell DOES store a usable surface stamp.** Superflat Stone (opacity 15) floor
+  to `y = 10`, after `RunInitialLighting`: the topmost stone at `y = 10` stores `sky = 15` while buried
+  stone at `y ≤ 9` stores 0. **This resolves §8 open question 1** — see the revised VO-6 precondition.
+- **(d) Version anchors for VO-7.** The chunk binary version is
+  `ChunkSerializer.CURRENT_CHUNK_VERSION = 7` (`Assets/Scripts/Serialization/ChunkSerializer.cs:31`); the
+  *world* version ladder is separate and its highest registered step is
+  `Migration_v12_to_v13_PlayerChunkRelativePosition`, so VO-7 adds a `Migration_v13_to_v14_*` step.
+  (Executor confirms no v13→v14 step has since been added and locates the current-version constant.)
 
 **Relationship to other documents:**
 
@@ -272,28 +292,34 @@ decision whose *visual* outcome needs user sign-off (VO-5).
 | **VO-3** | Directional occlusion in the BFS                             | 🔴     | VO-2         |
 | **VO-4** | Directional cross-chunk support / veto                       | 🔴     | VO-3         |
 | **VO-5** | Fractional AO occlusion                                      | 🟡     | VO-1         |
-| **VO-6** | Sub-block face light sampling (closes Bug M01)               | 🟡     | VO-3         |
+| **VO-6** | Sub-block face light sampling (closes Bug M01)               | 🟡     | VO-1 (VO-3 for the general case — see packet) |
 | **VO-7** | World-version bump + relight migration                       | 🟡     | VO-3, VO-4   |
 
 **Minimal standalone-value set:** VO-0 → VO-1 → VO-5 → VO-6 delivers the *visual* fix (AO stops
-max-darkening, sub-block faces sample correctly) without touching the BFS. It leaves the motivating
-case (light through a vertical slab's open half) unfixed — that needs VO-3.
+max-darkening, sub-block faces sample correctly) without touching the BFS — **confirmed viable by
+VO-0(c)**, which cleared VO-6's dependency on VO-3. It leaves the motivating case (light through a
+vertical slab's open half) unfixed — that needs VO-3 — and its sub-block face light is exact only
+for sky-exposed slabs (VO-6 packet).
 
 ---
 
-### VO-0 — Probe (🟢, no behavior change)
+### VO-0 — Probe (🟢, no behavior change) · ✅ **EXECUTED 2026-08-07**
 
-- **Scope:** `[Conditional("UNITY_EDITOR")]` counters/warn-once logs. Record: (a) how many block
-  types in the real `BlockDatabase.asset` have `HasCustomBounds` true (the population this plan
-  affects); (b) the authored `collisionBounds.min/max` of `Stone Half Slab`, confirming §2.3's
-  worked table; (c) whether a sky-exposed opaque slab cell actually stores a usable surface stamp
-  (`LIGHTING_SYSTEM_OVERVIEW.md:247` says opaque voxels "receive surface light but never propagate
-  it onward" — VO-6's fallback depends on this being true); (d) the real world-version constant (F9).
+- **Scope (as executed):** no production instrumentation was needed — (a), (b) and (d) are static
+  data reads and (c) is a harness question, so all four ran through `Unity_RunCommand` against the
+  real `BlockDatabase.asset` and `LightingTestWorld`. Recorded: (a) how many block types have
+  `HasCustomBounds` true (the population this plan affects); (b) the authored
+  `collisionBounds.min/max` of `Stone Half Slab`, confirming §2.3's worked table; (c) whether a
+  sky-exposed opaque cell stores a usable surface stamp (`LIGHTING_SYSTEM_OVERVIEW.md:247` says
+  opaque voxels "receive surface light but never propagate it onward" — VO-6's fallback depends on
+  this); (d) the version anchors for VO-7 (F9).
 - **Ordering:** first. Every later phase cites its results.
-- **Prove-red:** none (instrumentation only) — lean on the regression gate.
-- **Acceptance:** gate + results recorded as a dated `**Amended:**` line in this doc.
-- **Testability gain:** turns three assumptions in this doc into recorded evidence.
-- **Doc-sync:** the `**Amended:**` line only.
+- **Prove-red:** none (read-only probe) — lean on the regression gate.
+- **Acceptance:** ✅ results recorded as the dated `**Amended:**` line above. No build or suite run
+  was required, since nothing was changed.
+- **Testability gain:** turns four assumptions in this doc into recorded evidence, and resolves §8
+  open question 1.
+- **Doc-sync:** the `**Amended:**` line only. ✅ done.
 - **Serialization:** none.
 
 ### VO-1 — Burst-safe bounds mirror + shared occlusion utility (🟢, no behavior change)
@@ -398,9 +424,14 @@ case (light through a vertical slab's open half) unfixed — that needs VO-3.
 
 ### VO-6 — Sub-block face light sampling (🟡, behavior change — the F1 fix, closes Bug M01)
 
-- **Precondition:** VO-3 landed (so a partial block's cell carries a real value) **or** VO-0(c)
-  confirmed the surface-stamp fallback. If neither holds, STOP — sampling the own cell renders slabs
-  black, which is the trap recorded in `MESHING_BUGS.md` Bug M01's "Fix ordering".
+- **Precondition:** ✅ **satisfied by VO-0(c)** — a sky-exposed opaque cell stores a usable surface
+  stamp (measured: sky 15 on the topmost opaque block, 0 when buried), so sampling the own cell does
+  **not** render slabs black and the trap recorded in `MESHING_BUGS.md` Bug M01's "Fix ordering" is
+  cleared. VO-6 may therefore land **before** VO-3, which is what makes the minimal standalone-value
+  set viable. Know the limit of that: the stamp is the light the *sky column* delivered to the
+  surface, so VO-6-before-VO-3 is exact for sky-exposed slabs (the reported screenshot) and an
+  approximation for slabs lit indirectly or by blocklight. VO-3 upgrades it to a properly propagated
+  value; do not describe VO-6 alone as closing the general case.
 - **Scope:** in `GenerateCustomBlockMesh_SchemaAware`, derive the light-sampling cell from the face's
   actual position rather than the block boundary —
   `sampleCell = floor(pos + rotatedFaceCentroid + 0.5 · rotatedNormal)` degenerates to today's
@@ -462,9 +493,9 @@ case (light through a vertical slab's open half) unfixed — that needs VO-3.
 
 ## 8. Open questions
 
-1. **Does an opaque partial block's cell store a usable surface stamp today?** VO-0(c) answers it.
-   If yes, VO-6 could in principle land before VO-3 for earlier partial value; if no, the VO-3
-   dependency is hard.
+1. ~~**Does an opaque partial block's cell store a usable surface stamp today?**~~ — ✅ **RESOLVED
+   2026-08-07 by VO-0(c): yes.** Measured sky 15 on a sky-exposed opaque surface, 0 when buried.
+   VO-6 is unblocked from VO-3, with the sky-exposed-only caveat recorded in its packet.
 2. **What is the correct rounding in D2's cost formula?** `round` is written here as a placeholder;
    the executor pins one rule and shares it between `LightAttenuation` and `LightingOracle` in the
    same commit (F7 is the failure mode if they diverge).
@@ -478,8 +509,9 @@ case (light through a vertical slab's open half) unfixed — that needs VO-3.
 ## Document History
 
 * **v1.0** - Initial design
+* **v1.1** - VO-0 executed (no production code needed): blast radius is one block type, §2.3's bounds table confirmed, surface stamp confirmed (resolves open question 1 and unblocks VO-6 from VO-3), VO-7 version anchors pinned
 
 ---
 
 **Last Updated:** 2026-08-07  
-**Next Review:** when VO-0 starts
+**Next Review:** when VO-1 starts
