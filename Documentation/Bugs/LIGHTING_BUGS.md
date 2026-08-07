@@ -67,3 +67,61 @@ baseline **B91**) is deliberately scoped to face-adjacent seams and excludes thi
 > must settle through an edge-check-inclusive driver to avoid re-flagging this same artifact.)
 
 **Testing environment:** IL2CPP master build, ocean biome (underwater), June 2026.
+
+---
+
+## Bug 20: Partial Blocks Are Uniformly Opaque — Slabs Block All Light and Max-Darken AO
+
+**Severity:** Medium-High  
+**Status:** Open  
+**Related:** [`MESHING_BUGS.md`](./MESHING_BUGS.md) Bug M01 (the mesher-side half of the same visual artifact — fixing M01 requires this entry fixed first)
+
+**Description:**
+The lighting model has one `opacity` value per block type and no concept of a block that occupies only part of its cell
+(`LIGHTING_SYSTEM_OVERVIEW.md` §"Conditionally Opaque Blocks": *"We have no block types with directional transparency. …
+If stairs, slabs, or other partial blocks are added in the future, this optimization would become relevant."*).
+
+A partial block **has** since been added. `Stone Half Slab` (`BlockIDs.StoneHalfSlab`) is authored in
+`BlockDatabase.asset` with `opacity = 15`, and `IsOpaque => opacity >= 15` (`Data/JobData.cs`, `Data/BlockType.cs`),
+so a half slab is treated as a *full* light blocker despite filling half its cell. Two consequences:
+
+1. **Sky light stops at the slab.** `LightAttenuation.Attenuate` charges the destination's opacity on entry
+   (`max(0, source - max(1, opacity))`), so entering a slab cell costs the full 15 — the cell stores no propagatable
+   value and everything below a slab goes dark, as if it were a solid cube.
+2. **Ambient occlusion darkens at maximum.** `MeshGenerationJob.SampleNeighborLight` and `CalculateCornerLights` branch
+   on the `IsOpaque` **boolean**: an opaque sample contributes `sun=0, r=g=b=0` and suppresses the corner's diagonal
+   term. Every AO corner that touches a slab therefore receives the hardest possible darkening, regardless of the fact
+   that light physically reaches that corner through the slab's empty half.
+
+Effect 2 is what makes rotated slabs look wrong even where the surrounding cells are fully lit: a ring of slabs around a
+sky-lit cell mutually max-darken each other's faces.
+
+**Reproduction Steps:**
+
+1. Dig a one-block-deep pit in flat, sky-lit terrain (the centre cell reads sky light 15).
+2. Place a `Stone Half Slab` in each of the four cells around the pit, rotated so each slab's solid half faces the pit
+   (`Facing6Roll2` metadata `0x03`, `0x0B`, `0x13`, `0x1B` — facing 3 = Bottom, rolls 0–3).
+3. Observe with smooth lighting enabled: the slab faces are darkened far below what the neighbouring light levels justify.
+
+**Root Cause:**
+Confirmed by inspection, not yet by a failing scenario. `opacity = 15` on a block that does not fill its cell, combined
+with a boolean `IsOpaque` gate in both the BFS and the AO sampler. The graded part of the model already exists
+(`LightAttenuation` is a per-level cost, not a boolean), so the missing piece is a block-level notion of "does not fill
+its cell" that keeps such a block out of the `IsOpaque` fast paths and gives it a traversal cost below 15.
+
+**Scope note:** full *directional* (per-face) occlusion — the `hasDirectionalOpacity` design the architecture doc
+sketches — is a strictly larger change and is **not** required to fix the artifact above. A non-directional partial-block
+opacity is sufficient; per-face occlusion remains a follow-up.
+
+**Repro scenario:** TBD (lighting suite) — authored by
+[`VOXEL_OCCLUSION_REFACTOR.md`](../Design/VOXEL_OCCLUSION_REFACTOR.md) **VO-2**, which adds the
+partial-block palette entry the lighting harness currently lacks. Baselines claim numbers from the
+current suite tip (B100).
+
+**Fix phases:** that same plan — **VO-3** (directional occlusion in the BFS) and **VO-4** (the
+directional cross-chunk support/veto that VO-3 is not shippable without), with **VO-7** owning the
+world-version bump and relight. The plan's §4 D1 records why a new `VoxelShape` descriptor was
+rejected in favour of deriving occlusion from the existing `BlockCollisionBounds` — do not
+re-litigate that without reading it.
+
+**Testing environment:** Editor, smooth lighting enabled, August 2026.
