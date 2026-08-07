@@ -73,9 +73,11 @@ namespace Editor.Validation.Meshing.Framework
     /// <see cref="MeshGenerationJob"/> synchronously (<c>job.Run()</c>) and exposes its
     /// <see cref="MeshDataJobOutput"/> for assertion.
     /// <para>
-    /// Mirrors the production / benchmark job wiring: light maps and the neighbor/custom input arrays
+    /// Mirrors the production / benchmark job wiring: light maps and the neighbor input arrays
     /// are left empty <b>by default</b>, exactly as <see cref="Benchmarks.MeshGenerationBenchmark"/> leaves
     /// them, because the standard-cube path under <see cref="SmoothLightingQuality.Off"/> reads neither. The
+    /// custom-mesh arrays ARE populated (from <see cref="TestCustomMeshLibrary"/>) so the palette's half-slab
+    /// blocks route through the real schema-aware custom-mesh path; no non-custom-mesh block indexes them. The
     /// fluid height templates ARE populated (16 real entries each) so the fluid meshing path — which indexes
     /// them by fluid level — runs exactly as in production. Most tests place blocks in the chunk interior so
     /// face culling only consults in-chunk neighbors and the empty neighbor-chunk maps never influence the
@@ -451,11 +453,14 @@ namespace Editor.Validation.Meshing.Framework
             NativeArray<uint> mapSE = _neighborSE.IsCreated ? _neighborSE : emptyMap;
             NativeArray<uint> mapSW = _neighborSW.IsCreated ? _neighborSW : emptyMap;
             NativeArray<uint> mapNW = _neighborNW.IsCreated ? _neighborNW : emptyMap;
-            // Empty custom-mesh inputs (no custom-mesh blocks in the palette).
-            NativeArray<CustomMeshData> customMeshes = new NativeArray<CustomMeshData>(0, Allocator.TempJob);
-            NativeArray<CustomFaceData> customFaces = new NativeArray<CustomFaceData>(0, Allocator.TempJob);
-            NativeArray<CustomVertData> customVerts = new NativeArray<CustomVertData>(0, Allocator.TempJob);
-            NativeArray<int> customTris = new NativeArray<int>(0, Allocator.TempJob);
+            // Real flattened custom-mesh inputs for the palette's HalfSlab/PartialOpaque blocks, built the
+            // same way JobDataManagerFactory flattens VoxelMeshData assets. Blocks that are not custom
+            // meshes never index these, so every pre-existing baseline is unaffected by their presence.
+            TestCustomMeshLibrary.Build(Allocator.TempJob,
+                out NativeArray<CustomMeshData> customMeshes,
+                out NativeArray<CustomFaceData> customFaces,
+                out NativeArray<CustomVertData> customVerts,
+                out NativeArray<int> customTris);
             // Real 16-entry water height template (the palette's only fluid is water). The fluid path
             // indexes this by fluid level, so an empty array would index out of range; it is built from
             // the same shared source of truth the FluidDataGenerator editor tool bakes into the asset.

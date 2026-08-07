@@ -65,8 +65,33 @@ namespace Editor.Validation.Meshing.Framework
         /// <summary>The authored sway strength of <see cref="SwayingLeafCube"/> (0.25 — exact in half precision).</summary>
         public const float SwayStrength = 0.25f;
 
+        /// <summary>
+        /// Half-slab custom mesh (<see cref="RenderShape.CustomMesh"/>) on the
+        /// <see cref="MetadataSchema.Facing6Roll2"/> schema, so its meta byte selects one of 24 orientations
+        /// and its geometry is physically rotated by <c>BurstCustomMeshRotationUtility</c>. Geometry comes
+        /// from <see cref="TestCustomMeshLibrary.HalfSlabMeshIndex"/>; its Top face sits at the block
+        /// mid-plane, which is the sub-block case `MESHING_BUGS.md` Bug M01 is about.
+        /// <para>
+        /// Authored with the <b>production</b> Stone Half Slab's lighting properties
+        /// (<c>opacity = 15</c>, <c>renderNeighborFaces = true</c>) so the fixture reproduces the real
+        /// block's behavior rather than a corrected one. See <see cref="PartialOpaque"/> for the contrast case.
+        /// </para>
+        /// </summary>
+        public const ushort HalfSlab = 7;
+
+        /// <summary>
+        /// Same half-slab geometry and schema as <see cref="HalfSlab"/>, but with a sub-15 opacity — the
+        /// partial-block lighting model `LIGHTING_BUGS.md` Bug 20 calls for. Lets a scenario contrast
+        /// "treated as a full blocker" against "treated as a partial block" without editing the fixture
+        /// the other scenarios share.
+        /// </summary>
+        public const ushort PartialOpaque = 8;
+
+        /// <summary>The authored opacity of <see cref="PartialOpaque"/> — below the <c>IsOpaque</c> threshold of 15.</summary>
+        public const byte PartialOpacity = 7;
+
         /// <summary>Total number of block types in the palette.</summary>
-        public const int Count = 7;
+        public const int Count = 9;
 
         /// <summary>
         /// Builds the palette as managed <see cref="BlockType"/> instances and converts them to the
@@ -91,6 +116,11 @@ namespace Editor.Validation.Meshing.Framework
             BlockType swayingLeaf = MakeCube("TestSwayingLeafCube", isSolid: true, opacity: 1, renderNeighborFaces: true, MetadataSchema.None);
             swayingLeaf.swayStrength = SwayStrength;
             jobData[SwayingLeafCube] = new BlockTypeJobData(swayingLeaf);
+            // Custom meshes carry their geometry index out-of-band, exactly as JobDataManagerFactory does.
+            jobData[HalfSlab] = new BlockTypeJobData(
+                MakeHalfSlab("TestHalfSlab", opacity: 15), TestCustomMeshLibrary.HalfSlabMeshIndex);
+            jobData[PartialOpaque] = new BlockTypeJobData(
+                MakeHalfSlab("TestPartialOpaqueSlab", PartialOpacity), TestCustomMeshLibrary.HalfSlabMeshIndex);
             return jobData;
         }
 
@@ -152,6 +182,24 @@ namespace Editor.Validation.Meshing.Framework
             block.opacity = 0;
             block.renderNeighborFaces = false;
             block.renderShape = RenderShape.CrossMesh;
+            return block;
+        }
+
+        /// <summary>
+        /// Constructs a half-slab <see cref="BlockType"/> that routes through the schema-aware custom-mesh
+        /// path (<c>GenerateCustomBlockMesh_SchemaAware</c>). Solid + <c>renderNeighborFaces</c> like the
+        /// production Stone Half Slab, so a slab never culls its neighbor's faces (it does not fill its cell).
+        /// </summary>
+        /// <param name="name">Block name.</param>
+        /// <param name="opacity">Light entry cost; 15 makes it <c>IsOpaque</c>, below 15 makes it partial.</param>
+        private static BlockType MakeHalfSlab(string name, byte opacity)
+        {
+            BlockType block = MakeBaseBlock(name);
+            block.isSolid = true;
+            block.opacity = opacity;
+            block.renderNeighborFaces = true;
+            block.renderShape = RenderShape.CustomMesh;
+            block.metadataSchema = MetadataSchema.Facing6Roll2;
             return block;
         }
 
