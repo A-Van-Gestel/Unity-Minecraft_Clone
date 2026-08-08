@@ -12,7 +12,7 @@ namespace Editor.Validation.Lighting
     /// <para>
     /// <b>Why this phase existed.</b> <c>VO-3</c> made the in-chunk BFS deliver light through a partial
     /// block's open half but left the cross-chunk removal veto whole-block: its support scan skipped any
-    /// <c>IsOpaque</c> neighbour, and a half slab is authored <c>opacity = 15</c>. So the BFS fed a seam
+    /// <c>IsOpaque</c> neighbor, and a half slab is authored <c>opacity = 15</c>. So the BFS fed a seam
     /// voxel through a slab while the veto computed zero support for it — the removal initiator cleared it,
     /// the BFS re-lit it, and the pair cycled. That is the Bug 13 period-2 live-lock shape, reachable
     /// through a slab. <c>VO-4</c> closed it by making both the source guard and the entry cost per-face.
@@ -33,7 +33,7 @@ namespace Editor.Validation.Lighting
         /// <summary>Facing6Roll2 metadata for an unrotated slab, solid half resting on the cell floor.</summary>
         private const byte VO4_SLAB_HORIZONTAL = 0x00;
 
-        /// <summary>Sky level written into the single lit neighbour of each support probe.</summary>
+        /// <summary>Sky level written into the single lit neighbor of each support probe.</summary>
         private const byte VO4_NEIGHBOR_SKY = 12;
 
         /// <summary>
@@ -57,9 +57,9 @@ namespace Editor.Validation.Lighting
         /// B106 — the permanent guard for the VO-4 half of Bug 20, promoted from repro <c>K20b</c> on
         /// 2026-08-08 after the fix was confirmed in game (no flicker at a slab seam). The cross-chunk
         /// sunlight removal veto's support scan (<c>CrossChunkLightModApplier.InChunkSunlightSupport</c>)
-        /// must answer the same question the BFS answers: <i>can this neighbour deliver light to me through
+        /// must answer the same question the BFS answers: <i>can this neighbor deliver light to me through
         /// the face between us?</i> Between VO-3 and VO-4 it could not — the scan skipped every
-        /// <c>IsOpaque</c> neighbour, and a half slab is authored opaque, so a voxel the BFS legitimately
+        /// <c>IsOpaque</c> neighbor, and a half slab is authored opaque, so a voxel the BFS legitimately
         /// fed through a slab read support 0 and a removal cleared what the BFS immediately restored.
         /// <para>
         /// Four legs, and the directional pairs are the point — this is not "slabs always count":
@@ -73,7 +73,7 @@ namespace Editor.Validation.Lighting
         /// support stays 0. It passed before the fix too, for the wrong reason (the slab was skipped
         /// wholesale), and is kept as the tripwire against "credit every partial block in every
         /// direction", which would over-estimate support and veto legitimate removals.</item>
-        /// <item><b>Leg C — full-cube guard:</b> B49's rule restated locally — a fully-opaque neighbour
+        /// <item><b>Leg C — full-cube guard:</b> B49's rule restated locally — a fully-opaque neighbor
         /// storing sky 15 is a surface stamp, never support. Guards against the directional change
         /// weakening the whole-block source guard.</item>
         /// <item><b>Leg D — target side:</b> the probe itself is the slab. Entry cost is directional too, so
@@ -85,7 +85,7 @@ namespace Editor.Validation.Lighting
         {
             using LightingTestWorld world = new LightingTestWorld(1);
 
-            // Leg A — the slab's OPEN side. Neighbour at probe + FaceChecks[4] (-X), so it delivers
+            // Leg A — the slab's OPEN side. Neighbor at probe + FaceChecks[4] (-X), so it delivers
             // through its own +X face; a vertical slab's ±X faces are half covered, so light passes.
             Vector3Int openProbe = new Vector3Int(8, 64, 8);
             byte openSupport = SupportFromSlabNeighbor(world, openProbe, faceIndex: 4, VO4_SLAB_VERTICAL);
@@ -98,7 +98,7 @@ namespace Editor.Validation.Lighting
                 + "opacity 15, while the BFS since VO-3 does deliver light through the slab's open half. "
                 + "That disagreement is the live-lock — the removal clears what the BFS re-lights.");
 
-            // Leg B — the same slab, same rotation, SOLID side. Neighbour at probe + FaceChecks[0] (-Z)
+            // Leg B — the same slab, same rotation, SOLID side. Neighbor at probe + FaceChecks[0] (-Z)
             // delivers through its +Z face, which this rotation covers fully.
             Vector3Int solidProbe = new Vector3Int(8, 70, 8);
             byte solidSupport = SupportFromSlabNeighbor(world, solidProbe, faceIndex: 0, VO4_SLAB_VERTICAL);
@@ -117,8 +117,8 @@ namespace Editor.Validation.Lighting
             byte cubeSupport = world.InChunkSunlightSupportAt(cubeProbe, 0);
 
             passed &= LightingAssert.IsTrue(cubeSupport == 0,
-                "B106: a fully-opaque neighbour storing sky 15 still contributes no support",
-                $"expected 0 from an opaque sky-15 neighbour, got {cubeSupport} — the directional change "
+                "B106: a fully-opaque neighbor storing sky 15 still contributes no support",
+                $"expected 0 from an opaque sky-15 neighbor, got {cubeSupport} — the directional change "
                 + "must not weaken the whole-block source guard for full cubes.");
 
             // Leg D — the TARGET side of the same question. A slab receiving light pays its opacity only
@@ -137,13 +137,13 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>
-        /// Places a lit half slab in one face-neighbour of a probe and returns the in-chunk sunlight
+        /// Places a lit half slab in one face-neighbor of a probe and returns the in-chunk sunlight
         /// support the production veto computes for that probe (entering air, so the entry cost is the
         /// flat air step and the only variable is whether the slab is credited).
         /// </summary>
         /// <param name="world">The harness world to build into.</param>
-        /// <param name="probe">The world-space voxel whose neighbours are scanned.</param>
-        /// <param name="faceIndex">Index into <c>VoxelData.FaceChecks</c> locating the slab neighbour.</param>
+        /// <param name="probe">The world-space voxel whose neighbors are scanned.</param>
+        /// <param name="faceIndex">Index into <c>VoxelData.FaceChecks</c> locating the slab neighbor.</param>
         /// <param name="slabMeta">The slab's Facing6Roll2 metadata (its orientation).</param>
         /// <returns>The strongest support the scan finds for the probe.</returns>
         private static byte SupportFromSlabNeighbor(LightingTestWorld world, Vector3Int probe, int faceIndex, byte slabMeta)
@@ -155,13 +155,13 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>
-        /// Makes the probe voxel itself a vertical half slab, lights one of its face-neighbours, and
+        /// Makes the probe voxel itself a vertical half slab, lights one of its face-neighbors, and
         /// returns the support the production veto computes for it — exercising the <b>entry</b> cost
         /// rather than the source guard.
         /// </summary>
         /// <param name="world">The harness world to build into.</param>
         /// <param name="probe">The world-space voxel that becomes the slab.</param>
-        /// <param name="faceIndex">Index into <c>VoxelData.FaceChecks</c> locating the lit neighbour, and
+        /// <param name="faceIndex">Index into <c>VoxelData.FaceChecks</c> locating the lit neighbor, and
         /// therefore the slab's entry face.</param>
         /// <returns>The strongest support the scan finds for the slab.</returns>
         private static byte SupportIntoSlabTarget(LightingTestWorld world, Vector3Int probe, int faceIndex)
@@ -176,7 +176,7 @@ namespace Editor.Validation.Lighting
         /// B105 — the settled-field guard for partial blocks across chunk seams, and the suite's
         /// <b>first oracle comparison containing a partial block at all</b> (B101–B104 are probe-based by
         /// design, per F7). A ceiling of <i>horizontal</i> half slabs (solid side down, so they block)
-        /// spans the centre chunk and overhangs its neighbours, pierced by a line of <i>vertical</i> half
+        /// spans the center chunk and overhangs its neighbors, pierced by a line of <i>vertical</i> half
         /// slabs sitting exactly on a chunk seam: light punches down through their open halves and
         /// spreads sideways under the ceiling into both chunks. VO-4 must not disturb this field.
         /// <para>
@@ -210,6 +210,13 @@ namespace Editor.Validation.Lighting
         /// must not be filed against VO-4.
         /// </para>
         /// <para>
+        /// <b>Reachability.</b> Sealing without an opacity change needs in-place rotation or a same-opacity
+        /// direct overwrite, and neither is player-reachable today (a normal seal is break → place, which
+        /// changes opacity at both steps and always worked). So the stuck-column half is a <b>latent</b>
+        /// defect that goes live when in-place rotation ships — this scenario is what keeps it fixed until
+        /// then. The wrong heightmap underneath it was never latent.
+        /// </para>
+        /// <para>
         /// <b>Mechanism</b> (classified, not guessed). <c>IsLightObstructing</c> is <c>Opacity &gt; 0</c>,
         /// so a half slab — authored opacity 15 — puts the heightmap at itself, and sealing it leaves the
         /// heightmap unchanged, so <c>RecalculateSunlightForColumn</c> (the authority for sky removal)
@@ -225,12 +232,58 @@ namespace Editor.Validation.Lighting
         private static bool K21a_SealedPartialBlockShaftDarkens()
         {
             bool passed = SealedShaftDarkens("K21a control: a Glass shaft (full cube, undimmed column)",
-                TestBlockPalette.Glass, meta: 0);
+                TestBlockPalette.Glass, meta: 0, TestBlockPalette.Stone, sealMeta: 0);
             passed &= SealedShaftDarkens("K21a control: a Water shaft (attenuating column)",
-                TestBlockPalette.Water, meta: 0);
-            passed &= SealedShaftDarkens("K21a: a VERTICAL HALF SLAB shaft (Bug 21)",
-                TestBlockPalette.HalfSlab, VO4_SLAB_VERTICAL);
+                TestBlockPalette.Water, meta: 0, TestBlockPalette.Stone, sealMeta: 0);
+            passed &= SealedShaftDarkens("K21a: a VERTICAL HALF SLAB shaft sealed with an opaque cube (Bug 21)",
+                TestBlockPalette.HalfSlab, VO4_SLAB_VERTICAL, TestBlockPalette.Stone, sealMeta: 0);
+
+            // Sealed by ROTATION alone — same block, same opacity 15, only the shape moves. This is the
+            // case an opacity-valued trigger cannot see at all, so it is the sharpest form of the bug.
+            passed &= SealedShaftDarkens("K21a: the same slab sealed by ROTATION alone (no opacity change)",
+                TestBlockPalette.HalfSlab, VO4_SLAB_VERTICAL, TestBlockPalette.HalfSlab, VO4_SLAB_HORIZONTAL);
+
+            // Reverse direction: OPENING a shaft by standing a flat slab upright must light the column.
+            // Guards against "fix Bug 21 by making every partial block obstruct", which would darken
+            // correctly and then never re-light — trading a stuck-lit column for a stuck-dark one.
+            passed &= OpenedShaftLights();
+
             return passed;
+        }
+
+        /// <summary>
+        /// The reverse of <see cref="SealedShaftDarkens"/>: rotating a flat slab upright turns its cell into
+        /// a full-height channel, so the column beneath it must go from shadowed to fully lit.
+        /// </summary>
+        /// <returns>True when opening the shaft lights the column to the oracle.</returns>
+        private static bool OpenedShaftLights()
+        {
+            using LightingTestWorld world = new LightingTestWorld(1);
+            world.FillSuperflatFloor(VO4_FLOOR_Y, TestBlockPalette.Stone);
+            for (int x = 4; x <= 11; x++)
+            for (int z = 4; z <= 11; z++)
+                world.SetBlock(new Vector3Int(x, VO4_ROOM_CEILING_Y, z), TestBlockPalette.Stone);
+
+            Vector3Int shaft = new Vector3Int(8, VO4_ROOM_CEILING_Y, 8);
+            world.SetBlock(shaft, TestBlockPalette.HalfSlab, VO4_SLAB_HORIZONTAL);
+            world.RecalculateHeightmaps();
+            world.RunInitialLighting();
+
+            Vector3Int probe = new Vector3Int(8, VO4_ROOM_CEILING_Y - 3, 8);
+            byte before = world.GetSkyLight(probe);
+
+            LightingFrameSimulator sim = new LightingFrameSimulator(world);
+            world.PlaceBlock(shaft, TestBlockPalette.HalfSlab, VO4_SLAB_VERTICAL);
+            sim.RunToConvergence(VO4_MAX_FRAMES, int.MaxValue, LightingFrameSimulator.CompletionOrder.Fifo);
+
+            byte after = world.GetSkyLight(probe);
+            return LightingAssert.IsTrue(
+                LightingAssert.MatchesOracleQuiet(world, LightingOracle.Solve(world), out string summary)
+                && after > before,
+                "K21a reverse: standing a flat slab upright lights the column beneath it",
+                $"{summary}. Probe {probe} went {before} -> {after}. If it did not brighten, the sky-column "
+                + "obstruction test has been made unconditionally true for partial blocks — which fixes the "
+                + "stuck-lit column by creating a stuck-dark one.");
         }
 
         /// <summary>
@@ -241,8 +294,10 @@ namespace Editor.Validation.Lighting
         /// <param name="label">Console label for this leg.</param>
         /// <param name="shaftBlock">The block forming the light shaft.</param>
         /// <param name="meta">The shaft block's metadata (its orientation).</param>
+        /// <param name="sealBlock">The block the shaft is sealed with.</param>
+        /// <param name="sealMeta">The sealing block's metadata.</param>
         /// <returns>True when the sealed field matches the oracle.</returns>
-        private static bool SealedShaftDarkens(string label, ushort shaftBlock, byte meta)
+        private static bool SealedShaftDarkens(string label, ushort shaftBlock, byte meta, ushort sealBlock, byte sealMeta)
         {
             using LightingTestWorld world = new LightingTestWorld(1);
             world.FillSuperflatFloor(VO4_FLOOR_Y, TestBlockPalette.Stone);
@@ -256,7 +311,7 @@ namespace Editor.Validation.Lighting
             world.RunInitialLighting();
 
             LightingFrameSimulator sim = new LightingFrameSimulator(world);
-            world.PlaceBlock(shaft, TestBlockPalette.Stone);
+            world.PlaceBlock(shaft, sealBlock, sealMeta);
             sim.RunToConvergence(VO4_MAX_FRAMES, int.MaxValue, LightingFrameSimulator.CompletionOrder.Fifo);
 
             Vector3Int probe = new Vector3Int(8, VO4_ROOM_CEILING_Y - 3, 8);
@@ -282,7 +337,7 @@ namespace Editor.Validation.Lighting
         private const int VO4_FLOOR_Y = 10;
 
         /// <summary>
-        /// Builds B105's world: a superflat floor, and a half-slab ceiling over the centre chunk whose
+        /// Builds B105's world: a superflat floor, and a half-slab ceiling over the center chunk whose
         /// slabs are horizontal (blocking) except along the seam line returned by
         /// <see cref="Vo4ShaftPositions"/>, which are vertical (open). Returned un-lit.
         /// </summary>
@@ -292,7 +347,7 @@ namespace Editor.Validation.Lighting
             LightingTestWorld world = new LightingTestWorld(3);
             world.FillSuperflatFloor(VO4_FLOOR_Y, TestBlockPalette.Stone);
 
-            // Ceiling over the centre chunk, overhanging one voxel into each neighbour so the gradient
+            // Ceiling over the center chunk, overhanging one voxel into each neighbor so the gradient
             // beneath it genuinely straddles the seams rather than stopping at them.
             const int min = VoxelData.ChunkWidth - 1;
             const int max = 2 * VoxelData.ChunkWidth;
@@ -308,13 +363,13 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>
-        /// The ceiling cells that are vertical (open) slabs: the column sitting exactly on the centre
+        /// The ceiling cells that are vertical (open) slabs: the column sitting exactly on the center
         /// chunk's west seam, so the light they admit spreads under the ceiling into both chunks.
         /// </summary>
         /// <returns>World-space positions of the light shafts.</returns>
         private static IEnumerable<Vector3Int> Vo4ShaftPositions()
         {
-            const int seamX = VoxelData.ChunkWidth; // local x = 0 of the centre chunk
+            const int seamX = VoxelData.ChunkWidth; // local x = 0 of the center chunk
             for (int z = VoxelData.ChunkWidth + 4; z <= VoxelData.ChunkWidth + 11; z++)
                 yield return new Vector3Int(seamX, VO4_CEILING_Y, z);
         }

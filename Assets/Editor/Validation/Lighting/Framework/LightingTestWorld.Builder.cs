@@ -80,8 +80,10 @@ namespace Editor.Validation.Lighting.Framework
                         ushort height = 0;
                         for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
                         {
-                            ushort id = BurstVoxelDataBitMapping.GetId(chunk.Data.GetVoxel(x, y, z));
-                            if (_blockTypes[id].IsLightObstructing)
+                            uint voxel = chunk.Data.GetVoxel(x, y, z);
+                            if (LightAttenuation.ObstructsSkyColumn(
+                                    _blockTypes[BurstVoxelDataBitMapping.GetId(voxel)],
+                                    BurstVoxelDataBitMapping.GetMeta(voxel)))
                             {
                                 height = (ushort)y;
                                 break;
@@ -133,7 +135,8 @@ namespace Editor.Validation.Lighting.Framework
 
             // --- Maintain heightmap via the shared ChunkData logic (same code as production ModifyVoxel) ---
             chunk.Data.UpdateColumnHeightAfterEdit(localPos.x, localPos.z, localPos.y,
-                newProps.IsLightObstructing, new JobDataBlockObstruction(_blockTypes));
+                LightAttenuation.ObstructsSkyColumn(in newProps, BurstVoxelDataBitMapping.GetMeta(newPackedData)),
+                new JobDataBlockObstruction(_blockTypes));
 
             // --- Queue lighting updates ---
 
@@ -163,10 +166,15 @@ namespace Editor.Validation.Lighting.Framework
                     chunk.BlockQueue.Enqueue(new LightQueueNode { Position = neighborPos });
             }
 
-            // 3. Opacity change → full vertical sunlight recalculation of this column
+            // 3. Changed light transport → full vertical sunlight recalculation of this column
             //    (production routes this through WorldData.QueueSunlightRecalculation, which lands
-            //    in the owning chunk's column recalc queue).
-            if (newProps.Opacity != oldProps.Opacity)
+            //    in the owning chunk's column recalc queue). Mirrors ChunkData.ModifyVoxel's two
+            //    triggers exactly: a changed attenuation cost (opacity) OR a changed shape at equal
+            //    opacity (obstruction) — the second being Bug 21's, where sealing a vertical half slab
+            //    ends an undimmed column while leaving opacity at 15 throughout.
+            if (newProps.Opacity != oldProps.Opacity
+                || LightAttenuation.ObstructsSkyColumn(in newProps, BurstVoxelDataBitMapping.GetMeta(newPackedData))
+                != LightAttenuation.ObstructsSkyColumn(in oldProps, BurstVoxelDataBitMapping.GetMeta(oldPackedData)))
             {
                 chunk.SunColumnRecalcQueue.Enqueue(new Vector2Int(localPos.x, localPos.z));
 
@@ -495,7 +503,8 @@ namespace Editor.Validation.Lighting.Framework
 
             public JobDataBlockObstruction(BlockTypeJobData[] blockTypes) => _blockTypes = blockTypes;
 
-            public bool IsLightObstructing(ushort blockId) => _blockTypes[blockId].IsLightObstructing;
+            public bool ObstructsSkyColumn(ushort blockId, byte meta)
+                => LightAttenuation.ObstructsSkyColumn(_blockTypes[blockId], meta);
         }
     }
 }

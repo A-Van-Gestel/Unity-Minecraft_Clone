@@ -632,7 +632,7 @@ namespace Jobs
                 }
 
                 // --- Heightmap ---
-                if (!highestBlockFound && voxelProps.IsLightObstructing)
+                if (!highestBlockFound && LightAttenuation.ObstructsSkyColumn(in voxelProps, packedMeta))
                 {
                     int heightmapIndex = x + VoxelData.ChunkWidth * z;
                     OutputHeightMap[heightmapIndex] = (ushort)y;

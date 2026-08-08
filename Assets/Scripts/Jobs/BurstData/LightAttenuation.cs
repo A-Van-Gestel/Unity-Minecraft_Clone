@@ -120,7 +120,42 @@ namespace Jobs.BurstData
             return EntryOpacity(in block, meta, faceIndex) == 0;
         }
 
+        /// <summary>
+        /// Returns <see langword="true"/> when this block interrupts the vertical sky column, and therefore
+        /// belongs in the heightmap. The column enters a cell through its <b>top</b> face and leaves through
+        /// its <b>bottom</b>, so both must be tested: a horizontal half slab is entered for free (its top
+        /// face is the open mid-plane) but its solid underside stops the column, while a vertical half slab
+        /// leaves a full-height channel and interrupts nothing.
+        /// <para>
+        /// This is the directional replacement for <c>BlockTypeJobData.IsLightObstructing</c>
+        /// (<c>Opacity &gt; 0</c>) at every heightmap site. For a full cube it reduces to exactly that, since
+        /// <see cref="EntryOpacity"/> short-circuits on <c>HasCustomBounds</c> and <see cref="ExitBlocked"/>
+        /// can never fire — so no full-cube world's heightmap changes by a single entry.
+        /// </para>
+        /// <para>
+        /// <b>Why the heightmap has to care</b> (<c>LIGHTING_BUGS.md</c> Bug 21): the heightmap is what makes
+        /// <c>RecalculateSunlightForColumn</c> authoritative for sky <i>removal</i>. A slab that registers
+        /// when it should not means sealing it never moves the heightmap, so the recalculation never re-runs
+        /// and the orphaned column — being flat, with no decrement chain for <c>PropagateDarkness</c> to
+        /// follow — stays lit forever.
+        /// </para>
+        /// </summary>
+        /// <param name="block">The block occupying the cell.</param>
+        /// <param name="meta">The placed voxel's raw metadata byte (selects the volume's rotation).</param>
+        /// <returns><see langword="true"/> when the vertical sky column cannot pass through this cell freely.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool ObstructsSkyColumn(in BlockTypeJobData block, byte meta)
+        {
+            return EntryOpacity(in block, meta, TOP_FACE) > 0 || ExitBlocked(in block, meta, BOTTOM_FACE);
+        }
+
         /// <summary>Coverage at or above which a face counts as fully covered (absorbs float round-off).</summary>
         private const float FULL_COVERAGE_THRESHOLD = 1f - 1e-4f;
+
+        /// <summary>The +Y face index in <c>VoxelData.FaceChecks</c> order — where a downward sky column enters.</summary>
+        private const int TOP_FACE = 2;
+
+        /// <summary>The -Y face index in <c>VoxelData.FaceChecks</c> order — where a downward sky column leaves.</summary>
+        private const int BOTTOM_FACE = 3;
     }
 }

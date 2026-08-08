@@ -521,8 +521,13 @@ namespace Data
 
             // --- MAINTAIN HEIGHTMAP ---
             // Shared Case 1 / Case 2 logic (also run by the editor lighting validation harness).
+            NativeArray<BlockTypeJobData> blockJobData = World.Instance.JobDataManager.BlockTypesJobData;
+            bool oldObstructsSkyColumn = LightAttenuation.ObstructsSkyColumn(
+                blockJobData[oldId], BurstVoxelDataBitMapping.GetMeta(oldPackedData));
+            bool newObstructsSkyColumn = LightAttenuation.ObstructsSkyColumn(blockJobData[mod.ID], mod.Meta);
+
             UpdateColumnHeightAfterEdit(localPos.x, localPos.z, localPos.y,
-                newProps.IsLightObstructing, new ManagedBlockObstruction(World.Instance.BlockTypes));
+                newObstructsSkyColumn, new JobDataBlockObstruction(blockJobData));
 
             // --- Queue Lighting Updates ---
 
@@ -548,10 +553,19 @@ namespace Data
                 }
             }
 
-            // 3. If opacity changed, queue a full vertical sunlight recalculation.
+            // 3. If the column's light transport changed, queue a full vertical sunlight recalculation.
             //    Gated by enableLighting: without the lighting engine, no job will ever process
             //    the recalculation queue or clear HasLightChangesToProcess, permanently blocking meshing.
-            if (lightingEnabled && newProps.opacity != oldProps.opacity)
+            //
+            //    Two triggers, because opacity alone is not enough (LIGHTING_BUGS.md Bug 21). Opacity
+            //    catches a changed attenuation cost. Obstruction catches a changed SHAPE at equal opacity:
+            //    sealing a vertical half slab — by rotating it, or replacing it with any other opacity-15
+            //    block — ends the undimmed column it was carrying while leaving `opacity` at 15 the whole
+            //    time. Without this the column recalculation, which is the only authority for sky-light
+            //    removal, never runs and the orphaned column stays lit forever. Strictly additive: every
+            //    edit that queued a recalculation before still does.
+            if (lightingEnabled && (newProps.opacity != oldProps.opacity
+                                    || newObstructsSkyColumn != oldObstructsSkyColumn))
             {
                 World.Instance.worldData.QueueSunlightRecalculation(new Vector2Int(localPos.x + Position.x, localPos.z + Position.y));
 
@@ -758,32 +772,35 @@ namespace Data
         /// <param name="localX">Local X of the edited column (0-15).</param>
         /// <param name="localZ">Local Z of the edited column (0-15).</param>
         /// <param name="localY">Local Y of the edited voxel.</param>
-        /// <param name="newIsLightObstructing">Whether the newly-placed block is light-obstructing.</param>
-        /// <param name="obstruction">Light-obstruction lookup for the downward rescan (Case 2).</param>
+        /// <param name="newObstructsSkyColumn">Whether the newly-placed voxel interrupts the sky column,
+        /// per <c>LightAttenuation.ObstructsSkyColumn</c> — orientation-dependent for partial blocks.</param>
+        /// <param name="obstruction">Sky-column obstruction lookup for the downward rescan (Case 2).</param>
         public void UpdateColumnHeightAfterEdit<TObstruction>(int localX, int localZ, int localY,
-            bool newIsLightObstructing, in TObstruction obstruction)
+            bool newObstructsSkyColumn, in TObstruction obstruction)
             where TObstruction : struct, IBlockObstruction
         {
             int heightmapIndex = localX + VoxelData.ChunkWidth * localZ;
             ushort currentHeight = heightMap[heightmapIndex];
 
-            // Case 1: A light-obstructing block was placed ABOVE the current highest block.
-            if (newIsLightObstructing && localY > currentHeight)
+            // Case 1: A sky-column-obstructing block was placed ABOVE the current highest block.
+            if (newObstructsSkyColumn && localY > currentHeight)
             {
                 heightMap[heightmapIndex] = (ushort)localY;
             }
-            // Case 2: The current highest light-obstructing block was removed or made fully transparent.
-            else if (!newIsLightObstructing && localY == currentHeight)
+            // Case 2: The current highest obstructing block was removed, made fully transparent, or —
+            // since Bug 21's fix — rotated into an orientation that no longer blocks the column.
+            else if (!newObstructsSkyColumn && localY == currentHeight)
             {
-                // Scan downwards from here to find the NEW highest light-obstructing block.
+                // Scan downwards from here to find the NEW highest obstructing block.
                 // Hoisted off the readonly parameter: the generic isn't readonly-constrained, so calling
                 // through `obstruction` directly would defensively copy it every iteration.
                 TObstruction obstructionLookup = obstruction;
                 ushort newHeight = 0;
                 for (int y = localY - 1; y >= 0; y--)
                 {
-                    ushort checkId = BurstVoxelDataBitMapping.GetId(GetVoxel(localX, y, localZ));
-                    if (obstructionLookup.IsLightObstructing(checkId))
+                    uint checkVoxel = GetVoxel(localX, y, localZ);
+                    if (obstructionLookup.ObstructsSkyColumn(BurstVoxelDataBitMapping.GetId(checkVoxel),
+                            BurstVoxelDataBitMapping.GetMeta(checkVoxel)))
                     {
                         newHeight = (ushort)y;
                         break; // Found the new highest block, stop scanning.
@@ -795,16 +812,19 @@ namespace Data
         }
 
         /// <summary>
-        /// Allocation-free <see cref="IBlockObstruction"/> over the live managed block palette
-        /// (<c>World.Instance.BlockTypes</c>) used by <see cref="ModifyVoxel"/>'s heightmap maintenance.
+        /// Allocation-free <see cref="IBlockObstruction"/> over the live block job data
+        /// (<c>World.Instance.JobDataManager.BlockTypesJobData</c>) used by <see cref="ModifyVoxel"/>'s
+        /// heightmap maintenance. Job data rather than the managed palette because the sky-column test is
+        /// shape- and orientation-aware, and the bounds mirror lives on <see cref="BlockTypeJobData"/>.
         /// </summary>
-        private readonly struct ManagedBlockObstruction : IBlockObstruction
+        private readonly struct JobDataBlockObstruction : IBlockObstruction
         {
-            private readonly BlockType[] _blockTypes;
+            private readonly NativeArray<BlockTypeJobData> _blockTypes;
 
-            public ManagedBlockObstruction(BlockType[] blockTypes) => _blockTypes = blockTypes;
+            public JobDataBlockObstruction(NativeArray<BlockTypeJobData> blockTypes) => _blockTypes = blockTypes;
 
-            public bool IsLightObstructing(ushort blockId) => _blockTypes[blockId].IsLightObstructing;
+            public bool ObstructsSkyColumn(ushort blockId, byte meta)
+                => LightAttenuation.ObstructsSkyColumn(_blockTypes[blockId], meta);
         }
 
         #endregion

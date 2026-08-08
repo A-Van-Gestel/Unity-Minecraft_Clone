@@ -259,7 +259,8 @@ namespace Editor.WorldTools
                             uint packed = map[flatIndex];
                             ushort blockId = (ushort)(packed & 0xFFFF);
 
-                            if (blockId != 0 && blockTypes[blockId].IsLightObstructing)
+                            if (blockId != 0 && LightAttenuation.ObstructsSkyColumn(
+                                    blockTypes[blockId], BurstVoxelDataBitMapping.GetMeta(packed)))
                             {
                                 highestY = (ushort)y;
                                 break;

@@ -75,7 +75,8 @@ namespace Editor.Validation.Lighting.Framework
                     int highest = 0;
                     for (int y = height - 1; y >= 0; y--)
                     {
-                        if (blockTypes[ids[field.Index(x, y, z)]].IsLightObstructing)
+                        int scanIndex = field.Index(x, y, z);
+                        if (LightAttenuation.ObstructsSkyColumn(blockTypes[ids[scanIndex]], metas[scanIndex]))
                         {
                             highest = y;
                             break;

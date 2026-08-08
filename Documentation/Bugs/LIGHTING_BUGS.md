@@ -156,8 +156,12 @@ re-litigate that without reading it.
 
 ## Bug 21: A Sealed Partial-Block Light Shaft Leaves Its Sky Column Permanently Lit
 
-**Severity:** Medium-High  
-**Status:** Open  
+**Severity:** Medium — downgraded 2026-08-08 once reachability was checked (see below): the stuck-lit column
+needs in-place rotation, which players cannot do yet, so that half was latent. The wrong heightmap it stems
+from was not latent.  
+**Status:** **Fixed in code (August 2026).** Repro `K21a` passes; all 422 baselines green. The fix is
+verified against the borderless oracle rather than in game, because the defect's live trigger does not exist
+yet — an in-game pass can only confirm no regression around vertical slabs, not that the bug is gone.  
 **Found:** 2026-08-08, while authoring baseline B105 for `VO-4`.  
 **Related:** Bug 20 (this is a consequence of the `VO-3` sky-column fix, not of the cross-chunk work `VO-4` covers)
 
@@ -197,24 +201,59 @@ never fires.
 So it is neither "undimmed columns cannot be removed" (Glass disproves that) nor "opaque shafts cannot be
 removed" — it is specifically a block that is light-obstructing by opacity while transmitting light by shape.
 
-**Reproduction Steps:**
+**Reachability — read this before judging severity.** The stuck-lit column requires sealing the shaft
+*without changing the cell's opacity*: rotating the slab in place, or overwriting it directly with another
+opacity-15 block. **Neither is player-reachable today** — in-place block rotation is not implemented for
+players, and a normal seal goes break → place (opacity 15→0→15), which changed opacity at both steps and so
+always triggered the recalculation correctly. Verified: break-then-place settles to the oracle exactly.
+
+So the *stuck column* half of this entry was **latent**, reproducible only through the harness's direct
+`PlaceBlock` overwrite, and it becomes live the day in-place rotation ships. What was **not** latent is the
+heightmap itself: a column topped by a vertical slab registered that slab as its highest light-obstructing
+block, which is wrong with no edit involved at all and feeds
+`RecalculateSunlightForColumn`'s PASS 1/PASS 2 boundary.
+
+**Reproduction Steps** (harness, or in game once rotation exists):
 
 1. Roof a room with opaque blocks and leave one cell holding a `Stone Half Slab` rotated vertical
    (`Facing6Roll2` metadata `0x03`), so the column below it reads sky 15.
-2. Rotate that slab solid-side-down, or replace it with any opaque block.
+2. Rotate that slab solid-side-down, or overwrite it directly with any opacity-15 block.
 3. Observe the column below stays fully lit. Any other block update in the chunk does **not** clear it —
    the column recalculation is not triggered by an edit that does not move the heightmap.
 
 **Repro scenario:** **`K21a`** (lighting suite, `LightingValidationSuite.PartialBlocksCrossChunk.cs`) —
 single-chunk minimal form, red for the documented reason, shipped with the Glass and Water controls above so
-a red cannot be mistaken for a broken fixture.
+a red could not be mistaken for a broken fixture. Strengthened alongside the fix with the seal-by-rotation
+leg (the case an opacity-valued trigger cannot see at all) and the reverse-direction leg.
 
-**Fix options (not yet chosen — needs a scope decision):**
+**Fix (August 2026 — the root fix, chosen over the narrower alternative):**
 
-- Make `IsLightObstructing` directional, so a vertical slab stops registering in the heightmap. This is the
-  root fix, and it is exactly what `VO-3` scoped out: it touches `ChunkData` heightmap maintenance, terrain
-  generation, and the LI-2 band derivation.
-- Or trigger a column recalculation on any edit that changes a cell's *occlusion* even when the heightmap is
-  unmoved — narrower, but it needs a notion of "occlusion changed" that the voxel-edit path does not have today.
+The heightmap test became directional, and it turned out to need **two** parts — the first alone did not fix
+the bug, which the harness caught before any in-game pass:
+
+1. **`LightAttenuation.ObstructsSkyColumn(block, meta)`** replaces `IsLightObstructing` at every heightmap
+   site (`ChunkData.UpdateColumnHeightAfterEdit` + `IBlockObstruction`, both generation jobs, the harness
+   heightmap builder, the oracle's column scan, and the chunk-preview tool). The sky column enters a cell
+   through its **top** face and leaves through its **bottom**, so both are tested:
+   `EntryOpacity(top) > 0 || ExitBlocked(bottom)`. A vertical slab now stays out of the heightmap; a flat one
+   stays in. **Bit-identical for every full cube** — `EntryOpacity` short-circuits on `HasCustomBounds` and
+   `ExitBlocked` can never fire — so no full-cube world's heightmap changes by a single entry.
+2. **The recalculation trigger** in `ChunkData.ModifyVoxel` fired only on `newProps.opacity != oldProps.opacity`.
+   Sealing a slab with any other opacity-15 block — or merely **rotating it**, which changes no block id at
+   all — passes that test unchanged, so nothing recomputed even once the heightmap moved. It now also fires
+   when the cell's sky-column obstruction changes. Strictly additive: every edit that queued a recalculation
+   before still does.
+
+`IsLightObstructing` itself is kept (it is a legitimate whole-block "has any opacity" question) with a
+docstring warning against reusing it for a heightmap.
+
+**Verified**, engine against the borderless oracle, zero divergence in all five cases: Glass and Water shaft
+controls, slab sealed with an opaque cube, slab sealed **by rotation alone**, and the reverse direction —
+standing a flat slab upright re-lights the column (11 → 15), which guards against "fix this by making every
+partial block obstruct", a change that would trade a stuck-lit column for a stuck-dark one.
+
+**Serialization:** `heightMap` is persisted, but only its *values* change for worlds containing vertical
+slabs — the layout is untouched, so no migration or version bump (same basis on which `VO-7` was descoped).
+A stale persisted heightmap is self-healing: any edit in that column recomputes it.
 
 **Testing environment:** Editor, lighting validation harness, August 2026.

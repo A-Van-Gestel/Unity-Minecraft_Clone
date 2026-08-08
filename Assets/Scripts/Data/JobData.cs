@@ -400,6 +400,12 @@ namespace Data
 
         /// <summary>
         /// Returns true if the block has an opacity, and thus has an effect on the light.
+        /// <para>
+        /// <b>Not the heightmap test.</b> This is a whole-block question, so it cannot distinguish a
+        /// vertical half slab (which leaves the sky column intact) from the same block laid flat. Use
+        /// <c>LightAttenuation.ObstructsSkyColumn</c> for anything that decides what belongs in the
+        /// heightmap — using this one there is <c>LIGHTING_BUGS.md</c> Bug 21.
+        /// </para>
         /// </summary>
         public bool IsLightObstructing
         {
