@@ -49,8 +49,8 @@ namespace Editor.Validation.Lighting
                 "B105: a seam-straddling gradient fed through partial blocks settles on the borderless oracle",
                 B105_PartialBlockSeamGradientMatchesOracle));
             scenarios.Add(new Scenario(
-                "K21a: sealing a partial-block light shaft darkens the column beneath it",
-                K21a_SealedPartialBlockShaftDarkens, "21"));
+                "B107: sealing a partial-block light shaft darkens the column beneath it",
+                B107_SealedPartialBlockShaftDarkens));
         }
 
         /// <summary>
@@ -201,46 +201,48 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>
-        /// K21a — reproduces <c>LIGHTING_BUGS.md</c> Bug 21, found 2026-08-08 while authoring B105.
-        /// A vertical half slab admits an <b>undimmed</b> sky column (VO-3, baseline B104). Sealing that
-        /// shaft must darken the column beneath it. It does not: the column stays at 15 forever.
+        /// B107 — the permanent guard for <c>_FIXED_BUGS.md</c> Bug 21, promoted from repro <c>K21a</c> on
+        /// 2026-08-08. A vertical half slab admits an <b>undimmed</b> sky column (VO-3, baseline B104), so
+        /// sealing that shaft must darken the column beneath it. Before the fix it did not — the column
+        /// stayed at 15 forever, stable and 4 levels above the oracle.
         /// <para>
-        /// The minimal form is deliberately <b>single-chunk</b> — the defect was first seen in a 3×3 seam
+        /// The minimal form is deliberately <b>single-chunk</b>: the defect was first seen in a 3×3 seam
         /// world, but it reproduces with no chunk boundary anywhere, so it is not a cross-chunk defect and
-        /// must not be filed against VO-4.
+        /// was not filed against VO-4.
         /// </para>
         /// <para>
-        /// <b>Reachability.</b> Sealing without an opacity change needs in-place rotation or a same-opacity
-        /// direct overwrite, and neither is player-reachable today (a normal seal is break → place, which
-        /// changes opacity at both steps and always worked). So the stuck-column half is a <b>latent</b>
-        /// defect that goes live when in-place rotation ships — this scenario is what keeps it fixed until
-        /// then. The wrong heightmap underneath it was never latent.
+        /// <b>Why this baseline is load-bearing.</b> Sealing without an opacity change needs in-place
+        /// rotation or a same-opacity direct overwrite, and neither is player-reachable today (a normal seal
+        /// is break → place, which changes opacity at both steps and always worked). So the stuck-column
+        /// half is <b>latent</b> until in-place rotation ships — nothing in game can catch a regression
+        /// here, and this scenario is the only thing that will. Do not delete it as "untested in practice".
+        /// The wrong heightmap underneath it was never latent.
         /// </para>
         /// <para>
-        /// <b>Mechanism</b> (classified, not guessed). <c>IsLightObstructing</c> is <c>Opacity &gt; 0</c>,
-        /// so a half slab — authored opacity 15 — puts the heightmap at itself, and sealing it leaves the
-        /// heightmap unchanged, so <c>RecalculateSunlightForColumn</c> (the authority for sky removal)
-        /// never re-runs. <c>PropagateDarkness</c> cannot finish the job either: it unwinds light by
-        /// following exact <c>neighbor == old − cost</c> chains, which a flat 15 column does not have.
-        /// The controls prove the diagnosis: sealing a <b>Glass</b> shaft (a full cube at opacity 0, which
-        /// carries an equally undimmed 15 column but is <i>not</i> light-obstructing, so the heightmap
-        /// moves) darkens correctly, as does an attenuating <b>Water</b> shaft. Both are asserted here, so
-        /// a red leg A cannot be mistaken for a broken fixture.
+        /// <b>Mechanism</b> (classified, not guessed). The pre-fix heightmap test was
+        /// <c>IsLightObstructing</c> = <c>Opacity &gt; 0</c>, so a half slab — authored opacity 15 — put the
+        /// heightmap at itself; sealing it left the heightmap unchanged, so
+        /// <c>RecalculateSunlightForColumn</c> (the authority for sky removal) never re-ran.
+        /// <c>PropagateDarkness</c> could not finish the job either: it unwinds light by following exact
+        /// <c>neighbor == old − cost</c> chains, which a flat 15 column does not have. The controls prove
+        /// the diagnosis and are kept: a <b>Glass</b> shaft (full cube at opacity 0, equally undimmed column,
+        /// but <i>not</i> light-obstructing, so its heightmap moved) always darkened correctly, as did an
+        /// attenuating <b>Water</b> shaft — so a red slab leg cannot be mistaken for a broken fixture.
         /// </para>
         /// </summary>
-        /// <returns>True once sealed partial-block shafts darken; false (expected) while Bug 21 is open.</returns>
-        private static bool K21a_SealedPartialBlockShaftDarkens()
+        /// <returns>True when sealed partial-block shafts darken and opened ones re-light.</returns>
+        private static bool B107_SealedPartialBlockShaftDarkens()
         {
-            bool passed = SealedShaftDarkens("K21a control: a Glass shaft (full cube, undimmed column)",
+            bool passed = SealedShaftDarkens("B107 control: a Glass shaft (full cube, undimmed column)",
                 TestBlockPalette.Glass, meta: 0, TestBlockPalette.Stone, sealMeta: 0);
-            passed &= SealedShaftDarkens("K21a control: a Water shaft (attenuating column)",
+            passed &= SealedShaftDarkens("B107 control: a Water shaft (attenuating column)",
                 TestBlockPalette.Water, meta: 0, TestBlockPalette.Stone, sealMeta: 0);
-            passed &= SealedShaftDarkens("K21a: a VERTICAL HALF SLAB shaft sealed with an opaque cube (Bug 21)",
+            passed &= SealedShaftDarkens("B107: a VERTICAL HALF SLAB shaft sealed with an opaque cube (Bug 21)",
                 TestBlockPalette.HalfSlab, VO4_SLAB_VERTICAL, TestBlockPalette.Stone, sealMeta: 0);
 
             // Sealed by ROTATION alone — same block, same opacity 15, only the shape moves. This is the
             // case an opacity-valued trigger cannot see at all, so it is the sharpest form of the bug.
-            passed &= SealedShaftDarkens("K21a: the same slab sealed by ROTATION alone (no opacity change)",
+            passed &= SealedShaftDarkens("B107: the same slab sealed by ROTATION alone (no opacity change)",
                 TestBlockPalette.HalfSlab, VO4_SLAB_VERTICAL, TestBlockPalette.HalfSlab, VO4_SLAB_HORIZONTAL);
 
             // Reverse direction: OPENING a shaft by standing a flat slab upright must light the column.
@@ -280,7 +282,7 @@ namespace Editor.Validation.Lighting
             return LightingAssert.IsTrue(
                 LightingAssert.MatchesOracleQuiet(world, LightingOracle.Solve(world), out string summary)
                 && after > before,
-                "K21a reverse: standing a flat slab upright lights the column beneath it",
+                "B107 reverse: standing a flat slab upright lights the column beneath it",
                 $"{summary}. Probe {probe} went {before} -> {after}. If it did not brighten, the sky-column "
                 + "obstruction test has been made unconditionally true for partial blocks — which fixes the "
                 + "stuck-lit column by creating a stuck-dark one.");
@@ -330,7 +332,7 @@ namespace Editor.Validation.Lighting
         /// <summary>Y level of the partial-block ceiling, well clear of the floor so the gradient has room.</summary>
         private const int VO4_CEILING_Y = 100;
 
-        /// <summary>Y level of K21a's single-chunk room ceiling.</summary>
+        /// <summary>Y level of B107's single-chunk room ceiling.</summary>
         private const int VO4_ROOM_CEILING_Y = 60;
 
         /// <summary>Inclusive top Y of the superflat floor beneath the ceiling.</summary>

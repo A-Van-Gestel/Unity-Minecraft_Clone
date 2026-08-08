@@ -184,8 +184,9 @@ namespace Editor.Validation.Lighting
             // --- VO-4 cross-chunk directional occlusion: baselines B106 (the removal veto's support scan
             // credits a partial block per face on both the source and target sides — promoted from repro
             // K20b after in-game confirmation) and B105 (the settled seam gradient fed through partial
-            // blocks matches the borderless oracle), plus the known-bug repro K21a for Bug 21, which is a
-            // SEPARATE defect found while authoring B105 and reproduces with no chunk seam at all.
+            // blocks matches the borderless oracle), plus B107 (sealing a partial-block light shaft darkens
+            // the column beneath it, and opening one re-lights it — promoted from repro K21a for Bug 21, a
+            // SEPARATE defect found while authoring B105 that reproduces with no chunk seam at all).
             // Lives in LightingValidationSuite.PartialBlocksCrossChunk.cs. ---
             AddPartialBlockCrossChunkScenarios(scenarios);
         }

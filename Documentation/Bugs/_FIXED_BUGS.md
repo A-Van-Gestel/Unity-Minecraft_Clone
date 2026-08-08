@@ -555,6 +555,69 @@ only genuine-float callers remain) — plus a latched dev-build ±2²⁴ tripwir
 
 ---
 
+### ~~25. Sealed partial-block light shaft leaves its sky column permanently lit~~
+
+**Severity:** Medium  
+**Files:** `Jobs/BurstData/LightAttenuation.cs`, `Data/ChunkData.cs`, `Data/IBlockObstruction.cs`, `Data/JobData.cs`, `Jobs/StandardChunkGenerationJob.cs`, `Legacy/LegacyChunkGenerationJob.cs`, plus the harness heightmap builder, the oracle column scan, and `ChunkPreview3DWindow`  
+**Reported:** August 2026 (2026-08-08, found in the harness while authoring baseline B105 for `VO-4`)  
+**Fixed:** August 2026 (2026-08-08)
+
+**Symptom:** A vertical half slab admits an undimmed sky column through its open half (`VO-3`, baseline
+B104). Sealing that shaft did not darken the column beneath it — it stayed at 15 forever, stable, 4 levels
+above the borderless oracle (550 divergent voxels in a single-chunk room, converged in 2 frames).
+
+**Reachability (why this was latent, and why it still had to be fixed):** the stuck column needs the shaft
+sealed *without an opacity change* — in-place rotation, or a same-opacity direct overwrite. Neither is
+player-reachable today: a normal seal is break → place (opacity 15→0→15), which changed opacity at both
+steps and always worked. So that half was reproducible only in the harness and goes live the day in-place
+rotation ships. The **wrong heightmap** underneath it was not latent: a column topped by a vertical slab
+registered that slab as its highest light-obstructing block with no edit involved at all.
+
+**Root Cause (classified by differential controls, not inferred):** two independent parts, and fixing only
+the first left the bug fully intact.
+
+1. `IsLightObstructing` is `Opacity > 0`, and a half slab is authored `opacity = 15`, so the slab already
+   sat in the heightmap; sealing it never moved the heightmap, so `RecalculateSunlightForColumn` — the sole
+   authority for sky-light *removal* — never re-ran. `PropagateDarkness` could not finish the job either: it
+   unwinds light by following exact `neighbor == old − cost` chains, which a flat 15 column does not have.
+2. `ChunkData.ModifyVoxel` queued the column recalculation only when `newProps.opacity != oldProps.opacity`.
+   Sealing a slab with another opacity-15 block — or merely rotating it, which changes no block id at all —
+   passes that test unchanged, so nothing recomputed even once the heightmap was correct.
+
+The controls pin part 1 to partial blocks specifically: a **Glass** shaft (full cube, opacity 0, carries an
+equally undimmed 15 column but is *not* light-obstructing, so its heightmap moved) always darkened
+correctly, as did an attenuating **Water** shaft. So it was neither "undimmed columns cannot be removed" nor
+"opaque shafts cannot be removed", but precisely *light-obstructing by opacity while transmitting by shape*.
+
+`VO-3` had deliberately left `IsLightObstructing` whole-block, reasoning that "the BFS carries the undimmed
+column down anyway, so the field is correct; the heightmap merely stays conservative". True for **placement**,
+false for **removal** — a conservative heightmap also means that column's removal authority never fires.
+
+**Fix:** new `LightAttenuation.ObstructsSkyColumn(block, meta)` = `EntryOpacity(top) > 0 || ExitBlocked(bottom)`
+replaces `IsLightObstructing` at every heightmap site (the column enters a cell through its top face and
+leaves through its bottom, so both must be tested), and `ModifyVoxel`'s recalculation trigger now also fires
+when a cell's sky-column obstruction changes — strictly additive, so every edit that queued a recalculation
+before still does. Bit-identical for full cubes: `EntryOpacity` short-circuits on `HasCustomBounds` and
+`ExitBlocked` can never fire, so no full-cube world's heightmap changes by a single entry. `IsLightObstructing`
+is kept as a legitimate whole-block "has any opacity" test, with a docstring warning against reusing it for a
+heightmap. **This is the same defect class as archived Lighting #04** — an opacity-valued predicate standing
+in for the column question in the same function.
+
+**Serialization:** `heightMap` is persisted, but only its values change and only for columns containing
+vertical slabs; layout untouched, so no migration or version bump. A stale persisted heightmap self-heals on
+the next edit in that column.
+
+**Validation suite:** repro `K21a` promoted to baseline **B107**, which asserts five legs against the
+borderless oracle — Glass and Water shaft controls, slab sealed with an opaque cube, slab sealed **by
+rotation alone** (the case an opacity-valued trigger cannot see), and the reverse direction: standing a flat
+slab upright re-lights the column (11 → 15), guarding against "fix this by making every partial block
+obstruct", which would trade a stuck-lit column for a stuck-dark one. Validate All 423/423.
+**B107 is the only thing that can catch a regression here until in-place rotation ships — do not remove it
+as "untested in practice".** In-game pass 2026-08-08 confirmed no regression around vertical or horizontal
+slabs; it could not confirm the fix itself, because the defect's live trigger does not exist yet.
+
+---
+
 ## Fluid
 
 ### ~~01. Cross-chunk fluid simulation stops at chunk borders~~
