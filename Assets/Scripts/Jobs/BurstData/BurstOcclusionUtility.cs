@@ -123,6 +123,37 @@ namespace Jobs.BurstData
         }
 
         /// <summary>
+        /// VO-8: returns the fraction of one <b>octant</b> of a cell that a rotated block volume fills,
+        /// in <c>[0, 1]</c>. An octant is a <c>0.5³</c> corner sub-box, selected per axis by
+        /// <paramref name="lowHalf"/>.
+        /// <para>
+        /// This is the per-corner counterpart to <see cref="GetFaceCoverage"/>. Ambient occlusion asks
+        /// its question at a <i>vertex</i> shared by eight cells, so "how much of the corner is blocked"
+        /// is answered by the volume sitting in the octant nearest that vertex — which is what lets a
+        /// vertical slab darken the two corners on its solid side and leave the other two open.
+        /// A full-cell volume fills every octant, so this returns 1 for any full cube.
+        /// </para>
+        /// </summary>
+        /// <param name="rotatedMin">Rotated minimum corner, block-local (from <see cref="RotateLocalBounds"/>).</param>
+        /// <param name="rotatedMax">Rotated maximum corner, block-local.</param>
+        /// <param name="lowHalf">Per axis: true selects <c>[0, 0.5]</c>, false selects <c>[0.5, 1]</c>.</param>
+        /// <returns>The filled fraction of that octant.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float GetOctantCoverage(float3 rotatedMin, float3 rotatedMax, bool3 lowHalf)
+        {
+            float3 octantMin = math.select(new float3(0.5f), float3.zero, lowHalf);
+            float3 octantMax = math.select(new float3(1f), new float3(0.5f), lowHalf);
+
+            float3 overlap = math.max(0f, math.min(rotatedMax, octantMax) - math.max(rotatedMin, octantMin));
+
+            // An octant's volume is 0.125, so scaling by 8 normalizes the overlap to [0, 1].
+            return math.saturate(overlap.x * overlap.y * overlap.z * OCTANTS_PER_CELL);
+        }
+
+        /// <summary>Reciprocal of an octant's volume (0.125), used to normalize an overlap to a fraction.</summary>
+        private const float OCTANTS_PER_CELL = 8f;
+
+        /// <summary>
         /// Maps a face index to the axis it is perpendicular to and which end of that axis it sits on.
         /// </summary>
         /// <param name="faceIndex">Face direction, in <c>VoxelData.FaceChecks</c> order.</param>

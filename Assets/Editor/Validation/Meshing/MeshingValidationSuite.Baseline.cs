@@ -48,6 +48,9 @@ namespace Editor.Validation.Meshing
 
             // --- VO-6 sub-block face light sampling (B44–B45) lives in MeshingValidationSuite.SubBlockFaceLight.cs. ---
             AddSubBlockFaceLightBaselineScenarios(scenarios);
+
+            // --- VO-8 per-corner occlusion (B46) lives in MeshingValidationSuite.CornerOcclusion.cs. ---
+            AddCornerOcclusionBaselineScenarios(scenarios);
         }
 
         /// <summary>Hook for the cross-chunk border-culling baselines (implemented in MeshingValidationSuite.CrossChunk.cs).</summary>
@@ -61,6 +64,10 @@ namespace Editor.Validation.Meshing
         /// <summary>Hook for the VO-6 sub-block face-light baselines (implemented in MeshingValidationSuite.SubBlockFaceLight.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddSubBlockFaceLightBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the VO-8 per-corner occlusion baselines (implemented in MeshingValidationSuite.CornerOcclusion.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddCornerOcclusionBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>
         /// B1 — Direct, isolated differential test of <see cref="VoxelMeshHelper.GenerateStandardCubeFace"/>:

@@ -5,6 +5,7 @@ using Data.Enums;
 using Editor.Validation.Meshing.Framework;
 using Jobs.BurstData;
 using Unity.Collections;
+using Unity.Mathematics;
 using UnityEngine;
 using Scenario = Editor.Validation.Framework.Scenario;
 
@@ -67,25 +68,27 @@ namespace Editor.Validation.Meshing
         private const byte AO_SLAB_TOP = 0x10;
 
         /// <summary>
-        /// B41 — VO-5's bit-identity guard, asserted on the mechanism rather than on output.
+        /// B41 — the bit-identity guard, asserted on the mechanism rather than on output.
         /// <para>
-        /// For any full-cube block <see cref="LightAttenuation.AmbientOcclusionCoverage"/> returns
-        /// exactly 1 (opaque) or exactly 0 (not opaque) — never a fraction. That is what makes the
-        /// weighting branch in <c>SampleNeighborLight</c> unreachable for full cubes, and therefore what
-        /// makes "no change to full-cube smooth lighting" a structural property instead of a hope.
+        /// For any full-cube block <see cref="LightAttenuation.AmbientOcclusionOctantCoverage"/> returns
+        /// exactly 1 (opaque) or exactly 0 (not opaque) — never a fraction, and identically on all eight
+        /// octants. That is what makes the weighting branch in <c>SampleNeighborLight</c> unreachable for
+        /// full cubes, and therefore what makes "no change to full-cube smooth lighting" a structural
+        /// property instead of a hope.
+        /// <b>Sweeping all eight octants is what carries this claim across VO-8</b>: the query became
+        /// per-corner, so a full cube being uniform now means uniform over octants, not over faces.
         /// </para>
         /// <para>
         /// <b>What this does and does not catch</b> (measured by mutation, 2026-08-08, rather than
         /// assumed). It catches a change to the <b>opacity gate</b> — returning a fraction for a
-        /// non-opaque block turns this red, and B11 red with it. It does <b>not</b> catch removing the
-        /// <c>HasCustomBounds</c> short-circuit from <c>AmbientOcclusionCoverage</c>: that was tried and
-        /// this stayed green, because <see cref="BurstOcclusionUtility.GetBlockFaceCoverage"/> carries an
-        /// identical short-circuit underneath, and a full cube's authored <c>0..1</c> bounds would
-        /// compute a coverage of 1 through the geometry anyway. The binary result is over-determined by
-        /// three independent mechanisms; this scenario pins the <i>result</i>, not any one of them.
+        /// non-opaque block turns this red, and B11 red with it. It did <b>not</b> catch removing the
+        /// <c>HasCustomBounds</c> short-circuit from the coverage entry point when that was tried under
+        /// VO-5: the geometry computes the same answer anyway, since a full cube's authored <c>0..1</c>
+        /// bounds fill every octant. The binary result is over-determined; this scenario pins the
+        /// <i>result</i>, not any one mechanism that produces it.
         /// </para>
         /// </summary>
-        /// <returns>True when every full-cube palette block reports binary coverage.</returns>
+        /// <returns>True when every full-cube palette block reports binary coverage on every octant.</returns>
         private static bool B41_FullCubeCoverageIsBinary()
         {
             NativeArray<BlockTypeJobData> palette =
@@ -95,21 +98,23 @@ namespace Editor.Validation.Meshing
             for (ushort id = 0; id < TestMeshBlockPalette.Count; id++)
             {
                 BlockTypeJobData block = palette[id];
-                if (block.HasCustomBounds) continue; // Partial blocks are B42's subject.
+                if (block.HasCustomBounds) continue; // Partial blocks are B42's and B46's subject.
 
                 float expected = block.IsOpaque ? 1f : 0f;
-                for (int face = 0; face < 6; face++)
+                for (int octant = 0; octant < 8; octant++)
                 {
+                    bool3 lowHalf = new bool3((octant & 1) != 0, (octant & 2) != 0, (octant & 4) != 0);
+
                     // Sweep the whole metadata byte: a full cube must be orientation-independent here,
                     // and a rotation leaking in would show up as a fractional coverage on some meta.
                     for (int meta = 0; meta < 256; meta += 7)
                     {
-                        float actual = LightAttenuation.AmbientOcclusionCoverage(block, (byte)meta, face);
+                        float actual = LightAttenuation.AmbientOcclusionOctantCoverage(block, (byte)meta, lowHalf);
                         if (!Mathf.Approximately(actual, expected))
                         {
                             failures.AppendFormat(
-                                "    block {0} (opaque={1}) face {2} meta 0x{3:X2}: coverage {4}, expected {5}\n",
-                                id, block.IsOpaque, face, meta, actual, expected);
+                                "    block {0} (opaque={1}) octant {2} meta 0x{3:X2}: coverage {4}, expected {5}\n",
+                                id, block.IsOpaque, lowHalf, meta, actual, expected);
                         }
                     }
                 }

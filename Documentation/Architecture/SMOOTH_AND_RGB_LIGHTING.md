@@ -127,45 +127,49 @@ Each face direction (6 total) has its own set of corner offsets. For each of the
 
 Opaque blocks contribute `0` light AND count toward the average denominator (count is always 4). This naturally darkens corners and edges where solid blocks meet — producing ambient-occlusion-like shadows for free.
 
-Since **VO-5** the contribution is weighted by *how much* of the shaded surface each sample actually covers, rather than all-or-nothing:
+Since **VO-5** the contribution is weighted by *how much* a partial block actually blocks, rather than all-or-nothing — and since **VO-8** that question is asked per **corner**:
 
 ```
 lightSum = 0
 count = 4    // Always 4 — occluding blocks still count
 
-occlusionFace = opposite(meshedFace)   // the sampled cell's face turned toward the surface
+cornerVertex = the block vertex this corner sits on   // shared by 8 cells
 
 For each of the 4 neighbors (direct, sideA, sideB, diagonal):
-    coverage = AmbientOcclusionCoverage(block, meta, occlusionFace)
+    octant  = the sample cell's octant touching cornerVertex
+    coverage = AmbientOcclusionOctantCoverage(block, meta, octant)
     if coverage >= 1 → lightSum += 0                          // fully covered: never read
     else             → lightSum += block.light × (1 - coverage)
 
 vertexLight = lightSum / count
 ```
 
-`LightAttenuation.AmbientOcclusionCoverage` is 0 for anything not opaque (glass fills a cell and darkens
-nothing) and, for an opaque block, the fraction of that face its volume spans. **A full cube always scores
-exactly 0 or 1**, so the weighting branch is unreachable for one and full-cube output is unchanged — the
-`HasCustomBounds` short-circuit shared by every `LightAttenuation` predicate is what makes that structural.
+`LightAttenuation.AmbientOcclusionOctantCoverage` is 0 for anything not opaque (glass fills a cell and
+darkens nothing) and, for an opaque block, the fraction of that octant its volume fills. **A full cube always
+scores exactly 0 or 1 on every octant**, so the weighting branch is unreachable for one and full-cube output
+is unchanged — the `HasCustomBounds` short-circuit shared by every `LightAttenuation` predicate is what makes
+that structural, and what keeps the per-corner cost off the hot path for block types with no custom shape.
 
-Which face is asked matters, and is the whole point: a **bottom** half slab in the ring above a `+Y` surface
-covers its own `−Y` face completely and darkens like a full cube, a **top** half slab floats clear and
-darkens nothing, and a **vertical** slab covers half and darkens half. Averaging the block's coverage over
-all six faces would score all three identically — see `VOXEL_OCCLUSION_REFACTOR.md` §4 D5.
+**Why per-octant rather than per-face.** An AO corner is a *vertex* shared by eight cells, so the question a
+sample should answer is "do you occupy the corner *here*". Asking per-face gives one answer for all four
+corners of a face: a vertical slab standing on a block used to dim that block's whole top surface evenly
+instead of shading only the half its solid part stands on. With octants, the four rolls of a vertical slab
+each darken a different pair of corners — the wall-like gradient, with the in-between shade coming from the
+corner average rather than from a fractional coverage.
 
 > **Ambient occlusion is the one consumer that reads coverage as a fraction.** Light *transport* thresholds
 > it to a binary decision (D2): "can photons get past" is not the same question as "how much of this corner
-> looks blocked". Both read the same `BurstOcclusionUtility.GetFaceCoverage`.
+> looks blocked". Both read the same rotated AABB from `BurstOcclusionUtility`.
 
 #### 2.2.2 Diagonal Occlusion Rule (Critical)
 
 When **both** side neighbors of a corner are opaque, the diagonal neighbor is fully occluded and must be treated as opaque (contributing 0) **without being sampled**. This prevents light from leaking through L-shaped solid corners.
 
-Since VO-5 the test is on *full* coverage rather than on opacity, so two half slabs meeting at a corner no longer seal it — light genuinely reaches that corner through the open halves:
+Since VO-5 the test is on *full* coverage rather than on opacity, and since VO-8 that coverage is the corner's own octant — so two half slabs meeting at a corner seal it only when both actually fill their side of it:
 
 ```
-sideA_seals = coverage(sideA) >= 1
-sideB_seals = coverage(sideB) >= 1
+sideA_seals = octantCoverage(sideA, thisCorner) >= 1
+sideB_seals = octantCoverage(sideB, thisCorner) >= 1
 
 if (sideA_seals AND sideB_seals):
     // Diagonal is fully occluded — skip the read, count as opaque

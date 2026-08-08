@@ -620,6 +620,81 @@ slabs; it could not confirm the fix itself, because the defect's live trigger do
 
 ## Meshing
 
+### ~~M03. A recessed partial block's mid-plane face renders black (it occludes itself)~~
+
+**Severity:** High — plainly visible, and a regression against pre-VO-6 rendering.  
+**Reported:** August 2026  
+**Fixed:** August 2026  
+**Status:** Resolved — confirmed in game 2026-08-08. Guarded by baseline **B47** in `MeshingValidationSuite.CornerOcclusion.cs`. **Introduced by VO-6** (commit `6fbcebcc`) and fixed before that arc shipped further.  
+**Found:** 2026-08-08, owner's in-game visual review of the VO-* arc.
+
+**Description:**
+A half slab embedded in a floor — its mid-plane top face recessed below the surrounding surface —
+renders **fully black** under smooth lighting. With smooth lighting off it renders normally, so this is
+purely the ambient-occlusion term.
+
+Reproduced in the harness under a **uniform light field of sky 15**, which rules out light propagation
+as a contributor:
+
+| Configuration                 | Slab's mid-plane top face |
+|-------------------------------|---------------------------|
+| slab isolated                 | `191,191,191,191`         |
+| **slab embedded in a floor**  | **`0,0,0,0`**             |
+
+**Root cause — one error, two symptoms.** VO-6 correctly made a mid-plane face take its light from the
+cell the face looks into, which for such a face is the block's **own** cell. VO-8 then selects, per
+corner, the octant of the sampled cell that touches the corner's vertex. But the corner vertex used is
+derived from the *re-based* `blockPos`, so it lands on the cell boundary — half a block below the face's
+actual plane. The octant chosen is therefore the half of the cell **behind** the surface:
+
+1. **The block occludes its own face.** The isolated reading proves it arithmetically:
+   `191 = (0 + 15 + 15 + 15) / 4 × 17`. Three ring samples contribute full light; the direct sample —
+   the block itself — contributes zero. The slab's solid half sits in the selected octant, so it answers
+   "yes, I block this corner" about its own surface.
+2. **The ring is evaluated at the wrong height.** With the octant taken below the face plane, the ring
+   neighbours are sampled through the floor's solid material rather than through the open space the face
+   actually faces. Embedded, all three ring samples read as fully covered — combined with (1), all four
+   samples are zero and the face is black.
+
+**This predates VO-8.** Under VO-5's per-face rule the direct coverage was `cov(−Y)` = 1 for a bottom
+slab, giving the same zero. VO-8 changed *which* octant is asked, not the fact that the block is asked
+about itself. The defect arrived with VO-6's sample-cell move.
+
+**Why the suite did not catch it:** `B44`/`B45` exercise an **isolated** slab, the one configuration
+where self-occlusion is survivable (191 rather than 0). No baseline covers a recessed or embedded
+partial block — the ordinary real-world case.
+
+**Fix (August 2026):** the octant's **normal axis** is now resolved from the face itself rather than from
+the corner vertex. `CalculateCornerLights` takes a `faceIsInteriorToSampleCell` flag — true exactly when
+VO-6 resolved the sample cell to the emitting block's own cell — and picks the half the normal points
+*into* for an interior face, the half it points *away from* for a boundary face. The perpendicular axes
+still come from the corner vertex, so boundary faces are untouched. One change, both symptoms:
+
+| Configuration | Before | After |
+|---|---|---|
+| slab isolated  | `191` | `255` — nothing occludes it, so nothing should darken it |
+| slab embedded  | `0`   | `64`  |
+
+**`64` is the right answer, not a tuned one:** an equivalent 1×1 pit floor built from full blocks measures
+`64,64,64,64` too. The recessed slab is no longer a special case — it shades exactly like any other
+one-block recess.
+
+**Reproduction Steps:**
+Place a `Stone Half Slab` flat in a floor so its top face is recessed half a block, with open sky above.
+Enable smooth lighting.
+
+**Repro scenario:** `KM03a` (meshing suite) — landed red, now green. Asserts both the symptom (the face is
+not fully black under a uniform sky-15 field) and the mechanism (brightening the slab's own cell must move
+that face — under the bug its contribution was multiplied by zero). Uses the opacity-15
+`HalfSlab` fixture deliberately: the AO query is gated on `IsOpaque`, so a sub-15 slab never
+self-occludes and would not reproduce this.
+
+**Testing environment:** Editor, smooth lighting High, August 2026.
+
+---
+
+---
+
 ### ~~M01. Sub-block custom-mesh faces sample smooth light from the wrong cell~~
 
 **Severity:** Medium  
