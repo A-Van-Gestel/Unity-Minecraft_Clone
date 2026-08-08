@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Data;
 using Unity.Collections;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace Editor.Validation.Meshing.Framework
@@ -121,6 +122,10 @@ namespace Editor.Validation.Meshing.Framework
                 VertCount = 4,
                 TriStartIndex = triList.Count,
                 TriCount = s_quadTris.Length,
+                // VO-6: mirrors JobDataManagerFactory.FaceCentroid — the mean of the face's verts. Left
+                // unset, every face would report a centroid at the cell origin and the mesher would
+                // resolve the wrong sampling cell for all of them.
+                Centroid = ((float3)bl + (float3)tl + (float3)br + (float3)tr) / 4f,
             });
 
             vertList.Add(new CustomVertData { Position = bl, UV = s_quadUvs[0] });

@@ -524,9 +524,21 @@ namespace Jobs
                     int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
                     int textureID = GetTextureID(id, translatedP);
 
+                    // VO-6: this path's cull check and face index are both unrotated (only the vertices
+                    // take the Y rotation), so the sample cell is resolved in that same unrotated frame
+                    // — identity matrix, unrotated face normal — keeping it consistent with the
+                    // neighborPos above. A Y rotation leaves a face's own-cell-vs-boundary character
+                    // unchanged for the shapes this path serves.
+                    float3x3 identity = float3x3.identity;
+                    Vector3Int faceNormal = BurstVoxelData.FaceChecks.Data[p];
+                    Vector3Int sampleCell = ResolveFaceSampleCell(pos, in identity,
+                        CustomFaces[meshData.FaceStartIndex + p].Centroid, faceNormal);
+
                     if (SmoothLighting >= SmoothLightingQuality.Standard)
                     {
-                        CalculateCornerLights(p, pos, neighborVoxel, out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
+                        CalculateCornerLights(p, sampleCell - faceNormal,
+                            GetVoxelStateFromLocalPos(sampleCell),
+                            out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
                         VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, pos, rotation,
                             p, l0, l1, l2, l3,
                             voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
@@ -535,7 +547,7 @@ namespace Jobs
                     }
                     else
                     {
-                        Color32 flatLight = BuildFlatLightData(neighborVoxel, neighborPos);
+                        Color32 flatLight = BuildFlatLightData(GetVoxelStateFromLocalPos(sampleCell), sampleCell);
                         VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, flatLight, pos, rotation,
                             voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
                             ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles, ref Output.Uvs,
@@ -585,7 +597,15 @@ namespace Jobs
                     if (SmoothLighting >= SmoothLightingQuality.Standard)
                     {
                         int worldFace = DirectionToFaceIndex(rotatedOffset);
-                        CalculateCornerLights(worldFace, pos, neighborVoxel, out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
+                        Vector3Int sampleCell = ResolveFaceSampleCell(pos, in matrix,
+                            CustomFaces[meshData.FaceStartIndex + p].Centroid, rotatedOffset);
+                        VoxelState? sampleVoxel = GetVoxelStateFromLocalPos(sampleCell);
+
+                        // The ring's LUT offsets are relative to a block whose face-normal neighbor is the
+                        // sampled cell, so re-basing by one face step moves the ring and the direct term
+                        // together. For a boundary face this is exactly `pos`, as before.
+                        CalculateCornerLights(worldFace, sampleCell - rotatedOffset, sampleVoxel,
+                            out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
                         VoxelMeshHelper.GenerateCustomMeshFace(p, textureID, pos, in matrix,
                             worldFace, l0, l1, l2, l3,
                             voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
@@ -594,7 +614,9 @@ namespace Jobs
                     }
                     else
                     {
-                        Color32 flatLight = BuildFlatLightData(neighborVoxel, neighborPos2);
+                        Vector3Int sampleCell = ResolveFaceSampleCell(pos, in matrix,
+                            CustomFaces[meshData.FaceStartIndex + p].Centroid, rotatedOffset);
+                        Color32 flatLight = BuildFlatLightData(GetVoxelStateFromLocalPos(sampleCell), sampleCell);
                         VoxelMeshHelper.GenerateCustomMeshFace(p, textureID, flatLight, pos, in matrix,
                             voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
                             ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
@@ -951,6 +973,48 @@ namespace Jobs
                 }
             }
         }
+
+        /// <summary>
+        /// VO-6: resolves which cell a custom-mesh face actually looks into — the cell containing the
+        /// space immediately in front of the face's own position, rather than the block-boundary neighbor.
+        /// <para>
+        /// A boundary face's centroid lies on a cell wall, so stepping off it lands in the neighbor and
+        /// this returns exactly <c>pos + rotatedNormal</c> — today's behavior, unchanged. A half slab's
+        /// large face lies on the mid-plane, so stepping off it stays inside the block's own cell, which
+        /// is the <c>MESHING_BUGS.md</c> Bug M01 fix.
+        /// </para>
+        /// </summary>
+        /// <param name="pos">The voxel's chunk-local position.</param>
+        /// <param name="matrix">The block's metadata rotation, applied about the cell center exactly as
+        /// <see cref="VoxelMeshHelper.GenerateCustomMeshFace"/> applies it to the vertices.</param>
+        /// <param name="centroid">The face's unrotated block-local centroid.</param>
+        /// <param name="rotatedNormal">The face's rotated normal, ±1 on exactly one axis.</param>
+        /// <returns>The chunk-local cell whose light this face should sample.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector3Int ResolveFaceSampleCell(Vector3Int pos, in float3x3 matrix,
+            float3 centroid, Vector3Int rotatedNormal)
+        {
+            float3 center = BurstVoxelData.BlockCenter;
+            float3 rotatedCentroid = math.mul(matrix, centroid - center) + center;
+            float3 probe = rotatedCentroid
+                           + FACE_SAMPLE_STEP * new float3(rotatedNormal.x, rotatedNormal.y, rotatedNormal.z);
+            int3 cell = (int3)math.floor(probe);
+            return new Vector3Int(pos.x + cell.x, pos.y + cell.y, pos.z + cell.z);
+        }
+
+        /// <summary>
+        /// How far off a face to step, in cells, when asking which cell it faces. Must be strictly
+        /// between 0 and 0.5.
+        /// <para>
+        /// A half-cell step — the obvious choice, and the one this phase's plan originally specified —
+        /// puts a mid-plane face at exactly <c>0.5 ± 0.5</c>, a cell boundary, where <c>floor</c> breaks
+        /// the tie toward the own cell for a negative normal and toward the neighbor for a positive one.
+        /// That silently fixes half the orientations and leaves the other half untouched. Any step short
+        /// of the boundary resolves both, and for a face that is not on the mid-plane every step in the
+        /// range agrees anyway. Guarded by <c>KM01a</c> (negative normal) and <c>KM01b</c> (positive).
+        /// </para>
+        /// </summary>
+        private const float FACE_SAMPLE_STEP = 0.25f;
 
         /// <summary>
         /// Computes per-vertex corner-averaged light values for smooth lighting.

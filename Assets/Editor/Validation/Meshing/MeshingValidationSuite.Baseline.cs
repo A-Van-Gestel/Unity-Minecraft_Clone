@@ -45,6 +45,9 @@ namespace Editor.Validation.Meshing
 
             // --- VO-5 fractional ambient occlusion (B41–B43) lives in MeshingValidationSuite.FractionalAO.cs. ---
             AddFractionalAoBaselineScenarios(scenarios);
+
+            // --- VO-6 sub-block face light sampling (B44–B45) lives in MeshingValidationSuite.SubBlockFaceLight.cs. ---
+            AddSubBlockFaceLightBaselineScenarios(scenarios);
         }
 
         /// <summary>Hook for the cross-chunk border-culling baselines (implemented in MeshingValidationSuite.CrossChunk.cs).</summary>
@@ -54,6 +57,10 @@ namespace Editor.Validation.Meshing
         /// <summary>Hook for the VO-5 fractional-AO baselines (implemented in MeshingValidationSuite.FractionalAO.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddFractionalAoBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the VO-6 sub-block face-light baselines (implemented in MeshingValidationSuite.SubBlockFaceLight.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddSubBlockFaceLightBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>
         /// B1 — Direct, isolated differential test of <see cref="VoxelMeshHelper.GenerateStandardCubeFace"/>:

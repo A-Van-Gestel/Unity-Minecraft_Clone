@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Data.NativeData;
 using Helpers;
 using Unity.Collections;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace Data.JobData
@@ -62,6 +63,7 @@ namespace Data.JobData
                         VertCount = faceAsset.vertData.Length,
                         TriStartIndex = customTrisList.Count,
                         TriCount = faceAsset.triangles.Length,
+                        Centroid = FaceCentroid(faceAsset),
                     });
 
                     foreach (VertData vertAsset in faceAsset.vertData)
@@ -120,6 +122,25 @@ namespace Data.JobData
             FluidVertexTemplatesNativeData fluidVertexTemplates = new FluidVertexTemplatesNativeData(fluidTemplates);
 
             return new GlobalJobData(jobDataManager, fluidVertexTemplates, isActiveById, isSolidById);
+        }
+
+        /// <summary>
+        /// VO-6: the mean of a face's authored vertices, in unrotated block-local space — the face's
+        /// position inside its own cell, which the mesher needs to know which cell a face actually looks
+        /// into (<see cref="CustomFaceData.Centroid"/>).
+        /// </summary>
+        /// <param name="faceAsset">The authored face.</param>
+        /// <returns>The centroid, or the cell center for a degenerate (vertex-less) face.</returns>
+        private static float3 FaceCentroid(FaceMeshData faceAsset)
+        {
+            if (faceAsset.vertData == null || faceAsset.vertData.Length == 0)
+                return new float3(0.5f, 0.5f, 0.5f);
+
+            float3 sum = float3.zero;
+            foreach (VertData vertAsset in faceAsset.vertData)
+                sum += (float3)vertAsset.position;
+
+            return sum / faceAsset.vertData.Length;
         }
     }
 

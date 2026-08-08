@@ -618,6 +618,72 @@ slabs; it could not confirm the fix itself, because the defect's live trigger do
 
 ---
 
+## Meshing
+
+### ~~M01. Sub-block custom-mesh faces sample smooth light from the wrong cell~~
+
+**Severity:** Medium  
+**Reported:** August 2026  
+**Fixed:** August 2026  
+**Status:** Resolved — confirmed in game 2026-08-08. Guarded by baselines **B44** (rotated, `−Z` mid-plane face) and **B45** (unrotated, `+Y`) in `MeshingValidationSuite.SubBlockFaceLight.cs`.  
+**Related:** [`LIGHTING_BUGS.md`](./LIGHTING_BUGS.md) Bug 20 (the lighting-model half of the same visual artifact, fixed first by VO-3/VO-4)
+
+**Description:**
+`MeshGenerationJob.GenerateCustomBlockMesh_SchemaAware` computed one smooth-light corner quad per emitted face via
+`CalculateCornerLights(worldFace, pos, …)`. That quad was defined entirely by the block cell `pos` and the world
+direction `rotatedOffset`: it read the direct light at `pos + rotatedOffset` and the eight-cell ambient-occlusion ring
+around **that** cell.
+
+That is correct only for a face lying on the block boundary. A custom mesh's *interior* faces do not — a half slab's
+large face sits at the mesh's mid-plane, half a block inside its own cell. For such a face the direct light should come
+from the cell in front of the surface (the block's own cell, whose remaining half is open) and the AO ring should be
+centred on that same cell; both were taken a full block further away.
+
+The per-vertex bilinear blend *within* the face was never at fault — `GetCornerUV` was verified against the
+corner-offset LUT that `BurstVoxelData.BuildCornerOffsetLUT` generates, corner by corner, for all six faces, and the
+documented `l0↔(0,0), l1↔(0,1), l2↔(1,0), l3↔(1,1)` mapping holds exactly. The defect was the *source quad*.
+
+**Why rotation made it visible.** Unrotated, a bottom slab's mid-plane face points +Y and the cell above it usually
+carries light similar to the slab's own cell, so the error was nearly invisible. Rotated to vertical (`Facing6Roll2`
+facing 3, rolls 0–3), the mid-plane face points at a *horizontal* neighbour whose light and occlusion ring have nothing
+to do with what is in front of the surface — and each roll aims it at a different neighbour.
+
+**Root cause / fix ([`VOXEL_OCCLUSION_REFACTOR.md`](../Design/VOXEL_OCCLUSION_REFACTOR.md) VO-6):**
+`CustomFaceData.Centroid` (the face's mean vertex position, precomputed at load in `JobDataManagerFactory` and mirrored
+in `TestCustomMeshLibrary`) plus `MeshGenerationJob.ResolveFaceSampleCell`, which steps a short distance off the
+rotated centroid along the face normal and takes the cell that lands in. Applied to the schema-aware path, the legacy
+path, and the flat-light path. The pre-fetched `directNeighbor` moved with the ring, so the direct term and the ambient
+ring cannot end up sampling different cells.
+
+**⚠️ The step size is load-bearing, and the original plan got it wrong.** The plan specified
+`floor(pos + rotatedFaceCentroid + 0.5 · rotatedNormal)`. A *half*-cell step puts a mid-plane face at exactly
+`0.5 ± 0.5` — a cell boundary — where `floor` breaks the tie toward the own cell for a negative normal and toward the
+neighbour for a positive one. The shipped value is `0.25`; any step strictly inside `(0, 0.5)` works. **Do not
+"simplify" it back to half a cell.**
+
+**This is why there are two baselines.** `B44` (promoted from `KM01a`) uses meta `0x03`, a negative-normal case, so it
+flips green even on the broken half-cell formula. Verified by mutation: with the half-cell step, **B44 passes and B45
+fails**. A fix validated on the original single repro would have shipped working rotated slabs and untouched unrotated
+ones. Generalizable: *a single repro of a sign-symmetric defect only ever tests one sign.*
+
+**Test-design lesson — a positive control must not be satisfiable by the behaviour under test.** `KM01a`'s original leg
+C asserted "brightening the block-boundary neighbour must move the mid-plane face", documented as proof the probe
+worked. That coupling *was* the defect: once the sampling cell became correct the boundary neighbour rightly stopped
+affecting the face, so the control failed exactly when the fix succeeded and briefly masked the flip. The promoted
+baselines control on "raising the whole light field moves the face" instead, and the old control became a real
+assertion (the boundary neighbour must *not* reach a mid-plane face).
+
+**Documentation conflict, resolved:** `Architecture/SMOOTH_AND_RGB_LIGHTING.md` §2.5.2 claimed this path *"correctly
+handles sub-block geometry (half slabs, fences, stairs)"*. True of the bilinear blend, false of the sampled quad; §2.5.2
+now documents the sampling rule and the step-size constraint.
+
+**Still open:** [`MESHING_BUGS.md`](./MESHING_BUGS.md) **Bug M02** — the same wrong-cell confusion in the *culling*
+decision, which VO-6 deliberately did not touch because it changes emitted vertex counts.
+
+**Testing environment:** Editor, smooth lighting enabled, August 2026.
+
+---
+
 ## Fluid
 
 ### ~~01. Cross-chunk fluid simulation stops at chunk borders~~

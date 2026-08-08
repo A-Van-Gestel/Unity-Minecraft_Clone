@@ -1,9 +1,9 @@
 # Directional Per-Face Voxel Occlusion (VO-*)
 
-**Version:** 1.9  
+**Version:** 2.1  
 **Date:** 2026-08-08  
-**Status:** Proposed design — VO-0…VO-5 implemented (VO-0…VO-4 confirmed in game, VO-5 confirmed in game
-2026-08-08); VO-6 pending; VO-7 descoped.  
+**Status:** **VO-0…VO-6 implemented and confirmed in game — the original arc is complete.** VO-7
+descoped. VO-8 (per-corner AO coverage) filed 2026-08-08 from an in-game observation and not started.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > The engine gained partial blocks (`Stone Half Slab`) without the lighting model gaining a notion
@@ -375,8 +375,9 @@ slabs all at 0.5 where the chosen rule scores 1 / 0.5 / 0.
 | ~~**VO-3**~~ | ✅ Directional occlusion in the BFS (awaiting in-game)    | 🔴     | VO-2         |
 | ~~**VO-4**~~ | ✅ Directional cross-chunk support / veto                     | 🔴     | VO-3         |
 | ~~**VO-5**~~ | ✅ Fractional AO occlusion                                | 🟡     | VO-1         |
-| **VO-6** | Sub-block face light sampling (closes Bug M01)               | 🟡     | VO-1 (VO-3 for the general case — see packet) |
+| ~~**VO-6**~~ | ✅ Sub-block face light sampling (closed Bug M01)         | 🟡     | VO-1 (VO-3 for the general case — see packet) |
 | ~~**VO-7**~~ | ❌ World-version bump + relight — **DESCOPED**, see packet | —      | —            |
+| **VO-8** | Per-corner (sub-cell) AO coverage                            | 🟡     | VO-5, VO-6   |
 
 **Minimal standalone-value set:** VO-0 → VO-1 → VO-5 → VO-6 delivers the *visual* fix (AO stops
 max-darkening, sub-block faces sample correctly) without touching the BFS — **confirmed viable by
@@ -694,7 +695,44 @@ block never occludes its own face — judging the blend on slab faces has to wai
   MH-3 entry.
 - **Serialization:** none (mesh output is not persisted).
 
-### VO-6 — Sub-block face light sampling (🟡, behavior change — the F1 fix, closes Bug M01)
+### VO-6 — Sub-block face light sampling (🟡, behavior change — the F1 fix, closes Bug M01) · ✅ **EXECUTED + CONFIRMED IN GAME 2026-08-08**
+
+**What landed.** `CustomFaceData.Centroid` (mean of the face's authored verts, precomputed in
+`JobDataManagerFactory` and mirrored in `TestCustomMeshLibrary`) + `MeshGenerationJob.ResolveFaceSampleCell`.
+Applied to the schema-aware path, the legacy path, and the flat-light path. The pre-fetched
+`directNeighbor` moved with the ring — one substitution does both, because the corner LUT's offsets
+each carry the face-normal component, so re-basing by `sampleCell − rotatedOffset` re-centres the ring
+and the direct read together with no LUT change. `KM01a` and `KM01b` both flip green; 43 baselines and
+Validate All **426** stay green.
+
+> ⚠️ **This packet's formula was wrong, and the phase's own acceptance test could not tell.** The
+> specified `floor(pos + rotatedFaceCentroid + 0.5 · rotatedNormal)` steps a *half* cell, which puts a
+> mid-plane face at exactly `0.5 ± 0.5` — a cell boundary — where `floor` resolves toward the own cell
+> for a negative normal and toward the neighbour for a positive one. `KM01a` uses meta `0x03`, a
+> negative-normal case, so it flips green on the broken formula. **Verified by mutation: with the
+> half-cell step, `KM01a` passes and `KM01b` reproduces.** The implementation steps `0.25` (any value
+> strictly inside `(0, 0.5)` works; for a face not on the mid-plane every value in the range agrees).
+> `KM01b` was written *before* the fix specifically to close this hole — the generalizable lesson is
+> that a single repro of a sign-symmetric defect only ever tests one sign.
+
+**New finding F15 — the positive control was only true because of the bug.** `KM01a`'s original leg C
+asserted "brightening the block-boundary neighbour must move the mid-plane face", documented as proof
+the probe works. That coupling *is* the defect: once the sampling cell is right, the boundary neighbour
+correctly stops affecting the face, so the control failed exactly when the fix succeeded — the scenario
+stayed red for the right reason and the wrong one at once. Both scenarios now control on "raising the
+whole light field moves the face", which is independent of which cell is read, and the old control was
+promoted to a real assertion (the boundary neighbour must *not* reach a mid-plane face). **A positive
+control must not be satisfiable by the behaviour under test.**
+
+**New finding F16 — `MESHING_BUGS.md` Bug M02, filed not fixed.** Culling still asks the
+block-boundary neighbour about a face that sits inside its own cell, so a solid block a full cell away
+deletes a slab's mid-plane face (confirmed: emitted at `z = 8.50` isolated, absent with a block at
+`(8,8,7)`). Same wrong-cell confusion as F1, in the visibility decision rather than the light sample,
+and `ResolveFaceSampleCell` is already the answer. Deliberately out of VO-6's scope: it changes emitted
+vertex counts, so it needs its own prove-red and a geometry-baseline sweep rather than riding along
+with a lighting-only change.
+
+
 
 - **Precondition:** ✅ **satisfied by VO-0(c)** — a sky-exposed opaque cell stores a usable surface
   stamp (measured: sky 15 on the topmost opaque block, 0 when buried), so sampling the own cell does
@@ -755,6 +793,54 @@ append-only — the cost is permanent.
 > `Migration_v12_to_v13_PlayerChunkRelativePosition`, so the step would be `Migration_v13_to_v14_*`.
 > Re-open this phase — do not invent a new id — and route through `serialization-migration`.
 
+### VO-8 — Per-corner (sub-cell) AO coverage (🟡, behavior change — visual)
+
+**Requested by the owner 2026-08-08**, on seeing VO-6 in game: a vertical slab standing on a block
+should shade the exposed half of that block's top face the way a wall shades the floor beside it —
+a gradient — "except for in between shades". Filed rather than folded into VO-6, which is a
+self-contained fix for a filed bug; this is a new capability.
+
+**What is true today** (measured, not inferred — floor block's `+Y` face, sun out of 255):
+
+| Occupant of the cell above | Floor's top face      |
+|----------------------------|-----------------------|
+| nothing                    | `255,255,255,255`     |
+| **vertical slab** `0x03`   | **`225,225,225,225`** |
+| bottom slab `0x00`         | `191,191,191,191`     |
+| top slab `0x10`            | `255,255,255,255`     |
+
+So VO-5's in-between shade is already there and correctly ordered — it is simply **uniform**. The
+cause is structural, not a defect: AO has two sampling roles with different granularity.
+
+- **Ring samples are per-corner**, which is where a wall's gradient comes from — a slab in the ring
+  measures `255,255,225,225`.
+- **The direct sample is per-face**: one value shared by all four corners. A vertical slab reports
+  `cov(−Y) = 0.5`, and 0.5 applied to four corners is exactly the flat 225 above.
+
+**Scope.** Replace the per-face coverage question with a per-corner one: *does this occluder's volume
+cover the part of the shaded face nearest **this** corner?* For a vertical slab over a floor that
+answers 1 on the two corners beneath its solid half and 0 on the other two — the requested gradient.
+The occluder's rotated AABB is already available (`BurstOcclusionUtility.RotateLocalBounds`); what is
+new is intersecting it against the corner's quadrant of the face rather than the whole face. Applies to
+the ring samples too, which are currently per-corner in *position* but per-face in *coverage*.
+
+**Do not re-derive D5's face choice.** The face a sample is asked about stays
+`OppositeFace(meshedFace)` (§4 D5, signed off); VO-8 subdivides *that* face, it does not re-open which
+face to ask.
+
+- **Precondition:** VO-6 confirmed in game (done) — the sample cell must be right before subdividing it.
+- **Prove-red:** a vertical slab on a floor block must take that face from four equal corners to two
+  dark and two light, with the dark pair on the side its solid half occupies (a *directional*
+  assertion — rotating the slab through its four rolls must move which pair darkens). Full cubes stay
+  bit-identical: coverage is 1 on every quadrant, so B41's binary invariant must extend unchanged, and
+  B11 plus every standard-cube baseline stay green. B42's per-orientation ordering stays green — VO-8
+  refines *where* the darkening lands, not the totals it is asserted on.
+- **Watch the cost:** this moves a coverage computation from once-per-face to once-per-corner in the
+  engine's hottest loop. Measure before defaulting it on; a per-block-type per-face LUT of the four
+  quadrant coverages is the obvious precomputation if it bites.
+- **Acceptance:** universal gate + in-game confirmation. **User sign-off** (visual change).
+- **Serialization:** none (mesh output is not persisted).
+
 ---
 
 ## 6. Constraint compliance
@@ -802,6 +888,8 @@ append-only — the cost is permanent.
 
 * **v1.0** - Initial design
 * **v1.1** - VO-0 executed (no production code needed): blast radius is one block type, §2.3's bounds table confirmed, surface stamp confirmed (resolves open question 1 and unblocks VO-6 from VO-3), VO-7 version anchors pinned
+* **v2.1** - **VO-6 confirmed in game; the original VO-0…VO-6 arc is complete.** `KM01a`/`KM01b` promoted to permanent baselines **B44**/**B45** (`MeshingValidationSuite.SubBlockFaceLight.cs`), the now-empty known-bug file retired, Bug M01 archived as `_FIXED_BUGS.md` Meshing #M01. **VO-8 filed** (per-corner sub-cell AO coverage) from the owner's in-game observation that a vertical slab shades the block beneath it uniformly rather than with a wall-like gradient — measured 225 flat vs 255 unshaded and 191 fully shaded, so VO-5's in-between shade is present and correctly ordered but not directional
+* **v2.0** - **VO-6 code complete**: `CustomFaceData.Centroid` + `MeshGenerationJob.ResolveFaceSampleCell` across the schema-aware, legacy, and flat-light paths; `KM01a` **and new `KM01b`** both flip green, Validate All **426**. Three findings: this packet's half-cell step was **wrong** and `KM01a` could not detect it (proved by mutation — half-cell step passes KM01a, reproduces KM01b), **F15** (KM01a's original positive control asserted the buggy coupling, so it would have failed exactly when the fix succeeded), and **F16** (`MESHING_BUGS.md` Bug M02 — the same wrong-cell confusion in *culling*, filed not fixed). AWAITING IN-GAME CONFIRMATION
 * **v1.9** - **VO-5 executed + confirmed in game**: `AmbientOcclusionCoverage` + `BurstVoxelData.OppositeFace`, AO weighted by `1 − coverage`, baselines **B41–B43** (Validate All **426**), all three prove-red by mutation. D5's face rule **signed off** — measured to score bottom/vertical/top slabs 1 / 0.5 / 0 where the rejected six-face average scores all three 0.5. Two new findings: **F13** (the meshing palette's half slab had no authored `collisionBounds`, so VO-5 was invisible to that suite until fixed) and **F14** (slab surfaces gain no shading from VO-5 by construction, so the blend cannot be judged on them until VO-6 — owner accepted VO-5 as-is rather than tune a shading knob to hide a sampling bug)
 * **v1.8** - VO-4 confirmed in game (repro `K20b` → baseline **B106**, commits `9443d08c`/`72b11cd8`); **F12's Bug 21 fixed and archived** as `_FIXED_BUGS.md` Lighting #25 with baseline **B107** (commits `eeb8953e`/`2857996c`) — the root fix needed a second part beyond the heightmap, since `ModifyVoxel`'s recalc trigger keyed on opacity and a rotation changes none; D5 gained a concrete face-choice proposal awaiting user sign-off, and VO-6 gained the centroid-storage and `directNeighbor` notes. Validate All **423**
 * **v1.7** - VO-4 code complete: the support/veto mirrors made directional via `TargetEntryCost` + `NeighborCanDeliver`, `IsVerticallySkyLit` found as a third unlisted site, shadow-caster site deliberately left whole-block; repro `K20b` flips green and baseline **B105** added; 421 baselines green. Two new findings — **F11** (the oracle's column seeding was over-migrated by VO-3; B105 is the suite's first partial-block oracle comparison) and **F12** (sealed partial-block shafts never darken — filed as Bug 21, NOT a VO-4 defect). AWAITING IN-GAME CONFIRMATION
@@ -814,4 +902,4 @@ append-only — the cost is permanent.
 ---
 
 **Last Updated:** 2026-08-08  
-**Next Review:** when VO-6 starts
+**Next Review:** when VO-8 starts

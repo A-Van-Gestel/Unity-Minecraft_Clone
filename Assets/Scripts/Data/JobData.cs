@@ -225,6 +225,19 @@ namespace Data
         public int VertCount;
         public int TriStartIndex;
         public int TriCount;
+
+        /// <summary>
+        /// VO-6: the mean of this face's vertices in unrotated block-local <c>[0,1]³</c> — where the face
+        /// actually sits inside its cell. A boundary face's centroid lies on a cell wall; a half slab's
+        /// large face lies on the mid-plane at 0.5, which is the whole point (<c>MESHING_BUGS.md</c> Bug M01).
+        /// <para>
+        /// Precomputed at load rather than averaged per voxel: it is a per-block-type constant and the
+        /// meshing job is the engine's hottest loop. Both flatteners that build this struct
+        /// (<c>JobDataManagerFactory</c> for production, <c>TestCustomMeshLibrary</c> for the meshing
+        /// harness) must fill it, or the harness silently meshes against a zero centroid.
+        /// </para>
+        /// </summary>
+        public float3 Centroid;
     }
 
     /// <summary>
