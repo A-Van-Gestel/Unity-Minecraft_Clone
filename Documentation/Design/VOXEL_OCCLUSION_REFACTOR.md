@@ -1,6 +1,6 @@
 # Directional Per-Face Voxel Occlusion (VO-*)
 
-**Version:** 2.4  
+**Version:** 2.5  
 **Date:** 2026-08-08  
 **Status:** **VO-0…VO-6 implemented and confirmed in game — the original arc is complete.** VO-7
 descoped. **VO-8 (per-corner AO coverage) implemented and confirmed in game.** VO-9 filed, not started.  
@@ -839,13 +839,16 @@ floor. Validate All **430**.
 > reasonable and jointly wrong. Any future work that adds a face position the cell grid does not describe
 > should re-check every place that infers geometry from a cell index.
 
-**⚠️ Perf still owed.** The packet asked for a measurement before defaulting this on, and that has **not**
-been done — only a structural argument: `AmbientOcclusionOctantCoverage` short-circuits on
-`HasCustomBounds`, so the 37 of 38 block types without a shape pay one inlined early return plus three
-comparisons, and the rotation path runs only for blocks that actually have custom bounds. The real added
-work is that the direct term's coverage is now computed four times per face instead of once — negligible
-while short-circuited, four rotations instead of one for a partial block. An IL2CPP profiler capture in a
-slab-heavy scene would close this properly.
+**Perf — measurement WAIVED by the owner 2026-08-08. Do not re-open it speculatively.** The packet
+asked for a profiler capture before defaulting VO-8 on; the owner waived it on the grounds that
+correctness is what matters here and that a real bottleneck would be handled when it actually shows up.
+What exists is a structural argument, and it is the reason the waiver is safe:
+`AmbientOcclusionOctantCoverage` short-circuits on `HasCustomBounds`, so the 37 of 38 block types with
+no authored shape pay one inlined early return plus three comparisons and never reach the rotation path.
+The added work is that the direct term's coverage is computed four times per face instead of once —
+negligible while short-circuited, four rotations instead of one for a partial block.
+**If meshing ever does become a measured bottleneck**, the precomputation to reach for first is a
+per-block-type LUT of the eight octant coverages, which removes the rotation from the loop entirely.
 
 **Original request, for the record. Raised by the owner 2026-08-08**, on seeing VO-6 in game: a vertical slab standing on a block
 should shade the exposed half of that block's top face the way a wall shades the floor beside it —
@@ -888,8 +891,8 @@ face to ask.
   B11 plus every standard-cube baseline stay green. B42's per-orientation ordering stays green — VO-8
   refines *where* the darkening lands, not the totals it is asserted on.
 - **Watch the cost:** this moves a coverage computation from once-per-face to once-per-corner in the
-  engine's hottest loop. Measure before defaulting it on; a per-block-type per-face LUT of the four
-  quadrant coverages is the obvious precomputation if it bites.
+  engine's hottest loop. (Measurement was subsequently **waived** — see the perf note in the executed
+  packet above.)
 - **Acceptance:** universal gate + in-game confirmation. **User sign-off** (visual change).
 - **Serialization:** none (mesh output is not persisted).
 
@@ -925,8 +928,11 @@ axis-aligned half-slab case simply never produces an intermediate one; shapes th
 future stair) would already grade. Deciding whether (b) is worth solving for slabs specifically means
 deciding whether a corner should carry sub-cell resolution at all.
 
-**Precondition:** `MESHING_BUGS.md` **Bug M03** first. It is in the same code and would confound any
-before/after judgement of this one.
+**Precondition:** `MESHING_BUGS.md` **Bug M03** first — satisfied (fixed and archived 2026-08-08).
+
+**Ordering:** the owner sequenced `MESHING_BUGS.md` **Bug M02** ahead of this phase (2026-08-08). Both
+touch custom-mesh face handling, and M02 changes *which faces are emitted at all* — doing it second would
+mean re-judging VO-9's visual result against a changed mesh.
 
 ---
 
@@ -975,6 +981,7 @@ before/after judgement of this one.
 
 * **v1.0** - Initial design
 * **v1.1** - VO-0 executed (no production code needed): blast radius is one block type, §2.3's bounds table confirmed, surface stamp confirmed (resolves open question 1 and unblocks VO-6 from VO-3), VO-7 version anchors pinned
+* **v2.5** - VO-8's **perf measurement waived** by the owner (correctness over a speculative capture; the octant LUT is recorded as the first lever if meshing ever measures as a bottleneck). VO-9 gains an explicit ordering note: Bug **M02** runs first, since it changes which faces are emitted and would otherwise force VO-9's visual result to be re-judged
 * **v2.4** - **VO-8 confirmed in game** (a vertical slab shades its neighbouring floor face the way a full block does), closing the last gate on the arc. Everything shipped except VO-9. Outstanding, unchanged: VO-8's perf measurement is still a structural argument rather than a profiler capture
 * **v2.3** - **Bug M03 fixed and archived** (owner's in-game review: a recessed half slab rendered fully black). The octant's normal axis is now resolved from the face's own plane rather than from a cell-boundary vertex, so a face interior to its cell is not shadowed by the block emitting it — baseline **B47**, Validate All **430**. **VO-9 filed** (partial/coplanar occluders cast a weak or absent contact shadow — the model working as specified, measured, not a defect). `MESHING_BUGS.md` **M04** filed for the radiating-streak artifact with AO ruled out and a decisive diagnostic recorded
 * **v2.2** - **VO-8 code complete**: AO coverage is now per-corner (octant of the sample cell touching the corner's vertex) rather than per-face — `GetOctantCoverage` + `AmbientOcclusionOctantCoverage` replace the per-face entry point outright, plus a `CornerVertices` LUT built alongside `CornerOffsets`. The four rolls of a vertical slab now darken four different corner pairs (measured), while bottom/top slabs are unchanged from VO-5. Baseline **B46**, prove-red by a corner-blind mutation; Validate All **429**. **Perf measurement still owed** — only a structural argument (the `HasCustomBounds` short-circuit) so far. AWAITING IN-GAME CONFIRMATION
