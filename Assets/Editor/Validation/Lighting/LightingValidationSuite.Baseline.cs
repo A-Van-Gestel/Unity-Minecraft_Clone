@@ -177,10 +177,20 @@ namespace Editor.Validation.Lighting
             // daylight) + B102/B103 (full-cube and open-shaft controls), all green today and tripwires
             // against VO-3 making slabs transparent, PLUS the known-bug repro K20a (a vertical slab must
             // pass daylight through its open half) which is EXPECTED RED until VO-3 lands. K20a goes to
-            // the known-bug channel deliberately: it asserts behaviour the engine does not have yet, so it
+            // the known-bug channel deliberately: it asserts behavior the engine does not have yet, so it
             // must not mark the suite red. Lives in LightingValidationSuite.PartialBlocks.cs. ---
             AddPartialBlockOcclusionScenarios(scenarios);
+
+            // --- VO-4 cross-chunk directional occlusion: the known-bug repro K20b (the removal veto's
+            // support scan must credit a partial block per face, the way the BFS already does since VO-3)
+            // plus baseline B105, the end-to-end live-lock guard over a seam gradient fed through partial
+            // blocks. Lives in LightingValidationSuite.PartialBlocksCrossChunk.cs. ---
+            AddPartialBlockCrossChunkScenarios(scenarios);
         }
+
+        /// <summary>Hook for the VO-4 cross-chunk partial-block scenarios K20b + B105 (implemented in LightingValidationSuite.PartialBlocksCrossChunk.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddPartialBlockCrossChunkScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the Bug-19 far-coordinate column-routing baselines B95-B96 (implemented in Baselines/LightingValidationSuite.Baseline.Bug19FarColumns.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>

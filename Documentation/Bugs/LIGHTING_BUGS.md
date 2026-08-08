@@ -73,17 +73,28 @@ baseline **B91**) is deliberately scoped to face-adjacent seams and excludes thi
 ## Bug 20: Partial Blocks Are Uniformly Opaque — Slabs Block All Light and Max-Darken AO
 
 **Severity:** Medium-High  
-**Status:** Sky/blocklight propagation **fixed and confirmed in game** (August 2026); **still open** for the
-cross-chunk sites (`VO-4`) and ambient occlusion (`VO-5`). The lighting half is done
+**Status:** Sky/blocklight propagation **fixed and confirmed in game** (August 2026). The cross-chunk half
+(`VO-4`) is **fixed in code August 2026 — awaiting in-game confirmation**; **still open** for ambient
+occlusion (`VO-5`). The lighting half is done
 (`VO-3`, commit `f0d12ca2`): occlusion is now per-face, derived from the block's rotated
 `BlockCollisionBounds` via `LightAttenuation.FaceBlocksLight` / `EntryOpacity` / `ExitBlocked`, with
 propagation-source guards switched to `BlockTypeJobData.IsFullyOpaqueCell` so a partial block re-propagates
 the light held in the open part of its cell. A first in-game pass found the column still decaying `15/14/13/…` below a vertical slab — the
 `isVerticalSunlight` rule was likewise whole-block — fixed by `LightAttenuation.IsTransparentThroughFace`
 and confirmed ("15 all the way down"). `K20a` was strengthened to a column-differential and **promoted to
-permanent baseline `B104`**; all 419 baselines stay green. **Two pieces remain before this can be archived:** the cross-chunk sites
-(edge-check seeding, removal initiators, `CrossChunkLightModApplier` support/veto) are deferred to `VO-4`,
-and the ambient-occlusion half of the artifact — partial blocks still darken AO at maximum — is `VO-5`.  
+permanent baseline `B104`**.
+
+`VO-4` (August 2026) then made the cross-chunk half directional: the removal veto's support scan
+(`CrossChunkLightModApplier`, now taking a `TargetEntryCost` and a block-data lookup instead of a
+whole-block opacity and an `IsOpaque` predicate), the Bug 12/18 removal initiators, the dimmer-seam stamp
+pull-back, `CheckEdgeVoxel`/`CheckEdgeVoxelRGB`, and `IsVerticallySkyLit` — the last being a site the plan
+had not listed, and the one that let the Bug 12 initiator fire on a column the BFS holds at an undimmed 15.
+Repro `K20b` (source-side credit, target-side entry cost, with solid-face and full-cube tripwires) flips
+green; baseline `B105` guards the settled seam field; all **421** baselines stay green.
+
+**One piece remains before this can be archived:** the ambient-occlusion half of the artifact — partial
+blocks still darken AO at maximum — is `VO-5`. See also **Bug 21**, a separate defect found while
+authoring `B105`.  
 **Related:** [`MESHING_BUGS.md`](./MESHING_BUGS.md) Bug M01 (the mesher-side half of the same visual artifact — fixing M01 requires this entry fixed first)
 
 **Description:**
@@ -139,3 +150,70 @@ rejected in favour of deriving occlusion from the existing `BlockCollisionBounds
 re-litigate that without reading it.
 
 **Testing environment:** Editor, smooth lighting enabled, August 2026.
+
+---
+
+## Bug 21: A Sealed Partial-Block Light Shaft Leaves Its Sky Column Permanently Lit
+
+**Severity:** Medium-High  
+**Status:** Open  
+**Found:** 2026-08-08, while authoring baseline B105 for `VO-4`.  
+**Related:** Bug 20 (this is a consequence of the `VO-3` sky-column fix, not of the cross-chunk work `VO-4` covers)
+
+**Description:**
+Since `VO-3`, a vertical half slab admits an **undimmed** sky column through its open half — sky 15 all the
+way down, confirmed in game and guarded by baseline `B104`. Sealing that shaft afterwards (rotating the slab
+solid-side-down, or replacing it with any opaque block) must darken the column beneath it. It does not: the
+column stays at **15 forever**, and every voxel it lights stays over-bright with it. Measured on a
+single-chunk room: after sealing, the probe reads 15 where the borderless oracle says 11, with 550 voxels
+divergent and the field stable (converged in 2 frames).
+
+This is the **removal** counterpart to what `VO-3` fixed for placement. It is *not* a cross-chunk defect —
+it reproduces with no chunk boundary anywhere in the world.
+
+**Root Cause:**
+Classified, not inferred, by differential controls:
+
+1. `IsLightObstructing` is `Opacity > 0`, and a half slab is authored `opacity = 15`, so the slab **already
+   sits in the heightmap** before it is sealed. Sealing it therefore does not move the heightmap, so
+   `RecalculateSunlightForColumn` — the authority for sky-light removal — never re-runs for that column.
+2. `PropagateDarkness` cannot finish the job either: it unwinds light by following exact
+   `neighbor == old − cost` decrement chains, and a flat 15 column has none.
+
+`VO-3` left `IsLightObstructing` whole-block deliberately, reasoning that "the BFS carries the undimmed
+column down anyway, so the field is correct; the heightmap merely stays conservative". That reasoning holds
+for placement and **fails for removal** — a conservative heightmap also means the column's removal authority
+never fires.
+
+**The controls are what pin this to partial blocks** (all three legs are in the repro scenario):
+
+| Shaft block                 | Column before sealing | After sealing        | Verdict                    |
+|-----------------------------|-----------------------|----------------------|----------------------------|
+| Glass (full cube, opacity 0) | 15 (undimmed)        | 11 = oracle ✅        | Not light-obstructing, so the heightmap moves and the recalc runs |
+| Water (opacity 2)           | 12 (gradient)         | 11 = oracle ✅        | Has a decrement chain for the darkness wave |
+| **Vertical half slab**      | **15 (undimmed)**     | **15, oracle 11 ❌**  | Light-obstructing *and* flat — neither mechanism fires |
+
+So it is neither "undimmed columns cannot be removed" (Glass disproves that) nor "opaque shafts cannot be
+removed" — it is specifically a block that is light-obstructing by opacity while transmitting light by shape.
+
+**Reproduction Steps:**
+
+1. Roof a room with opaque blocks and leave one cell holding a `Stone Half Slab` rotated vertical
+   (`Facing6Roll2` metadata `0x03`), so the column below it reads sky 15.
+2. Rotate that slab solid-side-down, or replace it with any opaque block.
+3. Observe the column below stays fully lit. Any other block update in the chunk does **not** clear it —
+   the column recalculation is not triggered by an edit that does not move the heightmap.
+
+**Repro scenario:** **`K21a`** (lighting suite, `LightingValidationSuite.PartialBlocksCrossChunk.cs`) —
+single-chunk minimal form, red for the documented reason, shipped with the Glass and Water controls above so
+a red cannot be mistaken for a broken fixture.
+
+**Fix options (not yet chosen — needs a scope decision):**
+
+- Make `IsLightObstructing` directional, so a vertical slab stops registering in the heightmap. This is the
+  root fix, and it is exactly what `VO-3` scoped out: it touches `ChunkData` heightmap maintenance, terrain
+  generation, and the LI-2 band derivation.
+- Or trigger a column recalculation on any edit that changes a cell's *occlusion* even when the heightmap is
+  unmoved — narrower, but it needs a notion of "occlusion changed" that the voxel-edit path does not have today.
+
+**Testing environment:** Editor, lighting validation harness, August 2026.

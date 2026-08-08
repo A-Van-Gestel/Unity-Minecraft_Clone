@@ -1,8 +1,8 @@
 # Directional Per-Face Voxel Occlusion (VO-*)
 
-**Version:** 1.6  
+**Version:** 1.7  
 **Date:** 2026-08-08  
-**Status:** Proposed design — VO-0…VO-3 implemented and confirmed in game; VO-4…VO-6 pending; VO-7 descoped.  
+**Status:** Proposed design — VO-0…VO-3 implemented and confirmed in game; VO-4 code complete, awaiting in-game confirmation; VO-5…VO-6 pending; VO-7 descoped.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > The engine gained partial blocks (`Stone Half Slab`) without the lighting model gaining a notion
@@ -206,6 +206,8 @@ Not part of the phases below — recording it so a cold executor does not redo i
 | F7 | **The oracle shares the model under test.** `LightingOracle` calls the same `LightAttenuation.Attenuate` as the engine, so a directional change lands in both simultaneously and the suite cannot arbitrate correctness by itself. Baselines must be authored to pin *behaviour* (light reaches / does not reach a probe) rather than re-deriving the formula.                                | VO-2         |
 | F8 | **AO occlusion is boolean, not fractional.** `SampleCorner` skips the diagonal term only when `sideAOpaque && sideBOpaque`, and `SampleNeighborLight` substitutes hard zero. There is no representation for "half occluding", so even a correct shape model has nowhere to put a coverage fraction.                                                                                            | VO-5         |
 | F10 | **`NS-4` does not guard the collision rotation.** Discovered by VO-1's prove-red: with `math.transpose` applied to the shared rotation core, all **26** Physics Solver baselines stayed green. The plan (v1.0) had asserted `NS-4` was the guard that a collision-bounds refactor is behaviour-preserving; it is not — none of its scenarios distinguish a rotated custom-bounds volume from its inverse. This is a pre-existing coverage gap in `NS-4`, not something VO-1 introduced, and it means *any* future change to the rotation path needs the occlusion baselines (or new `NS-4` scenarios) to be safe. | Recorded here; VO-1's guard chain compensates. A dedicated `NS-4` rotated-bounds scenario is filed as a follow-up in §7. |
+| F11 | **The oracle's sky column seeding was over-migrated by VO-3, and nothing could see it.** `LightingOracle`'s downward column walk charged only each cell's *entry* cost through its top face — and a horizontal slab's top face is the open mid-plane, so the column walked straight through the solid half beneath it, leaving the oracle 1 level brighter than the engine under any slab ceiling. The engine was right (its column recalc uses whole-block opacity there). It went unnoticed because B101–B104 are probe-based by design (F7), so **VO-4's B105 is the suite's first oracle comparison containing a partial block at all**. Full-cube controls matched throughout, which is how the fixture was cleared before the spec was touched. | VO-4 (fixed: `ExitBlocked` on the bottom face) |
+| F12 | **Sealing a partial-block light shaft never darkens the column beneath it.** Found while authoring B105; reproduces with **no chunk seam anywhere**, so it is not VO-4's subject. `IsLightObstructing` is `Opacity > 0`, so a slab already sits in the heightmap and sealing it never re-runs `RecalculateSunlightForColumn`; `PropagateDarkness` cannot help either, because a flat 15 column has no decrement chain. Controls pin it to partial blocks: a Glass shaft (full cube, opacity 0, equally undimmed column, *not* light-obstructing) and a Water shaft both darken correctly. This makes VO-3's recorded "the field is correct; the heightmap merely stays conservative" true for placement and **false for removal**. | Filed as `LIGHTING_BUGS.md` **Bug 21**, repro `K21a`; root fix needs the `IsLightObstructing` scope decision VO-3 deferred |
 | F9 | ⚠️ **CLOSED-AS-WONTFIX 2026-08-08 (see VO-7).** **Light values are serialized; the model is not versioned.** Nothing on disk records which occlusion model produced a chunk's `LightData`, so without an explicit version bump an upgraded client silently mixes old and new lighting per chunk. (Executor verifies the exact world-version constant — the grep for it returned nothing under `Serialization/`/`Data/`.)                       | ~~VO-7~~ — descoped |
 
 ---
@@ -343,7 +345,7 @@ decision whose *visual* outcome needs user sign-off (VO-5).
 | ~~**VO-1**~~ | ✅ Burst-safe bounds mirror + shared occlusion utility    | 🟢     | VO-0         |
 | ~~**VO-2**~~ | ✅ Harness support for partial blocks (suite-only)        | 🟢     | VO-1         |
 | ~~**VO-3**~~ | ✅ Directional occlusion in the BFS (awaiting in-game)    | 🔴     | VO-2         |
-| **VO-4** | Directional cross-chunk support / veto                       | 🔴     | VO-3         |
+| ~~**VO-4**~~ | ✅ Directional cross-chunk support / veto (awaiting in-game) | 🔴     | VO-3         |
 | **VO-5** | Fractional AO occlusion                                      | 🟡     | VO-1         |
 | **VO-6** | Sub-block face light sampling (closes Bug M01)               | 🟡     | VO-1 (VO-3 for the general case — see packet) |
 | ~~**VO-7**~~ | ❌ World-version bump + relight — **DESCOPED**, see packet | —      | —            |
@@ -568,7 +570,42 @@ scheduled.
   **descoped 2026-08-08** — there are no released worlds and stale light self-heals on any block update.
   See the VO-7 packet for the conditional tripwire.
 
-### VO-4 — Directional cross-chunk support / veto (🔴, behavior change)
+### VO-4 — Directional cross-chunk support / veto (🔴, behavior change) · ✅ **CODE COMPLETE 2026-08-08 — AWAITING IN-GAME CONFIRMATION**
+
+**The live-lock, named precisely.** VO-3 taught `PropagateLight` to deliver through a partial block's open
+half but left the veto's support scan whole-block, and a half slab is authored `opacity = 15`. So the BFS
+feeds a seam voxel through a slab while the veto computes **zero** support for it: the Bug 12 initiator
+fires, the removal applies, the BFS re-lights, and the pair cycles — the Bug 13 period-2 shape, reachable
+through a slab. The governing invariant restored here is **support(neighbour → target, face) must equal
+what `PropagateLight` would write**; five hand-written mirrors of that rule had drifted from the original.
+
+**Site classification (done before any edit — the packet's own warning).** Ten surviving `IsOpaque` sites:
+
+| Site | Question | Verdict |
+|------|----------|---------|
+| Bug 12 sky initiator; `PullBackDimmerCrossSeamStamp` neighbour + centre; Bug 18 RGB initiator | valid propagation participant? | → `IsFullyOpaqueCell` |
+| `CheckEdgeVoxel` / `CheckEdgeVoxelRGB`, neighbour and centre arms | can light cross this face? | → `IsFullyOpaqueCell` + `ExitBlocked` / `FaceBlocksLight` / `EntryOpacity` |
+| Column-recalc shadow caster (`:1144`) | does this cast a horizontal shadow? | **left whole-block, deliberately** |
+
+The shadow-caster site is asymmetric: over-triggering only enqueues a redundant removal + re-propagate
+(correct field, wasted work), while under-triggering leaves stale light that edge checks can never remove
+(§3.7 reason 2). Conservative is the safe side there. Sites 1–4 have no safe side — too generous vetoes a
+legitimate removal (stable over-bright), too stingy live-locks — which is why the mirror is now structural.
+
+**`IsVerticallySkyLit` was the third, unlisted site.** It gated on whole-block `IsFullyTransparentToLight`,
+so a voxel held at an undimmed 15 beneath a vertical slab did **not** count as sky-lit and the Bug 12
+initiator would fire on it — while the veto's support model tops out at 14 and cannot defend a 15. It now
+uses `IsTransparentThroughFace` on the same two faces `PropagateLight`'s vertical rule tests.
+
+**API change.** `Func<ushort,bool> isBlockFullyOpaque` + `Func<ushort,(byte,byte,byte)> blockEmission`
+collapsed into one `Func<ushort, BlockTypeJobData> getBlockData`, and the scalar `targetOpacity` became
+`CrossChunkLightModApplier.TargetEntryCost` — `Flat(opacity)` (whole-block, bit-identical to before, and
+what B49 varies) or `ForBlock(block, meta)` (directional). Making the distinction a *type* is what keeps a
+future edit from silently reintroducing a whole-block answer.
+
+**Results:** `K20b` flips to a fix candidate; **Validate All: all 421 baselines across 18 suites PASSED**,
+including B48/B49 and B56–B59. Values verified inline against live assemblies (open-side slab source 11,
+solid-side 0, opaque cube 0, open-face entry 11, covered-face entry 0, B49's flat differential 7/11).
 
 - **Scope:** `CrossChunkLightModApplier`'s `InChunkSunlightSupport` / `CrossChunkSunlightSupport` /
   `PullBackClaimStillSupported` currently exclude "fully-opaque neighbours" as non-propagating; that
@@ -703,6 +740,7 @@ append-only — the cost is permanent.
 
 * **v1.0** - Initial design
 * **v1.1** - VO-0 executed (no production code needed): blast radius is one block type, §2.3's bounds table confirmed, surface stamp confirmed (resolves open question 1 and unblocks VO-6 from VO-3), VO-7 version anchors pinned
+* **v1.7** - VO-4 code complete: the support/veto mirrors made directional via `TargetEntryCost` + `NeighborCanDeliver`, `IsVerticallySkyLit` found as a third unlisted site, shadow-caster site deliberately left whole-block; repro `K20b` flips green and baseline **B105** added; 421 baselines green. Two new findings — **F11** (the oracle's column seeding was over-migrated by VO-3; B105 is the suite's first partial-block oracle comparison) and **F12** (sealed partial-block shafts never darken — filed as Bug 21, NOT a VO-4 defect). AWAITING IN-GAME CONFIRMATION
 * **v1.6** - VO-3 confirmed in game (repro `K20a` promoted to permanent baseline **B104**); the sky-column rule found still whole-block in play and fixed via `IsTransparentThroughFace`; undimmed-column question settled with rationale; **VO-7 DESCOPED** (no released worlds, stale light self-heals on block update) with a conditional tripwire; F9 closed as wontfix and D4 superseded
 * **v1.5** - VO-3 code complete: directional occlusion in the sky + RGB propagation paths and the oracle; D3's full-cube-equivalence risk resolved by short-circuiting every predicate on `HasCustomBounds`; K20a fixed (sky 0 → 14), 419 baselines green, B101 prove-red confirmed. Cross-chunk sites deferred to VO-4. AWAITING IN-GAME CONFIRMATION
 * **v1.4** - VO-2 executed: `TestBlockPalette.HalfSlab` + `meta` on `SetBlock`/`PlaceBlock`, baselines B101–B103 green and repro **K20a** red as designed (lighting harness gap **B9** closed); oracle deliberately left to VO-3

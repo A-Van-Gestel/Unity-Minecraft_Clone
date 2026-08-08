@@ -679,8 +679,11 @@ namespace Jobs
                         // (CrossChunkLightModApplier.CrossChunkSunlightSupport, the Bug 13 fix) — emitting
                         // here from the stale snapshot and adjudicating there against live data keeps the
                         // initiator aggressive without livelocking perimeter-fed seams.
+                        // VO-4: a PARTIAL opaque block is a loop participant — since VO-3 it re-propagates
+                        // the light held in the open part of its cell, so it can sit in exactly this
+                        // 2-cycle. Only a fully-opaque CELL is exempt (it merely stores surface light).
                         if (neighborLight == node.LightLevel
-                            && !BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsOpaque
+                            && !BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsFullyOpaqueCell
                             && !IsVerticallySkyLit(neighborPos, neighborPacked))
                             EmitCrossChunkSunlightRemoval(neighborPos, ref emittedSunRemovals);
                     }
@@ -713,7 +716,7 @@ namespace Jobs
                 return;
 
             byte pulledBack = CheckEdgeVoxel(centerPos, centerPacked, GetLightData(centerPos),
-                neighborPacked, neighborLightData, pQueue);
+                neighborPos, neighborPacked, neighborLightData, pQueue);
 
             // Claims are only recorded for CENTER voxels — the merge-time verifier
             // indexes this chunk's live data with CenterPos. A removal node CAN sit in
@@ -750,14 +753,17 @@ namespace Jobs
         private void PullBackDimmerCrossSeamStamp(Vector3Int centerPos, Vector3Int neighborPos,
             uint neighborPacked, byte neighborLight)
         {
-            // An opaque neighbor's stored value is a surface stamp, not a valid propagation source.
-            if (BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsOpaque)
+            // A fully-opaque cell's stored value is a surface stamp, not a valid propagation source.
+            if (BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsFullyOpaqueCell)
                 return;
 
             uint centerPacked = GetPackedData(centerPos);
             if (centerPacked == uint.MaxValue)
                 return;
-            if (!BlockTypes[BurstVoxelDataBitMapping.GetId(centerPacked)].IsOpaque)
+
+            // Stamps are for receive-only cells. A partial block re-propagates, so re-lighting it from a
+            // dimmer stale neighbor would plant spreading ghost light (_FIXED_BUGS.md Lighting #19).
+            if (!BlockTypes[BurstVoxelDataBitMapping.GetId(centerPacked)].IsFullyOpaqueCell)
                 return;
 
             byte stamp = (byte)math.max(0, neighborLight - 1);
@@ -899,7 +905,7 @@ namespace Jobs
                         bool sigG = nG == node.LightG && node.LightG > 0;
                         bool sigB = nB == node.LightB && node.LightB > 0;
                         if ((sigR || sigG || sigB)
-                            && !BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsOpaque)
+                            && !BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsFullyOpaqueCell)
                             EmitCrossChunkBlocklightRemoval(neighborPos, ref emittedBlockRemovals);
                     }
                 }
@@ -1256,7 +1262,7 @@ namespace Jobs
                         ushort centerLightData = GetLightData(pos);
                         ushort neighborLightData = GetLightData(neighborPos);
 
-                        CheckEdgeVoxel(pos, centerPacked, centerLightData, neighborPacked, neighborLightData,
+                        CheckEdgeVoxel(pos, centerPacked, centerLightData, neighborPos, neighborPacked, neighborLightData,
                             sunPlacement);
                         CheckEdgeVoxelRGB(pos, centerPacked, neighborPos,
                             blockPlacement);
@@ -1281,7 +1287,7 @@ namespace Jobs
         /// return (its staleness is reconciled by the iterative edge-check rounds).</returns>
         private byte CheckEdgeVoxel(
             Vector3Int centerPos, uint centerPacked, ushort centerLightData,
-            uint neighborPacked, ushort neighborLightData,
+            Vector3Int neighborPos, uint neighborPacked, ushort neighborLightData,
             NativeQueue<Vector3Int> placementQueue)
         {
             byte centerLight = LightBitMapping.GetSkyLight(centerLightData);
@@ -1289,13 +1295,24 @@ namespace Jobs
 
             // An opaque neighbor cannot transmit sunlight across the border: its sky value is
             // non-propagable surface light (opaque blocks have no sky emission), so seeding from it would
-            // leak light out of a wall into the adjacent chunk (Bug 10). Mirror of the IsOpaque source
-            // guard in PropagateLight; the add-only edge check could never reconcile the surplus away.
+            // leak light out of a wall into the adjacent chunk (Bug 10). Mirror of PropagateLight's source
+            // guard AND its per-direction exit test; the add-only edge check could never reconcile a
+            // surplus away, so this must not be looser than the BFS.
+            int entryFace = FaceIndexOfDirection(neighborPos - centerPos);
+            int exitFace = VoxelData.RevFaceChecksIndices[entryFace];
+
             BlockTypeJobData neighborProps = BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)];
-            if (neighborProps.IsOpaque) return 0;
+            if (neighborProps.IsFullyOpaqueCell) return 0;
+
+            byte neighborMeta = BurstVoxelDataBitMapping.GetMeta(neighborPacked);
+            if (LightAttenuation.ExitBlocked(in neighborProps, neighborMeta, exitFace)) return 0;
 
             BlockTypeJobData centerProps = BlockTypes[BurstVoxelDataBitMapping.GetId(centerPacked)];
-            if (centerProps.IsOpaque)
+            byte centerMeta = BurstVoxelDataBitMapping.GetMeta(centerPacked);
+
+            // A receive-only cell takes the surface stamp; a partial block re-propagates, so it takes the
+            // attenuated arm below and IS enqueued.
+            if (centerProps.IsFullyOpaqueCell || LightAttenuation.FaceBlocksLight(in centerProps, centerMeta, entryFace))
             {
                 byte stamp = (byte)math.max(0, neighborLight - 1);
                 if (stamp > centerLight)
@@ -1307,7 +1324,8 @@ namespace Jobs
                 return 0;
             }
 
-            byte expectedFromNeighbor = AttenuateLight(neighborLight, centerProps.Opacity);
+            byte expectedFromNeighbor = AttenuateLight(neighborLight,
+                LightAttenuation.EntryOpacity(in centerProps, centerMeta, entryFace));
 
             if (expectedFromNeighbor > centerLight)
             {
@@ -1352,16 +1370,30 @@ namespace Jobs
             // border while an opaque non-emissive block (emission 0) contributes nothing.
             uint neighborPacked = GetPackedData(neighborPos);
             if (neighborPacked == uint.MaxValue) return;
+
+            int entryFace = FaceIndexOfDirection(neighborPos - centerPos);
+            int exitFace = VoxelData.RevFaceChecksIndices[entryFace];
+
             BlockTypeJobData neighborProps = BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)];
-            if (neighborProps.IsOpaque)
+            byte neighborMeta = BurstVoxelDataBitMapping.GetMeta(neighborPacked);
+            if (neighborProps.IsFullyOpaqueCell)
             {
                 nR = neighborProps.EmissionR;
                 nG = neighborProps.EmissionG;
                 nB = neighborProps.EmissionB;
             }
+            else if (LightAttenuation.ExitBlocked(in neighborProps, neighborMeta, exitFace))
+            {
+                // A partial block's solid side seals this direction (mirror of PropagateLightRGB).
+                return;
+            }
+
+            byte centerMeta = BurstVoxelDataBitMapping.GetMeta(centerPacked);
+            bool centerReceivesOnly = centerProps.IsFullyOpaqueCell
+                                      || LightAttenuation.FaceBlocksLight(in centerProps, centerMeta, entryFace);
 
             byte expR, expG, expB;
-            if (centerProps.IsOpaque)
+            if (centerReceivesOnly)
             {
                 expR = (byte)math.max(0, nR - 1);
                 expG = (byte)math.max(0, nG - 1);
@@ -1369,9 +1401,10 @@ namespace Jobs
             }
             else
             {
-                expR = AttenuateLight(nR, centerProps.Opacity);
-                expG = AttenuateLight(nG, centerProps.Opacity);
-                expB = AttenuateLight(nB, centerProps.Opacity);
+                byte entryOpacity = LightAttenuation.EntryOpacity(in centerProps, centerMeta, entryFace);
+                expR = AttenuateLight(nR, entryOpacity);
+                expG = AttenuateLight(nG, entryOpacity);
+                expB = AttenuateLight(nB, entryOpacity);
             }
 
             byte finalR = (byte)math.max(cR, (int)expR);
@@ -1381,7 +1414,7 @@ namespace Jobs
             if (finalR != cR || finalG != cG || finalB != cB)
             {
                 SetBlocklightRGB(centerPos, finalR, finalG, finalB, isRemovalContext: false);
-                if (!centerProps.IsOpaque)
+                if (!centerReceivesOnly)
                     placementQueue.Enqueue(centerPos);
             }
         }
@@ -1517,14 +1550,44 @@ namespace Jobs
         /// <returns>True if the voxel is directly lit by vertical sunlight.</returns>
         private bool IsVerticallySkyLit(Vector3Int pos, uint packed)
         {
-            if (!BlockTypes[BurstVoxelDataBitMapping.GetId(packed)].IsFullyTransparentToLight) return false;
+            // VO-4: this must test the same faces PropagateLight's isVerticalSunlight rule does, or the
+            // Bug 12 initiator fires on voxels the BFS is holding at an undimmed 15 through a partial
+            // block's open half — and the veto's support model, which tops out at 14, cannot defend them.
+            BlockTypeJobData props = BlockTypes[BurstVoxelDataBitMapping.GetId(packed)];
+            if (!LightAttenuation.IsTransparentThroughFace(in props, BurstVoxelDataBitMapping.GetMeta(packed), TOP_FACE))
+                return false;
 
             Vector3Int above = new Vector3Int(pos.x, pos.y + 1, pos.z);
             uint abovePacked = GetPackedData(above);
             if (abovePacked == uint.MaxValue) return false;
-            if (!BlockTypes[BurstVoxelDataBitMapping.GetId(abovePacked)].IsFullyTransparentToLight) return false;
+
+            BlockTypeJobData aboveProps = BlockTypes[BurstVoxelDataBitMapping.GetId(abovePacked)];
+            if (!LightAttenuation.IsTransparentThroughFace(in aboveProps, BurstVoxelDataBitMapping.GetMeta(abovePacked), BOTTOM_FACE))
+                return false;
 
             return LightBitMapping.GetSkyLight(GetLightData(above)) == 15;
+        }
+
+        /// <summary>The +Y face index in <c>VoxelData.FaceChecks</c> order.</summary>
+        private const int TOP_FACE = 2;
+
+        /// <summary>The -Y face index in <c>VoxelData.FaceChecks</c> order.</summary>
+        private const int BOTTOM_FACE = 3;
+
+        /// <summary>
+        /// The <c>VoxelData.FaceChecks</c> index of a unit step between face-adjacent voxels. Callers that
+        /// already hold both positions use this rather than threading a face index through every seam path.
+        /// </summary>
+        /// <param name="direction">The step from the center voxel to its face neighbor.</param>
+        /// <returns>The matching face index, or 0 when the step is not a unit face direction.</returns>
+        private static int FaceIndexOfDirection(Vector3Int direction)
+        {
+            if (direction.z < 0) return 0;
+            if (direction.z > 0) return 1;
+            if (direction.y > 0) return TOP_FACE;
+            if (direction.y < 0) return BOTTOM_FACE;
+            if (direction.x < 0) return 4;
+            return 5;
         }
 
         /// <summary>

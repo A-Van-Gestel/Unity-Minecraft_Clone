@@ -27,6 +27,9 @@ namespace Editor.Validation.Lighting.Framework
         /// <summary>The +Y face index in VoxelData.FaceChecks order — the face a downward sky column enters through.</summary>
         private const int TOP_FACE = 2;
 
+        /// <summary>The -Y face index in VoxelData.FaceChecks order — the face a downward sky column leaves through.</summary>
+        private const int BOTTOM_FACE = 3;
+
         /// <summary>
         /// Computes the expected global light field for the world's current voxel contents.
         /// </summary>
@@ -88,8 +91,17 @@ namespace Editor.Validation.Lighting.Framework
                         int index = field.Index(x, y, z);
                         field.Sky[index] = lightFromSky;
                         if (lightFromSky == 0) continue;
-                        lightFromSky = Attenuate(lightFromSky, LightAttenuation.EntryOpacity(
-                            blockTypes[ids[index]], metas[index], TOP_FACE));
+
+                        // The column leaves this cell through its BOTTOM face, so the exit must be
+                        // tested as well as the entry. Charging the entry cost alone let the column walk
+                        // straight through a horizontal half slab — its top face is the open mid-plane,
+                        // so entry is free, while the solid half underneath is exactly what stops the
+                        // light (the B101 rule). A vertical slab's bottom face is only half covered and
+                        // still passes, so the undimmed column survives.
+                        lightFromSky = LightAttenuation.ExitBlocked(blockTypes[ids[index]], metas[index], BOTTOM_FACE)
+                            ? (byte)0
+                            : Attenuate(lightFromSky, LightAttenuation.EntryOpacity(
+                                blockTypes[ids[index]], metas[index], TOP_FACE));
                     }
                 }
             }

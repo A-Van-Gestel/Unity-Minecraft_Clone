@@ -28,18 +28,47 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     private readonly World _world;
     private readonly IChunkGenerator _chunkGenerator;
 
-    // Cached predicate for the cross-chunk sunlight veto: is a block id fully opaque (cannot propagate
-    // sunlight)? Allocated once so ApplyCrossChunkLightMod doesn't churn a closure per cross-chunk mod.
-    private readonly Func<ushort, bool> _isBlockFullyOpaque;
+    // Cached lookup for the cross-chunk removal vetoes: a block id's job data, from which they derive
+    // both whether it can propagate at all and its per-face entry cost (VO-4 — a partial block's answer
+    // depends on direction, so a bool predicate could no longer express it). Allocated once so
+    // ApplyCrossChunkLightMod doesn't churn a closure per cross-chunk mod.
+    private readonly Func<ushort, BlockTypeJobData> _getBlockData;
 
     // Cached lookup for the veto's live third-party support scan (CrossChunkLightModApplier.
     // CrossChunkSunlightSupport, the Bug 13 fix): chunk voxel origin -> live populated ChunkData, or
     // null when absent. Allocated once so ApplyCrossChunkLightMod doesn't churn a closure per mod.
     private readonly Func<Vector2Int, ChunkData> _getLoadedChunkByOrigin;
 
-    // Cached lookup for the RGB removal veto (CrossChunkLightModApplier.*BlocklightSupport, the Bug 17
-    // fix): a block id's own emission RGB (an opaque block propagates only its emission). Allocated once.
-    private readonly Func<ushort, (byte r, byte g, byte b)> _blockEmission;
+    /// <summary>
+    /// The per-face entry cost of the voxel a cross-chunk modification targets, read from its live block
+    /// and orientation. Since VO-3 a partial block charges its opacity only on the faces its volume
+    /// covers, so the veto must ask per face or it under-estimates support through a slab's open half and
+    /// clears light the BFS immediately restores.
+    /// </summary>
+    /// <param name="chunk">The chunk holding the target voxel.</param>
+    /// <param name="localPos">The target's local position within that chunk.</param>
+    /// <returns>The directional entry cost for that voxel.</returns>
+    private CrossChunkLightModApplier.TargetEntryCost TargetEntryCostFor(ChunkData chunk, Vector3Int localPos)
+    {
+        uint voxel = chunk.GetVoxel(localPos.x, localPos.y, localPos.z);
+        return CrossChunkLightModApplier.TargetEntryCost.ForBlock(
+            _getBlockData(BurstVoxelDataBitMapping.GetId(voxel)), BurstVoxelDataBitMapping.GetMeta(voxel));
+    }
+
+    /// <summary>
+    /// The <c>VoxelData.FaceChecks</c> index of a unit step between face-adjacent voxels.
+    /// </summary>
+    /// <param name="direction">The step from the center voxel to its face neighbor.</param>
+    /// <returns>The matching face index, or 0 when the step is not a unit face direction.</returns>
+    private static int FaceIndexOfDirection(Vector3Int direction)
+    {
+        if (direction.z < 0) return 0;
+        if (direction.z > 0) return 1;
+        if (direction.y > 0) return 2;
+        if (direction.y < 0) return 3;
+        if (direction.x < 0) return 4;
+        return 5;
+    }
 
     #region Job Tracking Dictionaries
 
@@ -337,12 +366,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     {
         _world = world;
         _meshDriver = new MeshCompletionDriver(this); // MP-4: one cached driver for the mesh completion pass
-        _isBlockFullyOpaque = id => _world.BlockTypes[id].IsOpaque;
-        _blockEmission = id =>
-        {
-            BlockTypeJobData bt = _world.JobDataManager.BlockTypesJobData[id];
-            return (bt.EmissionR, bt.EmissionG, bt.EmissionB);
-        };
+        _getBlockData = id => _world.JobDataManager.BlockTypesJobData[id];
         _getLoadedChunkByOrigin = originXZ =>
         {
             if (!World.IsChunkInWorld(ChunkCoord.FromVoxelOrigin(originXZ))) return null;
@@ -1828,13 +1852,24 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 neighborGlobal.x - neighborOriginXZ.x, neighborGlobal.y, neighborGlobal.z - neighborOriginXZ.y);
             byte liveNeighborSky = LightBitMapping.GetSkyLight(
                 neighborChunk.GetLightData(neighborLocal.x, neighborLocal.y, neighborLocal.z));
-            bool neighborFullyOpaque = _isBlockFullyOpaque(BurstVoxelDataBitMapping.GetId(
-                neighborChunk.GetVoxel(neighborLocal.x, neighborLocal.y, neighborLocal.z)));
-            byte centerOpacity = _world.BlockTypes[BurstVoxelDataBitMapping.GetId(
-                chunkData.GetVoxel(claim.CenterPos.x, claim.CenterPos.y, claim.CenterPos.z))].opacity;
+
+            // The claim's two voxels are face-adjacent across the seam, so the neighbor delivers through
+            // the face pointing back at the center and the center is entered through the opposite one.
+            int entryFace = FaceIndexOfDirection(neighborGlobal - new Vector3Int(
+                ownOriginXZ.x + claim.CenterPos.x, claim.CenterPos.y, ownOriginXZ.y + claim.CenterPos.z));
+            bool neighborCanDeliver = CrossChunkLightModApplier.NeighborCanDeliver(
+                neighborChunk.GetVoxel(neighborLocal.x, neighborLocal.y, neighborLocal.z),
+                VoxelData.RevFaceChecksIndices[entryFace], _getBlockData);
+
+            uint centerVoxel = chunkData.GetVoxel(claim.CenterPos.x, claim.CenterPos.y, claim.CenterPos.z);
+            BlockTypeJobData centerBlock = _getBlockData(BurstVoxelDataBitMapping.GetId(centerVoxel));
+            byte centerMeta = BurstVoxelDataBitMapping.GetMeta(centerVoxel);
+            bool centerReceivesOnly = centerBlock.IsFullyOpaqueCell
+                                      || LightAttenuation.FaceBlocksLight(in centerBlock, centerMeta, entryFace);
 
             if (CrossChunkLightModApplier.PullBackClaimStillSupported(
-                    liveNeighborSky, neighborFullyOpaque, centerOpacity, claim.WrittenSky))
+                    liveNeighborSky, neighborCanDeliver, centerReceivesOnly,
+                    LightAttenuation.EntryOpacity(in centerBlock, centerMeta, entryFace), claim.WrittenSky))
                 continue;
 
             // Stale: clear through the standard removal veto (emitter = the claimed neighbor's chunk,
@@ -1881,13 +1916,11 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             // NeighborhoodLightingJob.AttenuateLight — a flat air step would over-estimate support into
             // semi-transparent media and wrongly veto a legitimate removal. Independent support is the
             // max of in-chunk neighbors (Bug 11) and live third-party cross-chunk neighbors (Bug 13).
-            ushort targetId = BurstVoxelDataBitMapping.GetId(
-                targetChunk.GetVoxel(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z));
-            byte targetOpacity = _world.BlockTypes[targetId].opacity;
-            byte inChunk = CrossChunkLightModApplier.InChunkSunlightSupport(targetChunk, localVoxelPos, targetOpacity, _isBlockFullyOpaque);
+            CrossChunkLightModApplier.TargetEntryCost sunEntryCost = TargetEntryCostFor(targetChunk, localVoxelPos);
+            byte inChunk = CrossChunkLightModApplier.InChunkSunlightSupport(targetChunk, localVoxelPos, sunEntryCost, _getBlockData);
             byte crossChunk = CrossChunkLightModApplier.CrossChunkSunlightSupport(
-                _world.worldData.GetChunkCoordFor(mod.GlobalPosition), localVoxelPos, targetOpacity,
-                emitterOriginXZ, _getLoadedChunkByOrigin, _isBlockFullyOpaque);
+                _world.worldData.GetChunkCoordFor(mod.GlobalPosition), localVoxelPos, sunEntryCost,
+                emitterOriginXZ, _getLoadedChunkByOrigin, _getBlockData);
             independentSunSupport = Math.Max(inChunk, crossChunk);
         }
 
@@ -1897,14 +1930,12 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         byte independentBlockR = 0, independentBlockG = 0, independentBlockB = 0;
         if (mod.Channel == LightChannel.Block && mod.IsRemoval)
         {
-            ushort targetId = BurstVoxelDataBitMapping.GetId(
-                targetChunk.GetVoxel(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z));
-            byte targetOpacity = _world.BlockTypes[targetId].opacity;
-            CrossChunkLightModApplier.InChunkBlocklightSupport(targetChunk, localVoxelPos, targetOpacity,
-                _isBlockFullyOpaque, _blockEmission, out byte inR, out byte inG, out byte inB);
+            CrossChunkLightModApplier.TargetEntryCost blockEntryCost = TargetEntryCostFor(targetChunk, localVoxelPos);
+            CrossChunkLightModApplier.InChunkBlocklightSupport(targetChunk, localVoxelPos, blockEntryCost,
+                _getBlockData, out byte inR, out byte inG, out byte inB);
             CrossChunkLightModApplier.CrossChunkBlocklightSupport(
-                _world.worldData.GetChunkCoordFor(mod.GlobalPosition), localVoxelPos, targetOpacity,
-                emitterOriginXZ, _getLoadedChunkByOrigin, _isBlockFullyOpaque, _blockEmission,
+                _world.worldData.GetChunkCoordFor(mod.GlobalPosition), localVoxelPos, blockEntryCost,
+                emitterOriginXZ, _getLoadedChunkByOrigin, _getBlockData,
                 out byte crR, out byte crG, out byte crB);
             independentBlockR = Math.Max(inR, crR);
             independentBlockG = Math.Max(inG, crG);

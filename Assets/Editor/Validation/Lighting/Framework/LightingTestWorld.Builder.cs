@@ -345,12 +345,29 @@ namespace Editor.Validation.Lighting.Framework
         /// flat air step.
         /// </summary>
         /// <param name="worldPos">The world-space voxel position whose in-chunk neighbors are sampled.</param>
-        /// <param name="targetOpacity">The opacity to attenuate the neighbors' sky by (the entry cost).</param>
+        /// <param name="targetOpacity">The opacity to attenuate the neighbors' sky by (the entry cost),
+        /// charged in every direction — the whole-block form, which is what B49 varies.</param>
         /// <returns>The strongest opacity-attenuated sky a same-chunk neighbor supplies.</returns>
         public byte InChunkSunlightSupportAt(Vector3Int worldPos, byte targetOpacity)
         {
             TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
-            return CrossChunkLightModApplier.InChunkSunlightSupport(chunk.Data, localPos, targetOpacity, _isBlockFullyOpaque);
+            return CrossChunkLightModApplier.InChunkSunlightSupport(chunk.Data, localPos,
+                CrossChunkLightModApplier.TargetEntryCost.Flat(targetOpacity), _getBlockData);
+        }
+
+        /// <summary>
+        /// Test affordance over the production cross-chunk guard, using the target voxel's <b>real</b>
+        /// block and orientation for the entry cost rather than a synthetic flat opacity. This is the form
+        /// production uses since <c>VO-4</c>, and the only one that can express a partial block charging
+        /// its opacity on a covered face and nothing on an open one.
+        /// </summary>
+        /// <param name="worldPos">The world-space voxel position whose in-chunk neighbors are sampled.</param>
+        /// <returns>The strongest support a same-chunk neighbor supplies, entering through the real block.</returns>
+        public byte DirectionalInChunkSunlightSupportAt(Vector3Int worldPos)
+        {
+            TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
+            return CrossChunkLightModApplier.InChunkSunlightSupport(chunk.Data, localPos,
+                TargetEntryCostFor(chunk.Data, localPos), _getBlockData);
         }
 
         /// <summary>

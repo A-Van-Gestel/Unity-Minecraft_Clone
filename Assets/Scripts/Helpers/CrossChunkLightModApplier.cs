@@ -78,6 +78,89 @@ namespace Helpers
         }
 
         /// <summary>
+        /// The cost of entering the voxel a cross-chunk modification targets, per face.
+        /// <para>
+        /// Two forms, because the support scans have two kinds of caller. <see cref="ForBlock"/> is what
+        /// production uses: since <c>VO-3</c> a partial block's entry cost depends on which face the light
+        /// arrives through, so a scalar cannot express it — a vertical slab charges its full opacity on the
+        /// covered face and nothing on the open one. <see cref="Flat"/> charges one opacity in every
+        /// direction, which is exactly the pre-VO-4 behaviour and remains correct for every full cube; it
+        /// also lets a baseline ask "what would the support be if this voxel had opacity N" without
+        /// synthesizing a block type.
+        /// </para>
+        /// </summary>
+        public readonly struct TargetEntryCost
+        {
+            private readonly BlockTypeJobData _block;
+            private readonly byte _meta;
+            private readonly byte _flatOpacity;
+            private readonly bool _directional;
+
+            private TargetEntryCost(in BlockTypeJobData block, byte meta, byte flatOpacity, bool directional)
+            {
+                _block = block;
+                _meta = meta;
+                _flatOpacity = flatOpacity;
+                _directional = directional;
+            }
+
+            /// <summary>
+            /// A single opacity charged regardless of direction — the whole-block form.
+            /// </summary>
+            /// <param name="opacity">The entry cost to charge on every face.</param>
+            /// <returns>A direction-independent entry cost.</returns>
+            public static TargetEntryCost Flat(byte opacity)
+            {
+                return new TargetEntryCost(default, 0, opacity, directional: false);
+            }
+
+            /// <summary>
+            /// The entry cost derived from the target block's own shape and orientation.
+            /// </summary>
+            /// <param name="block">The block the light is entering.</param>
+            /// <param name="meta">That voxel's raw metadata byte (selects the volume's rotation).</param>
+            /// <returns>A per-face entry cost that reduces to the block's opacity for full cubes.</returns>
+            public static TargetEntryCost ForBlock(in BlockTypeJobData block, byte meta)
+            {
+                return new TargetEntryCost(in block, meta, block.Opacity, directional: true);
+            }
+
+            /// <summary>
+            /// The opacity charged for light arriving through the given face of the target voxel.
+            /// </summary>
+            /// <param name="entryFace">The target's entry face, in <c>VoxelData.FaceChecks</c> order.</param>
+            /// <returns>The entry cost (minimum 1 is applied later by <see cref="LightAttenuation.Attenuate"/>).</returns>
+            public byte OpacityOnEntryThrough(int entryFace)
+            {
+                return _directional
+                    ? LightAttenuation.EntryOpacity(in _block, _meta, entryFace)
+                    : _flatOpacity;
+            }
+        }
+
+        /// <summary>
+        /// Whether a neighbor can deliver sky light to the voxel it is being scanned for — the veto's
+        /// mirror of <c>NeighborhoodLightingJob.PropagateLight</c>'s two source guards, and the invariant
+        /// <c>VO-4</c> exists to restore. A fully-opaque <i>cell</i> holds only non-propagable surface light
+        /// (the §3.7 data-model gotcha); a partial block DOES re-propagate, but only through the faces its
+        /// volume leaves open. Getting this looser than the BFS over-estimates support and vetoes legitimate
+        /// removals (stable over-bright, the Bug 12 shape); getting it stricter under-estimates support and
+        /// lets the removal initiator clear what the BFS immediately re-lights (the Bug 13 live-lock).
+        /// </summary>
+        /// <param name="neighborVoxel">The neighbor's packed voxel data.</param>
+        /// <param name="exitFace">The neighbor's face pointing at the target, in <c>VoxelData.FaceChecks</c> order.</param>
+        /// <param name="getBlockData">Lookup from a block id to its job data.</param>
+        /// <returns>True when the neighbor is a valid propagation source through that face.</returns>
+        public static bool NeighborCanDeliver(uint neighborVoxel, int exitFace, Func<ushort, BlockTypeJobData> getBlockData)
+        {
+            BlockTypeJobData block = getBlockData(BurstVoxelDataBitMapping.GetId(neighborVoxel));
+            if (block.IsFullyOpaqueCell)
+                return false;
+
+            return !LightAttenuation.ExitBlocked(in block, BurstVoxelDataBitMapping.GetMeta(neighborVoxel), exitFace);
+        }
+
+        /// <summary>
         /// The strongest sky light an <b>in-chunk</b> neighbor of <paramref name="localPos"/> could still
         /// supply it, attenuated by the cost of entering the target voxel. Used to veto a spurious
         /// cross-chunk sunlight removal: a voxel a neighbor inside the receiving chunk independently
@@ -94,22 +177,22 @@ namespace Helpers
         /// leaving stale over-bright light until a full relight.
         /// </para>
         /// <para>
-        /// Fully-opaque neighbors are skipped: a fully-opaque block cannot propagate sunlight to its
-        /// neighbors (mirror of <c>NeighborhoodLightingJob.PropagateLight</c>'s <c>IsOpaque</c> source
-        /// guard), yet it can still hold a high stored sky value (e.g. a sky-exposed roof block stores
-        /// sky-top 15). Counting that as support would over-estimate it and again veto a legitimate
-        /// removal. Semi-transparent neighbors (glass/leaves/water) DO propagate and are kept.
+        /// Neighbors that cannot deliver are skipped — see <see cref="NeighborCanDeliver"/>. A fully-opaque
+        /// block cannot propagate sunlight at all, yet it can still hold a high stored sky value (e.g. a
+        /// sky-exposed roof block stores sky-top 15); counting that as support would over-estimate it and
+        /// veto a legitimate removal. Semi-transparent neighbors (glass/leaves/water) DO propagate and are
+        /// kept, and since VO-4 so does a partial block through the faces its volume leaves open.
         /// </para>
         /// </summary>
         /// <param name="chunk">The chunk receiving the cross-chunk modification.</param>
         /// <param name="localPos">The local voxel position the modification targets.</param>
-        /// <param name="targetOpacity">The opacity of the voxel at <paramref name="localPos"/> (the light
-        /// enters this voxel, so it pays this voxel's opacity — minimum 1).</param>
-        /// <param name="isBlockFullyOpaque">Predicate returning true when a block id is fully opaque
-        /// (opacity ≥ 15) and therefore cannot propagate sunlight. Supplied by the caller so this helper
-        /// stays free of any block-database dependency.</param>
+        /// <param name="entryCost">The cost of entering the voxel at <paramref name="localPos"/> (the light
+        /// enters this voxel, so it pays this voxel's opacity — minimum 1), per face.</param>
+        /// <param name="getBlockData">Lookup from a block id to its job data. Supplied by the caller so this
+        /// helper stays free of any block-database dependency; cache the delegate to avoid per-mod closures.</param>
         /// <returns>The maximum attenuated sky a same-chunk neighbor supports (0 if none).</returns>
-        public static byte InChunkSunlightSupport(ChunkData chunk, Vector3Int localPos, byte targetOpacity, Func<ushort, bool> isBlockFullyOpaque)
+        public static byte InChunkSunlightSupport(ChunkData chunk, Vector3Int localPos, TargetEntryCost entryCost,
+            Func<ushort, BlockTypeJobData> getBlockData)
         {
             byte best = 0;
             for (int i = 0; i < 6; i++)
@@ -120,15 +203,14 @@ namespace Helpers
                     n.y < 0 || n.y >= VoxelData.ChunkHeight)
                     continue; // cross-chunk (untrusted) or out of vertical range
 
+                // The target's face toward this neighbor is i, so the neighbor's face toward the target —
+                // the one the light leaves through — is the opposite one.
                 byte s = LightBitMapping.GetSkyLight(chunk.GetLightData(n.x, n.y, n.z));
-                byte support = LightAttenuation.Attenuate(s, targetOpacity);
+                byte support = LightAttenuation.Attenuate(s, entryCost.OpacityOnEntryThrough(i));
                 if (support <= best)
-                    continue; // can't improve the best support — skip the voxel read + opacity check
+                    continue; // can't improve the best support — skip the voxel read + source check
 
-                // A fully-opaque neighbor cannot propagate sunlight (mirror of PropagateLight's IsOpaque
-                // source guard), so its stored sky — possibly a high sky-top value — is not real support.
-                ushort neighborId = BurstVoxelDataBitMapping.GetId(chunk.GetVoxel(n.x, n.y, n.z));
-                if (isBlockFullyOpaque(neighborId))
+                if (!NeighborCanDeliver(chunk.GetVoxel(n.x, n.y, n.z), VoxelData.RevFaceChecksIndices[i], getBlockData))
                     continue;
 
                 best = support;
@@ -151,17 +233,16 @@ namespace Helpers
         /// </summary>
         /// <param name="targetChunkOriginXZ">The receiving chunk's voxel origin (world XZ).</param>
         /// <param name="localPos">The local voxel position the modification targets.</param>
-        /// <param name="targetOpacity">The opacity of the target voxel (entry cost, minimum 1).</param>
+        /// <param name="entryCost">The cost of entering the target voxel (minimum 1), per face.</param>
         /// <param name="emitterChunkOriginXZ">The voxel origin of the chunk whose job emitted the mod.</param>
         /// <param name="getLoadedChunk">Lookup from a chunk voxel origin (world XZ) to its live,
         /// populated <see cref="ChunkData"/>, or null when absent/unloaded. Supplied by the caller
         /// (world store vs. harness grid); cache the delegate to avoid per-mod closures.</param>
-        /// <param name="isBlockFullyOpaque">Predicate returning true when a block id is fully opaque
-        /// (opacity ≥ 15) and therefore cannot propagate sunlight.</param>
+        /// <param name="getBlockData">Lookup from a block id to its job data.</param>
         /// <returns>The maximum attenuated sky a live third-party cross-chunk neighbor supports (0 if none).</returns>
         public static byte CrossChunkSunlightSupport(Vector2Int targetChunkOriginXZ, Vector3Int localPos,
-            byte targetOpacity, Vector2Int emitterChunkOriginXZ,
-            Func<Vector2Int, ChunkData> getLoadedChunk, Func<ushort, bool> isBlockFullyOpaque)
+            TargetEntryCost entryCost, Vector2Int emitterChunkOriginXZ,
+            Func<Vector2Int, ChunkData> getLoadedChunk, Func<ushort, BlockTypeJobData> getBlockData)
         {
             byte best = 0;
             for (int i = 0; i < 6; i++)
@@ -185,13 +266,11 @@ namespace Helpers
                 int lz = n.z - dir.z * VoxelData.ChunkWidth;
 
                 byte s = LightBitMapping.GetSkyLight(owner.GetLightData(lx, n.y, lz));
-                byte support = LightAttenuation.Attenuate(s, targetOpacity);
+                byte support = LightAttenuation.Attenuate(s, entryCost.OpacityOnEntryThrough(i));
                 if (support <= best)
-                    continue; // can't improve the best support — skip the voxel read + opacity check
+                    continue; // can't improve the best support — skip the voxel read + source check
 
-                // A fully-opaque neighbor cannot propagate sunlight — its stored sky is not real support.
-                ushort neighborId = BurstVoxelDataBitMapping.GetId(owner.GetVoxel(lx, n.y, lz));
-                if (isBlockFullyOpaque(neighborId))
+                if (!NeighborCanDeliver(owner.GetVoxel(lx, n.y, lz), VoxelData.RevFaceChecksIndices[i], getBlockData))
                     continue;
 
                 best = support;
@@ -199,12 +278,6 @@ namespace Helpers
 
             return best;
         }
-
-        /// <summary>
-        /// The opacity at and above which a block is fully opaque (mirrors
-        /// <c>BlockTypeJobData.IsOpaque</c>'s <c>Opacity >= 15</c>).
-        /// </summary>
-        private const byte FULLY_OPAQUE_OPACITY = 15;
 
         /// <summary>
         /// Re-verifies one <see cref="Jobs.PullBackClaim"/> against the claimed neighbor's LIVE data (the
@@ -218,19 +291,24 @@ namespace Helpers
         /// by the caller. Centralized so production and the validation harness cannot drift on the rule.
         /// </summary>
         /// <param name="liveNeighborSky">The claimed neighbor voxel's live sky level (0-15).</param>
-        /// <param name="neighborFullyOpaque">Whether the live neighbor block is fully opaque.</param>
-        /// <param name="centerOpacity">The re-lit center voxel's opacity (entry cost, minimum 1).</param>
+        /// <param name="neighborCanDeliver">Whether the live neighbor is a valid propagation source through
+        /// the face it faces the center with (false for a fully-opaque cell, and since VO-4 also false for a
+        /// partial block whose volume seals that face).</param>
+        /// <param name="centerReceivesOnly">Whether the center holds a surface stamp rather than propagated
+        /// light — a fully-opaque <i>cell</i>. A partial block re-propagates, so it takes the attenuated arm.</param>
+        /// <param name="centerEntryOpacity">The center's entry cost through the face the light arrives on
+        /// (minimum 1). Ignored when <paramref name="centerReceivesOnly"/> is set.</param>
         /// <param name="writtenSky">The sky level the pull-back wrote from the snapshot.</param>
         /// <returns>True when the live neighbor still supports the written level.</returns>
-        public static bool PullBackClaimStillSupported(byte liveNeighborSky, bool neighborFullyOpaque,
-            byte centerOpacity, byte writtenSky)
+        public static bool PullBackClaimStillSupported(byte liveNeighborSky, bool neighborCanDeliver,
+            bool centerReceivesOnly, byte centerEntryOpacity, byte writtenSky)
         {
-            if (neighborFullyOpaque)
+            if (!neighborCanDeliver)
                 return false;
 
-            int support = centerOpacity >= FULLY_OPAQUE_OPACITY
+            int support = centerReceivesOnly
                 ? liveNeighborSky - 1
-                : LightAttenuation.Attenuate(liveNeighborSky, centerOpacity);
+                : LightAttenuation.Attenuate(liveNeighborSky, centerEntryOpacity);
             return support >= writtenSky;
         }
 
@@ -245,14 +323,13 @@ namespace Helpers
         /// </summary>
         /// <param name="chunk">The chunk receiving the cross-chunk modification.</param>
         /// <param name="localPos">The local voxel position the modification targets.</param>
-        /// <param name="targetOpacity">The target voxel's opacity (entry cost, minimum 1).</param>
-        /// <param name="isBlockFullyOpaque">Predicate: is a block id fully opaque?</param>
-        /// <param name="blockEmission">Lookup: a block id's own RGB emission.</param>
+        /// <param name="entryCost">The target voxel's entry cost (minimum 1), per face.</param>
+        /// <param name="getBlockData">Lookup from a block id to its job data.</param>
         /// <param name="suppR">Out: strongest attenuated red an in-chunk neighbor supplies.</param>
         /// <param name="suppG">Out: strongest attenuated green.</param>
         /// <param name="suppB">Out: strongest attenuated blue.</param>
-        public static void InChunkBlocklightSupport(ChunkData chunk, Vector3Int localPos, byte targetOpacity,
-            Func<ushort, bool> isBlockFullyOpaque, Func<ushort, (byte r, byte g, byte b)> blockEmission,
+        public static void InChunkBlocklightSupport(ChunkData chunk, Vector3Int localPos, TargetEntryCost entryCost,
+            Func<ushort, BlockTypeJobData> getBlockData,
             out byte suppR, out byte suppG, out byte suppB)
         {
             suppR = 0;
@@ -267,11 +344,12 @@ namespace Helpers
                     continue; // cross-chunk (untrusted) or out of vertical range
 
                 ResolveNeighborBlocklight(chunk.GetVoxel(n.x, n.y, n.z), chunk.GetLightData(n.x, n.y, n.z),
-                    isBlockFullyOpaque, blockEmission, out byte nR, out byte nG, out byte nB);
+                    VoxelData.RevFaceChecksIndices[i], getBlockData, out byte nR, out byte nG, out byte nB);
 
-                byte sR = LightAttenuation.Attenuate(nR, targetOpacity);
-                byte sG = LightAttenuation.Attenuate(nG, targetOpacity);
-                byte sB = LightAttenuation.Attenuate(nB, targetOpacity);
+                byte entryOpacity = entryCost.OpacityOnEntryThrough(i);
+                byte sR = LightAttenuation.Attenuate(nR, entryOpacity);
+                byte sG = LightAttenuation.Attenuate(nG, entryOpacity);
+                byte sB = LightAttenuation.Attenuate(nB, entryOpacity);
                 if (sR > suppR) suppR = sR;
                 if (sG > suppG) suppG = sG;
                 if (sB > suppB) suppB = sB;
@@ -287,18 +365,16 @@ namespace Helpers
         /// </summary>
         /// <param name="targetChunkOriginXZ">The receiving chunk's voxel origin (world XZ).</param>
         /// <param name="localPos">The local voxel position the modification targets.</param>
-        /// <param name="targetOpacity">The target voxel's opacity (entry cost, minimum 1).</param>
+        /// <param name="entryCost">The target voxel's entry cost (minimum 1), per face.</param>
         /// <param name="emitterChunkOriginXZ">The voxel origin of the chunk whose job emitted the mod.</param>
         /// <param name="getLoadedChunk">Lookup from a chunk voxel origin to its live loaded chunk, or null.</param>
-        /// <param name="isBlockFullyOpaque">Predicate: is a block id fully opaque?</param>
-        /// <param name="blockEmission">Lookup: a block id's own RGB emission.</param>
+        /// <param name="getBlockData">Lookup from a block id to its job data.</param>
         /// <param name="suppR">Out: strongest attenuated red a live third-party cross-chunk neighbor supplies.</param>
         /// <param name="suppG">Out: strongest attenuated green.</param>
         /// <param name="suppB">Out: strongest attenuated blue.</param>
         public static void CrossChunkBlocklightSupport(Vector2Int targetChunkOriginXZ, Vector3Int localPos,
-            byte targetOpacity, Vector2Int emitterChunkOriginXZ,
-            Func<Vector2Int, ChunkData> getLoadedChunk, Func<ushort, bool> isBlockFullyOpaque,
-            Func<ushort, (byte r, byte g, byte b)> blockEmission,
+            TargetEntryCost entryCost, Vector2Int emitterChunkOriginXZ,
+            Func<Vector2Int, ChunkData> getLoadedChunk, Func<ushort, BlockTypeJobData> getBlockData,
             out byte suppR, out byte suppG, out byte suppB)
         {
             suppR = 0;
@@ -324,11 +400,12 @@ namespace Helpers
                 int lz = n.z - dir.z * VoxelData.ChunkWidth;
 
                 ResolveNeighborBlocklight(owner.GetVoxel(lx, n.y, lz), owner.GetLightData(lx, n.y, lz),
-                    isBlockFullyOpaque, blockEmission, out byte nR, out byte nG, out byte nB);
+                    VoxelData.RevFaceChecksIndices[i], getBlockData, out byte nR, out byte nG, out byte nB);
 
-                byte sR = LightAttenuation.Attenuate(nR, targetOpacity);
-                byte sG = LightAttenuation.Attenuate(nG, targetOpacity);
-                byte sB = LightAttenuation.Attenuate(nB, targetOpacity);
+                byte entryOpacity = entryCost.OpacityOnEntryThrough(i);
+                byte sR = LightAttenuation.Attenuate(nR, entryOpacity);
+                byte sG = LightAttenuation.Attenuate(nG, entryOpacity);
+                byte sB = LightAttenuation.Attenuate(nB, entryOpacity);
                 if (sR > suppR) suppR = sR;
                 if (sG > suppG) suppG = sG;
                 if (sB > suppB) suppB = sB;
@@ -336,18 +413,37 @@ namespace Helpers
         }
 
         /// <summary>
-        /// Resolves a neighbor voxel's propagable blocklight per channel for the RGB removal veto: an
-        /// opaque block propagates only its own emission (mirror of <c>PropagateLightRGB</c>'s
-        /// opaque-source arm), a transparent/semi block propagates its stored blocklight.
+        /// Resolves a neighbor voxel's propagable blocklight per channel for the RGB removal veto: a
+        /// fully-opaque cell propagates only its own emission (mirror of <c>PropagateLightRGB</c>'s
+        /// opaque-source arm), a transparent/semi/partial block propagates its stored blocklight. A face
+        /// the neighbor's own volume seals delivers nothing at all (VO-4).
         /// </summary>
-        private static void ResolveNeighborBlocklight(uint neighborVoxel, ushort neighborLight,
-            Func<ushort, bool> isBlockFullyOpaque, Func<ushort, (byte r, byte g, byte b)> blockEmission,
-            out byte nR, out byte nG, out byte nB)
+        /// <param name="neighborVoxel">The neighbor's packed voxel data.</param>
+        /// <param name="neighborLight">The neighbor's packed light value.</param>
+        /// <param name="exitFace">The neighbor's face pointing at the target.</param>
+        /// <param name="getBlockData">Lookup from a block id to its job data.</param>
+        /// <param name="nR">Out: propagable red.</param>
+        /// <param name="nG">Out: propagable green.</param>
+        /// <param name="nB">Out: propagable blue.</param>
+        private static void ResolveNeighborBlocklight(uint neighborVoxel, ushort neighborLight, int exitFace,
+            Func<ushort, BlockTypeJobData> getBlockData, out byte nR, out byte nG, out byte nB)
         {
-            ushort neighborId = BurstVoxelDataBitMapping.GetId(neighborVoxel);
-            if (isBlockFullyOpaque(neighborId))
+            BlockTypeJobData block = getBlockData(BurstVoxelDataBitMapping.GetId(neighborVoxel));
+            byte meta = BurstVoxelDataBitMapping.GetMeta(neighborVoxel);
+
+            if (block.IsFullyOpaqueCell)
             {
-                (nR, nG, nB) = blockEmission(neighborId);
+                // An opaque lamp still radiates its own emission across the seam; an opaque non-emissive
+                // block contributes nothing, since its stored blocklight is received surface light.
+                nR = block.EmissionR;
+                nG = block.EmissionG;
+                nB = block.EmissionB;
+            }
+            else if (LightAttenuation.ExitBlocked(in block, meta, exitFace))
+            {
+                nR = 0;
+                nG = 0;
+                nB = 0;
             }
             else
             {
