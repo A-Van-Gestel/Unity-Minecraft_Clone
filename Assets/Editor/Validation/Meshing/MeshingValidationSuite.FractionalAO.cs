@@ -249,22 +249,12 @@ namespace Editor.Validation.Meshing
 
             MeshDataJobOutput o = world.Run(SmoothLightingQuality.High);
 
-            for (int quad = 0; quad < o.Vertices.Length / 4; quad++)
-            {
-                Vector3 normal = o.Normals[quad * 4];
-                Vector3 vertex = o.Vertices[quad * 4];
-                bool isProbeTopFace = normal.y > 0.5f
-                                      && Mathf.Abs(vertex.y - (AO_PROBE_Y + 1)) < 0.01f
-                                      && vertex.x >= AO_PROBE_X - 0.01f && vertex.x <= AO_PROBE_X + 1.01f
-                                      && vertex.z >= AO_PROBE_Z - 0.01f && vertex.z <= AO_PROBE_Z + 1.01f;
-                if (!isProbeTopFace) continue;
+            // Corner-located, not first-quad-located: VO-9b may split this face into sub-quads, and the
+            // corner values are the reading that survives any tessellation density (see TopFaceCornerSun).
+            byte[] corners = TopFaceCornerSun(o, AO_PROBE_X, AO_PROBE_Y, AO_PROBE_Z);
+            if (corners == null) return -1;
 
-                int sum = 0;
-                for (int i = 0; i < 4; i++) sum += o.LightData[quad * 4 + i].r;
-                return sum;
-            }
-
-            return -1;
+            return corners[0] + corners[1] + corners[2] + corners[3];
         }
     }
 }

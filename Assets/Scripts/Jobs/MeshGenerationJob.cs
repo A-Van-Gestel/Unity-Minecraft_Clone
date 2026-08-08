@@ -711,7 +711,18 @@ namespace Jobs
                     if (SmoothLighting >= SmoothLightingQuality.Standard)
                     {
                         CalculateCornerLights(p, pos, neighborVoxel, faceIsInteriorToSampleCell: false,
-                            out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
+                            out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3,
+                            out bool hasPartialOccluder);
+
+                        if (hasPartialOccluder)
+                        {
+                            // Sampling by world position makes the corner-light permutation unnecessary
+                            // here: each sub-vertex asks about the cell it actually sits under.
+                            EmitTessellatedStandardCubeFace(p, translatedP, pos, rotation, 0,
+                                textureID, neighborVoxel, voxelProps.RenderNeighborFaces);
+                            continue;
+                        }
+
                         PermuteCornerLightsForYRotation(p, rotation, ref l0, ref l1, ref l2, ref l3);
                         VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, in pos, rotation,
                             0, l0, l1, l2, l3,
@@ -731,6 +742,186 @@ namespace Jobs
                 }
             }
         }
+
+        /// <summary>
+        /// VO-9b: emits one standard cube face as an N×N grid of sub-quads, shading every sub-vertex
+        /// through <see cref="SampleFacePoint"/> instead of blending four cell-corner values.
+        /// <para>
+        /// This is what gives a partial occluder a contact shadow of the right <i>width</i>. A slab's
+        /// edge lies at the cell midline, where an undivided face has no vertex, so its shadow was
+        /// smeared across the whole cell at a fraction of its strength — the resolution of the shading
+        /// signal was pinned to the resolution of the mesh.
+        /// </para>
+        /// <para>
+        /// Only faces that a partial occluder can actually reach take this path, and the sub-vertex
+        /// shading function reduces to the old one at the face's own corners, so a tessellated face
+        /// still meets an ordinary neighboring face without a seam.
+        /// </para>
+        /// </summary>
+        /// <param name="worldFace">Cardinal face index used for neighbor sampling.</param>
+        /// <param name="geometryFace">Face index whose vertices and UVs are emitted (differs from
+        /// <paramref name="worldFace"/> only on the legacy rotated path).</param>
+        /// <param name="pos">Block position in chunk-local space.</param>
+        /// <param name="rotation">Y-axis rotation in degrees applied to the emitted geometry.</param>
+        /// <param name="uvQuarterTurnsCW">Number of 90° clockwise UV rotations to apply (0-3).</param>
+        /// <param name="textureID">Atlas texture index for this face.</param>
+        /// <param name="directNeighbor">The cell in front of the face, pre-fetched.</param>
+        /// <param name="renderNeighborFaces">Routes the triangles to the transparent submesh.</param>
+        private void EmitTessellatedStandardCubeFace(int worldFace, int geometryFace, Vector3Int pos,
+            float rotation, int uvQuarterTurnsCW, int textureID, VoxelState? directNeighbor,
+            bool renderNeighborFaces)
+        {
+            PrepareFaceSampling(worldFace, pos, directNeighbor, faceIsInteriorToSampleCell: false,
+                out Vector3Int directCell, out int normalAxis, out bool normalLowHalf,
+                out byte directSun, out byte directR, out byte directG, out byte directB);
+
+            VoxelMeshHelper.GetStandardCubeFaceQuad(geometryFace, in pos, rotation, uvQuarterTurnsCW,
+                out VoxelMeshHelper.FaceQuad face);
+            Vector3 normal = BurstVoxelData.FaceChecks.Data[geometryFace];
+
+            // The ring's contribution is sampled at the face's own corners and then blended, exactly as an
+            // undivided face does. Only the direct cell — the one an occluder standing on this surface
+            // sits in — is re-evaluated per sample point.
+            bool ignored = false;
+            SampleFacePoint(face.P0, directCell, directNeighbor, normalAxis, normalLowHalf,
+                directSun, directR, directG, directB, ref ignored, out float4 ring0);
+            SampleFacePoint(face.P1, directCell, directNeighbor, normalAxis, normalLowHalf,
+                directSun, directR, directG, directB, ref ignored, out float4 ring1);
+            SampleFacePoint(face.P2, directCell, directNeighbor, normalAxis, normalLowHalf,
+                directSun, directR, directG, directB, ref ignored, out float4 ring2);
+            SampleFacePoint(face.P3, directCell, directNeighbor, normalAxis, normalLowHalf,
+                directSun, directR, directG, directB, ref ignored, out float4 ring3);
+
+            const float step = 1f / SUB_CELL_TESSELLATION;
+
+            for (int j = 0; j < SUB_CELL_TESSELLATION; j++)
+            {
+                for (int i = 0; i < SUB_CELL_TESSELLATION; i++)
+                {
+                    float u0 = i * step, v0 = j * step, u1 = (i + 1) * step, v1 = (j + 1) * step;
+                    VoxelMeshHelper.GetSubQuad(in face, u0, v0, u1, v1, out VoxelMeshHelper.FaceQuad sub);
+
+                    Color32 s0 = ShadeSubVertex(sub.P0, u0, v0, in ring0, in ring1, in ring2, in ring3,
+                        directCell, directNeighbor, normalAxis, normalLowHalf,
+                        directSun, directR, directG, directB);
+                    Color32 s1 = ShadeSubVertex(sub.P1, u0, v1, in ring0, in ring1, in ring2, in ring3,
+                        directCell, directNeighbor, normalAxis, normalLowHalf,
+                        directSun, directR, directG, directB);
+                    Color32 s2 = ShadeSubVertex(sub.P2, u1, v0, in ring0, in ring1, in ring2, in ring3,
+                        directCell, directNeighbor, normalAxis, normalLowHalf,
+                        directSun, directR, directG, directB);
+                    Color32 s3 = ShadeSubVertex(sub.P3, u1, v1, in ring0, in ring1, in ring2, in ring3,
+                        directCell, directNeighbor, normalAxis, normalLowHalf,
+                        directSun, directR, directG, directB);
+
+                    VoxelMeshHelper.EmitFaceQuad(in sub, textureID, in normal, s0, s1, s2, s3,
+                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles,
+                        ref Output.TransparentTriangles, ref Output.Uvs, ref Output.Colors,
+                        ref Output.Normals, ref Output.LightData, renderNeighborFaces);
+                }
+            }
+        }
+
+        /// <summary>
+        /// VO-9b: shades one sub-vertex — the face's blended ring contribution plus a direct term
+        /// re-evaluated against the occluder's actual sub-cell footprint at this point.
+        /// <para>
+        /// <b>Only the direct term may vary within the face.</b> The ring carries the shadows cast by
+        /// everything standing <i>beside</i> the surface, and an undivided face renders those as a
+        /// bilinear blend of its four corner values. Re-sampling the ring per sub-vertex instead pulls
+        /// those shadows into a hard band against the occluder — much lighter across the face interior —
+        /// so a subdivided face stops matching the ordinary faces around it and the boundary between
+        /// them reads as a sharp change in shading. Blending the ring keeps neighboring geometry
+        /// looking exactly as it did, and confines the new detail to the cell whose occupant is the
+        /// reason the face was subdivided at all.
+        /// </para>
+        /// </summary>
+        /// <param name="samplePoint">The sub-vertex, in chunk-local space.</param>
+        /// <param name="u">The sub-vertex's first face-parameter coordinate, in <c>[0, 1]</c>.</param>
+        /// <param name="v">The sub-vertex's second face-parameter coordinate.</param>
+        /// <param name="ring0">Ring contribution at the face's corner 0.</param>
+        /// <param name="ring1">Ring contribution at corner 1.</param>
+        /// <param name="ring2">Ring contribution at corner 2.</param>
+        /// <param name="ring3">Ring contribution at corner 3.</param>
+        /// <param name="directCell">The cell in front of the face.</param>
+        /// <param name="directNeighbor">That cell's voxel state.</param>
+        /// <param name="normalAxis">The face's normal axis (0 = X, 1 = Y, 2 = Z).</param>
+        /// <param name="normalLowHalf">Which half along that axis lies in front of the face.</param>
+        /// <param name="directSun">The direct cell's raw sky light.</param>
+        /// <param name="directR">The direct cell's raw red block light.</param>
+        /// <param name="directG">The direct cell's raw green block light.</param>
+        /// <param name="directB">The direct cell's raw blue block light.</param>
+        /// <returns>The encoded light value at that sub-vertex.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private Color32 ShadeSubVertex(float3 samplePoint, float u, float v,
+            in float4 ring0, in float4 ring1, in float4 ring2, in float4 ring3,
+            Vector3Int directCell, VoxelState? directNeighbor, int normalAxis, bool normalLowHalf,
+            byte directSun, byte directR, byte directG, byte directB)
+        {
+            float4 ring = ring0 * ((1f - u) * (1f - v)) + ring1 * ((1f - u) * v)
+                                                        + ring2 * (u * (1f - v)) + ring3 * (u * v);
+
+            float open = DirectOpenFractionAt(samplePoint, directCell, directNeighbor,
+                normalAxis, normalLowHalf);
+
+            float sunSum = Weigh(directSun, open) + ring.x;
+            float rSum = Weigh(directR, open) + ring.y;
+            float gSum = Weigh(directG, open) + ring.z;
+            float bSum = Weigh(directB, open) + ring.w;
+
+            return new Color32(
+                (byte)((sunSum * 17f + 2f) / 4f),
+                (byte)((rSum * 17f + 2f) / 4f),
+                (byte)((gSum * 17f + 2f) / 4f),
+                (byte)((bSum * 17f + 2f) / 4f)
+            );
+        }
+
+        /// <summary>
+        /// VO-9b: how much of the direct cell's footprint around a sample point is left open by the
+        /// occupant of that cell — the one term that carries sub-cell detail.
+        /// </summary>
+        /// <param name="samplePoint">The sample point, in chunk-local space.</param>
+        /// <param name="directCell">The cell in front of the face.</param>
+        /// <param name="directNeighbor">That cell's voxel state.</param>
+        /// <param name="normalAxis">The face's normal axis (0 = X, 1 = Y, 2 = Z).</param>
+        /// <param name="normalLowHalf">Which half along that axis lies in front of the face.</param>
+        /// <returns>The open fraction, in <c>[0, 1]</c>; 0 once the footprint counts as fully covered.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private float DirectOpenFractionAt(float3 samplePoint, Vector3Int directCell,
+            VoxelState? directNeighbor, int normalAxis, bool normalLowHalf)
+        {
+            if (!directNeighbor.HasValue) return 1f;
+
+            int axisA = normalAxis == 0 ? 1 : 0;
+            int axisB = normalAxis == 2 ? 1 : 2;
+
+            TangentSpan(samplePoint[axisA], Component(directCell, axisA), out _, out _, out _,
+                out float minA, out float maxA, out _, out _);
+            TangentSpan(samplePoint[axisB], Component(directCell, axisB), out _, out _, out _,
+                out float minB, out float maxB, out _, out _);
+
+            float3 regionMin = default, regionMax = default;
+            regionMin[normalAxis] = normalLowHalf ? 0f : 0.5f;
+            regionMax[normalAxis] = normalLowHalf ? 0.5f : 1f;
+            regionMin[axisA] = minA;
+            regionMax[axisA] = maxA;
+            regionMin[axisB] = minB;
+            regionMax[axisB] = maxB;
+
+            BlockTypeJobData props = BlockTypes[directNeighbor.Value.ID];
+            float coverage = LightAttenuation.AmbientOcclusionRegionCoverage(in props,
+                directNeighbor.Value.Meta, regionMin, regionMax);
+
+            return coverage >= LightAttenuation.FullCoverageThreshold ? 0f : 1f - coverage;
+        }
+
+        /// <summary>
+        /// How many sub-quads per axis a face is split into when a partial occluder can reach it. The
+        /// sample points land on multiples of <c>1 / N</c>, so a value of 4 puts one exactly on the cell
+        /// midline — where an axis-aligned slab's edge sits.
+        /// </summary>
+        private const int SUB_CELL_TESSELLATION = 4;
 
         /// <summary>
         /// Checks visibility of a single cube face and, if visible, emits its vertices, UVs, and
@@ -756,7 +947,16 @@ namespace Jobs
             if (SmoothLighting >= SmoothLightingQuality.Standard)
             {
                 CalculateCornerLights(worldFace, pos, neighborVoxel, faceIsInteriorToSampleCell: false,
-                    out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
+                    out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3,
+                    out bool hasPartialOccluder);
+
+                if (hasPartialOccluder)
+                {
+                    EmitTessellatedStandardCubeFace(worldFace, worldFace, pos, rotation: 0f, uvQuarterTurnsCW,
+                        textureID, neighborVoxel, voxelProps.RenderNeighborFaces);
+                    return;
+                }
+
                 VoxelMeshHelper.GenerateStandardCubeFace(worldFace, textureID, in pos, rotation: 0f, uvQuarterTurnsCW,
                     l0, l1, l2, l3,
                     ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
@@ -1028,22 +1228,81 @@ namespace Jobs
             VoxelState? directNeighbor, bool faceIsInteriorToSampleCell,
             out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3)
         {
-            // Read the direct neighbor's RAW light once — the value is the same for all four corners.
-            // VO-8 moved the *weighting* per-corner (into SampleCorner), because a partial block occupies
-            // only some of the corners it shares with this face.
+            CalculateCornerLights(faceIndex, blockPos, directNeighbor, faceIsInteriorToSampleCell,
+                out l0, out l1, out l2, out l3, out _);
+        }
+
+        /// <summary>
+        /// Corner-light overload that also reports whether any sampled cell holds a <b>partial</b>
+        /// occluder — the gate VO-9b uses to decide a face needs sub-cell shading detail.
+        /// <para>
+        /// It rides along on samples the face already takes, so an ordinary cube surrounded by ordinary
+        /// cubes pays one boolean for the whole question.
+        /// </para>
+        /// </summary>
+        /// <param name="faceIndex">Face direction, in <c>VoxelData.FaceChecks</c> order.</param>
+        /// <param name="blockPos">The shaded block's chunk-local position.</param>
+        /// <param name="directNeighbor">The cell in front of the face, pre-fetched.</param>
+        /// <param name="faceIsInteriorToSampleCell">True when the face sits inside its own cell (VO-6).</param>
+        /// <param name="l0">Light at corner 0.</param>
+        /// <param name="l1">Light at corner 1.</param>
+        /// <param name="l2">Light at corner 2.</param>
+        /// <param name="l3">Light at corner 3.</param>
+        /// <param name="hasPartialOccluder">True when some sampled cell has authored custom bounds and occludes.</param>
+        private void CalculateCornerLights(int faceIndex, Vector3Int blockPos,
+            VoxelState? directNeighbor, bool faceIsInteriorToSampleCell,
+            out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3, out bool hasPartialOccluder)
+        {
+            PrepareFaceSampling(faceIndex, blockPos, directNeighbor, faceIsInteriorToSampleCell,
+                out Vector3Int directCell, out int normalAxis, out bool normalLowHalf,
+                out byte directSun, out byte directR, out byte directG, out byte directB);
+
+            hasPartialOccluder = false;
+            l0 = SampleCornerPoint(faceIndex, 0, blockPos, directCell, directNeighbor, normalAxis, normalLowHalf,
+                directSun, directR, directG, directB, ref hasPartialOccluder);
+            l1 = SampleCornerPoint(faceIndex, 1, blockPos, directCell, directNeighbor, normalAxis, normalLowHalf,
+                directSun, directR, directG, directB, ref hasPartialOccluder);
+            l2 = SampleCornerPoint(faceIndex, 2, blockPos, directCell, directNeighbor, normalAxis, normalLowHalf,
+                directSun, directR, directG, directB, ref hasPartialOccluder);
+            l3 = SampleCornerPoint(faceIndex, 3, blockPos, directCell, directNeighbor, normalAxis, normalLowHalf,
+                directSun, directR, directG, directB, ref hasPartialOccluder);
+        }
+
+        /// <summary>
+        /// Resolves the per-face constants every shading sample on that face shares: the cell in front of
+        /// it, which half of a sampled cell lies in front of the surface, and the direct cell's raw light.
+        /// </summary>
+        /// <param name="faceIndex">Face direction, in <c>VoxelData.FaceChecks</c> order.</param>
+        /// <param name="blockPos">The shaded block's chunk-local position.</param>
+        /// <param name="directNeighbor">The cell in front of the face, pre-fetched.</param>
+        /// <param name="faceIsInteriorToSampleCell">True when the face sits inside its own cell (VO-6).</param>
+        /// <param name="directCell">The cell in front of the face.</param>
+        /// <param name="normalAxis">The face's normal axis (0 = X, 1 = Y, 2 = Z).</param>
+        /// <param name="normalLowHalf">Which half along that axis lies in front of the face.</param>
+        /// <param name="directSun">The direct cell's raw sky light.</param>
+        /// <param name="directR">The direct cell's raw red block light.</param>
+        /// <param name="directG">The direct cell's raw green block light.</param>
+        /// <param name="directB">The direct cell's raw blue block light.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void PrepareFaceSampling(int faceIndex, Vector3Int blockPos,
+            VoxelState? directNeighbor, bool faceIsInteriorToSampleCell,
+            out Vector3Int directCell, out int normalAxis, out bool normalLowHalf,
+            out byte directSun, out byte directR, out byte directG, out byte directB)
+        {
+            // Read the direct neighbor's RAW light once — the value is the same for every sample on this
+            // face. VO-8 moved the *weighting* per-sample, because a partial block occupies only some of
+            // the space it shares with the face.
             Vector3Int faceNormal = BurstVoxelData.FaceChecks.Data[faceIndex];
-            Vector3Int directCell = blockPos + faceNormal;
+            directCell = blockPos + faceNormal;
 
             // Bug M03: pick the half of a sampled cell that lies in FRONT of the shaded surface, on the
             // face's normal axis. For a boundary face the whole sample cell is in front, so the near half
             // is the one the normal points away from; for a face interior to its own cell (a slab's
             // mid-plane, after VO-6) the front half is the one the normal points INTO — otherwise the
             // block is asked about its own material and reports that it occludes its own surface.
-            int normalAxis = faceNormal.x != 0 ? 0 : (faceNormal.y != 0 ? 1 : 2);
+            normalAxis = faceNormal.x != 0 ? 0 : (faceNormal.y != 0 ? 1 : 2);
             int normalSign = faceNormal.x + faceNormal.y + faceNormal.z;
-            bool normalLowHalf = faceIsInteriorToSampleCell ? normalSign < 0 : normalSign > 0;
-
-            byte directSun, directR, directG, directB;
+            normalLowHalf = faceIsInteriorToSampleCell ? normalSign < 0 : normalSign > 0;
 
             if (!directNeighbor.HasValue)
             {
@@ -1069,15 +1328,6 @@ namespace Jobs
                 directG = LightBitMapping.GetBlocklightG(lightData);
                 directB = LightBitMapping.GetBlocklightB(lightData);
             }
-
-            l0 = SampleCornerPoint(faceIndex, 0, blockPos, directCell, directNeighbor, normalAxis, normalLowHalf,
-                directSun, directR, directG, directB);
-            l1 = SampleCornerPoint(faceIndex, 1, blockPos, directCell, directNeighbor, normalAxis, normalLowHalf,
-                directSun, directR, directG, directB);
-            l2 = SampleCornerPoint(faceIndex, 2, blockPos, directCell, directNeighbor, normalAxis, normalLowHalf,
-                directSun, directR, directG, directB);
-            l3 = SampleCornerPoint(faceIndex, 3, blockPos, directCell, directNeighbor, normalAxis, normalLowHalf,
-                directSun, directR, directG, directB);
         }
 
         /// <summary>
@@ -1095,18 +1345,19 @@ namespace Jobs
         /// <param name="directR">The direct cell's raw red block light.</param>
         /// <param name="directG">The direct cell's raw green block light.</param>
         /// <param name="directB">The direct cell's raw blue block light.</param>
+        /// <param name="hasPartialOccluder">Set to true when a sampled cell has authored custom bounds.</param>
         /// <returns>The corner's encoded light value.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private Color32 SampleCornerPoint(int faceIndex, int cornerIndex, Vector3Int blockPos,
             Vector3Int directCell, VoxelState? directNeighbor, int normalAxis, bool normalLowHalf,
-            byte directSun, byte directR, byte directG, byte directB)
+            byte directSun, byte directR, byte directG, byte directB, ref bool hasPartialOccluder)
         {
             int3 cornerVert = BurstVoxelData.CornerVertices.Data[faceIndex * 4 + cornerIndex];
             float3 samplePoint = new float3(
                 blockPos.x + cornerVert.x, blockPos.y + cornerVert.y, blockPos.z + cornerVert.z);
 
             return SampleFacePoint(samplePoint, directCell, directNeighbor, normalAxis, normalLowHalf,
-                directSun, directR, directG, directB);
+                directSun, directR, directG, directB, ref hasPartialOccluder, out _);
         }
 
         /// <summary>
@@ -1119,7 +1370,7 @@ namespace Jobs
         /// the direct, two side, and diagonal samples — with a quarter of its volume in each, giving
         /// the four equal weights the old fixed <c>/4</c> average applied. That identity is what makes
         /// sub-cell sampling safe to introduce: corner values do not move, so a densely sampled face
-        /// still agrees with its neighbours along their shared edge instead of showing a seam.
+        /// still agrees with its neighbors along their shared edge instead of showing a seam.
         /// </para>
         /// <para>
         /// It is also what keeps the model shape-agnostic. The question asked of each cell is a plain
@@ -1136,11 +1387,16 @@ namespace Jobs
         /// <param name="directR">The direct cell's raw red block light.</param>
         /// <param name="directG">The direct cell's raw green block light.</param>
         /// <param name="directB">The direct cell's raw blue block light.</param>
+        /// <param name="hasPartialOccluder">Set to true when a sampled cell has authored custom bounds.</param>
+        /// <param name="ringSums">The three ring samples' contribution, before the direct term is added
+        /// and before encoding. VO-9b blends this across a subdivided face while re-evaluating the direct
+        /// term per sample point.</param>
         /// <returns>The encoded light value at that point.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private Color32 SampleFacePoint(float3 samplePoint, Vector3Int directCell,
             VoxelState? directNeighbor, int normalAxis, bool normalLowHalf,
-            byte directSun, byte directR, byte directG, byte directB)
+            byte directSun, byte directR, byte directG, byte directB, ref bool hasPartialOccluder,
+            out float4 ringSums)
         {
             int axisA = normalAxis == 0 ? 1 : 0;
             int axisB = normalAxis == 2 ? 1 : 2;
@@ -1189,6 +1445,7 @@ namespace Jobs
             if (directNeighbor.HasValue)
             {
                 BlockTypeJobData directProps = BlockTypes[directNeighbor.Value.ID];
+                hasPartialOccluder |= directProps.HasCustomBounds && directProps.IsOpaque;
                 float directCoverage = LightAttenuation.AmbientOcclusionRegionCoverage(in directProps,
                     directNeighbor.Value.Meta, regionMinDirect, regionMaxDirect);
 
@@ -1210,10 +1467,12 @@ namespace Jobs
             }
 
             SampleNeighborLight(directCell + stepA, regionMinSideA, regionMaxSideA,
-                out byte sideASun, out byte sideAR, out byte sideAG, out byte sideAB, out float sideACoverage);
+                out byte sideASun, out byte sideAR, out byte sideAG, out byte sideAB, out float sideACoverage,
+                ref hasPartialOccluder);
 
             SampleNeighborLight(directCell + stepB, regionMinSideB, regionMaxSideB,
-                out byte sideBSun, out byte sideBR, out byte sideBG, out byte sideBB, out float sideBCoverage);
+                out byte sideBSun, out byte sideBR, out byte sideBG, out byte sideBB, out float sideBCoverage,
+                ref hasPartialOccluder);
 
             byte diagSun = 0, diagR = 0, diagG = 0, diagB = 0;
             bool sidesSealCorner = sideACoverage >= LightAttenuation.FullCoverageThreshold
@@ -1221,7 +1480,7 @@ namespace Jobs
             if (!sidesSealCorner)
             {
                 SampleNeighborLight(directCell + stepA + stepB, regionMinDiag, regionMaxDiag,
-                    out diagSun, out diagR, out diagG, out diagB, out _);
+                    out diagSun, out diagR, out diagG, out diagB, out _, ref hasPartialOccluder);
             }
 
             // Blend the four samples by their share of the query box, then encode to UNorm8 exactly as
@@ -1232,14 +1491,16 @@ namespace Jobs
             float weightSideB = weightDirectA * weightNeighborB * WEIGHT_SCALE;
             float weightDiag = weightNeighborA * weightNeighborB * WEIGHT_SCALE;
 
-            float sunSum = directSun * weightDirect + sideASun * weightSideA
-                                                    + sideBSun * weightSideB + diagSun * weightDiag;
-            float rSum = directR * weightDirect + sideAR * weightSideA
-                                                + sideBR * weightSideB + diagR * weightDiag;
-            float gSum = directG * weightDirect + sideAG * weightSideA
-                                                + sideBG * weightSideB + diagG * weightDiag;
-            float bSum = directB * weightDirect + sideAB * weightSideA
-                                                + sideBB * weightSideB + diagB * weightDiag;
+            ringSums = new float4(
+                sideASun * weightSideA + sideBSun * weightSideB + diagSun * weightDiag,
+                sideAR * weightSideA + sideBR * weightSideB + diagR * weightDiag,
+                sideAG * weightSideA + sideBG * weightSideB + diagG * weightDiag,
+                sideAB * weightSideA + sideBB * weightSideB + diagB * weightDiag);
+
+            float sunSum = directSun * weightDirect + ringSums.x;
+            float rSum = directR * weightDirect + ringSums.y;
+            float gSum = directG * weightDirect + ringSums.z;
+            float bSum = directB * weightDirect + ringSums.w;
 
             return new Color32(
                 (byte)((sunSum * 17f + 2f) / 4f),
@@ -1328,9 +1589,11 @@ namespace Jobs
         /// <param name="blockG">The sample's green block light, already weighted.</param>
         /// <param name="blockB">The sample's blue block light, already weighted.</param>
         /// <param name="coverage">The occluded fraction of that region, in <c>[0, 1]</c>.</param>
+        /// <param name="hasPartialOccluder">Set to true when this cell has authored custom bounds.</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void SampleNeighborLight(Vector3Int pos, float3 regionMin, float3 regionMax,
-            out byte sun, out byte blockR, out byte blockG, out byte blockB, out float coverage)
+            out byte sun, out byte blockR, out byte blockG, out byte blockB, out float coverage,
+            ref bool hasPartialOccluder)
         {
             VoxelState? state = GetVoxelStateFromLocalPos(pos);
             if (!state.HasValue)
@@ -1345,6 +1608,7 @@ namespace Jobs
 
             VoxelState s = state.Value;
             BlockTypeJobData props = BlockTypes[s.ID];
+            hasPartialOccluder |= props.HasCustomBounds && props.IsOpaque;
             coverage = LightAttenuation.AmbientOcclusionRegionCoverage(in props, s.Meta, regionMin, regionMax);
 
             // A fully-covered face substitutes hard darkness and never reads the light array — the

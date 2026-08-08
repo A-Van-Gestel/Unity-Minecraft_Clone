@@ -278,25 +278,76 @@ namespace Editor.Validation.Meshing
 
             MeshDataJobOutput o = world.Run(SmoothLightingQuality.High);
 
-            for (int quad = 0; quad < o.Vertices.Length / 4; quad++)
-            {
-                Vector3 normal = o.Normals[quad * 4];
-                Vector3 vertex = o.Vertices[quad * 4];
-                bool isFloorTop = normal.y > 0.5f
-                                  && Mathf.Abs(vertex.y - (VO8_FLOOR_Y + 1)) < 0.01f
-                                  && vertex.x >= VO8_FLOOR_X - 0.01f && vertex.x <= VO8_FLOOR_X + 1.01f
-                                  && vertex.z >= VO8_FLOOR_Z - 0.01f && vertex.z <= VO8_FLOOR_Z + 1.01f;
-                if (!isFloorTop) continue;
-
-                byte[] corners = new byte[4];
-                for (int i = 0; i < 4; i++) corners[i] = o.LightData[quad * 4 + i].r;
-                return corners;
-            }
+            byte[] corners = TopFaceCornerSun(o, VO8_FLOOR_X, VO8_FLOOR_Y, VO8_FLOOR_Z);
+            if (corners != null) return corners;
 
             Debug.LogError($"[FAIL] B46 setup: the floor's +Y face was not emitted with block {aboveId} "
                            + $"(meta 0x{aboveMeta:X2}) above it. Either the fixture culls it or the probe "
                            + "is looking for the wrong quad — the scenario is broken, not the engine.");
             return null;
+        }
+
+        /// <summary>
+        /// Returns the sunlight at the four corners of a cell's <c>+Y</c> face, located by vertex
+        /// <i>position</i> rather than by quad.
+        /// <para>
+        /// <b>Do not simplify this back to "read the first quad of the face".</b> That held only while a
+        /// face was always exactly one quad; VO-9b splits a face into sub-quads whenever a partial
+        /// occluder can reach it, and the first sub-quad is a corner patch, not the face. The corner
+        /// values are the tessellation-independent reading — VO-9a's whole design is that they do not
+        /// move — so probing them keeps these scenarios asserting the same property at any density.
+        /// </para>
+        /// </summary>
+        /// <param name="o">The meshing job output to search.</param>
+        /// <param name="cellX">Chunk-local X of the cell whose top face is read.</param>
+        /// <param name="cellY">Chunk-local Y of that cell (the face lies at <c>cellY + 1</c>).</param>
+        /// <param name="cellZ">Chunk-local Z of that cell.</param>
+        /// <returns>The four corner sun values in <c>l0..l3</c> order, or null when a corner is missing.</returns>
+        private static byte[] TopFaceCornerSun(MeshDataJobOutput o, int cellX, int cellY, int cellZ)
+        {
+            float plane = cellY + 1;
+
+            // l0..l3 order for a +Y face is (u, v) = (x, z): (0,0), (0,1), (1,0), (1,1).
+            Vector3[] wanted =
+            {
+                new Vector3(cellX, plane, cellZ),
+                new Vector3(cellX, plane, cellZ + 1),
+                new Vector3(cellX + 1, plane, cellZ),
+                new Vector3(cellX + 1, plane, cellZ + 1),
+            };
+
+            byte[] corners = new byte[4];
+            bool[] found = new bool[4];
+
+            for (int quad = 0; quad < o.Vertices.Length / 4; quad++)
+            {
+                if (o.Normals[quad * 4].y < 0.99f) continue;
+
+                // Require the whole quad to lie on this cell's top face, so a neighboring block's face
+                // sharing a corner position cannot answer for this one.
+                bool onThisFace = true;
+                for (int v = 0; v < 4; v++)
+                {
+                    Vector3 p = o.Vertices[quad * 4 + v];
+                    onThisFace &= Mathf.Abs(p.y - plane) < 0.01f
+                                  && p.x >= cellX - 0.01f && p.x <= cellX + 1.01f
+                                  && p.z >= cellZ - 0.01f && p.z <= cellZ + 1.01f;
+                }
+
+                if (!onThisFace) continue;
+
+                for (int v = 0; v < 4; v++)
+                {
+                    for (int c = 0; c < 4; c++)
+                    {
+                        if (found[c] || Vector3.Distance(o.Vertices[quad * 4 + v], wanted[c]) > 0.01f) continue;
+                        corners[c] = o.LightData[quad * 4 + v].r;
+                        found[c] = true;
+                    }
+                }
+            }
+
+            return found[0] && found[1] && found[2] && found[3] ? corners : null;
         }
 
         /// <summary>Returns true when all four corner values are identical.</summary>

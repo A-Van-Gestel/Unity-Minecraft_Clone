@@ -277,6 +277,197 @@ namespace Helpers
         }
 
         /// <summary>
+        /// VO-9b: a face's four emitted corners — positions and tile-space UVs — in the mesh's vertex
+        /// order, which is also the <c>l0..l3</c> corner-light order.
+        /// </summary>
+        public struct FaceQuad
+        {
+            /// <summary>Corner 0 position (parameter <c>(0, 0)</c>).</summary>
+            public float3 P0;
+
+            /// <summary>Corner 1 position (parameter <c>(0, 1)</c>).</summary>
+            public float3 P1;
+
+            /// <summary>Corner 2 position (parameter <c>(1, 0)</c>).</summary>
+            public float3 P2;
+
+            /// <summary>Corner 3 position (parameter <c>(1, 1)</c>).</summary>
+            public float3 P3;
+
+            /// <summary>Corner 0 tile-space UV.</summary>
+            public float2 T0;
+
+            /// <summary>Corner 1 tile-space UV.</summary>
+            public float2 T1;
+
+            /// <summary>Corner 2 tile-space UV.</summary>
+            public float2 T2;
+
+            /// <summary>Corner 3 tile-space UV.</summary>
+            public float2 T3;
+        }
+
+        /// <summary>
+        /// VO-9b: resolves a standard cube face's four emitted corners without emitting anything, so a
+        /// caller can subdivide the face and still land on exactly the geometry
+        /// <see cref="GenerateStandardCubeFace"/> would have produced.
+        /// </summary>
+        /// <param name="faceIndex">Geometry face index (0-5).</param>
+        /// <param name="position">Block position in chunk-local space.</param>
+        /// <param name="rotation">Y-axis rotation in degrees; 0 for the unrotated case.</param>
+        /// <param name="uvQuarterTurnsCW">Number of 90° clockwise UV rotations to apply (0-3).</param>
+        /// <param name="quad">The face's four corner positions and tile-space UVs.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void GetStandardCubeFaceQuad(int faceIndex, in Vector3Int position, float rotation,
+            int uvQuarterTurnsCW, out FaceQuad quad)
+        {
+            bool isRotated = rotation != 0f;
+            float3 center = BurstVoxelData.BlockCenter;
+            float3x3 yRotation = isRotated ? BurstCustomMeshRotationUtility.GetYRotationMatrix(rotation) : default;
+            float3 origin = new float3(position.x, position.y, position.z);
+
+            quad = default;
+            for (int i = 0; i < 4; i++)
+            {
+                int vertIndex = BurstVoxelData.VoxelTris.Data[faceIndex * 4 + i];
+                float3 vertPos = BurstVoxelData.VoxelVerts.Data[vertIndex];
+                float3 world = isRotated
+                    ? origin + math.mul(yRotation, vertPos - center) + center
+                    : origin + vertPos;
+
+                Vector2 uv = BurstVoxelData.VoxelUvs.Data[s_faceUvOrder[faceIndex * 4 + i]];
+                if ((uvQuarterTurnsCW & 3) != 0) uv = RotateUvQuarterTurnsCW(uv, uvQuarterTurnsCW);
+
+                switch (i)
+                {
+                    case 0:
+                        quad.P0 = world;
+                        quad.T0 = uv;
+                        break;
+                    case 1:
+                        quad.P1 = world;
+                        quad.T1 = uv;
+                        break;
+                    case 2:
+                        quad.P2 = world;
+                        quad.T2 = uv;
+                        break;
+                    default:
+                        quad.P3 = world;
+                        quad.T3 = uv;
+                        break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// VO-9b: carves the axis-aligned parameter rectangle <c>[u0, u1] × [v0, v1]</c> out of a face,
+        /// bilinearly interpolating both positions and tile UVs. Interpolating the UVs is what keeps a
+        /// subdivided face sampling its own slice of the atlas tile instead of repeating the whole tile
+        /// per sub-quad.
+        /// </summary>
+        /// <param name="quad">The full face.</param>
+        /// <param name="u0">Low edge of the sub-rectangle on the first parameter axis.</param>
+        /// <param name="v0">Low edge on the second parameter axis.</param>
+        /// <param name="u1">High edge on the first parameter axis.</param>
+        /// <param name="v1">High edge on the second parameter axis.</param>
+        /// <param name="sub">The resulting sub-quad, in the same corner order.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void GetSubQuad(in FaceQuad quad, float u0, float v0, float u1, float v1,
+            out FaceQuad sub)
+        {
+            sub = default;
+            sub.P0 = BilerpPosition(in quad, u0, v0);
+            sub.P1 = BilerpPosition(in quad, u0, v1);
+            sub.P2 = BilerpPosition(in quad, u1, v0);
+            sub.P3 = BilerpPosition(in quad, u1, v1);
+            sub.T0 = BilerpUv(in quad, u0, v0);
+            sub.T1 = BilerpUv(in quad, u0, v1);
+            sub.T2 = BilerpUv(in quad, u1, v0);
+            sub.T3 = BilerpUv(in quad, u1, v1);
+        }
+
+        /// <summary>Bilinearly interpolates a face's corner positions, in the l0..l3 weighting convention.</summary>
+        /// <param name="quad">The face.</param>
+        /// <param name="u">First parameter axis coordinate.</param>
+        /// <param name="v">Second parameter axis coordinate.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static float3 BilerpPosition(in FaceQuad quad, float u, float v)
+        {
+            return quad.P0 * ((1f - u) * (1f - v)) + quad.P1 * ((1f - u) * v)
+                                                   + quad.P2 * (u * (1f - v)) + quad.P3 * (u * v);
+        }
+
+        /// <summary>Bilinearly interpolates a face's corner tile UVs, in the l0..l3 weighting convention.</summary>
+        /// <param name="quad">The face.</param>
+        /// <param name="u">First parameter axis coordinate.</param>
+        /// <param name="v">Second parameter axis coordinate.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static float2 BilerpUv(in FaceQuad quad, float u, float v)
+        {
+            return quad.T0 * ((1f - u) * (1f - v)) + quad.T1 * ((1f - u) * v)
+                                                   + quad.T2 * (u * (1f - v)) + quad.T3 * (u * v);
+        }
+
+        /// <summary>
+        /// VO-9b: emits one explicitly-positioned quad — the sub-quad primitive the tessellated
+        /// smooth-lighting path builds a face out of. Winding, atlas mapping and the anisotropy-aware
+        /// diagonal split are the same ones <see cref="GenerateStandardCubeFace"/> uses, so a
+        /// single-quad call through here is indistinguishable from an ordinary face.
+        /// </summary>
+        /// <param name="quad">The quad's four corner positions and tile-space UVs.</param>
+        /// <param name="textureID">Atlas texture index.</param>
+        /// <param name="normal">Face normal shared by all four vertices.</param>
+        /// <param name="light0">Light at corner 0.</param>
+        /// <param name="light1">Light at corner 1.</param>
+        /// <param name="light2">Light at corner 2.</param>
+        /// <param name="light3">Light at corner 3.</param>
+        /// <param name="vertexIndex">Running vertex counter, advanced by 4.</param>
+        /// <param name="vertices">Vertex position stream.</param>
+        /// <param name="triangles">Opaque triangle index stream.</param>
+        /// <param name="transparentTriangles">Transparent triangle index stream.</param>
+        /// <param name="uvs">UV stream.</param>
+        /// <param name="colors">Vertex color stream.</param>
+        /// <param name="normals">Normal stream.</param>
+        /// <param name="lightData">Per-vertex light stream.</param>
+        /// <param name="isTransparent">Routes the triangles to the transparent submesh.</param>
+        [BurstCompile]
+        [SkipLocalsInit]
+        public static void EmitFaceQuad(in FaceQuad quad, int textureID, in Vector3 normal,
+            Color32 light0, Color32 light1, Color32 light2, Color32 light3,
+            ref int vertexIndex,
+            ref NativeList<Vector3> vertices, ref NativeList<int> triangles, ref NativeList<int> transparentTriangles,
+            ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
+            ref NativeList<Color32> lightData, bool isTransparent)
+        {
+            vertices.Add(quad.P0);
+            vertices.Add(quad.P1);
+            vertices.Add(quad.P2);
+            vertices.Add(quad.P3);
+
+            for (int i = 0; i < 4; i++)
+            {
+                normals.Add(normal);
+                colors.Add(new Color32(255, 255, 255, 255));
+            }
+
+            AddTexture(textureID, quad.T0, ref uvs);
+            AddTexture(textureID, quad.T1, ref uvs);
+            AddTexture(textureID, quad.T2, ref uvs);
+            AddTexture(textureID, quad.T3, ref uvs);
+
+            lightData.Add(light0);
+            lightData.Add(light1);
+            lightData.Add(light2);
+            lightData.Add(light3);
+
+            NativeList<int> targetTris = isTransparent ? ref transparentTriangles : ref triangles;
+            EmitQuadTriangles(light0, light1, light2, light3, vertexIndex, ref targetTris);
+
+            vertexIndex += 4;
+        }
+
+        /// <summary>
         /// Emits 6 triangle indices for a quad, flipping the diagonal when the luminance
         /// sum of corners 0+3 exceeds 1+2 to minimize smooth-lighting interpolation artifacts.
         /// </summary>
