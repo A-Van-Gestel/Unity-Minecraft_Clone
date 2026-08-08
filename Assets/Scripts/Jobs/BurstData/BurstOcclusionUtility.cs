@@ -144,14 +144,44 @@ namespace Jobs.BurstData
             float3 octantMin = math.select(new float3(0.5f), float3.zero, lowHalf);
             float3 octantMax = math.select(new float3(1f), new float3(0.5f), lowHalf);
 
-            float3 overlap = math.max(0f, math.min(rotatedMax, octantMax) - math.max(rotatedMin, octantMin));
-
-            // An octant's volume is 0.125, so scaling by 8 normalizes the overlap to [0, 1].
-            return math.saturate(overlap.x * overlap.y * overlap.z * OCTANTS_PER_CELL);
+            return GetRegionCoverage(rotatedMin, rotatedMax, octantMin, octantMax);
         }
 
-        /// <summary>Reciprocal of an octant's volume (0.125), used to normalize an overlap to a fraction.</summary>
-        private const float OCTANTS_PER_CELL = 8f;
+        /// <summary>
+        /// VO-9: returns the fraction of an <b>arbitrary</b> block-local box that a rotated block volume
+        /// fills, in <c>[0, 1]</c>. This is the general form of <see cref="GetOctantCoverage"/>, which is
+        /// now the special case where the box is one of the eight <c>0.5³</c> corner sub-boxes.
+        /// <para>
+        /// Ambient occlusion needs it because a shading sample taken somewhere other than a cell corner
+        /// asks about a box centred on that sample point, not about an octant. Generalizing the region
+        /// rather than adding per-shape cases is what keeps the query shape-agnostic: the primitive is
+        /// still an AABB-versus-AABB fill fraction, so any single-box custom mesh works unchanged.
+        /// </para>
+        /// <para>
+        /// The result is normalized by the <i>region's own</i> volume, so a sliver of a cell reports the
+        /// fraction of that sliver which is filled. A region of zero volume returns 0.
+        /// </para>
+        /// </summary>
+        /// <param name="rotatedMin">Rotated minimum corner, block-local (from <see cref="RotateLocalBounds"/>).</param>
+        /// <param name="rotatedMax">Rotated maximum corner, block-local.</param>
+        /// <param name="regionMin">Minimum corner of the query box, block-local.</param>
+        /// <param name="regionMax">Maximum corner of the query box, block-local.</param>
+        /// <returns>The filled fraction of that region.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float GetRegionCoverage(float3 rotatedMin, float3 rotatedMax,
+            float3 regionMin, float3 regionMax)
+        {
+            float3 extent = math.max(0f, regionMax - regionMin);
+            float regionVolume = extent.x * extent.y * extent.z;
+            if (regionVolume <= 0f) return 0f;
+
+            float3 overlap = math.max(0f, math.min(rotatedMax, regionMax) - math.max(rotatedMin, regionMin));
+
+            // An octant's volume is exactly 0.125, so for the octant case this division is by a power of
+            // two — bit-identical to the multiply by 8 this replaced, which is what lets VO-9's general
+            // form take over without moving a single existing corner value.
+            return math.saturate(overlap.x * overlap.y * overlap.z / regionVolume);
+        }
 
         /// <summary>
         /// Maps a face index to the axis it is perpendicular to and which end of that axis it sits on.

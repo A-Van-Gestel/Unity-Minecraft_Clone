@@ -1070,40 +1070,127 @@ namespace Jobs
                 directB = LightBitMapping.GetBlocklightB(lightData);
             }
 
-            l0 = SampleCorner(faceIndex, 0, blockPos, directCell, directNeighbor, normalAxis, normalLowHalf,
+            l0 = SampleCornerPoint(faceIndex, 0, blockPos, directCell, directNeighbor, normalAxis, normalLowHalf,
                 directSun, directR, directG, directB);
-            l1 = SampleCorner(faceIndex, 1, blockPos, directCell, directNeighbor, normalAxis, normalLowHalf,
+            l1 = SampleCornerPoint(faceIndex, 1, blockPos, directCell, directNeighbor, normalAxis, normalLowHalf,
                 directSun, directR, directG, directB);
-            l2 = SampleCorner(faceIndex, 2, blockPos, directCell, directNeighbor, normalAxis, normalLowHalf,
+            l2 = SampleCornerPoint(faceIndex, 2, blockPos, directCell, directNeighbor, normalAxis, normalLowHalf,
                 directSun, directR, directG, directB);
-            l3 = SampleCorner(faceIndex, 3, blockPos, directCell, directNeighbor, normalAxis, normalLowHalf,
+            l3 = SampleCornerPoint(faceIndex, 3, blockPos, directCell, directNeighbor, normalAxis, normalLowHalf,
                 directSun, directR, directG, directB);
         }
 
+        /// <summary>
+        /// Evaluates <see cref="SampleFacePoint"/> at one of the face's four cell corners — the shading
+        /// points the mesher used exclusively before VO-9 introduced sub-cell sampling.
+        /// </summary>
+        /// <param name="faceIndex">Face direction, in <c>VoxelData.FaceChecks</c> order.</param>
+        /// <param name="cornerIndex">Which of the face's four corners (0-3).</param>
+        /// <param name="blockPos">The shaded block's chunk-local position.</param>
+        /// <param name="directCell">The cell in front of the face.</param>
+        /// <param name="directNeighbor">That cell's voxel state, pre-fetched once per face.</param>
+        /// <param name="normalAxis">The face's normal axis (0 = X, 1 = Y, 2 = Z).</param>
+        /// <param name="normalLowHalf">Which half along that axis lies in front of the face.</param>
+        /// <param name="directSun">The direct cell's raw sky light, read once per face.</param>
+        /// <param name="directR">The direct cell's raw red block light.</param>
+        /// <param name="directG">The direct cell's raw green block light.</param>
+        /// <param name="directB">The direct cell's raw blue block light.</param>
+        /// <returns>The corner's encoded light value.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private Color32 SampleCorner(int faceIndex, int cornerIndex, Vector3Int blockPos,
+        private Color32 SampleCornerPoint(int faceIndex, int cornerIndex, Vector3Int blockPos,
             Vector3Int directCell, VoxelState? directNeighbor, int normalAxis, bool normalLowHalf,
             byte directSun, byte directR, byte directG, byte directB)
         {
-            int lutBase = faceIndex * 12 + cornerIndex * 3;
-            int3 sideAOffset = BurstVoxelData.CornerOffsets.Data[lutBase + 0];
-            int3 sideBOffset = BurstVoxelData.CornerOffsets.Data[lutBase + 1];
-            int3 diagOffset = BurstVoxelData.CornerOffsets.Data[lutBase + 2];
-
-            // VO-8: every sample is asked about the octant touching this corner's vertex, so a partial
-            // block darkens only the corners its volume actually stands next to. (VO-5 asked per-face,
-            // which gave one answer for all four corners — see VOXEL_OCCLUSION_REFACTOR.md §4 D5/VO-8.)
             int3 cornerVert = BurstVoxelData.CornerVertices.Data[faceIndex * 4 + cornerIndex];
-            Vector3Int cornerVertex = new Vector3Int(
+            float3 samplePoint = new float3(
                 blockPos.x + cornerVert.x, blockPos.y + cornerVert.y, blockPos.z + cornerVert.z);
 
-            // The direct neighbor's raw light was read once by the caller; weight it for THIS corner.
+            return SampleFacePoint(samplePoint, directCell, directNeighbor, normalAxis, normalLowHalf,
+                directSun, directR, directG, directB);
+        }
+
+        /// <summary>
+        /// VO-9: computes one smooth-lighting value at an arbitrary point on a face, by sampling the
+        /// four cells of the layer in front of it that a half-cell-wide box centred on that point
+        /// reaches, and blending them by how much of the box each one holds.
+        /// <para>
+        /// <b>At a cell corner this is exactly the pre-VO-9 model, arithmetically.</b> The box then
+        /// straddles the corner, so it covers one octant of each of the four cells that meet there —
+        /// the direct, two side, and diagonal samples — with a quarter of its volume in each, giving
+        /// the four equal weights the old fixed <c>/4</c> average applied. That identity is what makes
+        /// sub-cell sampling safe to introduce: corner values do not move, so a densely sampled face
+        /// still agrees with its neighbours along their shared edge instead of showing a seam.
+        /// </para>
+        /// <para>
+        /// It is also what keeps the model shape-agnostic. The question asked of each cell is a plain
+        /// box-versus-volume fill fraction, so a fence post or any other single-AABB custom mesh needs
+        /// no code of its own.
+        /// </para>
+        /// </summary>
+        /// <param name="samplePoint">The shaded point, in chunk-local space, on the face's plane.</param>
+        /// <param name="directCell">The cell in front of the face.</param>
+        /// <param name="directNeighbor">That cell's voxel state, pre-fetched once per face.</param>
+        /// <param name="normalAxis">The face's normal axis (0 = X, 1 = Y, 2 = Z).</param>
+        /// <param name="normalLowHalf">Which half along that axis lies in front of the face (Bug M03).</param>
+        /// <param name="directSun">The direct cell's raw sky light, read once per face.</param>
+        /// <param name="directR">The direct cell's raw red block light.</param>
+        /// <param name="directG">The direct cell's raw green block light.</param>
+        /// <param name="directB">The direct cell's raw blue block light.</param>
+        /// <returns>The encoded light value at that point.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private Color32 SampleFacePoint(float3 samplePoint, Vector3Int directCell,
+            VoxelState? directNeighbor, int normalAxis, bool normalLowHalf,
+            byte directSun, byte directR, byte directG, byte directB)
+        {
+            int axisA = normalAxis == 0 ? 1 : 0;
+            int axisB = normalAxis == 2 ? 1 : 2;
+
+            TangentSpan(samplePoint[axisA], Component(directCell, axisA),
+                out int offsetA, out float weightDirectA, out float weightNeighborA,
+                out float directMinA, out float directMaxA, out float neighborMinA, out float neighborMaxA);
+            TangentSpan(samplePoint[axisB], Component(directCell, axisB),
+                out int offsetB, out float weightDirectB, out float weightNeighborB,
+                out float directMinB, out float directMaxB, out float neighborMinB, out float neighborMaxB);
+
+            // Every query region shares the same slab along the normal axis: the half of the sampled
+            // cell that lies in front of the shaded surface.
+            float3 baseMin = default, baseMax = default;
+            baseMin[normalAxis] = normalLowHalf ? 0f : 0.5f;
+            baseMax[normalAxis] = normalLowHalf ? 0.5f : 1f;
+
+            float3 regionMinDirect = baseMin, regionMaxDirect = baseMax;
+            regionMinDirect[axisA] = directMinA;
+            regionMaxDirect[axisA] = directMaxA;
+            regionMinDirect[axisB] = directMinB;
+            regionMaxDirect[axisB] = directMaxB;
+
+            float3 regionMinSideA = baseMin, regionMaxSideA = baseMax;
+            regionMinSideA[axisA] = neighborMinA;
+            regionMaxSideA[axisA] = neighborMaxA;
+            regionMinSideA[axisB] = directMinB;
+            regionMaxSideA[axisB] = directMaxB;
+
+            float3 regionMinSideB = baseMin, regionMaxSideB = baseMax;
+            regionMinSideB[axisA] = directMinA;
+            regionMaxSideB[axisA] = directMaxA;
+            regionMinSideB[axisB] = neighborMinB;
+            regionMaxSideB[axisB] = neighborMaxB;
+
+            float3 regionMinDiag = baseMin, regionMaxDiag = baseMax;
+            regionMinDiag[axisA] = neighborMinA;
+            regionMaxDiag[axisA] = neighborMaxA;
+            regionMinDiag[axisB] = neighborMinB;
+            regionMaxDiag[axisB] = neighborMaxB;
+
+            Vector3Int stepA = AxisStep(axisA, offsetA);
+            Vector3Int stepB = AxisStep(axisB, offsetB);
+
+            // The direct neighbor's raw light was read once by the caller; weight it for THIS point.
             if (directNeighbor.HasValue)
             {
                 BlockTypeJobData directProps = BlockTypes[directNeighbor.Value.ID];
-                float directCoverage = LightAttenuation.AmbientOcclusionOctantCoverage(in directProps,
-                    directNeighbor.Value.Meta,
-                    OctantTowardCorner(directCell, cornerVertex, normalAxis, normalLowHalf));
+                float directCoverage = LightAttenuation.AmbientOcclusionRegionCoverage(in directProps,
+                    directNeighbor.Value.Meta, regionMinDirect, regionMaxDirect);
 
                 if (directCoverage >= LightAttenuation.FullCoverageThreshold)
                 {
@@ -1122,12 +1209,10 @@ namespace Jobs
                 }
             }
 
-            SampleNeighborLight(blockPos + new Vector3Int(sideAOffset.x, sideAOffset.y, sideAOffset.z),
-                cornerVertex, normalAxis, normalLowHalf,
+            SampleNeighborLight(directCell + stepA, regionMinSideA, regionMaxSideA,
                 out byte sideASun, out byte sideAR, out byte sideAG, out byte sideAB, out float sideACoverage);
 
-            SampleNeighborLight(blockPos + new Vector3Int(sideBOffset.x, sideBOffset.y, sideBOffset.z),
-                cornerVertex, normalAxis, normalLowHalf,
+            SampleNeighborLight(directCell + stepB, regionMinSideB, regionMaxSideB,
                 out byte sideBSun, out byte sideBR, out byte sideBG, out byte sideBB, out float sideBCoverage);
 
             byte diagSun = 0, diagR = 0, diagG = 0, diagB = 0;
@@ -1135,24 +1220,100 @@ namespace Jobs
                                    && sideBCoverage >= LightAttenuation.FullCoverageThreshold;
             if (!sidesSealCorner)
             {
-                SampleNeighborLight(blockPos + new Vector3Int(diagOffset.x, diagOffset.y, diagOffset.z),
-                    cornerVertex, normalAxis, normalLowHalf,
+                SampleNeighborLight(directCell + stepA + stepB, regionMinDiag, regionMaxDiag,
                     out diagSun, out diagR, out diagG, out diagB, out _);
             }
 
-            // Average all 4 channels independently (always divide by 4).
-            // Encode to UNorm8: value * 17 maps 0-15 → 0-255 (with rounding: (sum * 17 + 2) / 4).
-            int sunSum = directSun + sideASun + sideBSun + diagSun;
-            int rSum = directR + sideAR + sideBR + diagR;
-            int gSum = directG + sideAG + sideBG + diagG;
-            int bSum = directB + sideAB + sideBB + diagB;
+            // Blend the four samples by their share of the query box, then encode to UNorm8 exactly as
+            // the fixed four-way average did: scaling the weights by 4 leaves the corner case summing
+            // the same integers it always has, so `(sum * 17 + 2) / 4` still reproduces it bit for bit.
+            float weightDirect = weightDirectA * weightDirectB * WEIGHT_SCALE;
+            float weightSideA = weightNeighborA * weightDirectB * WEIGHT_SCALE;
+            float weightSideB = weightDirectA * weightNeighborB * WEIGHT_SCALE;
+            float weightDiag = weightNeighborA * weightNeighborB * WEIGHT_SCALE;
+
+            float sunSum = directSun * weightDirect + sideASun * weightSideA
+                                                    + sideBSun * weightSideB + diagSun * weightDiag;
+            float rSum = directR * weightDirect + sideAR * weightSideA
+                                                + sideBR * weightSideB + diagR * weightDiag;
+            float gSum = directG * weightDirect + sideAG * weightSideA
+                                                + sideBG * weightSideB + diagG * weightDiag;
+            float bSum = directB * weightDirect + sideAB * weightSideA
+                                                + sideBB * weightSideB + diagB * weightDiag;
 
             return new Color32(
-                (byte)((sunSum * 17 + 2) / 4),
-                (byte)((rSum * 17 + 2) / 4),
-                (byte)((gSum * 17 + 2) / 4),
-                (byte)((bSum * 17 + 2) / 4)
+                (byte)((sunSum * 17f + 2f) / 4f),
+                (byte)((rSum * 17f + 2f) / 4f),
+                (byte)((gSum * 17f + 2f) / 4f),
+                (byte)((bSum * 17f + 2f) / 4f)
             );
+        }
+
+        /// <summary>
+        /// Rescales the blend weights (which sum to 1) so the four-way corner case sums plain integers,
+        /// keeping the UNorm8 encode below bit-identical to the fixed <c>/4</c> average it generalizes.
+        /// </summary>
+        private const float WEIGHT_SCALE = 4f;
+
+        /// <summary>
+        /// Splits the sample box's extent along one tangent axis between the direct cell and whichever
+        /// neighbor the box reaches into, returning both the blend weights and the per-cell query ranges.
+        /// <para>
+        /// The box is one cell wide and centred on the sample point, so it always spans exactly two
+        /// cells along each tangent axis. Sampling at a cell corner splits it evenly (0.5 / 0.5 — the
+        /// octant case); sampling at the cell's midline gives the whole box to the direct cell.
+        /// </para>
+        /// </summary>
+        /// <param name="samplePos">The sample point's coordinate on this axis, chunk-local.</param>
+        /// <param name="cellBase">The direct cell's minimum coordinate on this axis, chunk-local.</param>
+        /// <param name="neighborOffset">Which neighbor the box reaches: -1 or +1 cells.</param>
+        /// <param name="directWeight">Share of the box inside the direct cell, in <c>[0, 1]</c>.</param>
+        /// <param name="neighborWeight">Share of the box inside the neighbor.</param>
+        /// <param name="directMin">Query range start inside the direct cell, cell-local.</param>
+        /// <param name="directMax">Query range end inside the direct cell.</param>
+        /// <param name="neighborMin">Query range start inside the neighbor, cell-local.</param>
+        /// <param name="neighborMax">Query range end inside the neighbor.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void TangentSpan(float samplePos, int cellBase,
+            out int neighborOffset, out float directWeight, out float neighborWeight,
+            out float directMin, out float directMax, out float neighborMin, out float neighborMax)
+        {
+            float boxMin = samplePos - SAMPLE_BOX_HALF_EXTENT;
+            float boxMax = samplePos + SAMPLE_BOX_HALF_EXTENT;
+
+            directMin = math.saturate(boxMin - cellBase);
+            directMax = math.saturate(boxMax - cellBase);
+            directWeight = directMax - directMin;
+
+            neighborOffset = samplePos - cellBase < 0.5f ? -1 : 1;
+            int neighborBase = cellBase + neighborOffset;
+            neighborMin = math.saturate(boxMin - neighborBase);
+            neighborMax = math.saturate(boxMax - neighborBase);
+            neighborWeight = neighborMax - neighborMin;
+        }
+
+        /// <summary>
+        /// Half-width of the ambient-occlusion sample box, in cells. Half a cell each way makes the box
+        /// one cell wide, which is what reduces it to an octant of each of four cells at a corner.
+        /// </summary>
+        private const float SAMPLE_BOX_HALF_EXTENT = 0.5f;
+
+        /// <summary>Returns a unit-axis step vector: <paramref name="amount"/> on <paramref name="axis"/>, zero elsewhere.</summary>
+        /// <param name="axis">0 = X, 1 = Y, 2 = Z.</param>
+        /// <param name="amount">Signed cell count to step.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector3Int AxisStep(int axis, int amount)
+        {
+            return new Vector3Int(axis == 0 ? amount : 0, axis == 1 ? amount : 0, axis == 2 ? amount : 0);
+        }
+
+        /// <summary>Reads one component of a <see cref="Vector3Int"/> by axis index, branchlessly enough for Burst.</summary>
+        /// <param name="value">The vector to read.</param>
+        /// <param name="axis">0 = X, 1 = Y, 2 = Z.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int Component(Vector3Int value, int axis)
+        {
+            return axis == 0 ? value.x : axis == 1 ? value.y : value.z;
         }
 
         /// <summary>
@@ -1160,18 +1321,15 @@ namespace Jobs
         /// shaded surface the block there occludes.
         /// </summary>
         /// <param name="pos">The cell to sample, in chunk-local coordinates.</param>
-        /// <param name="cornerVertex">The shaded corner's vertex in chunk-local space (VO-8). The octant
-        /// of <paramref name="pos"/> touching it is what the sample is asked about.</param>
-        /// <param name="normalAxis">The shaded face's normal axis (0 = X, 1 = Y, 2 = Z).</param>
-        /// <param name="normalLowHalf">Which half of the cell along that axis lies in front of the face.</param>
+        /// <param name="regionMin">Minimum corner of the query region inside that cell, cell-local (VO-9).</param>
+        /// <param name="regionMax">Maximum corner of the query region inside that cell, cell-local.</param>
         /// <param name="sun">The sample's sky light, already weighted by the open fraction.</param>
         /// <param name="blockR">The sample's red block light, already weighted.</param>
         /// <param name="blockG">The sample's green block light, already weighted.</param>
         /// <param name="blockB">The sample's blue block light, already weighted.</param>
-        /// <param name="coverage">The occluded fraction of that octant, in <c>[0, 1]</c>.</param>
+        /// <param name="coverage">The occluded fraction of that region, in <c>[0, 1]</c>.</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void SampleNeighborLight(Vector3Int pos, Vector3Int cornerVertex,
-            int normalAxis, bool normalLowHalf,
+        private void SampleNeighborLight(Vector3Int pos, float3 regionMin, float3 regionMax,
             out byte sun, out byte blockR, out byte blockG, out byte blockB, out float coverage)
         {
             VoxelState? state = GetVoxelStateFromLocalPos(pos);
@@ -1187,8 +1345,7 @@ namespace Jobs
 
             VoxelState s = state.Value;
             BlockTypeJobData props = BlockTypes[s.ID];
-            coverage = LightAttenuation.AmbientOcclusionOctantCoverage(in props, s.Meta,
-                OctantTowardCorner(pos, cornerVertex, normalAxis, normalLowHalf));
+            coverage = LightAttenuation.AmbientOcclusionRegionCoverage(in props, s.Meta, regionMin, regionMax);
 
             // A fully-covered face substitutes hard darkness and never reads the light array — the
             // pre-VO-5 opaque branch, reached unchanged by every full cube.
@@ -1214,37 +1371,6 @@ namespace Jobs
             blockR = Weigh(blockR, open);
             blockG = Weigh(blockG, open);
             blockB = Weigh(blockB, open);
-        }
-
-        /// <summary>
-        /// VO-8: selects the octant of <paramref name="cellPos"/> that touches <paramref name="cornerVertex"/>.
-        /// <para>
-        /// Every ambient-occlusion sample is a cell having that vertex as one of its own corners, so on
-        /// each axis the vertex sits either at the cell's minimum (take the low half) or at its maximum
-        /// (take the high half). One comparison per axis, identical for the direct, side, and diagonal
-        /// samples — none of them needs to know which kind it is.
-        /// </para>
-        /// </summary>
-        /// <param name="cellPos">The sampled cell, chunk-local.</param>
-        /// <param name="cornerVertex">The shaded corner's vertex, chunk-local.</param>
-        /// <param name="normalAxis">The shaded face's normal axis (0 = X, 1 = Y, 2 = Z).</param>
-        /// <param name="normalLowHalf">Which half along that axis lies in front of the face — resolved
-        /// once per face by the caller, because it depends on where the face sits inside the cell rather
-        /// than on the corner (Bug M03).</param>
-        /// <returns>Per axis, true when the octant is the cell's <c>[0, 0.5]</c> half.</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static bool3 OctantTowardCorner(Vector3Int cellPos, Vector3Int cornerVertex,
-            int normalAxis, bool normalLowHalf)
-        {
-            bool3 octant = new bool3(
-                cornerVertex.x <= cellPos.x,
-                cornerVertex.y <= cellPos.y,
-                cornerVertex.z <= cellPos.z);
-
-            // The corner vertex sits on a cell boundary, so it cannot say which side of an *interior*
-            // face the octant should be on. The normal axis is therefore resolved from the face itself.
-            octant[normalAxis] = normalLowHalf;
-            return octant;
         }
 
         /// <summary>Scales one light channel by a partial occluder's open fraction.</summary>

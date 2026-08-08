@@ -188,6 +188,38 @@ namespace Jobs.BurstData
             return BurstOcclusionUtility.GetOctantCoverage(rotatedMin, rotatedMax, lowHalf);
         }
 
+        /// <summary>
+        /// VO-9: how much of an <b>arbitrary block-local region</b> of a sampled cell is occluded — the
+        /// general form of <see cref="AmbientOcclusionOctantCoverage"/>, used when a shading sample is
+        /// taken somewhere other than a cell corner.
+        /// <para>
+        /// Same gating as the octant form, and for the same reasons: transparent volumes occlude nothing,
+        /// and a block with no custom bounds answers 0 or 1 without touching the rotation path — so an
+        /// ordinary cube costs one branch here no matter how densely the face is sampled.
+        /// </para>
+        /// </summary>
+        /// <param name="block">The block being sampled.</param>
+        /// <param name="meta">The placed voxel's raw metadata byte (selects the volume's rotation).</param>
+        /// <param name="regionMin">Minimum corner of the query region, in the sampled cell's local space.</param>
+        /// <param name="regionMax">Maximum corner of the query region, in the sampled cell's local space.</param>
+        /// <returns>The occluded fraction of that region.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float AmbientOcclusionRegionCoverage(in BlockTypeJobData block, byte meta,
+            float3 regionMin, float3 regionMax)
+        {
+            if (!block.IsOpaque)
+                return 0f;
+            if (!block.HasCustomBounds)
+                return 1f;
+
+            float3x3 rotationMatrix = BurstCustomMeshRotationUtility.GetRotationMatrix(
+                block.MetadataSchema, meta, block.DefaultMetadata);
+            BurstOcclusionUtility.RotateLocalBounds(block.BoundsMin, block.BoundsMax, in rotationMatrix,
+                out float3 rotatedMin, out float3 rotatedMax);
+
+            return BurstOcclusionUtility.GetRegionCoverage(rotatedMin, rotatedMax, regionMin, regionMax);
+        }
+
         /// <summary>Coverage at or above which a face counts as fully covered (absorbs float round-off).</summary>
         private const float FULL_COVERAGE_THRESHOLD = 1f - 1e-4f;
 
