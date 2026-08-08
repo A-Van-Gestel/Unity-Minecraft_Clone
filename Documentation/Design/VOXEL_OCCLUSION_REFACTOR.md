@@ -1147,6 +1147,7 @@ owner as a scope decision rather than picking one.
 | v2      | Directional occlusion for fluids                                     | Fluid surfaces have their own height model; would need its own coverage derivation.          |
 | v3      | `FLAG_HAS_SIDED_TRANSPARENT_BLOCKS`-style queue flag                 | Starlight's optimization — only pay the directional check when a partial block is in range. Measure first (`perf-benchmark`); do not pre-optimize. |
 | —       | **Close the `NS-4` rotated-bounds gap (F10)**                        | Add a Physics Solver scenario that actually discriminates a rotated custom-bounds volume (e.g. land a body on a vertical slab and assert the rest height differs from the identity orientation). Owned by `SUB_VOXEL_COLLISION_SYSTEM.md` / `NS-4`, not by a VO phase — but every VO phase touching the rotation core is unguarded there until it exists. |
+| next    | **`SS-*` — silhouette-based contact shadows** (its own design doc)   | The visual feature VO-9 set out to deliver. **F18 establishes that no coverage-fraction model can produce it for an axis-aligned slab**, and the owner's "AO around a single block is too circular" observation is the same gap seen on a full cube. Needs a shading term keyed on the occluder's *silhouette* with a distance falloff, evaluated per sub-vertex — VO-9b's subdivision is the substrate it consumes. Design pass first; this arc (VO-*) is closed. |
 
 ---
 
