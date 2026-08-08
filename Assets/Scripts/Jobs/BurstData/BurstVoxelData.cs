@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Mathematics;
@@ -37,6 +38,22 @@ namespace Jobs.BurstData
         /// re-spelling <c>(0.5, 0.5, 0.5)</c> at every rotation site.
         /// </summary>
         public static float3 BlockCenter => new float3(0.5f, 0.5f, 0.5f);
+
+        /// <summary>
+        /// The index of the face opposite <paramref name="faceIndex"/>, in <c>VoxelData.FaceChecks</c>
+        /// order. The Burst-safe mirror of <c>VoxelData.RevFaceChecksIndices</c>, which is a managed
+        /// <c>int[]</c> a Burst job cannot read.
+        /// <para>
+        /// <c>FaceChecks</c> pairs every face with its opposite in adjacent slots (0↔1 Back/Front,
+        /// 2↔3 Top/Bottom, 4↔5 Left/Right), so flipping the low bit is exact rather than a
+        /// coincidence. Meshing baseline B43 asserts this against the managed table so the two
+        /// cannot drift.
+        /// </para>
+        /// </summary>
+        /// <param name="faceIndex">Face direction, in <c>VoxelData.FaceChecks</c> order.</param>
+        /// <returns>The opposing face's index.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int OppositeFace(int faceIndex) => faceIndex ^ 1;
 
         // These empty structs are just unique keys for the SharedStatic fields.
         private struct VoxelVertsKey

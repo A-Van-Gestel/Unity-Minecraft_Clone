@@ -2,7 +2,7 @@
 
 **Status:** ✅ **Active backlog** — Wave 1 executed 2026-06-17 (MH-1/MH-4/MH-9 closed), Wave 2 executed 2026-06-18 (MH-5/MH-3 closed), Wave 3 executed 2026-06-18 (MH-6 closed — buildable-now portion), Wave 5 executed 2026-06-21 (MH-10/MH-11 cross-chunk border culling closed); see §6. **Optimizations landed (guarded by this suite):** MR-1, MR-7 (2026-06-15); **MR-3 + MR-4 + MR-5**
 (2026-06-18, Wave 1 of the MR-* implementation phase) — MR-3/MR-4 added the build-alongside postconditions **B15** (no-reassign-when-bitmask-unchanged) and **B16** (constant-cell-bounds); MR-6 added **B17** (pooled-output stale guard); the cross-chunk substrate prerequisite added **B18–B21**. Since then FL-1/FL-2 added **B22/B23**, the MP-* orchestration arc added **B24–B27**, MP-5 added **B28–B30**, MP-6 added **B31–B33**, the chunk load-animation toggle regression added **B34–B36**, MP-7 added **B37–B39** (neighbor-map permutation guards, MH-12 —
-cardinals via face culling, diagonals via fluid corner geometry, and the shared acquire-site offset table), and MH-13 added **B40** (the same guard for the eight neighbor **light** maps) — **tip is B40 (40 baselines); see §4 for the arc detail.**  
+cardinals via face culling, diagonals via fluid corner geometry, and the shared acquire-site offset table), MH-13 added **B40** (the same guard for the eight neighbor **light** maps), and **VO-5** added **B41–B43** (fractional ambient occlusion for partial blocks) — **tip is B43 (43 baselines); see §4 for the arc detail.**  
 **Created:** 2026-06-16 · **Last updated:** 2026-07-26 **Scope:**
 `Assets/Editor/Validation/Meshing/` — the `MeshingValidationSuite` + `MeshingTestWorld` +
 `MeshOracle` + `MeshAssert` + `TestMeshBlockPalette` harness (menu item **`Minecraft Clone/Dev/Validate Meshing`**). **Sibling:** [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](LIGHTING_VALIDATION_HARNESS_FIDELITY.md) — same document shape; the meshing suite was built test-first as that suite's younger sibling.
@@ -62,7 +62,17 @@ So the blind spots below are read against a clear baseline of what *is* covered:
 > and asserted via the MH-5 opt-in path (→ **MH-5**, CLOSED 2026-06-18). `MeshDataJobOutput.SectionStats`
 > (per-section vertex/triangle index ranges) is tile-checked by `StructuralInvariants` (→ **MH-9**, CLOSED
 > 2026-06-17). Smooth-light values are oracle-covered for the *uniform* case (→ **MH-3**, CLOSED 2026-06-18);
-> distinct-per-corner / AO values remain a future extension (see §3 MH-3).
+> distinct-per-corner light values remain a future extension (see §3 MH-3). **AO is now partly covered**:
+> VO-5's **B41–B43** assert occlusion *ordering* between orientations over a uniform light field, which
+> needs no model of the corner LUT (the A4 trap) but also does not pin absolute corner values — that is
+> still the MH-3 extension.
+>
+> ⚠️ **Fixture authoring is a fidelity surface of its own** (VO-5, finding **F13**). `TestMeshBlockPalette`'s
+> half slab carried no `collisionBounds` for its entire existence: a slab in geometry, a full cube in shape.
+> Nothing caught it because no meshing code asked a shape question until VO-5, and the sibling *lighting*
+> palette had always authored it. A palette field that production authors and the fixture omits is invisible
+> until some phase reads it — and then it silently produces plausible, wrong numbers rather than an error.
+> `TestCustomMeshLibrary` carries the same exposure for VO-6's face centroid.
 
 ---
 

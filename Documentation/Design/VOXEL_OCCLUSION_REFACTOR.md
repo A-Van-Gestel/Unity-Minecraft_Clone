@@ -1,8 +1,9 @@
 # Directional Per-Face Voxel Occlusion (VO-*)
 
-**Version:** 1.8  
+**Version:** 1.9  
 **Date:** 2026-08-08  
-**Status:** Proposed design — VO-0…VO-4 implemented and confirmed in game; VO-5…VO-6 pending; VO-7 descoped.  
+**Status:** Proposed design — VO-0…VO-5 implemented (VO-0…VO-4 confirmed in game, VO-5 confirmed in game
+2026-08-08); VO-6 pending; VO-7 descoped.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > The engine gained partial blocks (`Stone Half Slab`) without the lighting model gaining a notion
@@ -208,6 +209,8 @@ Not part of the phases below — recording it so a cold executor does not redo i
 | F10 | **`NS-4` does not guard the collision rotation.** Discovered by VO-1's prove-red: with `math.transpose` applied to the shared rotation core, all **26** Physics Solver baselines stayed green. The plan (v1.0) had asserted `NS-4` was the guard that a collision-bounds refactor is behaviour-preserving; it is not — none of its scenarios distinguish a rotated custom-bounds volume from its inverse. This is a pre-existing coverage gap in `NS-4`, not something VO-1 introduced, and it means *any* future change to the rotation path needs the occlusion baselines (or new `NS-4` scenarios) to be safe. | Recorded here; VO-1's guard chain compensates. A dedicated `NS-4` rotated-bounds scenario is filed as a follow-up in §7. |
 | F11 | **The oracle's sky column seeding was over-migrated by VO-3, and nothing could see it.** `LightingOracle`'s downward column walk charged only each cell's *entry* cost through its top face — and a horizontal slab's top face is the open mid-plane, so the column walked straight through the solid half beneath it, leaving the oracle 1 level brighter than the engine under any slab ceiling. The engine was right (its column recalc uses whole-block opacity there). It went unnoticed because B101–B104 are probe-based by design (F7), so **VO-4's B105 is the suite's first oracle comparison containing a partial block at all**. Full-cube controls matched throughout, which is how the fixture was cleared before the spec was touched. | VO-4 (fixed: `ExitBlocked` on the bottom face) |
 | F12 | **Sealing a partial-block light shaft never darkens the column beneath it.** Found while authoring B105; reproduces with **no chunk seam anywhere**, so it is not VO-4's subject. `IsLightObstructing` is `Opacity > 0`, so a slab already sits in the heightmap and sealing it never re-runs `RecalculateSunlightForColumn`; `PropagateDarkness` cannot help either, because a flat 15 column has no decrement chain. Controls pin it to partial blocks: a Glass shaft (full cube, opacity 0, equally undimmed column, *not* light-obstructing) and a Water shaft both darken correctly. This makes VO-3's recorded "the field is correct; the heightmap merely stays conservative" true for placement and **false for removal**. | Filed as `LIGHTING_BUGS.md` **Bug 21**; **root fix landed 2026-08-08** (user chose it over the narrower trigger-only option): `LightAttenuation.ObstructsSkyColumn` replaces `IsLightObstructing` at every heightmap site, **plus** a second part the harness caught — `ModifyVoxel`'s recalculation trigger fired only on an opacity change, which sealing a slab by rotation does not produce |
+| F13 | **The meshing harness's half slab had no authored volume.** `TestMeshBlockPalette.MakeHalfSlab` never set `collisionBounds`, so both slab fixtures reported `HasCustomBounds = false` and coverage 1 on all six faces — a slab in geometry, a full cube in shape. The lighting palette has always authored it (`TestBlockPalette.cs:88`); the meshing palette diverged silently because, until VO-5, no meshing code asked a shape question. Found by VO-5's first probe returning identical numbers for every orientation. Inert before VO-5 (no existing baseline read bounds), so no prior result was wrong. | VO-5 (fixed: `collisionBounds = BlockCollisionBounds.BottomHalfSlab`). Generalizes the warning already recorded against `TestCustomMeshLibrary` in the VO-6 packet: **harness fixtures mirror production authoring, and an unmirrored field stays invisible until some phase reads it.** |
+| F14 | **VO-5 cannot be visually judged on slab surfaces until VO-6 lands.** VO-5 only ever *removes* darkening (a partial block occludes less), and a block's volume never occludes its own face — so slab faces gain no shading from it, while losing the blanket darkening that previously masked F1. In game this reads as "the slabs have no AO". Confirmed numerically on the four-slab pit: the pit floor moved 64 → 132 (the reported artifact, fixed), while every slab face only brightened. The surfaces a viewer judges the AO blend on are exactly the ones VO-6 re-samples. | Recorded. Owner accepted VO-5 as-is on this basis (2026-08-08) rather than reordering or tuning the blend to compensate — tuning a shading knob to hide a sampling bug would have to be undone by VO-6. **Re-check the D5 blend once VO-6 is in game.** |
 | F9 | ⚠️ **CLOSED-AS-WONTFIX 2026-08-08 (see VO-7).** **Light values are serialized; the model is not versioned.** Nothing on disk records which occlusion model produced a chunk's `LightData`, so without an explicit version bump an upgraded client silently mixes old and new lighting per chunk. (Executor verifies the exact world-version constant — the grep for it returned nothing under `Serialization/`/`Data/`.)                       | ~~VO-7~~ — descoped |
 
 ---
@@ -321,7 +324,14 @@ diagonal term is skipped only when both side coverages are ≥ 1 (preserving tod
 full cubes exactly). Executor confirms the exact blend before writing baselines — this is the one
 decision whose *visual* outcome needs user sign-off (VO-5).
 
-**Which face's coverage does an AO sample ask for? (proposed 2026-08-08, NOT yet signed off.)** The
+> ✅ **SIGNED OFF 2026-08-08 (VO-5 executed).** The face rule below was adopted unchanged and the blend
+> is the linear `light × (1 − coverage)`. Verified on the engine, not argued: the three orientations of
+> one slab — differing only by metadata — produce three distinct results on a probe face (bottom slab
+> occludes exactly like a full cube, vertical occludes half, top occludes nothing), while the rejected
+> six-face average scores all three at 0.5. Guarded by baseline **B42**. The owner accepted the blend
+> knowing VO-6 will change these same surfaces (**F14**) rather than tune it twice.
+
+**Which face's coverage does an AO sample ask for? (proposed 2026-08-08, adopted same day.)** The
 question D5 left open: AO's side and diagonal samples are not face-adjacent to the meshed face, so
 "the coverage of the sampled block" is ambiguous. Proposed rule — **ask the sampled cell for the
 face pointing back at the meshed face's plane**, i.e. `RevFaceChecksIndices[faceIndex]`. Why this one:
@@ -336,8 +346,8 @@ face pointing back at the meshed face's plane**, i.e. `RevFaceChecksIndices[face
 
 The alternative considered was averaging the sampled volume's coverage over all six faces (orientation-
 blind, so a vertical and a horizontal slab would darken identically — it discards exactly the
-information this arc added). **Executor: put this in front of the user with a before/after image before
-writing the baselines; the rule above is a starting proposal, not a decision.**
+information this arc added). Measured on the engine, that alternative scores bottom / vertical / top
+slabs all at 0.5 where the chosen rule scores 1 / 0.5 / 0.
 
 ---
 
@@ -364,7 +374,7 @@ writing the baselines; the rule above is a starting proposal, not a decision.**
 | ~~**VO-2**~~ | ✅ Harness support for partial blocks (suite-only)        | 🟢     | VO-1         |
 | ~~**VO-3**~~ | ✅ Directional occlusion in the BFS (awaiting in-game)    | 🔴     | VO-2         |
 | ~~**VO-4**~~ | ✅ Directional cross-chunk support / veto                     | 🔴     | VO-3         |
-| **VO-5** | Fractional AO occlusion                                      | 🟡     | VO-1         |
+| ~~**VO-5**~~ | ✅ Fractional AO occlusion                                | 🟡     | VO-1         |
 | **VO-6** | Sub-block face light sampling (closes Bug M01)               | 🟡     | VO-1 (VO-3 for the general case — see packet) |
 | ~~**VO-7**~~ | ❌ World-version bump + relight — **DESCOPED**, see packet | —      | —            |
 
@@ -644,9 +654,29 @@ solid-side 0, opaque cube 0, open-face entry 11, covered-face entry 0, B49's fla
 - **Doc-sync:** `LIGHTING_SYSTEM_OVERVIEW.md` §3.4.
 - **Serialization:** none beyond VO-3's.
 
-### VO-5 — Fractional AO occlusion (🟡, behavior change — the F8 fix)
+### VO-5 — Fractional AO occlusion (🟡, behavior change — the F8 fix) · ✅ **EXECUTED + CONFIRMED IN GAME 2026-08-08**
 
-- **Precondition:** D5's blend confirmed with the user.
+**What landed.** `LightAttenuation.AmbientOcclusionCoverage` (opacity-gated coverage, `HasCustomBounds`
+short-circuit like every sibling predicate) + `BurstVoxelData.OppositeFace` (Burst-safe mirror of the
+managed `VoxelData.RevFaceChecksIndices`, which a Burst job cannot read). `SampleNeighborLight` returns a
+coverage fraction instead of `out bool isOpaque` and weights each channel by `1 − coverage`;
+`SampleCorner` skips the diagonal only when both side coverages are full; `CalculateCornerLights`'s direct
+term does the same. Baselines **B41** (full-cube coverage is binary), **B42** (per-orientation ordering),
+**B43** (`OppositeFace` drift guard) in `MeshingValidationSuite.FractionalAO.cs`. Validate All **426**.
+
+**Prove-red, done by mutation** (a baseline shipped alongside its own fix has never been seen failing):
+forcing coverage to 1 for opaque blocks reddened **B42 alone**, on exactly its two behavioural legs;
+breaking `OppositeFace` to the identity reddened **B43** and flipped B42's bottom/top slab readings,
+which is the wrong-face signature. **B41 was measured, not assumed:** removing the `HasCustomBounds`
+short-circuit from `AmbientOcclusionCoverage` left it **green** (`GetBlockFaceCoverage` carries an
+identical one underneath, and a full cube's `0..1` bounds compute 1 geometrically anyway) — the docstring
+now says what it observes rather than what it felt like it guarded. It does redden on an opacity-gate
+change, alongside B11.
+
+**Not delivered by this phase (F14):** slab *surfaces* gain no shading. VO-5 only removes darkening, and a
+block never occludes its own face — judging the blend on slab faces has to wait for VO-6.
+
+- **Precondition:** ✅ D5's blend confirmed with the user (see the sign-off note in §4 D5).
 - **Scope:** `MeshGenerationJob.SampleNeighborLight` returns a coverage fraction instead of a bool;
   `SampleCorner` weights the darkness term and the diagonal-skip test by it;
   `CalculateCornerLights`'s `directOpaque` branch likewise. Full cubes must produce **bit-identical**
@@ -772,6 +802,7 @@ append-only — the cost is permanent.
 
 * **v1.0** - Initial design
 * **v1.1** - VO-0 executed (no production code needed): blast radius is one block type, §2.3's bounds table confirmed, surface stamp confirmed (resolves open question 1 and unblocks VO-6 from VO-3), VO-7 version anchors pinned
+* **v1.9** - **VO-5 executed + confirmed in game**: `AmbientOcclusionCoverage` + `BurstVoxelData.OppositeFace`, AO weighted by `1 − coverage`, baselines **B41–B43** (Validate All **426**), all three prove-red by mutation. D5's face rule **signed off** — measured to score bottom/vertical/top slabs 1 / 0.5 / 0 where the rejected six-face average scores all three 0.5. Two new findings: **F13** (the meshing palette's half slab had no authored `collisionBounds`, so VO-5 was invisible to that suite until fixed) and **F14** (slab surfaces gain no shading from VO-5 by construction, so the blend cannot be judged on them until VO-6 — owner accepted VO-5 as-is rather than tune a shading knob to hide a sampling bug)
 * **v1.8** - VO-4 confirmed in game (repro `K20b` → baseline **B106**, commits `9443d08c`/`72b11cd8`); **F12's Bug 21 fixed and archived** as `_FIXED_BUGS.md` Lighting #25 with baseline **B107** (commits `eeb8953e`/`2857996c`) — the root fix needed a second part beyond the heightmap, since `ModifyVoxel`'s recalc trigger keyed on opacity and a rotation changes none; D5 gained a concrete face-choice proposal awaiting user sign-off, and VO-6 gained the centroid-storage and `directNeighbor` notes. Validate All **423**
 * **v1.7** - VO-4 code complete: the support/veto mirrors made directional via `TargetEntryCost` + `NeighborCanDeliver`, `IsVerticallySkyLit` found as a third unlisted site, shadow-caster site deliberately left whole-block; repro `K20b` flips green and baseline **B105** added; 421 baselines green. Two new findings — **F11** (the oracle's column seeding was over-migrated by VO-3; B105 is the suite's first partial-block oracle comparison) and **F12** (sealed partial-block shafts never darken — filed as Bug 21, NOT a VO-4 defect). AWAITING IN-GAME CONFIRMATION
 * **v1.6** - VO-3 confirmed in game (repro `K20a` promoted to permanent baseline **B104**); the sky-column rule found still whole-block in play and fixed via `IsTransparentThroughFace`; undimmed-column question settled with rationale; **VO-7 DESCOPED** (no released worlds, stale light self-heals on block update) with a conditional tripwire; F9 closed as wontfix and D4 superseded
@@ -783,4 +814,4 @@ append-only — the cost is permanent.
 ---
 
 **Last Updated:** 2026-08-08  
-**Next Review:** when VO-5 starts
+**Next Review:** when VO-6 starts

@@ -42,11 +42,18 @@ namespace Editor.Validation.Meshing
             // --- Cross-chunk border-face-culling family (B18–B21, MH-10/MH-11) lives in its own partial
             // file (MeshingValidationSuite.CrossChunk.cs) and self-registers here. ---
             AddCrossChunkBaselineScenarios(scenarios);
+
+            // --- VO-5 fractional ambient occlusion (B41–B43) lives in MeshingValidationSuite.FractionalAO.cs. ---
+            AddFractionalAoBaselineScenarios(scenarios);
         }
 
         /// <summary>Hook for the cross-chunk border-culling baselines (implemented in MeshingValidationSuite.CrossChunk.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddCrossChunkBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the VO-5 fractional-AO baselines (implemented in MeshingValidationSuite.FractionalAO.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddFractionalAoBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>
         /// B1 — Direct, isolated differential test of <see cref="VoxelMeshHelper.GenerateStandardCubeFace"/>:

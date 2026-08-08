@@ -200,6 +200,12 @@ namespace Editor.Validation.Meshing.Framework
             block.renderNeighborFaces = true;
             block.renderShape = RenderShape.CustomMesh;
             block.metadataSchema = MetadataSchema.Facing6Roll2;
+
+            // VO-5: the authored volume must match the geometry, or the fixture is a slab to the mesher
+            // and a full cube to every shape query (BurstOcclusionUtility reads these bounds, not the
+            // custom mesh). The lighting palette has always authored this; the meshing palette did not,
+            // which was inert only for as long as no meshing code asked about shape.
+            block.collisionBounds = BlockCollisionBounds.BottomHalfSlab;
             return block;
         }
 

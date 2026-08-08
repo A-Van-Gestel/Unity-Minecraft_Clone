@@ -973,8 +973,11 @@ namespace Jobs
             else
             {
                 VoxelState ds = directNeighbor.Value;
-                bool directOpaque = BlockTypes[ds.ID].IsOpaque;
-                if (directOpaque)
+                BlockTypeJobData dProps = BlockTypes[ds.ID];
+                float directCoverage = LightAttenuation.AmbientOcclusionCoverage(in dProps, ds.Meta,
+                    BurstVoxelData.OppositeFace(faceIndex));
+
+                if (directCoverage >= LightAttenuation.FullCoverageThreshold)
                 {
                     directSun = 0;
                     directR = 0;
@@ -990,6 +993,15 @@ namespace Jobs
                     directR = LightBitMapping.GetBlocklightR(lightData);
                     directG = LightBitMapping.GetBlocklightG(lightData);
                     directB = LightBitMapping.GetBlocklightB(lightData);
+
+                    if (directCoverage > 0f)
+                    {
+                        float open = 1f - directCoverage;
+                        directSun = Weigh(directSun, open);
+                        directR = Weigh(directR, open);
+                        directG = Weigh(directG, open);
+                        directB = Weigh(directB, open);
+                    }
                 }
             }
 
@@ -1008,17 +1020,26 @@ namespace Jobs
             int3 sideBOffset = BurstVoxelData.CornerOffsets.Data[lutBase + 1];
             int3 diagOffset = BurstVoxelData.CornerOffsets.Data[lutBase + 2];
 
+            // D5: an AO sample occludes through the face it turns toward the surface being shaded, which
+            // is the one opposite the meshed face — a bottom slab in the ring above a +Y face covers its
+            // -Y face fully and still darkens, while a top slab floats clear and does not.
+            int occlusionFace = BurstVoxelData.OppositeFace(faceIndex);
+
             SampleNeighborLight(blockPos + new Vector3Int(sideAOffset.x, sideAOffset.y, sideAOffset.z),
-                out byte sideASun, out byte sideAR, out byte sideAG, out byte sideAB, out bool sideAOpaque);
+                occlusionFace, out byte sideASun, out byte sideAR, out byte sideAG, out byte sideAB,
+                out float sideACoverage);
 
             SampleNeighborLight(blockPos + new Vector3Int(sideBOffset.x, sideBOffset.y, sideBOffset.z),
-                out byte sideBSun, out byte sideBR, out byte sideBG, out byte sideBB, out bool sideBOpaque);
+                occlusionFace, out byte sideBSun, out byte sideBR, out byte sideBG, out byte sideBB,
+                out float sideBCoverage);
 
             byte diagSun = 0, diagR = 0, diagG = 0, diagB = 0;
-            if (!(sideAOpaque && sideBOpaque))
+            bool sidesSealCorner = sideACoverage >= LightAttenuation.FullCoverageThreshold
+                                   && sideBCoverage >= LightAttenuation.FullCoverageThreshold;
+            if (!sidesSealCorner)
             {
                 SampleNeighborLight(blockPos + new Vector3Int(diagOffset.x, diagOffset.y, diagOffset.z),
-                    out diagSun, out diagR, out diagG, out diagB, out _);
+                    occlusionFace, out diagSun, out diagR, out diagG, out diagB, out _);
             }
 
             // Average all 4 channels independently (always divide by 4).
@@ -1036,8 +1057,21 @@ namespace Jobs
             );
         }
 
+        /// <summary>
+        /// Reads one ambient-occlusion sample: the light at <paramref name="pos"/> and how much of the
+        /// shaded surface the block there occludes.
+        /// </summary>
+        /// <param name="pos">The cell to sample, in chunk-local coordinates.</param>
+        /// <param name="occlusionFace">The sampled block's face turned toward the shaded surface, in
+        /// <c>VoxelData.FaceChecks</c> order — see <c>VOXEL_OCCLUSION_REFACTOR.md</c> §4 D5.</param>
+        /// <param name="sun">The sample's sky light, already weighted by the open fraction.</param>
+        /// <param name="blockR">The sample's red block light, already weighted.</param>
+        /// <param name="blockG">The sample's green block light, already weighted.</param>
+        /// <param name="blockB">The sample's blue block light, already weighted.</param>
+        /// <param name="coverage">The occluded fraction of that face, in <c>[0, 1]</c>.</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void SampleNeighborLight(Vector3Int pos, out byte sun, out byte blockR, out byte blockG, out byte blockB, out bool isOpaque)
+        private void SampleNeighborLight(Vector3Int pos, int occlusionFace,
+            out byte sun, out byte blockR, out byte blockG, out byte blockB, out float coverage)
         {
             VoxelState? state = GetVoxelStateFromLocalPos(pos);
             if (!state.HasValue)
@@ -1046,28 +1080,46 @@ namespace Jobs
                 blockR = 0;
                 blockG = 0;
                 blockB = 0;
-                isOpaque = false;
+                coverage = 0f;
                 return;
             }
 
             VoxelState s = state.Value;
-            isOpaque = BlockTypes[s.ID].IsOpaque;
-            if (isOpaque)
+            BlockTypeJobData props = BlockTypes[s.ID];
+            coverage = LightAttenuation.AmbientOcclusionCoverage(in props, s.Meta, occlusionFace);
+
+            // A fully-covered face substitutes hard darkness and never reads the light array — the
+            // pre-VO-5 opaque branch, reached unchanged by every full cube.
+            if (coverage >= LightAttenuation.FullCoverageThreshold)
             {
                 sun = 0;
                 blockR = 0;
                 blockG = 0;
                 blockB = 0;
+                return;
             }
-            else
-            {
-                ushort lightData = GetLightDataFromLocalPos(pos);
-                sun = LightBitMapping.GetSkyLight(lightData);
-                blockR = LightBitMapping.GetBlocklightR(lightData);
-                blockG = LightBitMapping.GetBlocklightG(lightData);
-                blockB = LightBitMapping.GetBlocklightB(lightData);
-            }
+
+            ushort lightData = GetLightDataFromLocalPos(pos);
+            sun = LightBitMapping.GetSkyLight(lightData);
+            blockR = LightBitMapping.GetBlocklightR(lightData);
+            blockG = LightBitMapping.GetBlocklightG(lightData);
+            blockB = LightBitMapping.GetBlocklightB(lightData);
+
+            if (coverage <= 0f) return;
+
+            float open = 1f - coverage;
+            sun = Weigh(sun, open);
+            blockR = Weigh(blockR, open);
+            blockG = Weigh(blockG, open);
+            blockB = Weigh(blockB, open);
         }
+
+        /// <summary>Scales one light channel by a partial occluder's open fraction.</summary>
+        /// <param name="value">The unoccluded channel value (0-15).</param>
+        /// <param name="open">The fraction of the face left open, in <c>[0, 1]</c>.</param>
+        /// <returns>The weighted channel value.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static byte Weigh(byte value, float open) => (byte)math.round(value * open);
 
         /// <summary>
         /// Retrieves the packed ushort light data for any position relative to the current chunk.

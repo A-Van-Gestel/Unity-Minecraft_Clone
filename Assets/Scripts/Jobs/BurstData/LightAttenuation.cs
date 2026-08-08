@@ -149,8 +149,40 @@ namespace Jobs.BurstData
             return EntryOpacity(in block, meta, TOP_FACE) > 0 || ExitBlocked(in block, meta, BOTTOM_FACE);
         }
 
+        /// <summary>
+        /// How much of a face this block visually blocks, in <c>[0, 1]</c> — the ambient-occlusion
+        /// counterpart to <see cref="FaceBlocksLight"/>, which asks the same question as a yes/no.
+        /// AO is a local shading term rather than a transport decision, so it is the one consumer that
+        /// takes the coverage fraction ungraded (see <c>VOXEL_OCCLUSION_REFACTOR.md</c> §4 D2/D5).
+        /// <para>
+        /// Gated on opacity, not on volume alone: glass fills every face and darkens nothing. Full
+        /// cubes return exactly 0 or 1 without touching the rotation path, which is what keeps the
+        /// smooth-lighting output bit-identical for them.
+        /// </para>
+        /// </summary>
+        /// <param name="block">The block being sampled.</param>
+        /// <param name="meta">The placed voxel's raw metadata byte (selects the volume's rotation).</param>
+        /// <param name="faceIndex">The face facing the shaded surface, in <c>VoxelData.FaceChecks</c> order.</param>
+        /// <returns>The occluded fraction of that face.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float AmbientOcclusionCoverage(in BlockTypeJobData block, byte meta, int faceIndex)
+        {
+            if (!block.IsOpaque)
+                return 0f;
+            if (!block.HasCustomBounds)
+                return 1f;
+
+            return math.saturate(BurstOcclusionUtility.GetBlockFaceCoverage(in block, meta, faceIndex));
+        }
+
         /// <summary>Coverage at or above which a face counts as fully covered (absorbs float round-off).</summary>
         private const float FULL_COVERAGE_THRESHOLD = 1f - 1e-4f;
+
+        /// <summary>
+        /// Public form of <see cref="FULL_COVERAGE_THRESHOLD"/> for the AO path, whose caller must apply
+        /// the same "counts as fully covered" cutoff to stay consistent with the transport predicates.
+        /// </summary>
+        public const float FullCoverageThreshold = FULL_COVERAGE_THRESHOLD;
 
         /// <summary>The +Y face index in <c>VoxelData.FaceChecks</c> order — where a downward sky column enters.</summary>
         private const int TOP_FACE = 2;
