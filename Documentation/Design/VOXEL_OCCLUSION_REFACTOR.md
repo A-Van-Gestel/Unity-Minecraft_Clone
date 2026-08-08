@@ -1,6 +1,6 @@
 # Directional Per-Face Voxel Occlusion (VO-*)
 
-**Version:** 1.7  
+**Version:** 1.8  
 **Date:** 2026-08-08  
 **Status:** Proposed design — VO-0…VO-4 implemented and confirmed in game; VO-5…VO-6 pending; VO-7 descoped.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
@@ -110,7 +110,7 @@ code. Results, which later phases cite:
 | # | Stage                        | Code (anchors — re-verify before editing)                                              | Occlusion model today                    | Suite coverage                          |
 |---|------------------------------|-----------------------------------------------------------------------------------------|-------------------------------------------|------------------------------------------|
 | 1 | Light attenuation rule       | `Jobs/BurstData/LightAttenuation.cs:29` `Attenuate(sourceLight, opacity)`                | Scalar, direction-free                    | Indirectly, via every lighting baseline |
-| 2 | BFS propagation              | `Jobs/NeighborhoodLightingJob.cs` — 16 `IsOpaque` sites                                  | Boolean `Opacity >= 15` gates             | ✅ Lighting suite (tip **B100**)         |
+| 2 | BFS propagation              | `Jobs/NeighborhoodLightingJob.cs` — 16 `IsOpaque` sites                                  | Boolean `Opacity >= 15` gates             | ✅ Lighting suite (tip **B107** since VO-4) |
 | 3 | Cross-chunk support / veto   | `Helpers/CrossChunkLightModApplier.cs` — 3 `IsOpaque` references                          | Boolean; "fully-opaque neighbors excluded" | ✅ Lighting B48/B49, B56–B59            |
 | 4 | Borderless oracle (the spec) | `Assets/Editor/Validation/Lighting/Framework/LightingOracle.cs`                           | Calls the same `Attenuate`                | n/a — it *is* the spec                   |
 | 5 | AO corner sampling           | `Jobs/MeshGenerationJob.cs:1040` `SampleNeighborLight`, `:960` `CalculateCornerLights`    | Boolean → substitutes zero                | ⚠️ MH-3 covers **uniform fields only**   |
@@ -320,6 +320,24 @@ fraction, and weight both the substituted-darkness term and the diagonal-skip te
 diagonal term is skipped only when both side coverages are ≥ 1 (preserving today's behaviour for
 full cubes exactly). Executor confirms the exact blend before writing baselines — this is the one
 decision whose *visual* outcome needs user sign-off (VO-5).
+
+**Which face's coverage does an AO sample ask for? (proposed 2026-08-08, NOT yet signed off.)** The
+question D5 left open: AO's side and diagonal samples are not face-adjacent to the meshed face, so
+"the coverage of the sampled block" is ambiguous. Proposed rule — **ask the sampled cell for the
+face pointing back at the meshed face's plane**, i.e. `RevFaceChecksIndices[faceIndex]`. Why this one:
+
+- It is full-cube-identical by construction (coverage 1 on every face), so the bit-identical claim
+  survives.
+- It answers the arc's motivating geometry correctly: for a probe's `+Y` face, a *bottom* slab in the
+  ring above has `−Y` coverage 1 and still occludes fully, while a *top* slab floats above the surface
+  with `−Y` coverage 0 and does not. A rule keyed on the sampled block's own "up" face would get both
+  backwards.
+- Blend: `sun = actualLight × (1 − coverage)`, replacing the hard zero substitution.
+
+The alternative considered was averaging the sampled volume's coverage over all six faces (orientation-
+blind, so a vertical and a horizontal slab would darken identically — it discards exactly the
+information this arc added). **Executor: put this in front of the user with a before/after image before
+writing the baselines; the rule above is a starting proposal, not a decision.**
 
 ---
 
@@ -661,6 +679,16 @@ solid-side 0, opaque cube 0, open-face entry 11, covered-face entry 0, B49's fla
   `sampleCell = floor(pos + rotatedFaceCentroid + 0.5 · rotatedNormal)` degenerates to today's
   `pos + rotatedOffset` for boundary faces and yields `pos` for mid-plane faces. Apply to the legacy
   custom-mesh path (`GenerateCustomBlockMesh_Legacy`) too, or state explicitly why not.
+- **The face centroid is not stored today** (verified 2026-08-08): `CustomFaceData` (`Data/JobData.cs`)
+  carries only `VertStartIndex`/`VertCount`/`TriStartIndex`/`TriCount`. **Precompute it into
+  `CustomFaceData` at load in `JobDataManagerFactory`** rather than averaging vertices per-voxel inside
+  the mesh hot path — this is a per-block-type constant and the meshing job is the engine's hottest
+  loop. `TestCustomMeshLibrary` must mirror whatever field is added, or the harness fixtures diverge
+  from production flattening.
+- **`CalculateCornerLights` also needs the sample cell threaded through**, not just the corner ring: it
+  currently takes a pre-fetched `directNeighbor` resolved at `MeshGenerationJob.cs:579` from
+  `pos + rotatedOffset`. That fetch moves with the rest, or the direct term keeps sampling the old cell
+  while the ring samples the new one — a half-fix that would look plausible in game.
 - **Ordering:** after VO-3.
 - **Prove-red:** **`KM01a` flips green** — it is already red on record, so this phase gets its
   prove-red for free. Every boundary-face baseline stays green (that is the "degenerates correctly"
@@ -744,6 +772,7 @@ append-only — the cost is permanent.
 
 * **v1.0** - Initial design
 * **v1.1** - VO-0 executed (no production code needed): blast radius is one block type, §2.3's bounds table confirmed, surface stamp confirmed (resolves open question 1 and unblocks VO-6 from VO-3), VO-7 version anchors pinned
+* **v1.8** - VO-4 confirmed in game (repro `K20b` → baseline **B106**, commits `9443d08c`/`72b11cd8`); **F12's Bug 21 fixed and archived** as `_FIXED_BUGS.md` Lighting #25 with baseline **B107** (commits `eeb8953e`/`2857996c`) — the root fix needed a second part beyond the heightmap, since `ModifyVoxel`'s recalc trigger keyed on opacity and a rotation changes none; D5 gained a concrete face-choice proposal awaiting user sign-off, and VO-6 gained the centroid-storage and `directNeighbor` notes. Validate All **423**
 * **v1.7** - VO-4 code complete: the support/veto mirrors made directional via `TargetEntryCost` + `NeighborCanDeliver`, `IsVerticallySkyLit` found as a third unlisted site, shadow-caster site deliberately left whole-block; repro `K20b` flips green and baseline **B105** added; 421 baselines green. Two new findings — **F11** (the oracle's column seeding was over-migrated by VO-3; B105 is the suite's first partial-block oracle comparison) and **F12** (sealed partial-block shafts never darken — filed as Bug 21, NOT a VO-4 defect). AWAITING IN-GAME CONFIRMATION
 * **v1.6** - VO-3 confirmed in game (repro `K20a` promoted to permanent baseline **B104**); the sky-column rule found still whole-block in play and fixed via `IsTransparentThroughFace`; undimmed-column question settled with rationale; **VO-7 DESCOPED** (no released worlds, stale light self-heals on block update) with a conditional tripwire; F9 closed as wontfix and D4 superseded
 * **v1.5** - VO-3 code complete: directional occlusion in the sky + RGB propagation paths and the oracle; D3's full-cube-equivalence risk resolved by short-circuiting every predicate on `HasCustomBounds`; K20a fixed (sky 0 → 14), 419 baselines green, B101 prove-red confirmed. Cross-chunk sites deferred to VO-4. AWAITING IN-GAME CONFIRMATION
@@ -754,4 +783,4 @@ append-only — the cost is permanent.
 ---
 
 **Last Updated:** 2026-08-08  
-**Next Review:** when VO-4 starts
+**Next Review:** when VO-5 starts
