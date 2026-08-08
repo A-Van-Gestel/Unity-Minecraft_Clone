@@ -1,9 +1,9 @@
 # Directional Per-Face Voxel Occlusion (VO-*)
 
-**Version:** 2.3  
+**Version:** 2.4  
 **Date:** 2026-08-08  
 **Status:** **VO-0…VO-6 implemented and confirmed in game — the original arc is complete.** VO-7
-descoped. **VO-8 (per-corner AO coverage) code complete, awaiting in-game confirmation.**  
+descoped. **VO-8 (per-corner AO coverage) implemented and confirmed in game.** VO-9 filed, not started.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > The engine gained partial blocks (`Stone Half Slab`) without the lighting model gaining a notion
@@ -377,7 +377,7 @@ slabs all at 0.5 where the chosen rule scores 1 / 0.5 / 0.
 | ~~**VO-5**~~ | ✅ Fractional AO occlusion                                | 🟡     | VO-1         |
 | ~~**VO-6**~~ | ✅ Sub-block face light sampling (closed Bug M01)         | 🟡     | VO-1 (VO-3 for the general case — see packet) |
 | ~~**VO-7**~~ | ❌ World-version bump + relight — **DESCOPED**, see packet | —      | —            |
-| ~~**VO-8**~~ | ✅ Per-corner (sub-cell) AO coverage (awaiting in-game)   | 🟡     | VO-5, VO-6   |
+| ~~**VO-8**~~ | ✅ Per-corner (sub-cell) AO coverage                      | 🟡     | VO-5, VO-6   |
 | **VO-9** | Contact shadow from partial + coplanar occluders            | 🟡     | Bug M03      |
 
 **Minimal standalone-value set:** VO-0 → VO-1 → VO-5 → VO-6 delivers the *visual* fix (AO stops
@@ -794,7 +794,7 @@ append-only — the cost is permanent.
 > `Migration_v12_to_v13_PlayerChunkRelativePosition`, so the step would be `Migration_v13_to_v14_*`.
 > Re-open this phase — do not invent a new id — and route through `serialization-migration`.
 
-### VO-8 — Per-corner (sub-cell) AO coverage (🟡, behavior change — visual) · ✅ **CODE COMPLETE 2026-08-08 — AWAITING IN-GAME CONFIRMATION**
+### VO-8 — Per-corner (sub-cell) AO coverage (🟡, behavior change — visual) · ✅ **EXECUTED + CONFIRMED IN GAME 2026-08-08**
 
 **What landed.** `BurstOcclusionUtility.GetOctantCoverage` + `LightAttenuation.AmbientOcclusionOctantCoverage`
 replace the per-face `AmbientOcclusionCoverage` outright (the AO path was its only consumer, so no dead
@@ -975,6 +975,7 @@ before/after judgement of this one.
 
 * **v1.0** - Initial design
 * **v1.1** - VO-0 executed (no production code needed): blast radius is one block type, §2.3's bounds table confirmed, surface stamp confirmed (resolves open question 1 and unblocks VO-6 from VO-3), VO-7 version anchors pinned
+* **v2.4** - **VO-8 confirmed in game** (a vertical slab shades its neighbouring floor face the way a full block does), closing the last gate on the arc. Everything shipped except VO-9. Outstanding, unchanged: VO-8's perf measurement is still a structural argument rather than a profiler capture
 * **v2.3** - **Bug M03 fixed and archived** (owner's in-game review: a recessed half slab rendered fully black). The octant's normal axis is now resolved from the face's own plane rather than from a cell-boundary vertex, so a face interior to its cell is not shadowed by the block emitting it — baseline **B47**, Validate All **430**. **VO-9 filed** (partial/coplanar occluders cast a weak or absent contact shadow — the model working as specified, measured, not a defect). `MESHING_BUGS.md` **M04** filed for the radiating-streak artifact with AO ruled out and a decisive diagnostic recorded
 * **v2.2** - **VO-8 code complete**: AO coverage is now per-corner (octant of the sample cell touching the corner's vertex) rather than per-face — `GetOctantCoverage` + `AmbientOcclusionOctantCoverage` replace the per-face entry point outright, plus a `CornerVertices` LUT built alongside `CornerOffsets`. The four rolls of a vertical slab now darken four different corner pairs (measured), while bottom/top slabs are unchanged from VO-5. Baseline **B46**, prove-red by a corner-blind mutation; Validate All **429**. **Perf measurement still owed** — only a structural argument (the `HasCustomBounds` short-circuit) so far. AWAITING IN-GAME CONFIRMATION
 * **v2.1** - **VO-6 confirmed in game; the original VO-0…VO-6 arc is complete.** `KM01a`/`KM01b` promoted to permanent baselines **B44**/**B45** (`MeshingValidationSuite.SubBlockFaceLight.cs`), the now-empty known-bug file retired, Bug M01 archived as `_FIXED_BUGS.md` Meshing #M01. **VO-8 filed** (per-corner sub-cell AO coverage) from the owner's in-game observation that a vertical slab shades the block beneath it uniformly rather than with a wall-like gradient — measured 225 flat vs 255 unshaded and 191 fully shaded, so VO-5's in-between shade is present and correctly ordered but not directional
