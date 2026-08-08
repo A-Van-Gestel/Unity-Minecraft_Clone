@@ -620,6 +620,63 @@ slabs; it could not confirm the fix itself, because the defect's live trigger do
 
 ## Meshing
 
+### ~~M02. A custom mesh's mid-plane face is culled by the block-boundary neighbor~~
+
+**Severity:** Medium  
+**Reported:** August 2026  
+**Fixed:** August 2026  
+**Status:** Resolved — confirmed in game 2026-08-08. Guarded by baseline **B48** in `MeshingValidationSuite.SubBlockCulling.cs`.  
+**Found:** 2026-08-08, while verifying VO-6 (predicted from reading the culling path, then confirmed in
+the harness). Confirmed visible in game by the owner the same day — a player-facing hole, not a
+harness-only artifact.
+
+**Description:**
+Both custom-mesh paths decided face visibility with
+`ShouldDrawFace(voxelProps, GetVoxelStateFromLocalPos(pos + rotatedOffset))` — the block-boundary
+neighbor — regardless of where the face actually sits inside the cell. That is right for a boundary
+face and wrong for an interior one: a half slab's mid-plane face is half a block *inside* its own
+cell, with the cell's open half between it and that neighbor, so a full block beyond the gap cannot
+occlude it.
+
+Confirmed numerically: a slab at `Facing6Roll2` meta `0x03` emits its mid-plane face at `z = 8.50`
+when isolated, and **emitted nothing** once a solid block was placed at `(8, 8, 7)` — a full cell away.
+The surface is genuinely visible through the slab's open half from a grazing angle, so this rendered
+as a hole rather than a hidden face.
+
+This was the culling twin of [Bug M01](#m01-sub-block-custom-mesh-faces-sample-smooth-light-from-the-wrong-cell)
+(the same confusion in the *lighting* sample, fixed by VO-6) and it survived that fix deliberately:
+VO-6 moved only the light sample, because changing culling changes emitted vertex counts.
+
+**Root cause and fix:** `MeshGenerationJob.ResolveFaceSampleCell` — added by VO-6 — already returns the
+cell a face actually looks into. Both custom-mesh paths now resolve it *before* the visibility test and
+cull against that cell instead of `pos + rotatedOffset`.
+
+**The interior-face guard is load-bearing.** Asking the resolved cell directly would ask an interior
+face's *own* cell whether it occludes — i.e. ask the block about itself. The rule that makes it correct
+is structural: one block per cell, so nothing but this block can occupy the open half in front of an
+interior face, and such a face can never be occluded. It survived without the guard only by accident,
+because `Stone Half Slab` is authored `renderNeighborFaces: 1`; a custom mesh authored without that flag
+would have lost every mid-plane face. This is the same class of error as M03 below — geometry inferred
+from a cell index, in a world where VO-6 made face positions stop coinciding with the grid.
+
+**Why no existing baseline moved.** The fix changes emitted vertex counts (B48's own fixtures go 5 quads
+to 6), and this entry was filed rather than fixed on exactly that basis. In the event, all 429 prior
+baselines stayed green — because none of them placed a solid block against a slab's mid-plane face. The
+sweep was clean for want of coverage, not for want of blast radius, which is the same suite gap shape
+that let M03 ship. B48 is what closes it.
+
+**Reproduction Steps:**
+Place a `Stone Half Slab` rotated to vertical against a solid wall so its large face points at the
+wall, then look along the wall. The slab's large face was missing.
+
+**Repro scenario:** `B48` (promoted from `KM02`) — five legs, covering both signs of the mid-plane
+normal, the counter-assertion that boundary faces still cull, and the fully walled-in configuration in
+both orientations.
+
+**Testing environment:** Editor, August 2026.
+
+---
+
 ### ~~M03. A recessed partial block's mid-plane face renders black (it occludes itself)~~
 
 **Severity:** High — plainly visible, and a regression against pre-VO-6 rendering.  

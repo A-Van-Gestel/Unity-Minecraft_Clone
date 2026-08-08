@@ -1,9 +1,11 @@
 # Directional Per-Face Voxel Occlusion (VO-*)
 
-**Version:** 2.5  
+**Version:** 2.6  
 **Date:** 2026-08-08  
 **Status:** **VO-0…VO-6 implemented and confirmed in game — the original arc is complete.** VO-7
-descoped. **VO-8 (per-corner AO coverage) implemented and confirmed in game.** VO-9 filed, not started.  
+descoped. **VO-8 (per-corner AO coverage) implemented and confirmed in game.** **F16 / Bug M02 fixed,
+confirmed in game and archived — VO-9's ordering precondition is met.** VO-9 filed, not started; its
+scope is still an open decision.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > The engine gained partial blocks (`Stone Half Slab`) without the lighting model gaining a notion
@@ -725,13 +727,28 @@ whole light field moves the face", which is independent of which cell is read, a
 promoted to a real assertion (the boundary neighbour must *not* reach a mid-plane face). **A positive
 control must not be satisfiable by the behaviour under test.**
 
-**New finding F16 — `MESHING_BUGS.md` Bug M02, filed not fixed.** Culling still asks the
+**New finding F16 — `MESHING_BUGS.md` Bug M02. ✅ FIXED + ARCHIVED 2026-08-08.** Culling asked the
 block-boundary neighbour about a face that sits inside its own cell, so a solid block a full cell away
-deletes a slab's mid-plane face (confirmed: emitted at `z = 8.50` isolated, absent with a block at
+deleted a slab's mid-plane face (confirmed: emitted at `z = 8.50` isolated, absent with a block at
 `(8,8,7)`). Same wrong-cell confusion as F1, in the visibility decision rather than the light sample,
-and `ResolveFaceSampleCell` is already the answer. Deliberately out of VO-6's scope: it changes emitted
-vertex counts, so it needs its own prove-red and a geometry-baseline sweep rather than riding along
-with a lighting-only change.
+and `ResolveFaceSampleCell` was already the answer. It was deliberately out of VO-6's scope because it
+changes emitted vertex counts. Both custom-mesh paths now resolve the sample cell **before** the
+visibility test and cull against it; baseline **B48**, Validate All **431**.
+
+> **The interior-face guard is the load-bearing part, and it is an M03-class trap.** Asking the resolved
+> cell directly asks an *interior* face's own cell whether it occludes — i.e. asks the block about
+> itself. The rule that makes it correct is structural: one block per cell, so nothing but this block
+> can occupy the open half in front of an interior face. Without the explicit guard it survives only by
+> accident, because `Stone Half Slab` is authored `renderNeighborFaces: 1`; a custom mesh authored
+> without that flag would lose every mid-plane face. This is the third time in this arc that code
+> inferred geometry from a cell index after VO-6 made face positions stop coinciding with the grid.
+
+> **The predicted geometry-baseline sweep came back empty, and that is a finding, not a clearance.**
+> This phase was filed rather than folded into VO-6 on the strength of "it moves a large number of
+> meshing baselines". Vertex counts do change (B48's own fixtures go 5 quads to 6), but **all 429 prior
+> baselines stayed green** — none of them placed a solid block against a slab's mid-plane face. The
+> sweep was clean for want of coverage, not for want of blast radius: the same suite-gap shape that let
+> M03 ship. B48 closes it.
 
 
 
@@ -932,7 +949,19 @@ deciding whether a corner should carry sub-cell resolution at all.
 
 **Ordering:** the owner sequenced `MESHING_BUGS.md` **Bug M02** ahead of this phase (2026-08-08). Both
 touch custom-mesh face handling, and M02 changes *which faces are emitted at all* — doing it second would
-mean re-judging VO-9's visual result against a changed mesh.
+mean re-judging VO-9's visual result against a changed mesh. ✅ **Satisfied: M02 fixed, confirmed in game,
+and archived 2026-08-08** (baseline **B48**). Any VO-9 measurement taken before that date was taken
+against a mesh missing its mid-plane faces and must be re-run.
+
+**Both preconditions are now met, but the scope is still open.** §5's sketch above is explicitly *not a
+decision*: cause (a) needs the sample set widened for surfaces whose own layer contains partial geometry
+(cost in the hottest loop, so it must be gated on partial geometry being present at all), and cause (b)
+asks whether a corner should carry sub-cell resolution at all — for an axis-aligned half slab
+`GetOctantCoverage` never returns an intermediate value, so (b) buys nothing for slabs specifically.
+**The executor re-measures both causes in the harness first** — note that VO-6 already re-centres a
+mid-plane face's ring on its own cell (`sampleCell - rotatedOffset`), so cause (a)'s one-line statement
+needs checking against the current engine before it is designed against — and brings the numbers to the
+owner as a scope decision rather than picking one.
 
 ---
 
@@ -981,6 +1010,7 @@ mean re-judging VO-9's visual result against a changed mesh.
 
 * **v1.0** - Initial design
 * **v1.1** - VO-0 executed (no production code needed): blast radius is one block type, §2.3's bounds table confirmed, surface stamp confirmed (resolves open question 1 and unblocks VO-6 from VO-3), VO-7 version anchors pinned
+* **v2.6** - **`MESHING_BUGS.md` Bug M02 (finding F16) fixed, confirmed in game and archived.** Both custom-mesh paths now resolve `ResolveFaceSampleCell` *before* the visibility test and cull against that cell, with an explicit interior-face guard (an interior face keeps its own cell's open half in front of it, so nothing outside the cell can occlude it) — without that guard the block asks itself whether it occludes, and it survives only by the accident of `Stone Half Slab` being authored `renderNeighborFaces: 1`. Repro `KM02` (five legs: both signs of the mid-plane normal, the counter-assertion that boundary faces still cull, and the walled-in configuration in both orientations) promoted to baseline **B48**; Validate All **431**. **The predicted geometry-baseline sweep moved nothing** — recorded under F16 as a coverage finding, not a clearance. VO-9's ordering precondition is now satisfied
 * **v2.5** - VO-8's **perf measurement waived** by the owner (correctness over a speculative capture; the octant LUT is recorded as the first lever if meshing ever measures as a bottleneck). VO-9 gains an explicit ordering note: Bug **M02** runs first, since it changes which faces are emitted and would otherwise force VO-9's visual result to be re-judged
 * **v2.4** - **VO-8 confirmed in game** (a vertical slab shades its neighbouring floor face the way a full block does), closing the last gate on the arc. Everything shipped except VO-9. Outstanding, unchanged: VO-8's perf measurement is still a structural argument rather than a profiler capture
 * **v2.3** - **Bug M03 fixed and archived** (owner's in-game review: a recessed half slab rendered fully black). The octant's normal axis is now resolved from the face's own plane rather than from a cell-boundary vertex, so a face interior to its cell is not shadowed by the block emitting it — baseline **B47**, Validate All **430**. **VO-9 filed** (partial/coplanar occluders cast a weak or absent contact shadow — the model working as specified, measured, not a defect). `MESHING_BUGS.md` **M04** filed for the radiating-streak artifact with AO ruled out and a decisive diagnostic recorded

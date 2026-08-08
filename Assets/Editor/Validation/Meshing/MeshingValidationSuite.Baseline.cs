@@ -51,6 +51,9 @@ namespace Editor.Validation.Meshing
 
             // --- VO-8 per-corner occlusion (B46) lives in MeshingValidationSuite.CornerOcclusion.cs. ---
             AddCornerOcclusionBaselineScenarios(scenarios);
+
+            // --- Bug M02 sub-block face culling (B48) lives in MeshingValidationSuite.SubBlockCulling.cs. ---
+            AddSubBlockCullingBaselineScenarios(scenarios);
         }
 
         /// <summary>Hook for the cross-chunk border-culling baselines (implemented in MeshingValidationSuite.CrossChunk.cs).</summary>
@@ -68,6 +71,10 @@ namespace Editor.Validation.Meshing
         /// <summary>Hook for the VO-8 per-corner occlusion baselines (implemented in MeshingValidationSuite.CornerOcclusion.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddCornerOcclusionBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the Bug M02 sub-block culling baseline (implemented in MeshingValidationSuite.SubBlockCulling.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddSubBlockCullingBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>
         /// B1 — Direct, isolated differential test of <see cref="VoxelMeshHelper.GenerateStandardCubeFace"/>:

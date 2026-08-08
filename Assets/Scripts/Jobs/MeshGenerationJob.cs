@@ -516,28 +516,27 @@ namespace Jobs
                 // Skip faces not defined in the custom mesh
                 if (p >= meshData.FaceCount) continue;
 
-                Vector3Int neighborPos = pos + BurstVoxelData.FaceChecks.Data[p];
-                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(neighborPos);
+                // VO-6: this path's cull check and face index are both unrotated (only the vertices take
+                // the Y rotation), so the sample cell is resolved in that same unrotated frame — identity
+                // matrix, unrotated face normal. A Y rotation leaves a face's own-cell-vs-boundary
+                // character unchanged for the shapes this path serves.
+                float3x3 identity = float3x3.identity;
+                Vector3Int faceNormal = BurstVoxelData.FaceChecks.Data[p];
+                Vector3Int sampleCell = ResolveFaceSampleCell(pos, in identity,
+                    CustomFaces[meshData.FaceStartIndex + p].Centroid, faceNormal);
+                bool faceIsInterior = sampleCell == pos;
+                VoxelState? sampleVoxel = GetVoxelStateFromLocalPos(sampleCell);
 
-                if (ShouldDrawFace(voxelProps, neighborVoxel))
+                // An interior face keeps the cell's own open half in front of it, and only this block can
+                // occupy that space — so nothing outside the cell can occlude it (Bug M02).
+                if (faceIsInterior || ShouldDrawFace(voxelProps, sampleVoxel))
                 {
                     int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
                     int textureID = GetTextureID(id, translatedP);
 
-                    // VO-6: this path's cull check and face index are both unrotated (only the vertices
-                    // take the Y rotation), so the sample cell is resolved in that same unrotated frame
-                    // — identity matrix, unrotated face normal — keeping it consistent with the
-                    // neighborPos above. A Y rotation leaves a face's own-cell-vs-boundary character
-                    // unchanged for the shapes this path serves.
-                    float3x3 identity = float3x3.identity;
-                    Vector3Int faceNormal = BurstVoxelData.FaceChecks.Data[p];
-                    Vector3Int sampleCell = ResolveFaceSampleCell(pos, in identity,
-                        CustomFaces[meshData.FaceStartIndex + p].Centroid, faceNormal);
-
                     if (SmoothLighting >= SmoothLightingQuality.Standard)
                     {
-                        CalculateCornerLights(p, sampleCell - faceNormal,
-                            GetVoxelStateFromLocalPos(sampleCell), sampleCell == pos,
+                        CalculateCornerLights(p, sampleCell - faceNormal, sampleVoxel, faceIsInterior,
                             out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
                         VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, pos, rotation,
                             p, l0, l1, l2, l3,
@@ -547,7 +546,7 @@ namespace Jobs
                     }
                     else
                     {
-                        Color32 flatLight = BuildFlatLightData(GetVoxelStateFromLocalPos(sampleCell), sampleCell);
+                        Color32 flatLight = BuildFlatLightData(sampleVoxel, sampleCell);
                         VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, flatLight, pos, rotation,
                             voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
                             ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles, ref Output.Uvs,
@@ -565,8 +564,9 @@ namespace Jobs
         /// <remarks>
         /// Handles <see cref="MetadataSchema.Axis3"/>, <see cref="MetadataSchema.Facing6"/>,
         /// <see cref="MetadataSchema.Facing6Roll2"/>, and <see cref="MetadataSchema.HorizontalOnly"/>.
-        /// Face culling rotates the neighbor-check direction through the same rotation matrix
-        /// as the vertices, ensuring correct occlusion for all orientations.
+        /// Face culling rotates the check direction through the same rotation matrix as the vertices, then
+        /// asks <see cref="ResolveFaceSampleCell"/> which cell the face looks into, so a face sitting
+        /// inside its own cell is not culled by a neighbor a whole cell away.
         /// </remarks>
         private void GenerateCustomBlockMesh_SchemaAware(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
         {
@@ -587,24 +587,27 @@ namespace Jobs
                 Vector3Int faceCheck = BurstVoxelData.FaceChecks.Data[p];
                 float3 rotatedCheck = math.round(math.mul(matrix, new float3(faceCheck.x, faceCheck.y, faceCheck.z)));
                 Vector3Int rotatedOffset = new Vector3Int((int)rotatedCheck.x, (int)rotatedCheck.y, (int)rotatedCheck.z);
-                Vector3Int neighborPos2 = pos + rotatedOffset;
-                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(neighborPos2);
 
-                if (ShouldDrawFace(voxelProps, neighborVoxel))
+                // Visibility and light both ask about the cell this face actually looks into.
+                Vector3Int sampleCell = ResolveFaceSampleCell(pos, in matrix,
+                    CustomFaces[meshData.FaceStartIndex + p].Centroid, rotatedOffset);
+                bool faceIsInterior = sampleCell == pos;
+                VoxelState? sampleVoxel = GetVoxelStateFromLocalPos(sampleCell);
+
+                // An interior face keeps the cell's own open half in front of it, and only this block can
+                // occupy that space — so nothing outside the cell can occlude it (Bug M02).
+                if (faceIsInterior || ShouldDrawFace(voxelProps, sampleVoxel))
                 {
                     int textureID = GetTextureID(id, p);
 
                     if (SmoothLighting >= SmoothLightingQuality.Standard)
                     {
                         int worldFace = DirectionToFaceIndex(rotatedOffset);
-                        Vector3Int sampleCell = ResolveFaceSampleCell(pos, in matrix,
-                            CustomFaces[meshData.FaceStartIndex + p].Centroid, rotatedOffset);
-                        VoxelState? sampleVoxel = GetVoxelStateFromLocalPos(sampleCell);
 
                         // The ring's LUT offsets are relative to a block whose face-normal neighbor is the
                         // sampled cell, so re-basing by one face step moves the ring and the direct term
                         // together. For a boundary face this is exactly `pos`, as before.
-                        CalculateCornerLights(worldFace, sampleCell - rotatedOffset, sampleVoxel, sampleCell == pos,
+                        CalculateCornerLights(worldFace, sampleCell - rotatedOffset, sampleVoxel, faceIsInterior,
                             out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
                         VoxelMeshHelper.GenerateCustomMeshFace(p, textureID, pos, in matrix,
                             worldFace, l0, l1, l2, l3,
@@ -614,9 +617,7 @@ namespace Jobs
                     }
                     else
                     {
-                        Vector3Int sampleCell = ResolveFaceSampleCell(pos, in matrix,
-                            CustomFaces[meshData.FaceStartIndex + p].Centroid, rotatedOffset);
-                        Color32 flatLight = BuildFlatLightData(GetVoxelStateFromLocalPos(sampleCell), sampleCell);
+                        Color32 flatLight = BuildFlatLightData(sampleVoxel, sampleCell);
                         VoxelMeshHelper.GenerateCustomMeshFace(p, textureID, flatLight, pos, in matrix,
                             voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
                             ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
