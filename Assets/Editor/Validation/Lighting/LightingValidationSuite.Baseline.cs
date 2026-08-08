@@ -181,10 +181,12 @@ namespace Editor.Validation.Lighting
             // must not mark the suite red. Lives in LightingValidationSuite.PartialBlocks.cs. ---
             AddPartialBlockOcclusionScenarios(scenarios);
 
-            // --- VO-4 cross-chunk directional occlusion: the known-bug repro K20b (the removal veto's
-            // support scan must credit a partial block per face, the way the BFS already does since VO-3)
-            // plus baseline B105, the end-to-end live-lock guard over a seam gradient fed through partial
-            // blocks. Lives in LightingValidationSuite.PartialBlocksCrossChunk.cs. ---
+            // --- VO-4 cross-chunk directional occlusion: baselines B106 (the removal veto's support scan
+            // credits a partial block per face on both the source and target sides — promoted from repro
+            // K20b after in-game confirmation) and B105 (the settled seam gradient fed through partial
+            // blocks matches the borderless oracle), plus the known-bug repro K21a for Bug 21, which is a
+            // SEPARATE defect found while authoring B105 and reproduces with no chunk seam at all.
+            // Lives in LightingValidationSuite.PartialBlocksCrossChunk.cs. ---
             AddPartialBlockCrossChunkScenarios(scenarios);
         }
 

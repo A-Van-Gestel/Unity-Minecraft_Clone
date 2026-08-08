@@ -89,8 +89,9 @@ permanent baseline `B104`**.
 whole-block opacity and an `IsOpaque` predicate), the Bug 12/18 removal initiators, the dimmer-seam stamp
 pull-back, `CheckEdgeVoxel`/`CheckEdgeVoxelRGB`, and `IsVerticallySkyLit` — the last being a site the plan
 had not listed, and the one that let the Bug 12 initiator fire on a column the BFS holds at an undimmed 15.
-Repro `K20b` (source-side credit, target-side entry cost, with solid-face and full-cube tripwires) flips
-green; baseline `B105` guards the settled seam field; all **421** baselines stay green.
+Repro `K20b` (source-side credit, target-side entry cost, with solid-face and full-cube tripwires) flipped
+green and was **promoted to permanent baseline `B106`** after in-game confirmation (no flicker at a slab
+seam); baseline `B105` guards the settled seam field.
 
 **One piece remains before this can be archived:** the ambient-occlusion half of the artifact — partial
 blocks still darken AO at maximum — is `VO-5`. See also **Bug 21**, a separate defect found while

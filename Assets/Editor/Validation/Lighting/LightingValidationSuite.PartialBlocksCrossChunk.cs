@@ -10,15 +10,15 @@ namespace Editor.Validation.Lighting
     /// <c>Documentation/Bugs/LIGHTING_BUGS.md</c> Bug 20, per
     /// <c>Documentation/Design/VOXEL_OCCLUSION_REFACTOR.md</c>.
     /// <para>
-    /// <b>Why this phase exists.</b> <c>VO-3</c> made the in-chunk BFS deliver light through a partial
-    /// block's open half, but left the cross-chunk removal veto whole-block: its support scan skips any
-    /// <c>IsOpaque</c> neighbour, and a half slab is authored <c>opacity = 15</c>. So the BFS feeds a seam
-    /// voxel through a slab while the veto computes zero support for it — the removal initiator clears it,
-    /// the BFS re-lights it, and the pair cycles. That is the Bug 13 period-2 live-lock shape, reachable
-    /// through a slab.
+    /// <b>Why this phase existed.</b> <c>VO-3</c> made the in-chunk BFS deliver light through a partial
+    /// block's open half but left the cross-chunk removal veto whole-block: its support scan skipped any
+    /// <c>IsOpaque</c> neighbour, and a half slab is authored <c>opacity = 15</c>. So the BFS fed a seam
+    /// voxel through a slab while the veto computed zero support for it — the removal initiator cleared it,
+    /// the BFS re-lit it, and the pair cycled. That is the Bug 13 period-2 live-lock shape, reachable
+    /// through a slab. <c>VO-4</c> closed it by making both the source guard and the entry cost per-face.
     /// </para>
     /// <para>
-    /// <b>K20b tests the production decision function directly</b> rather than end-to-end. B49's own note
+    /// <b>B106 tests the production decision function directly</b> rather than end-to-end. B49's own note
     /// records why: a full cross-chunk-removal scenario over a seam forms an orphaned light loop, so no
     /// removal mod ever reaches the target and the thing under test is masked. The support function is
     /// public and pure, so it is asserted with controlled inputs — still real production code.
@@ -43,8 +43,8 @@ namespace Editor.Validation.Lighting
         static partial void AddPartialBlockCrossChunkScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario(
-                "K20b: the cross-chunk removal veto credits a partial block as a light source, per face",
-                K20b_SupportCreditsPartialBlockNeighbor, "20"));
+                "B106: the cross-chunk removal veto credits a partial block as a light source, per face",
+                B106_SupportCreditsPartialBlockNeighbor));
             scenarios.Add(new Scenario(
                 "B105: a seam-straddling gradient fed through partial blocks settles on the borderless oracle",
                 B105_PartialBlockSeamGradientMatchesOracle));
@@ -54,29 +54,34 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>
-        /// K20b — reproduces the VO-4 half of Bug 20. The cross-chunk sunlight removal veto's support
-        /// scan (<c>CrossChunkLightModApplier.InChunkSunlightSupport</c>) must answer the same question
-        /// the BFS answers: <i>can this neighbour deliver light to me through the face between us?</i>
-        /// Since VO-3 it cannot — the scan skips every <c>IsOpaque</c> neighbour, and a half slab is
-        /// opaque, so a voxel the BFS legitimately feeds through a slab reads support 0 and a removal
-        /// clears it.
+        /// B106 — the permanent guard for the VO-4 half of Bug 20, promoted from repro <c>K20b</c> on
+        /// 2026-08-08 after the fix was confirmed in game (no flicker at a slab seam). The cross-chunk
+        /// sunlight removal veto's support scan (<c>CrossChunkLightModApplier.InChunkSunlightSupport</c>)
+        /// must answer the same question the BFS answers: <i>can this neighbour deliver light to me through
+        /// the face between us?</i> Between VO-3 and VO-4 it could not — the scan skipped every
+        /// <c>IsOpaque</c> neighbour, and a half slab is authored opaque, so a voxel the BFS legitimately
+        /// fed through a slab read support 0 and a removal cleared what the BFS immediately restored.
         /// <para>
-        /// Three legs, and the directional pair is the point — this is not "slabs always count":
+        /// Four legs, and the directional pairs are the point — this is not "slabs always count":
         /// </para>
         /// <list type="bullet">
-        /// <item><b>Open side (RED today):</b> the slab sits west of the probe, so it would deliver
-        /// through its +X face, which a vertical slab covers only half — light passes, support must be
-        /// <c>Attenuate(sky, air)</c>.</item>
-        /// <item><b>Solid side (green today, for the wrong reason):</b> the slab sits behind the probe in
-        /// −Z, delivering through its +Z face, which the same rotation covers <i>fully</i> — support must
-        /// stay 0. Green today only because the slab is skipped wholesale; it becomes the tripwire against
-        /// "fix this by crediting every partial block in every direction".</item>
-        /// <item><b>Full cube (green today and after):</b> B49's rule restated locally — a fully-opaque
-        /// neighbour storing sky 15 is a surface stamp, never support.</item>
+        /// <item><b>Leg A — source side, open face:</b> the slab sits west of the probe and delivers through
+        /// its +X face, which a vertical slab covers only half, so light passes and support is
+        /// <c>Attenuate(sky, air)</c>. This is the leg that was red before the fix.</item>
+        /// <item><b>Leg B — source side, covered face:</b> the same slab in the same rotation, now behind the
+        /// probe in −Z so it would deliver through its +Z face, which that rotation covers <i>fully</i> —
+        /// support stays 0. It passed before the fix too, for the wrong reason (the slab was skipped
+        /// wholesale), and is kept as the tripwire against "credit every partial block in every
+        /// direction", which would over-estimate support and veto legitimate removals.</item>
+        /// <item><b>Leg C — full-cube guard:</b> B49's rule restated locally — a fully-opaque neighbour
+        /// storing sky 15 is a surface stamp, never support. Guards against the directional change
+        /// weakening the whole-block source guard.</item>
+        /// <item><b>Leg D — target side:</b> the probe itself is the slab. Entry cost is directional too, so
+        /// light arriving on the open face is charged air and on the covered face the authored opacity.</item>
         /// </list>
         /// </summary>
-        /// <returns>True once the support scan is directional; false (expected) while it is whole-block.</returns>
-        private static bool K20b_SupportCreditsPartialBlockNeighbor()
+        /// <returns>True when the support scan answers per face on both the source and target sides.</returns>
+        private static bool B106_SupportCreditsPartialBlockNeighbor()
         {
             using LightingTestWorld world = new LightingTestWorld(1);
 
@@ -87,7 +92,7 @@ namespace Editor.Validation.Lighting
             const byte expectedOpen = VO4_NEIGHBOR_SKY - 1; // air entry cost into the probe
 
             bool passed = LightingAssert.IsTrue(openSupport == expectedOpen,
-                "K20b: a partial block delivering through an UNCOVERED face counts as support",
+                "B106: a partial block delivering through an UNCOVERED face counts as support",
                 $"expected {expectedOpen} (= sky {VO4_NEIGHBOR_SKY} attenuated by the air probe), got {openSupport}. "
                 + "The veto's support scan is still whole-block: it skips the slab because it is authored "
                 + "opacity 15, while the BFS since VO-3 does deliver light through the slab's open half. "
@@ -99,7 +104,7 @@ namespace Editor.Validation.Lighting
             byte solidSupport = SupportFromSlabNeighbor(world, solidProbe, faceIndex: 0, VO4_SLAB_VERTICAL);
 
             passed &= LightingAssert.IsTrue(solidSupport == 0,
-                "K20b: the same slab delivering through its COVERED face contributes no support",
+                "B106: the same slab delivering through its COVERED face contributes no support",
                 $"expected 0 support through the slab's solid half, got {solidSupport}. Crediting a partial "
                 + "block in every direction would over-estimate support and veto legitimate removals — "
                 + "the over-bright failure mode this scan exists to avoid.");
@@ -112,7 +117,7 @@ namespace Editor.Validation.Lighting
             byte cubeSupport = world.InChunkSunlightSupportAt(cubeProbe, 0);
 
             passed &= LightingAssert.IsTrue(cubeSupport == 0,
-                "K20b: a fully-opaque neighbour storing sky 15 still contributes no support",
+                "B106: a fully-opaque neighbour storing sky 15 still contributes no support",
                 $"expected 0 from an opaque sky-15 neighbour, got {cubeSupport} — the directional change "
                 + "must not weaken the whole-block source guard for full cubes.");
 
@@ -123,7 +128,7 @@ namespace Editor.Validation.Lighting
             byte covedEntry = SupportIntoSlabTarget(world, new Vector3Int(8, 88, 8), faceIndex: 1);
 
             passed &= LightingAssert.IsTrue(openEntry == expectedOpen && covedEntry == 0,
-                "K20b: entering a partial block costs air on an open face and its opacity on a covered one",
+                "B106: entering a partial block costs air on an open face and its opacity on a covered one",
                 $"expected open-face support {expectedOpen} and covered-face support 0, got {openEntry} and "
                 + $"{covedEntry}. A vertical slab covers only its +Z face, so light arriving from −Z enters "
                 + "through empty space and must not be charged the slab's authored opacity 15.");

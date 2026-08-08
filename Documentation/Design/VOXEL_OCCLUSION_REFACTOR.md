@@ -2,7 +2,7 @@
 
 **Version:** 1.7  
 **Date:** 2026-08-08  
-**Status:** Proposed design — VO-0…VO-3 implemented and confirmed in game; VO-4 code complete, awaiting in-game confirmation; VO-5…VO-6 pending; VO-7 descoped.  
+**Status:** Proposed design — VO-0…VO-4 implemented and confirmed in game; VO-5…VO-6 pending; VO-7 descoped.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > The engine gained partial blocks (`Stone Half Slab`) without the lighting model gaining a notion
@@ -345,7 +345,7 @@ decision whose *visual* outcome needs user sign-off (VO-5).
 | ~~**VO-1**~~ | ✅ Burst-safe bounds mirror + shared occlusion utility    | 🟢     | VO-0         |
 | ~~**VO-2**~~ | ✅ Harness support for partial blocks (suite-only)        | 🟢     | VO-1         |
 | ~~**VO-3**~~ | ✅ Directional occlusion in the BFS (awaiting in-game)    | 🔴     | VO-2         |
-| ~~**VO-4**~~ | ✅ Directional cross-chunk support / veto (awaiting in-game) | 🔴     | VO-3         |
+| ~~**VO-4**~~ | ✅ Directional cross-chunk support / veto                     | 🔴     | VO-3         |
 | **VO-5** | Fractional AO occlusion                                      | 🟡     | VO-1         |
 | **VO-6** | Sub-block face light sampling (closes Bug M01)               | 🟡     | VO-1 (VO-3 for the general case — see packet) |
 | ~~**VO-7**~~ | ❌ World-version bump + relight — **DESCOPED**, see packet | —      | —            |
@@ -570,7 +570,11 @@ scheduled.
   **descoped 2026-08-08** — there are no released worlds and stale light self-heals on any block update.
   See the VO-7 packet for the conditional tripwire.
 
-### VO-4 — Directional cross-chunk support / veto (🔴, behavior change) · ✅ **CODE COMPLETE 2026-08-08 — AWAITING IN-GAME CONFIRMATION**
+### VO-4 — Directional cross-chunk support / veto (🔴, behavior change) · ✅ **EXECUTED + CONFIRMED IN GAME 2026-08-08**
+
+✅ **CONFIRMED IN GAME 2026-08-08** — no flicker at a slab seam under a break/replace soak, which is the
+check that matters here: the failure mode was a period-2 oscillation, not a wrong value. Repro `K20b`
+promoted to permanent baseline **B106**. Committed as `9443d08c`.
 
 **The live-lock, named precisely.** VO-3 taught `PropagateLight` to deliver through a partial block's open
 half but left the veto's support scan whole-block, and a half slab is authored `opacity = 15`. So the BFS
