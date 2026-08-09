@@ -27,7 +27,257 @@ namespace Editor.Validation.Meshing
             scenarios.Add(new Scenario(
                 "B56: a face corner with 0/1/2/3 fully-occluding neighbors reads exactly 255/191/64/64 — the pre-SS-2 model, reproduced (SS-2)",
                 B56_CornerReduction));
+
+            scenarios.Add(new Scenario(
+                "B57: the corner seal stays in its corner — full strength at the corner itself, falling off with distance from it (SS-2a)",
+                B57_CornerSealLocality));
+
+            scenarios.Add(new Scenario(
+                "B58: a cell the seal treats as occluded does not also feed the light average — under a NON-uniform light field (SS-2a)",
+                B58_SealedCornerIgnoresHiddenLight));
         }
+
+        /// <summary>
+        /// B58 — <b>the first meshing scenario to shade under a non-uniform light field, and it exists
+        /// because that gap shipped a defect.</b> A sealed corner must not read the light of the cell the
+        /// seal declares hidden: if the two walls meeting at a corner hide the diagonal quadrant, they
+        /// hide whatever light is in it.
+        /// <para>
+        /// The engine got this wrong for a subtle reason worth stating. `SS-2` expressed shading as a
+        /// light mean times <c>(1 − occlusion)</c>, taking the mean over cells that <i>hold</i> light —
+        /// a property of the block. That matches the occluded set exactly while occluders are opaque
+        /// (an opaque cell both occludes and holds no usable light), so it looks correct and every
+        /// baseline agreed. A <b>sealed diagonal is air</b>: it holds light, so it fed the mean at full
+        /// weight while the seal simultaneously counted it as fully occluding — its light credited and
+        /// debited at once. At a concave corner the hidden cell is the darkest one around, so real
+        /// corners rendered up to <b>twice as dark as they should</b>.
+        /// </para>
+        /// <para>
+        /// <b>Uniform light hides this completely</b>, which is why 436 baselines could not: when every
+        /// cell carries the same value, the mean is that value no matter how it is weighted. Every AO
+        /// scenario in this suite fills light uniformly (harness gap <c>MH-3</c>), so this is the one
+        /// place the two models can be told apart at all.
+        /// </para>
+        /// </summary>
+        /// <returns>True when the sealed corner ignores the hidden cell's light and an open one does not.</returns>
+        private static bool B58_SealedCornerIgnoresHiddenLight()
+        {
+            int sealedBright = SealedCornerSun(nookSky: 15, sealCorner: true);
+            int sealedDark = SealedCornerSun(nookSky: 0, sealCorner: true);
+            int openBright = SealedCornerSun(nookSky: 15, sealCorner: false);
+            int openDark = SealedCornerSun(nookSky: 0, sealCorner: false);
+
+            if (sealedBright < 0 || sealedDark < 0 || openBright < 0 || openDark < 0)
+            {
+                Debug.LogError("[FAIL] B58 setup: the probe face's corner vertex was not emitted.");
+                return false;
+            }
+
+            bool ok = MeshAssert.IsTrue("B58 a sealed corner ignores the light of the cell it hides",
+                sealedBright == sealedDark,
+                $"Darkening the diagonal cell moved the sealed corner from {sealedBright} to "
+                + $"{sealedDark}. That cell is hidden behind the two walls meeting at this corner — the "
+                + "seal says so, and the occlusion term already charges for it in full. Averaging its "
+                + "light in as well counts it twice, and because the hidden cell is the darkest one "
+                + "around a real concave corner, corners render far darker than the model claims.\n"
+                + "The light mean must be taken over the same visibility weights the occlusion term "
+                + "uses, not over a per-block 'holds light' flag — the two agree only while every "
+                + "occluder is opaque.");
+
+            // F15: without the walls the diagonal is a legitimate light source, so the corner MUST track
+            // it. A model that simply dropped the diagonal would satisfy the leg above and fail here.
+            ok &= MeshAssert.IsTrue("B58 an open corner still reads the light around it",
+                openBright != openDark,
+                $"With no walls raised, the corner reads {openBright} whether the diagonal cell carries "
+                + $"full sky or none at all. Smooth lighting must average the light of the cells meeting "
+                + "at a corner; a corner that ignores a visible neighbour is not lit, it is flat.");
+
+            return ok;
+        }
+
+        /// <summary>
+        /// Builds a concave corner from two full cubes — leaving the diagonal cell air — and reads the
+        /// probe face's corner vertex under a light field that is uniform except in that diagonal cell.
+        /// </summary>
+        /// <param name="nookSky">Sky light to write into the diagonal ("nook") cell.</param>
+        /// <param name="sealCorner">Whether to raise the two walls that seal the corner.</param>
+        /// <returns>The corner vertex's encoded sky light, or -1 when it was not emitted.</returns>
+        private static int SealedCornerSun(byte nookSky, bool sealCorner)
+        {
+            using MeshingTestWorld world = new MeshingTestWorld();
+            BuildFloor(world);
+
+            if (sealCorner)
+            {
+                world.SetBlock(B49_X + 1, B49_Y + 1, B49_Z, TestMeshBlockPalette.SolidOpaque, 0);
+                world.SetBlock(B49_X, B49_Y + 1, B49_Z + 1, TestMeshBlockPalette.SolidOpaque, 0);
+            }
+
+            world.FillLight(LightBitMapping.PackLightData(15, 0, 0, 0));
+            world.SetLight(B49_X + 1, B49_Y + 1, B49_Z + 1, LightBitMapping.PackLightData(nookSky, 0, 0, 0));
+
+            // Read inside the using scope: the output's buffers are pooled by the world.
+            return TryReadSubVertex(TopFaceSubVertexField(world.Run(SmoothLightingQuality.High),
+                B49_X, B49_Y, B49_Z), 1f, 1f, out int sun)
+                ? sun
+                : -1;
+        }
+
+        /// <summary>
+        /// B57 — <b>the corner seal must be local to the corner.</b> Two walls meeting at a right angle
+        /// darken the point where they meet more than either does alone: the diagonal quadrant is hidden
+        /// behind them, which is the rule <see cref="B56_CornerReduction"/> pins at <c>64</c>. This
+        /// scenario asks the question B56 cannot — <i>how far out does that extra darkening reach</i> —
+        /// because the whole suite reads face corners and face interiors, and the defect this guards
+        /// (SS-2a) lived in the field between them: a dark wedge running diagonally out of every concave
+        /// corner across open floor, visible in game while all 435 baselines were green.
+        /// <para>
+        /// Measured as a <b>four-configuration differential</b> — the same face with both walls, either
+        /// wall alone, and neither — so what it reads is exactly the seal: the falloff profile, the
+        /// radius, the gate-tripping slab and the light field all appear in every configuration and
+        /// cancel. The excess is what the second wall adds <i>beyond</i> the two walls acting
+        /// independently, and nothing but the seal produces it.
+        /// </para>
+        /// <para>
+        /// <b>Both legs are load-bearing in opposite directions</b> (finding F15). The locality leg alone
+        /// is satisfied by deleting the seal outright, which would lighten every inside corner in the
+        /// world from 64 to 127; the corner leg alone is satisfied by the defect. Only together do they
+        /// say "keep the corner value, stop it spreading".
+        /// </para>
+        /// </summary>
+        /// <returns>True when the seal is present at the corner and decays away from it.</returns>
+        private static bool B57_CornerSealLocality()
+        {
+            ushort lit = LightBitMapping.PackLightData(15, 0, 0, 0);
+
+            List<SubVertexSample> both = InnerCornerField(lit, wallA: true, wallB: true);
+            List<SubVertexSample> onlyA = InnerCornerField(lit, wallA: true, wallB: false);
+            List<SubVertexSample> onlyB = InnerCornerField(lit, wallA: false, wallB: true);
+            List<SubVertexSample> neither = InnerCornerField(lit, wallA: false, wallB: false);
+
+            // The corner the two walls form is (u, v) = (1, 1); the probes walk away from it.
+            if (!TrySealExcess(both, onlyA, onlyB, neither, 1f, 1f, out int atCorner)
+                || !TrySealExcess(both, onlyA, onlyB, neither, 1f, 0.5f, out int againstWall)
+                || !TrySealExcess(both, onlyA, onlyB, neither, 0.5f, 0.5f, out int outAlongDiagonal))
+            {
+                Debug.LogError("[FAIL] B57 setup: the probe face did not emit all three sample points. "
+                               + "The face must be subdivided in every configuration for the differential "
+                               + "to be readable.");
+                return false;
+            }
+
+            bool ok = MeshAssert.IsTrue("B57 the corner seal is at full strength in the corner itself",
+                atCorner >= MIN_CORNER_SEAL,
+                $"Where the two walls meet, the second wall adds only {atCorner} light units beyond what "
+                + "the walls contribute independently — the seal is missing or weakened there.\n"
+                + "A point tucked into a concave corner cannot see the diagonal quadrant at all, whatever "
+                + "that cell contains, because the two walls stand between them. Removing the seal to "
+                + "cure a spreading artifact lightens every inside corner in the world from 64 to 127; "
+                + "B56 pins that corner value and this leg pins the mechanism behind it.");
+
+            ok &= MeshAssert.IsTrue("B57 the corner seal falls off with distance from the corner",
+                againstWall - outAlongDiagonal >= MIN_SEAL_FALLOFF,
+                $"Half a cell out along the diagonal the seal still adds {outAlongDiagonal} light units, "
+                + $"against {againstWall} for a point pressed into the corner along one wall — a fall-off "
+                + $"of {againstWall - outAlongDiagonal}, below the {MIN_SEAL_FALLOFF} this guards.\n"
+                + "Occlusion attributed to the diagonal cell is only justified while the two walls hide "
+                + "it; as the shaded point leaves the corner that cell comes into view, and a seal that "
+                + "holds its strength out there darkens open floor a wall's width away from any geometry "
+                + "— the diagonal wedge SS-2 shipped and SS-2a corrects.");
+
+            return ok;
+        }
+
+        /// <summary>
+        /// Reads the extra darkening two perpendicular walls produce at one point beyond their independent
+        /// contributions — <c>(A only) + (B only) − (both) − (neither)</c>, in encoded light units.
+        /// </summary>
+        /// <param name="both">Sub-vertex field with both walls raised.</param>
+        /// <param name="onlyA">Field with only the wall on the first tangent axis.</param>
+        /// <param name="onlyB">Field with only the wall on the second tangent axis.</param>
+        /// <param name="neither">Field with no walls.</param>
+        /// <param name="u">Face-parameter coordinate of the probe point.</param>
+        /// <param name="v">Second face-parameter coordinate.</param>
+        /// <param name="excess">The extra darkening, in light units.</param>
+        /// <returns>True when all four configurations emitted a vertex at that point.</returns>
+        private static bool TrySealExcess(List<SubVertexSample> both, List<SubVertexSample> onlyA,
+            List<SubVertexSample> onlyB, List<SubVertexSample> neither, float u, float v, out int excess)
+        {
+            excess = 0;
+
+            if (!TryReadSubVertex(both, u, v, out int sunBoth)
+                || !TryReadSubVertex(onlyA, u, v, out int sunA)
+                || !TryReadSubVertex(onlyB, u, v, out int sunB)
+                || !TryReadSubVertex(neither, u, v, out int sunNeither))
+            {
+                return false;
+            }
+
+            excess = sunA + sunB - sunBoth - sunNeither;
+            return true;
+        }
+
+        /// <summary>Reads one sub-vertex's sunlight by its position within the face.</summary>
+        /// <param name="field">The face's sub-vertex field.</param>
+        /// <param name="u">Face-parameter coordinate to match.</param>
+        /// <param name="v">Second face-parameter coordinate to match.</param>
+        /// <param name="sun">The vertex's encoded sky light.</param>
+        /// <returns>True when the face emitted a vertex there.</returns>
+        private static bool TryReadSubVertex(List<SubVertexSample> field, float u, float v, out int sun)
+        {
+            foreach (SubVertexSample s in field)
+            {
+                if (Mathf.Abs(s.U - u) >= FACE_POSITION_EPSILON) continue;
+                if (Mathf.Abs(s.V - v) >= FACE_POSITION_EPSILON) continue;
+
+                sun = s.Sun;
+                return true;
+            }
+
+            sun = -1;
+            return false;
+        }
+
+        /// <summary>
+        /// Builds the concave-corner fixture and returns the probe face's whole sub-vertex field: a floor,
+        /// a gate-tripping slab, and either, both or neither of the two walls that form the corner.
+        /// <para>
+        /// The slab stands on the diagonal <i>opposite</i> the corner and is present in every
+        /// configuration — it keeps the face subdivided (so all four fields are sampled at the same
+        /// points) and cancels out of the differential.
+        /// </para>
+        /// </summary>
+        /// <param name="lit">Packed light value to fill the world with.</param>
+        /// <param name="wallA">Whether to raise the wall on the <c>+u</c> side.</param>
+        /// <param name="wallB">Whether to raise the wall on the <c>+v</c> side.</param>
+        /// <returns>Every vertex emitted on the probe cell's top face.</returns>
+        private static List<SubVertexSample> InnerCornerField(ushort lit, bool wallA, bool wallB)
+        {
+            using MeshingTestWorld world = new MeshingTestWorld();
+            BuildFloor(world);
+            world.SetBlock(B49_X - 1, B49_Y + 1, B49_Z - 1, TestMeshBlockPalette.HalfSlab, 0x03);
+
+            if (wallA) world.SetBlock(B49_X + 1, B49_Y + 1, B49_Z, TestMeshBlockPalette.SolidOpaque, 0);
+            if (wallB) world.SetBlock(B49_X, B49_Y + 1, B49_Z + 1, TestMeshBlockPalette.SolidOpaque, 0);
+
+            world.FillLight(lit);
+
+            // Read inside the using scope: the output's buffers are pooled by the world. The samples are
+            // copied values, so the returned list outlives it.
+            return TopFaceSubVertexField(world.Run(SmoothLightingQuality.High), B49_X, B49_Y, B49_Z);
+        }
+
+        /// <summary>
+        /// Extra darkening the seal must still produce where the two walls actually meet. The model gives
+        /// a quarter of the range there (the 127 → 64 step B56 pins); a deleted seal gives zero.
+        /// </summary>
+        private const int MIN_CORNER_SEAL = 48;
+
+        /// <summary>
+        /// How far the seal must decay between a point pressed into the corner and one half a cell out
+        /// along the diagonal. The defect holds it flat (a fall-off of 0); the fix roughly quarters it.
+        /// </summary>
+        private const int MIN_SEAL_FALLOFF = 6;
 
         /// <summary>
         /// B56 — <b>the claim the whole SS-2 replacement rests on.</b> Swapping a coverage fraction for a

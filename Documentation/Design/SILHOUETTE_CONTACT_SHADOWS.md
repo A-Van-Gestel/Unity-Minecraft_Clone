@@ -1,6 +1,6 @@
 # Silhouette-Based Contact-Shadow Ambient Occlusion (SS-*)
 
-**Version:** 1.6  
+**Version:** 1.8  
 **Date:** 2026-08-09  
 **Status:** Proposed design — not implemented.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
@@ -603,14 +603,46 @@ with `openᵢ(p) = 1 − Falloff(Distance(p, silhouetteᵢ) / R)`, `R = 1.0` (D2
 (D2), `Distance` the Euclidean signed distance to the silhouette rectangle (D1), and
 `CELL_OCCLUSION_SHARE = 0.25`.
 
+> ⚠️ **Corrected in `SS-2a`, and this one is the whole reason ordinary terrain moved: `openᵢ` above is
+> the *visibility* term, and the light mean must be weighted by it.** `SS-2` shipped the mean weighted
+> by a per-block "holds usable ambient light" flag instead. Those two agree exactly while every
+> occluder is **opaque** — an opaque cell both occludes and holds no usable light — so the substitution
+> looked sound and every baseline agreed. It breaks on the **sealed diagonal**, which is *air*: it
+> holds light, so it fed the mean at full weight while the corner seal simultaneously counted it as
+> fully occluding. Its light was credited and debited at once, and at a concave corner the hidden cell
+> is the darkest one around, so real corners rendered **up to twice as dark as this model claims**.
+>
+> Weighting the mean by `wᵢ · openᵢ` makes the reduction far stronger than the one this section
+> originally claimed. The kernel weights sum to one, so the visible weight **is** `1 − occ` at a
+> corner, and the renormalization cancels the `(1 − occ)` factor outright:
+>
+> ```
+> out(p) = [ Σ wᵢ openᵢ Lᵢ / Σ wᵢ openᵢ ] · (1 − occ)  =  Σ wᵢ · openᵢ · Lᵢ
+> ```
+>
+> — which is *exactly* the expression the pre-`SS-2` engine evaluated, **for an arbitrary light field
+> rather than only a uniform one**. The renormalized form survives only to handle the degenerate case
+> below. Baseline **B58** pins it.
+>
+> **The guard it needs:** where the kernel collapses onto a single cell that occludes — a face centre
+> under a slab standing on it — the visible weight is zero and the mean is undefined. Fall back to the
+> unshadowed mean there; the occlusion term already carries the darkening, and a zero renders the face
+> black. That black face is the defect `SS-2` hit and mis-diagnosed as "light must not be weighted by
+> the per-point shadow": true of an *unrenormalized* weighting, false of this one.
+
 > ⚠️ **Corrected during `SS-2` execution: the two-occluder row read `128` in v1.3–v1.4 and the real
 > value is `64`.** Classic voxel AO darkens a corner *fully* once both flanking cells are solid,
 > whatever sits diagonally — the diagonal quadrant is not visible from that corner at all, because the
 > two walls meeting there stand between them. The engine has always done this (`SampleNeighborLight`'s
 > `sidesSealCorner` test); this document's table simply had not accounted for it. A model that treats
 > the nine cells as independent lightens **every inside corner in the world** from `64` to `127`.
-> The rule is preserved as `shadow[diag] = max(own, min(sideA, sideB))` — the smooth form of the
-> original boolean test, so a partial occluder half-seals a corner instead of switching it.
+> The rule is preserved as `shadow[diag] = max(own, sideA · sideB)` — a smooth form of the original
+> boolean test, so a partial occluder half-seals a corner instead of switching it. **The combiner is a
+> product, and `SS-2a` is what that costs to get wrong**: `SS-2` shipped `min`, which is also an
+> identity at a corner but holds the seal at *full strength* along the whole diagonal, sealing open
+> floor a cell away from the corner. Measured, the seal's contribution half a cell out ran `16` light
+> units against `16` in the corner itself — flat. The product decays it to `4` while the corner holds
+> at `63`. Baseline **B57** pins both ends.
 
 **Why `0.25`, and why a sum rather than `max`.** Occlusion is a share of the shaded point's
 hemisphere, and the four cells meeting at a face corner divide it in four — which is the existing
@@ -759,8 +791,11 @@ corner field no longer the expectation, the leg is replaced by the reduction ass
 
 ### 6.4 Baseline map
 
-Numbering is claimed against the meshing suite's current tip **B49** (Validate All **432**); the
-executor re-confirms the tip before writing.
+Numbering was claimed against the meshing suite's tip at authoring time, **B49** (Validate All
+**432**); the executor re-confirms the tip before writing. **As shipped through `SS-2a` the tip is
+`B58` (53 meshing baselines, Validate All 437)** — `B51`–`B55` were never written: `SS-2` folded
+their claims into rewritten `B46`/`B49` plus the new `B56`, and `B54`/`B55` remain owed by `SS-3` and
+`SS-4`.
 
 | ID      | Phase  | Asserts                                                                                                                                                       | Prove-red                                                                                                                             |
 |---------|--------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
@@ -770,6 +805,8 @@ executor re-confirms the tip before writing.
 | **B53** | SS-2   | **Position purity (D6).** A corner emitted by a subdivided face and the same corner emitted by its ordinary neighbour carry the same value; and a subdivided face's corner equals the undivided formula at that point. | Apply the model in `ShadeSubVertex` only → corners disagree across the seam. This is the mutation that reproduces the seam `VO-9a` exists to prevent. |
 | **B56** | SS-2   | **The corner reduction — the claim the whole replacement rests on.** With full-cube occluders, a face corner reads `255 / 191 / 128 / 64` for 0 / 1 / 2 / 3 occluding neighbours — **exact values, no tolerance beyond UNorm8 rounding**, because §5.2's collapse is algebraic. Read through `TopFaceCornerSun` on an open floor, one wall, an inner corner, and a 1×1 pit. | Perturb `CELL_OCCLUSION_SHARE` off `0.25`, or swap the sum for a `max` → the 2- and 3-occluder rows red while the 1-occluder row survives, which is the exact signature of D3's rejected global-factor form. |
 | **B49′**| SS-2   | Rewritten per §6.3 — the inner-corner face centre is bounded away from the unoccluded value and correctly ordered against the face's corners; new roll-away positive control. | Force the ring's occlusion to vanish in the interior (the historical `VO-9b` mutation) → the centre returns `255` and every clause reds. |
+| **B57** | SS-2a  | **The corner seal is local.** A four-configuration differential (both walls / either / neither) isolates what the second wall adds beyond two independent walls, and asserts it is at full strength in the corner *and* materially weaker half a cell out along the diagonal. The first suite scenario to read the field **between** a face's corners and its centre, which is where SS-2a's artifact lived. | Both directions, both executed: the shipped `min` combiner reds the locality leg alone; deleting the seal reds the corner leg *and* B56. Neither leg is satisfiable by the other's failure mode. |
+| **B58** | SS-2a  | **A cell the seal hides does not also feed the light average**, asserted under the suite's **first non-uniform light field**. Two legs: darkening the hidden diagonal must not move a *sealed* corner, and must still move an *open* one. | Weight the light mean by the kernel alone (what SS-2 shipped) → B58 reds alone, `64 → 32`, with all 52 others green. The open-corner leg is the F15 control: a model that simply dropped the diagonal would satisfy the first leg and fail this one. |
 | **B54** | SS-3   | **The shadow follows the rectangle (goal 2 / S2).** Around an isolated full cube, a point beside the cube's *face* at distance `d` and a point beside its *corner* at the same `d` agree within tolerance. A metric assertion, independent of D2's profile. | The pre-`SS-3` engine fails it grossly: `12 of 32` corners darken (§2.3), the corner-adjacent point being far lighter than the edge-adjacent one at equal distance. |
 | **B55** | SS-4   | A custom-mesh face (a slab's own top face) is subdivided and carries the same field a standard-cube face would at the same positions.                          | Route custom-mesh faces back through the single-quad path → the field collapses to a bilinear blend and B55 reds while B51 survives.    |
 
@@ -860,7 +897,7 @@ get to rely on them.
 | ~~**SS-0**~~ | ✅ Harness fixtures + sub-vertex probe + pre-SS record (suite-only) |   🟢   | —          |
 | ~~**SS-1**~~ | ✅ Silhouette primitive, no consumer                                |   🟢   | SS-0       |
 | **SS-2**  | ⚠️ Contact-shadow term, partial occluders (**observation 1**) — code complete, **rejected in game** |   🟡   | SS-1, D1–D3 |
-| **SS-2a** | ⛔ Fix the corner-darkening artifact SS-2 introduced                 |   🟡   | SS-2       |
+| **SS-2a** | ⏳ Fix the corner-darkening artifact SS-2 introduced — fixed, awaiting in-game |   🟡   | SS-2       |
 | **SS-3**  | Extend the gate to full-cube occluders (**observation 2**)          |   🔴   | SS-2a, D7  |
 | **SS-4**  | Subdivide custom-mesh faces (S6)                                    |   🟡   | SS-2a      |
 
@@ -1108,11 +1145,14 @@ whole reason that baseline exists.
   closed, it is not re-opened).
 - **Serialization:** none.
 
-### SS-2a — Fix the corner-darkening artifact (🟡, behaviour change) · ⛔ **OPEN — blocks SS-2's sign-off**
+### SS-2a — Fix the corner-darkening artifact (🟡, behaviour change) · ✅ **FIXED 2026-08-09 — AWAITING IN-GAME CONFIRMATION**
 
 **Symptom (owner, in game, 2026-08-09).** Concave corners — where two walls meet — cast a dark wedge
 that spreads diagonally across open floor instead of darkening only the corner itself. Reported as
 the *"corner darkening artifact"* re-introduced by SS-2.
+
+> ✅ **The suspicion below was confirmed and the fix is one line: the seal's combiner is a product,
+> not a `min`.** What follows is the packet as filed, then the record of what was measured.
 
 **Leading suspicion, stated as a suspicion.** `MeshGenerationJob.ApplyCornerSeal`. §5.2's corner seal
 reproduces classic voxel AO's rule that a corner flanked by two solid cells is fully dark whatever
@@ -1144,17 +1184,99 @@ spreading** — for example by restricting the seal to the region where it is ge
 (the point lying inside the wedge between the two occluders) rather than applying it wherever both
 are merely within range. Do not resolve this by loosening `B56`.
 
-- **Precondition:** none — `SS-2` is committed (`20761a46`) and this fixes it in place.
+**What was measured, and how the diagnostic was answered.** The packet's decisive diagnostic asks for
+an in-game look with the seal disabled. It was answered *numerically* instead, which is strictly
+sharper and did not need the game: the fixture is a concave corner built from two single-cell walls,
+run in **four configurations** — both walls, either alone, neither — so that
+
+```
+excess(p) = sun(A only) + sun(B only) − sun(both) − sun(neither)
+```
+
+isolates exactly what the second wall adds *beyond two independent walls*. Nothing but the seal
+produces it; the falloff profile, the radius, the gate-tripping slab and the light field all appear in
+every configuration and cancel. (The light mean is a clean constant here — the wall cells are fully
+opaque, so they hold no ambient light and drop out of the blend — which makes the excess exactly
+proportional to occlusion.)
+
+The field came back as `63.75 · min(u², v²)`, in light units over the face's parameter square:
+
+| `v` ↓ / `u` → | `0.00` | `0.25` | `0.50` | `0.75` | `1.00` |
+|---------------|-------:|-------:|-------:|-------:|-------:|
+| **`1.00`**    | 0      | 4      | 16     | 35     | **63** |
+| **`0.75`**    | 0      | 4      | 16     | 36     | 35     |
+| **`0.50`**    | 0      | 4      | **16** | **16** | **16** |
+| **`0.25`**    | 0      | 0      | 1      | 2      | 4      |
+
+**Read the `v = 0.50` row.** The seal is *flat* from the corner out to half a cell along the
+diagonal — a point standing in open floor is sealed exactly as hard as one wedged into the corner.
+That is the wedge, and `min` has a second signature that explains its hard edge: it is
+non-differentiable where its two arguments cross, i.e. precisely along the diagonal `u = v`, so the
+field carries a crease radiating out of every concave corner.
+
+**The fix.** `shadow[diag] = max(own, sideA · sideB)`. A product is the natural smooth conjunction of
+"both sides hide the diagonal", where `min` is the hardest one; it is an identity at a cell corner
+(every argument is `0` or `1`), so **`B56` is untouched**, and it decays with distance in both
+tangent directions instead of one. Re-measured, the excess field is `63.75 · u²v²`: `63` in the
+corner, `16` against a wall, `4` half a cell out along the diagonal, and no crease.
+
+**A related deviation, deliberately not acted on.** With the seal correct, `SS-2`'s interior is still
+*lighter* than the pre-`SS-2` bilinear ramp everywhere except the corner itself — on the diagonal,
+`147` against `124` at `u = v = 0.75` — because a `(1 − t)²` falloff concentrates a shadow near its
+occluder where the GPU's interpolation of corner values was linear. That is `D2` working as chosen,
+not a defect, and §5.2 already names the exponent as the lever if interiors read too flat. **It is
+also the one thing the in-game check should look at**: were the corners to still read wrong after this
+fix, the exponent — not the seal — is the remaining suspect, and `D2` re-opens with the owner.
+
+### The second defect, found only after the first fix went in game
+
+The corner-seal fix above was correct and necessary, and the artifact **survived it**. The second
+in-game report named the same corners, and the analysis that followed is the more important of the
+two — because it invalidates a claim this document had been making since `SS-2`.
+
+**Every block in the reported scene is a full cube** (`Snow`, `Grass`, `Dirt`, `Stone` are all
+`RenderShape.Cube` / `FullBlock`, verified against `BlockDatabase.asset`). Nothing there is
+subdivided, and at a cell corner every silhouette sits at distance exactly `0` or `1`. By §5.2's
+reduction, ordinary terrain **cannot** have moved — which is what `B56` asserts and what this document
+claimed. The contradiction was the finding: **the reduction holds only when the light field is
+uniform**, and every AO scenario in the meshing suite fills light uniformly (`MH-3`'s documented
+harness limit). Measured on plain full cubes at a sealed corner, varying only the hidden diagonal
+cell's sky light:
+
+| Sky light in the hidden diagonal cell | Engine (as `SS-2` shipped) | Pre-`SS-2` model |
+|---------------------------------------|---------------------------:|-----------------:|
+| `15` (as bright as the open air)      | `64`                       | `64`             |
+| `9`                                   | `51`                       | `64`             |
+| `3`                                   | `38`                       | `64`             |
+| `0`                                   | `32`                       | `64`             |
+
+The cause and the fix are in §5.2's second correction block: the light mean must be weighted by the
+same visibility the occlusion term uses. **The lesson generalizes past this design** — when a model is
+split into two factors that were previously one expression, the split is only sound where the two
+factors partition the same set, and "opaque" versus "occluded" stopped being the same set the moment
+the seal began occluding air.
+
+- **Precondition:** none — `SS-2` is committed (`fd588e57`) and this fixes it in place.
 - **Ordering:** **before** `SS-3` and `SS-4`. Both widen the same field; judging either on top of a
   known artifact would confound them.
-- **Prove-red:** the artifact needs a scenario that can *see* it, and none of the 435 existing
-  baselines can — they read face corners and face interiors, while this lives in the field a cell
-  away from a corner. Author it first, red, then fix: sample the sub-vertex field on open floor
-  **diagonally adjacent** to a concave corner and assert it is not darkened beyond what a single wall
-  at that distance produces. Follow `validation-driven-bugfix`; the F15 rule applies — the positive
-  control must not be satisfiable by the behaviour under test.
-- **Acceptance:** universal gate + **in-game confirmation on the same enclosure**, plus the four
-  SS-2 acceptance readings that were never reached (§ the SS-2 packet's acceptance list).
+- **Prove-red (executed 2026-08-09, each mutation restored clean):** new baseline **B57**, authored
+  and observed red *before* the engine was touched. It reads the four-configuration excess at three
+  points and asserts two things at once:
+
+  | Mutation | Result |
+  |----------|--------|
+  | The shipped `min` combiner | **B57's locality leg red, alone** — a fall-off of `0` against the `6` it guards — with all 51 other meshing baselines green. This is the defect itself, on record. |
+  | Seal deleted (`sealStrength = 0`) | **B56 red at `127` *and* B57's corner leg red.** The cheapest wrong fix is blocked by the suite, in both directions. |
+  | Light mean weighted by the kernel alone (as `SS-2` shipped) | **B58 red, alone** — the sealed corner moves `64 → 32` as the hidden cell darkens — with **all 52 others green**, which is the measurement of how invisible this defect was to a uniform-light suite. B58's own positive control stayed green throughout. |
+
+  The second mutation is the F15 control: the locality leg alone is satisfied by deleting the seal,
+  the corner leg alone is satisfied by the defect, and only the pair states "keep the corner value,
+  stop it spreading". Note that **B57's corner leg stayed green under the defect** — it had to, or it
+  would not be an independent control.
+- **Acceptance:** ✅ universal gate — **Validate All 437/437 across 18 suites**, both assemblies
+  clean. ⏳ **in-game confirmation on the same enclosure still required**, and it carries the four
+  `SS-2` acceptance readings that were never reached (§ the `SS-2` packet's acceptance list) plus one
+  of its own: the concave corners of a walled enclosure show a corner shadow, not a diagonal wedge.
 - **Serialization:** none.
 
 ### SS-3 — Extend the gate to full-cube occluders (🔴, behaviour change — observation 2)
@@ -1245,6 +1367,8 @@ are merely within range. Do not resolve this by loosening `B56`.
 
 ## Document History
 
+* **v1.8** - **SS-2a, second defect: the light mean must be weighted by visibility, not by a per-block "holds light" flag.** The product-seal fix was correct and the artifact survived it in game. Every block in the reported scene is a **full cube**, so §5.2's reduction says ordinary terrain cannot have moved — and that contradiction is the finding: **the reduction holds only under a uniform light field**, which is what every AO scenario in the suite fills (`MH-3`). Measured at a sealed corner on plain full cubes, the engine read `64 / 51 / 38 / 32` as the hidden diagonal cell's sky went `15 / 9 / 3 / 0`, where the pre-SS-2 model reads `64` throughout. Cause: `SS-2` split one expression into "light mean × `(1 − occ)`" and took the mean over cells that *hold* light — identical to the occluded set while occluders are opaque, and wrong the moment the **seal occludes air**, which is credited and debited at once. Weighting the mean by `wᵢ·openᵢ` makes the two factors cancel (`Σw·open = 1 − occ` at a corner), so the model now collapses to the pre-SS-2 expression **for an arbitrary light field** — a strictly stronger reduction than §5.2 originally claimed. Needs one guard: fall back to the unshadowed mean where the kernel sees nothing, which is the black-face case SS-2 mis-diagnosed as "light must not be weighted by the per-point shadow" (true unrenormalized, false renormalized). New baseline **B58**, red first at `64 → 32` with **all 52 others green** — the measure of how invisible this was. Validate All **437**
+* **v1.7** - **SS-2a fixed: the corner seal's combiner is a product, not a `min`.** The suspicion filed in v1.6 was confirmed, and answered by measurement rather than by eye: a four-configuration differential (both walls / either alone / neither) isolates the seal from the falloff, the radius and the light field, and showed its contribution running **flat at 16 light units from the corner out to half a cell along the diagonal** — the wedge — with a crease along `u = v` where `min`'s two arguments cross. The product decays it to `4` while holding `63` in the corner, is an identity at a cell corner so **B56 is untouched**, and is the natural smooth conjunction of "both sides hide the diagonal". New baseline **B57**, authored red first, pins both ends: **the shipped `min` reds its locality leg alone; deleting the seal reds its corner leg *and* B56**, so the cheapest wrong fix is blocked in both directions (F15). Validate All **436**. Recorded but not acted on: with the seal correct, SS-2's interior is still *lighter* than the pre-SS-2 bilinear ramp (147 vs 124 mid-diagonal) because `(1 − t)²` concentrates a shadow near its occluder — that is D2 working as chosen, and the exponent is the remaining suspect if the in-game check still reads wrong
 * **v1.6** - **SS-2 rejected in game: a corner-darkening artifact**, dark wedges spreading diagonally out of concave corners across open floor. Filed as **SS-2a**, which now blocks SS-2's sign-off and both later phases. Leading suspicion is `ApplyCornerSeal`: §5.2's corner seal is right at a corner (B56's 2/3-occluder rows depend on it) but SS-2 implemented it as a *continuous* `max(own, min(sideA, sideB))` over distance-attenuated shadows, so at `R = 1.0` it fires across a cell-wide band around every concave corner and attributes occlusion to air that is plainly visible. Decisive diagnostic recorded (disable the seal and look; B56 going red at 127 is the expected confirming red). **All 435 baselines were green throughout** — every scenario reads face corners or face interiors, and this artifact lives in the field between them, so SS-2a must author a probe that can see it before fixing
 * **v1.5** - **SS-2 code complete, awaiting in-game confirmation.** Coverage is gone from the AO path: one `ShadePoint` function serves corners and sub-vertices, fed by a 3x3 hoist built once per face; `DirectOpenFractionAt`, `SampleNeighborLight` and `Weigh` deleted. **The corner reduction is exact** (`255/191/64/64`) and the **post now shades to 191 where it managed 251** — a shape that cast essentially nothing, fixed with no per-shape code. **Three defects were found and fixed during execution, none of which the suite could see beforehand:** (1) the face centre under a slab rendered `0`, because the light mean was weighted by the per-point shadow and the kernel collapses onto a single occluding cell there — fixed by weighting on a per-cell "holds usable light" flag, which is also the cleaner separation D3 wants; (2) **inside corners lightened 64 -> 127**, because this document's §5.2 table had the two-occluder row wrong (`128`) and missed classic AO's corner seal — restored as `max(own, min(sideA, sideB))`, the smooth form of the original boolean rule; (3) **Bug M03 re-introduced** — the interior-face touch test let a half slab shadow its own mid-plane face, rendering a recessed slab fully black, caught by B47. New baseline **B56** pins the reduction and is the only guard that sees a `max` combiner flatten every inside corner; **B46** and **B49** had their *assertions* rewritten rather than loosened (B46 now counts corners at the strongest darkening; B49's leg 3b is a with/without-walls differential). Prove-red: sum->max reds B56's 2/3 rows alone; R=0.5 reds B49 with the centre at 255 both ways — the F18 signature via the radius. Validate All **434**
 * **v1.4** - **SS-1 executed** (2026-08-09, no behaviour change). `BurstOcclusionUtility.GetFaceSilhouette` + `LightAttenuation.AmbientOcclusionFaceSilhouette`, gated exactly like their siblings; **nothing consumes them yet**. Baseline **Occlusion B6** (5 -> 6) — corrected from the plan's *meshing* B50, which SS-0 consumed and which was the wrong suite anyway: a pure shape-primitive test belongs in the Occlusion suite VO-1 built for this layer. **§11 question 4 resolved: `GetFaceCoverage` is NOT re-expressed through the new primitive** — it feeds light transport, where a last-ulp difference could flip `FaceBlocksLight`'s `>= 1 - 1e-4` threshold, and the drift the consolidation would prevent is prevented just as well by B6 asserting the silhouette's area equals it **bitwise** across every fixture/face/orientation. Guarded, not merged (the B5 pattern). Prove-red by transposing the shared rotation core reproduced the **F10 signature exactly**: B2 and B6 red, B1/B3/B4/B5 green, meshing B46 red downstream — and **the post rows stayed green**, so B6's discrimination rests entirely on its roll leg. Recorded as a do-not-drop
@@ -1256,4 +1380,4 @@ are merely within range. Do not resolve this by loosening `B56`.
 ---
 
 **Last Updated:** 2026-08-09  
-**Next Review:** when SS-2a starts — it blocks SS-2's sign-off and everything after it, or when `VX-1` is scheduled (it changes D7) — D1/D2/D3 are settled and no phase is blocked before SS-3 (D7)
+**Next Review:** on the in-game confirmation of SS-2 + SS-2a together — it unblocks SS-3 and SS-4 — or when `VX-1` is scheduled (it changes D7); D1/D2/D3 are settled

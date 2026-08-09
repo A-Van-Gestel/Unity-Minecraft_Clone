@@ -788,7 +788,7 @@ namespace Jobs
                     VoxelMeshHelper.GetSubQuad(in face, u0, v0, u1, v1, out VoxelMeshHelper.FaceQuad sub);
 
                     // Every sub-vertex asks the same question an ordinary face asks at its corners, at
-                    // its own position — so a subdivided face and an undivided neighbour agree wherever
+                    // its own position — so a subdivided face and an undivided neighbor agree wherever
                     // they meet, without the tessellation needing to know about the seam.
                     Color32 s0 = ShadePoint(sub.P0, directCell, axisA, axisB, occluders);
                     Color32 s1 = ShadePoint(sub.P1, directCell, axisA, axisB, occluders);
@@ -1218,7 +1218,7 @@ namespace Jobs
 
             // Hoist the whole 3x3 of cells in front of the face ONCE. Every shading point on this face
             // draws from these nine, so this replaces the sixteen overlapping per-corner fetches the
-            // pre-SS-2 path made — and it is what lets a sub-vertex evaluate the full neighbourhood
+            // pre-SS-2 path made — and it is what lets a sub-vertex evaluate the full neighborhood
             // without any per-point voxel reads at all.
             for (int da = -1; da <= 1; da++)
             {
@@ -1230,7 +1230,7 @@ namespace Jobs
                     VoxelState? state = GetVoxelStateFromLocalPos(cell);
                     if (!state.HasValue)
                     {
-                        // Outside the built neighbourhood: treat as open sky, exactly as before.
+                        // Outside the built neighborhood: treat as open sky, exactly as before.
                         entry.Sun = 15;
                         entry.HoldsLight = 1;
                     }
@@ -1326,20 +1326,20 @@ namespace Jobs
         /// quarter and every occluder is either in contact or a full cell away, so the result collapses
         /// term-for-term to a quarter of the sum of the open cells' light — the expression the engine has
         /// always evaluated, reproducing <c>255 / 191 / 128 / 64</c> for zero to three occluding
-        /// neighbours. That identity is what lets this replace a coverage model without moving ordinary
+        /// neighbors. That identity is what lets this replace a coverage model without moving ordinary
         /// terrain, and baseline <b>B56</b> pins it.
         /// </para>
         /// <para>
         /// <b>Why occlusion is kept out of the interpolation weights.</b> The weights exist to blend
         /// <i>light</i>, and they collapse onto a single cell at the middle of a face — correct for
         /// light and fatal for occlusion, because evaluating a form where the two are multiplied
-        /// together destroys every ring occluder's contribution toward the face centre. That is
-        /// precisely the defect VO-9b shipped and had to correct (an inner corner's centre went 144 to
+        /// together destroys every ring occluder's contribution toward the face center. That is
+        /// precisely the defect VO-9b shipped and had to correct (an inner corner's center went 144 to
         /// 255). Separating them is what makes per-sub-vertex evaluation safe here.
         /// </para>
         /// </summary>
         /// <param name="samplePoint">The shaded point, in chunk-local space, on the face's plane.</param>
-        /// <param name="directCell">The cell in front of the face (the 3x3's centre).</param>
+        /// <param name="directCell">The cell in front of the face (the 3x3's center).</param>
         /// <param name="axisA">The face's first tangent axis (0 = X, 1 = Y, 2 = Z).</param>
         /// <param name="axisB">The face's second tangent axis.</param>
         /// <param name="occluders">The hoisted 3x3, from <see cref="PrepareFaceSampling"/>.</param>
@@ -1371,23 +1371,60 @@ namespace Jobs
 
             occlusion = math.saturate(occlusion);
 
-            // The light mean is taken over the cells that hold usable ambient light, weighted only by
-            // the interpolation kernel. Deliberately NOT weighted by the per-point shadow: that would
-            // count the occlusion twice, and where the kernel collapses onto a single shadowing cell it
-            // would leave the point with no light source at all (a slab's own cell, mid-face).
+            // Light arrives from the part of the neighborhood this point can actually SEE, so the mean
+            // is taken over the interpolation kernel weighted by BOTH what holds light and what is not
+            // shadowed. Taking it over the same weights the occlusion term uses is what makes the two
+            // factors cancel rather than compound: since the kernel weights sum to one, the visible
+            // weight IS `1 - occlusion` at a corner, so `mean * (1 - occlusion)` collapses to
+            // `sum(weight * open * light)` — the expression the engine evaluated before SS-2, now for an
+            // arbitrary light field rather than only a uniform one. Baseline B58 pins that.
             TangentSpan(point.x, out int offsetA, out float weightDirectA, out float weightNeighborA);
             TangentSpan(point.y, out int offsetB, out float weightDirectB, out float weightNeighborB);
 
-            float4 sum = float4.zero;
-            float weightSum = 0f;
+            Span<int> kernelCell = stackalloc int[LIGHT_KERNEL_COUNT]
+            {
+                OccluderIndex(0, 0),
+                OccluderIndex(offsetA, 0),
+                OccluderIndex(0, offsetB),
+                OccluderIndex(offsetA, offsetB),
+            };
 
-            AccumulateLight(occluders, 0, 0, weightDirectA * weightDirectB, ref sum, ref weightSum);
-            AccumulateLight(occluders, offsetA, 0, weightNeighborA * weightDirectB, ref sum, ref weightSum);
-            AccumulateLight(occluders, 0, offsetB, weightDirectA * weightNeighborB, ref sum, ref weightSum);
-            AccumulateLight(occluders, offsetA, offsetB, weightNeighborA * weightNeighborB, ref sum, ref weightSum);
+            Span<float> kernelWeight = stackalloc float[LIGHT_KERNEL_COUNT]
+            {
+                weightDirectA * weightDirectB,
+                weightNeighborA * weightDirectB,
+                weightDirectA * weightNeighborB,
+                weightNeighborA * weightNeighborB,
+            };
 
-            // Nothing reachable holds light: the point is buried, and the occlusion term is 1 anyway.
-            float4 light = weightSum > LIGHT_WEIGHT_EPSILON ? sum / weightSum : float4.zero;
+            float4 visibleSum = float4.zero, litSum = float4.zero;
+            float visibleWeight = 0f, litWeight = 0f;
+
+            for (int k = 0; k < LIGHT_KERNEL_COUNT; k++)
+            {
+                int cell = kernelCell[k];
+                float weight = kernelWeight[k];
+                if (weight <= 0f || occluders[cell].HoldsLight == 0) continue;
+
+                FaceOccluder o = occluders[cell];
+                float4 value = new float4(o.Sun, o.R, o.G, o.B);
+
+                litSum += weight * value;
+                litWeight += weight;
+
+                float visible = weight * (1f - shadow[cell]);
+                visibleSum += visible * value;
+                visibleWeight += visible;
+            }
+
+            // Fall back to the unshadowed mean when the kernel sees nothing: at a face center the kernel
+            // collapses onto the single cell in front of the face, and if that cell occludes — a slab
+            // standing on the surface — there is no visible light source left to average. The occlusion
+            // term already carries the darkening there; a zero would render the face black.
+            float4 light = visibleWeight > LIGHT_WEIGHT_EPSILON
+                ? visibleSum / visibleWeight
+                : (litWeight > LIGHT_WEIGHT_EPSILON ? litSum / litWeight : float4.zero);
+
             float4 shaded = light * (1f - occlusion);
 
             return new Color32(
@@ -1408,9 +1445,21 @@ namespace Jobs
         /// exists to prevent, and one this model would otherwise have reintroduced.
         /// </para>
         /// <para>
-        /// Written as <c>max(own, min(sideA, sideB))</c> rather than the original boolean test, so the
-        /// seal closes gradually as the flanking occluders approach: a partial block half-blocking one
-        /// side half-seals the corner instead of switching it.
+        /// Written as <c>max(own, sideA · sideB)</c> rather than the original boolean test, so the seal
+        /// closes gradually as the flanking occluders approach: a partial block half-blocking one side
+        /// half-seals the corner instead of switching it. <b>The product is the load-bearing choice</b>
+        /// (SS-2a). Both sides must hide the diagonal for it to be hidden, and only a product falls off
+        /// with distance from the corner in the way that conjunction demands — <c>min</c> holds the seal
+        /// at full strength along the entire diagonal, sealing open floor a whole cell away from the
+        /// corner and creasing where the two arguments cross. That shipped as a dark wedge running
+        /// diagonally out of every concave corner. Baseline <b>B57</b> guards both halves: the seal is
+        /// still whole in the corner, and it decays away from it.
+        /// </para>
+        /// <para>
+        /// At a cell corner with full cubes the two forms are identical (every argument is 0 or 1), which
+        /// is why <b>B56</b>'s reduction is untouched. Away from one they diverge sharply: measured on a
+        /// concave corner, the seal's contribution half a cell out along the diagonal falls from 16 light
+        /// units to 4, while the corner itself holds at 63.
         /// </para>
         /// </summary>
         /// <param name="shadow">Per-cell shadow strengths for the hoisted 3x3, modified in place.</param>
@@ -1422,34 +1471,17 @@ namespace Jobs
                 for (int db = -1; db <= 1; db += 2)
                 {
                     int diagonal = OccluderIndex(da, db);
-                    float sealStrength = math.min(shadow[OccluderIndex(da, 0)], shadow[OccluderIndex(0, db)]);
+                    float sealStrength = shadow[OccluderIndex(da, 0)] * shadow[OccluderIndex(0, db)];
                     shadow[diagonal] = math.max(shadow[diagonal], sealStrength);
                 }
             }
         }
 
         /// <summary>
-        /// Adds one of the four kernel-reachable cells to the light mean, weighted by its share of the
-        /// sample box. Cells holding no usable light are skipped and their weight is renormalized away.
+        /// How many cells the light interpolation kernel reaches: the sample box is one cell wide, so it
+        /// spans two cells on each tangent axis.
         /// </summary>
-        /// <param name="occluders">The hoisted 3x3.</param>
-        /// <param name="da">The cell's offset on the first tangent axis.</param>
-        /// <param name="db">Its offset on the second tangent axis.</param>
-        /// <param name="weight">Its share of the sample box.</param>
-        /// <param name="sum">Running weighted light sum (sky, R, G, B).</param>
-        /// <param name="weightSum">Running weight total, for renormalization.</param>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void AccumulateLight(ReadOnlySpan<FaceOccluder> occluders,
-            int da, int db, float weight, ref float4 sum, ref float weightSum)
-        {
-            if (weight <= 0f) return;
-
-            FaceOccluder o = occluders[OccluderIndex(da, db)];
-            if (o.HoldsLight == 0) return;
-
-            sum += weight * new float4(o.Sun, o.R, o.G, o.B);
-            weightSum += weight;
-        }
+        private const int LIGHT_KERNEL_COUNT = 4;
 
         /// <summary>
         /// Euclidean distance from a point to an occluder's silhouette rectangle, in cells; zero when
