@@ -1,6 +1,6 @@
 # Performance Improvements Report
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-07-26  
 **Status:** **Open backlog.** 31 items open, 29 complete. Completed items keep their ✅ row in the master
 summary table; their detail sections live in
@@ -351,9 +351,11 @@ options.
 
 **Constraints specific to this engine:**
 
-- **Per-vertex smooth lighting** is the hard one: merged quads interpolate light across the merged area, which is wrong unless (a) merging is restricted to faces with identical corner light values (still merges large uniform areas — most of the win), or (b) lighting moves out of vertex data into a per-chunk 3D light texture sampled per-pixel (bigger refactor, also improves light quality).
+- **Per-vertex smooth lighting** is the hard one: merged quads interpolate light across the merged area, which is wrong unless (a) merging is restricted to faces with identical corner light values (still merges large uniform areas — most of the win), or (b) lighting moves out of vertex data into a per-chunk 3D light texture sampled per-pixel (bigger refactor, also improves light quality). **Route (b) is owned by `VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md` `VX-1` + `VX-8`** — do not re-derive it here.
+- **⚠️ Route (b) unblocks *light*, not *ambient occlusion* (added 2026-08-09).** `VX-8` keeps AO vertex-baked, and for a hard reason recorded there: hardware trilinear filtering of a voxel-resolution volume is a product of three per-axis linear ramps, which is precisely the weighting that produces the engine's round-blob AO artifact (`SILHOUETTE_CONTACT_SHADOWS.md` finding **S2**). So AO cannot follow light into the volume, and **constraint (a) survives `VX-8` reworded as an *AO* predicate**: merge faces with identical corner AO. That still merges open floors and unobstructed walls — where the vertex count actually lives — so the bulk of the win survives.
 - **Texture atlas UVs** can't tile across a merged quad. Requires `Texture2DArray` (UV.z = layer index, fragment-side `frac()` tiling) — a shader + atlas build change.
-- The anisotropy quad-flip (`EmitQuadTriangles`) and AO/light diagonal logic must be re-derived for merged quads.
+- The anisotropy quad-flip (`EmitQuadTriangles`) and AO/light diagonal logic must be re-derived for merged quads. Note it now runs **per sub-quad** on tessellated faces (`VO-9b`).
+- **`SS-*` sub-cell shading is merge-neutral, and its gate partitions the face set with this item (added 2026-08-09).** `SILHOUETTE_CONTACT_SHADOWS.md` subdivides a face into N×N sub-quads whenever an occluder is within one cell of it — alarming next to a vertex-reduction item, but the two do not compete for the same faces: a face with an occluder in range is exactly a face whose corner AO is *non-uniform*, which constraint (a) cannot merge anyway. Tessellate the varying faces, merge the uniform ones. And `SS-*` does not shrink the mergeable set: its occlusion is zero beyond one cell from an occluder's silhouette, the same support today's AO has.
 - Sub-chunk section stats (`MeshSectionStats`) and the visibility-culling connectivity work (`VISIBILITY_CULLING_ARCHITECTURE.md`) are unaffected — merging happens within a section.
 
 **Recommendation:** Treat as a phased design doc of its own when picked up: Phase 1 opaque cubes with flat lighting + texture arrays; Phase 2 smooth-lighting-aware merge predicate. Capture a meshing baseline first (`Performance/README.md`).
@@ -1197,6 +1199,7 @@ inherit a one-click `Validate All` that also flags stale-code runs automatically
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.2** - `MR-8` annotated with two interlocks (2026-08-09), no scope change. (1) Its route-(b) escape hatch is owned by `VX-1`/`VX-8`, and that route unblocks **light only** — AO cannot follow it into a filtered volume, because trilinear filtering is the separable product that produces the engine's round-blob AO (`SILHOUETTE_CONTACT_SHADOWS.md` **S2**), so constraint (a) survives reworded as an *AO* predicate and keeps most of the win. (2) `SS-*`'s sub-cell tessellation is **merge-neutral** and partitions the face set with this item — a face with an occluder in range has non-uniform corner AO and was never mergeable
 * **v1.1** - `SL-1` annotated with a corroboration note pointing at the new
   [`THIRD_PARTY_LIBRARY_IDEAS_REPORT.md`](THIRD_PARTY_LIBRARY_IDEAS_REPORT.md) (2026-08-05): an
   independent evaluation of Cysharp's `NativeMemoryArray` converges on `SL-1`'s pooled-buffer
@@ -1229,7 +1232,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-05 (`SL-1` corroboration note; 2026-07-26: header completed, completed
+**Last Updated:** 2026-08-09 (`MR-8` VX-8 / `SS-*` interlocks; 2026-08-05: `SL-1` corroboration note; 2026-07-26: header completed, completed
 items archived, 2,100 → 1,126 lines)  
 **Next Review:** on the next implementation wave — move each newly-finished item's detail section to the
 archive and leave its ✅ row behind. A fresh audit pass is also due: the last one was 2026-07-02.

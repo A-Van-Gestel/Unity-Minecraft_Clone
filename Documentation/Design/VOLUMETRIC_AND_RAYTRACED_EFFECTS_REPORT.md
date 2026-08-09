@@ -1,6 +1,6 @@
 # Volumetric & Ray-Traced Effects Report
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** 2026-07-20  
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production), URP 17.5
@@ -46,6 +46,11 @@ that unblocks MR-8's smooth-lighting constraint), VX-9 (heat-haze distortion), V
 - [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) — `GS-2` (opaque
   texture) and `GS-4` (render-tier audit) constrain every render-feature addition here; `MR-8`'s
   "per-chunk 3D light texture" aside describes the same data structure as VX-1.
+- [`SILHOUETTE_CONTACT_SHADOWS.md`](SILHOUETTE_CONTACT_SHADOWS.md) (`SS-*`) — **orthogonal to VX-8,
+  and the source of the reason VX-8 must keep AO vertex-baked.** VX-8 moves *where* shading is
+  stored; `SS-*` fixes *what an occlusion value is*. VX-1's occupancy volume also offers `SS-*` a
+  way to deliver its full-cube case per-pixel at zero vertex cost (see VX-8, and that design's
+  `D7`); VX-5 would extend it to partial blocks.
 - [`../Architecture/SMOOTH_AND_RGB_LIGHTING.md`](../Architecture/SMOOTH_AND_RGB_LIGHTING.md) —
   the `ushort` light model (sky 4b + RGB 3×4b) that VX-1 uploads and VX-4 extends.
 - [`../Architecture/LIGHTING_SYSTEM_OVERVIEW.md`](../Architecture/LIGHTING_SYSTEM_OVERVIEW.md) —
@@ -488,9 +493,37 @@ position — better light than the baked path, from data the volume already hold
    smooth-lighting baselines (meshing suite B-series pins TexCoord1 — untouched, but visual
    parity needs captures), and editor previews need the fallback path.
 
+**Why proposal point 2's "vertex AO stays vertex-baked" is right — the reason, added 2026-08-09.**
+That line was written as a scoping choice ("AO is geometric, not light"); the `SS-*` design
+([`SILHOUETTE_CONTACT_SHADOWS.md`](SILHOUETTE_CONTACT_SHADOWS.md)) supplies the hard reason, and it
+means the line must **not** be relaxed later as a convenience:
+
+- **Hardware trilinear filtering is a product of three per-axis linear ramps** — precisely the
+  separable weighting `SS-*` finding **S2** identifies as the cause of the "AO around a single block
+  is a round blob" artifact (its derivation reproduces the engine's measured `12 of 32` darkened
+  corners exactly). Sampling AO from a filtered volume therefore *reproduces that artifact by
+  construction*, at any resolution.
+- **One texel per voxel cannot locate a partial block inside its cell**, so a slab's contact shadow
+  stays smeared across a whole cell — `VO-*` finding **F18**, unchanged by the move.
+
+So VX-8 moves *where light is stored*; it does not and cannot fix *what an occlusion value is*. The
+two are orthogonal and compose: `SS-*` is the model, VX-8 is the container.
+
+**A cheap consumer this unlocks, for `VX-5`'s attention.** VX-1's `_VoxelOccupancyVolume` puts
+full-cube occupancy on the GPU, which is enough for a fragment shader to tap the 3×3 in the layer in
+front of its face and evaluate `SS-*`'s Euclidean distance-to-silhouette field **per pixel** — no
+extra memory, zero vertex cost, and it would retire `SS-*`'s expensive `SS-3` phase outright (that
+design's `D7` records this as one of its three answers). Two limits: partial blocks are invisible
+until **VX-5** widens occupancy to carry bounds + rotation, and AO cannot be *baked* into a volume at
+all because it is **face-dependent** — six directional volumes would cost ≈ 157 MB at 2× voxel
+resolution against VX-1's 3.3 MB scalar. Analytic per-pixel is the only viable GPU route here.
+
 **Dependencies / cross-links:** VX-1 (hard); `MR-8` (this is its named prerequisite (b) —
-coordinate if/when greedy meshing starts); GS-3 (per-fragment lighting math cost — same
-audit); meshing suite (baked channels stay byte-identical — differential guard).
+coordinate if/when greedy meshing starts, and note VX-8 unblocks its *light* constraint but not its
+AO one — see that entry); `SILHOUETTE_CONTACT_SHADOWS.md` (`SS-*` — orthogonal, and the source of
+the AO reasoning above); VX-5 (would widen occupancy enough for per-pixel `SS-*` on partial blocks);
+GS-3 (per-fragment lighting math cost — same audit); meshing suite (baked channels stay
+byte-identical — differential guard).
 
 ---
 
@@ -589,6 +622,7 @@ but v2+ is best scheduled after RF-1 ships.
 
 ## Document History
 
+* **v1.3** - **VX-8 gains the technical reason behind its "vertex AO stays vertex-baked" line**, supplied by the new `SILHOUETTE_CONTACT_SHADOWS.md` (`SS-*`) design: hardware trilinear filtering is a product of three per-axis linear ramps, which is exactly the separable weighting that produces the engine's round-blob AO artifact, and one texel per voxel cannot locate a partial block inside its cell. So a light volume would reproduce both artifacts rather than fix either — the line is now a constraint with a reason, not a scoping choice. Also recorded on VX-8: a cheap consumer for `VX-5`'s attention — per-pixel evaluation of `SS-*`'s distance field on VX-1's occupancy volume would deliver full-cube contact shadows at zero vertex cost and retire that design's expensive `SS-3` phase, while AO can never be *baked* into a volume because it is face-dependent (~157 MB for six directional volumes at 2x, against VX-1's 3.3 MB). No item added or changed
 * **v1.2** - Routing note: the gap sweep's non-volumetric ideas were documented in their owning
   reports (RF-2 §6 sky ambience, RF-3 §5 extra post effects, RF-7 §6 lightning sketch, new RF-8
   animated block textures at combined-roadmap #22) — this report deliberately stays
@@ -600,5 +634,5 @@ but v2+ is best scheduled after RF-1 ships.
 
 ---
 
-**Last Updated:** 2026-07-20  
+**Last Updated:** 2026-08-09  
 **Next Review:** when VX-0 or VX-4 starts (re-verify `SettingsManager`/`SettingFieldAttribute` and the lighting-suite baseline count) or on the next RF/CL gap sweep

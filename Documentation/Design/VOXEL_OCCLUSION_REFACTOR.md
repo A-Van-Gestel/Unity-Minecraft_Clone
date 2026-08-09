@@ -1,13 +1,14 @@
 # Directional Per-Face Voxel Occlusion (VO-*)
 
-**Version:** 2.9  
+**Version:** 3.0  
 **Date:** 2026-08-09  
 **Status:** **VO-0…VO-6 implemented and confirmed in game — the original arc is complete.** VO-7
 descoped. **VO-8 (per-corner AO coverage) implemented and confirmed in game.** **F16 / Bug M02 fixed,
 confirmed in game and archived — VO-9's ordering precondition is met.** **VO-9 not started and its
 premise is revised (F17) and it is restated as sub-voxel AO via adaptive tessellation. **VO-9a and VO-9b
 both executed; VO-9b is the substrate and is visually inert (F18).** The visual request itself now needs a
-silhouette-based contact-shadow term — filed as its own design pass.  
+silhouette-based contact-shadow term, now designed in its own doc
+(`SILHOUETTE_CONTACT_SHADOWS.md`, `SS-*`, 0/5 executed).  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > The engine gained partial blocks (`Stone Half Slab`) without the lighting model gaining a notion
@@ -76,6 +77,9 @@ code. Results, which later phases cite:
   — VO-2 closed its gap **B9** (no partial block, no metadata authoring); see that entry for why these scenarios avoid oracle comparison.
 - [`AOT_WORLD_MIGRATION_SYSTEM.md`](../Architecture/AOT_WORLD_MIGRATION_SYSTEM.md) — would have hosted
   VO-7's relight; **no longer touched by this arc** (VO-7 descoped 2026-08-08).
+- [`SILHOUETTE_CONTACT_SHADOWS.md`](SILHOUETTE_CONTACT_SHADOWS.md) — **the child design this arc
+  hands off to.** It owns the visual feature VO-9 could not deliver (F18), consuming VO-9a's
+  sample-point query and VO-9b's subdivision as substrate. See §7.
 
 ---
 
@@ -1147,7 +1151,7 @@ owner as a scope decision rather than picking one.
 | v2      | Directional occlusion for fluids                                     | Fluid surfaces have their own height model; would need its own coverage derivation.          |
 | v3      | `FLAG_HAS_SIDED_TRANSPARENT_BLOCKS`-style queue flag                 | Starlight's optimization — only pay the directional check when a partial block is in range. Measure first (`perf-benchmark`); do not pre-optimize. |
 | —       | **Close the `NS-4` rotated-bounds gap (F10)**                        | Add a Physics Solver scenario that actually discriminates a rotated custom-bounds volume (e.g. land a body on a vertical slab and assert the rest height differs from the identity orientation). Owned by `SUB_VOXEL_COLLISION_SYSTEM.md` / `NS-4`, not by a VO phase — but every VO phase touching the rotation core is unguarded there until it exists. |
-| next    | **`SS-*` — silhouette-based contact shadows** (its own design doc)   | The visual feature VO-9 set out to deliver. **F18 establishes that no coverage-fraction model can produce it for an axis-aligned slab**, and the owner's "AO around a single block is too circular" observation is the same gap seen on a full cube. Needs a shading term keyed on the occluder's *silhouette* with a distance falloff, evaluated per sub-vertex — VO-9b's subdivision is the substrate it consumes. Design pass first; this arc (VO-*) is closed. |
+| next    | **`SS-*` — silhouette-based contact shadows** — ✅ **designed**, see [`SILHOUETTE_CONTACT_SHADOWS.md`](SILHOUETTE_CONTACT_SHADOWS.md) | The visual feature VO-9 set out to deliver. **F18 establishes that no coverage-fraction model can produce it for an axis-aligned slab**, and the owner's "AO around a single block is too circular" observation is the same gap seen on a full cube. The design pass landed 2026-08-09: it derives the occluder's silhouette rectangle from the **same rotated AABB `GetFaceCoverage` already projects** (coverage is that rectangle's area), so the shape-agnostic primitive is preserved; it consumes VO-9a's `SampleFacePoint` and VO-9b's subdivision unchanged. Five phases `SS-0…SS-4`, 0 executed. **This arc (VO-*) is closed — no VO-* phase serves it.** |
 
 ---
 
@@ -1170,6 +1174,7 @@ owner as a scope decision rather than picking one.
 
 * **v1.0** - Initial design
 * **v1.1** - VO-0 executed (no production code needed): blast radius is one block type, §2.3's bounds table confirmed, surface stamp confirmed (resolves open question 1 and unblocks VO-6 from VO-3), VO-7 version anchors pinned
+* **v3.0** - **The `SS-*` follow-up has its own design doc** — [`SILHOUETTE_CONTACT_SHADOWS.md`](SILHOUETTE_CONTACT_SHADOWS.md), authored 2026-08-09, 0/5 phases executed. §7's roadmap row and the relationship list now point at it. It generalizes F18 (a fill fraction is linear across the cell for *any* occluder bounded by one plane, not just a slab) and adds the mechanism behind the owner's second observation: the round blob is a **weighting** artifact — the four-cell average weights an occluder by a product of two per-axis ramps, giving hyperbolic isocontours — and that derivation reproduces **F17's measured `12 of 32` darkened corners exactly**. No change to this document's own phases; **the VO-* arc stays closed**
 * **v2.9** - **VO-9b executed as a visually inert substrate, and the reason is finding F18.** Faces a partial occluder can reach are split into 4x4 sub-quads (gated on a flag that rides along on samples the face already takes); baseline **B49**, Validate All **432**. The first implementation re-sampled the ring per sub-vertex, which collapsed every wall shadow into a hard band and lightened face interiors (an inner corner's centre went 144 -> 255) — caught in game by the owner, and the same defect was what made the slab case look improved. Corrected to vary only the direct cell, an axis-aligned half slab shows no useful change, because its coverage is linear across the cell and a blend of the two corner values already is that ramp. **A seam-only continuity check stayed green throughout the defect** — B49 now samples face interiors, exactly where the direct cell is empty so any drift is ring re-sampling. B42/B46 probes rewritten to locate faces by corner position (they had assumed one quad per face). Cost measured at 4.75x verts on a floor with nine slabs. Next: a silhouette-following contact-shadow term, which is what both the original request and the owner's "AO is too circular" observation actually need
 * **v2.8** - **VO-9 restated as sub-voxel ambient occlusion, and VO-9a executed.** The owner's clarification localized the defect: the occlusion query is already right, but AO resolution is pinned to mesh vertex resolution (one sample per cell corner), so a slab's mid-cell edge is smeared across a whole cell — the visible half of a floor face under a vertical slab runs `255 -> 223` where a contact shadow should reach ~`191` at the wall. Approach chosen by the owner: **adaptive sub-quad tessellation** (texture/per-pixel/baked alternatives rejected against the arbitrary-custom-mesh requirement). **VO-9a** generalizes the query to an arbitrary sample point (`GetRegionCoverage` / `AmbientOcclusionRegionCoverage` / `SampleFacePoint`), with the octant reduced to its corner case so corner values cannot move — proven by a bit-identical mesh fingerprint across three lighting qualities, prove-red by two reverted mutations (box extent reds B11; inverted neighbour selection reds B11/B40/B42). Validate All **431**. **VO-9b** (tessellation, visual) not started
 * **v2.7** - **VO-9 measured before designing, and its premise did not survive (finding F17).** Cause (a) — "a coplanar occluder is never sampled at all" — is refuted: VO-6 re-bases a mid-plane face's ring onto its own cell, so the own layer IS sampled (full cube 8/32, vertical slab 4/32 on a bottom-slab floor), and the control shows the original zero reading is what ANY occluder does when it lies entirely below the shaded plane (full cube 0/32, identical to a slab). The hot-loop sample-set widening must not be built. Cause (b) reproduces exactly (12/32, 16/36, 8/36) but its proposed fix cannot work: an octant is exactly half a cell and so is an axis-aligned slab, so `GetOctantCoverage` never returns an intermediate value for one. **Owner paused VO-9 for a fresh in-game look** — M02 changed the meshes it would be judged on; measurements predating 2026-08-08 are void
@@ -1191,5 +1196,5 @@ owner as a scope decision rather than picking one.
 
 ---
 
-**Last Updated:** 2026-08-08  
-**Next Review:** when VO-8 starts
+**Last Updated:** 2026-08-09  
+**Next Review:** none — the arc is closed; follow-up work lives in `SILHOUETTE_CONTACT_SHADOWS.md`
