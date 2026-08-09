@@ -30,6 +30,9 @@ When debugging complex systems in this voxel engine, you must act as a Senior Sy
     - `Unity_Camera_Capture` — capture visual evidence of the bug (lighting artifacts, mesh holes, rendering glitches).
     - `Unity_ManageEditor` → `GetState` — check if the editor is in play mode, has compilation errors, or is paused.
 3. **DO NOT GUESS:** Do not offer a hypothetical fix immediately if the root cause is not 100% obvious. Searching in the dark breaks things in a multi-threaded engine.
+    - **When the report follows a recent change, settle "did my change cause this?" by measurement, not by reasoning — and do it FIRST.** Copy the suspect file aside, `git show <commit>^:<path> > <path>`, rebuild, run an identical probe, restore. Compare a **checksum over the whole output** (fingerprint every element by position + normal + value), not a handful of spot probes: byte-identical output over a thousand vertices is proof, four matching probes is an anecdote. Old engine files usually still compile, because most changes add helpers rather than remove callees — and if one does not compile, that is itself informative.
+    - **Run the comparison under both a uniform and a non-uniform input field.** Uniform inputs hide whole classes of defect — a weighted mean equals its value however it is weighted, so any error in *which* elements are averaged or *how* they are weighted is invisible. (The `SS-*` arc shipped two such defects behind uniform light.)
+    - Cost is ~5 minutes per side, mostly waiting on Unity to recompile. In the `SS-*` arc, skipping it cost three rounds of fixing real-but-unrelated defects from screenshot reasoning; running it redirected the investigation in one step by proving full-cube terrain was untouched.
 4. **INSTRUMENT FIRST:** Generate a "Diagnostic Patch" instead of a fix.
     - Add targeted `Debug.Log` statements to trace data flow.
     - Suggest creating temporary `OnDrawGizmos` to visualize the data state.
