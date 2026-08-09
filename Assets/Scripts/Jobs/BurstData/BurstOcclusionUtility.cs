@@ -184,6 +184,59 @@ namespace Jobs.BurstData
         }
 
         /// <summary>
+        /// SS-1: returns the rectangle a rotated block volume projects onto one of its cell faces — the
+        /// occluder's <b>silhouette</b> in that face's tangent plane, in block-local <c>[0,1]²</c>.
+        /// <para>
+        /// This is <see cref="GetFaceCoverage"/> stopped one step early: that function multiplies the two
+        /// perpendicular extents into an <i>area</i>, which is what a coverage model needs and what a
+        /// contact shadow cannot use. A shadow that falls off with distance has to know <i>where</i> the
+        /// occluder is on the face, not merely how much of it is filled.
+        /// </para>
+        /// <para>
+        /// Keeping the primitive an AABB projection is what keeps the shading model shape-agnostic: a
+        /// fence post, a slab, or any other single-box custom mesh is answered by the same arithmetic
+        /// with no per-shape code. Compound shapes remain out of scope, inherited from the collision
+        /// model (see the type remarks and <c>VQ-4</c>).
+        /// </para>
+        /// <para>
+        /// The rectangle's axes are the two perpendicular to the face normal, in ascending axis order —
+        /// <c>(X, Z)</c> for <c>±Y</c> faces, <c>(X, Y)</c> for <c>±Z</c>, <c>(Y, Z)</c> for <c>±X</c> —
+        /// the same pair <see cref="GetFaceCoverage"/> multiplies, so its area reproduces that function.
+        /// </para>
+        /// </summary>
+        /// <param name="rotatedMin">Rotated minimum corner, block-local (from <see cref="RotateLocalBounds"/>).</param>
+        /// <param name="rotatedMax">Rotated maximum corner, block-local.</param>
+        /// <param name="faceIndex">Face direction, in <c>VoxelData.FaceChecks</c> order.</param>
+        /// <param name="rectMin">Silhouette minimum corner on the two perpendicular axes.</param>
+        /// <param name="rectMax">Silhouette maximum corner.</param>
+        /// <returns>True when the volume reaches the face plane; false leaves the rectangle at zero.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool GetFaceSilhouette(float3 rotatedMin, float3 rotatedMax, int faceIndex,
+            out float2 rectMin, out float2 rectMax)
+        {
+            FaceAxis(faceIndex, out int axis, out bool positive);
+
+            // A volume that stops short of the face plane casts no contact shadow on it — the same test
+            // GetFaceCoverage makes, and the reason a *top* slab does not shade the floor beneath it.
+            bool touches = positive
+                ? rotatedMax[axis] >= 1f - FACE_TOUCH_EPSILON
+                : rotatedMin[axis] <= FACE_TOUCH_EPSILON;
+
+            if (!touches)
+            {
+                rectMin = float2.zero;
+                rectMax = float2.zero;
+                return false;
+            }
+
+            int a = axis == 0 ? 1 : 0;
+            int b = axis == 2 ? 1 : 2;
+            rectMin = math.saturate(new float2(rotatedMin[a], rotatedMin[b]));
+            rectMax = math.saturate(new float2(rotatedMax[a], rotatedMax[b]));
+            return true;
+        }
+
+        /// <summary>
         /// Maps a face index to the axis it is perpendicular to and which end of that axis it sits on.
         /// </summary>
         /// <param name="faceIndex">Face direction, in <c>VoxelData.FaceChecks</c> order.</param>

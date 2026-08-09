@@ -51,6 +51,7 @@ namespace Editor.Validation.Occlusion
                 new Scenario("B3: a full-block type covers every face completely, for every orientation", B3_FullBlockControl),
                 new Scenario("B4: across all 24 Facing6Roll2 orientations a half slab always has exactly one full face, one empty face, and they are opposite", B4_AllOrientationsStructure),
                 new Scenario("B5: the managed collision path and the Burst occlusion core report the same volume for all 24 orientations", B5_ManagedAndBurstAgree),
+                new Scenario("B6: a face silhouette is the shape's own rectangle — full cube, slab, post and every roll — and its area still reproduces GetFaceCoverage exactly (SS-1)", B6_FaceSilhouette),
             };
 
             return ValidationSuiteRunner.Execute("Voxel Occlusion", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
@@ -210,6 +211,192 @@ namespace Editor.Validation.Occlusion
             }
 
             return Report("B5 managed/Burst agreement", failures);
+        }
+
+        /// <summary>
+        /// B6 — the <c>SS-1</c> primitive. <see cref="BurstOcclusionUtility.GetFaceSilhouette"/> must
+        /// report <i>where</i> a volume sits on a face, not merely how much of it is filled, because a
+        /// contact shadow measures distance to that rectangle.
+        /// <list type="bullet">
+        /// <item><b>Shape-derived, with no per-shape code.</b> A full cube projects the unit square on
+        /// every face; a bottom slab's mid-plane face is not reached at all; a vertical slab covers half
+        /// its top face; a <b>post</b> projects a small central square on <c>±Y</c> and reaches no side
+        /// wall. The post is the case that matters — it is the only fixture whose silhouette is neither
+        /// the whole face nor a clean half.</item>
+        /// <item><b>Rotation is real.</b> Rolling a vertical slab through its four rolls must move the
+        /// silhouette to four <i>distinct</i> halves of the top face. Asserted structurally rather than
+        /// against a hand-derived table, like B4 — and this is the leg that earns its keep: <c>VO-1</c>'s
+        /// prove-red established that a transposed rotation leaves symmetric cases green and is caught
+        /// only by an asymmetric one (finding <b>F10</b>).</item>
+        /// <item><b>It is a strict generalization.</b> The rectangle's area must equal
+        /// <see cref="BurstOcclusionUtility.GetFaceCoverage"/> <b>exactly</b>, for every fixture, face and
+        /// orientation. That is what licenses leaving <c>GetFaceCoverage</c> in place rather than
+        /// re-expressing it through the new primitive: the two cannot drift without this going red, and
+        /// consolidating instead would put a last-ulp change into the light-transport path for the sake
+        /// of one multiply.</item>
+        /// </list>
+        /// </summary>
+        /// <returns>True when every silhouette matches and every area reproduces the coverage.</returns>
+        private static bool B6_FaceSilhouette()
+        {
+            StringBuilder failures = new StringBuilder();
+
+            BlockTypeJobData cube = new BlockTypeJobData(MakeBlock("TestFullCube", BlockCollisionBounds.FullBlock));
+            BlockTypeJobData slab = new BlockTypeJobData(MakeHalfSlab());
+            BlockTypeJobData post = new BlockTypeJobData(MakePost());
+
+            // A full cube covers every face completely, in every orientation — the degeneration check
+            // that keeps ordinary terrain out of the rotation path.
+            for (int meta = 0; meta < 24; meta++)
+            {
+                byte raw = BurstVoxelMetadataUtility.EncodeFacing6Roll2((byte)(meta % 6), (byte)(meta / 6));
+                for (int face = 0; face < 6; face++)
+                {
+                    AssertSilhouette(failures, $"full cube meta 0x{raw:X2}", cube, raw, face,
+                        expectTouches: true, new float2(0f, 0f), new float2(1f, 1f));
+                }
+            }
+
+            // Bottom slab, identity: resting on the cell floor, so its mid-plane top face is unreached.
+            AssertSilhouette(failures, "bottom slab", slab, 0x00, BOTTOM, true, new float2(0f, 0f), new float2(1f, 1f));
+            AssertSilhouette(failures, "bottom slab", slab, 0x00, TOP, false, float2.zero, float2.zero);
+            AssertSilhouette(failures, "bottom slab", slab, 0x00, BACK, true, new float2(0f, 0f), new float2(1f, 0.5f));
+
+            // Vertical slab 0x03: solid half against +Z, so -Z is unreached and the top face is half covered.
+            AssertSilhouette(failures, "vertical slab", slab, 0x03, BACK, false, float2.zero, float2.zero);
+            AssertSilhouette(failures, "vertical slab", slab, 0x03, FRONT, true, new float2(0f, 0f), new float2(1f, 1f));
+            AssertSilhouette(failures, "vertical slab", slab, 0x03, TOP, true, new float2(0f, 0.5f), new float2(1f, 1f));
+
+            // The post: a central column touching floor and ceiling but neither side wall.
+            AssertSilhouette(failures, "post", post, 0x00, TOP, true, new float2(0.375f, 0.375f), new float2(0.625f, 0.625f));
+            AssertSilhouette(failures, "post", post, 0x00, BOTTOM, true, new float2(0.375f, 0.375f), new float2(0.625f, 0.625f));
+            foreach (int side in new[] { BACK, FRONT, LEFT, RIGHT })
+            {
+                AssertSilhouette(failures, "post", post, 0x00, side, false, float2.zero, float2.zero);
+            }
+
+            AssertRollsMoveSilhouette(failures, slab);
+            AssertAreaReproducesCoverage(failures, cube, "full cube");
+            AssertAreaReproducesCoverage(failures, slab, "half slab");
+            AssertAreaReproducesCoverage(failures, post, "post");
+
+            return Report("B6 face silhouette", failures);
+        }
+
+        /// <summary>
+        /// Asserts one face's silhouette against an expected rectangle (or against "does not touch").
+        /// </summary>
+        /// <param name="failures">Failure accumulator.</param>
+        /// <param name="label">Fixture label for the failure text.</param>
+        /// <param name="block">The block fixture's job data.</param>
+        /// <param name="meta">Raw metadata byte selecting the orientation.</param>
+        /// <param name="face">Face index, in <c>FaceChecks</c> order.</param>
+        /// <param name="expectTouches">Whether the volume should reach that face's plane.</param>
+        /// <param name="expectMin">Expected rectangle minimum, when it touches.</param>
+        /// <param name="expectMax">Expected rectangle maximum, when it touches.</param>
+        private static void AssertSilhouette(StringBuilder failures, string label, BlockTypeJobData block,
+            byte meta, int face, bool expectTouches, float2 expectMin, float2 expectMax)
+        {
+            bool touches = LightAttenuation.AmbientOcclusionFaceSilhouette(in block, meta, face,
+                out float2 rectMin, out float2 rectMax);
+
+            if (touches != expectTouches)
+            {
+                failures.AppendLine($"    {label} face {face} ({FaceName(face)}): touches={touches}, expected {expectTouches}");
+                return;
+            }
+
+            if (!expectTouches) return;
+
+            if (math.any(math.abs(rectMin - expectMin) > EPSILON) || math.any(math.abs(rectMax - expectMax) > EPSILON))
+            {
+                failures.AppendLine($"    {label} face {face} ({FaceName(face)}): silhouette [{rectMin} .. {rectMax}], "
+                                    + $"expected [{expectMin} .. {expectMax}]");
+            }
+        }
+
+        /// <summary>
+        /// Asserts that the four rolls of a vertical slab put its top-face silhouette on four distinct
+        /// halves of that face — the asymmetric case a transposed rotation cannot survive (F10).
+        /// </summary>
+        /// <param name="failures">Failure accumulator.</param>
+        /// <param name="slab">The half-slab fixture's job data.</param>
+        private static void AssertRollsMoveSilhouette(StringBuilder failures, BlockTypeJobData slab)
+        {
+            List<float4> seen = new List<float4>();
+
+            for (int roll = 0; roll < 4; roll++)
+            {
+                byte raw = BurstVoxelMetadataUtility.EncodeFacing6Roll2(3, (byte)roll); // facing 3 = Bottom
+                if (!LightAttenuation.AmbientOcclusionFaceSilhouette(in slab, raw, TOP,
+                        out float2 rectMin, out float2 rectMax))
+                {
+                    failures.AppendLine($"    vertical slab roll {roll}: top face reports no silhouette at all");
+                    continue;
+                }
+
+                float area = (rectMax.x - rectMin.x) * (rectMax.y - rectMin.y);
+                if (math.abs(area - 0.5f) > EPSILON)
+                {
+                    failures.AppendLine($"    vertical slab roll {roll}: top silhouette area {area:F4}, expected 0.5");
+                }
+
+                float4 rect = new float4(rectMin, rectMax);
+                foreach (float4 previous in seen)
+                {
+                    if (math.all(math.abs(rect - previous) <= EPSILON))
+                    {
+                        failures.AppendLine($"    vertical slab roll {roll}: top silhouette [{rectMin} .. {rectMax}] "
+                                            + "repeats an earlier roll's — rolling the block does not move it");
+                    }
+                }
+
+                seen.Add(rect);
+            }
+        }
+
+        /// <summary>
+        /// Asserts the silhouette's area reproduces <see cref="BurstOcclusionUtility.GetFaceCoverage"/>
+        /// exactly, across every face and orientation — the drift guard that lets the two coexist.
+        /// </summary>
+        /// <param name="failures">Failure accumulator.</param>
+        /// <param name="block">The block fixture's job data.</param>
+        /// <param name="label">Fixture label for the failure text.</param>
+        private static void AssertAreaReproducesCoverage(StringBuilder failures, BlockTypeJobData block, string label)
+        {
+            for (int meta = 0; meta < 24; meta++)
+            {
+                byte raw = BurstVoxelMetadataUtility.EncodeFacing6Roll2((byte)(meta % 6), (byte)(meta / 6));
+                for (int face = 0; face < 6; face++)
+                {
+                    float coverage = BurstOcclusionUtility.GetBlockFaceCoverage(in block, raw, face);
+                    float area = LightAttenuation.AmbientOcclusionFaceSilhouette(in block, raw, face,
+                        out float2 rectMin, out float2 rectMax)
+                        ? (rectMax.x - rectMin.x) * (rectMax.y - rectMin.y)
+                        : 0f;
+
+                    // Bitwise, not approximate: the point is that the two computations cannot drift.
+                    if (area != coverage)
+                    {
+                        failures.AppendLine($"    {label} meta 0x{raw:X2} face {face} ({FaceName(face)}): "
+                                            + $"silhouette area {area:R} != coverage {coverage:R}");
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// The <c>SS-0</c> post fixture — a quarter-cell column touching floor and ceiling but no side
+        /// wall. Its bounds come from <see cref="Meshing.Framework.TestCustomMeshLibrary.PostBounds"/>
+        /// rather than a local literal, so this suite and the meshing suite cannot disagree about what
+        /// "the post" is.
+        /// </summary>
+        /// <returns>The fixture block type.</returns>
+        private static BlockType MakePost()
+        {
+            BlockType block = MakeBlock("TestPost", Meshing.Framework.TestCustomMeshLibrary.PostBounds);
+            block.renderShape = RenderShape.CustomMesh;
+            return block;
         }
 
         /// <summary>Asserts a block's coverage on all six faces against an expected table.</summary>

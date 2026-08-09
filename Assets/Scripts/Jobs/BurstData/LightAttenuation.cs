@@ -220,6 +220,54 @@ namespace Jobs.BurstData
             return BurstOcclusionUtility.GetRegionCoverage(rotatedMin, rotatedMax, regionMin, regionMax);
         }
 
+        /// <summary>
+        /// SS-1: the rectangle a block's volume projects onto one of its cell faces — the occluder's
+        /// silhouette, which a contact-shadow term measures distance to.
+        /// <para>
+        /// Same gating as every sibling predicate here, and for the same reasons: a transparent volume
+        /// casts nothing (glass fills its cell and shades nothing), and a block with no custom bounds
+        /// answers the whole face without touching the rotation path — so an ordinary cube costs one
+        /// branch no matter how densely a face is sampled.
+        /// </para>
+        /// <para>
+        /// "Touching" is the contact in <i>contact shadow</i>: a volume that stops short of the face
+        /// plane — a top slab above a floor, say — returns false and shades nothing, which is the
+        /// behavior the <c>VO-*</c> arc already signed off for that case.
+        /// </para>
+        /// </summary>
+        /// <param name="block">The block being sampled.</param>
+        /// <param name="meta">The placed voxel's raw metadata byte (selects the volume's rotation).</param>
+        /// <param name="faceIndex">Face direction, in <c>VoxelData.FaceChecks</c> order.</param>
+        /// <param name="rectMin">Silhouette minimum corner on the two axes perpendicular to the face.</param>
+        /// <param name="rectMax">Silhouette maximum corner.</param>
+        /// <returns>True when this block casts a silhouette on that face.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool AmbientOcclusionFaceSilhouette(in BlockTypeJobData block, byte meta,
+            int faceIndex, out float2 rectMin, out float2 rectMax)
+        {
+            if (!block.IsOpaque)
+            {
+                rectMin = float2.zero;
+                rectMax = float2.zero;
+                return false;
+            }
+
+            if (!block.HasCustomBounds)
+            {
+                rectMin = float2.zero;
+                rectMax = new float2(1f, 1f);
+                return true;
+            }
+
+            float3x3 rotationMatrix = BurstCustomMeshRotationUtility.GetRotationMatrix(
+                block.MetadataSchema, meta, block.DefaultMetadata);
+            BurstOcclusionUtility.RotateLocalBounds(block.BoundsMin, block.BoundsMax, in rotationMatrix,
+                out float3 rotatedMin, out float3 rotatedMax);
+
+            return BurstOcclusionUtility.GetFaceSilhouette(rotatedMin, rotatedMax, faceIndex,
+                out rectMin, out rectMax);
+        }
+
         /// <summary>Coverage at or above which a face counts as fully covered (absorbs float round-off).</summary>
         private const float FULL_COVERAGE_THRESHOLD = 1f - 1e-4f;
 

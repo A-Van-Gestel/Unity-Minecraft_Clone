@@ -1,6 +1,6 @@
 # Silhouette-Based Contact-Shadow Ambient Occlusion (SS-*)
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Date:** 2026-08-09  
 **Status:** Proposed design — not implemented.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
@@ -755,7 +755,7 @@ executor re-confirms the tip before writing.
 
 | ID      | Phase  | Asserts                                                                                                                                                       | Prove-red                                                                                                                             |
 |---------|--------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
-| **B50** | SS-1   | The silhouette primitive is shape-derived: full cube → unit square + touching; bottom slab's `+Y` → **not** touching; vertical slab `0x03` → touching, half the cell on `z`, full on `x`; **post** → the central `0.25 × 0.25`. Rolling the slab moves *which* half. | `math.transpose` on the rotation. **Only the asymmetric rows catch it** — `VO-1`'s F10 lesson, where 26 physics baselines stayed green and one occlusion row did the work. The post row and the roll rows are that guard here. |
+| **Occl. B6** | SS-1 | The silhouette primitive is shape-derived: full cube → unit square + touching; bottom slab's `+Y` → **not** touching; vertical slab `0x03` → touching, half the cell on `z`, full on `x`; **post** → the central `0.25 × 0.25`. Rolling the slab moves *which* half. | `math.transpose` on the rotation. **Only the asymmetric rows catch it** — `VO-1`'s F10 lesson, where 26 physics baselines stayed green and one occlusion row did the work. The post row and the roll rows are that guard here. |
 | **B51** | SS-2   | **The direct answer to F18.** On the floor face under a vertical slab, the sub-vertex nearest the slab's edge is strictly **darker than the linear interpolation of the face's own corner values**, and the far edge is unchanged within rounding. A departure-from-linear assertion, not a predicted constant, so it survives D1/D2 retuning. | Pre-`SS-2` engine fails it by construction (F18 measured the profile as linear). Positive control: replace the slab with air — no departure, and that control is independent of the shadow's shape. |
 | **B52** | SS-2   | The **post** casts a shadow whose darkest sub-vertex lies under the post's footprint and which is zero beyond `R` — the shape-agnostic claim (goal 3) asserted on a shape no production block has. | Force the silhouette to the unit square → the shadow stops tracking the footprint and B52 reds while B51 (a half-cell silhouette) survives. |
 | **B53** | SS-2   | **Position purity (D6).** A corner emitted by a subdivided face and the same corner emitted by its ordinary neighbour carry the same value; and a subdivided face's corner equals the undivided formula at that point. | Apply the model in `ShadeSubVertex` only → corners disagree across the seam. This is the mutation that reproduces the seam `VO-9a` exists to prevent. |
@@ -921,7 +921,49 @@ Three things this pins down, none of which were certain before:
   shared-constant rule, and the probe.
 - **Serialization:** none.
 
-### SS-1 — Silhouette primitive (🟢, no behaviour change)
+### SS-1 — Silhouette primitive (🟢, no behaviour change) · ✅ **EXECUTED 2026-08-09**
+
+**What landed.** `BurstOcclusionUtility.GetFaceSilhouette` (touch test + the rectangle on the two
+axes perpendicular to the face, saturated to the cell) and
+`LightAttenuation.AmbientOcclusionFaceSilhouette` with the same gating as every sibling predicate —
+`!IsOpaque` → no silhouette, `!HasCustomBounds` → the unit square without entering the rotation path.
+**Nothing consumes either yet.** Baseline **B6** in the **Occlusion** suite (5 → 6); meshing
+untouched at 50.
+
+> **Baseline numbering, corrected against the plan.** §6.4 assigned this phase *meshing* `B50`, but
+> `SS-0` consumed that number during execution, and on reflection a pure-function test of a shape
+> primitive belongs in the **Occlusion** suite `VO-1` built for exactly this layer — it needs no mesh,
+> no world fixture, and no job run. It is therefore **Occlusion B6**, and §6.4's remaining rows are
+> unaffected.
+
+**`GetFaceCoverage` was deliberately NOT re-expressed through the new primitive** — a decision §11
+question 4 left to this phase. D4 anticipated the consolidation (coverage *is* the silhouette's
+area), and it would be a one-line change. Against it: `GetFaceCoverage` feeds **light transport**,
+where `FaceBlocksLight` thresholds it at `>= 1 − 1e-4`, so a last-ulp difference between
+`saturate(max − min)` and `saturate(max) − saturate(min)` could flip a face from blocking to open and
+move lighting baselines — to save one multiply. **The risk the consolidation was meant to remove is
+drift between two implementations, and a baseline removes that just as well**: B6 asserts the
+silhouette's area equals `GetFaceCoverage` **bitwise** (`!=`, not an epsilon) across every fixture,
+face and orientation. Guarded rather than merged, following the same "agreement" pattern as `B5`.
+
+**Prove-red — `math.transpose` on the shared rotation core, reverted clean.** The F10 signature
+reproduced exactly:
+
+| Guard                          | Under transpose | Note                                                                 |
+|--------------------------------|-----------------|----------------------------------------------------------------------|
+| Occlusion `B1` (identity)      | green           | Identity is its own transpose                                        |
+| Occlusion `B3` (full cube)     | green           | Symmetric                                                            |
+| Occlusion `B4` (structural)    | green           | One-full/one-empty/opposite is transpose-invariant                   |
+| Occlusion `B5` (managed==core) | green           | Both sides share the core, so agreement cannot see a core bug        |
+| Occlusion **`B2`**             | **RED**         | Faces 0/1 swapped — the pre-existing guard                           |
+| Occlusion **`B6`**             | **RED**         | Back/Front touch flipped, TOP silhouette on the wrong half, and **all four rolls collapsed to one rectangle** |
+| Meshing **`B46`**              | **RED**         | Downstream of the same core (per-roll corner shading goes flat)      |
+
+**The post rows stayed green under the mutation, and that is the finding.** At meta `0x00` the post
+is transpose-invariant, so B6's discrimination comes entirely from its **roll** leg — the packet's
+warning that a non-discriminating B6 must be strengthened before `SS-2` builds on it is satisfied by
+that leg alone, not by the post. Keep it: a future edit that drops the roll assertion for "the post
+covers the interesting shape" would silently remove the only rotation guard this baseline has.
 
 - **Precondition:** ✅ `SS-0`'s post fixture exists.
 - **Scope:** `BurstOcclusionUtility.GetFaceSilhouette` and
@@ -1064,17 +1106,18 @@ Three things this pins down, none of which were certain before:
 4. **What does `SS-3` actually cost on real terrain?** §8 gives the formula and the flat-terrain
    floor but no magnitude for broken terrain, caves, or built structures. Resolved by `SS-3`'s
    `perf-benchmark` capture, which lands as a `Documentation/Performance/` report.
-5. **Should `GetFaceCoverage` be re-expressed as the area of `GetFaceSilhouette`, and does
-   `AmbientOcclusionOctantCoverage` retire?** Consolidation is the house direction
-   (`GetOctantCoverage` → `GetRegionCoverage` is the precedent), but `GetFaceCoverage` feeds light
-   transport, where a rounding change moves lighting baselines — so it consolidates only if
-   bit-identical. The octant form loses its last consumer in `SS-2`. `SS-1` and `SS-2` decide
-   respectively and record which way each went.
+5. ~~**Should `GetFaceCoverage` be re-expressed as the area of `GetFaceSilhouette`?**~~ —
+   **RESOLVED by `SS-1`: no, guarded instead.** It feeds light transport, where a last-ulp change
+   could flip `FaceBlocksLight`'s threshold, and the drift the consolidation would have prevented is
+   prevented just as well by B6's bitwise area assertion. **Still open:** whether
+   `AmbientOcclusionOctantCoverage` retires when `SS-2` removes its last consumer — `SS-2` decides
+   and records.
 
 ---
 
 ## Document History
 
+* **v1.4** - **SS-1 executed** (2026-08-09, no behaviour change). `BurstOcclusionUtility.GetFaceSilhouette` + `LightAttenuation.AmbientOcclusionFaceSilhouette`, gated exactly like their siblings; **nothing consumes them yet**. Baseline **Occlusion B6** (5 -> 6) — corrected from the plan's *meshing* B50, which SS-0 consumed and which was the wrong suite anyway: a pure shape-primitive test belongs in the Occlusion suite VO-1 built for this layer. **§11 question 4 resolved: `GetFaceCoverage` is NOT re-expressed through the new primitive** — it feeds light transport, where a last-ulp difference could flip `FaceBlocksLight`'s `>= 1 - 1e-4` threshold, and the drift the consolidation would prevent is prevented just as well by B6 asserting the silhouette's area equals it **bitwise** across every fixture/face/orientation. Guarded, not merged (the B5 pattern). Prove-red by transposing the shared rotation core reproduced the **F10 signature exactly**: B2 and B6 red, B1/B3/B4/B5 green, meshing B46 red downstream — and **the post rows stayed green**, so B6's discrimination rests entirely on its roll leg. Recorded as a do-not-drop
 * **v1.3** - **SS-0 executed** (suite-only, 2026-08-09). Fixture shape and authored volume are now **one `BlockCollisionBounds` value used twice**, so F13's divergence is unrepresentable; new `Post` fixture, positional `TopFaceSubVertexField` probe, baseline **B50**; meshing suite 49 -> 50 baselines green, both prove-red mutations reverted (the second reds the monotonicity leg *alone*, proving it discriminates independently). **New finding S9 corrects this document's own S1/**§**6.1 claim**: the post is not "more non-linear" than the slab — measured, the slab departs from an endpoint-linear fit by `0.083` and the post by only `0.038`. The post's distinguishing property is that its sweep is **non-monotonic**, because `GetRegionCoverage` normalizes by the query region's own volume and a region clipped at a cell edge shrinks, inflating the fraction into a rise where distance says fall. Coverage is not a mildly-wrong distance field; it is not one at all. Pre-SS record: a post standing on a face darkens it by **~3%** (255 -> 251/247) against a slab's 25%, and the slab row reproduces F18's published profile exactly — cross-checking the new fixture and probe against the measurement the design rests on. The post already trips VO-9b's gate (16 quads), so **SS-2 needs no gate change to reach it**
 * **v1.2** - **Interlocked with `VX-1`/`VX-8` (the resident light volume) and `MR-8` (greedy meshing) after the owner raised the light-texture route.** No new IDs: the "per-chunk 3D light texture" idea is already tracked as **VX-1** + **VX-8**, and VX-8 already names itself MR-8's escape hatch. Recorded finding: **hardware trilinear filtering of a voxel-resolution volume IS the separable product S2 blames for the round blob**, and one texel per cell cannot locate a slab within its cell — so a light volume reproduces *both* observations rather than fixing either. That is the technical reason VX-8's "vertex AO stays vertex-baked" line is correct, and it makes the two changes orthogonal (VX-8 moves *where* shading lives; this design fixes *what the value is*). **D7 gains a third answer**: defer observation 2 to a per-pixel evaluation of this design's distance field on VX-1's occupancy volume — zero vertex cost, would retire `SS-3`, full cubes only until `VX-5` carries bounds. A six-volume baked alternative is ruled out on face-dependence (≈157 MB at 2x against VX-1's 3.3 MB). §10's v1.0 "per-face AO texture" row is dropped as strictly worse than the resident volume. This design is **merge-neutral** for MR-8 and its tessellation gate partitions the face set against MR-8's mergeable set
 * **v1.1** - **D1/D2/D3 decided by the owner — Euclidean distance, a `(1 − t)²` falloff, and the silhouette field *replacing* the coverage fraction — and D3's specification corrected in the process.** The Option C written in v1.0 (a plain light average times one global `(1 − s·SS)` factor) does not work: a bounded occlusion field with a single strength cannot reproduce both `191` for one occluder and `64` for a 1×1 pit, so it would have flattened every deep AO configuration. The correct form gives each of the four cells meeting at a shaded point a fixed quarter share of the occlusion budget and multiplies a renormalized light blend by `(1 − occ)`; **at a cell corner with binary occlusion that is algebraically identical to today** (`255/191/128/64` verified against all four cases), which dissolves both objections v1.0 filed against Option C and keeps `SS-2` at 🟡 with `B11` and the standard-cube family green. A second correction followed from the same arithmetic: **`R = 0.5` is wrong and the radius is `1.0`** — at `0.5` a wall's occlusion dies before mid-face and an inner corner's centre computes `255`, the F18 interior-lightening signature reached by a different route. D5 is rewritten accordingly: this design **does** re-sample the ring per sub-vertex, and it is safe because occlusion is decoupled from the box-overlap weights, which is the one-line diagnosis of F18 itself. §6.3's B49 rewrite changes the *assertion* rather than the tolerance (the corner field is legitimately no longer the expectation), and new baseline **B56** pins the corner reduction as the guard the whole replacement rests on. D1's rounding concern answered with isocontour reach (today's blob bulges outward at diagonals; a Euclidean SDF cuts a fillet inward, and `(1 − t)²` confines it to the invisible tail); a p-norm escape hatch recorded but not built. Only D7 (the full-cube gate) remains open
@@ -1083,4 +1126,4 @@ Three things this pins down, none of which were certain before:
 ---
 
 **Last Updated:** 2026-08-09  
-**Next Review:** when SS-1 starts, or when `VX-1` is scheduled (it changes D7) — D1/D2/D3 are settled and no phase is blocked before SS-3 (D7)
+**Next Review:** when SS-2 starts, or when `VX-1` is scheduled (it changes D7) — D1/D2/D3 are settled and no phase is blocked before SS-3 (D7)
