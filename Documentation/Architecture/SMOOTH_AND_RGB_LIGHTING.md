@@ -683,7 +683,25 @@ public SmoothLightingQuality smoothLighting = SmoothLightingQuality.High;
 | **Standard** | Corner-averaged AO with horizontal gradients for all mesh types. Cross meshes sample 1 Y-level (top face only). |
 | **High**     | Standard plus vertical gradients on cross meshes (flora). Samples 2 Y-levels — head height and ground level.    |
 
-The shader, vertex layout, and data format are unchanged across all levels — the setting only controls how much CPU-side averaging the mesh job performs. This provides:
+A second, independent toggle sits beside it (**`SS-3`**, added 2026-08-09):
+
+```csharp
+[SettingField(SettingsTab.Graphics, Label = "Full-Block Contact Shadows")]
+public bool fullBlockContactShadows;   // default OFF, pending a perf capture
+```
+
+| State   | Behavior                                                                                                                                                                        |
+|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Off** (default) | A face is subdivided only when a **partial** occluder (slab, post — anything with authored `collisionBounds`) can reach it. Ordinary full-cube terrain carries one shading value per cell corner, as it always has. |
+| **On**  | Faces reached by **full cubes** are subdivided too, at half the density (`FULL_CUBE_SUB_CELL_TESSELLATION = 2` against `SUB_CELL_TESSELLATION = 4`), so a wall's shadow resolves as a band hugging it instead of a ramp across the whole adjoining cell. |
+
+It is off by default because it is **the one shading change in this area that moves the world's
+vertex count** — measured **1.00×** on flat ground, **1.41×–1.73×** on rolling terrain and **1.48×**
+in a built room, with the count following silhouette length rather than area. Everything else in the
+`VO-*`/`SS-*` arc changes per-vertex *values* at a fixed vertex count. Design, cost table and the
+decision behind the density: [`SILHOUETTE_CONTACT_SHADOWS.md`](../Design/SILHOUETTE_CONTACT_SHADOWS.md) §8 / D7.
+
+The shader, vertex layout, and data format are unchanged across all levels — the settings only control how much CPU-side averaging and subdivision the mesh job performs. This provides:
 
 - A fallback for lower-end hardware where the extra mesh job work is noticeable.
 - A debugging aid to isolate smooth-lighting-related visual issues.

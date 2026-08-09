@@ -424,6 +424,9 @@ namespace Editor.Validation.Meshing.Framework
         /// so geometry is independent of (absent) light data.</param>
         /// <param name="postProcess">Whether/how to chain <see cref="MeshPostProcessJob"/>; defaults to
         /// <see cref="PostProcessMode.Off"/> so the gen-only chunk-space output is preserved unchanged.</param>
+        /// <param name="fullCubeContactShadows">SS-3: opts this run into subdividing faces that only
+        /// <b>full cubes</b> reach. Defaults to off, matching the shipped setting, so every baseline
+        /// written before SS-3 keeps meshing exactly the geometry it was written against.</param>
         /// <param name="reuseOutput">MH-2: when supplied, the job writes into this caller-owned output
         /// instead of a fresh one, and the harness does NOT take ownership of it (it is neither stored as
         /// <see cref="Output"/> nor disposed by <see cref="Dispose"/>). Used to drive a pooled, reused
@@ -431,7 +434,8 @@ namespace Editor.Validation.Meshing.Framework
         /// empty (length 0) on entry — the job appends and never clears.</param>
         public MeshDataJobOutput Run(SmoothLightingQuality lighting = SmoothLightingQuality.Off,
             PostProcessMode postProcess = PostProcessMode.Off,
-            MeshDataJobOutput? reuseOutput = null)
+            MeshDataJobOutput? reuseOutput = null,
+            bool fullCubeContactShadows = false)
         {
             DisposeOutput();
 
@@ -511,6 +515,7 @@ namespace Editor.Validation.Meshing.Framework
                 WaterVertexTemplates = waterTemplates,
                 LavaVertexTemplates = lavaTemplates,
                 SmoothLighting = lighting,
+                FullCubeContactShadows = fullCubeContactShadows,
                 Output = output,
                 LightMap = _lightMap,
                 LightS = lightS,

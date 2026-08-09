@@ -218,6 +218,18 @@ public class Settings
     public SmoothLightingQuality smoothLighting = SmoothLightingQuality.High;
 
     /// <summary>
+    /// If true, ordinary full blocks cast sub-cell contact shadows onto the surfaces beside them.
+    /// </summary>
+    [SettingField(SettingsTab.Graphics, Label = "Full-Block Contact Shadows", Order = 5)]
+    [Tooltip("Lets ordinary full blocks cast a tight contact shadow on the surfaces beside them, " +
+             "instead of shading evenly across the whole neighbouring block.\n\n" +
+             "Blocks with their own shape (slabs, posts) cast contact shadows either way.\n\n" +
+             TooltipTags.Performance + "Subdivides every surface within one block of a wall, ledge or " +
+             "step. Flat open ground is unaffected; broken terrain and built structures cost the most.\n" +
+             TooltipTags.DefaultColorStart + "Off" + TooltipTags.DefaultColorEnd)]
+    public bool fullBlockContactShadows;
+
+    /// <summary>
     /// The visual style of clouds in the sky.
     /// </summary>
     [SubHeader("Effects")]

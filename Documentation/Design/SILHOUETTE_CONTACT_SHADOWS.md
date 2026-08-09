@@ -1,6 +1,6 @@
 # Silhouette-Based Contact-Shadow Ambient Occlusion (SS-*)
 
-**Version:** 1.9  
+**Version:** 2.0  
 **Date:** 2026-08-09  
 **Status:** Proposed design — not implemented.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
@@ -956,7 +956,7 @@ get to rely on them.
 | ~~**SS-1**~~ | ✅ Silhouette primitive, no consumer                                |   🟢   | SS-0       |
 | **SS-2**  | ⚠️ Contact-shadow term, partial occluders (**observation 1**) — code complete, **rejected in game** |   🟡   | SS-1, D1–D3 |
 | **SS-2a** | ⏳ Fix the corner-darkening artifact SS-2 introduced — fixed, awaiting in-game |   🟡   | SS-2       |
-| **SS-3**  | Extend the gate to full-cube occluders (**observation 2**)          |   🔴   | SS-2a, D7  |
+| ~~**SS-3**~~ | ✅ Extend the gate to full-cube occluders (**observation 2**) — shipped **default-off**, capture owed |   🔴   | SS-2a, D7  |
 | **SS-4**  | Subdivide custom-mesh faces (S6)                                    |   🟡   | SS-2a      |
 
 **Minimal standalone-value set: SS-0 → SS-1 → SS-2.** It delivers the owner's first observation, is
@@ -1337,7 +1337,7 @@ the seal began occluding air.
   of its own: the concave corners of a walled enclosure show a corner shadow, not a diagonal wedge.
 - **Serialization:** none.
 
-### SS-3 — Extend the gate to full-cube occluders (🔴, behaviour change — observation 2)
+### SS-3 — Extend the gate to full-cube occluders (🔴, behaviour change — observation 2) · ✅ **SHIPPED BEHIND A SETTING 2026-08-09 — DEFAULT OFF, AWAITING A CAPTURE**
 
 - **Precondition:** ⚠️ `SS-2` + `SS-2a` confirmed in game. ✅ **D7 is decided (2026-08-09): build
   this phase now, with route B as the destination it later falls back for** — so this is permanent
@@ -1349,16 +1349,59 @@ the seal began occluding air.
   distinct `SUB_CELL_TESSELLATION` for the full-cube case — §8's measurement says **expect to need
   it, with `N = 2` the likely value** (1.4×–1.7× vertices against `N = 4`'s 3.1×–4.7×). A named
   constant with its own docstring, not a magic number.
+**What landed.** `MeshGenerationJob.PrepareFaceSampling` now reports an **`int tessellation`** —
+1, `FULL_CUBE_SUB_CELL_TESSELLATION` (2) or `SUB_CELL_TESSELLATION` (4) — instead of a
+`hasPartialOccluder` boolean, and `EmitTessellatedStandardCubeFace` takes the density as a parameter.
+A face is admitted at density 2 when **any** of the nine hoisted cells casts a silhouette and the new
+`FullCubeContactShadows` job flag is set; a partial occluder still wins at density 4; a face nothing
+reaches stays a single quad. Behind a Graphics setting, **`Full-Block Contact Shadows`, default off**
+(`SettingsManager.fullBlockContactShadows` → `WorldJobManager`). The harness gained the same opt-in
+(`MeshingTestWorld.Run(..., fullCubeContactShadows:)`, default off), so **no pre-SS-3 baseline moved**.
+New baseline **B54**. Validate All **438**.
+
+**Measured cost — projection and reality agreed exactly.** §8's numbers were a projection from a face
+census; running the real gate reproduces them to the digit:
+
+| Geometry                         | Projected (§8) | Measured, flag on |
+|----------------------------------|---------------:|------------------:|
+| Flat ground                      | 1.00×          | **1.00×**         |
+| Rolling terrain (gentle)         | 1.41×          | **1.41×**         |
+| Rolling terrain (rough)          | 1.73×          | **1.73×**         |
+| Built room                       | 1.48×          | **1.48×**         |
+
+**Why `N = 2` and not 4.** A partial occluder's edge can sit anywhere inside its cell, which is the
+resolution problem `VO-9b` was built for. A full cube's silhouette **is** its cell — there is no edge
+position to resolve, only a falloff — so the extra density buys nothing but vertices, and the cost
+goes as `N²`. `FULL_CUBE_SUB_CELL_TESSELLATION` is a named constant with that reasoning on it.
+
 - **Ordering:** after `SS-2`, and **after** its in-game sign-off specifically — judging a
   whole-world change on top of an unjudged local one confounds both.
-- **Prove-red:** **B54** (the shadow follows the rectangle) is red on the pre-`SS-3` engine by
-  construction, so this phase gets its prove-red on record for free — the `VO-6`/`KM01a` pattern.
-  Then the gate mutation: force the gate always-on → vertex counts explode and the `B49` gate leg
-  reds; force it never-on → B54 returns to red. Both restored.
-- **Acceptance:** universal gate + **a `perf-benchmark` capture before defaulting on** (§8) + in-game
-  confirmation with user sign-off. Expect `B11` and the standard-cube family to move; each movement
-  is explained in the packet's record, not silently re-baselined. Ship behind a flag if the
-  measurement is marginal, and add the flag to the flag-retirement backlog in the same commit.
+- **Prove-red (executed 2026-08-09, both mutations restored clean):**
+
+  | Mutation | Result |
+  |----------|--------|
+  | Gate **never** on (the pre-`SS-3` engine) | **B54 red, alone** — "the floor face beside a full cube emitted 1 quad", so there is nowhere to read a metric. This is the packet's predicted free prove-red. |
+  | Gate **always** on (ignoring both the flag and the occluder test) | **B11, B49's gate leg and B56 red** — precisely the standard-cube family this packet predicted would move, and all three for the same reason: each asserts the *undivided* path. Nothing else moved. |
+
+  **B54's own shape matters more than its greenness.** Leg 1 asserts the face is subdivided at all —
+  that is the leg the first mutation reds. Leg 2 is the suite's **first metric assertion**: it sweeps
+  all eight floor cells around a lone cube and checks every sub-vertex against a closed form derived
+  from §5.2, `occ = 0.25·(1 − d)²` in the Euclidean distance `d` to the silhouette — with an
+  anti-vacuity guard requiring **off-axis** samples, since the diagonal samples are the only ones that
+  tell a Euclidean metric from a separable one (finding S2). Leg 2 alone would pass on the pre-`SS-3`
+  engine, where the only samples are corners at `d = 0` or `1` and every model agrees; leg 1 alone
+  would pass on a subdivided face shaded by any rule at all.
+- **Acceptance:** ✅ universal gate — **Validate All 438/438**, both assemblies clean, and **no
+  existing baseline moved** (the flag is off by default on both the shipped and harness paths, so the
+  standard-cube family is untouched rather than re-baselined). ⏳ **Still owed before the default
+  flips: a `perf-benchmark` capture on an IL2CPP build with the setting on**, and in-game
+  confirmation with user sign-off. The vertex multiplier is known (above); what is not known is what
+  it costs in frame time, mesh memory and upload bandwidth on the target build — §8's numbers are a
+  geometry count, not a frame budget.
+- **Flag retirement:** `fullBlockContactShadows` is a **quality setting, not a migration flag** — it
+  is expected to stay as a user-facing toggle the way `Smooth Lighting` does, so it does **not** enter
+  the flag-retirement backlog. What may retire is its *default*, once a capture justifies flipping it
+  on.
 - **Testability gain:** the suite gains a *metric* assertion (equal distance ⇒ equal shadow), which
   is orthogonal to every value assertion it has today.
 - **Doc-sync:** `SMOOTH_AND_RGB_LIGHTING.md`; a `Documentation/Performance/` report for the capture.
@@ -1428,6 +1471,7 @@ the seal began occluding air.
 
 ## Document History
 
+* **v2.0** - **`SS-3` shipped behind a default-off Graphics setting (`Full-Block Contact Shadows`).** The gate now reports an `int tessellation` rather than a boolean, admitting a face at **density 2** when any of the nine hoisted cells casts a silhouette — `FULL_CUBE_SUB_CELL_TESSELLATION`, half of the partial-occluder density, because a full cube's silhouette *is* its cell so there is no sub-cell edge to resolve and the cost goes as `N²`. **§8's projected cost proved exact when measured against the real gate** (1.00× / 1.41× / 1.73× / 1.48×). New baseline **B54**, the suite's **first metric assertion**: every sub-vertex around a lone cube is checked against the closed form `occ = 0.25·(1 − d)²` derived from §5.2, with an anti-vacuity guard demanding off-axis samples, since only the diagonals separate a Euclidean metric from a separable one (S2). Prove-red both ways: gate-never-on reds B54 alone (the pre-SS-3 engine, the packet's predicted free prove-red); gate-always-on reds **B11, B49's gate leg and B56** — exactly the standard-cube family predicted, all three asserting the undivided path. **No existing baseline moved**, because the flag defaults off on both the shipped and harness paths. Validate All **438**. Still owed before the default flips: an IL2CPP `perf-benchmark` capture and in-game sign-off
 * **v1.9** - **D7 decided (owner): build `SS-3` now, per-pixel on `VX-1` is the destination**, after a research pass over four routes. `SS-3` is **not** throwaway under that plan — route B's volume is finite, so the far field keeps vertex-baked AO and `SS-3` becomes its fallback. Two corrections to D7's own assumptions came out of the research: (1) **route B needs `VX-1`'s light volume too, not just occupancy** — `SS-2a` moved occlusion into the light weights, so a per-pixel occlusion factor over an interpolated vertex light no longer reproduces the model (≈ 9 occupancy + 4 light taps per fragment); (2) **route B has an AO horizon** at the volume radius (`VX-1`'s default ≈ 5 chunks, against view distances of 10 and 20 in `FP-4`'s sweep) and AO does not degrade gracefully the way fog does — the owner's steer that the volume be **view-distance aware** is filed against `VX-1`, along with the quadratic memory that implies and the `MR-8` vertex saving that could offset it. **§8's "genuinely open magnitude" is now measured**: `SS-3` admits 0 % of faces on flat ground, 13.8–24.3 % on rolling terrain and 16.0 % in a built room → **3.1×–4.7× vertices at `N = 4`, 1.4×–1.7× at `N = 2`**, making `N = 2` the expected answer. Also recorded so they are not re-derived: **route C** (an 8-bit neighbour-occupancy mask in the spare `Normal.w`, evaluated per pixel — zero cost and no `VX-1` dependency, but only a separable approximation, so `B58` would red it, and incompatible with `MR-8`) and **route D** (URP's screen-space AO — rejected). And a cost nothing else carries: moving AO off the mesh makes the meshing suite **blind** to it, with no golden-image harness to replace `B41`–`B58`
 * **v1.8** - **SS-2a, second defect: the light mean must be weighted by visibility, not by a per-block "holds light" flag.** The product-seal fix was correct and the artifact survived it in game. Every block in the reported scene is a **full cube**, so §5.2's reduction says ordinary terrain cannot have moved — and that contradiction is the finding: **the reduction holds only under a uniform light field**, which is what every AO scenario in the suite fills (`MH-3`). Measured at a sealed corner on plain full cubes, the engine read `64 / 51 / 38 / 32` as the hidden diagonal cell's sky went `15 / 9 / 3 / 0`, where the pre-SS-2 model reads `64` throughout. Cause: `SS-2` split one expression into "light mean × `(1 − occ)`" and took the mean over cells that *hold* light — identical to the occluded set while occluders are opaque, and wrong the moment the **seal occludes air**, which is credited and debited at once. Weighting the mean by `wᵢ·openᵢ` makes the two factors cancel (`Σw·open = 1 − occ` at a corner), so the model now collapses to the pre-SS-2 expression **for an arbitrary light field** — a strictly stronger reduction than §5.2 originally claimed. Needs one guard: fall back to the unshadowed mean where the kernel sees nothing, which is the black-face case SS-2 mis-diagnosed as "light must not be weighted by the per-point shadow" (true unrenormalized, false renormalized). New baseline **B58**, red first at `64 → 32` with **all 52 others green** — the measure of how invisible this was. Validate All **437**
 * **v1.7** - **SS-2a fixed: the corner seal's combiner is a product, not a `min`.** The suspicion filed in v1.6 was confirmed, and answered by measurement rather than by eye: a four-configuration differential (both walls / either alone / neither) isolates the seal from the falloff, the radius and the light field, and showed its contribution running **flat at 16 light units from the corner out to half a cell along the diagonal** — the wedge — with a crease along `u = v` where `min`'s two arguments cross. The product decays it to `4` while holding `63` in the corner, is an identity at a cell corner so **B56 is untouched**, and is the natural smooth conjunction of "both sides hide the diagonal". New baseline **B57**, authored red first, pins both ends: **the shipped `min` reds its locality leg alone; deleting the seal reds its corner leg *and* B56**, so the cheapest wrong fix is blocked in both directions (F15). Validate All **436**. Recorded but not acted on: with the seal correct, SS-2's interior is still *lighter* than the pre-SS-2 bilinear ramp (147 vs 124 mid-diagonal) because `(1 − t)²` concentrates a shadow near its occluder — that is D2 working as chosen, and the exponent is the remaining suspect if the in-game check still reads wrong
@@ -1442,4 +1486,4 @@ the seal began occluding air.
 ---
 
 **Last Updated:** 2026-08-09  
-**Next Review:** on the in-game confirmation of SS-2 + SS-2a together — it unblocks SS-3 and SS-4. D1/D2/D3 and **D7** are all settled now; `VX-1` being scheduled changes SS-3's horizon, not its go/no-go
+**Next Review:** on the `SS-3` perf capture — it decides whether `Full-Block Contact Shadows` defaults on. `SS-4` is unblocked and independent; D1/D2/D3/D7 are all settled

@@ -577,6 +577,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 WaterVertexTemplates = _world.FluidVertexTemplates.WaterVertexTemplates,
                 LavaVertexTemplates = _world.FluidVertexTemplates.LavaVertexTemplates,
                 SmoothLighting = _world.settings.smoothLighting,
+                FullCubeContactShadows = _world.settings.fullBlockContactShadows,
                 ClipBounds = MeshClipBounds.Disabled,
                 Output = jobData.Output,
             };

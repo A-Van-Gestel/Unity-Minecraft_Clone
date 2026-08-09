@@ -35,7 +35,133 @@ namespace Editor.Validation.Meshing
             scenarios.Add(new Scenario(
                 "B58: a cell the seal treats as occluded does not also feed the light average — under a NON-uniform light field (SS-2a)",
                 B58_SealedCornerIgnoresHiddenLight));
+
+            scenarios.Add(new Scenario(
+                "B54: a lone full cube's shadow follows Euclidean distance to its silhouette, not a product of two ramps (SS-3)",
+                B54_FullCubeShadowFollowsDistance));
         }
+
+        /// <summary>
+        /// B54 — <b>the metric assertion, and the first one in this suite</b>. Every other AO scenario
+        /// checks <i>values</i>; this one checks that the shading is a function of <b>Euclidean distance
+        /// to the occluder's silhouette</b> and of nothing else — which is the property that makes the
+        /// AO around an isolated block read as a rectangle rather than a round blob (design finding S2:
+        /// the pre-SS model weighted an occluder by a product of two per-axis ramps, whose isocontours
+        /// are hyperbolic, so its shadow reached about twice as far diagonally as straight out).
+        /// <para>
+        /// The oracle is derived from the model's specification, not from the mesher: around a lone full
+        /// cube on an open floor every neighbouring cell is air and holds full light, so the light mean
+        /// is exactly 15 and the corner seal contributes nothing (a sealed diagonal needs <i>two</i>
+        /// flanking occluders). What remains is one occluder's share of a hemisphere,
+        /// <c>occ = 0.25 · (1 − d)²</c> — a closed form in <c>d</c> alone. Any separable or
+        /// axis-dependent weighting fails it off the axes.
+        /// </para>
+        /// <para>
+        /// <b>Leg 1 is red on the pre-SS-3 engine by construction</b> — an undivided face emits only its
+        /// four corners, where <c>d</c> is 0 or 1 and every model agrees, so there is nowhere to read a
+        /// metric. That is the phase's prove-red, and it is also why leg 2 alone would be vacuous.
+        /// </para>
+        /// </summary>
+        /// <returns>True when the faces around a lone cube are subdivided and match the distance oracle.</returns>
+        private static bool B54_FullCubeShadowFollowsDistance()
+        {
+            ushort lit = LightBitMapping.PackLightData(15, 0, 0, 0);
+
+            using MeshingTestWorld world = new MeshingTestWorld();
+            for (int dx = -3; dx <= 3; dx++)
+            for (int dz = -3; dz <= 3; dz++)
+                world.SetBlock(B49_X + dx, B49_Y, B49_Z + dz, TestMeshBlockPalette.SolidOpaque, 0);
+
+            // One ordinary full cube standing on the floor — no custom bounds anywhere in the fixture,
+            // so nothing here trips SS-2's gate and only SS-3's widening can subdivide these faces.
+            world.SetBlock(B49_X, B49_Y + 1, B49_Z, TestMeshBlockPalette.SolidOpaque, 0);
+            world.FillLight(lit);
+
+            MeshDataJobOutput output = world.Run(SmoothLightingQuality.High, fullCubeContactShadows: true);
+
+            int quads = CountTopFaceQuads(output, B49_X + 1, B49_Y, B49_Z);
+            bool ok = MeshAssert.IsTrue("B54 a face a full cube reaches is subdivided",
+                quads > 1,
+                $"The floor face beside a full cube emitted {quads} quad(s), so its shading still lives "
+                + "only at the cell's corners. A shadow whose whole point is to hug the block cannot "
+                + "resolve at one sample per cell — it becomes a ramp across the entire neighbouring "
+                + "block, which is the artifact this phase exists to fix.");
+
+            if (!ok) return false;
+
+            StringBuilder failures = new StringBuilder();
+            int checkedSamples = 0;
+            int offAxisSamples = 0;
+
+            // Sweep the eight floor cells around the cube, so perpendicular and diagonal directions are
+            // measured by the same oracle. A model that is right on the axes and wrong between them —
+            // exactly the separable failure — survives the first four and dies on the rest.
+            for (int dx = -1; dx <= 1; dx++)
+            for (int dz = -1; dz <= 1; dz++)
+            {
+                if (dx == 0 && dz == 0) continue;
+
+                foreach (SubVertexSample s in TopFaceSubVertexField(output, B49_X + dx, B49_Y, B49_Z + dz))
+                {
+                    // The cube's silhouette on this floor plane is its own cell's footprint, expressed
+                    // in the probed face's parameter frame.
+                    float u = s.U + dx, v = s.V + dz;
+                    float outsideU = Mathf.Max(Mathf.Max(-u, u - 1f), 0f);
+                    float outsideV = Mathf.Max(Mathf.Max(-v, v - 1f), 0f);
+                    float distance = Mathf.Sqrt(outsideU * outsideU + outsideV * outsideV);
+
+                    int expected = ExpectedLoneCubeSun(distance);
+                    checkedSamples++;
+                    if (outsideU > 0.001f && outsideV > 0.001f) offAxisSamples++;
+
+                    if (Mathf.Abs(s.Sun - expected) > SHADOW_METRIC_TOLERANCE)
+                    {
+                        if (failures.Length < 700)
+                        {
+                            failures.AppendFormat(
+                                "    cell({0},{1}) uv({2:0.00},{3:0.00}) d={4:0.000}: reads {5}, distance predicts {6}\n",
+                                dx, dz, s.U, s.V, distance, s.Sun, expected);
+                        }
+                    }
+                }
+            }
+
+            ok &= MeshAssert.IsTrue("B54 the sweep found off-axis samples to check",
+                checkedSamples >= 32 && offAxisSamples >= 4,
+                $"Only {checkedSamples} samples ({offAxisSamples} off-axis) were read around the cube. "
+                + "The diagonal samples are the ones that discriminate a Euclidean metric from a "
+                + "separable one, so a sweep without them proves nothing.");
+
+            ok &= MeshAssert.IsTrue("B54 the shadow is a function of distance to the silhouette",
+                failures.Length == 0,
+                "Shading around a lone full cube must depend only on how far the point is from the "
+                + "block's silhouette — equal distance, equal shadow, in every direction. A model that "
+                + "weights an occluder by a product of per-axis ramps reaches further diagonally than "
+                + "straight out and reads as a round blob (finding S2).\n" + failures);
+
+            return ok;
+        }
+
+        /// <summary>
+        /// The specification's closed form for a lone full-cube occluder on an otherwise open surface:
+        /// full light attenuated by one cell's share of the hemisphere, falling off with the square of
+        /// the remaining distance. Derived from the design's §5.2, never from the mesher.
+        /// </summary>
+        /// <param name="distance">Euclidean distance from the shaded point to the cube's silhouette, in cells.</param>
+        /// <returns>The encoded sky light the model predicts at that point.</returns>
+        private static int ExpectedLoneCubeSun(float distance)
+        {
+            float falloff = distance >= 1f ? 0f : (1f - distance) * (1f - distance);
+            float light = 15f * (1f - 0.25f * falloff);
+            return Mathf.Min(255, (int)(light * 17f + 0.5f));
+        }
+
+        /// <summary>
+        /// Slack on the distance oracle, in encoded light units — UNorm8 rounding plus the float error
+        /// of recomputing the distance test-side. Well under the tens of units a wrong metric moves a
+        /// diagonal sample by.
+        /// </summary>
+        private const int SHADOW_METRIC_TOLERANCE = 2;
 
         /// <summary>
         /// B58 — <b>the first meshing scenario to shade under a non-uniform light field, and it exists

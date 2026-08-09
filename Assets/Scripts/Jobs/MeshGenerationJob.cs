@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Data;
 using Data.Enums;
 using Helpers;
@@ -111,6 +112,19 @@ namespace Jobs
 
         // --- SETTINGS ---
         public SmoothLightingQuality SmoothLighting;
+
+        /// <summary>
+        /// SS-3: when set, faces reached by ordinary <b>full cubes</b> are subdivided too, so a wall's
+        /// shadow resolves as a band hugging it instead of a ramp across the whole adjoining cell.
+        /// Partial occluders (slabs, posts) are subdivided regardless — that is SS-2 and not gated here.
+        /// <para>
+        /// Off by default: it is the one shading change in this arc that moves the world's vertex count
+        /// (1.4×–1.7× measured), so it stays behind a setting until a capture says what it costs on the
+        /// target build.
+        /// </para>
+        /// </summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool FullCubeContactShadows;
 
         // --- OUTPUT ---
         public MeshDataJobOutput Output;
@@ -713,14 +727,14 @@ namespace Jobs
                     {
                         CalculateCornerLights(p, pos, neighborVoxel, faceIsInteriorToSampleCell: false,
                             out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3,
-                            out bool hasPartialOccluder);
+                            out int tessellation);
 
-                        if (hasPartialOccluder)
+                        if (tessellation > 1)
                         {
                             // Sampling by world position makes the corner-light permutation unnecessary
                             // here: each sub-vertex asks about the cell it actually sits under.
                             EmitTessellatedStandardCubeFace(p, translatedP, pos, rotation, 0,
-                                textureID, voxelProps.RenderNeighborFaces);
+                                textureID, voxelProps.RenderNeighborFaces, tessellation);
                             continue;
                         }
 
@@ -767,8 +781,10 @@ namespace Jobs
         /// <param name="uvQuarterTurnsCW">Number of 90° clockwise UV rotations to apply (0-3).</param>
         /// <param name="textureID">Atlas texture index for this face.</param>
         /// <param name="renderNeighborFaces">Routes the triangles to the transparent submesh.</param>
+        /// <param name="tessellation">Sub-quads per axis, from the face's own gate.</param>
         private void EmitTessellatedStandardCubeFace(int worldFace, int geometryFace, Vector3Int pos,
-            float rotation, int uvQuarterTurnsCW, int textureID, bool renderNeighborFaces)
+            float rotation, int uvQuarterTurnsCW, int textureID, bool renderNeighborFaces,
+            int tessellation)
         {
             Span<FaceOccluder> occluders = stackalloc FaceOccluder[FACE_OCCLUDER_COUNT];
             PrepareFaceSampling(worldFace, pos, faceIsInteriorToSampleCell: false, occluders,
@@ -778,11 +794,11 @@ namespace Jobs
                 out VoxelMeshHelper.FaceQuad face);
             Vector3 normal = BurstVoxelData.FaceChecks.Data[geometryFace];
 
-            const float step = 1f / SUB_CELL_TESSELLATION;
+            float step = 1f / tessellation;
 
-            for (int j = 0; j < SUB_CELL_TESSELLATION; j++)
+            for (int j = 0; j < tessellation; j++)
             {
-                for (int i = 0; i < SUB_CELL_TESSELLATION; i++)
+                for (int i = 0; i < tessellation; i++)
                 {
                     float u0 = i * step, v0 = j * step, u1 = (i + 1) * step, v1 = (j + 1) * step;
                     VoxelMeshHelper.GetSubQuad(in face, u0, v0, u1, v1, out VoxelMeshHelper.FaceQuad sub);
@@ -811,6 +827,15 @@ namespace Jobs
         private const int SUB_CELL_TESSELLATION = 4;
 
         /// <summary>
+        /// SS-3: sub-quads per axis for a face reached only by <b>full-cube</b> occluders. Half the
+        /// density of <see cref="SUB_CELL_TESSELLATION"/>, because a full cube's silhouette is its whole
+        /// cell — there is no sub-cell edge position to resolve, only a falloff — and the vertex cost
+        /// goes as the square: measured across terrain and built geometry, 4 costs 3.1×–4.7× the world's
+        /// vertices where 2 costs 1.4×–1.7× (design doc §8).
+        /// </summary>
+        private const int FULL_CUBE_SUB_CELL_TESSELLATION = 2;
+
+        /// <summary>
         /// Checks visibility of a single cube face and, if visible, emits its vertices, UVs, and
         /// color into the output mesh buffers.
         /// </summary>
@@ -835,12 +860,12 @@ namespace Jobs
             {
                 CalculateCornerLights(worldFace, pos, neighborVoxel, faceIsInteriorToSampleCell: false,
                     out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3,
-                    out bool hasPartialOccluder);
+                    out int tessellation);
 
-                if (hasPartialOccluder)
+                if (tessellation > 1)
                 {
                     EmitTessellatedStandardCubeFace(worldFace, worldFace, pos, rotation: 0f, uvQuarterTurnsCW,
-                        textureID, voxelProps.RenderNeighborFaces);
+                        textureID, voxelProps.RenderNeighborFaces, tessellation);
                     return;
                 }
 
@@ -1120,11 +1145,11 @@ namespace Jobs
         }
 
         /// <summary>
-        /// Corner-light overload that also reports whether any sampled cell holds a <b>partial</b>
-        /// occluder — the gate VO-9b uses to decide a face needs sub-cell shading detail.
+        /// Corner-light overload that also reports how finely this face must be subdivided to resolve
+        /// the shadows reaching it — the gate that decides a face needs sub-cell shading detail.
         /// <para>
-        /// It rides along on samples the face already takes, so an ordinary cube surrounded by ordinary
-        /// cubes pays one boolean for the whole question.
+        /// It rides along on samples the face already takes, so an ordinary cube in open air pays one
+        /// integer for the whole question.
         /// </para>
         /// </summary>
         /// <param name="faceIndex">Face direction, in <c>VoxelData.FaceChecks</c> order.</param>
@@ -1135,15 +1160,15 @@ namespace Jobs
         /// <param name="l1">Light at corner 1.</param>
         /// <param name="l2">Light at corner 2.</param>
         /// <param name="l3">Light at corner 3.</param>
-        /// <param name="hasPartialOccluder">True when some sampled cell has authored custom bounds and occludes.</param>
+        /// <param name="tessellation">Sub-quads per axis this face needs: 1 leaves it undivided.</param>
         private void CalculateCornerLights(int faceIndex, Vector3Int blockPos,
             VoxelState? directNeighbor, bool faceIsInteriorToSampleCell,
-            out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3, out bool hasPartialOccluder)
+            out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3, out int tessellation)
         {
             Span<FaceOccluder> occluders = stackalloc FaceOccluder[FACE_OCCLUDER_COUNT];
             PrepareFaceSampling(faceIndex, blockPos, faceIsInteriorToSampleCell, occluders,
                 out Vector3Int directCell, out int normalAxis, out int axisA, out int axisB,
-                out hasPartialOccluder);
+                out tessellation);
 
             l0 = ShadeCorner(faceIndex, 0, blockPos, directCell, axisA, axisB, occluders);
             l1 = ShadeCorner(faceIndex, 1, blockPos, directCell, axisA, axisB, occluders);
@@ -1194,7 +1219,7 @@ namespace Jobs
         private void PrepareFaceSampling(int faceIndex, Vector3Int blockPos,
             bool faceIsInteriorToSampleCell, Span<FaceOccluder> occluders,
             out Vector3Int directCell, out int normalAxis, out int axisA, out int axisB,
-            out bool hasPartialOccluder)
+            out int tessellation)
         {
             Vector3Int faceNormal = BurstVoxelData.FaceChecks.Data[faceIndex];
             directCell = blockPos + faceNormal;
@@ -1214,7 +1239,8 @@ namespace Jobs
                 ? (lowHalf ? 0f : 0.5f)
                 : (lowHalf ? 0.5f : 1f);
 
-            hasPartialOccluder = false;
+            bool hasPartialOccluder = false;
+            bool hasAnyOccluder = false;
 
             // Hoist the whole 3x3 of cells in front of the face ONCE. Every shading point on this face
             // draws from these nine, so this replaces the sixteen overlapping per-corner fetches the
@@ -1248,6 +1274,7 @@ namespace Jobs
                             entry.RectMin = rectMin + new float2(da, db);
                             entry.RectMax = rectMax + new float2(da, db);
                             entry.Casts = 1;
+                            hasAnyOccluder = true;
                         }
 
                         // A fully-opaque cell holds only surface light and is fully shadowing wherever it
@@ -1266,6 +1293,15 @@ namespace Jobs
                     occluders[OccluderIndex(da, db)] = entry;
                 }
             }
+
+            // SS-3: a partial occluder needs the finer grid — its edge can sit anywhere inside a cell,
+            // which is the resolution problem VO-9b was built for. A full cube's silhouette is the cell
+            // itself, so its shadow only has to resolve a falloff, and half the density carries it at a
+            // quarter of the vertex cost. Faces no occluder reaches stay a single quad, which is what
+            // keeps flat ground free.
+            tessellation = hasPartialOccluder
+                ? SUB_CELL_TESSELLATION
+                : (FullCubeContactShadows && hasAnyOccluder ? FULL_CUBE_SUB_CELL_TESSELLATION : 1);
         }
 
         /// <summary>
