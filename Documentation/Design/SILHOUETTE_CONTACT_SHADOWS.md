@@ -1,6 +1,6 @@
 # Silhouette-Based Contact-Shadow Ambient Occlusion (SS-*)
 
-**Version:** 2.1  
+**Version:** 2.2  
 **Date:** 2026-08-09  
 **Status:** Proposed design — not implemented.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
@@ -986,7 +986,7 @@ get to rely on them.
 | **SS-2**  | ⚠️ Contact-shadow term, partial occluders (**observation 1**) — code complete, **rejected in game** |   🟡   | SS-1, D1–D3 |
 | **SS-2a** | ⏳ Fix the corner-darkening artifact SS-2 introduced — fixed, awaiting in-game |   🟡   | SS-2       |
 | ~~**SS-3**~~ | ✅ Extend the gate to full-cube occluders (**observation 2**) — shipped **default-off**, capture owed |   🔴   | SS-2a, D7  |
-| **SS-3a** | ✅ Bin occlusion by direction, not by cell — fixed, awaiting in-game               |   🟡   | SS-3       |
+| ~~**SS-3a**~~ | ✅ Bin occlusion by direction, not by cell — confirmed in game; one residual accepted (§10) |   🟡   | SS-3       |
 | **SS-4**  | Subdivide custom-mesh faces (S6)                                    |   🟡   | SS-2a      |
 
 **Minimal standalone-value set: SS-0 → SS-1 → SS-2.** It delivers the owner's first observation, is
@@ -1426,11 +1426,14 @@ goes as `N²`. `FULL_CUBE_SUB_CELL_TESSELLATION` is a named constant with that r
   would pass on a subdivided face shaded by any rule at all.
 - **Acceptance:** ✅ universal gate — **Validate All 438/438**, both assemblies clean, and **no
   existing baseline moved** (the flag is off by default on both the shipped and harness paths, so the
-  standard-cube family is untouched rather than re-baselined). ⏳ **Still owed before the default
-  flips: a `perf-benchmark` capture on an IL2CPP build with the setting on**, and in-game
-  confirmation with user sign-off. The vertex multiplier is known (above); what is not known is what
-  it costs in frame time, mesh memory and upload bandwidth on the target build — §8's numbers are a
-  geometry count, not a frame budget.
+  standard-cube family is untouched rather than re-baselined). ✅ **Confirmed in game 2026-08-09**,
+  and the owner called it a visual improvement.
+- ⚠️ **The default stays OFF, and that is a settled decision — not an outstanding task.** The owner
+  waived the IL2CPP capture (§8's vertex multiplier was accepted in place of a frame-time
+  measurement) and chose to keep the setting opt-in **on taste, not on cost**: with it on, full-block
+  face shading darkens voxels overall, and the deep contact shadow it buys does not pay for that
+  everywhere. **Do not flip the default because the capture box is unticked** — flipping it needs a
+  fresh aesthetic decision from the owner, and probably §10's coverage refinement first.
 - **Flag retirement:** `fullBlockContactShadows` is a **quality setting, not a migration flag** — it
   is expected to stay as a user-facing toggle the way `Smooth Lighting` does, so it does **not** enter
   the flag-retirement backlog. What may retire is its *default*, once a capture justifies flipping it
@@ -1479,8 +1482,17 @@ rejects zero-area clips; `LightAttenuation.CellOcclusionShare` is renamed
   which was never what finding S2 claims. The assertion moved to the two properties S2 *is* about and
   which depend on the metric alone: the shadow **reaches equally far in every direction**, and it
   **never deepens with distance** within a direction. Values stay pinned by `B56`/`B57`/`B58`/`B59`.
-- **Acceptance:** ✅ universal gate — Validate All **439/439**, both assemblies clean. ⏳ in-game
-  confirmation, **both with the setting on and off** — the fix changes the `SS-2` path too.
+- **Acceptance:** ✅ universal gate — Validate All **439/439**, both assemblies clean. ✅ confirmed in
+  game 2026-08-09: *"that indeed fixed most of the artifacts"*.
+- ⚠️ **Known residual, accepted by the owner for now: a step at a silhouette's edge.** One artifact
+  survives, reported between two vertical slabs, and it is a limitation of this fix rather than a
+  leftover of the old one. A quadrant is covered or not — a binary test — so coverage flips
+  discontinuously where an occluder's edge crosses the sample point. Measured on a floor between two
+  slabs one cell apart, reading along the row: `191 · 128 · 128 · 128 · 191 · 215 · 223 · 215 · 191 · 128`
+  — `128` under the slab's footprint, stepping to `191` **exactly at its boundary**, a 63-unit jump.
+  A slab's footprint edge coincides with a cell boundary, so it reads as a light line at a voxel
+  border. The same step appears, smaller, at the end of a run of slabs (`223` → `239`). The fix is
+  the angular-coverage refinement in §10, deliberately **not** built here.
 - **Cost:** the occlusion term goes from 9 distance evaluations per sample to at most 9 × 4 clipped
   ones, pruned by the zero-area test (most cells touch one or two quadrants). Folded into `SS-3`'s
   outstanding capture rather than measured separately.
@@ -1519,6 +1531,7 @@ rejects zero-area clips; `LightAttenuation.CellOcclusionShare` is renamed
 | v2      | **Silhouettes for fluid surfaces**                          | Fluids have their own height/flow model; `SS-4` explicitly leaves them out.                                                                                              |
 | v3      | ✅ **Per-pixel evaluation of this distance field, on `VX-1`'s volumes — THE DESTINATION** | **Interlock, not a phase — `VX-1`/`VX-8` own this ID space.** Owner-endorsed 2026-08-09 as where this design ends up: observation 2 at per-pixel quality, zero vertex cost, and the only route that retires `MR-8`'s *AO* merge constraint (analytic evaluation is per fragment, so a merged quad is fine — unlike a filtered baked channel, see the `VX-8` row below). Needs **both** of `VX-1`'s volumes, not just occupancy: post-`SS-2a` the occlusion enters the light weights, so a fragment needs per-cell light too (D7). Full cubes only until `VX-5` widens occupancy to carry bounds + rotation, so `SS-2`/`SS-4` stay CPU-side regardless. **Does not delete `SS-3`** — the volume is finite, so the far field keeps vertex-baked AO. Supersedes v1.0's "per-face AO texture" row: a resident volume needs no atlas, no UV allocation, and no change to `MR-2`'s packed vertex format, so the per-face variant is strictly worse and is dropped rather than deferred. |
 | —       | **`VX-8` (per-fragment light) does not subsume this design** | Recorded so it is not mistaken for a replacement. `VX-8` moves *where light is stored*; this design fixes *what the occlusion value is*. Hardware trilinear filtering of a voxel-resolution volume **is** the separable product S2 blames for the round blob, and one texel per cell cannot say where inside a cell a slab sits — so moving AO into the volume would bake both observations in permanently. `VX-8`'s own "vertex AO stays vertex-baked" line is correct, and this is the reason. |
+| v2      | **Weight a quadrant by the angular fraction an occluder covers** | The named fix for two things at once, and the highest-value item on this list. `SS-3a` bins occlusion by direction but decides coverage with a **binary** in-quadrant test, which (a) steps discontinuously where a silhouette's edge crosses the sample point — the known residual in the `SS-3a` packet — and (b) charges a full quarter for any occluder touching a quadrant, which is what makes full-block shading read *darker overall* and is why the owner left `SS-3` off by default. Weighting each quadrant by the angular fraction its nearest occluder actually subtends makes coverage continuous across a silhouette edge and lands an isolated block's edge between today's `191` and `128` instead of at the extreme. It moves every AO value in the world, so it needs its own phase, its own prove-red and its own sign-off. |
 | —       | **Adaptive `SUB_CELL_TESSELLATION`**                        | Density chosen per face from the occluder's distance, rather than one constant. Only worth it if `SS-3`'s measurement says the constant is the problem. |
 
 ---
@@ -1550,6 +1563,7 @@ rejects zero-area clips; `LightAttenuation.CellOcclusionShare` is renamed
 
 ## Document History
 
+* **v2.2** - **`SS-3` and `SS-3a` both confirmed in game; `SS-3` stays default-OFF by owner decision.** The capture is **waived** — §8's vertex multiplier was accepted in place of a frame-time measurement — and the setting stays opt-in **on taste rather than cost**: full-block face shading darkens voxels overall, and the deeper contact shadow does not pay for that everywhere. Recorded explicitly so nobody flips the default on the grounds that the capture box is unticked. **One residual accepted:** a **step at a silhouette's edge**, reported between two vertical slabs and measured at 63 units (`128` under a slab's footprint → `191` exactly at its boundary), a limitation of `SS-3a`'s binary in-quadrant test rather than a leftover of the per-cell defect. Its fix is a new §10 v2 row — **weight a quadrant by the angular fraction its occluder subtends** — which addresses the residual *and* the over-darkening behind the default-off decision, making it the highest-value item on that roadmap
 * **v2.1** - **`SS-3a`: occlusion is summed over the four QUADRANTS around a point, not over the nine cells.** In game, `SS-3` showed a dark dash at every cell seam along every wall; measured, the wall base read `128` at seams against `159` mid-cell. The per-cell sum reads the **grid**, not the geometry — a straight wall arrives as three separate cell silhouettes, and how many of them touch the sample point depends on where the seams fall. At a cell corner cells and quadrants coincide, which is why the per-cell form reproduced every corner value and shipped. **The seams were the correct value**: pre-SS-3 that edge had only its two `128` corners with the GPU interpolating between them, so it was the *interior* samples that disagreed with the corners. **The defect predates SS-3** — the same fixture in slabs rippled 5 units, live since SS-2. Fix: `quadrant[4]` alongside `shadow[9]`, a quadrant darkened by the nearest silhouette *covering area* in it (a silhouette merely touching a quadrant boundary covers none of it), with the corner seal staying per-cell and applied to both readings so `B58`'s identity survives. `CellOcclusionShare` → **`QuadrantOcclusionShare`**. Walls are now flat at `128 / 223 / 255`, and the SS-2 slab path is flat too. **Accepted look change:** a lone block's contact shadow deepens at the middle of its edge, `191 → 128` (its corners stay `191`) — a block touching you along a whole edge fills two quadrants, not one quarter. New baseline **B59** (wall uniformity), red first at 31 units. **`B54` rewritten, not loosened**: its "equal distance ⇒ equal shadow" premise is *false* under the correct model and encoded circular isocontours, which is not what S2 claims — it now asserts reach and ordering, both metric-only. Validate All **439**
 * **v2.0** - **`SS-3` shipped behind a default-off Graphics setting (`Full-Block Contact Shadows`).** The gate now reports an `int tessellation` rather than a boolean, admitting a face at **density 2** when any of the nine hoisted cells casts a silhouette — `FULL_CUBE_SUB_CELL_TESSELLATION`, half of the partial-occluder density, because a full cube's silhouette *is* its cell so there is no sub-cell edge to resolve and the cost goes as `N²`. **§8's projected cost proved exact when measured against the real gate** (1.00× / 1.41× / 1.73× / 1.48×). New baseline **B54**, the suite's **first metric assertion**: every sub-vertex around a lone cube is checked against the closed form `occ = 0.25·(1 − d)²` derived from §5.2, with an anti-vacuity guard demanding off-axis samples, since only the diagonals separate a Euclidean metric from a separable one (S2). Prove-red both ways: gate-never-on reds B54 alone (the pre-SS-3 engine, the packet's predicted free prove-red); gate-always-on reds **B11, B49's gate leg and B56** — exactly the standard-cube family predicted, all three asserting the undivided path. **No existing baseline moved**, because the flag defaults off on both the shipped and harness paths. Validate All **438**. Still owed before the default flips: an IL2CPP `perf-benchmark` capture and in-game sign-off
 * **v1.9** - **D7 decided (owner): build `SS-3` now, per-pixel on `VX-1` is the destination**, after a research pass over four routes. `SS-3` is **not** throwaway under that plan — route B's volume is finite, so the far field keeps vertex-baked AO and `SS-3` becomes its fallback. Two corrections to D7's own assumptions came out of the research: (1) **route B needs `VX-1`'s light volume too, not just occupancy** — `SS-2a` moved occlusion into the light weights, so a per-pixel occlusion factor over an interpolated vertex light no longer reproduces the model (≈ 9 occupancy + 4 light taps per fragment); (2) **route B has an AO horizon** at the volume radius (`VX-1`'s default ≈ 5 chunks, against view distances of 10 and 20 in `FP-4`'s sweep) and AO does not degrade gracefully the way fog does — the owner's steer that the volume be **view-distance aware** is filed against `VX-1`, along with the quadratic memory that implies and the `MR-8` vertex saving that could offset it. **§8's "genuinely open magnitude" is now measured**: `SS-3` admits 0 % of faces on flat ground, 13.8–24.3 % on rolling terrain and 16.0 % in a built room → **3.1×–4.7× vertices at `N = 4`, 1.4×–1.7× at `N = 2`**, making `N = 2` the expected answer. Also recorded so they are not re-derived: **route C** (an 8-bit neighbour-occupancy mask in the spare `Normal.w`, evaluated per pixel — zero cost and no `VX-1` dependency, but only a separable approximation, so `B58` would red it, and incompatible with `MR-8`) and **route D** (URP's screen-space AO — rejected). And a cost nothing else carries: moving AO off the mesh makes the meshing suite **blind** to it, with no golden-image harness to replace `B41`–`B58`
@@ -1566,4 +1580,4 @@ rejects zero-area clips; `LightAttenuation.CellOcclusionShare` is renamed
 ---
 
 **Last Updated:** 2026-08-09  
-**Next Review:** on the in-game confirmation of `SS-3a` (with the setting both on and off), then the `SS-3` perf capture — which decides whether `Full-Block Contact Shadows` defaults on. `SS-4` is unblocked and independent; D1/D2/D3/D7 are all settled
+**Next Review:** when `SS-4` (custom-mesh faces) or §10's angular-coverage refinement is scheduled. `SS-0`–`SS-3a` are shipped and confirmed; the `SS-3` default is settled at OFF by owner decision and its capture is waived; D1/D2/D3/D7 are all settled
