@@ -222,7 +222,7 @@ public class Settings
     /// </summary>
     [SettingField(SettingsTab.Graphics, Label = "Full-Block Contact Shadows", Order = 5)]
     [Tooltip("Lets ordinary full blocks cast a tight contact shadow on the surfaces beside them, " +
-             "instead of shading evenly across the whole neighbouring block.\n\n" +
+             "instead of shading evenly across the whole neighboring block.\n\n" +
              "Blocks with their own shape (slabs, posts) cast contact shadows either way.\n\n" +
              TooltipTags.Performance + "Subdivides every surface within one block of a wall, ledge or " +
              "step. Flat open ground is unaffected; broken terrain and built structures cost the most.\n" +

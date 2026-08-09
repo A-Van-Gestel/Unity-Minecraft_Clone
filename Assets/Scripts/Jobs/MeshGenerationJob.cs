@@ -1579,7 +1579,7 @@ namespace Jobs
 
         /// <summary>
         /// Smallest extent that counts as covering a quadrant. A silhouette lying exactly along a
-        /// quadrant boundary — a neighbouring cell's edge through the shaded point — has zero area on
+        /// quadrant boundary — a neighboring cell's edge through the shaded point — has zero area on
         /// one side and must not darken it, or every occluder would darken all four.
         /// </summary>
         private const float QUADRANT_AREA_EPSILON = 1e-4f;

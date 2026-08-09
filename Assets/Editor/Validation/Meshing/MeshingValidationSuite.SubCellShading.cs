@@ -197,7 +197,7 @@ namespace Editor.Validation.Meshing
                 quads > 1,
                 $"The floor face beside a full cube emitted {quads} quad(s), so its shading still lives "
                 + "only at the cell's corners. A shadow whose whole point is to hug the block cannot "
-                + "resolve at one sample per cell — it becomes a ramp across the entire neighbouring "
+                + "resolve at one sample per cell — it becomes a ramp across the entire neighboring "
                 + "block, which is the artifact this phase exists to fix.");
 
             if (!ok) return false;
@@ -264,7 +264,7 @@ namespace Editor.Validation.Meshing
 
             // F15: the reach leg alone is satisfied by a face carrying no shadow at all, and a shadow
             // present only on the axes would pass a perpendicular-only sweep.
-            ok &= MeshAssert.IsTrue("B54 the cube darkens both perpendicular and diagonal neighbours",
+            ok &= MeshAssert.IsTrue("B54 the cube darkens both perpendicular and diagonal neighbors",
                 darkenedPerpendicular && darkenedDiagonal,
                 $"Within the shadow's radius, darkening was found perpendicular={darkenedPerpendicular}, "
                 + "diagonal=" + darkenedDiagonal + ". Both are required: the diagonal samples are the "
@@ -357,7 +357,7 @@ namespace Editor.Validation.Meshing
                 openBright != openDark,
                 $"With no walls raised, the corner reads {openBright} whether the diagonal cell carries "
                 + $"full sky or none at all. Smooth lighting must average the light of the cells meeting "
-                + "at a corner; a corner that ignores a visible neighbour is not lit, it is flat.");
+                + "at a corner; a corner that ignores a visible neighbor is not lit, it is flat.");
 
             return ok;
         }
@@ -612,7 +612,7 @@ namespace Editor.Validation.Meshing
                 failures.Length == 0,
                 "A face corner surrounded by full cubes must read exactly what it read before SS-2 "
                 + "replaced the occlusion function. If it does not, the replacement is not the "
-                + "behaviour-preserving generalization it is documented to be, and ordinary terrain has "
+                + "behavior-preserving generalization it is documented to be, and ordinary terrain has "
                 + "moved.\n" + failures);
         }
 
