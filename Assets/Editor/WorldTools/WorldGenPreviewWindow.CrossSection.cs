@@ -1336,11 +1336,12 @@ namespace Editor.WorldTools
                     floraSurfaceY = y;
                 }
 
-                // Mirror the generation job's heightmap tracking: the job uses IsLightObstructing
-                // (Opacity > 0), but BlockTypeJobData is not available here. Using != Air is equivalent
-                // for all current generation-placed blocks (stone, water, bedrock, lodes — all have
-                // Opacity > 0). Would diverge only if a zero-opacity non-Air block were added to a
-                // biome's terrain layers or lode config.
+                // Mirror the generation job's heightmap tracking: the job uses
+                // LightAttenuation.ObstructsSkyColumn, but BlockTypeJobData is not available here. Using
+                // != Air is equivalent for all current generation-placed blocks (stone, water, bedrock,
+                // lodes — all full cubes with Opacity > 0, for which that predicate reduces to
+                // Opacity > 0). Would diverge if a zero-opacity block, or a partial block whose volume
+                // leaves the sky column open, were added to a biome's terrain layers or lode config.
                 if (!floraHighestBlockFound && voxelValue != BlockIDs.Air)
                 {
                     floraHighestBlockFound = true;

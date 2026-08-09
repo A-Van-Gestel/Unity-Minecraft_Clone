@@ -49,7 +49,8 @@ Namespace: suite = `Editor.Validation.Meshing`, framework = `Editor.Validation.M
 > **B1–B16**. **MR-* Wave 2 (2026-06-20):** MR-2 (32 B/vertex) + MR-6 (pre-size + pool the `MeshDataJobOutput`
 > buffers) landed; MR-6's build-alongside guard **MH-2** closed as **B17** (a pooled output reused across two
 > scenes == a fresh buffer, via `MeshOutputPool` + `MeshingTestWorld.Run(reuseOutput:)`) → baselines **B1–B17**.  
-> **Since then the suite grew past the job harness — tip is now B40 (40 baselines, 2026-07-26):** B18–B21
+> **Since then the suite grew past the job harness — tip is now B60 (56 baselines, 2026-08-09;
+> B51–B53 and B55 were never issued, so the numbering has gaps):** B18–B21
 > (cross-chunk culling), B22/B23 (FL sway), and the **MP-\* orchestration arc** B24–B27 (schedule decision,
 > drain policy, in-flight fix, completion skeleton — none of which use `MeshingTestWorld`) plus MP-5's
 > B28–B30 on the renderer fixture, MP-6's B31–B33 on the real `MeshCompletionDriver` behind a fake
@@ -63,8 +64,23 @@ Namespace: suite = `Editor.Validation.Meshing`, framework = `Editor.Validation.M
 > lighting schedule too and which neither harness executes), and **B40** (MH-13) does the same for the eight
 > neighbor **light** maps — the harness now also models per-direction light via
 > `EnsureNeighborChunk(dir)` + `FillNeighborLight(dir, packed)`, and B40 is the only baseline that runs
-> `MeshingTestWorld` with a populated neighbor light map. When adding a scenario, put it in the partial that matches its *unit*,
-> not the next free file.
+> `MeshingTestWorld` with a populated neighbor light map.  
+> **The VO-\* / SS-\* voxel-occlusion + contact-shadow arc added B41–B60 (2026-08):** B41/B42 (VO-5 —
+> a full cube casts all of its cell or none, a partial block lands strictly between cube and air;
+> B41 retargeted to the silhouette primitive when the coverage helpers were retired), B43
+> (`OppositeFace` agrees with `RevFaceChecksIndices`), B44–B45 (VO-6 — a slab's mid-plane face samples
+> the cell in front of the *surface*, both normal signs), B46 (VO-8 — a vertical slab shades only the
+> corners its solid half stands on), B47 (Bug M03 — a recessed partial must not occlude its own face),
+> B48 (M02 — a mid-plane face survives a solid block at the block-boundary neighbor), B49 (VO-9b —
+> the sub-cell subdivision substrate and its gate), B50 (SS-0 finding F13 — fixtures' authored bounds
+> match their flattened geometry), B54 (SS-3 — a lone cube's shadow follows Euclidean distance, not a
+> product of per-axis ramps), B56 (**SS-2's load-bearing identity** — a corner with 0/1/2/3 occluders
+> still reads exactly 255/191/64/64, i.e. the pre-SS-2 model), B57/B58 (SS-2a — the corner seal stays
+> local, and a sealed cell does not also feed the light mean; B58 is the suite's first **non-uniform**
+> light field, which is the only way those two models can be told apart), and B59/B60 (SS-3a — a
+> straight wall's shadow does not scallop at cell seams; a partial occluder that casts nothing does not
+> subdivide the face it stands over).  
+> When adding a scenario, put it in the partial that matches its *unit*, not the next free file.
 > The forward **execution-wave plan** (§6 — harness Waves 1–3 DONE; MH-7 build-alongside; MH-8
 > gated) and the per-gap detail (`MH-7/8`) are in
 > [MESHING_VALIDATION_HARNESS_FIDELITY.md](../../../../Documentation/Architecture/Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md).

@@ -363,12 +363,7 @@ namespace Jobs
                 {
                     for (int face = 0; face < 6; face++)
                     {
-                        // Reuse the already-fetched 14-neighbor array instead of re-calling GetVoxelStateFromLocalPos.
-                        // Mapping: Back(-Z)→2(S), Front(+Z)→0(N), Top(+Y)→8(Above), Bottom(-Y)→9(Below), Left(-X)→3(W), Right(+X)→1(E)
-                        int neighborIdx = face switch { 0 => 2, 1 => 0, 2 => 8, 3 => 9, 4 => 3, 5 => 1, _ => 0 };
-                        OptionalVoxelState cached = neighbors[neighborIdx];
-                        VoxelState? directNeighbor = cached.HasValue ? new VoxelState?(cached.State) : null;
-                        CalculateCornerLights(face, pos, directNeighbor, faceIsInteriorToSampleCell: false,
+                        CalculateCornerLights(face, pos, faceIsInteriorToSampleCell: false,
                             out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
                         cornerLights.SetFace(face, l0, l1, l2, l3);
                     }
@@ -391,17 +386,14 @@ namespace Jobs
                 if (SmoothLighting >= SmoothLightingQuality.Standard)
                 {
                     // Top-level corners: sample the block above the flora (Top face at pos).
-                    VoxelState? aboveNeighbor = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[2]);
-                    CalculateCornerLights(2, pos, aboveNeighbor, faceIsInteriorToSampleCell: false,
+                    CalculateCornerLights(2, pos, faceIsInteriorToSampleCell: false,
                         out crossLights.TopL0, out crossLights.TopL1, out crossLights.TopL2, out crossLights.TopL3);
 
                     if (SmoothLighting >= SmoothLightingQuality.High)
                     {
                         // Bottom-level corners: sample Top face of the block below (light at ground level).
-                        // The direct neighbor for this shifted sample is the flora block itself.
-                        VoxelState? centerVoxel = GetVoxelStateFromLocalPos(pos);
                         Vector3Int belowPos = pos + BurstVoxelData.FaceChecks.Data[3];
-                        CalculateCornerLights(2, belowPos, centerVoxel, faceIsInteriorToSampleCell: false,
+                        CalculateCornerLights(2, belowPos, faceIsInteriorToSampleCell: false,
                             out crossLights.BotL0, out crossLights.BotL1, out crossLights.BotL2, out crossLights.BotL3);
                     }
                     else
@@ -551,7 +543,7 @@ namespace Jobs
 
                     if (SmoothLighting >= SmoothLightingQuality.Standard)
                     {
-                        CalculateCornerLights(p, sampleCell - faceNormal, sampleVoxel, faceIsInterior,
+                        CalculateCornerLights(p, sampleCell - faceNormal, faceIsInterior,
                             out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
                         VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, pos, rotation,
                             p, l0, l1, l2, l3,
@@ -622,7 +614,7 @@ namespace Jobs
                         // The ring's LUT offsets are relative to a block whose face-normal neighbor is the
                         // sampled cell, so re-basing by one face step moves the ring and the direct term
                         // together. For a boundary face this is exactly `pos`, as before.
-                        CalculateCornerLights(worldFace, sampleCell - rotatedOffset, sampleVoxel, faceIsInterior,
+                        CalculateCornerLights(worldFace, sampleCell - rotatedOffset, faceIsInterior,
                             out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
                         VoxelMeshHelper.GenerateCustomMeshFace(p, textureID, pos, in matrix,
                             worldFace, l0, l1, l2, l3,
@@ -1171,12 +1163,18 @@ namespace Jobs
         private const float FACE_SAMPLE_STEP = 0.25f;
 
         /// <summary>
-        /// Computes per-vertex corner-averaged light values for smooth lighting.
-        /// Samples 4 neighboring blocks per corner (direct + sideA + sideB + diagonal)
-        /// and averages sunlight and blocklight channels independently.
+        /// Computes per-vertex corner-shaded light values for smooth lighting: the four cell corners of
+        /// one face, each evaluated against the 3x3 neighborhood in front of it.
         /// </summary>
+        /// <param name="faceIndex">Face direction, in <c>VoxelData.FaceChecks</c> order.</param>
+        /// <param name="blockPos">The shaded block's chunk-local position.</param>
+        /// <param name="faceIsInteriorToSampleCell">True when the face sits inside its own cell (VO-6).</param>
+        /// <param name="l0">Light at corner 0.</param>
+        /// <param name="l1">Light at corner 1.</param>
+        /// <param name="l2">Light at corner 2.</param>
+        /// <param name="l3">Light at corner 3.</param>
         private void CalculateCornerLights(int faceIndex, Vector3Int blockPos,
-            VoxelState? directNeighbor, bool faceIsInteriorToSampleCell,
+            bool faceIsInteriorToSampleCell,
             out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3)
         {
             Span<FaceOccluder> occluders = stackalloc FaceOccluder[FACE_OCCLUDER_COUNT];
@@ -1217,20 +1215,23 @@ namespace Jobs
         }
 
         /// <summary>
-        /// Resolves the per-face constants every shading sample on that face shares: the cell in front of
-        /// it, which half of a sampled cell lies in front of the surface, and the direct cell's raw light.
+        /// Resolves everything a face's shading samples share: the cell in front of it, its two tangent
+        /// axes, the 3x3 of occluders and light around it, and how finely it must be subdivided.
+        /// <para>
+        /// The 3x3 is gathered here once and read by every sample on the face, which is what lets a
+        /// sub-vertex be shaded without any voxel reads of its own.
+        /// </para>
         /// </summary>
         /// <param name="faceIndex">Face direction, in <c>VoxelData.FaceChecks</c> order.</param>
         /// <param name="blockPos">The shaded block's chunk-local position.</param>
-        /// <param name="directNeighbor">The cell in front of the face, pre-fetched.</param>
         /// <param name="faceIsInteriorToSampleCell">True when the face sits inside its own cell (VO-6).</param>
-        /// <param name="directCell">The cell in front of the face.</param>
+        /// <param name="occluders">Receives the 3x3 in front of the face, in <see cref="OccluderIndex"/>
+        /// order; must have <see cref="FACE_OCCLUDER_COUNT"/> entries.</param>
+        /// <param name="directCell">The cell in front of the face (the 3x3's center).</param>
         /// <param name="normalAxis">The face's normal axis (0 = X, 1 = Y, 2 = Z).</param>
-        /// <param name="normalLowHalf">Which half along that axis lies in front of the face.</param>
-        /// <param name="directSun">The direct cell's raw sky light.</param>
-        /// <param name="directR">The direct cell's raw red block light.</param>
-        /// <param name="directG">The direct cell's raw green block light.</param>
-        /// <param name="directB">The direct cell's raw blue block light.</param>
+        /// <param name="axisA">The face's first tangent axis.</param>
+        /// <param name="axisB">The face's second tangent axis.</param>
+        /// <param name="tessellation">Sub-quads per axis this face needs: 1 leaves it undivided.</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void PrepareFaceSampling(int faceIndex, Vector3Int blockPos,
             bool faceIsInteriorToSampleCell, Span<FaceOccluder> occluders,
