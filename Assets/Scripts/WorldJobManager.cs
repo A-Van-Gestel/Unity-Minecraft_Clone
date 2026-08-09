@@ -59,16 +59,34 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// The <c>VoxelData.FaceChecks</c> index of a unit step between face-adjacent voxels.
     /// </summary>
     /// <param name="direction">The step from the center voxel to its face neighbor.</param>
-    /// <returns>The matching face index, or 0 when the step is not a unit face direction.</returns>
+    /// <returns>The matching face index, or <see cref="NO_FACE"/> when the step is not a unit face
+    /// direction — a diagonal, a longer step, or the zero vector.</returns>
     private static int FaceIndexOfDirection(Vector3Int direction)
     {
-        if (direction.z < 0) return 0;
-        if (direction.z > 0) return 1;
-        if (direction.y > 0) return 2;
-        if (direction.y < 0) return 3;
-        if (direction.x < 0) return 4;
-        return 5;
+        if ((direction.x != 0 ? 1 : 0) + (direction.y != 0 ? 1 : 0) + (direction.z != 0 ? 1 : 0) != 1)
+            return NO_FACE;
+
+        if (direction.z == -1) return 0;
+        if (direction.z == 1) return 1;
+        if (direction.y == 1) return 2;
+        if (direction.y == -1) return 3;
+        if (direction.x == -1) return 4;
+        if (direction.x == 1) return 5;
+
+        return NO_FACE;
     }
+
+    /// <summary>
+    /// Returned by <see cref="FaceIndexOfDirection"/> when the step is not a unit face direction.
+    /// <para>
+    /// Deliberately not a valid face index. The predicate used to fall through to <c>5</c> (<c>+X</c>)
+    /// for the zero vector and for anything with no <c>x</c>/<c>y</c>/<c>z</c> sign to key on, so a
+    /// malformed step was adjudicated against an arbitrary face instead of being rejected. Callers
+    /// index face tables with the result, so the sentinel must be one they check rather than one they
+    /// can pass through.
+    /// </para>
+    /// </summary>
+    private const int NO_FACE = -1;
 
     #region Job Tracking Dictionaries
 
@@ -1858,6 +1876,12 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             // the face pointing back at the center and the center is entered through the opposite one.
             int entryFace = FaceIndexOfDirection(neighborGlobal - new Vector3Int(
                 ownOriginXZ.x + claim.CenterPos.x, claim.CenterPos.y, ownOriginXZ.y + claim.CenterPos.z));
+
+            // A claim whose two voxels are not face-adjacent describes no transport this can reason
+            // about, so treat it like the absent-neighbor case above and keep the value rather than
+            // adjudicate it against whichever face a fallback happened to name.
+            if (entryFace == NO_FACE) continue;
+
             bool neighborCanDeliver = CrossChunkLightModApplier.NeighborCanDeliver(
                 neighborChunk.GetVoxel(neighborLocal.x, neighborLocal.y, neighborLocal.z),
                 VoxelData.RevFaceChecksIndices[entryFace], _getBlockData);

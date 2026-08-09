@@ -1284,6 +1284,11 @@ namespace Editor.Validation.Lighting.Framework
                 int entryFace = FaceIndexOfDirection(neighborGlobal - new Vector3Int(
                     chunk.VoxelOrigin.x + claim.CenterPos.x, claim.CenterPos.y,
                     chunk.VoxelOrigin.y + claim.CenterPos.z));
+
+                // Not face-adjacent: unverifiable in the same sense as the absent-neighbor case above,
+                // so keep the value (mirror of WorldJobManager.VerifyPullBackClaims).
+                if (entryFace == NO_FACE) continue;
+
                 bool neighborCanDeliver = CrossChunkLightModApplier.NeighborCanDeliver(
                     neighborData.GetVoxel(neighborLocalX, neighborGlobal.y, neighborLocalZ),
                     VoxelData.RevFaceChecksIndices[entryFace], _getBlockData);
@@ -1336,16 +1341,28 @@ namespace Editor.Validation.Lighting.Framework
         /// <c>WorldJobManager.FaceIndexOfDirection</c>).
         /// </summary>
         /// <param name="direction">The step from the center voxel to its face neighbor.</param>
-        /// <returns>The matching face index, or 0 when the step is not a unit face direction.</returns>
+        /// <returns>The matching face index, or <see cref="NO_FACE"/> when the step is not a unit face
+        /// direction — a diagonal, a longer step, or the zero vector.</returns>
         private static int FaceIndexOfDirection(Vector3Int direction)
         {
-            if (direction.z < 0) return 0;
-            if (direction.z > 0) return 1;
-            if (direction.y > 0) return 2;
-            if (direction.y < 0) return 3;
-            if (direction.x < 0) return 4;
-            return 5;
+            if ((direction.x != 0 ? 1 : 0) + (direction.y != 0 ? 1 : 0) + (direction.z != 0 ? 1 : 0) != 1)
+                return NO_FACE;
+
+            if (direction.z == -1) return 0;
+            if (direction.z == 1) return 1;
+            if (direction.y == 1) return 2;
+            if (direction.y == -1) return 3;
+            if (direction.x == -1) return 4;
+            if (direction.x == 1) return 5;
+
+            return NO_FACE;
         }
+
+        /// <summary>
+        /// Returned by <see cref="FaceIndexOfDirection"/> when the step is not a unit face direction
+        /// (mirror of <c>WorldJobManager.NO_FACE</c>).
+        /// </summary>
+        private const int NO_FACE = -1;
 
         /// <summary>
         /// Applies one cross-chunk mod to a live chunk through the shared production decision logic

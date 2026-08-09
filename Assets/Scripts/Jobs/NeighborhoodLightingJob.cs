@@ -1299,6 +1299,11 @@ namespace Jobs
             // guard AND its per-direction exit test; the add-only edge check could never reconcile a
             // surplus away, so this must not be looser than the BFS.
             int entryFace = FaceIndexOfDirection(neighborPos - centerPos);
+
+            // Not face-adjacent: no transport to check, so write nothing. Returning 0 also keeps the
+            // pull-back from recording a claim for a seam that does not exist.
+            if (entryFace == NO_FACE) return 0;
+
             int exitFace = VoxelData.RevFaceChecksIndices[entryFace];
 
             BlockTypeJobData neighborProps = BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)];
@@ -1372,6 +1377,10 @@ namespace Jobs
             if (neighborPacked == uint.MaxValue) return;
 
             int entryFace = FaceIndexOfDirection(neighborPos - centerPos);
+
+            // Not face-adjacent: no transport to check (mirror of CheckEdgeVoxel's guard).
+            if (entryFace == NO_FACE) return;
+
             int exitFace = VoxelData.RevFaceChecksIndices[entryFace];
 
             BlockTypeJobData neighborProps = BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)];
@@ -1579,16 +1588,32 @@ namespace Jobs
         /// already hold both positions use this rather than threading a face index through every seam path.
         /// </summary>
         /// <param name="direction">The step from the center voxel to its face neighbor.</param>
-        /// <returns>The matching face index, or 0 when the step is not a unit face direction.</returns>
+        /// <returns>The matching face index, or <see cref="NO_FACE"/> when the step is not a unit face
+        /// direction — a diagonal, a longer step, or the zero vector.</returns>
         private static int FaceIndexOfDirection(Vector3Int direction)
         {
-            if (direction.z < 0) return 0;
-            if (direction.z > 0) return 1;
-            if (direction.y > 0) return TOP_FACE;
-            if (direction.y < 0) return BOTTOM_FACE;
-            if (direction.x < 0) return 4;
-            return 5;
+            if ((direction.x != 0 ? 1 : 0) + (direction.y != 0 ? 1 : 0) + (direction.z != 0 ? 1 : 0) != 1)
+                return NO_FACE;
+
+            if (direction.z == -1) return 0;
+            if (direction.z == 1) return 1;
+            if (direction.y == 1) return TOP_FACE;
+            if (direction.y == -1) return BOTTOM_FACE;
+            if (direction.x == -1) return 4;
+            if (direction.x == 1) return 5;
+
+            return NO_FACE;
         }
+
+        /// <summary>
+        /// Returned by <see cref="FaceIndexOfDirection"/> when the step is not a unit face direction.
+        /// <para>
+        /// Deliberately not a valid face index: the callers index <c>VoxelData.RevFaceChecksIndices</c>
+        /// with the result, so a malformed step must be rejected rather than silently charged against
+        /// whichever face a fallback happened to name.
+        /// </para>
+        /// </summary>
+        private const int NO_FACE = -1;
 
         /// <summary>
         /// Emits a cross-chunk sunlight REMOVAL mod (level 0) for a neighbor-chunk voxel WITHOUT touching
