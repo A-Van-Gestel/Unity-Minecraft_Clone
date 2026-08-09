@@ -67,6 +67,19 @@ namespace Jobs.BurstData
         /// this is 0 (air cost) on a face its volume does not fully cover — the light travels through the
         /// empty part of the cell — and its authored opacity on a face that does. Full cubes always
         /// return their authored opacity, exactly as before VO-3.
+        /// <para>
+        /// <b>Known limitation — entry cost only.</b> The charge is levied on the face light arrives
+        /// through, never on the one it leaves by, so a volume is not paid for in a direction that enters
+        /// through an open face and exits through a solid one. This is exact for every block the engine
+        /// ships: opacity 0 has nothing to charge, and a fully-opaque partial is sealed in that direction
+        /// by <see cref="ExitBlocked"/> instead. It is <b>wrong for a semi-transparent partial block</b>
+        /// (custom bounds, opacity 1-14) — a stained-glass or leaf slab would cost nothing downward
+        /// through its solid half, and <see cref="ObstructsSkyColumn"/> would correspondingly drop it from
+        /// the heightmap, leaving the column below it undimmed. Nothing in <c>BlockDatabase.asset</c> is
+        /// in that class, and the block editor warns when one is authored; closing it properly means an
+        /// exit-cost term applied by every transport site, not a wider entry charge here (that would zero
+        /// the light stored inside an opaque slab's own cell, which the mesher reads to shade it).
+        /// </para>
         /// </summary>
         /// <param name="block">The block being entered.</param>
         /// <param name="meta">The placed voxel's raw metadata byte.</param>

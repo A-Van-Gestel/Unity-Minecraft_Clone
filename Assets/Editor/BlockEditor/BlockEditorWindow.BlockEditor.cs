@@ -446,6 +446,24 @@ namespace Editor.BlockEditor
                 EditorUILayoutHelper.DrawSeparator();
                 EditorUILayoutHelper.SubHeader("Lighting Properties");
                 _selectedBlock.opacity = (byte)EditorGUILayout.IntSlider(new GUIContent("Opacity", "How many light levels will be blocked by this block."), _selectedBlock.opacity, 0, 15);
+
+                // The transport model charges opacity only on the face light ENTERS through, and a partial
+                // volume's uncovered face costs nothing — so a semi-transparent partial is never charged in
+                // the direction light passes through its solid half. Opacity 0 has nothing to charge, and a
+                // fully-opaque partial is sealed by ExitBlocked, so only this middle band is unmodelled.
+                if (_selectedBlock.collisionBounds.HasCustomBounds
+                    && _selectedBlock.opacity > 0 && !_selectedBlock.IsOpaque)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Unmodelled combination: a semi-transparent block (opacity 1-14) with custom bounds.\n\n"
+                        + "The lighting engine charges opacity only where the volume covers the face light "
+                        + "enters through. Light entering this block through an uncovered face and leaving "
+                        + "through its solid half is therefore never attenuated, and the block does not "
+                        + "register in the sky-column heightmap — so a column beneath it stays fully lit.\n\n"
+                        + "Use opacity 0 or 15 unless LightAttenuation has gained an exit-cost term.",
+                        MessageType.Warning);
+                }
+
                 _selectedBlock.lightEmission = (byte)EditorGUILayout.IntSlider(new GUIContent("Light Emission", "How many light levels will be emitted by this block."), _selectedBlock.lightEmission, 0, 15);
                 if (_selectedBlock.lightEmission > 0)
                 {
