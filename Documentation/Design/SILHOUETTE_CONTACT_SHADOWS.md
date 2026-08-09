@@ -1,6 +1,6 @@
 # Silhouette-Based Contact-Shadow Ambient Occlusion (SS-*)
 
-**Version:** 2.4  
+**Version:** 2.5  
 **Date:** 2026-08-09  
 **Status:** Proposed design — not implemented.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
@@ -1567,22 +1567,32 @@ rejects zero-area clips; `LightAttenuation.CellOcclusionShare` is renamed
    ⚠️ **§10's angular-coverage refinement is not this lever** — it makes the field *smoother*, so if
    anything it flattens further. It is filed for the silhouette-edge step, and the two must not be
    conflated. Any change here moves shading world-wide and needs its own phase and sign-off.
-6. **`AmbientOcclusionOctantCoverage` and `AmbientOcclusionRegionCoverage` are now TEST-ONLY, and
-   nobody has decided their fate** (verified 2026-08-09 — the only callers left are
-   `MeshingValidationSuite.FractionalAO.cs` and `.MeshFixtures.cs`; `SS-2` replaced their production
-   consumer and, contrary to what question 5 promised, did not record this). They are live production
-   API kept alive solely by baselines `B41` and `B50`. Two honest answers: **retire both** and drop
-   the baseline legs that exist only to guard them, or **keep them** as unit-guarded utilities and
-   say so in their docstrings so the next reader does not assume they still shade anything.
-   ⚠️ Whoever takes this must not simply delete them and re-point the baselines — `B50`'s coverage
-   sweep is what caught finding **S9** (coverage is non-monotonic across a cell), and that finding is
-   the evidence base for why this design abandoned coverage at all.
+6. ~~**`AmbientOcclusionOctantCoverage` and `AmbientOcclusionRegionCoverage` are now TEST-ONLY.**~~ —
+   **RESOLVED 2026-08-09: deleted**, together with their `GetOctantCoverage` / `GetRegionCoverage`
+   backings in `BurstOcclusionUtility`. `GetFaceCoverage` is untouched and still feeds light transport.
+   The two baselines were handled differently, and the split is the transferable part:
+   - **`B41` retargeted, not deleted.** Its claim — a block without custom bounds occludes all of its
+     cell or none of it, on every face and orientation — is still a live guarantee; only the function
+     expressing it changed, so it now sweeps `AmbientOcclusionPlaneSilhouette`.
+   - **`B50`'s coverage leg deleted.** Its subject was the removed function's *own* behaviour (finding
+     **S9**), and that finding is recorded here in prose. Re-proving a property of deleted code every
+     run guards nothing. Leg 1 (F13 bounds-match-geometry) is untouched.
+   - **Rule:** when a baseline's *subject* disappears, ask whether the **claim** survives on the new
+     code path — retarget if it does, delete if the claim was about the removed mechanism itself, and
+     check the finding it produced lives in a document either way.
+
+   ⚠️ **A claim made and then measured false during this cleanup, recorded so it is not repeated:**
+   `B41` was briefly documented as the *only* guard on the opacity gate. Neutering that gate reds
+   `B41` **and ten other baselines**, because every air cell then shadows. `B41`'s real distinct value
+   is that it reads the primitive directly and sweeps the **whole palette**, where the shading
+   baselines only ever place three block types.
 
 ---
 
 ## Document History
 
 * **v2.3** - Open questions closed out: D7 (1) and the `SS-3` cost (4) marked resolved, and a new question 6 files `AmbientOcclusionOctantCoverage`/`AmbientOcclusionRegionCoverage` as **test-only** — `SS-2` removed their production consumer and, contrary to what question 5 promised, never recorded it
+* **v2.5** - **Dead coverage code deleted** (§11 question 6 resolved). `AmbientOcclusionOctantCoverage`, `AmbientOcclusionRegionCoverage` and their `GetOctantCoverage`/`GetRegionCoverage` backings are gone — `SS-2` removed their production consumer and only two baselines kept them alive. **`B41` was retargeted onto `AmbientOcclusionPlaneSilhouette`** (its claim survives the model change; only the function expressing it moved) and **`B50`'s coverage leg was deleted** (its subject was the removed function's own behaviour — finding S9 — which is recorded in prose). `GetFaceCoverage` untouched: light transport still uses it. Validate All **439/439**, suite count unchanged. Also recorded: a claim that `B41` was the *only* guard on the opacity gate, made and then measured false in the same pass — neutering the gate reds eleven baselines, and B41's real value is reading the primitive directly across the whole palette
 * **v2.4** - **Corrected the record on why `SS-3` is default-off, and closed §11.** The standing verdict is **too flat**, not too dark — the dark readings reported during the arc were the `SS-2a` light double-count and the `SS-3a` per-cell banding, both fixed, and carrying them forward as a taste verdict would have sent the next session after the wrong lever. **Performance played no part** in the decision or in waiving the capture (owner: cost is not the concern at this point), so the phase does not reopen on a performance argument. New §11 question 7 lists the honest levers for flatness (falloff exponent, radius, share) and warns that §10's angular-coverage row is **not** one of them — a smoother field is a flatter one. Also filed: `AmbientOcclusionOctantCoverage`, `AmbientOcclusionRegionCoverage` and their `GetOctantCoverage`/`GetRegionCoverage` backings are **test-only** since SS-2 removed their consumer, kept alive by B41 and B50's coverage legs
 * **v2.2** - **`SS-3` and `SS-3a` both confirmed in game; `SS-3` stays default-OFF by owner decision.** The capture is **waived** because cost is not the owner's concern at this point, and the setting stays opt-in on **taste**: with it on the result reads **too flat**. (Corrected in v2.4 — v2.2 first recorded this as "too dark", which was a misreading: the dark readings were `SS-2a`/`SS-3a` bugs, since fixed.) Recorded explicitly so nobody flips the default on the grounds that the capture box is unticked. **One residual accepted:** a **step at a silhouette's edge**, reported between two vertical slabs and measured at 63 units (`128` under a slab's footprint → `191` exactly at its boundary), a limitation of `SS-3a`'s binary in-quadrant test rather than a leftover of the per-cell defect. Its fix is a new §10 v2 row — **weight a quadrant by the angular fraction its occluder subtends**. (v2.4 corrects the rest of this sentence: that row addresses the *step*, and is explicitly **not** the answer to the flatness behind the default-off decision.)
 * **v2.1** - **`SS-3a`: occlusion is summed over the four QUADRANTS around a point, not over the nine cells.** In game, `SS-3` showed a dark dash at every cell seam along every wall; measured, the wall base read `128` at seams against `159` mid-cell. The per-cell sum reads the **grid**, not the geometry — a straight wall arrives as three separate cell silhouettes, and how many of them touch the sample point depends on where the seams fall. At a cell corner cells and quadrants coincide, which is why the per-cell form reproduced every corner value and shipped. **The seams were the correct value**: pre-SS-3 that edge had only its two `128` corners with the GPU interpolating between them, so it was the *interior* samples that disagreed with the corners. **The defect predates SS-3** — the same fixture in slabs rippled 5 units, live since SS-2. Fix: `quadrant[4]` alongside `shadow[9]`, a quadrant darkened by the nearest silhouette *covering area* in it (a silhouette merely touching a quadrant boundary covers none of it), with the corner seal staying per-cell and applied to both readings so `B58`'s identity survives. `CellOcclusionShare` → **`QuadrantOcclusionShare`**. Walls are now flat at `128 / 223 / 255`, and the SS-2 slab path is flat too. **Accepted look change:** a lone block's contact shadow deepens at the middle of its edge, `191 → 128` (its corners stay `191`) — a block touching you along a whole edge fills two quadrants, not one quarter. New baseline **B59** (wall uniformity), red first at 31 units. **`B54` rewritten, not loosened**: its "equal distance ⇒ equal shadow" premise is *false* under the correct model and encoded circular isocontours, which is not what S2 claims — it now asserts reach and ordering, both metric-only. Validate All **439**

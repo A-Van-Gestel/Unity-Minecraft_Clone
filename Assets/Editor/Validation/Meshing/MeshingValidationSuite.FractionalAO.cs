@@ -21,9 +21,9 @@ namespace Editor.Validation.Meshing
     /// to drift. An ordering needs no model and still fails the moment the weighting breaks.
     /// </para>
     /// <para>
-    /// <b>Bit-identity for full cubes</b> is guarded structurally by <see cref="B41_FullCubeCoverageIsBinary"/>
-    /// (coverage can only ever be 0 or 1 for a block without custom bounds, so the weighting branch is
-    /// unreachable) plus every pre-existing standard-cube baseline staying green — notably B11. There
+    /// <b>Bit-identity for full cubes</b> is guarded structurally by <see cref="B41_FullCubeSilhouetteIsBinary"/>
+    /// (a block without custom bounds occludes all of its cell or none of it, so the partial-occluder
+    /// path is unreachable) plus every pre-existing standard-cube baseline staying green — notably B11. There
     /// is deliberately no "run it both ways and compare" scenario: the pre-VO-5 path no longer exists,
     /// having been a temporary sign-off toggle, and keeping it alive purely for a test would have put a
     /// dead branch in the engine's hottest loop.
@@ -36,8 +36,8 @@ namespace Editor.Validation.Meshing
         static partial void AddFractionalAoBaselineScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario(
-                "B41: a full cube's face coverage is exactly 0 or 1 on every face and orientation (VO-5 bit-identity guard)",
-                B41_FullCubeCoverageIsBinary));
+                "B41: a block without custom bounds casts all of its cell or none of it, on every face and orientation (VO-5 bit-identity guard, retargeted by SS-3a)",
+                B41_FullCubeSilhouetteIsBinary));
             scenarios.Add(new Scenario(
                 "B42: a partial block darkens a probe face less than a full cube and more than air, per orientation (VO-5)",
                 B42_PartialBlockAoOrdering));
@@ -70,26 +70,39 @@ namespace Editor.Validation.Meshing
         /// <summary>
         /// B41 — the bit-identity guard, asserted on the mechanism rather than on output.
         /// <para>
-        /// For any full-cube block <see cref="LightAttenuation.AmbientOcclusionOctantCoverage"/> returns
-        /// exactly 1 (opaque) or exactly 0 (not opaque) — never a fraction, and identically on all eight
-        /// octants. That is what makes the weighting branch in <c>SampleNeighborLight</c> unreachable for
-        /// full cubes, and therefore what makes "no change to full-cube smooth lighting" a structural
-        /// property instead of a hope.
-        /// <b>Sweeping all eight octants is what carries this claim across VO-8</b>: the query became
-        /// per-corner, so a full cube being uniform now means uniform over octants, not over faces.
+        /// For any block without custom bounds, the occlusion query returns <b>all of the cell or none
+        /// of it</b> — never a fraction, and identically on every face and orientation. That is what
+        /// makes the partial-occluder machinery unreachable for full cubes, and therefore what makes
+        /// "no change to full-cube smooth lighting" a structural property rather than a hope.
         /// </para>
         /// <para>
-        /// <b>What this does and does not catch</b> (measured by mutation, 2026-08-08, rather than
-        /// assumed). It catches a change to the <b>opacity gate</b> — returning a fraction for a
-        /// non-opaque block turns this red, and B11 red with it. It did <b>not</b> catch removing the
-        /// <c>HasCustomBounds</c> short-circuit from the coverage entry point when that was tried under
-        /// VO-5: the geometry computes the same answer anyway, since a full cube's authored <c>0..1</c>
-        /// bounds fill every octant. The binary result is over-determined; this scenario pins the
-        /// <i>result</i>, not any one mechanism that produces it.
+        /// <b>Retargeted by SS-3a onto the live code path.</b> This scenario used to read
+        /// <c>AmbientOcclusionOctantCoverage</c>, an octant fill fraction; SS-2 replaced that with a
+        /// silhouette rectangle and SS-3a deleted the coverage functions once nothing shaded through
+        /// them. The claim is unchanged, and it is now asserted where the mesher actually looks — so it
+        /// went on testing a live guarantee instead of quietly guarding dead code.
+        /// </para>
+        /// <para>
+        /// <b>What this adds over the rest of the suite, measured rather than assumed.</b> Neutering the
+        /// opacity gate reds this scenario — and ten others with it (B11, B40, B42, B46, B49, B54,
+        /// B56–B59), because every air cell then shadows and the change is visible in the output. So
+        /// this is <i>not</i> the only guard against that break, and it should not be described as one.
+        /// Its distinct value is narrower and real: it reads the <b>primitive directly</b>, so the
+        /// failure names the block, plane and metadata byte instead of a shifted light value; and it
+        /// sweeps the <b>whole palette</b> against every plane and 37 metadata bytes, where the shading
+        /// baselines only ever place <c>SolidOpaque</c>, <c>HalfSlab</c> and <c>Post</c>. A gate or
+        /// rotation break confined to a block type no scenario happens to place — <c>TransparentCube</c>,
+        /// <c>OrientedOpaque</c>, <c>WaterSource</c> — is caught here and nowhere else.
+        /// </para>
+        /// <para>
+        /// <b>What it does not catch</b> (measured by mutation under VO-5, and still true): removing the
+        /// <c>HasCustomBounds</c> short-circuit. The geometry computes the same answer anyway, since a
+        /// full cube's authored <c>0..1</c> bounds fill the cell. The binary result is over-determined;
+        /// this pins the <i>result</i>, not any one mechanism that produces it.
         /// </para>
         /// </summary>
-        /// <returns>True when every full-cube palette block reports binary coverage on every octant.</returns>
-        private static bool B41_FullCubeCoverageIsBinary()
+        /// <returns>True when every full-cube palette block casts its whole cell, and every transparent one casts nothing.</returns>
+        private static bool B41_FullCubeSilhouetteIsBinary()
         {
             NativeArray<BlockTypeJobData> palette =
                 TestMeshBlockPalette.CreateJobDataNativeArray(Allocator.Temp);
@@ -100,21 +113,41 @@ namespace Editor.Validation.Meshing
                 BlockTypeJobData block = palette[id];
                 if (block.HasCustomBounds) continue; // Partial blocks are B42's and B46's subject.
 
-                float expected = block.IsOpaque ? 1f : 0f;
-                for (int octant = 0; octant < 8; octant++)
+                for (int normalAxis = 0; normalAxis < 3; normalAxis++)
+                for (int side = 0; side < 2; side++)
                 {
-                    bool3 lowHalf = new bool3((octant & 1) != 0, (octant & 2) != 0, (octant & 4) != 0);
+                    bool frontIsPositive = side == 0;
 
-                    // Sweep the whole metadata byte: a full cube must be orientation-independent here,
-                    // and a rotation leaking in would show up as a fractional coverage on some meta.
-                    for (int meta = 0; meta < 256; meta += 7)
+                    // The three planes the mesher asks about: a cell's two walls (a boundary face) and
+                    // its midline (a face interior to its own cell, VO-6).
+                    foreach (float planeCoord in new[] { frontIsPositive ? 0f : 1f, 0.5f })
                     {
-                        float actual = LightAttenuation.AmbientOcclusionOctantCoverage(block, (byte)meta, lowHalf);
-                        if (!Mathf.Approximately(actual, expected))
+                        // Sweep the whole metadata byte: a full cube must be orientation-independent
+                        // here, and a rotation leaking in would show up as a partial rectangle.
+                        for (int meta = 0; meta < 256; meta += 7)
                         {
-                            failures.AppendFormat(
-                                "    block {0} (opaque={1}) octant {2} meta 0x{3:X2}: coverage {4}, expected {5}\n",
-                                id, block.IsOpaque, lowHalf, meta, actual, expected);
+                            bool casts = LightAttenuation.AmbientOcclusionPlaneSilhouette(in block,
+                                (byte)meta, normalAxis, planeCoord, frontIsPositive,
+                                out float2 rectMin, out float2 rectMax);
+
+                            if (casts != block.IsOpaque)
+                            {
+                                failures.AppendFormat(
+                                    "    block {0} (opaque={1}) axis {2} plane {3} front={4} meta 0x{5:X2}: casts {6}\n",
+                                    id, block.IsOpaque, normalAxis, planeCoord, frontIsPositive, meta, casts);
+                                continue;
+                            }
+
+                            if (!casts) continue;
+
+                            bool whole = Mathf.Approximately(rectMin.x, 0f) && Mathf.Approximately(rectMin.y, 0f)
+                                                                            && Mathf.Approximately(rectMax.x, 1f) && Mathf.Approximately(rectMax.y, 1f);
+                            if (!whole)
+                            {
+                                failures.AppendFormat(
+                                    "    block {0} axis {1} plane {2} front={3} meta 0x{4:X2}: silhouette [{5} .. {6}], expected the whole cell\n",
+                                    id, normalAxis, planeCoord, frontIsPositive, meta, rectMin, rectMax);
+                            }
                         }
                     }
                 }
@@ -122,10 +155,12 @@ namespace Editor.Validation.Meshing
 
             palette.Dispose();
 
-            return MeshAssert.IsTrue("B41 full-cube coverage is binary", failures.Length == 0,
-                "A block without custom bounds returned a fractional AO coverage, so the weighting "
-                + "branch in SampleNeighborLight is now reachable for full cubes and their smooth "
-                + "lighting is no longer guaranteed unchanged:\n" + failures);
+            return MeshAssert.IsTrue("B41 a block without custom bounds casts all of its cell or none",
+                failures.Length == 0,
+                "A block without custom bounds cast a partial silhouette, or a transparent block cast "
+                + "one at all. Either breaks the guarantee that ordinary full-cube terrain never enters "
+                + "the partial-occluder path, and with it the claim that its smooth lighting is "
+                + "unchanged:\n" + failures);
         }
 
         /// <summary>

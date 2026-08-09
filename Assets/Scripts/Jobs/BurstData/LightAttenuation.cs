@@ -149,76 +149,6 @@ namespace Jobs.BurstData
             return EntryOpacity(in block, meta, TOP_FACE) > 0 || ExitBlocked(in block, meta, BOTTOM_FACE);
         }
 
-        /// <summary>
-        /// How much of one <b>octant</b> of its cell this block visually blocks, in <c>[0, 1]</c> — the
-        /// ambient-occlusion counterpart to <see cref="FaceBlocksLight"/>, which asks a related question
-        /// as a yes/no. AO is a local shading term rather than a transport decision, so it is the one
-        /// consumer that takes a coverage fraction ungraded (see <c>VOXEL_OCCLUSION_REFACTOR.md</c> §4
-        /// D2/D5, and VO-8 for why the question is per-octant rather than per-face).
-        /// <para>
-        /// <b>Why an octant.</b> An AO corner is a vertex shared by eight cells, and each sample's
-        /// contribution is whether it occupies the corner *there* — not whether it covers a whole face.
-        /// Asking per-face gives one answer for all four corners, which is why a vertical slab used to
-        /// dim the block beneath it evenly instead of shading only the half its solid part stands on.
-        /// </para>
-        /// <para>
-        /// Gated on opacity, not on volume alone: glass fills every octant and darkens nothing. Full
-        /// cubes return exactly 0 or 1 without touching the rotation path, which is what keeps the
-        /// smooth-lighting output unchanged for them — and keeps the per-corner cost off the hot path
-        /// for every block type that has no custom bounds.
-        /// </para>
-        /// </summary>
-        /// <param name="block">The block being sampled.</param>
-        /// <param name="meta">The placed voxel's raw metadata byte (selects the volume's rotation).</param>
-        /// <param name="lowHalf">The octant nearest the shaded vertex; per axis, true selects <c>[0, 0.5]</c>.</param>
-        /// <returns>The occluded fraction of that octant.</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static float AmbientOcclusionOctantCoverage(in BlockTypeJobData block, byte meta, bool3 lowHalf)
-        {
-            if (!block.IsOpaque)
-                return 0f;
-            if (!block.HasCustomBounds)
-                return 1f;
-
-            float3x3 rotationMatrix = BurstCustomMeshRotationUtility.GetRotationMatrix(
-                block.MetadataSchema, meta, block.DefaultMetadata);
-            BurstOcclusionUtility.RotateLocalBounds(block.BoundsMin, block.BoundsMax, in rotationMatrix,
-                out float3 rotatedMin, out float3 rotatedMax);
-
-            return BurstOcclusionUtility.GetOctantCoverage(rotatedMin, rotatedMax, lowHalf);
-        }
-
-        /// <summary>
-        /// VO-9: how much of an <b>arbitrary block-local region</b> of a sampled cell is occluded — the
-        /// general form of <see cref="AmbientOcclusionOctantCoverage"/>, used when a shading sample is
-        /// taken somewhere other than a cell corner.
-        /// <para>
-        /// Same gating as the octant form, and for the same reasons: transparent volumes occlude nothing,
-        /// and a block with no custom bounds answers 0 or 1 without touching the rotation path — so an
-        /// ordinary cube costs one branch here no matter how densely the face is sampled.
-        /// </para>
-        /// </summary>
-        /// <param name="block">The block being sampled.</param>
-        /// <param name="meta">The placed voxel's raw metadata byte (selects the volume's rotation).</param>
-        /// <param name="regionMin">Minimum corner of the query region, in the sampled cell's local space.</param>
-        /// <param name="regionMax">Maximum corner of the query region, in the sampled cell's local space.</param>
-        /// <returns>The occluded fraction of that region.</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static float AmbientOcclusionRegionCoverage(in BlockTypeJobData block, byte meta,
-            float3 regionMin, float3 regionMax)
-        {
-            if (!block.IsOpaque)
-                return 0f;
-            if (!block.HasCustomBounds)
-                return 1f;
-
-            float3x3 rotationMatrix = BurstCustomMeshRotationUtility.GetRotationMatrix(
-                block.MetadataSchema, meta, block.DefaultMetadata);
-            BurstOcclusionUtility.RotateLocalBounds(block.BoundsMin, block.BoundsMax, in rotationMatrix,
-                out float3 rotatedMin, out float3 rotatedMax);
-
-            return BurstOcclusionUtility.GetRegionCoverage(rotatedMin, rotatedMax, regionMin, regionMax);
-        }
 
         /// <summary>
         /// SS-1: the rectangle a block's volume projects onto one of its cell faces — the occluder's
@@ -361,7 +291,7 @@ namespace Jobs.BurstData
         /// cells meeting there are the four quadrants — which is why a per-cell sum looked equivalent
         /// and shipped. Away from a corner they diverge, and the per-cell reading depends on where the
         /// grid lines fall rather than on the geometry: a straight wall arrives as three separate cell
-        /// silhouettes, so its shadow scalloped between seam and cell centre.
+        /// silhouettes, so its shadow scalloped between seam and cell center.
         /// </para>
         /// </summary>
         public const float QuadrantOcclusionShare = 0.25f;

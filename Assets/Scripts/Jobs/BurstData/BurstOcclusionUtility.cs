@@ -122,66 +122,6 @@ namespace Jobs.BurstData
             return GetFaceCoverage(rotatedMin, rotatedMax, faceIndex);
         }
 
-        /// <summary>
-        /// VO-8: returns the fraction of one <b>octant</b> of a cell that a rotated block volume fills,
-        /// in <c>[0, 1]</c>. An octant is a <c>0.5³</c> corner sub-box, selected per axis by
-        /// <paramref name="lowHalf"/>.
-        /// <para>
-        /// This is the per-corner counterpart to <see cref="GetFaceCoverage"/>. Ambient occlusion asks
-        /// its question at a <i>vertex</i> shared by eight cells, so "how much of the corner is blocked"
-        /// is answered by the volume sitting in the octant nearest that vertex — which is what lets a
-        /// vertical slab darken the two corners on its solid side and leave the other two open.
-        /// A full-cell volume fills every octant, so this returns 1 for any full cube.
-        /// </para>
-        /// </summary>
-        /// <param name="rotatedMin">Rotated minimum corner, block-local (from <see cref="RotateLocalBounds"/>).</param>
-        /// <param name="rotatedMax">Rotated maximum corner, block-local.</param>
-        /// <param name="lowHalf">Per axis: true selects <c>[0, 0.5]</c>, false selects <c>[0.5, 1]</c>.</param>
-        /// <returns>The filled fraction of that octant.</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static float GetOctantCoverage(float3 rotatedMin, float3 rotatedMax, bool3 lowHalf)
-        {
-            float3 octantMin = math.select(new float3(0.5f), float3.zero, lowHalf);
-            float3 octantMax = math.select(new float3(1f), new float3(0.5f), lowHalf);
-
-            return GetRegionCoverage(rotatedMin, rotatedMax, octantMin, octantMax);
-        }
-
-        /// <summary>
-        /// VO-9: returns the fraction of an <b>arbitrary</b> block-local box that a rotated block volume
-        /// fills, in <c>[0, 1]</c>. This is the general form of <see cref="GetOctantCoverage"/>, which is
-        /// now the special case where the box is one of the eight <c>0.5³</c> corner sub-boxes.
-        /// <para>
-        /// Ambient occlusion needs it because a shading sample taken somewhere other than a cell corner
-        /// asks about a box centred on that sample point, not about an octant. Generalizing the region
-        /// rather than adding per-shape cases is what keeps the query shape-agnostic: the primitive is
-        /// still an AABB-versus-AABB fill fraction, so any single-box custom mesh works unchanged.
-        /// </para>
-        /// <para>
-        /// The result is normalized by the <i>region's own</i> volume, so a sliver of a cell reports the
-        /// fraction of that sliver which is filled. A region of zero volume returns 0.
-        /// </para>
-        /// </summary>
-        /// <param name="rotatedMin">Rotated minimum corner, block-local (from <see cref="RotateLocalBounds"/>).</param>
-        /// <param name="rotatedMax">Rotated maximum corner, block-local.</param>
-        /// <param name="regionMin">Minimum corner of the query box, block-local.</param>
-        /// <param name="regionMax">Maximum corner of the query box, block-local.</param>
-        /// <returns>The filled fraction of that region.</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static float GetRegionCoverage(float3 rotatedMin, float3 rotatedMax,
-            float3 regionMin, float3 regionMax)
-        {
-            float3 extent = math.max(0f, regionMax - regionMin);
-            float regionVolume = extent.x * extent.y * extent.z;
-            if (regionVolume <= 0f) return 0f;
-
-            float3 overlap = math.max(0f, math.min(rotatedMax, regionMax) - math.max(rotatedMin, regionMin));
-
-            // An octant's volume is exactly 0.125, so for the octant case this division is by a power of
-            // two — bit-identical to the multiply by 8 this replaced, which is what lets VO-9's general
-            // form take over without moving a single existing corner value.
-            return math.saturate(overlap.x * overlap.y * overlap.z / regionVolume);
-        }
 
         /// <summary>
         /// SS-1: returns the rectangle a rotated block volume projects onto one of its cell faces — the
