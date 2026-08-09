@@ -216,21 +216,56 @@ namespace Jobs.BurstData
         {
             FaceAxis(faceIndex, out int axis, out bool positive);
 
-            // A volume that stops short of the face plane casts no contact shadow on it — the same test
-            // GetFaceCoverage makes, and the reason a *top* slab does not shade the floor beneath it.
-            bool touches = positive
-                ? rotatedMax[axis] >= 1f - FACE_TOUCH_EPSILON
-                : rotatedMin[axis] <= FACE_TOUCH_EPSILON;
+            // The shaded surface lies on the cell wall the face points at: cell-local 1 for a +axis
+            // face, 0 for a -axis one. The volume must reach it from the near side.
+            return GetPlaneSilhouette(rotatedMin, rotatedMax, axis,
+                positive ? 1f : 0f, frontIsPositive: !positive, out rectMin, out rectMax);
+        }
 
-            if (!touches)
+        /// <summary>
+        /// SS-2: the general form of <see cref="GetFaceSilhouette"/> — the rectangle a rotated volume
+        /// projects onto an <b>arbitrary plane</b> through the cell, perpendicular to one axis.
+        /// <para>
+        /// Needed because not every shaded surface lies on a cell wall. A custom mesh's face can sit
+        /// inside its own cell (a half slab's mid-plane top, after <c>VO-6</c>), and asking such a face
+        /// about a cell wall is the confusion behind <c>MESHING_BUGS.md</c> Bug M03. Parameterizing the
+        /// plane keeps one silhouette model for boundary and interior faces alike, so two faces sharing
+        /// a plane always agree.
+        /// </para>
+        /// </summary>
+        /// <param name="rotatedMin">Rotated minimum corner, block-local (from <see cref="RotateLocalBounds"/>).</param>
+        /// <param name="rotatedMax">Rotated maximum corner, block-local.</param>
+        /// <param name="normalAxis">Axis the plane is perpendicular to (0 = X, 1 = Y, 2 = Z).</param>
+        /// <param name="planeCoord">The plane's coordinate on that axis, block-local.</param>
+        /// <param name="frontIsPositive">True when the shaded space lies on the plane's +axis side.</param>
+        /// <param name="rectMin">Silhouette minimum corner on the two perpendicular axes.</param>
+        /// <param name="rectMax">Silhouette maximum corner.</param>
+        /// <returns>True when the volume reaches the plane from the shaded side.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool GetPlaneSilhouette(float3 rotatedMin, float3 rotatedMax, int normalAxis,
+            float planeCoord, bool frontIsPositive, out float2 rectMin, out float2 rectMax)
+        {
+            // Two conditions, and BOTH are load-bearing. The volume must reach the plane — a *top* slab
+            // floating above a floor does not, and correctly shades nothing — and it must have extent on
+            // the shaded side of it. Testing only the first lets a block shadow its own surface: a half
+            // slab's volume reaches its own mid-plane face from below, and that face is emitted looking
+            // the other way, which renders a recessed slab fully black (MESHING_BUGS.md Bug M03).
+            bool reachesPlane = frontIsPositive
+                ? rotatedMin[normalAxis] <= planeCoord + FACE_TOUCH_EPSILON
+                : rotatedMax[normalAxis] >= planeCoord - FACE_TOUCH_EPSILON;
+            bool extendsInFront = frontIsPositive
+                ? rotatedMax[normalAxis] >= planeCoord + FACE_TOUCH_EPSILON
+                : rotatedMin[normalAxis] <= planeCoord - FACE_TOUCH_EPSILON;
+
+            if (!reachesPlane || !extendsInFront)
             {
                 rectMin = float2.zero;
                 rectMax = float2.zero;
                 return false;
             }
 
-            int a = axis == 0 ? 1 : 0;
-            int b = axis == 2 ? 1 : 2;
+            int a = normalAxis == 0 ? 1 : 0;
+            int b = normalAxis == 2 ? 1 : 2;
             rectMin = math.saturate(new float2(rotatedMin[a], rotatedMin[b]));
             rectMax = math.saturate(new float2(rotatedMax[a], rotatedMax[b]));
             return true;

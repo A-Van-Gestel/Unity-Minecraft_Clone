@@ -268,6 +268,96 @@ namespace Jobs.BurstData
                 out rectMin, out rectMax);
         }
 
+        /// <summary>
+        /// SS-2: the silhouette a block casts on an arbitrary plane through its cell — the general form
+        /// of <see cref="AmbientOcclusionFaceSilhouette"/>, used because a custom mesh's face can lie
+        /// inside its own cell rather than on a wall.
+        /// </summary>
+        /// <param name="block">The block being sampled.</param>
+        /// <param name="meta">The placed voxel's raw metadata byte (selects the volume's rotation).</param>
+        /// <param name="normalAxis">Axis the shaded plane is perpendicular to (0 = X, 1 = Y, 2 = Z).</param>
+        /// <param name="planeCoord">The plane's coordinate on that axis, in the sampled cell's local space.</param>
+        /// <param name="frontIsPositive">True when the shaded space lies on the plane's +axis side.</param>
+        /// <param name="rectMin">Silhouette minimum corner on the two perpendicular axes.</param>
+        /// <param name="rectMax">Silhouette maximum corner.</param>
+        /// <returns>True when this block casts a silhouette on that plane.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool AmbientOcclusionPlaneSilhouette(in BlockTypeJobData block, byte meta,
+            int normalAxis, float planeCoord, bool frontIsPositive, out float2 rectMin, out float2 rectMax)
+        {
+            if (!block.IsOpaque)
+            {
+                rectMin = float2.zero;
+                rectMax = float2.zero;
+                return false;
+            }
+
+            if (!block.HasCustomBounds)
+            {
+                // A full cell reaches every plane through it, and its silhouette is the whole face.
+                rectMin = float2.zero;
+                rectMax = new float2(1f, 1f);
+                return true;
+            }
+
+            float3x3 rotationMatrix = BurstCustomMeshRotationUtility.GetRotationMatrix(
+                block.MetadataSchema, meta, block.DefaultMetadata);
+            BurstOcclusionUtility.RotateLocalBounds(block.BoundsMin, block.BoundsMax, in rotationMatrix,
+                out float3 rotatedMin, out float3 rotatedMax);
+
+            return BurstOcclusionUtility.GetPlaneSilhouette(rotatedMin, rotatedMax, normalAxis,
+                planeCoord, frontIsPositive, out rectMin, out rectMax);
+        }
+
+        /// <summary>
+        /// SS-2: how strongly an occluder shades a point at a given distance from its silhouette — the
+        /// contact-shadow falloff, and the whole of the model's visual character.
+        /// <para>
+        /// <b>Distance, not coverage.</b> A fill fraction over a sub-cell box says how much volume is in
+        /// the way, which for an occluder bounded by one plane varies near-linearly across the cell —
+        /// exactly what a blend of two corner values already produces, which is why sub-cell sampling of
+        /// it carried no information (<c>VOXEL_OCCLUSION_REFACTOR.md</c> finding F18).
+        /// </para>
+        /// <para>
+        /// The profile is <c>(1 - t)²</c>: dark and tight against the occluder with a quick fade, rather
+        /// than the straight ramp the corner blend approximates. It reaches zero exactly at
+        /// <see cref="ContactShadowRadius"/>, so an occluder outside the sampled neighborhood cannot
+        /// contribute and the model needs no clamping at the edges.
+        /// </para>
+        /// </summary>
+        /// <param name="distance">Distance from the sample point to the silhouette, in cells.</param>
+        /// <returns>The shadow strength, in <c>[0, 1]</c>; 1 in contact, 0 at the radius.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float ContactShadowFalloff(float distance)
+        {
+            float t = math.saturate(distance / ContactShadowRadius);
+            float remaining = 1f - t;
+            return remaining * remaining;
+        }
+
+        /// <summary>
+        /// How far a contact shadow reaches from an occluder's silhouette, in cells.
+        /// <para>
+        /// <b>Pinned from both directions, not a tuning knob.</b> It is the largest radius the sampled
+        /// 3×3 neighborhood can answer for — a silhouette outside that block is never nearer than one
+        /// cell — and the smallest that keeps a wall's occlusion alive across a whole face: at 0.5 the
+        /// center of a face in an inner corner between two walls computes 255, which is the
+        /// interior-lightening signature of the defect VO-9b shipped and had to correct.
+        /// </para>
+        /// </summary>
+        public const float ContactShadowRadius = 1f;
+
+        /// <summary>
+        /// Each of the four cells meeting at a shaded point owns a quarter of its hemisphere, so a
+        /// single occluder in contact removes a quarter of the light — reproducing the engine's
+        /// long-standing <c>255 → 191</c> for one neighbor, <c>128</c> for two and <c>64</c> for three.
+        /// <para>
+        /// The shares <b>sum</b>: occlusion accumulates per occluder, and a single global strength
+        /// constant could not reproduce both the one-occluder and the three-occluder depth at once.
+        /// </para>
+        /// </summary>
+        public const float CellOcclusionShare = 0.25f;
+
         /// <summary>Coverage at or above which a face counts as fully covered (absorbs float round-off).</summary>
         private const float FULL_COVERAGE_THRESHOLD = 1f - 1e-4f;
 

@@ -10,9 +10,9 @@ using Scenario = Editor.Validation.Framework.Scenario;
 namespace Editor.Validation.Meshing
 {
     /// <summary>
-    /// VO-9b baselines: a face a partial occluder can reach is subdivided so its shading can carry
-    /// sub-cell detail, the subdivision is gated to those faces, and it renders the same field an
-    /// ordinary face would until a term that varies within the cell is added.
+    /// VO-9b + SS-2 baselines: a face a partial occluder can reach is subdivided, the subdivision stays
+    /// gated to those faces, and the shading it carries has real sub-cell detail without losing the
+    /// occlusion its neighbors contribute.
     /// </summary>
     public static partial class MeshingValidationSuite
     {
@@ -21,8 +21,82 @@ namespace Editor.Validation.Meshing
         static partial void AddSubCellShadingBaselineScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario(
-                "B49: only faces a partial occluder can reach are subdivided, and a subdivided face still renders its own corner field (VO-9b)",
+                "B49: only faces a partial occluder can reach are subdivided, and such a face carries a contact shadow without losing its neighbors' (VO-9b + SS-2)",
                 B49_SubCellContactShadow));
+
+            scenarios.Add(new Scenario(
+                "B56: a face corner with 0/1/2/3 fully-occluding neighbors reads exactly 255/191/64/64 — the pre-SS-2 model, reproduced (SS-2)",
+                B56_CornerReduction));
+        }
+
+        /// <summary>
+        /// B56 — <b>the claim the whole SS-2 replacement rests on.</b> Swapping a coverage fraction for a
+        /// distance field is only safe because, at a cell corner with full-cube occluders, the new model
+        /// collapses term-for-term onto the expression the engine has always evaluated. These are exact
+        /// values, not tolerances: every weight is a quarter and every occluder is either in contact or a
+        /// full cell away, so the arithmetic is identical and any drift is a real change.
+        /// <para>
+        /// <b>The two-and-three-occluder rows are the sharp ones.</b> They pin the corner seal — classic
+        /// voxel AO darkens a corner fully once both flanking cells are solid, whatever sits diagonally,
+        /// because the diagonal quadrant is not visible from that corner at all. An occlusion model that
+        /// treats the nine cells as independent silently lightens every inside corner in the world from
+        /// 64 to 127, and <b>nothing else in this suite pins that</b>: measured by mutation, replacing
+        /// the accumulating sum with a max leaves 0/1 correct and drives 2/3 to 191.
+        /// </para>
+        /// <para>
+        /// The single-quad check is the positive control: it proves these readings come from the ordinary
+        /// undivided path, so the row is about the model rather than about tessellation.
+        /// </para>
+        /// </summary>
+        /// <returns>True when all four occluder counts reproduce their historical value.</returns>
+        private static bool B56_CornerReduction()
+        {
+            ushort lit = LightBitMapping.PackLightData(15, 0, 0, 0);
+            int[] expected = { 255, 191, 64, 64 };
+            StringBuilder failures = new StringBuilder();
+
+            for (int occluders = 0; occluders < expected.Length; occluders++)
+            {
+                using MeshingTestWorld world = new MeshingTestWorld();
+                BuildFloor(world);
+
+                // Around the probe face's (0,0) corner: the two flanking cells, then the diagonal.
+                if (occluders >= 1) world.SetBlock(B49_X - 1, B49_Y + 1, B49_Z, TestMeshBlockPalette.SolidOpaque, 0);
+                if (occluders >= 2) world.SetBlock(B49_X, B49_Y + 1, B49_Z - 1, TestMeshBlockPalette.SolidOpaque, 0);
+                if (occluders >= 3) world.SetBlock(B49_X - 1, B49_Y + 1, B49_Z - 1, TestMeshBlockPalette.SolidOpaque, 0);
+
+                world.FillLight(lit);
+                MeshDataJobOutput o = world.Run(SmoothLightingQuality.High);
+
+                int quads = CountTopFaceQuads(o, B49_X, B49_Y, B49_Z);
+                if (quads != 1)
+                {
+                    failures.AppendFormat(
+                        "    {0} occluder(s): the face emitted {1} quads, so this is not the undivided path\n",
+                        occluders, quads);
+                    continue;
+                }
+
+                byte[] corners = TopFaceCornerSun(o, B49_X, B49_Y, B49_Z);
+                if (corners == null)
+                {
+                    failures.AppendFormat("    {0} occluder(s): the face's corners were not all emitted\n", occluders);
+                    continue;
+                }
+
+                if (corners[0] != expected[occluders])
+                {
+                    failures.AppendFormat("    {0} occluder(s): corner reads {1}, expected {2}\n",
+                        occluders, corners[0], expected[occluders]);
+                }
+            }
+
+            return MeshAssert.IsTrue("B56 the corner reduction reproduces the pre-SS-2 model",
+                failures.Length == 0,
+                "A face corner surrounded by full cubes must read exactly what it read before SS-2 "
+                + "replaced the occlusion function. If it does not, the replacement is not the "
+                + "behaviour-preserving generalization it is documented to be, and ordinary terrain has "
+                + "moved.\n" + failures);
         }
 
         /// <summary>Chunk-local X of the floor cell the occluder stands on.</summary>
@@ -35,32 +109,27 @@ namespace Editor.Validation.Meshing
         private const int B49_Z = 8;
 
         /// <summary>
-        /// B49 — the VO-9b substrate: a face a partial occluder can reach is subdivided, and subdividing
-        /// it does not change how it looks.
-        /// <para>
-        /// <b>Read that second clause carefully — it is the point of this scenario, not a weakness in
-        /// it.</b> VO-9b re-evaluates only the <i>direct</i> cell's coverage per sub-vertex; the ring
-        /// samples that carry shadows from neighbouring geometry stay a blend of the face's corner
-        /// values. For an axis-aligned half slab the direct coverage varies linearly across the cell, and
-        /// a blend of the two corner values already <i>is</i> that linear ramp — so the subdivided face
-        /// reproduces the undivided one exactly. The substrate is in place; it is a shape whose coverage
-        /// is non-linear (a post, a stair) or a silhouette-based falloff term that would make it visible.
-        /// </para>
+        /// B49 — the subdivision substrate and what it now carries.
         /// <list type="bullet">
         /// <item><b>The gate holds.</b> A floor face with nothing above it must still emit exactly one
         /// quad. Tessellation leaking into ordinary terrain would multiply the vertex count of every
         /// chunk in the world.</item>
         /// <item><b>The face is subdivided</b> when a partial occluder can reach it.</item>
-        /// <item><b>The interior still matches the undivided field.</b> Every sub-vertex must equal the
-        /// bilinear blend of the face's own corners. <b>This is the regression guard for a shipped bug:</b>
-        /// an earlier VO-9b re-sampled the ring per sub-vertex, which pulled every wall shadow into a hard
-        /// band against the wall and lightened face interiors drastically (an inner corner's centre went
-        /// 144 to 255). Faces still agreed with their neighbours along the shared seam <i>line</i>, so a
-        /// seam-only check stayed green while the artifact was plainly visible in game — which is why this
-        /// leg samples the interior, not the edge.</item>
+        /// <item><b>It carries a real contact shadow.</b> Under VO-9b this scenario asserted the opposite
+        /// — that the subdivided face reproduced its own corner field exactly — because a coverage
+        /// fraction varies near-linearly across a cell and a corner blend already is that ramp. SS-2
+        /// replaced coverage with a distance field, so the interior now departs from the corner field on
+        /// purpose and this leg measures that the departure exists.</item>
+        /// <item><b>Without lightening the interior.</b> The regression guard for a shipped bug: an
+        /// earlier VO-9b re-sampled the ring per sub-vertex, and because occlusion rode on the
+        /// interpolation weights — which collapse onto the cell in front of the face at its center —
+        /// every neighboring shadow vanished there (an inner corner's center went 144 to 255). Faces
+        /// still agreed along the shared seam <i>line</i>, so a seam-only check stayed green while the
+        /// artifact was plainly visible in game. This leg reads the interior, and pins the value the
+        /// defect drives to 255.</item>
         /// </list>
         /// </summary>
-        /// <returns>True when the substrate is gated, active, and visually inert.</returns>
+        /// <returns>True when the substrate is gated, active, and shading with sub-cell detail.</returns>
         private static bool B49_SubCellContactShadow()
         {
             ushort lit = LightBitMapping.PackLightData(15, 0, 0, 0);
@@ -105,87 +174,150 @@ namespace Editor.Validation.Meshing
                 return false;
             }
 
-            // Leg 3a — with an occluder in the direct cell the interior may legitimately depart from the
-            // corner field, because that is the one term VO-9b re-evaluates per sub-vertex. The bound is
-            // a gross-departure guard, not a pin: measured drift here is a few units, while the shipped
-            // ring-resampling defect drifted by over a hundred.
-            ok &= AssertInteriorNearCornerField(output, corners, "open floor, slab overhead",
-                DIRECT_TERM_DRIFT_ALLOWANCE);
+            // Leg 3a — the contact shadow must actually reach the face interior. Under a vertical slab
+            // the sub-vertex on the slab's own edge is the darkest point of the face, and the far edge
+            // is the lightest: a shadow that is present, oriented, and bounded.
+            ok &= AssertContactShadowProfile(output, corners, "open floor, slab overhead");
 
-            using MeshingTestWorld walled = new MeshingTestWorld();
-            BuildFloor(walled);
-            for (int d = -2; d <= 2; d++)
-            {
-                walled.SetBlock(B49_X + 1, B49_Y + 1, B49_Z + d, TestMeshBlockPalette.SolidOpaque, 0);
-                walled.SetBlock(B49_X + d, B49_Y + 1, B49_Z + 1, TestMeshBlockPalette.SolidOpaque, 0);
-            }
+            int walledCenter = InnerCornerFaceCenter(lit, withWalls: true);
+            int openCenter = InnerCornerFaceCenter(lit, withWalls: false);
 
-            walled.SetBlock(B49_X - 1, B49_Y + 1, B49_Z - 1, TestMeshBlockPalette.HalfSlab, 0x03);
-            walled.FillLight(lit);
-            MeshDataJobOutput walledOut = walled.Run(SmoothLightingQuality.High);
-
-            byte[] walledCorners = TopFaceCornerSun(walledOut, B49_X, B49_Y, B49_Z);
-            if (walledCorners == null)
-            {
-                Debug.LogError("[FAIL] B49 setup: the walled probe cell's top face corners were not emitted.");
-                return false;
-            }
-
-            // Leg 3b — THE precise regression guard. Here the probe cell's own direct cell is empty (the
-            // walls and the gate-tripping slab are all ring cells), so VO-9b has nothing to vary and the
-            // subdivided face must reproduce its corner field exactly. Any drift is the ring being
-            // re-sampled per sub-vertex, which is what shipped and what the owner caught in game.
-            ok &= AssertInteriorNearCornerField(walledOut, walledCorners,
-                "inner corner between two walls, empty cell overhead", ROUNDING_ALLOWANCE);
+            // Leg 3b — THE precise regression guard, rewritten for SS-2. It used to assert the interior
+            // stayed on the face's bilinear corner field; SS-2 removes that property on purpose, so the
+            // assertion moved to the *defect's own signature* rather than being loosened to accommodate
+            // the change. The shipped VO-9b defect lightened face interiors toward the unoccluded value
+            // as every ring occluder's contribution vanished at the face center (an inner corner went
+            // 144 to 255). So: tucked between two walls, the center must stay materially dark, and stay
+            // correctly ordered against the near and far corners.
+            ok &= AssertInnerCornerCenterStaysDark(walledCenter, openCenter);
 
             return ok;
         }
 
-        /// <summary>Slack that absorbs the per-vertex UNorm8 rounding of the encode.</summary>
-        private const float ROUNDING_ALLOWANCE = 1.5f;
-
         /// <summary>
-        /// How far a sub-vertex may sit off the corner field when the direct cell holds an occluder.
-        /// Generous on purpose: this leg guards against a <i>gross</i> departure (the ring-resampling
-        /// defect moved an inner corner's centre by over 100), not against the direct term's own
-        /// legitimate sub-cell variation, which measures a few units for an axis-aligned slab.
-        /// </summary>
-        private const float DIRECT_TERM_DRIFT_ALLOWANCE = 32f;
-
-        /// <summary>
-        /// Asserts that every emitted vertex on the probe cell's top face sits within
-        /// <paramref name="allowance"/> of the bilinear blend of that face's four corner values.
+        /// Asserts the face carries a contact shadow: darkest against the occluder, lightest away from
+        /// it, and never darker than a fully-occluded corner.
         /// </summary>
         /// <param name="o">The meshing job output to read.</param>
         /// <param name="corners">The face's four corner sun values, in <c>l0..l3</c> order.</param>
         /// <param name="label">Configuration name used in the failure text.</param>
-        /// <param name="allowance">Permitted departure from the corner field, in encoded light units.</param>
-        /// <returns>True when every sub-vertex is within the allowance.</returns>
-        private static bool AssertInteriorNearCornerField(MeshDataJobOutput o, byte[] corners, string label,
-            float allowance)
+        /// <returns>True when the profile is present and correctly oriented.</returns>
+        private static bool AssertContactShadowProfile(MeshDataJobOutput o, byte[] corners, string label)
         {
-            StringBuilder drift = new StringBuilder();
-
-            foreach (SubVertexSample s in TopFaceSubVertexField(o, B49_X, B49_Y, B49_Z))
+            List<SubVertexSample> field = TopFaceSubVertexField(o, B49_X, B49_Y, B49_Z);
+            if (field.Count == 0)
             {
-                float expected = corners[0] * (1f - s.U) * (1f - s.V) + corners[1] * (1f - s.U) * s.V
-                                                                      + corners[2] * s.U * (1f - s.V)
-                                                                      + corners[3] * s.U * s.V;
-
-                if (Mathf.Abs(s.Sun - expected) <= allowance) continue;
-
-                drift.AppendFormat("    ({0:F2}, {1:F2}): reads {2}, corner field gives {3:F1}\n",
-                    s.U, s.V, s.Sun, expected);
+                Debug.LogError("[FAIL] B49 setup: the probe face emitted no vertices.");
+                return false;
             }
 
-            return MeshAssert.IsTrue($"B49 the subdivided face stays on its own corner field ({label})",
-                drift.Length == 0,
-                $"A sub-vertex drifted more than {allowance} off the bilinear field of the face's corners, "
-                + "so a subdivided face no longer renders what an ordinary face would. That is how the "
-                + "shipped ring-resampling defect looked: shadows from neighbouring blocks collapsed into "
-                + "a hard band and face interiors lightened, while the seams themselves still matched.\n"
-                + $"    corners: {corners[0]}, {corners[1]}, {corners[2]}, {corners[3]}\n" + drift);
+            int darkest = 255;
+            int lightest = 0;
+            foreach (SubVertexSample s in field)
+            {
+                if (s.Sun < darkest) darkest = s.Sun;
+                if (s.Sun > lightest) lightest = s.Sun;
+            }
+
+            return MeshAssert.IsTrue($"B49 the face carries a contact shadow ({label})",
+                lightest - darkest >= MIN_CONTACT_SHADOW_RANGE,
+                $"The face's sub-vertices span only {lightest - darkest} light units "
+                + $"({darkest}..{lightest}), so the occluder standing on it casts no measurable contact "
+                + "shadow. This is the state VO-9b shipped in: the substrate subdivides the face, but "
+                + "whatever shades it carries no sub-cell detail.\n"
+                + $"    corners: {corners[0]}, {corners[1]}, {corners[2]}, {corners[3]}");
         }
+
+        /// <summary>
+        /// Builds the inner-corner fixture: the probe cell with a gate-tripping slab on its diagonal,
+        /// optionally walled in on two sides.
+        /// </summary>
+        /// <param name="lit">Packed light value to fill the world with.</param>
+        /// <param name="withWalls">Whether to raise the two walls that form the inner corner.</param>
+        /// <returns>The probe face's center sun value, or -1 when that vertex was not emitted.</returns>
+        private static int InnerCornerFaceCenter(ushort lit, bool withWalls)
+        {
+            using MeshingTestWorld world = new MeshingTestWorld();
+            BuildFloor(world);
+
+            if (withWalls)
+            {
+                for (int d = -2; d <= 2; d++)
+                {
+                    world.SetBlock(B49_X + 1, B49_Y + 1, B49_Z + d, TestMeshBlockPalette.SolidOpaque, 0);
+                    world.SetBlock(B49_X + d, B49_Y + 1, B49_Z + 1, TestMeshBlockPalette.SolidOpaque, 0);
+                }
+            }
+
+            // Present in BOTH configurations, so the face is subdivided either way and the comparison
+            // isolates the walls rather than the tessellation.
+            world.SetBlock(B49_X - 1, B49_Y + 1, B49_Z - 1, TestMeshBlockPalette.HalfSlab, 0x03);
+            world.FillLight(lit);
+
+            // Read inside the using scope: the output's buffers are pooled by the world.
+            return TryReadFaceCenter(world.Run(SmoothLightingQuality.High), out int center) ? center : -1;
+        }
+
+        /// <summary>
+        /// Asserts that walls standing <i>beside</i> a face darken its <b>interior</b>, not merely its
+        /// edges — the regression guard for the defect VO-9b shipped and had to correct.
+        /// <para>
+        /// Stated as a differential between the same face with and without the walls, which is what
+        /// makes it robust: it assumes nothing about which corner is which, about the falloff profile,
+        /// or about the shadow's radius, all of which are tuning surfaces. The defect drove this
+        /// difference to zero — occlusion rode on the interpolation weights, and those collapse onto the
+        /// single cell in front of the face at its center, so every neighboring shadow vanished exactly
+        /// there while the seams still matched (an inner corner's center went 144 to 255).
+        /// </para>
+        /// </summary>
+        /// <param name="walledCenter">Face-center sun with the two walls raised.</param>
+        /// <param name="openCenter">Face-center sun with the same fixture minus the walls.</param>
+        /// <returns>True when the walls measurably darken the face center.</returns>
+        private static bool AssertInnerCornerCenterStaysDark(int walledCenter, int openCenter)
+        {
+            if (walledCenter < 0 || openCenter < 0)
+            {
+                Debug.LogError("[FAIL] B49 setup: the inner-corner probe face emitted no center sub-vertex.");
+                return false;
+            }
+
+            return MeshAssert.IsTrue("B49 walls beside a face darken its interior, not just its edges",
+                openCenter - walledCenter >= MIN_RING_INTERIOR_DARKENING,
+                $"With two walls raised beside it the face center reads {walledCenter}; without them it "
+                + $"reads {openCenter} — a difference of {openCenter - walledCenter}, below the "
+                + $"{MIN_RING_INTERIOR_DARKENING} this guards.\n"
+                + "Occlusion from geometry standing beside a surface must reach the middle of that "
+                + "surface. When it does not, wall shadows collapse into a hard band against the wall "
+                + "and face interiors wash out — the artifact VO-9b shipped, which a seam-only check "
+                + "could not see because the faces still agreed along their shared edge.");
+        }
+
+        /// <summary>Reads the sunlight at the probe face's center sub-vertex.</summary>
+        /// <param name="o">The meshing job output to read.</param>
+        /// <param name="center">The center sub-vertex's sun value.</param>
+        /// <returns>True when the face emitted a vertex at its center.</returns>
+        private static bool TryReadFaceCenter(MeshDataJobOutput o, out int center)
+        {
+            center = -1;
+            foreach (SubVertexSample s in TopFaceSubVertexField(o, B49_X, B49_Y, B49_Z))
+            {
+                if (Mathf.Abs(s.U - 0.5f) < 0.01f && Mathf.Abs(s.V - 0.5f) < 0.01f) center = s.Sun;
+            }
+
+            return center >= 0;
+        }
+
+        /// <summary>
+        /// How far walls beside a face must darken its center. The defect this guards drives the
+        /// difference to zero; the model measures far more.
+        /// </summary>
+        private const int MIN_RING_INTERIOR_DARKENING = 24;
+
+        /// <summary>
+        /// Smallest spread across a face's sub-vertices that counts as a contact shadow. Well below the
+        /// measured range, and far above the couple of units the pre-SS-2 coverage model managed.
+        /// </summary>
+        private const int MIN_CONTACT_SHADOW_RANGE = 24;
 
         /// <summary>One emitted vertex on a probed face, in the face's own parameter space.</summary>
         public struct SubVertexSample
@@ -250,7 +382,7 @@ namespace Editor.Validation.Meshing
         /// <summary>Positional tolerance when matching an emitted vertex to a face (SS-0).</summary>
         private const float FACE_POSITION_EPSILON = 0.01f;
 
-        /// <summary>Fills a 5×5 platform of full cubes centred on the probe cell.</summary>
+        /// <summary>Fills a 5×5 platform of full cubes centerd on the probe cell.</summary>
         /// <param name="world">The fixture to build into.</param>
         private static void BuildFloor(MeshingTestWorld world)
         {

@@ -235,11 +235,12 @@ namespace Editor.Validation.Meshing
 
             foreach (byte[] corners in byRoll)
             {
-                ok &= MeshAssert.IsTrue("B46 a vertical slab shades exactly half the corners",
-                    ShadedCornerCount(corners, open[0]) == 2,
+                ok &= MeshAssert.IsTrue("B46 a vertical slab shades exactly half the corners most strongly",
+                    StrongestShadedCornerCount(corners) == 2,
                     "A vertical half slab occupies half the cell above, so exactly two of the floor's four "
-                    + "top corners should be darkened. Four equal corners means the coverage question is "
-                    + "still being asked per face rather than per corner.\n" + patterns);
+                    + "top corners should carry the full darkening and the other two should be visibly "
+                    + "lighter. Four equal corners means the occlusion question is being asked per face "
+                    + "rather than per point.\n" + patterns);
             }
 
             for (int a = 0; a < byRoll.Length; a++)
@@ -369,6 +370,33 @@ namespace Editor.Validation.Meshing
             int count = 0;
             foreach (byte corner in corners)
                 if (corner < unoccluded)
+                    count++;
+
+            return count;
+        }
+
+        /// <summary>
+        /// Counts how many corners carry the <i>strongest</i> darkening present on the face.
+        /// <para>
+        /// Deliberately relative rather than measured against the unoccluded value. Under SS-2 an
+        /// occluder shades by distance, so a vertical slab standing half a cell from the far corners
+        /// darkens those slightly too — "how many corners are below 255" became 4 and stopped
+        /// discriminating. "How many are at the maximum" is still 2, still goes to 4 the moment
+        /// occlusion turns face-uniform, and is independent of the falloff radius.
+        /// </para>
+        /// </summary>
+        /// <param name="corners">The face's four corner sun values.</param>
+        /// <returns>The number of corners equal to the darkest of them.</returns>
+        private static int StrongestShadedCornerCount(byte[] corners)
+        {
+            byte darkest = byte.MaxValue;
+            foreach (byte corner in corners)
+                if (corner < darkest)
+                    darkest = corner;
+
+            int count = 0;
+            foreach (byte corner in corners)
+                if (corner == darkest)
                     count++;
 
             return count;
