@@ -725,18 +725,12 @@ namespace Jobs
 
                     if (SmoothLighting >= SmoothLightingQuality.Standard)
                     {
-                        CalculateCornerLights(p, pos, neighborVoxel, faceIsInteriorToSampleCell: false,
-                            out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3,
-                            out int tessellation);
-
-                        if (tessellation > 1)
-                        {
-                            // Sampling by world position makes the corner-light permutation unnecessary
-                            // here: each sub-vertex asks about the cell it actually sits under.
-                            EmitTessellatedStandardCubeFace(p, translatedP, pos, rotation, 0,
-                                textureID, voxelProps.RenderNeighborFaces, tessellation);
+                        // Sampling by world position makes the corner-light permutation unnecessary on the
+                        // tessellated path: each sub-vertex asks about the cell it actually sits under.
+                        if (ShadeOrEmitStandardCubeFace(p, translatedP, pos, rotation, 0, textureID,
+                                voxelProps.RenderNeighborFaces,
+                                out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3))
                             continue;
-                        }
 
                         PermuteCornerLightsForYRotation(p, rotation, ref l0, ref l1, ref l2, ref l3);
                         VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, in pos, rotation,
@@ -759,6 +753,57 @@ namespace Jobs
         }
 
         /// <summary>
+        /// Resolves one standard-cube face's shading: samples its neighborhood once, then either emits the
+        /// face here as a tessellated grid or hands the four corner values back for the caller to emit.
+        /// <para>
+        /// The single sampling pass is the point. The 3×3 gather is the mesher's heaviest read — nine
+        /// voxel states and their light — and deciding tessellation separately from emitting ran it twice
+        /// for every face an occluder reached.
+        /// </para>
+        /// </summary>
+        /// <param name="worldFace">Cardinal face index used for neighbor sampling.</param>
+        /// <param name="geometryFace">Face index whose vertices and UVs are emitted (differs from
+        /// <paramref name="worldFace"/> only on the legacy rotated path).</param>
+        /// <param name="pos">Block position in chunk-local space.</param>
+        /// <param name="rotation">Y-axis rotation in degrees applied to the emitted geometry.</param>
+        /// <param name="uvQuarterTurnsCW">Number of 90° clockwise UV rotations to apply (0-3).</param>
+        /// <param name="textureID">Atlas texture index for this face.</param>
+        /// <param name="renderNeighborFaces">Routes the triangles to the transparent submesh.</param>
+        /// <param name="l0">Light at corner 0; only meaningful when this returns <see langword="false"/>.</param>
+        /// <param name="l1">Light at corner 1; only meaningful when this returns <see langword="false"/>.</param>
+        /// <param name="l2">Light at corner 2; only meaningful when this returns <see langword="false"/>.</param>
+        /// <param name="l3">Light at corner 3; only meaningful when this returns <see langword="false"/>.</param>
+        /// <returns><see langword="true"/> when the face was emitted here; <see langword="false"/> when the
+        /// caller must emit it from the corner values.</returns>
+        private bool ShadeOrEmitStandardCubeFace(int worldFace, int geometryFace, Vector3Int pos,
+            float rotation, int uvQuarterTurnsCW, int textureID, bool renderNeighborFaces,
+            out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3)
+        {
+            // Deliberately not inlined into the per-face callers: they run inside the six-face loop, and a
+            // stackalloc there would grow the frame once per iteration instead of once per face.
+            Span<FaceOccluder> occluders = stackalloc FaceOccluder[FACE_OCCLUDER_COUNT];
+
+            // A standard cube's faces always sit on its cell boundary — only a custom mesh can put one
+            // inside its own cell (VO-6).
+            PrepareFaceSampling(worldFace, pos, faceIsInteriorToSampleCell: false, occluders,
+                out Vector3Int directCell, out _, out int axisA, out int axisB, out int tessellation);
+
+            if (tessellation > 1)
+            {
+                EmitTessellatedStandardCubeFace(geometryFace, pos, rotation, uvQuarterTurnsCW,
+                    textureID, renderNeighborFaces, tessellation, directCell, axisA, axisB, occluders);
+                l0 = l1 = l2 = l3 = default;
+                return true;
+            }
+
+            l0 = ShadeCorner(worldFace, 0, pos, directCell, axisA, axisB, occluders);
+            l1 = ShadeCorner(worldFace, 1, pos, directCell, axisA, axisB, occluders);
+            l2 = ShadeCorner(worldFace, 2, pos, directCell, axisA, axisB, occluders);
+            l3 = ShadeCorner(worldFace, 3, pos, directCell, axisA, axisB, occluders);
+            return false;
+        }
+
+        /// <summary>
         /// VO-9b: emits one standard cube face as an N×N grid of sub-quads, shading every sub-vertex
         /// through <see cref="ShadePoint"/> instead of blending four cell-corner values.
         /// <para>
@@ -773,23 +818,23 @@ namespace Jobs
         /// still meets an ordinary neighboring face without a seam.
         /// </para>
         /// </summary>
-        /// <param name="worldFace">Cardinal face index used for neighbor sampling.</param>
-        /// <param name="geometryFace">Face index whose vertices and UVs are emitted (differs from
-        /// <paramref name="worldFace"/> only on the legacy rotated path).</param>
+        /// <param name="geometryFace">Face index whose vertices and UVs are emitted (differs from the
+        /// sampled world face only on the legacy rotated path).</param>
         /// <param name="pos">Block position in chunk-local space.</param>
         /// <param name="rotation">Y-axis rotation in degrees applied to the emitted geometry.</param>
         /// <param name="uvQuarterTurnsCW">Number of 90° clockwise UV rotations to apply (0-3).</param>
         /// <param name="textureID">Atlas texture index for this face.</param>
         /// <param name="renderNeighborFaces">Routes the triangles to the transparent submesh.</param>
         /// <param name="tessellation">Sub-quads per axis, from the face's own gate.</param>
-        private void EmitTessellatedStandardCubeFace(int worldFace, int geometryFace, Vector3Int pos,
+        /// <param name="directCell">The cell in front of the face, from <see cref="PrepareFaceSampling"/>.</param>
+        /// <param name="axisA">The face's first tangent axis.</param>
+        /// <param name="axisB">The face's second tangent axis.</param>
+        /// <param name="occluders">The hoisted 3x3, already sampled for this face.</param>
+        private void EmitTessellatedStandardCubeFace(int geometryFace, Vector3Int pos,
             float rotation, int uvQuarterTurnsCW, int textureID, bool renderNeighborFaces,
-            int tessellation)
+            int tessellation, Vector3Int directCell, int axisA, int axisB,
+            ReadOnlySpan<FaceOccluder> occluders)
         {
-            Span<FaceOccluder> occluders = stackalloc FaceOccluder[FACE_OCCLUDER_COUNT];
-            PrepareFaceSampling(worldFace, pos, faceIsInteriorToSampleCell: false, occluders,
-                out Vector3Int directCell, out int normalAxis, out int axisA, out int axisB, out _);
-
             VoxelMeshHelper.GetStandardCubeFaceQuad(geometryFace, in pos, rotation, uvQuarterTurnsCW,
                 out VoxelMeshHelper.FaceQuad face);
             Vector3 normal = BurstVoxelData.FaceChecks.Data[geometryFace];
@@ -858,16 +903,10 @@ namespace Jobs
 
             if (SmoothLighting >= SmoothLightingQuality.Standard)
             {
-                CalculateCornerLights(worldFace, pos, neighborVoxel, faceIsInteriorToSampleCell: false,
-                    out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3,
-                    out int tessellation);
-
-                if (tessellation > 1)
-                {
-                    EmitTessellatedStandardCubeFace(worldFace, worldFace, pos, rotation: 0f, uvQuarterTurnsCW,
-                        textureID, voxelProps.RenderNeighborFaces, tessellation);
+                if (ShadeOrEmitStandardCubeFace(worldFace, worldFace, pos, rotation: 0f, uvQuarterTurnsCW,
+                        textureID, voxelProps.RenderNeighborFaces,
+                        out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3))
                     return;
-                }
 
                 VoxelMeshHelper.GenerateStandardCubeFace(worldFace, textureID, in pos, rotation: 0f, uvQuarterTurnsCW,
                     l0, l1, l2, l3,
@@ -1140,35 +1179,12 @@ namespace Jobs
             VoxelState? directNeighbor, bool faceIsInteriorToSampleCell,
             out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3)
         {
-            CalculateCornerLights(faceIndex, blockPos, directNeighbor, faceIsInteriorToSampleCell,
-                out l0, out l1, out l2, out l3, out _);
-        }
-
-        /// <summary>
-        /// Corner-light overload that also reports how finely this face must be subdivided to resolve
-        /// the shadows reaching it — the gate that decides a face needs sub-cell shading detail.
-        /// <para>
-        /// It rides along on samples the face already takes, so an ordinary cube in open air pays one
-        /// integer for the whole question.
-        /// </para>
-        /// </summary>
-        /// <param name="faceIndex">Face direction, in <c>VoxelData.FaceChecks</c> order.</param>
-        /// <param name="blockPos">The shaded block's chunk-local position.</param>
-        /// <param name="directNeighbor">The cell in front of the face, pre-fetched.</param>
-        /// <param name="faceIsInteriorToSampleCell">True when the face sits inside its own cell (VO-6).</param>
-        /// <param name="l0">Light at corner 0.</param>
-        /// <param name="l1">Light at corner 1.</param>
-        /// <param name="l2">Light at corner 2.</param>
-        /// <param name="l3">Light at corner 3.</param>
-        /// <param name="tessellation">Sub-quads per axis this face needs: 1 leaves it undivided.</param>
-        private void CalculateCornerLights(int faceIndex, Vector3Int blockPos,
-            VoxelState? directNeighbor, bool faceIsInteriorToSampleCell,
-            out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3, out int tessellation)
-        {
             Span<FaceOccluder> occluders = stackalloc FaceOccluder[FACE_OCCLUDER_COUNT];
+
+            // The tessellation gate this computes is discarded: only standard cubes subdivide, and they
+            // go through ShadeOrEmitStandardCubeFace. A custom mesh's face keeps its authored geometry.
             PrepareFaceSampling(faceIndex, blockPos, faceIsInteriorToSampleCell, occluders,
-                out Vector3Int directCell, out int normalAxis, out int axisA, out int axisB,
-                out tessellation);
+                out Vector3Int directCell, out _, out int axisA, out int axisB, out _);
 
             l0 = ShadeCorner(faceIndex, 0, blockPos, directCell, axisA, axisB, occluders);
             l1 = ShadeCorner(faceIndex, 1, blockPos, directCell, axisA, axisB, occluders);
