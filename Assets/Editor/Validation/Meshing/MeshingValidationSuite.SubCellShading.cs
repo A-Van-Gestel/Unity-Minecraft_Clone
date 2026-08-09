@@ -165,25 +165,17 @@ namespace Editor.Validation.Meshing
             float allowance)
         {
             StringBuilder drift = new StringBuilder();
-            float plane = B49_Y + 1;
 
-            for (int v = 0; v < o.Vertices.Length; v++)
+            foreach (SubVertexSample s in TopFaceSubVertexField(o, B49_X, B49_Y, B49_Z))
             {
-                if (o.Normals[v].y < 0.99f) continue;
-                Vector3 p = o.Vertices[v];
-                if (Mathf.Abs(p.y - plane) > 0.01f) continue;
-                if (p.x < B49_X - 0.01f || p.x > B49_X + 1.01f) continue;
-                if (p.z < B49_Z - 0.01f || p.z > B49_Z + 1.01f) continue;
+                float expected = corners[0] * (1f - s.U) * (1f - s.V) + corners[1] * (1f - s.U) * s.V
+                                                                      + corners[2] * s.U * (1f - s.V)
+                                                                      + corners[3] * s.U * s.V;
 
-                float u = p.x - B49_X;
-                float w = p.z - B49_Z;
-                float expected = corners[0] * (1f - u) * (1f - w) + corners[1] * (1f - u) * w
-                                                                  + corners[2] * u * (1f - w) + corners[3] * u * w;
-
-                if (Mathf.Abs(o.LightData[v].r - expected) <= allowance) continue;
+                if (Mathf.Abs(s.Sun - expected) <= allowance) continue;
 
                 drift.AppendFormat("    ({0:F2}, {1:F2}): reads {2}, corner field gives {3:F1}\n",
-                    u, w, o.LightData[v].r, expected);
+                    s.U, s.V, s.Sun, expected);
             }
 
             return MeshAssert.IsTrue($"B49 the subdivided face stays on its own corner field ({label})",
@@ -194,6 +186,69 @@ namespace Editor.Validation.Meshing
                 + "a hard band and face interiors lightened, while the seams themselves still matched.\n"
                 + $"    corners: {corners[0]}, {corners[1]}, {corners[2]}, {corners[3]}\n" + drift);
         }
+
+        /// <summary>One emitted vertex on a probed face, in the face's own parameter space.</summary>
+        public struct SubVertexSample
+        {
+            /// <summary>First face-parameter coordinate, in <c>[0, 1]</c>.</summary>
+            public float U;
+
+            /// <summary>Second face-parameter coordinate, in <c>[0, 1]</c>.</summary>
+            public float V;
+
+            /// <summary>The vertex's encoded sky light.</summary>
+            public byte Sun;
+        }
+
+        /// <summary>
+        /// SS-0: returns every emitted vertex lying on one cell's <c>+Y</c> face, keyed by its position
+        /// within that face rather than by which quad carried it.
+        /// <para>
+        /// <b>The reading is tessellation-independent by construction</b>, which is the whole point: a
+        /// face is one quad or <c>N×N</c> sub-quads depending on what stands near it, so any probe that
+        /// indexes by quad order asserts something different at each density. B42 and B46 broke on
+        /// exactly that when VO-9b landed; <see cref="TopFaceCornerSun"/> is the corner-located answer
+        /// and this is its whole-field counterpart, for scenarios that need the interior too.
+        /// </para>
+        /// <para>
+        /// The <c>(u, v)</c> convention matches <c>VoxelMeshHelper.GetCornerUV</c> for a <c>+Y</c> face
+        /// (<c>u = x</c>, <c>v = z</c>), so a sample's parameters index the <c>l0..l3</c> corner order
+        /// directly and a caller can compare against a bilinear corner field without remapping.
+        /// </para>
+        /// </summary>
+        /// <param name="o">The meshing job output to read.</param>
+        /// <param name="cellX">Chunk-local X of the cell.</param>
+        /// <param name="cellY">Chunk-local Y of that cell (the face lies at <c>cellY + 1</c>).</param>
+        /// <param name="cellZ">Chunk-local Z of the cell.</param>
+        /// <returns>Every vertex on that face, in emission order; empty when the face is not emitted.</returns>
+        private static List<SubVertexSample> TopFaceSubVertexField(MeshDataJobOutput o,
+            int cellX, int cellY, int cellZ)
+        {
+            List<SubVertexSample> samples = new List<SubVertexSample>();
+            float plane = cellY + 1;
+
+            for (int v = 0; v < o.Vertices.Length; v++)
+            {
+                if (o.Normals[v].y < 0.99f) continue;
+
+                Vector3 p = o.Vertices[v];
+                if (Mathf.Abs(p.y - plane) > FACE_POSITION_EPSILON) continue;
+                if (p.x < cellX - FACE_POSITION_EPSILON || p.x > cellX + 1f + FACE_POSITION_EPSILON) continue;
+                if (p.z < cellZ - FACE_POSITION_EPSILON || p.z > cellZ + 1f + FACE_POSITION_EPSILON) continue;
+
+                samples.Add(new SubVertexSample
+                {
+                    U = p.x - cellX,
+                    V = p.z - cellZ,
+                    Sun = o.LightData[v].r,
+                });
+            }
+
+            return samples;
+        }
+
+        /// <summary>Positional tolerance when matching an emitted vertex to a face (SS-0).</summary>
+        private const float FACE_POSITION_EPSILON = 0.01f;
 
         /// <summary>Fills a 5×5 platform of full cubes centred on the probe cell.</summary>
         /// <param name="world">The fixture to build into.</param>

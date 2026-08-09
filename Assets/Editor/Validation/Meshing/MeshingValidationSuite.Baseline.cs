@@ -57,6 +57,9 @@ namespace Editor.Validation.Meshing
 
             // --- VO-9b sub-cell shading (B49) lives in MeshingValidationSuite.SubCellShading.cs. ---
             AddSubCellShadingBaselineScenarios(scenarios);
+
+            // --- SS-0 custom-mesh fixture integrity (B50) lives in MeshingValidationSuite.MeshFixtures.cs. ---
+            AddMeshFixtureBaselineScenarios(scenarios);
         }
 
         /// <summary>Hook for the cross-chunk border-culling baselines (implemented in MeshingValidationSuite.CrossChunk.cs).</summary>
@@ -82,6 +85,10 @@ namespace Editor.Validation.Meshing
         /// <summary>Hook for the VO-9b sub-cell shading baseline (implemented in MeshingValidationSuite.SubCellShading.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddSubCellShadingBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the SS-0 custom-mesh fixture baseline (implemented in MeshingValidationSuite.MeshFixtures.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddMeshFixtureBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>
         /// B1 — Direct, isolated differential test of <see cref="VoxelMeshHelper.GenerateStandardCubeFace"/>:

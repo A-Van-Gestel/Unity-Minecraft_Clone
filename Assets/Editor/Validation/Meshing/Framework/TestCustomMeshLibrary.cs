@@ -25,14 +25,46 @@ namespace Editor.Validation.Meshing.Framework
     /// </summary>
     public static class TestCustomMeshLibrary
     {
-        /// <summary>Index of the half-slab mesh within the flattened arrays (the only fixture mesh today).</summary>
+        /// <summary>Index of the half-slab mesh within the flattened arrays.</summary>
         public const int HalfSlabMeshIndex = 0;
+
+        /// <summary>Index of the post mesh within the flattened arrays (SS-0).</summary>
+        public const int PostMeshIndex = 1;
 
         /// <summary>
         /// The Y coordinate of the half slab's large horizontal face. This is the <b>mid-plane</b> face —
         /// it does not lie on a block boundary, which is exactly what <c>MESHING_BUGS.md</c> Bug M01 is about.
         /// </summary>
         public const float HalfSlabTopY = 0.5f;
+
+        /// <summary>
+        /// The half slab's volume — the <b>single</b> value both its geometry and its authored
+        /// <c>collisionBounds</c> are built from, so the two cannot disagree.
+        /// <para>
+        /// Finding <b>F13</b> was a fixture whose bounds and geometry diverged silently for an entire
+        /// arc, invisible until some phase first asked a shape question. Sharing one value makes that
+        /// divergence unrepresentable rather than merely asserted against; baseline <b>B50</b> still
+        /// checks it end-to-end, because a future hand-edit could reintroduce two sources.
+        /// </para>
+        /// </summary>
+        public static readonly BlockCollisionBounds HalfSlabBounds = BlockCollisionBounds.BottomHalfSlab;
+
+        /// <summary>
+        /// SS-0: a fence-post volume — a quarter-cell square column standing on the cell floor, spanning
+        /// the full cell height and touching neither side wall.
+        /// <para>
+        /// It exists because <b>every other meshing fixture is a full-width box</b> (the palette's only
+        /// custom mesh was the half slab, and its builder was parametric on height alone), so the suite
+        /// had no shape whose occlusion the corner-blended model cannot express. Its four side faces are
+        /// also <i>interior</i> to their own cell, which the half slab only exercises on one face.
+        /// </para>
+        /// </summary>
+        public static readonly BlockCollisionBounds PostBounds = new BlockCollisionBounds
+        {
+            mode = CollisionBoundsMode.CustomAABB,
+            min = new Vector3(0.375f, 0f, 0.375f),
+            max = new Vector3(0.625f, 1f, 0.625f),
+        };
 
         /// <summary>Number of faces every fixture mesh defines (all six canonical directions).</summary>
         public const int FaceCount = 6;
@@ -66,7 +98,9 @@ namespace Editor.Validation.Meshing.Framework
             List<CustomVertData> vertList = new List<CustomVertData>();
             List<int> triList = new List<int>();
 
-            AppendBoxMesh(meshList, faceList, vertList, triList, HalfSlabTopY);
+            // Order is load-bearing: the *MeshIndex constants above are positions in this list.
+            AppendBoxMesh(meshList, faceList, vertList, triList, HalfSlabBounds.min, HalfSlabBounds.max);
+            AppendBoxMesh(meshList, faceList, vertList, triList, PostBounds.min, PostBounds.max);
 
             meshes = new NativeArray<CustomMeshData>(meshList.ToArray(), allocator);
             faces = new NativeArray<CustomFaceData>(faceList.ToArray(), allocator);
@@ -75,34 +109,40 @@ namespace Editor.Validation.Meshing.Framework
         }
 
         /// <summary>
-        /// Appends one axis-aligned box mesh spanning the full X/Z cell and <c>y ∈ [0, topY]</c>, emitting all
-        /// six canonical faces in order. A <paramref name="topY"/> of 1 reproduces a standard cube; 0.5 gives
-        /// the half slab whose Top face lands on the block's mid-plane.
+        /// Appends one axis-aligned box mesh spanning <c>[min, max]</c> in block-local space, emitting all
+        /// six canonical faces in order. <c>(0,0,0)→(1,1,1)</c> reproduces a standard cube;
+        /// <c>(0,0,0)→(1,0.5,1)</c> gives the half slab whose Top face lands on the block's mid-plane.
+        /// <para>
+        /// SS-0 widened this from a height-only parameter. A face lying off the cell wall is the
+        /// interesting case — the sample-cell, culling and octant confusions of Bugs M01/M02/M03 all live
+        /// there — and until now only the slab's Top face could be one.
+        /// </para>
         /// </summary>
         /// <param name="meshList">Mesh range list to append to.</param>
         /// <param name="faceList">Face range list to append to.</param>
         /// <param name="vertList">Vertex list to append to.</param>
         /// <param name="triList">Triangle index list to append to.</param>
-        /// <param name="topY">Height of the box's top face in block-local space.</param>
+        /// <param name="min">Minimum corner of the box in block-local space.</param>
+        /// <param name="max">Maximum corner of the box in block-local space.</param>
         private static void AppendBoxMesh(List<CustomMeshData> meshList, List<CustomFaceData> faceList,
-            List<CustomVertData> vertList, List<int> triList, float topY)
+            List<CustomVertData> vertList, List<int> triList, Vector3 min, Vector3 max)
         {
             meshList.Add(new CustomMeshData { FaceStartIndex = faceList.Count, FaceCount = FaceCount });
 
             // Each face's four corners in the fixture's BL, TL, BR, TR order — the same per-face vertex
-            // ordering the standard cube uses (VoxelData.VoxelTris), with the top edge pulled down to topY.
+            // ordering the standard cube uses (VoxelData.VoxelTris), stretched to the box's extents.
             AppendFace(faceList, vertList, triList, // 0: Back (-Z)
-                new Vector3(0f, 0f, 0f), new Vector3(0f, topY, 0f), new Vector3(1f, 0f, 0f), new Vector3(1f, topY, 0f));
+                new Vector3(min.x, min.y, min.z), new Vector3(min.x, max.y, min.z), new Vector3(max.x, min.y, min.z), new Vector3(max.x, max.y, min.z));
             AppendFace(faceList, vertList, triList, // 1: Front (+Z)
-                new Vector3(1f, 0f, 1f), new Vector3(1f, topY, 1f), new Vector3(0f, 0f, 1f), new Vector3(0f, topY, 1f));
-            AppendFace(faceList, vertList, triList, // 2: Top (+Y) — the mid-plane face when topY < 1
-                new Vector3(0f, topY, 0f), new Vector3(0f, topY, 1f), new Vector3(1f, topY, 0f), new Vector3(1f, topY, 1f));
+                new Vector3(max.x, min.y, max.z), new Vector3(max.x, max.y, max.z), new Vector3(min.x, min.y, max.z), new Vector3(min.x, max.y, max.z));
+            AppendFace(faceList, vertList, triList, // 2: Top (+Y) — the mid-plane face for the half slab
+                new Vector3(min.x, max.y, min.z), new Vector3(min.x, max.y, max.z), new Vector3(max.x, max.y, min.z), new Vector3(max.x, max.y, max.z));
             AppendFace(faceList, vertList, triList, // 3: Bottom (-Y)
-                new Vector3(1f, 0f, 0f), new Vector3(1f, 0f, 1f), new Vector3(0f, 0f, 0f), new Vector3(0f, 0f, 1f));
+                new Vector3(max.x, min.y, min.z), new Vector3(max.x, min.y, max.z), new Vector3(min.x, min.y, min.z), new Vector3(min.x, min.y, max.z));
             AppendFace(faceList, vertList, triList, // 4: Left (-X)
-                new Vector3(0f, 0f, 1f), new Vector3(0f, topY, 1f), new Vector3(0f, 0f, 0f), new Vector3(0f, topY, 0f));
+                new Vector3(min.x, min.y, max.z), new Vector3(min.x, max.y, max.z), new Vector3(min.x, min.y, min.z), new Vector3(min.x, max.y, min.z));
             AppendFace(faceList, vertList, triList, // 5: Right (+X)
-                new Vector3(1f, 0f, 0f), new Vector3(1f, topY, 0f), new Vector3(1f, 0f, 1f), new Vector3(1f, topY, 1f));
+                new Vector3(max.x, min.y, min.z), new Vector3(max.x, max.y, min.z), new Vector3(max.x, min.y, max.z), new Vector3(max.x, max.y, max.z));
         }
 
         /// <summary>Appends one quad face (4 verts, 2 triangles) and its range record.</summary>

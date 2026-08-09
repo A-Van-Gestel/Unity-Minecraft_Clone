@@ -90,8 +90,21 @@ namespace Editor.Validation.Meshing.Framework
         /// <summary>The authored opacity of <see cref="PartialOpaque"/> — below the <c>IsOpaque</c> threshold of 15.</summary>
         public const byte PartialOpacity = 7;
 
+        /// <summary>
+        /// SS-0: fence-post custom mesh — a quarter-cell column standing on the cell floor
+        /// (<see cref="TestCustomMeshLibrary.PostBounds"/>), full cell height, touching neither side wall.
+        /// Same schema and lighting properties as <see cref="HalfSlab"/>.
+        /// <para>
+        /// The palette's other custom meshes are full-width boxes, so their occlusion of a neighboring
+        /// face varies monotonically across the cell and a two-corner blend reproduces it closely. The
+        /// post's does not — see baseline <b>B50</b>, which measures that and is the reason this fixture
+        /// exists at all.
+        /// </para>
+        /// </summary>
+        public const ushort Post = 9;
+
         /// <summary>Total number of block types in the palette.</summary>
-        public const int Count = 9;
+        public const int Count = 10;
 
         /// <summary>
         /// Builds the palette as managed <see cref="BlockType"/> instances and converts them to the
@@ -118,9 +131,14 @@ namespace Editor.Validation.Meshing.Framework
             jobData[SwayingLeafCube] = new BlockTypeJobData(swayingLeaf);
             // Custom meshes carry their geometry index out-of-band, exactly as JobDataManagerFactory does.
             jobData[HalfSlab] = new BlockTypeJobData(
-                MakeHalfSlab("TestHalfSlab", opacity: 15), TestCustomMeshLibrary.HalfSlabMeshIndex);
+                MakeCustomBox("TestHalfSlab", opacity: 15, TestCustomMeshLibrary.HalfSlabBounds),
+                TestCustomMeshLibrary.HalfSlabMeshIndex);
             jobData[PartialOpaque] = new BlockTypeJobData(
-                MakeHalfSlab("TestPartialOpaqueSlab", PartialOpacity), TestCustomMeshLibrary.HalfSlabMeshIndex);
+                MakeCustomBox("TestPartialOpaqueSlab", PartialOpacity, TestCustomMeshLibrary.HalfSlabBounds),
+                TestCustomMeshLibrary.HalfSlabMeshIndex);
+            jobData[Post] = new BlockTypeJobData(
+                MakeCustomBox("TestPost", opacity: 15, TestCustomMeshLibrary.PostBounds),
+                TestCustomMeshLibrary.PostMeshIndex);
             return jobData;
         }
 
@@ -186,13 +204,17 @@ namespace Editor.Validation.Meshing.Framework
         }
 
         /// <summary>
-        /// Constructs a half-slab <see cref="BlockType"/> that routes through the schema-aware custom-mesh
-        /// path (<c>GenerateCustomBlockMesh_SchemaAware</c>). Solid + <c>renderNeighborFaces</c> like the
-        /// production Stone Half Slab, so a slab never culls its neighbor's faces (it does not fill its cell).
+        /// Constructs a box-shaped custom-mesh <see cref="BlockType"/> that routes through the
+        /// schema-aware custom-mesh path (<c>GenerateCustomBlockMesh_SchemaAware</c>). Solid +
+        /// <c>renderNeighborFaces</c> like the production Stone Half Slab, so it never culls its
+        /// neighbor's faces (it does not fill its cell).
         /// </summary>
         /// <param name="name">Block name.</param>
         /// <param name="opacity">Light entry cost; 15 makes it <c>IsOpaque</c>, below 15 makes it partial.</param>
-        private static BlockType MakeHalfSlab(string name, byte opacity)
+        /// <param name="bounds">The volume, which MUST be the same value
+        /// <see cref="TestCustomMeshLibrary"/> built this block's geometry from — pass one of its
+        /// exposed constants, never a fresh literal.</param>
+        private static BlockType MakeCustomBox(string name, byte opacity, BlockCollisionBounds bounds)
         {
             BlockType block = MakeBaseBlock(name);
             block.isSolid = true;
@@ -201,11 +223,11 @@ namespace Editor.Validation.Meshing.Framework
             block.renderShape = RenderShape.CustomMesh;
             block.metadataSchema = MetadataSchema.Facing6Roll2;
 
-            // VO-5: the authored volume must match the geometry, or the fixture is a slab to the mesher
-            // and a full cube to every shape query (BurstOcclusionUtility reads these bounds, not the
-            // custom mesh). The lighting palette has always authored this; the meshing palette did not,
-            // which was inert only for as long as no meshing code asked about shape.
-            block.collisionBounds = BlockCollisionBounds.BottomHalfSlab;
+            // VO-5 / F13: the authored volume must match the geometry, or the fixture is one shape to the
+            // mesher and another to every shape query (BurstOcclusionUtility reads these bounds, not the
+            // custom mesh) — a divergence that stays invisible until some phase first asks. SS-0 removed
+            // the second source of truth: the caller passes the very value the mesh was built from.
+            block.collisionBounds = bounds;
             return block;
         }
 
