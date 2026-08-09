@@ -1,6 +1,6 @@
 # Silhouette-Based Contact-Shadow Ambient Occlusion (SS-*)
 
-**Version:** 2.2  
+**Version:** 2.3  
 **Date:** 2026-08-09  
 **Status:** Proposed design — not implemented.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
@@ -1538,26 +1538,37 @@ rejects zero-area clips; `LightAttenuation.CellOcclusionShare` is renamed
 
 ## 11. Open questions
 
-1. **D7 — the full-cube gate — is the one decision still open**, and it is what delivers
-   observation 2. `SS-3` is blocked on it and on the cost it carries (§8). Resolves as a dated
-   `**Amended:**` line here with the verdict marked in §4.
-2. **Do face interiors read too flat?** §5.2 predicts a single wall's mid-band at `239` against
-   today's `223`, and an inner corner's centre at `218` against `≈ 175` — the accepted cost of the
-   `(1 − t)²` profile the owner chose. Resolved by `SS-2`'s acceptance step (c); if it reads flat,
-   the lever is the falloff exponent alone, and the answer is recorded here either way.
+1. ~~**D7 — the full-cube gate — is the one decision still open.**~~ — **RESOLVED 2026-08-09**
+   (§4 D7): build `SS-3`, with per-pixel on `VX-1` as the destination. Shipped, confirmed in game,
+   and left **default-off on taste** — see the `SS-3` packet.
+2. ~~**Do face interiors read too flat?**~~ — **ANSWERED, and the opposite way round.** Interiors
+   were never reported flat; what the owner reported after `SS-3` was the *reverse* — full-block face
+   shading reads **too dark overall**, which is why the setting stays opt-in. The lever is no longer
+   the falloff exponent but §10's angular-coverage refinement: the binary in-quadrant test charges a
+   full quarter to any occluder merely touching a quadrant.
 3. **Do `B42` and `B46` survive `SS-2`?** They pin corner values under partial occluders, where the
    occlusion function changes from an octant fill fraction to a distance falloff. §6.4 predicts they
    do, because a slab's silhouette either contains a corner or lies half a cell from it. `SS-2`
    measures it; a surprise here means §5.2's reduction is narrower than claimed.
-4. **What does `SS-3` actually cost on real terrain?** §8 gives the formula and the flat-terrain
-   floor but no magnitude for broken terrain, caves, or built structures. Resolved by `SS-3`'s
-   `perf-benchmark` capture, which lands as a `Documentation/Performance/` report.
+4. ~~**What does `SS-3` actually cost on real terrain?**~~ — **VERTEX COST MEASURED** (§8:
+   1.00× flat, 1.41×–1.73× terrain, 1.48× built), and the **frame-time capture was waived by the
+   owner**, who accepted the vertex multiplier in its place and left the setting off by default.
+   Caves remain unmeasured; they will sit above the rough-terrain row. Only re-open this if someone
+   proposes flipping the default on.
 5. ~~**Should `GetFaceCoverage` be re-expressed as the area of `GetFaceSilhouette`?**~~ —
    **RESOLVED by `SS-1`: no, guarded instead.** It feeds light transport, where a last-ulp change
    could flip `FaceBlocksLight`'s threshold, and the drift the consolidation would have prevented is
-   prevented just as well by B6's bitwise area assertion. **Still open:** whether
-   `AmbientOcclusionOctantCoverage` retires when `SS-2` removes its last consumer — `SS-2` decides
-   and records.
+   prevented just as well by B6's bitwise area assertion.
+6. **`AmbientOcclusionOctantCoverage` and `AmbientOcclusionRegionCoverage` are now TEST-ONLY, and
+   nobody has decided their fate** (verified 2026-08-09 — the only callers left are
+   `MeshingValidationSuite.FractionalAO.cs` and `.MeshFixtures.cs`; `SS-2` replaced their production
+   consumer and, contrary to what question 5 promised, did not record this). They are live production
+   API kept alive solely by baselines `B41` and `B50`. Two honest answers: **retire both** and drop
+   the baseline legs that exist only to guard them, or **keep them** as unit-guarded utilities and
+   say so in their docstrings so the next reader does not assume they still shade anything.
+   ⚠️ Whoever takes this must not simply delete them and re-point the baselines — `B50`'s coverage
+   sweep is what caught finding **S9** (coverage is non-monotonic across a cell), and that finding is
+   the evidence base for why this design abandoned coverage at all.
 
 ---
 
