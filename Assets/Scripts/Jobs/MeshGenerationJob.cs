@@ -1387,22 +1387,48 @@ namespace Jobs
                 samplePoint[axisA] - Component(directCell, axisA),
                 samplePoint[axisB] - Component(directCell, axisB));
 
-            // How strongly each of the nine cells shadows THIS point.
+            // Two readings of the same nine silhouettes. `shadow` is per CELL — how strongly each cell
+            // shadows this point — and drives the corner seal and the light weighting, both of which are
+            // questions about cells. `quadrant` is per DIRECTION, and is what the occlusion term sums:
+            // occlusion is a share of the hemisphere, so it must be attributed to the quarter of the sky
+            // an occluder blocks, not to the cell that happens to contain it (SS-3a).
             Span<float> shadow = stackalloc float[FACE_OCCLUDER_COUNT];
+            Span<float> quadrant = stackalloc float[QUADRANT_COUNT];
+
+            for (int i = 0; i < QUADRANT_COUNT; i++) quadrant[i] = 0f;
+
             for (int i = 0; i < FACE_OCCLUDER_COUNT; i++)
             {
                 FaceOccluder o = occluders[i];
-                shadow[i] = o.Casts != 0
-                    ? LightAttenuation.ContactShadowFalloff(DistanceToRect(point, in o))
-                    : 0f;
+                if (o.Casts == 0)
+                {
+                    shadow[i] = 0f;
+                    continue;
+                }
+
+                shadow[i] = LightAttenuation.ContactShadowFalloff(DistanceToRect(point, in o));
+
+                // The same silhouette can darken several quadrants — a wall running past the point
+                // covers two of them — and that is exactly what makes its shadow independent of where
+                // the cell seams fall.
+                for (int qa = -1; qa <= 1; qa += 2)
+                for (int qb = -1; qb <= 1; qb += 2)
+                {
+                    if (!ClipToQuadrant(point, in o, qa, qb, out float2 clipMin, out float2 clipMax))
+                        continue;
+
+                    int q = QuadrantIndex(qa, qb);
+                    float lit = LightAttenuation.ContactShadowFalloff(DistanceToRect(point, clipMin, clipMax));
+                    quadrant[q] = math.max(quadrant[q], lit);
+                }
             }
 
-            ApplyCornerSeal(shadow);
+            ApplyCornerSeal(shadow, quadrant);
 
             float occlusion = 0f;
-            for (int i = 0; i < FACE_OCCLUDER_COUNT; i++)
+            for (int i = 0; i < QUADRANT_COUNT; i++)
             {
-                occlusion += LightAttenuation.CellOcclusionShare * shadow[i];
+                occlusion += LightAttenuation.QuadrantOcclusionShare * quadrant[i];
             }
 
             occlusion = math.saturate(occlusion);
@@ -1499,8 +1525,9 @@ namespace Jobs
         /// </para>
         /// </summary>
         /// <param name="shadow">Per-cell shadow strengths for the hoisted 3x3, modified in place.</param>
+        /// <param name="quadrant">Per-direction shadow strengths, modified in place.</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void ApplyCornerSeal(Span<float> shadow)
+        private static void ApplyCornerSeal(Span<float> shadow, Span<float> quadrant)
         {
             for (int da = -1; da <= 1; da += 2)
             {
@@ -1508,10 +1535,60 @@ namespace Jobs
                 {
                     int diagonal = OccluderIndex(da, db);
                     float sealStrength = shadow[OccluderIndex(da, 0)] * shadow[OccluderIndex(0, db)];
+
+                    // Applied to both readings, and it has to be: the cell copy feeds the light mean,
+                    // the quadrant copy feeds the occlusion term, and the identity that keeps a corner
+                    // matching the pre-SS-2 model holds only while the two agree there.
                     shadow[diagonal] = math.max(shadow[diagonal], sealStrength);
+
+                    int q = QuadrantIndex(da, db);
+                    quadrant[q] = math.max(quadrant[q], sealStrength);
                 }
             }
         }
+
+        /// <summary>
+        /// Clips an occluder's silhouette to one quadrant around the shaded point, rejecting clips with
+        /// no area — an occluder that merely <i>touches</i> a quadrant's boundary blocks none of it.
+        /// </summary>
+        /// <param name="point">The shaded point, in the face's parameter frame.</param>
+        /// <param name="occluder">The occluder whose silhouette is clipped.</param>
+        /// <param name="qa">Quadrant sign on the first tangent axis (-1 or +1).</param>
+        /// <param name="qb">Quadrant sign on the second tangent axis.</param>
+        /// <param name="clipMin">Minimum corner of the clipped rectangle.</param>
+        /// <param name="clipMax">Maximum corner.</param>
+        /// <returns>True when the silhouette covers area inside that quadrant.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static bool ClipToQuadrant(float2 point, in FaceOccluder occluder, int qa, int qb,
+            out float2 clipMin, out float2 clipMax)
+        {
+            clipMin = new float2(
+                qa > 0 ? math.max(occluder.RectMin.x, point.x) : occluder.RectMin.x,
+                qb > 0 ? math.max(occluder.RectMin.y, point.y) : occluder.RectMin.y);
+
+            clipMax = new float2(
+                qa > 0 ? occluder.RectMax.x : math.min(occluder.RectMax.x, point.x),
+                qb > 0 ? occluder.RectMax.y : math.min(occluder.RectMax.y, point.y));
+
+            return clipMax.x - clipMin.x > QUADRANT_AREA_EPSILON
+                   && clipMax.y - clipMin.y > QUADRANT_AREA_EPSILON;
+        }
+
+        /// <summary>Number of tangent quadrants around a shaded point.</summary>
+        private const int QUADRANT_COUNT = 4;
+
+        /// <summary>
+        /// Smallest extent that counts as covering a quadrant. A silhouette lying exactly along a
+        /// quadrant boundary — a neighbouring cell's edge through the shaded point — has zero area on
+        /// one side and must not darken it, or every occluder would darken all four.
+        /// </summary>
+        private const float QUADRANT_AREA_EPSILON = 1e-4f;
+
+        /// <summary>Maps a quadrant's two signs to its slot.</summary>
+        /// <param name="qa">Sign on the first tangent axis (-1 or +1).</param>
+        /// <param name="qb">Sign on the second tangent axis.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int QuadrantIndex(int qa, int qb) => (qa > 0 ? 2 : 0) + (qb > 0 ? 1 : 0);
 
         /// <summary>
         /// How many cells the light interpolation kernel reaches: the sample box is one cell wide, so it
@@ -1535,7 +1612,21 @@ namespace Jobs
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static float DistanceToRect(float2 point, in FaceOccluder occluder)
         {
-            float2 outside = math.max(math.max(occluder.RectMin - point, point - occluder.RectMax), 0f);
+            return DistanceToRect(point, occluder.RectMin, occluder.RectMax);
+        }
+
+        /// <summary>
+        /// Euclidean distance from a point to an axis-aligned rectangle given by its corners; zero when
+        /// the point lies inside it. The form <see cref="ClipToQuadrant"/> results are measured with.
+        /// </summary>
+        /// <param name="point">The sample point, in the face's parameter frame.</param>
+        /// <param name="rectMin">Minimum corner of the rectangle.</param>
+        /// <param name="rectMax">Maximum corner.</param>
+        /// <returns>The distance in cells, clamped at zero inside the rectangle.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static float DistanceToRect(float2 point, float2 rectMin, float2 rectMax)
+        {
+            float2 outside = math.max(math.max(rectMin - point, point - rectMax), 0f);
             return math.length(outside);
         }
 

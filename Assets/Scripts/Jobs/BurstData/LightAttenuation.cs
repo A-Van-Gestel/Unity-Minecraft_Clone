@@ -348,15 +348,23 @@ namespace Jobs.BurstData
         public const float ContactShadowRadius = 1f;
 
         /// <summary>
-        /// Each of the four cells meeting at a shaded point owns a quarter of its hemisphere, so a
-        /// single occluder in contact removes a quarter of the light — reproducing the engine's
-        /// long-standing <c>255 → 191</c> for one neighbor, <c>128</c> for two and <c>64</c> for three.
+        /// Each of the four quadrants around a shaded point owns a quarter of its hemisphere, so an
+        /// occluder filling one quadrant at contact removes a quarter of the light — reproducing the
+        /// engine's long-standing <c>255 → 191</c> for one occluding neighbor, <c>128</c> for two and
+        /// <c>64</c> for three.
         /// <para>
-        /// The shares <b>sum</b>: occlusion accumulates per occluder, and a single global strength
-        /// constant could not reproduce both the one-occluder and the three-occluder depth at once.
+        /// The shares <b>sum</b> across quadrants: a single global strength constant could not
+        /// reproduce both the one-occluder and the three-occluder depth at once.
+        /// </para>
+        /// <para>
+        /// <b>Quadrants, not cells</b> (SS-3a). At a cell corner the two are the same thing — the four
+        /// cells meeting there are the four quadrants — which is why a per-cell sum looked equivalent
+        /// and shipped. Away from a corner they diverge, and the per-cell reading depends on where the
+        /// grid lines fall rather than on the geometry: a straight wall arrives as three separate cell
+        /// silhouettes, so its shadow scalloped between seam and cell centre.
         /// </para>
         /// </summary>
-        public const float CellOcclusionShare = 0.25f;
+        public const float QuadrantOcclusionShare = 0.25f;
 
         /// <summary>Coverage at or above which a face counts as fully covered (absorbs float round-off).</summary>
         private const float FULL_COVERAGE_THRESHOLD = 1f - 1e-4f;

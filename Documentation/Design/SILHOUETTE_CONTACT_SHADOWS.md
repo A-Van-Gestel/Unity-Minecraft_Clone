@@ -1,6 +1,6 @@
 # Silhouette-Based Contact-Shadow Ambient Occlusion (SS-*)
 
-**Version:** 2.0  
+**Version:** 2.1  
 **Date:** 2026-08-09  
 **Status:** Proposed design — not implemented.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
@@ -632,8 +632,8 @@ rule, signed off and not re-derived here.
 Two position-pure fields, evaluated at every shading point and multiplied:
 
 ```
-occ(p) = saturate( Σ over the 3×3 cells in front of the face
-                     CELL_OCCLUSION_SHARE · Falloff( Distance(p, silhouetteᵢ) / R ) )
+occ(p) = saturate( Σ over the 4 tangent QUADRANTS around p
+                     QUADRANT_OCCLUSION_SHARE · Falloff( Distance(p, nearest silhouette in q) / R ) )
 
 L(p)   = Σᵢ wᵢ(p) · openᵢ(p) · Lᵢ                  // the existing four box-reachable cells
          ────────────────────────────
@@ -642,9 +642,9 @@ L(p)   = Σᵢ wᵢ(p) · openᵢ(p) · Lᵢ                  // the existing fo
 out(p) = L(p) · (1 − occ(p))
 ```
 
-with `openᵢ(p) = 1 − Falloff(Distance(p, silhouetteᵢ) / R)`, `R = 1.0` (D2), `Falloff(t) = (1 − t)²`
-(D2), `Distance` the Euclidean signed distance to the silhouette rectangle (D1), and
-`CELL_OCCLUSION_SHARE = 0.25`.
+with `openᵢ(p) = 1 − Falloff(Distance(p, silhouetteᵢ) / R)` **per cell** (the light mean's weights
+stay a per-cell question), `R = 1.0` (D2), `Falloff(t) = (1 − t)²` (D2), `Distance` the Euclidean
+distance to the silhouette rectangle (D1), and `QUADRANT_OCCLUSION_SHARE = 0.25`.
 
 > ⚠️ **Corrected in `SS-2a`, and this one is the whole reason ordinary terrain moved: `openᵢ` above is
 > the *visibility* term, and the light mean must be weighted by it.** `SS-2` shipped the mean weighted
@@ -686,6 +686,35 @@ with `openᵢ(p) = 1 − Falloff(Distance(p, silhouetteᵢ) / R)`, `R = 1.0` (D2
 > floor a cell away from the corner. Measured, the seal's contribution half a cell out ran `16` light
 > units against `16` in the corner itself — flat. The product decays it to `4` while the corner holds
 > at `63`. Baseline **B57** pins both ends.
+
+> ⚠️ **Corrected in `SS-3a`: the sum is over the four QUADRANTS around the point, not over the nine
+> cells.** At a cell corner the two are the same thing — the four cells meeting there *are* the four
+> quadrants — which is why the per-cell form reproduced every corner value, passed every baseline and
+> shipped. Away from a corner they diverge, and the per-cell form reads the **grid** rather than the
+> **geometry**: a straight wall arrives as three separate cell silhouettes, so at a cell seam two of
+> them touch the point (`0.25 + 0.25`) while mid-cell only one touches and the others sit half a cell
+> away (`0.25 + 2 × 0.0625`). Same wall, different answer — measured `128` at the seams against `159`
+> mid-cell, a scallop at every seam along every wall in the world.
+>
+> **The seams were right and the mid-cell samples were wrong.** Before sub-cell shading that edge had
+> only its two corner samples, both `128`, and the GPU interpolated a uniform band; the interior
+> samples are what disagreed with the corners the model already had. Binning by direction restores
+> the agreement: a quadrant is darkened by the *nearest* silhouette covering area in it, so a wall
+> passing the point fills the same two quadrants wherever along it the point sits.
+>
+> **A silhouette that merely touches a quadrant boundary covers none of it** — a neighbouring cell's
+> edge passing exactly through the shaded point must not darken the quadrant behind it, or every
+> occluder would darken all four. `QUADRANT_AREA_EPSILON` rejects the zero-area clip.
+>
+> **The corner seal stays per-cell and is applied to both readings.** Which cell is diagonal to which
+> is a fact about cells, not directions, and the identity that keeps a corner matching the pre-`SS-2`
+> model holds only while the cell and quadrant readings agree there (`B58`).
+>
+> **The deliberate consequence, accepted by the owner with the numbers on the table:** an isolated
+> block's contact shadow deepens at the middle of its edge, `191 → 128`, because a block touching you
+> along a whole edge fills two quadrants where the per-cell form charged it a single quarter. Its
+> *corners* still read `191`. This is a visible change on every free-standing block, and it is the
+> price of the wall being right.
 
 **Why `0.25`, and why a sum rather than `max`.** Occlusion is a share of the shaded point's
 hemisphere, and the four cells meeting at a face corner divide it in four — which is the existing
@@ -957,6 +986,7 @@ get to rely on them.
 | **SS-2**  | ⚠️ Contact-shadow term, partial occluders (**observation 1**) — code complete, **rejected in game** |   🟡   | SS-1, D1–D3 |
 | **SS-2a** | ⏳ Fix the corner-darkening artifact SS-2 introduced — fixed, awaiting in-game |   🟡   | SS-2       |
 | ~~**SS-3**~~ | ✅ Extend the gate to full-cube occluders (**observation 2**) — shipped **default-off**, capture owed |   🔴   | SS-2a, D7  |
+| **SS-3a** | ✅ Bin occlusion by direction, not by cell — fixed, awaiting in-game               |   🟡   | SS-3       |
 | **SS-4**  | Subdivide custom-mesh faces (S6)                                    |   🟡   | SS-2a      |
 
 **Minimal standalone-value set: SS-0 → SS-1 → SS-2.** It delivers the owner's first observation, is
@@ -1410,6 +1440,52 @@ goes as `N²`. `FULL_CUBE_SUB_CELL_TESSELLATION` is a named constant with that r
 - **Doc-sync:** `SMOOTH_AND_RGB_LIGHTING.md`; a `Documentation/Performance/` report for the capture.
 - **Serialization:** none.
 
+### SS-3a — Bin occlusion by direction, not by cell (🟡, behaviour change) · ✅ **FIXED 2026-08-09 — AWAITING IN-GAME CONFIRMATION**
+
+**Symptom (owner, in game, 2026-08-09, with `SS-3` enabled).** A dark dash at every cell seam along
+every wall — the shading changes as you walk along a flat wall, though the wall does not.
+
+**Measured.** Floor row against a wall: `128` at the seams, `159` mid-cell — a **31-unit** scallop.
+Half a cell out: `223` / `228`. One cell out: uniform `255`.
+
+**The defect predates `SS-3`.** The same fixture built from *partial* occluders (a run of vertical
+slabs, `SS-3` off) rippled `223 / 228` — 5 units, live since `SS-2`, unnoticed. `SS-3` did not
+introduce the mechanism; it applied the model to every wall in the world and multiplied the amplitude
+six-fold. **The cause and the fix are in §5.2's second correction block.**
+
+**What landed.** `ShadePoint` now keeps two readings of the same nine silhouettes: `shadow[9]` per
+**cell** (feeding the corner seal and the light-mean weights, both cell questions) and `quadrant[4]`
+per **direction** (feeding the occlusion sum). `ClipToQuadrant` clips a silhouette to a quadrant and
+rejects zero-area clips; `LightAttenuation.CellOcclusionShare` is renamed
+**`QuadrantOcclusionShare`** to stop the old reading being re-derived from the name.
+
+| Configuration                                | Before `SS-3a`      | After              |
+|----------------------------------------------|---------------------|--------------------|
+| Wall base, seam → centre                     | `128` → `159`       | **`128` → `128`**  |
+| Half a cell out                              | `223` → `228`       | **`223` → `223`**  |
+| Slab run (`SS-3` off), seam → centre         | `223` → `228`       | **`223` → `223`**  |
+| Corner reduction (0/1/2/3 occluders)         | `255/191/64/64`     | `255/191/64/64`    |
+| Lone cube, middle of its edge                | `191`               | **`128`** (intended) |
+
+- **Precondition:** none — fixes `SS-2`'s model in place, under `SS-3`'s already-shipped gate.
+- **Prove-red (executed 2026-08-09):** new baseline **B59** — walk the wall base and the row half a
+  cell out and require both flat — red first at **31** and **5** units, with its own positive control
+  green (the wall must actually cast, and its shadow must end within a cell, or "uniform" would mean
+  "absent").
+- **B54 was rewritten, not loosened, and the reason is the interesting part.** It asserted that
+  shading is a function of distance *alone*, against `occ = 0.25·(1 − d)²`. The quadrant model
+  falsifies that: beside a block's face the block fills two quadrants, beside its corner one — equal
+  distance, unequal occlusion, and correctly so. The old assertion encoded **circular isocontours**,
+  which was never what finding S2 claims. The assertion moved to the two properties S2 *is* about and
+  which depend on the metric alone: the shadow **reaches equally far in every direction**, and it
+  **never deepens with distance** within a direction. Values stay pinned by `B56`/`B57`/`B58`/`B59`.
+- **Acceptance:** ✅ universal gate — Validate All **439/439**, both assemblies clean. ⏳ in-game
+  confirmation, **both with the setting on and off** — the fix changes the `SS-2` path too.
+- **Cost:** the occlusion term goes from 9 distance evaluations per sample to at most 9 × 4 clipped
+  ones, pruned by the zero-area test (most cells touch one or two quadrants). Folded into `SS-3`'s
+  outstanding capture rather than measured separately.
+- **Serialization:** none.
+
 ### SS-4 — Subdivide custom-mesh faces (🟡, behaviour change — S6)
 
 - **Precondition:** `SS-2` confirmed in game.
@@ -1474,6 +1550,7 @@ goes as `N²`. `FULL_CUBE_SUB_CELL_TESSELLATION` is a named constant with that r
 
 ## Document History
 
+* **v2.1** - **`SS-3a`: occlusion is summed over the four QUADRANTS around a point, not over the nine cells.** In game, `SS-3` showed a dark dash at every cell seam along every wall; measured, the wall base read `128` at seams against `159` mid-cell. The per-cell sum reads the **grid**, not the geometry — a straight wall arrives as three separate cell silhouettes, and how many of them touch the sample point depends on where the seams fall. At a cell corner cells and quadrants coincide, which is why the per-cell form reproduced every corner value and shipped. **The seams were the correct value**: pre-SS-3 that edge had only its two `128` corners with the GPU interpolating between them, so it was the *interior* samples that disagreed with the corners. **The defect predates SS-3** — the same fixture in slabs rippled 5 units, live since SS-2. Fix: `quadrant[4]` alongside `shadow[9]`, a quadrant darkened by the nearest silhouette *covering area* in it (a silhouette merely touching a quadrant boundary covers none of it), with the corner seal staying per-cell and applied to both readings so `B58`'s identity survives. `CellOcclusionShare` → **`QuadrantOcclusionShare`**. Walls are now flat at `128 / 223 / 255`, and the SS-2 slab path is flat too. **Accepted look change:** a lone block's contact shadow deepens at the middle of its edge, `191 → 128` (its corners stay `191`) — a block touching you along a whole edge fills two quadrants, not one quarter. New baseline **B59** (wall uniformity), red first at 31 units. **`B54` rewritten, not loosened**: its "equal distance ⇒ equal shadow" premise is *false* under the correct model and encoded circular isocontours, which is not what S2 claims — it now asserts reach and ordering, both metric-only. Validate All **439**
 * **v2.0** - **`SS-3` shipped behind a default-off Graphics setting (`Full-Block Contact Shadows`).** The gate now reports an `int tessellation` rather than a boolean, admitting a face at **density 2** when any of the nine hoisted cells casts a silhouette — `FULL_CUBE_SUB_CELL_TESSELLATION`, half of the partial-occluder density, because a full cube's silhouette *is* its cell so there is no sub-cell edge to resolve and the cost goes as `N²`. **§8's projected cost proved exact when measured against the real gate** (1.00× / 1.41× / 1.73× / 1.48×). New baseline **B54**, the suite's **first metric assertion**: every sub-vertex around a lone cube is checked against the closed form `occ = 0.25·(1 − d)²` derived from §5.2, with an anti-vacuity guard demanding off-axis samples, since only the diagonals separate a Euclidean metric from a separable one (S2). Prove-red both ways: gate-never-on reds B54 alone (the pre-SS-3 engine, the packet's predicted free prove-red); gate-always-on reds **B11, B49's gate leg and B56** — exactly the standard-cube family predicted, all three asserting the undivided path. **No existing baseline moved**, because the flag defaults off on both the shipped and harness paths. Validate All **438**. Still owed before the default flips: an IL2CPP `perf-benchmark` capture and in-game sign-off
 * **v1.9** - **D7 decided (owner): build `SS-3` now, per-pixel on `VX-1` is the destination**, after a research pass over four routes. `SS-3` is **not** throwaway under that plan — route B's volume is finite, so the far field keeps vertex-baked AO and `SS-3` becomes its fallback. Two corrections to D7's own assumptions came out of the research: (1) **route B needs `VX-1`'s light volume too, not just occupancy** — `SS-2a` moved occlusion into the light weights, so a per-pixel occlusion factor over an interpolated vertex light no longer reproduces the model (≈ 9 occupancy + 4 light taps per fragment); (2) **route B has an AO horizon** at the volume radius (`VX-1`'s default ≈ 5 chunks, against view distances of 10 and 20 in `FP-4`'s sweep) and AO does not degrade gracefully the way fog does — the owner's steer that the volume be **view-distance aware** is filed against `VX-1`, along with the quadratic memory that implies and the `MR-8` vertex saving that could offset it. **§8's "genuinely open magnitude" is now measured**: `SS-3` admits 0 % of faces on flat ground, 13.8–24.3 % on rolling terrain and 16.0 % in a built room → **3.1×–4.7× vertices at `N = 4`, 1.4×–1.7× at `N = 2`**, making `N = 2` the expected answer. Also recorded so they are not re-derived: **route C** (an 8-bit neighbour-occupancy mask in the spare `Normal.w`, evaluated per pixel — zero cost and no `VX-1` dependency, but only a separable approximation, so `B58` would red it, and incompatible with `MR-8`) and **route D** (URP's screen-space AO — rejected). And a cost nothing else carries: moving AO off the mesh makes the meshing suite **blind** to it, with no golden-image harness to replace `B41`–`B58`
 * **v1.8** - **SS-2a, second defect: the light mean must be weighted by visibility, not by a per-block "holds light" flag.** The product-seal fix was correct and the artifact survived it in game. Every block in the reported scene is a **full cube**, so §5.2's reduction says ordinary terrain cannot have moved — and that contradiction is the finding: **the reduction holds only under a uniform light field**, which is what every AO scenario in the suite fills (`MH-3`). Measured at a sealed corner on plain full cubes, the engine read `64 / 51 / 38 / 32` as the hidden diagonal cell's sky went `15 / 9 / 3 / 0`, where the pre-SS-2 model reads `64` throughout. Cause: `SS-2` split one expression into "light mean × `(1 − occ)`" and took the mean over cells that *hold* light — identical to the occluded set while occluders are opaque, and wrong the moment the **seal occludes air**, which is credited and debited at once. Weighting the mean by `wᵢ·openᵢ` makes the two factors cancel (`Σw·open = 1 − occ` at a corner), so the model now collapses to the pre-SS-2 expression **for an arbitrary light field** — a strictly stronger reduction than §5.2 originally claimed. Needs one guard: fall back to the unshadowed mean where the kernel sees nothing, which is the black-face case SS-2 mis-diagnosed as "light must not be weighted by the per-point shadow" (true unrenormalized, false renormalized). New baseline **B58**, red first at `64 → 32` with **all 52 others green** — the measure of how invisible this was. Validate All **437**
@@ -1489,4 +1566,4 @@ goes as `N²`. `FULL_CUBE_SUB_CELL_TESSELLATION` is a named constant with that r
 ---
 
 **Last Updated:** 2026-08-09  
-**Next Review:** on the `SS-3` perf capture — it decides whether `Full-Block Contact Shadows` defaults on. `SS-4` is unblocked and independent; D1/D2/D3/D7 are all settled
+**Next Review:** on the in-game confirmation of `SS-3a` (with the setting both on and off), then the `SS-3` perf capture — which decides whether `Full-Block Contact Shadows` defaults on. `SS-4` is unblocked and independent; D1/D2/D3/D7 are all settled
