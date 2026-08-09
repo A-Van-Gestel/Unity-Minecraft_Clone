@@ -1315,7 +1315,11 @@ namespace Jobs
             // itself, so its shadow only has to resolve a falloff, and half the density carries it at a
             // quarter of the vertex cost. Faces no occluder reaches stay a single quad, which is what
             // keeps flat ground free.
-            tessellation = hasPartialOccluder
+            //
+            // The finer grid is worth paying for only where there is a shadow to resolve, so it requires
+            // that something actually cast: a partial block merely SITTING in the neighborhood is not a
+            // shadow. A top slab beside a floor is the case — its volume never reaches the floor plane.
+            tessellation = hasPartialOccluder && hasAnyOccluder
                 ? SUB_CELL_TESSELLATION
                 : (FullCubeContactShadows && hasAnyOccluder ? FULL_CUBE_SUB_CELL_TESSELLATION : 1);
         }

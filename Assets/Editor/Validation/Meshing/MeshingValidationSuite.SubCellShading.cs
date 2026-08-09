@@ -43,7 +43,105 @@ namespace Editor.Validation.Meshing
             scenarios.Add(new Scenario(
                 "B59: a straight wall's shadow is uniform along the wall — no scalloping at the cell seams (SS-3a)",
                 B59_StraightWallShadowIsUniform));
+
+            scenarios.Add(new Scenario(
+                "B60: a partial occluder that casts nothing does not subdivide the face it stands over (SS-3a)",
+                B60_NonCastingPartialDoesNotSubdivide));
         }
+
+        /// <summary>
+        /// B60 — <b>the tessellation gate must read the shadow, not the neighborhood.</b> A top slab
+        /// hanging above a floor casts nothing on that floor: its volume spans the upper half of its own
+        /// cell and never reaches the floor's plane, which
+        /// <c>BurstOcclusionUtility.GetPlaneSilhouette</c> already answers correctly. The floor face under
+        /// it must therefore stay a single quad.
+        /// <para>
+        /// The gate asked a cheaper question — <i>is a partial block present in the 3×3</i> — and a block
+        /// merely standing nearby is not a shadow. So this face was subdivided 4×4 and shaded at 25
+        /// sample points to render a shadow that does not exist: 16 quads and 64 vertices where 1 and 4
+        /// carry the same result, on every face any slab or stair hangs over.
+        /// </para>
+        /// <para>
+        /// <b>Both legs are load-bearing, in opposite directions</b> (finding F15). The first leg alone is
+        /// satisfied by deleting sub-cell shading outright; the second pins that the very same fixture
+        /// still subdivides when the slab is turned the other way up and does reach the plane. Only
+        /// together do they say "subdivide where there is a shadow, and only there".
+        /// </para>
+        /// </summary>
+        /// <returns>True when a non-casting partial leaves the face undivided and a casting one splits it.</returns>
+        private static bool B60_NonCastingPartialDoesNotSubdivide()
+        {
+            ushort lit = LightBitMapping.PackLightData(15, 0, 0, 0);
+
+            int topSlabQuads = SlabOverFloorQuads(lit, TOP_SLAB_META, out int darkest);
+            int bottomSlabQuads = SlabOverFloorQuads(lit, BOTTOM_SLAB_META, out _);
+
+            bool ok = MeshAssert.IsTrue("B60 a partial occluder that reaches nothing leaves the face undivided",
+                topSlabQuads == 1,
+                $"The floor face under a top half slab emitted {topSlabQuads} quad(s). That slab's volume "
+                + "occupies the upper half of its own cell, so it never reaches this face's plane and the "
+                + "silhouette model correctly reports it casts nothing — there is no shadow here to "
+                + "resolve.\n"
+                + "Subdividing on the mere presence of a partial block in the neighborhood, rather than on "
+                + "one having actually cast, makes every face a slab or stair hangs over pay 16 quads and "
+                + "64 vertices to reproduce the value a single quad already carried.");
+
+            // F15: "one quad" is also what a face with sub-cell shading removed emits, and "undarkened" is
+            // what a face with no light model at all reads. The same fixture with the slab the other way
+            // up must still subdivide — that is what makes the leg above a statement about casting.
+            ok &= MeshAssert.IsTrue("B60 the same fixture still subdivides when the slab does reach the face",
+                bottomSlabQuads > 1,
+                $"Turned the other way up — occupying the lower half of its cell, and so standing on this "
+                + $"very face — the slab produced {bottomSlabQuads} quad(s). A partial occluder in contact "
+                + "with a face must still get the finer grid; its edge sits at the cell midline, which is "
+                + "the resolution problem sub-cell shading exists to solve (B49).");
+
+            ok &= MeshAssert.IsTrue("B60 the non-casting slab leaves the face unshadowed",
+                darkest == 255,
+                $"The floor face under the top slab reads {darkest} at its darkest under a uniformly lit "
+                + "sky. A volume that does not reach this plane must not darken it at all; if it does, the "
+                + "undivided face above is hiding a real shadow at one sample per corner rather than "
+                + "correctly carrying none.");
+
+            return ok;
+        }
+
+        /// <summary>
+        /// Places one half slab in the cell directly above the probe floor cell and reports how finely the
+        /// floor's top face was subdivided.
+        /// </summary>
+        /// <param name="lit">Packed light value to fill the world with.</param>
+        /// <param name="slabMeta">Orientation of the slab, selecting which half of its cell it fills.</param>
+        /// <param name="darkest">The darkest sky value emitted on the probe face.</param>
+        /// <returns>The quad count on the probe cell's top face.</returns>
+        private static int SlabOverFloorQuads(ushort lit, byte slabMeta, out int darkest)
+        {
+            using MeshingTestWorld world = new MeshingTestWorld();
+            BuildFloor(world);
+            world.SetBlock(B49_X, B49_Y + 1, B49_Z, TestMeshBlockPalette.HalfSlab, slabMeta);
+            world.FillLight(lit);
+
+            // Read inside the using scope: the output's buffers are pooled by the world.
+            MeshDataJobOutput output = world.Run(SmoothLightingQuality.High);
+
+            darkest = 255;
+            foreach (SubVertexSample s in TopFaceSubVertexField(output, B49_X, B49_Y, B49_Z))
+                darkest = Mathf.Min(darkest, s.Sun);
+
+            return CountTopFaceQuads(output, B49_X, B49_Y, B49_Z);
+        }
+
+        /// <summary>
+        /// <see cref="MetadataSchema.Facing6Roll2"/> orientation placing the half slab in the <b>upper</b>
+        /// half of its cell (rotated bounds <c>y ∈ [0.5, 1]</c>) — the occluder that reaches no floor.
+        /// </summary>
+        private const byte TOP_SLAB_META = 0x10;
+
+        /// <summary>
+        /// Orientation leaving the slab in the <b>lower</b> half of its cell (the authored
+        /// <c>BottomHalfSlab</c> bounds, unrotated) — the contrast case, which does reach the floor.
+        /// </summary>
+        private const byte BOTTOM_SLAB_META = 0x00;
 
         /// <summary>
         /// B59 — <b>a straight wall must cast a straight shadow.</b> Walk along the base of a flat wall
@@ -899,7 +997,7 @@ namespace Editor.Validation.Meshing
         /// <summary>Positional tolerance when matching an emitted vertex to a face (SS-0).</summary>
         private const float FACE_POSITION_EPSILON = 0.01f;
 
-        /// <summary>Fills a 5×5 platform of full cubes centerd on the probe cell.</summary>
+        /// <summary>Fills a 5×5 platform of full cubes centered on the probe cell.</summary>
         /// <param name="world">The fixture to build into.</param>
         private static void BuildFloor(MeshingTestWorld world)
         {
