@@ -1355,7 +1355,10 @@ the seal began occluding air.
 A face is admitted at density 2 when **any** of the nine hoisted cells casts a silhouette and the new
 `FullCubeContactShadows` job flag is set; a partial occluder still wins at density 4; a face nothing
 reaches stays a single quad. Behind a Graphics setting, **`Full-Block Contact Shadows`, default off**
-(`SettingsManager.fullBlockContactShadows` → `WorldJobManager`). The harness gained the same opt-in
+(`SettingsManager.fullBlockContactShadows` → `WorldJobManager`), applied **live** — `World`'s
+`HandleSettingChanged` re-requests a mesh rebuild for every active chunk when it moves, the same hook
+`smoothLighting` uses, because the setting is read only inside the mesh job and here changes the
+geometry rather than only the shading values. The harness gained the same opt-in
 (`MeshingTestWorld.Run(..., fullCubeContactShadows:)`, default off), so **no pre-SS-3 baseline moved**.
 New baseline **B54**. Validate All **438**.
 

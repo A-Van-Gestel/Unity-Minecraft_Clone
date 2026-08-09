@@ -695,6 +695,12 @@ public bool fullBlockContactShadows;   // default OFF, pending a perf capture
 | **Off** (default) | A face is subdivided only when a **partial** occluder (slab, post — anything with authored `collisionBounds`) can reach it. Ordinary full-cube terrain carries one shading value per cell corner, as it always has. |
 | **On**  | Faces reached by **full cubes** are subdivided too, at half the density (`FULL_CUBE_SUB_CELL_TESSELLATION = 2` against `SUB_CELL_TESSELLATION = 4`), so a wall's shadow resolves as a band hugging it instead of a ramp across the whole adjoining cell. |
 
+Both settings **apply live**: `World.HandleSettingChanged` subscribes to
+`SettingsManager.OnSettingChanged` and re-requests a mesh rebuild for every active chunk when either
+one moves. Neither is read anywhere but inside `MeshGenerationJob`, so nothing already built reflects
+a change until that job runs again — and for `fullBlockContactShadows` the rebuild is not cosmetic,
+since the setting changes how many quads a face emits.
+
 It is off by default because it is **the one shading change in this area that moves the world's
 vertex count** — measured **1.00×** on flat ground, **1.41×–1.73×** on rolling terrain and **1.48×**
 in a built room, with the count following silhouette length rather than area. Everything else in the

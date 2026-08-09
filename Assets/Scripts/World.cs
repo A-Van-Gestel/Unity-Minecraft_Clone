@@ -4695,7 +4695,11 @@ public class World : MonoBehaviour, IMeshDrainHost
     /// </summary>
     private void HandleSettingChanged(string fieldName)
     {
-        if (fieldName == nameof(Settings.smoothLighting))
+        // Both settings are consumed inside MeshGenerationJob, so nothing already-built reflects a
+        // change until that job runs again over every loaded chunk. fullBlockContactShadows changes the
+        // geometry itself (SS-3 subdivides admitted faces), not only the shading values.
+        if (fieldName == nameof(Settings.smoothLighting)
+            || fieldName == nameof(Settings.fullBlockContactShadows))
         {
             foreach (ChunkCoord coord in _activeChunks)
             {
