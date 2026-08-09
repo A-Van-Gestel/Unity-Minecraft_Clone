@@ -73,8 +73,9 @@ namespace Editor.Validation.Meshing
         {
             ushort lit = LightBitMapping.PackLightData(15, 0, 0, 0);
 
-            int topSlabQuads = SlabOverFloorQuads(lit, TOP_SLAB_META, out int darkest);
-            int bottomSlabQuads = SlabOverFloorQuads(lit, BOTTOM_SLAB_META, out _);
+            int topSlabQuads = SlabOverFloorQuads(lit, TOP_SLAB_META, withCastingCube: false, out int darkest);
+            int bottomSlabQuads = SlabOverFloorQuads(lit, BOTTOM_SLAB_META, withCastingCube: false, out _);
+            int mixedQuads = SlabOverFloorQuads(lit, TOP_SLAB_META, withCastingCube: true, out _);
 
             bool ok = MeshAssert.IsTrue("B60 a partial occluder that reaches nothing leaves the face undivided",
                 topSlabQuads == 1,
@@ -96,6 +97,18 @@ namespace Editor.Validation.Meshing
                 + "with a face must still get the finer grid; its edge sits at the cell midline, which is "
                 + "the resolution problem sub-cell shading exists to solve (B49).");
 
+            // The non-casting partial must not ride in on someone else's shadow either. With a full cube
+            // casting beside it, "did anything cast" is true — so a gate that pairs that with the mere
+            // PRESENCE of a partial still reaches the fine grid, and only asking whether the partial
+            // itself cast gets this face down to the density its actual occluder calls for.
+            ok &= MeshAssert.IsTrue("B60 a caster nearby does not lend the non-casting partial its grid",
+                mixedQuads == 1,
+                $"With a full cube casting beside it, the floor face under the same non-casting top slab "
+                + $"emitted {mixedQuads} quad(s). The cube's shadow is a full-cell silhouette that resolves "
+                + "at the face's corners (full-block contact shadows being off here), and the slab still "
+                + "casts nothing — so nothing on this face needs sub-cell resolution, and the fine grid "
+                + "is being granted on the slab's presence rather than on any shadow it casts.");
+
             ok &= MeshAssert.IsTrue("B60 the non-casting slab leaves the face unshadowed",
                 darkest == 255,
                 $"The floor face under the top slab reads {darkest} at its darkest under a uniformly lit "
@@ -112,13 +125,19 @@ namespace Editor.Validation.Meshing
         /// </summary>
         /// <param name="lit">Packed light value to fill the world with.</param>
         /// <param name="slabMeta">Orientation of the slab, selecting which half of its cell it fills.</param>
+        /// <param name="withCastingCube">Whether to stand a full cube on the floor beside the probe cell,
+        /// so something in the neighborhood casts even when the slab does not.</param>
         /// <param name="darkest">The darkest sky value emitted on the probe face.</param>
         /// <returns>The quad count on the probe cell's top face.</returns>
-        private static int SlabOverFloorQuads(ushort lit, byte slabMeta, out int darkest)
+        private static int SlabOverFloorQuads(ushort lit, byte slabMeta, bool withCastingCube, out int darkest)
         {
             using MeshingTestWorld world = new MeshingTestWorld();
             BuildFloor(world);
             world.SetBlock(B49_X, B49_Y + 1, B49_Z, TestMeshBlockPalette.HalfSlab, slabMeta);
+
+            if (withCastingCube)
+                world.SetBlock(B49_X + 1, B49_Y + 1, B49_Z, TestMeshBlockPalette.SolidOpaque, 0);
+
             world.FillLight(lit);
 
             // Read inside the using scope: the output's buffers are pooled by the world.

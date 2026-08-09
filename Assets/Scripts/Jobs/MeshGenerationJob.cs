@@ -1281,7 +1281,6 @@ namespace Jobs
                     {
                         VoxelState s = state.Value;
                         BlockTypeJobData props = BlockTypes[s.ID];
-                        hasPartialOccluder |= props.HasCustomBounds && props.IsOpaque;
 
                         if (LightAttenuation.AmbientOcclusionPlaneSilhouette(in props, s.Meta, normalAxis,
                                 planeCoord, frontIsPositive, out float2 rectMin, out float2 rectMax))
@@ -1292,6 +1291,12 @@ namespace Jobs
                             entry.RectMax = rectMax + new float2(da, db);
                             entry.Casts = 1;
                             hasAnyOccluder = true;
+
+                            // Only a caster sets the finer grid, and only its SHAPE decides: the
+                            // silhouette already proves this volume reaches the plane, and only a partial
+                            // one can put an edge somewhere other than the cell border. IsOpaque is not
+                            // retested — a transparent volume never returns a silhouette at all.
+                            hasPartialOccluder |= props.HasCustomBounds;
                         }
 
                         // A fully-opaque cell holds only surface light and is fully shadowing wherever it
@@ -1317,10 +1322,11 @@ namespace Jobs
             // quarter of the vertex cost. Faces no occluder reaches stay a single quad, which is what
             // keeps flat ground free.
             //
-            // The finer grid is worth paying for only where there is a shadow to resolve, so it requires
-            // that something actually cast: a partial block merely SITTING in the neighborhood is not a
-            // shadow. A top slab beside a floor is the case — its volume never reaches the floor plane.
-            tessellation = hasPartialOccluder && hasAnyOccluder
+            // Every term here is a question about the SHADOWS that reached this face, not about what
+            // happens to be standing near it: both flags are set only where a silhouette was cast, so a
+            // top slab hanging over a floor — which never reaches the floor's plane — leaves it at one
+            // quad instead of sixteen (B60). hasPartialOccluder implies hasAnyOccluder by construction.
+            tessellation = hasPartialOccluder
                 ? SUB_CELL_TESSELLATION
                 : (FullCubeContactShadows && hasAnyOccluder ? FULL_CUBE_SUB_CELL_TESSELLATION : 1);
         }
