@@ -58,6 +58,7 @@ MonoBehaviour:
     fluidQuality: 2
     fluidRefraction: 100
     smoothLighting: 1
+    fullBlockContactShadows: 0
     clouds: 2
     enableFoliageSway: 1
     vSync: 1
