@@ -4604,6 +4604,62 @@ public class World : MonoBehaviour, IMeshDrainHost
     }
 
     /// <summary>
+    /// Reads a voxel's packed light value.
+    /// </summary>
+    /// <param name="voxelPos">World voxel position.</param>
+    /// <param name="lightData">The packed light value; 0 when the chunk is not loaded.</param>
+    /// <returns>True when the position resolved to a loaded chunk.</returns>
+    public bool TryGetLightData(Vector3Int voxelPos, out ushort lightData)
+    {
+        Chunk chunk = GetChunkFromVector3(voxelPos);
+        if (chunk?.ChunkData == null)
+        {
+            lightData = 0;
+            return false;
+        }
+
+        Vector3Int localPos = chunk.GetVoxelPositionInChunkFromGlobalVector3(voxelPos);
+        lightData = chunk.ChunkData.GetLightData(localPos.x, localPos.y, localPos.z);
+        return true;
+    }
+
+    /// <summary>
+    /// The sky light actually reaching a voxel at the current time of day (RF-1 §9).
+    /// </summary>
+    /// <param name="voxelPos">World voxel position.</param>
+    /// <returns>The time-darkened sky light (0-15); 0 when the chunk is not loaded.</returns>
+    /// <remarks>
+    /// Time-dependent gameplay — mob spawning, plant growth — must read this rather than the stored
+    /// channel, which is permanently 15 under open sky because it records <i>exposure</i>, not
+    /// brightness. Pure integer math: no lighting pass, no remesh, no save impact.
+    /// </remarks>
+    public byte GetEffectiveSkyLight(Vector3Int voxelPos)
+    {
+        return TryGetLightData(voxelPos, out ushort lightData)
+            ? LightBitMapping.GetEffectiveSkyLight(lightData, CurrentSkyDarken)
+            : (byte)0;
+    }
+
+    /// <summary>
+    /// The light level a voxel is lit to right now — the brighter of time-darkened sky light and
+    /// blocklight (RF-1 §9).
+    /// </summary>
+    /// <param name="voxelPos">World voxel position.</param>
+    /// <returns>The effective light level (0-15); 0 when the chunk is not loaded.</returns>
+    public byte GetEffectiveLight(Vector3Int voxelPos)
+    {
+        return TryGetLightData(voxelPos, out ushort lightData)
+            ? LightBitMapping.GetEffectiveLight(lightData, CurrentSkyDarken)
+            : (byte)0;
+    }
+
+    /// <summary>
+    /// How many sky-light levels the current time of day subtracts, <c>[0, 11]</c>. Zero (full
+    /// daylight) before the clock exists, so edit-mode fixtures read raw exposure.
+    /// </summary>
+    public int CurrentSkyDarken => TimeManager?.SkyDarken ?? 0;
+
+    /// <summary>
     /// Gets or sets whether the game is currently in a pause menu state.
     /// </summary>
     /// <summary>

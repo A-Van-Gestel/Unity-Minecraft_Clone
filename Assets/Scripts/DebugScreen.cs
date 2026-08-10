@@ -407,6 +407,17 @@ public class DebugScreen : MonoBehaviour
             _topLeftBuilder.Append(" | Direction: ").AppendLine(GetHorizontalDirection(lookingDirection.x));
             _topLeftBuilder.Append("Chunk: ").Append(_world.PlayerChunkCoord.X).Append(" / ").Append(_world.PlayerChunkCoord.Z).AppendLine();
             _topLeftBuilder.Append("Seed: ").Append(_world.worldData.seed).AppendLine();
+
+            // RF-1: the clock, so a lighting observation can be correlated with the time that produced it.
+            WorldTimeManager clock = _world.TimeManager;
+            if (clock != null)
+            {
+                _topLeftBuilder.Append("Time: ").Append(clock.DayTicks).Append(" (day ").Append(clock.ElapsedDays)
+                    .Append(", darken ").Append(clock.SkyDarken).Append(')');
+                if (clock.IsFrozen) _topLeftBuilder.Append(" [frozen]");
+                _topLeftBuilder.AppendLine();
+            }
+
             _topLeftBuilder.AppendLine();
         }
 
@@ -675,7 +686,16 @@ public class DebugScreen : MonoBehaviour
             builder.Append("Name: ").AppendLine(props.blockName);
             builder.Append("Coords: ").Append(voxelPos.x).Append(", ").Append(voxelPos.y).Append(", ").Append(voxelPos.z).AppendLine();
             builder.Append("Is Active: ").AppendLine(BoolToYesNoString(isVoxelActive));
-            builder.Append("Light (Sky/Block/Max): ").Append(skyLight).Append(" / ").Append(blockLight).Append(" / ").Append(Math.Max(skyLight, blockLight)).AppendLine();
+            // Sky is shown twice on purpose (RF-1 §9): the stored channel is time-invariant sky
+            // EXPOSURE, so under open sky it reads 15 at midnight too. "Eff" is what the time of day
+            // leaves of it — the value gameplay and the shader both work from.
+            int skyDarken = _world.CurrentSkyDarken;
+            int effectiveSky = Math.Max(0, skyLight - skyDarken);
+            builder.Append("Light (SkyExp/Block/Max): ").Append(skyLight).Append(" / ").Append(blockLight)
+                .Append(" / ").Append(Math.Max(skyLight, blockLight)).AppendLine();
+            builder.Append("Light Eff (Sky/Max): ").Append(effectiveSky).Append(" / ")
+                .Append(Math.Max(effectiveSky, blockLight))
+                .Append("  (darken ").Append(skyDarken).Append(')').AppendLine();
             builder.Append("Meta: 0x").AppendHex2(state.Meta).AppendLine();
 
             // --- Context-Specific Information ---

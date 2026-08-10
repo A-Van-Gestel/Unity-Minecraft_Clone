@@ -74,6 +74,45 @@ namespace Jobs.BurstData
             return (byte)math.max(r, math.max(g, b));
         }
 
+        // --- Time-of-day effective light (RF-1 §9) ---
+
+        /// <summary>
+        /// Applies the day/night darkening to a voxel's stored sky light.
+        /// </summary>
+        /// <param name="lightData">The packed light value.</param>
+        /// <param name="skyDarken">Levels to subtract, <c>[0, 11]</c> — <c>WorldTimeManager.SkyDarken</c>.</param>
+        /// <returns>The sky light actually reaching this voxel right now (0-15).</returns>
+        /// <remarks>
+        /// The stored value is time-invariant <b>sky exposure</b>: a voxel under open sky stores 15 at
+        /// midnight just as it does at noon. Darkening is applied here, at read time, so no lighting
+        /// pass, remesh, or save is involved. Time-dependent gameplay must read this, never the raw
+        /// channel. Burst-safe — pass <paramref name="skyDarken"/> in as job data.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte GetEffectiveSkyLight(ushort lightData, int skyDarken)
+        {
+            int stored = (lightData >> SKY_SHIFT) & CHANNEL_MASK;
+            return (byte)math.max(0, stored - skyDarken);
+        }
+
+        /// <summary>
+        /// The light level a voxel is actually lit to right now: the brighter of its time-darkened sky
+        /// light and its strongest blocklight channel.
+        /// </summary>
+        /// <param name="lightData">The packed light value.</param>
+        /// <param name="skyDarken">Levels to subtract from sky light, <c>[0, 11]</c>.</param>
+        /// <returns>The effective light level (0-15) all time-sensitive gameplay consumes.</returns>
+        /// <remarks>
+        /// Takes the max of the two contributions, matching the shader's per-channel <c>max()</c>, so a
+        /// torch-lit room stays bright at midnight while open terrain falls to the moonlight floor.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte GetEffectiveLight(ushort lightData, int skyDarken)
+        {
+            int effectiveSky = GetEffectiveSkyLight(lightData, skyDarken);
+            return (byte)math.max(effectiveSky, GetMaxBlocklight(lightData));
+        }
+
         // --- Setters ---
 
         /// <summary>

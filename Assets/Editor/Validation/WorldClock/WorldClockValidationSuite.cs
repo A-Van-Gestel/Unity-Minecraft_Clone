@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Data.WorldTypes;
 using Editor.Validation.Framework;
+using Jobs.BurstData;
 using UnityEditor;
 using UnityEngine;
 
@@ -71,6 +72,7 @@ namespace Editor.Validation.WorldClock
                 new Scenario("B7 /time named times map to the right point in the day", RunB7NamedTimes),
                 new Scenario("B8 SetDayTime keeps the day count; AddTicks clamps at zero", RunB8Setters),
                 new Scenario("B9 The named times are visually distinct — day != noon, night != midnight", RunB9NamedTimesDistinct),
+                new Scenario("B10 Effective light: sky darkens with time, blocklight never does", RunB10EffectiveLight),
             };
             return ValidationSuiteRunner.Execute("World Clock", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -440,6 +442,66 @@ namespace Editor.Validation.WorldClock
             {
                 Release(settings);
             }
+        }
+
+        /// <summary>
+        /// B10 — the RF-1 §9 read-time model: time of day subtracts from stored sky <i>exposure</i> and
+        /// never touches blocklight, so a torch-lit voxel reads the same at midnight as at noon.
+        /// </summary>
+        /// <returns>True when every assertion holds.</returns>
+        /// <remarks>
+        /// Exercises <see cref="LightBitMapping"/> directly rather than through <c>World</c>: the query is
+        /// pure integer math over a packed value, and a scene-bound test would only add a chunk lookup
+        /// between the assertion and the thing being asserted.
+        /// </remarks>
+        private static bool RunB10EffectiveLight()
+        {
+            // Fully sky-exposed, unlit by blocks — the open-terrain case.
+            ushort openSky = LightBitMapping.PackLightData(15, 0, 0, 0);
+            bool ok = Check("open sky at noon is full light",
+                LightBitMapping.GetEffectiveLight(openSky, 0) == 15);
+            ok &= Check($"open sky at deepest night is the moonlight floor 4, got {LightBitMapping.GetEffectiveLight(openSky, 11)}",
+                LightBitMapping.GetEffectiveLight(openSky, 11) == 4);
+
+            // Stored exposure is never mutated by the query — the whole point of the read-time model.
+            ok &= Check("the stored channel is untouched by darkening",
+                LightBitMapping.GetSkyLight(openSky) == 15);
+
+            // A dim sky-lit voxel clamps at zero rather than going negative.
+            ushort dimSky = LightBitMapping.PackLightData(3, 0, 0, 0);
+            ok &= Check($"sky light below the darken clamps to 0, got {LightBitMapping.GetEffectiveSkyLight(dimSky, 11)}",
+                LightBitMapping.GetEffectiveSkyLight(dimSky, 11) == 0);
+
+            // Torches are time-invariant: the max() picks blocklight once sky falls below it.
+            ushort torchLit = LightBitMapping.PackLightData(15, 14, 8, 2);
+            ok &= Check($"a torch-lit voxel keeps its blocklight at midnight, got {LightBitMapping.GetEffectiveLight(torchLit, 11)}",
+                LightBitMapping.GetEffectiveLight(torchLit, 11) == 14);
+            ok &= Check("its sky contribution still darkens underneath",
+                LightBitMapping.GetEffectiveSkyLight(torchLit, 11) == 4);
+
+            // A cave voxel with no sky exposure is unaffected by time entirely.
+            ushort cave = LightBitMapping.PackLightData(0, 9, 0, 0);
+            ok &= Check("a sky-sealed voxel reads the same at every time of day",
+                LightBitMapping.GetEffectiveLight(cave, 0) == 9 &&
+                LightBitMapping.GetEffectiveLight(cave, 11) == 9);
+
+            // The query and the clock agree: what the shader subtracts is what gameplay subtracts.
+            WorldTimeManager clock = NewClock(out TimeOfDaySettings settings);
+            try
+            {
+                SetDayFraction(clock, 0f);
+                int fromShaderGlobal = Mathf.RoundToInt((1f - clock.GlobalLightLevel) * WorldTimeManager.MaxSkyLight);
+                ok &= Check($"the darken implied by GlobalLightLevel matches SkyDarken ({fromShaderGlobal} vs {clock.SkyDarken})",
+                    fromShaderGlobal == clock.SkyDarken);
+                ok &= Check($"open sky at midnight reads 4 through the clock, got {LightBitMapping.GetEffectiveLight(openSky, clock.SkyDarken)}",
+                    LightBitMapping.GetEffectiveLight(openSky, clock.SkyDarken) == 4);
+            }
+            finally
+            {
+                Release(settings);
+            }
+
+            return ok;
         }
 
         /// <summary>B8 — the explicit setters keep the day count and refuse to run time backwards past zero.</summary>
