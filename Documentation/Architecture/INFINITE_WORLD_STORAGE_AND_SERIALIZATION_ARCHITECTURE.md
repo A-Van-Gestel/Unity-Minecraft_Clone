@@ -16,7 +16,7 @@ The core of this transition involves:
 4. **Custom Binary Serialization:** Abandoning `BinaryFormatter` for a high-performance, versioned binary writer/reader with **LZ4 Compression**.
 5. **Asynchronous I/O Pipeline:** Ensuring saving and loading never stalls the Main Thread.
 6. **Lighting State Preservation:** Critical system to prevent "black spots" by preserving lighting calculation state across save/load cycles.
-7. **Versioned Save Format with AOT Migration:** Every save carries a version number (`level.dat`, currently v14) and is upgraded offline before the world opens — see `AOT_WORLD_MIGRATION_SYSTEM.md`.
+7. **Versioned Save Format with AOT Migration:** Every save carries a version number (`level.dat`, currently v15) and is upgraded offline before the world opens — see `AOT_WORLD_MIGRATION_SYSTEM.md`.
 
 ---
 
@@ -230,13 +230,21 @@ JSON file at save folder root containing world metadata and player state.
   "borderRadius": 0,
   "creationDate": 638400000000000000,
   "lastPlayed": 638400000000000000,
+  // Every piece of mutable world state, grouped into sub-sections by concern.
   "worldState": {
-    "timeOfDay": 0.5
-  },
-  // Added in v14 — ambient environment state; RF-7's weather fields land here.
-  "environment": {
-    "windX": -0.6,
-    "windZ": 0.0
+    // Ambient environment state; RF-7's weather fields land here. Added in v14 at the document
+    // root, re-parented under worldState in v15.
+    "environment": {
+      "windX": -0.6,
+      "windZ": 0.0
+    },
+    // Added in v15 (RF-1) — the day/night clock. Total elapsed ticks (24000/day, tick 0 = sunrise),
+    // not a day fraction plus a day counter: one exact integer carries both and cannot drift.
+    // Replaces the v1–v14 "timeOfDay" field, which stored a LIGHT LEVEL because no clock existed.
+    "time": {
+      "ticks": 6000,
+      "frozen": false
+    }
   },
   "player": {
     // Chunk-relative since v13 (WS-4c) — an absolute Vector3 before that.

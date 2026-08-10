@@ -726,6 +726,12 @@ hard-to-diagnose runtime crashes on mobile and console builds.
 
 **Do not use `World.Instance` anywhere in the migration pipeline.** The migration runs before the World scene loads. Any reference to `World.Instance` will be a null reference exception.
 
+**Do not change what an already-shipped step produces.** A step's byte transform must stay identical for every input it has ever handled; semantic changes belong in a NEW step. Non-semantic hardening (error handling, fault isolation, logging) is fine.
+
+*One authorized exception exists, recorded here so it is not read as precedent.* On 2026-08-10 (RF-1) the shipped `MigrationV13ToV14EnvironmentWind` was revised to emit its `environment` section under `worldState` instead of at the document root, so all world state would share one parent. The project owner authorized it explicitly on the grounds that v14 had reached exactly one local test world, the change is `level.dat`-only, and every affected save was theirs. A v14 document written before the revision keeps its root-level `environment` and reads as calm wind — it is not re-migrated, because it is already stamped v14. **Any future world format that has reached a real save must take the new-step route instead.**
+
+**A step that REMOVES a field must mirror the whole target shape in its DTO.** Up to v14 every `level.dat` step was additive, so an incomplete DTO was merely lossy in theory. `MigrationV14ToV15TimeOfDay` is the first removal (`worldState.timeOfDay` → `worldState.time`): whatever its `V15LevelDat` omits is dropped from every migrated document, because the step re-serializes from the DTO.
+
 ---
 
 ## 7. Architecture Decision Summary

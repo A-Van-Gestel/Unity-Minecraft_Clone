@@ -1,7 +1,7 @@
 # Lighting & Rendering Feature Improvements Report
 
-**Version:** 1.1  
-**Date:** 2026-07-20  
+**Version:** 1.2  
+**Date:** 2026-08-10  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified. Owns lighting
 and rendering *features* (`RF-*`); the *performance* counterparts (`LI-*`, `GS-*`) live in
 [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md), and the combined ranked
@@ -108,7 +108,34 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 
 **Classification:** Core. Rank #1 in the combined roadmap.
 
-**What exists today (verified — the support is *wired and functional, but static*):**
+> **Phase 1 SHIPPED 2026-08-10** — the clock, the curve/gradient asset, `/time`, and save v15. **Phase 2
+> (§9 effective-light query + §10 subtractive shader parity) is still open**; the item stays on this
+> backlog until it lands and is confirmed in game. What shipped:
+>
+> - `WorldTimeManager` (`Assets/Scripts/WorldTimeManager.cs`) — a plain manager owned by `World`, ticked
+>   from `World.Update()`. Time is a `long` tick count (24000/day, tick 0 = sunrise, Minecraft parity) with
+>   a bounded sub-tick residue, so elapsed time never drifts.
+> - `TimeOfDaySettings` ScriptableObject, linked from `WorldTypeDefinition` (so a future dimension ships its
+>   own sky) with a `World` fallback. The curve outputs **sky darken 0–11**, not brightness — one sample
+>   feeds both `GlobalLightLevel` and the §9 `SkyDarken`, which is what makes them unable to disagree.
+> - **`GlobalLightLevel` is reused, not replaced**, redefined as `1 − skyDarken/15`. Its range narrows to
+>   `[0.27, 1]`: under the moonlight floor a fully sky-exposed voxel never drops below effective 4.
+> - `/time` regrammared to `set day|noon|sunset|night|midnight|<ticks>` + `add`/`freeze`/`resume`/query.
+> - Save **v14 → v15**: `worldState.time {ticks, frozen}` replaces `worldState.timeOfDay`; `environment`
+>   re-parented under `worldState`. See the AOT doc for the one authorized revision of the shipped v13→v14 step.
+> - New **World Clock validation suite** (8 baselines, prove-red verified), `Validate All` 19 suites / 452 baselines.
+>
+> The clock holds while the pause menu is open, which makes it the project's *only* pause-aware
+> system — nothing writes `Time.timeScale`, so chunk streaming and fluids run on behind the menu.
+> That inconsistency is scoped in
+> [`PAUSE_AND_SIMULATION_HALT.md`](PAUSE_AND_SIMULATION_HALT.md) (`PA-*`), filed from this work.
+>
+> Deliberately **not** shipped in Phase 1: §4's `SkyEvent` tint (no gameplay system produces events yet —
+> the lerp seam is left open), §7's day-length *user setting* (it is world/art state and lives on the asset),
+> §8's TF-4 tie-in (`hasSkyLight` does not exist), and the blue-moonlight night keys — the tint gradient
+> ships flat white, exactly as the retired `_skyLightGradient` was, so Phase 1's only visual delta is brightness.
+
+**What existed before Phase 1 (verified — the support was *wired and functional, but static*):**
 
 - `World.globalLightLevel` — a `[Range(0,1)]` inspector field (`World.cs:50-53`), set to `1` in
   `World.prefab`. Companion fields: `Color day`, `Color night`, and a
@@ -606,6 +633,11 @@ RF-8 (#22 — added 2026-07-20).
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.2** - RF-1 Phase 1 shipped (2026-08-10): world clock + `TimeOfDaySettings` asset + `/time` regrammar +
+  save v15. Corrected five stale claims in the RF-1 entry while implementing it — `SetGlobalLightValue` had a
+  third call site (`/time`, shipped 2026-07-18), the save version was already v14 (not 11), the `environment`
+  section already existed, `hasSkyLight`/`fixedGlobalLightLevel` were never built, and the line references had
+  drifted. §9/§10 remain open as Phase 2.
 * **v1.1** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Status`/`Target` lifted out of
   the summary blockquote into proper fields, including the RF-vs-LI/GS ownership split that keeps this
   report from overlapping the performance backlog. No findings or rankings changed.
@@ -624,7 +656,8 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-07-26 (header completed)  
-**Next Review:** when RF-1 (day/night cycle) is scheduled — it ranks #1 on the combined roadmap and its
-§9/§10 amendments are the most intricate part of this document; re-verify them against the shipped
-lighting storage before building.
+**Last Updated:** 2026-08-10 (RF-1 Phase 1 shipped)  
+**Next Review:** RF-1 Phase 2 — §9's effective-light query layer and §10's subtractive shader parity, the
+most intricate part of this document. Phase 1 already re-verified §1–§8 against the shipped code (see the
+RF-1 banner); §9/§10 still need that pass, and note that no validation suite can observe the shader half —
+it is capture-verified only.
