@@ -155,7 +155,7 @@ public class World : MonoBehaviour, IMeshDrainHost
     [Header("Clouds")]
     public Clouds clouds;
 
-    [Tooltip("Wind drift velocity in voxel-space XZ blocks per second, shared by clouds (per-layer scale/veer) and foliage sway (FL-1). Zero freezes both. Owned by the inspector for now; a future weather system (RF-7) takes over this value.")]
+    [Tooltip("Wind drift velocity in voxel-space XZ blocks per second, shared by clouds (per-layer scale/veer) and foliage sway (FL-1). Zero freezes both. Seeds a new world's wind; loaded worlds restore it from level.dat, and /wind overrides it at runtime. A future weather system (RF-7) takes over this value.")]
     [SerializeField]
     private Vector2 _windBlocksPerSecond = new Vector2(-0.6f, 0f);
 
@@ -164,6 +164,27 @@ public class World : MonoBehaviour, IMeshDrainHost
     /// every wind consumer (cloud drift, foliage sway); a future weather system (RF-7) drives it.
     /// </summary>
     public Vector2 WindBlocksPerSecond => _windBlocksPerSecond;
+
+    /// <summary>The shared wind's X component, in voxel-space blocks per second.</summary>
+    public float WindX => _windBlocksPerSecond.x;
+
+    /// <summary>The shared wind's Z component, in voxel-space blocks per second.</summary>
+    public float WindZ => _windBlocksPerSecond.y;
+
+    /// <summary>
+    /// Sets the shared wind vector. Both consumers sample it per frame, so the change is visible
+    /// immediately; it is persisted to level.dat on the next save.
+    /// </summary>
+    /// <remarks>
+    /// Takes loose floats rather than a <see cref="Vector2"/> so the <c>Commands</c> namespace can
+    /// drive it without a UnityEngine dependency (the <c>PlaceBlockCommand</c> precedent).
+    /// </remarks>
+    /// <param name="xBlocksPerSecond">The wind's X component, in blocks per second.</param>
+    /// <param name="zBlocksPerSecond">The wind's Z component, in blocks per second.</param>
+    public void SetWind(float xBlocksPerSecond, float zBlocksPerSecond)
+    {
+        _windBlocksPerSecond = new Vector2(xBlocksPerSecond, zBlocksPerSecond);
+    }
 
     [Header("World Border")]
     [Tooltip("Renders the per-world gameplay border wall. Inactive when the world has no border.")]
@@ -715,6 +736,8 @@ public class World : MonoBehaviour, IMeshDrainHost
                 loadedWorldType = existingMeta.worldType;
                 SetSpawnPoint(existingMeta.spawnPosition);
                 SetBorderRadius(existingMeta.borderRadius);
+                if (existingMeta.environment != null)
+                    SetWind(existingMeta.environment.windX, existingMeta.environment.windZ);
                 Debug.Log($"[World] Editor re-play detected — restoring persisted spawn point: {WorldSpawnPoint}");
             }
         }

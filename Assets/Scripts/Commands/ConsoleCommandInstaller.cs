@@ -13,7 +13,7 @@ namespace Commands
         /// <c>/help</c>. The count-floor baseline asserts the registry matches — a silently dropped
         /// registration reds the suite instead of shipping a missing command.
         /// </summary>
-        public const int InstalledCommandCount = 14;
+        public const int InstalledCommandCount = 15;
 
         /// <summary>Registers every built-in command on <paramref name="registry"/>.</summary>
         /// <param name="registry">The engine registry to populate.</param>
@@ -25,6 +25,7 @@ namespace Commands
             registry.Register(new OriginCommand());
             registry.Register(new TimeCommand());
             registry.Register(new WorldBorderCommand());
+            registry.Register(new WindCommand());
             registry.Register(new SetSpawnCommand());
             registry.Register(new SpawnCommand());
             registry.Register(new FlyCommand());

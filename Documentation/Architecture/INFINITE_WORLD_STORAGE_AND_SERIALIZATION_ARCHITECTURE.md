@@ -16,7 +16,7 @@ The core of this transition involves:
 4. **Custom Binary Serialization:** Abandoning `BinaryFormatter` for a high-performance, versioned binary writer/reader with **LZ4 Compression**.
 5. **Asynchronous I/O Pipeline:** Ensuring saving and loading never stalls the Main Thread.
 6. **Lighting State Preservation:** Critical system to prevent "black spots" by preserving lighting calculation state across save/load cycles.
-7. **Versioned Save Format with AOT Migration:** Every save carries a version number (`level.dat`, currently v11) and is upgraded offline before the world opens — see `AOT_WORLD_MIGRATION_SYSTEM.md`.
+7. **Versioned Save Format with AOT Migration:** Every save carries a version number (`level.dat`, currently v14) and is upgraded offline before the world opens — see `AOT_WORLD_MIGRATION_SYSTEM.md`.
 
 ---
 
@@ -210,7 +210,7 @@ JSON file at save folder root containing world metadata and player state.
 
 ```json
 {
-  "version": 11,
+  "version": 14,
   "worldName": "My World",
   "seed": 12345,
   "chunkHeight": 128,
@@ -226,16 +226,28 @@ JSON file at save folder root containing world metadata and player state.
       "z": 0.0
     }
   },
+  // 0 = disabled (unbounded). Added in v12; a player-only fence, see TF-14.
+  "borderRadius": 0,
   "creationDate": 638400000000000000,
   "lastPlayed": 638400000000000000,
   "worldState": {
     "timeOfDay": 0.5
   },
+  // Added in v14 — ambient environment state; RF-7's weather fields land here.
+  "environment": {
+    "windX": -0.6,
+    "windZ": 0.0
+  },
   "player": {
+    // Chunk-relative since v13 (WS-4c) — an absolute Vector3 before that.
     "position": {
-      "x": 10.5,
-      "y": 70.0,
-      "z": -5.5
+      "_chunkX": 0,
+      "_chunkZ": -1,
+      "localPosition": {
+        "x": 10.5,
+        "y": 70.0,
+        "z": 10.5
+      }
     },
     "rotation": {
       "x": 0.0,
@@ -268,7 +280,7 @@ JSON file at save folder root containing world metadata and player state.
 }
 ```
 
-**Implementation:** `SaveSystem.SaveWorld()` serializes a `WorldSaveData` DTO (`Assets/Scripts/Serialization/SaveDataTypes.cs`) via Unity's `JsonUtility` and writes it on world exit and on manual saves. The `version` field (currently **11** — `SaveSystem.CURRENT_VERSION`) drives the AOT migration system; the per-version changelog lives as comments above that constant and in `AOT_WORLD_MIGRATION_SYSTEM.md`.
+**Implementation:** `SaveSystem.SaveWorld()` serializes a `WorldSaveData` DTO (`Assets/Scripts/Serialization/SaveDataTypes.cs`) via Unity's `JsonUtility` and writes it on world exit and on manual saves. The `version` field (currently **14** — `SaveSystem.CURRENT_VERSION`) drives the AOT migration system; the per-version changelog lives as comments above that constant and in `AOT_WORLD_MIGRATION_SYSTEM.md`.
 
 ### 4.2. Chunk Blob Format (Inside Region File)
 
@@ -1121,7 +1133,7 @@ Before each major release:
 - [x] **LZ4 Compression Support**
 - [x] **Seed Mismatch Fix**
 - [x] **Quit/Flush Reliability Fix**
-- [x] **AOT World Migration System** (save versions v1 → v11; see `AOT_WORLD_MIGRATION_SYSTEM.md`)
+- [x] **AOT World Migration System** (save versions v1 → v14; see `AOT_WORLD_MIGRATION_SYSTEM.md`)
 - [x] **Versioned region addressing** (`RegionAddressCodec` V1/V2 + region repack migration)
 - [x] **PlayerStateManager** (position, rotation, capabilities, inventory, cursor item)
 - [x] **Pending blocklight store** (`pending_blocklight.bin`, Bug 08)

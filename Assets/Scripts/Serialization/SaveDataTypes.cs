@@ -62,6 +62,14 @@ namespace Serialization
         public long lastPlayed; // Ticks
 
         public WorldStateData worldState = new WorldStateData();
+
+        /// <summary>
+        /// Ambient environment state — today only the wind, deliberately a section of its own so
+        /// RF-7's weather fields (precipitation type, storm intensity) land beside it rather than
+        /// swelling <see cref="worldState"/>. Absent in pre-v14 saves, where the field defaults.
+        /// </summary>
+        public EnvironmentData environment = new EnvironmentData();
+
         public PlayerSaveData player = new PlayerSaveData();
     }
 
@@ -70,6 +78,21 @@ namespace Serialization
     public class WorldStateData
     {
         public float timeOfDay;
+    }
+
+    /// <summary>
+    /// The world's persisted environment state (v14+). Stored as the raw XZ velocity the engine
+    /// actually holds, not as speed/bearing — the polar form is a command-surface convenience and
+    /// round-tripping it through trig on every save would drift.
+    /// </summary>
+    [Serializable]
+    public class EnvironmentData
+    {
+        /// <summary>Wind velocity X component, in voxel-space blocks per second.</summary>
+        public float windX;
+
+        /// <summary>Wind velocity Z component, in voxel-space blocks per second.</summary>
+        public float windZ;
     }
 
     [Serializable]

@@ -22,6 +22,7 @@ namespace Editor.Validation.Commands
             scenarios.Add(new Scenario("B52: Suggest — a unique prefix yields the trimmed inline ghost suffix; an ambiguous/empty/fully-typed input yields nothing (CMD-5)", Completion_InlineSuggestion));
             scenarios.Add(new Scenario("B53: StripNoparse — removes every </noparse> incl. one spliced from surrounding text (loop-until-stable); null/empty safe (CMD-5 ghost guard)", Completion_StripNoparseGuard));
             scenarios.Add(new Scenario("B54: Complete — a leading space no longer defeats completion (trimmed like Execute); trailing space stays semantic (CMD-5)", Completion_LeadingWhitespaceTrimmed));
+            scenarios.Add(new Scenario("B56: Complete — /wind completes its subcommands at arg 0 and compass names at arg 2 (index-only completer: shared with /wind vector's Z slot); the speed slot offers nothing", Completion_WindArguments));
         }
 
         /// <summary>An engine with the full production pack registered (no world facade — name completion needs none).</summary>
@@ -191,6 +192,50 @@ namespace Editor.Validation.Commands
             CommandCompletion spacedSlash = engine.Complete("   /");
             ok &= Expect(spacedSlash.Candidates.Length == expected,
                 $"leading whitespace before '/' still offers the full pack ({expected}), got {spacedSlash.Candidates.Length}");
+            return ok;
+        }
+
+        private static bool Completion_WindArguments()
+        {
+            CommandEngine engine = NewPackEngine();
+
+            // Arg 0: the subcommand set. 'v' is unique → 'vector '.
+            CommandCompletion vector = engine.Complete("/wind v");
+            bool ok = Expect(vector.CompletedText == "/wind vector " && vector.Candidates.Length == 1,
+                $"'/wind v' completes to the single 'vector ', got '{vector.CompletedText}'");
+
+            // 'se' → 'set' ('set' and nothing else starts with 'se').
+            CommandCompletion set = engine.Complete("/wind se");
+            ok &= Expect(set.CompletedText == "/wind set " && set.Candidates.Length == 1,
+                $"'/wind se' completes to 'set ', got '{set.CompletedText}'");
+
+            // A fresh arg-0 slot offers every subcommand.
+            CommandCompletion fresh = engine.Complete("/wind ");
+            ok &= Expect(fresh.Candidates.Length == 3,
+                $"'/wind ' offers all three subcommands (set/vector/off), got {fresh.Candidates.Length}");
+
+            // Arg 2 of 'set' is the direction: compass names complete, canonical case.
+            CommandCompletion direction = engine.Complete("/wind set 0.6 ea");
+            ok &= Expect(direction.CompletedText == "/wind set 0.6 east " && direction.Candidates.Length == 1,
+                $"'/wind set 0.6 ea' completes the compass name to 'east ', got '{direction.CompletedText}'");
+
+            // A fresh direction slot lists every compass point — the discoverability case.
+            CommandCompletion freshDirection = engine.Complete("/wind set 0.6 ");
+            ok &= Expect(freshDirection.Candidates.Length == 8,
+                $"a fresh direction slot offers all eight compass points, got {freshDirection.Candidates.Length}");
+
+            // Arg 1 is a free speed — no candidates.
+            CommandCompletion speed = engine.Complete("/wind set 0");
+            ok &= Expect(speed.CompletedText == "/wind set 0" && speed.Candidates.Length == 0,
+                "the speed slot offers no candidates");
+
+            // IArgumentCompleter sees only the argument INDEX, not the subcommand, so /wind vector's
+            // Z slot shares index 2 with /wind set's direction and inherits its candidates. Harmless
+            // (they share no common prefix, so the text is never rewritten) and pinned here so the
+            // behavior is a recorded choice rather than a surprise.
+            CommandCompletion vectorArgs = engine.Complete("/wind vector 1 ");
+            ok &= Expect(vectorArgs.CompletedText == "/wind vector 1 ",
+                $"'/wind vector' numeric slots are never rewritten, got '{vectorArgs.CompletedText}'");
             return ok;
         }
     }

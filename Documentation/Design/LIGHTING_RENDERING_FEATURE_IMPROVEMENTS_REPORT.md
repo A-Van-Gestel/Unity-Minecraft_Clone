@@ -510,8 +510,10 @@ TF-11 snow line).
 
 1. **Weather state machine** on `World` (plain manager, `WorldTimeManager` pattern):
    `Clear / Rain / Storm` with seeded random durations. v1 is deliberately **not persisted** —
-   weather rerolls on load (Save ✅). If persistence is wanted later, one `level.dat` field rides
-   the next migration bump (RF-1/TF-4/TF-12 coordination).
+   weather rerolls on load (Save ✅). *Update 2026-08-10: the persistence hook now exists — the
+   `/wind` command shipped a `level.dat` `environment` section (save v14) holding the shared wind
+   vector, created explicitly as the home for these weather fields. Persisting the weather state is
+   now an additive field in that section, not a new migration design.*
 2. **Precipitation rendering:** a camera-following particle volume (GPU particles or a scrolling
    textured shell — prototype both; the shell is the mobile-safe option). **Under-cover culling**
    uses the existing highest-voxel heightmap (`GetHighestVoxel` path): sample the heightmap around

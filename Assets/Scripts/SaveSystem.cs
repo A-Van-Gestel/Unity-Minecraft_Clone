@@ -43,7 +43,12 @@ public static class SaveSystem
     //            level.dat change that is not purely additive — hence the frozen LegacyLevelDat DTO the pre-v13
     //            steps now read, without which they would silently blank this field.
     //            See Migration_v12_to_v13_PlayerChunkRelativePosition.cs.
-    public const int CURRENT_VERSION = 13;
+    // v13 → v14: Added an `environment` section to level.dat holding the world's wind vector
+    //            (windX/windZ), which /wind sets and clouds + FL-1 foliage sway read. Additive;
+    //            existing worlds take the historical default so their sky is unchanged. The section
+    //            is the home RF-7's future weather fields land in.
+    //            See Migration_v13_to_v14_EnvironmentWind.cs.
+    public const int CURRENT_VERSION = 14;
 
     /// <summary>
     /// Resolves the absolute directory path where a world's save files are stored.
@@ -90,6 +95,12 @@ public static class SaveSystem
             worldState = new WorldStateData
             {
                 timeOfDay = world.globalLightLevel,
+            },
+
+            environment = new EnvironmentData
+            {
+                windX = world.WindX,
+                windZ = world.WindZ,
             },
         };
 
@@ -172,6 +183,11 @@ public static class SaveSystem
 
         // Restore per-world gameplay border (0 = disabled).
         world.SetBorderRadius(data.borderRadius);
+
+        // Restore the environment state (v14+); pre-v14 saves are normalized to the historical
+        // default by the migration chain, so this never reads a blank wind.
+        if (data.environment != null)
+            world.SetWind(data.environment.windX, data.environment.windZ);
 
         // If the player doesn't exist, do nothing
         if (world.player == null) return;

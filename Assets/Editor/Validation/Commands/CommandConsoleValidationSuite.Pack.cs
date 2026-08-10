@@ -26,6 +26,7 @@ namespace Editor.Validation.Commands
             scenarios.Add(new Scenario("B41: /give — name→ID resolves case-insensitively; Air/unknown/bad-count rejected; graceful without a toolbar (CMD-3 Wave C)", Pack_Give));
             scenarios.Add(new Scenario("B42: /setblock — ForcePlace mod enqueued via World.PlaceBlockCommand; unloaded target reports 'queued'; parse/Y/wrap/unknown-block tiers (CMD-3 Wave C)", Pack_SetBlock));
             scenarios.Add(new Scenario("B43: /chunk info — reports 'not loaded' for an unloaded chunk; rejects unknown subcommands; graceful without a world (CMD-3 Wave C)", Pack_ChunkInfo));
+            scenarios.Add(new Scenario("B55: /wind — compass 'toward' polar set, vector set, off, and the query round-trip; speed uncapped above zero; rejects negative speed/bad direction; graceful without a world", Pack_Wind));
         }
 
         private static bool Pack_InstallerCountFloor()
@@ -308,6 +309,79 @@ namespace Editor.Validation.Commands
             CommandResult noWorld = worldless.Execute("/chunk info");
             return Expect(noWorld.Lines.Count == 1 && noWorld.Lines[0].Text.Contains("No world is loaded"),
                 "/chunk info without a world fails gracefully");
+        }
+
+        /// <summary>Float comparison tolerance for the wind vector (trig round-trip, not exact equality).</summary>
+        private const float WIND_EPSILON = 1e-4f;
+
+        /// <summary>Asserts the stub world's wind vector, naming both components on failure.</summary>
+        /// <param name="stub">The fixture whose world holds the wind.</param>
+        /// <param name="x">Expected X component in blocks per second.</param>
+        /// <param name="z">Expected Z component in blocks per second.</param>
+        /// <param name="what">The assertion description.</param>
+        /// <returns>True when both components match within <see cref="WIND_EPSILON"/>.</returns>
+        private static bool ExpectWind(CommandTeleportTestWorld stub, float x, float z, string what)
+        {
+            return Expect(System.Math.Abs(stub.World.WindX - x) < WIND_EPSILON &&
+                          System.Math.Abs(stub.World.WindZ - z) < WIND_EPSILON,
+                $"{what} — expected ({x}, {z}), got ({stub.World.WindX}, {stub.World.WindZ})");
+        }
+
+        private static bool Pack_Wind()
+        {
+            using (CommandTeleportTestWorld stub = new CommandTeleportTestWorld())
+            {
+                // Compass 'toward' convention: 0° = north = +Z, 90° = east = +X, clockwise.
+                stub.Engine.Execute("/wind set 0.6 east");
+                bool ok = ExpectWind(stub, 0.6f, 0f, "'east' blows toward +X");
+
+                // A SECOND, different value: a setter hardcoded to one answer cannot satisfy both.
+                stub.Engine.Execute("/wind set 2 north");
+                ok &= ExpectWind(stub, 0f, 2f, "'north' blows toward +Z at the new speed");
+
+                stub.Engine.Execute("/wind set 1 180");
+                ok &= ExpectWind(stub, 0f, -1f, "180° (south) blows toward -Z");
+                stub.Engine.Execute("/wind set 1 270");
+                ok &= ExpectWind(stub, -1f, 0f, "270° (west) blows toward -X");
+
+                // The raw vector form stores exactly what it is given (the developer escape hatch).
+                stub.Engine.Execute("/wind vector -1.5 0.25");
+                ok &= ExpectWind(stub, -1.5f, 0.25f, "/wind vector stores its arguments verbatim");
+
+                // The query reports speed, compass name, degrees, and the raw vector.
+                stub.Engine.Execute("/wind set 0.6 east");
+                CommandResult query = stub.Engine.Execute("/wind");
+                string queryText = query.Lines.Count > 0 ? query.Lines[0].Text : "";
+                ok &= Expect(query.Lines.Count >= 1 && query.Lines[0].Severity == ConsoleLineSeverity.Info,
+                    "/wind with no arguments is an Info query");
+                ok &= Expect(queryText.Contains("0.6") && queryText.Contains("east") && queryText.Contains("90"),
+                    $"the query names speed, compass direction, and degrees, got '{queryText}'");
+
+                // Speed is deliberately uncapped above zero (2026-08-10) — float range is the only
+                // limit, so an absurd value must SET rather than error.
+                stub.Engine.Execute("/wind set 100000 east");
+                ok &= ExpectWind(stub, 100000f, 0f, "a very large speed is accepted, not capped");
+
+                stub.Engine.Execute("/wind off");
+                ok &= ExpectWind(stub, 0f, 0f, "/wind off zeroes the wind");
+
+                // Rejections leave the wind untouched (checked after the batch).
+                ok &= ExpectTeleportError(stub.Engine, "/wind set -1 east", "zero or positive", "negative speed is rejected");
+                ok &= ExpectTeleportError(stub.Engine, "/wind set 1 sideways", "direction", "garbage direction is rejected");
+                ok &= ExpectTeleportError(stub.Engine, "/wind set 1", "Usage", "missing direction is a usage error");
+                ok &= ExpectTeleportError(stub.Engine, "/wind vector 1", "Usage", "vector needs both components");
+                ok &= ExpectTeleportError(stub.Engine, "/wind gusty", "Usage", "unknown subcommands are rejected");
+                ok &= ExpectWind(stub, 0f, 0f, "no rejected input changed the wind");
+
+                if (!ok) return false;
+            }
+
+            CommandEngine worldless = new CommandEngine();
+            ConsoleCommandInstaller.RegisterAll(worldless.Registry);
+            CommandResult noWorld = worldless.Execute("/wind set 1 east");
+            return Expect(noWorld.Lines.Count == 1 && noWorld.Lines[0].Severity == ConsoleLineSeverity.Error &&
+                          noWorld.Lines[0].Text.Contains("No world is loaded"),
+                "/wind without a world fails gracefully");
         }
     }
 }

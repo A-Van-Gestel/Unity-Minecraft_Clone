@@ -52,6 +52,7 @@ namespace Editor.Validation.DeserializationRobustness
                 new Scenario("B5: corrupt light-queue count — null, shell AND attached sections not leaked", CorruptTailReturnsShellAndSections),
                 new Scenario("B6: thrown load fault — task faults (retry), never the null 'not on disk' result", LoadFaultIsNotNull),
                 new Scenario("B7: corrupt payload on disk — LoadChunkAsync returns null (regenerate by design)", CorruptOnDiskLoadsNull),
+                new Scenario("B8: level.dat v13→v14 — the environment/wind section is injected at the historical default and every other field survives; a v14 document keeps its own wind", LevelDatV13ToV14EnvironmentWind),
             };
             return ValidationSuiteRunner.Execute("Deserialization Robustness", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -337,6 +338,76 @@ namespace Editor.Validation.DeserializationRobustness
                 second.Dispose();
             }
 
+            return ok;
+        }
+
+        /// <summary>The wind every pre-v14 world was rendered with — what the v13→v14 step must inject.</summary>
+        private const float HISTORICAL_WIND_X = -0.6f;
+
+        /// <summary>
+        /// A handwritten v13 <c>level.dat</c>: the last shape before the environment section, with a
+        /// distinct non-default value in every field so an additive migration that silently drops one
+        /// is caught rather than passing on defaults.
+        /// </summary>
+        private const string V13_LEVEL_DAT = @"{
+  ""version"": 13, ""worldName"": ""MigrationProbe"", ""seed"": 1234,
+  ""chunkHeight"": 128, ""chunkWidth"": 16, ""worldSizeInChunks"": 100, ""worldType"": 1,
+  ""spawnPosition"": { ""_chunkX"": 2, ""_chunkZ"": -3, ""localPosition"": { ""x"": 1.5, ""y"": 64.0, ""z"": 2.5 } },
+  ""borderRadius"": 512, ""creationDate"": 111, ""lastPlayed"": 222,
+  ""worldState"": { ""timeOfDay"": 0.25 },
+  ""player"": {
+    ""position"": { ""_chunkX"": 5, ""_chunkZ"": 6, ""localPosition"": { ""x"": 1.0, ""y"": 70.0, ""z"": 2.0 } },
+    ""rotation"": { ""x"": 0.0, ""y"": 90.0, ""z"": 0.0 },
+    ""capabilities"": { ""isFlying"": true, ""isNoclipping"": false },
+    ""inventory"": [ { ""slotIndex"": 0, ""itemID"": 3, ""amount"": 7 } ],
+    ""cursorItem"": null
+  }
+}";
+
+        /// <summary>B8. Red when: the v13→v14 step is unregistered, injects the wrong default, or the
+        /// frozen DTO drops a field it should have carried through (the silent-blanking failure the
+        /// v12→v13 header documents).</summary>
+        private static bool LevelDatV13ToV14EnvironmentWind()
+        {
+            WorldSaveData upgraded = LevelDatCodec.ReadNormalized(V13_LEVEL_DAT);
+
+            bool ok = Check("a v13 document gains an environment section",
+                upgraded.environment != null);
+            if (upgraded.environment != null)
+            {
+                ok &= Check($"the injected wind is the historical default, got ({upgraded.environment.windX}, {upgraded.environment.windZ})",
+                    Mathf.Approximately(upgraded.environment.windX, HISTORICAL_WIND_X) &&
+                    Mathf.Approximately(upgraded.environment.windZ, 0f));
+            }
+
+            // The codec deliberately keeps the ON-DISK version so the menu still offers a real migration.
+            ok &= Check("the reported version stays the disk's v13", upgraded.version == 13);
+
+            // Every other field must survive the additive step untouched.
+            ok &= Check("worldName survives", upgraded.worldName == "MigrationProbe");
+            ok &= Check("seed survives", upgraded.seed == 1234);
+            ok &= Check("borderRadius survives", upgraded.borderRadius == 512);
+            ok &= Check("timeOfDay survives", Mathf.Approximately(upgraded.worldState.timeOfDay, 0.25f));
+            ok &= Check("creation/lastPlayed survive", upgraded.creationDate == 111 && upgraded.lastPlayed == 222);
+            ok &= Check("spawn chunk survives", upgraded.spawnPosition.Chunk.X == 2 && upgraded.spawnPosition.Chunk.Z == -3);
+            ok &= Check("player chunk survives (the v13 re-type is not re-applied)",
+                upgraded.player.position.Chunk.X == 5 && upgraded.player.position.Chunk.Z == 6);
+            ok &= Check("player local Y survives", Mathf.Approximately(upgraded.player.position.localPosition.y, 70f));
+            ok &= Check("player capabilities survive", upgraded.player.capabilities.isFlying);
+            ok &= Check("inventory survives",
+                upgraded.player.inventory.Count == 1 && upgraded.player.inventory[0].amount == 7);
+
+            // A current-version document passes straight through with its own wind intact.
+            WorldSaveData current = new WorldSaveData
+            {
+                version = SaveSystem.CURRENT_VERSION,
+                worldName = "CurrentProbe",
+                environment = new EnvironmentData { windX = 1.25f, windZ = -2.5f },
+            };
+            WorldSaveData passthrough = LevelDatCodec.ReadNormalized(JsonUtility.ToJson(current));
+            ok &= Check($"a v{SaveSystem.CURRENT_VERSION} document keeps its own wind, got ({passthrough.environment.windX}, {passthrough.environment.windZ})",
+                Mathf.Approximately(passthrough.environment.windX, 1.25f) &&
+                Mathf.Approximately(passthrough.environment.windZ, -2.5f));
             return ok;
         }
     }

@@ -2,7 +2,7 @@
 
 **Version:** 1.13  
 **Date:** 2026-07-26  
-**Status:** **Implemented (Stable)** — the v1 arc (CMD-0..3), **CMD-4 relative `~` coordinates** (§8.2), and **CMD-5 tab autocomplete + PowerShell-style inline ghost suggestion** (§8.3) are all shipped and in-game confirmed. Guarded by the `Validate Command Console` suite (**54** baselines; see [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md) for live aggregate counts). Promoted from `Design/` 2026-07-26. §7 and §8.1–§8.3 are retained as **as-built records**; §8's table is the live extension roadmap — the remaining v2/v3+ rows (selectable/copyable output, chat, entity selectors, permissions) are deferred wishes, each owed a design pass when it becomes concrete.  
+**Status:** **Implemented (Stable)** — the v1 arc (CMD-0..3), **CMD-4 relative `~` coordinates** (§8.2), and **CMD-5 tab autocomplete + PowerShell-style inline ghost suggestion** (§8.3) are all shipped and in-game confirmed; **`/wind`** (§8.4) shipped + in-game confirmed 2026-08-10. Guarded by the `Validate Command Console` suite (**56** baselines; see [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md) for live aggregate counts). Promoted from `Design/` 2026-07-26. §7 and §8.1–§8.3 are retained as **as-built records**; §8's table is the live extension roadmap — the remaining v2/v3+ rows (selectable/copyable output, chat, entity selectors, permissions) are deferred wishes, each owed a design pass when it becomes concrete.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > An in-game command console (Minecraft-chat-style: `T` opens a left-anchored panel with
@@ -531,10 +531,65 @@ InputActions without the EventSystem stealing them or TMP inserting a tab char �
 (2) The CMD-3 stub `CommandTeleportTestWorld` exposes `BlockTypes` (Air + Stone) for headless
 argument-completion tests — confirmed (reused by B50/B52).
 
+### 8.4 `/wind` — environment wind ✅ (implemented + in-game confirmed 2026-08-10)
+
+A post-CMD-3 addition, following the §8.1 pattern (setter + save) for the shared wind vector that
+cloud drift and FL-1 foliage sway both read.
+
+| Form                         | Behavior                                                                                 |
+|------------------------------|------------------------------------------------------------------------------------------|
+| `/wind`                      | Query: speed, compass direction + degrees, and the raw `(x, z)` vector                    |
+| `/wind set <speed> <dir>`    | `<dir>` is a compass name (`north`, `ne`, …) **or** degrees; speed uncapped above zero    |
+| `/wind vector <x> <z>`       | Sets the stored XZ velocity verbatim — the developer form                                 |
+| `/wind off`                  | Becalms the world (clouds and foliage stop)                                               |
+
+**Direction convention (decided 2026-08-10):** compass degrees measured **toward** the direction the
+wind blows — `0° = north = +Z`, `90° = east = +X`, clockwise. The angle and the stored velocity
+vector therefore point the same way; the meteorological "wind *from* the north" reading was
+rejected because it inverts the vector against what the player sees the clouds do.
+
+**Backing state.** `World.SetWind(float, float)` + `World.WindX`/`WindZ` — loose floats rather than
+a `Vector2` so `Commands` stays UnityEngine-free (the `World.PlaceBlockCommand` precedent).
+Persisted in the level.dat `environment` section (**save v14**); see
+[`INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md`](INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md)
+§4.1. RF-7's weather state machine takes ownership of the value when it ships, and its rain/storm
+fields land in the same section.
+
+**Speed range (decided 2026-08-10).** Deliberately **uncapped** above zero — `float` range is the
+only limit; only a negative speed is rejected (reverse the wind with a direction instead). An
+arbitrary "sane maximum" was rejected as a dev tool second-guessing its user.
+
+**Known limitation.** `FoliageSway._referenceWindSpeed` (0.6) saturates the sway, so any speed above
+that looks identical on foliage while clouds keep accelerating. Expected, not a bug; decoupling the
+two is RF-7/FL work.
+
+**Completer limitation (pinned by B56).** `IArgumentCompleter` receives only the argument *index*,
+not the subcommand, so `/wind vector`'s Z slot shares index 2 with `/wind set`'s direction and
+inherits its compass candidates. Harmless — they share no common prefix, so the text is never
+rewritten — and left as-is rather than widening a four-implementer interface.
+
 ---
 
 ## Document History
 
+* **v1.15** - **`/wind` in-game CONFIRMED 2026-08-10** (all four forms verified by hand), plus two
+  feedback changes: the 20 blocks/s speed cap was **removed** (float range is the only limit; only a
+  negative speed is rejected — an arbitrary maximum was a dev tool second-guessing its user), and the
+  trailing "Persisted on the next save." clause was **dropped** from every `/wind` reply for parity
+  with `/time set`'s plain confirmation. §8.4 gained a Speed-range subsection; B55 now asserts a
+  100000 blocks/s set *succeeds* where it previously asserted the cap rejected it. Note
+  `/set-world-border` deliberately keeps its own persistence suffix — only `/wind` changed.
+* **v1.14** - **`/wind` shipped 2026-08-10** (§8.4): a post-CMD-3 setter+save command for the shared
+  wind vector clouds and FL-1 foliage sway read. Compass-`toward` degree convention (0° = north =
+  +Z, clockwise) chosen over the meteorological "from" reading; `World.SetWind`/`WindX`/`WindZ` take
+  loose floats to keep `Commands` UnityEngine-free. Persisted via a new level.dat `environment`
+  section (save **v13 → v14**, `MigrationV13ToV14EnvironmentWind`, existing worlds defaulted to the
+  historical `(-0.6, 0)` so no migrated sky changes) — the section RF-7's weather fields will share.
+  Installer count 14 → 15; suite 54 → **56** (B55 command matrix, B56 completion), plus B8 in the
+  Deserialization Robustness suite pinning the level.dat migration round-trip. **Prove-red ×2:**
+  B55/B56 red before the command existed, and B55's state assertions red again against a
+  deliberately neutered `SetWind` while its reply-text assertions still passed — confirming they
+  read real state, not the echo. `Validate All` 18/18 suites, 443/443 baselines.
 * **v1.13** - **Promoted `Design/` → `Architecture/` (2026-07-26).** The v1 arc plus CMD-3/4/5 are all shipped
   and in-game confirmed, so this document now describes a live system rather than a proposal; title dropped
   "Design", status flipped to **Implemented (Stable)**. §7 (phased plan) and §8.1–§8.3 are retained verbatim as
