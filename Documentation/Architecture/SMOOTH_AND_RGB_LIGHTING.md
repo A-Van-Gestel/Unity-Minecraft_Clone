@@ -76,7 +76,18 @@ shade = clamp(1.0 - shade, minLight, maxLight);
 return color * pow(lerp(1.0, 0.10, shade), 2.2);  // Gamma-corrected shadow
 ```
 
-Global uniforms (`GlobalLightLevel`, `minGlobalLightLevel`, `maxGlobalLightLevel`) are set by `World.cs` and modulate sunlight for the day/night cycle. Blocklight is not affected by these globals — but this distinction is invisible in the current system because sunlight and blocklight are merged into a single scalar via `max()` before reaching the mesh.
+Global uniforms (`GlobalLightLevel`, `minGlobalLightLevel`, `maxGlobalLightLevel`) are set by `World.cs` and apply the day/night cycle to sunlight. Blocklight is not affected by these globals — but this distinction is invisible in the current system because sunlight and blocklight are merged into a single scalar via `max()` before reaching the mesh.
+
+> **Amended 2026-08-10 (RF-1 §10) — the sky term is now SUBTRACTIVE, not multiplicative.**
+> `GlobalLightLevel` is `1 − skyDarken/15` (range `[0.27, 1]`, from `WorldTimeManager`), and
+> `ApplyVoxelLightingRGB` computes `max(skyExposure − (1 − GlobalLightLevel), 0)` before running the
+> shade curve at full intensity — see `ApplySkyDarken` in `VoxelLighting.hlsl`. The stored sky channel
+> is time-invariant **sky exposure**, so a voxel under open sky stores 15 at midnight as at noon;
+> darkening is a read-time operation with no BFS, remesh, or save cost. The reason for subtracting
+> rather than scaling: a voxel that *looks* like level 4 then **is** effective level 4, the same number
+> `LightBitMapping.GetEffectiveLight` returns to gameplay. A multiply agrees with that query at only
+> two points. `CloudShader` passes its day/night term through the same `ApplySkyDarken` path so the
+> cloud layer darkens in step with the terrain under it.
 
 ### 1.5 The Problem
 

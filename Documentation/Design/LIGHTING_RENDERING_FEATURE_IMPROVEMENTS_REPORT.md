@@ -108,9 +108,27 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 
 **Classification:** Core. Rank #1 in the combined roadmap.
 
-> **Phase 1 SHIPPED 2026-08-10** — the clock, the curve/gradient asset, `/time`, and save v15. **Phase 2
-> (§9 effective-light query + §10 subtractive shader parity) is still open**; the item stays on this
-> backlog until it lands and is confirmed in game. What shipped:
+> **Phase 1 SHIPPED + confirmed in game 2026-08-10. Phase 2 (§9 + §10) BUILT the same day, awaiting one
+> in-game confirmation** — the shader half cannot be observed by any validation suite, so it is
+> capture-verified only and the item stays on this backlog until you have looked at it.
+>
+> **Phase 2 — what changed:**
+>
+> - **§9 effective-light query.** `LightBitMapping.GetEffectiveSkyLight/GetEffectiveLight(lightData,
+>   skyDarken)` — Burst-safe integer math, `skyDarken` passable as job data — with `World.GetEffectiveSkyLight/
+>   GetEffectiveLight(voxelPos)` wrappers over `World.CurrentSkyDarken`. No BFS, remesh, or save impact.
+> - **§10 subtractive shader parity.** `ApplySkyDarken` in `VoxelLighting.hlsl`:
+>   `max(skyExposure − (1 − GlobalLightLevel), 0)`, then the shade curve at full intensity. All five
+>   terrain/liquid consumers route through `ApplyVoxelLightingRGB`, so no call site changed.
+> - **Clouds rewired** (`CloudShader.shader`): the day/night term moved from the curve's `globalLight`
+>   slot into the exposure slot. Under the subtractive model those are no longer the same number
+>   (`0.85·g + 0.15` vs `g`), so leaving it would have left clouds brighter than the terrain beneath.
+> - **Editor preview parity holds with no change** — both preview shaders and `ChunkPreview3DWindow`
+>   pin `globalLight = 1.0`, where `ApplySkyDarken` reduces to the identity. Verified by reading the
+>   call sites, not assumed. **Noon is bit-identical to the pre-RF-1 render**; the visible delta is night.
+> - `DebugScreen` shows raw sky exposure *and* effective light, plus the clock and its darken.
+>
+> **Phase 1 — what shipped:**
 >
 > - `WorldTimeManager` (`Assets/Scripts/WorldTimeManager.cs`) — a plain manager owned by `World`, ticked
 >   from `World.Update()`. Time is a `long` tick count (24000/day, tick 0 = sunrise, Minecraft parity) with
