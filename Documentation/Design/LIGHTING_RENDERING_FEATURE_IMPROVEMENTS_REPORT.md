@@ -1,6 +1,6 @@
 # Lighting & Rendering Feature Improvements Report
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** 2026-08-10  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified. Owns lighting
 and rendering *features* (`RF-*`); the *performance* counterparts (`LI-*`, `GS-*`) live in
@@ -99,6 +99,7 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 | RF-6 | "Some form of GI": SSAO is the pragmatic option; colored sky-bounce rejected with reasons |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | RF-7 | Weather: no rain/snow of any kind; precipitation type gated on TF-3's temperature axis    |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 | RF-8 | Animated block textures: every non-fluid tile is static — flipbook via atlas blitting     |   🟡   |  🟢  |   🟡    |  ✅   |  ✅   |
+| RF-9 | Vertex AO crushes to black at night — occlusion is baked in before the sky darkening       |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 
 ---
 
@@ -636,12 +637,77 @@ atlas uncompressed or same-format frame strips). Seed ✅ / Save ✅.
 
 ---
 
+### RF-9 — Vertex AO crushes to black at night (composition order)
+
+**Classification:** Polish, but a *regression surfaced by RF-1 §10* rather than a pre-existing gap —
+filed 2026-08-10 from the in-game confirmation of RF-1 Phase 2.
+
+**Symptom (observed in game).** At midnight, corner/contact AO becomes so pronounced that whole faces
+read as solid black, losing the shape information they carry during the day. Daylight is unaffected.
+
+**What exists today (verified in code).**
+
+- Smooth-lighting AO is applied to the vertex light value **at mesh time**, before the value is
+  encoded: `float4 shaded = light * (1f - occlusion);` (`MeshGenerationJob.cs:1517`). The vertex
+  therefore stores the *product* `exposure × (1 − occlusion)`.
+- RF-1 §10 then **subtracts** the day/night darkening from that product in the fragment shader:
+  `max(skyExposure − (1 − GlobalLightLevel), 0)` (`ApplySkyDarken`, `VoxelLighting.hlsl`).
+- At the deepest night the subtraction is `11/15 ≈ 0.733`, leaving only `0.267` of range. **Any vertex
+  whose occlusion exceeds ~27% therefore clamps to zero** — and every such vertex clamps to the *same*
+  zero, which is why differentiation is lost rather than merely dimmed.
+
+Measured shadow multipliers at midnight (shade curve + gamma, `MinLightLevel = 0.15`):
+
+| Vertex                | Pre-RF-1 (multiplicative) | Shipped (subtractive) |
+|-----------------------|---------------------------|-----------------------|
+| Unoccluded, open sky  | 0.1635                    | 0.0932                |
+| 30% occluded          | 0.0916                    | **0.0063 — the floor** |
+| Fully sealed (cave)   | 0.0063                    | 0.0063                |
+
+A 30%-occluded face is now **exactly as dark as a sealed cave face**, whereas before it was as bright
+as the new model's fully-open sky. Note the floor itself is *unchanged* — `MinLightLevel` behaves
+identically in both models; what changed is that the usable range above it collapsed.
+
+**Root cause.** AO and time-of-day darkening are composed in the wrong order. AO is a *geometric
+visibility* factor and darkening is a *source-intensity* factor, so they should multiply with the
+subtraction applied to the source — `max(exposure − darken, 0) × (1 − occlusion)` — not
+`max(exposure × (1 − occlusion) − darken, 0)`. Under the correct order the same 30% vertex reads
+`0.267 × 0.70 = 0.187` of the sky's night intensity: dimmer than its neighbours, still legible, and
+the AO ratio stays constant at every hour.
+
+**Why it is not a one-line fix.** The vertex holds only the product, so the shader cannot recover the
+two terms. Separating them needs occlusion in its own vertex channel, and **there is no spare
+capacity**: `TexCoord0.zw` (half2) went to FL-1 foliage sway (2026-07-19), and the `Color32` tint
+stream is already double-claimed by TF-11 (climate foliage tint, RGB) and RF-3 §2 (emissive strength).
+RF-9 therefore lands in the same vertex-format allocation decision as RF-3 and should be scheduled
+with it — `SectionRenderer.Layout` is the single source of truth, and any change rides the meshing
+suite's B-series baselines.
+
+**Options (not yet evaluated — this entry is the analysis, not the decision).**
+
+| Option                                                            | Note                                                                                                                                                        |
+|-------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Move occlusion to its own vertex channel, reorder the composition | The correct fix; blocked on the RF-3/TF-11 allocation. Also makes AO strength runtime-tunable, which SS-* would benefit from                                |
+| Soften AO strength as a function of `GlobalLightLevel`            | Cannot be done in the shader (not separable from the product). Would have to be applied at **mesh time**, which makes the mesh time-dependent — rejected on sight: it reintroduces remeshing as an animation driver |
+| Compress the subtraction near zero (e.g. a soft floor)            | Shader-only and cheap, but it breaks the §9/§10 exactness — the rendered level would stop equalling the queried one, which is the whole point of §10        |
+| Accept as Minecraft-parity                                        | MC's AO is likewise more visible at night. The honest fallback if the channel never frees up; re-judge against a capture rather than from the numbers        |
+
+**Dependencies / ordering.** Shares RF-3's vertex-channel decision; no dependency on RF-2. Nothing
+here touches the light engine, storage, or save format.
+
+**Risks.** 🟡 — vertex-format edits are regression-prone without the meshing suite baselines, and the
+change alters every rendered surface's night appearance. Seed ✅ / Save ✅.
+
+---
+
 ## Roadmap
 
 See the **combined ranked roadmap** at the end of
 [`WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md`](WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md) — RF items
-rank: RF-1 (#1), RF-2 (#5), RF-7 (#17), RF-4 (#18), RF-3 (#19), RF-6 (#20), RF-5 (#21),
-RF-8 (#22 — added 2026-07-20).
+rank: RF-1 (#1 — **shipped 2026-08-10**, awaiting archival once RF-2 no longer references it),
+RF-2 (#5), RF-7 (#17), RF-4 (#18), RF-3 (#19), RF-6 (#20), RF-5 (#21),
+RF-8 (#22 — added 2026-07-20), RF-9 (unranked — added 2026-08-10; schedule **with RF-3**, whose
+vertex-channel allocation it shares, rather than on its own merit).
 
 ---
 
@@ -651,6 +717,11 @@ RF-8 (#22 — added 2026-07-20).
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.3** - RF-1 Phase 2 shipped and confirmed in game (2026-08-10): §9 effective-light query +
+  §10 subtractive sky term + the cloud rewire. **RF-9 added** from that confirmation — the subtractive
+  model exposed that vertex AO is baked in *before* the darkening, so at night any face past ~27%
+  occlusion clamps to the same black. Analysis and measured numbers are in the entry; it shares RF-3's
+  vertex-channel decision and is unranked pending that.
 * **v1.2** - RF-1 Phase 1 shipped (2026-08-10): world clock + `TimeOfDaySettings` asset + `/time` regrammar +
   save v15. Corrected five stale claims in the RF-1 entry while implementing it — `SetGlobalLightValue` had a
   third call site (`/time`, shipped 2026-07-18), the save version was already v14 (not 11), the `environment`
@@ -674,8 +745,8 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-10 (RF-1 Phase 1 shipped)  
-**Next Review:** RF-1 Phase 2 — §9's effective-light query layer and §10's subtractive shader parity, the
-most intricate part of this document. Phase 1 already re-verified §1–§8 against the shipped code (see the
-RF-1 banner); §9/§10 still need that pass, and note that no validation suite can observe the shader half —
-it is capture-verified only.
+**Last Updated:** 2026-08-10 (RF-1 Phase 2 shipped; RF-9 added)  
+**Next Review:** when RF-3 is scheduled — RF-9 shares its vertex-channel allocation and the two should be
+decided together, alongside TF-11's claim on the same `Color32` stream. RF-1 is fully shipped and can be
+archived once RF-2 stops referencing its sections; note that no validation suite can observe the shader
+half of §10 — it is capture-verified only.
