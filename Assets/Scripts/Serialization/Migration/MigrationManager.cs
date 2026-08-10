@@ -37,6 +37,7 @@ namespace Serialization.Migration
             new MigrationV11ToV12WorldBorder(),
             new MigrationV12ToV13PlayerChunkRelativePosition(),
             new MigrationV13ToV14EnvironmentWind(),
+            new MigrationV14ToV15TimeOfDay(),
         };
 
         // Track the path of the backup we create so we can roll it back if needed.

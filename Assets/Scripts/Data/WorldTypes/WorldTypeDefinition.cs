@@ -41,6 +41,11 @@ namespace Data.WorldTypes
         [Tooltip("Legacy field. Only used by LegacyWorldGen format. Standard generation uses Biome-specific BaseTerrainHeight.")]
         public int solidGroundHeight = 42;
 
+        [Tooltip("Day/night curve and sky color gradients for this world type (RF-1). A shared asset, so " +
+                 "several world types can reference one authored look. Worlds without one fall back to the " +
+                 "engine default.")]
+        public TimeOfDaySettings timeOfDaySettings;
+
         [Header("Trunk Worm Layer")]
         [Tooltip("World-level trunk worm configuration. Trunk worms create long cross-biome cave highways " +
                  "that provide the exploration backbone. Leave disabled for worlds without trunk caves.")]

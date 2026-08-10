@@ -63,21 +63,25 @@ namespace Serialization
 
         public WorldStateData worldState = new WorldStateData();
 
-        /// <summary>
-        /// Ambient environment state — today only the wind, deliberately a section of its own so
-        /// RF-7's weather fields (precipitation type, storm intensity) land beside it rather than
-        /// swelling <see cref="worldState"/>. Absent in pre-v14 saves, where the field defaults.
-        /// </summary>
-        public EnvironmentData environment = new EnvironmentData();
-
         public PlayerSaveData player = new PlayerSaveData();
     }
 
 
+    /// <summary>
+    /// The world's mutable global state, grouped into sub-sections by concern rather than kept as a
+    /// flat bag — RF-7's weather fields join <see cref="environment"/> without swelling this type.
+    /// </summary>
     [Serializable]
     public class WorldStateData
     {
-        public float timeOfDay;
+        /// <summary>
+        /// Ambient environment state (wind today, weather later). Lived at the document root in v14;
+        /// re-parented here at v15 so every piece of world state has one home.
+        /// </summary>
+        public EnvironmentData environment = new EnvironmentData();
+
+        /// <summary>The day/night clock (v15+). Absent in older saves, where the migration seeds noon.</summary>
+        public WorldTimeData time = new WorldTimeData();
     }
 
     /// <summary>
@@ -93,6 +97,24 @@ namespace Serialization
 
         /// <summary>Wind velocity Z component, in voxel-space blocks per second.</summary>
         public float windZ;
+    }
+
+    /// <summary>
+    /// The world's persisted day/night clock (v15+, RF-1). Replaces the v1–v14 <c>timeOfDay</c> field,
+    /// which stored a light level rather than a time because no clock existed to store.
+    /// </summary>
+    /// <remarks>
+    /// Total elapsed ticks, not a day fraction plus a day counter: one exact integer carries both, and
+    /// it cannot drift the way an accumulated float would over a long-lived world.
+    /// </remarks>
+    [Serializable]
+    public class WorldTimeData
+    {
+        /// <summary>Total elapsed world time in ticks (24000 per day, tick 0 = sunrise).</summary>
+        public long ticks;
+
+        /// <summary>Whether the day/night cycle is held, as set by <c>/time freeze</c>.</summary>
+        public bool frozen;
     }
 
     [Serializable]

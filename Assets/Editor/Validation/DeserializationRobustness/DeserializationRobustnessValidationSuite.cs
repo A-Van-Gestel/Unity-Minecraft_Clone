@@ -52,7 +52,8 @@ namespace Editor.Validation.DeserializationRobustness
                 new Scenario("B5: corrupt light-queue count — null, shell AND attached sections not leaked", CorruptTailReturnsShellAndSections),
                 new Scenario("B6: thrown load fault — task faults (retry), never the null 'not on disk' result", LoadFaultIsNotNull),
                 new Scenario("B7: corrupt payload on disk — LoadChunkAsync returns null (regenerate by design)", CorruptOnDiskLoadsNull),
-                new Scenario("B8: level.dat v13→v14 — the environment/wind section is injected at the historical default and every other field survives; a v14 document keeps its own wind", LevelDatV13ToV14EnvironmentWind),
+                new Scenario("B8: level.dat v13→v14 — the worldState.environment/wind section is injected at the historical default and every other field survives", LevelDatV13ToV14EnvironmentWind),
+                new Scenario("B9: level.dat v14→v15 — timeOfDay is retired for a noon-seeded world clock, the document's own wind carries through, and a current document passes through untouched", LevelDatV14ToV15TimeOfDay),
             };
             return ValidationSuiteRunner.Execute("Deserialization Robustness", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -364,30 +365,52 @@ namespace Editor.Validation.DeserializationRobustness
   }
 }";
 
-        /// <summary>B8. Red when: the v13→v14 step is unregistered, injects the wrong default, or the
-        /// frozen DTO drops a field it should have carried through (the silent-blanking failure the
-        /// v12→v13 header documents).</summary>
+        /// <summary>Day tick the v14→v15 step seeds; a stored light level carries no recoverable time.</summary>
+        private const long MIGRATED_NOON_TICKS = 6000L;
+
+        /// <summary>
+        /// A handwritten v14 <c>level.dat</c> in the shape the (revised) v13→v14 step produces:
+        /// <c>environment</c> nested under <c>worldState</c>, alongside the <c>timeOfDay</c> field v15
+        /// retires. Distinct values throughout so a dropped field is caught rather than passing on defaults.
+        /// </summary>
+        private const string V14_LEVEL_DAT = @"{
+  ""version"": 14, ""worldName"": ""MigrationProbe14"", ""seed"": 4321,
+  ""chunkHeight"": 128, ""chunkWidth"": 16, ""worldSizeInChunks"": 100, ""worldType"": 1,
+  ""spawnPosition"": { ""_chunkX"": 7, ""_chunkZ"": -8, ""localPosition"": { ""x"": 1.5, ""y"": 64.0, ""z"": 2.5 } },
+  ""borderRadius"": 256, ""creationDate"": 333, ""lastPlayed"": 444,
+  ""worldState"": { ""timeOfDay"": 0.75, ""environment"": { ""windX"": 1.5, ""windZ"": -2.25 } },
+  ""player"": {
+    ""position"": { ""_chunkX"": 9, ""_chunkZ"": 10, ""localPosition"": { ""x"": 1.0, ""y"": 70.0, ""z"": 2.0 } },
+    ""rotation"": { ""x"": 0.0, ""y"": 90.0, ""z"": 0.0 },
+    ""capabilities"": { ""isFlying"": true, ""isNoclipping"": false },
+    ""inventory"": [ { ""slotIndex"": 0, ""itemID"": 3, ""amount"": 7 } ],
+    ""cursorItem"": null
+  }
+}";
+
+        /// <summary>B8. Red when: the v13→v14 step is unregistered, injects the wrong default, nests the
+        /// environment section at the wrong path, or the frozen DTO drops a field it should have carried
+        /// through (the silent-blanking failure the v12→v13 header documents).</summary>
         private static bool LevelDatV13ToV14EnvironmentWind()
         {
             WorldSaveData upgraded = LevelDatCodec.ReadNormalized(V13_LEVEL_DAT);
 
-            bool ok = Check("a v13 document gains an environment section",
-                upgraded.environment != null);
-            if (upgraded.environment != null)
+            bool ok = Check("a v13 document gains a worldState.environment section",
+                upgraded.worldState?.environment != null);
+            if (upgraded.worldState?.environment != null)
             {
-                ok &= Check($"the injected wind is the historical default, got ({upgraded.environment.windX}, {upgraded.environment.windZ})",
-                    Mathf.Approximately(upgraded.environment.windX, HISTORICAL_WIND_X) &&
-                    Mathf.Approximately(upgraded.environment.windZ, 0f));
+                ok &= Check($"the injected wind is the historical default, got ({upgraded.worldState.environment.windX}, {upgraded.worldState.environment.windZ})",
+                    Mathf.Approximately(upgraded.worldState.environment.windX, HISTORICAL_WIND_X) &&
+                    Mathf.Approximately(upgraded.worldState.environment.windZ, 0f));
             }
 
             // The codec deliberately keeps the ON-DISK version so the menu still offers a real migration.
             ok &= Check("the reported version stays the disk's v13", upgraded.version == 13);
 
-            // Every other field must survive the additive step untouched.
+            // Every other field must survive the chain untouched.
             ok &= Check("worldName survives", upgraded.worldName == "MigrationProbe");
             ok &= Check("seed survives", upgraded.seed == 1234);
             ok &= Check("borderRadius survives", upgraded.borderRadius == 512);
-            ok &= Check("timeOfDay survives", Mathf.Approximately(upgraded.worldState.timeOfDay, 0.25f));
             ok &= Check("creation/lastPlayed survive", upgraded.creationDate == 111 && upgraded.lastPlayed == 222);
             ok &= Check("spawn chunk survives", upgraded.spawnPosition.Chunk.X == 2 && upgraded.spawnPosition.Chunk.Z == -3);
             ok &= Check("player chunk survives (the v13 re-type is not re-applied)",
@@ -396,18 +419,57 @@ namespace Editor.Validation.DeserializationRobustness
             ok &= Check("player capabilities survive", upgraded.player.capabilities.isFlying);
             ok &= Check("inventory survives",
                 upgraded.player.inventory.Count == 1 && upgraded.player.inventory[0].amount == 7);
+            return ok;
+        }
 
-            // A current-version document passes straight through with its own wind intact.
+        /// <summary>B9. Red when: the v14→v15 step is unregistered, fails to seed the clock, drops the
+        /// wind it must carry through, or leaves the retired <c>timeOfDay</c> driving anything.</summary>
+        private static bool LevelDatV14ToV15TimeOfDay()
+        {
+            WorldSaveData upgraded = LevelDatCodec.ReadNormalized(V14_LEVEL_DAT);
+
+            bool ok = Check("a v14 document gains a worldState.time section", upgraded.worldState?.time != null);
+            if (upgraded.worldState?.time != null)
+            {
+                ok &= Check($"the migrated world starts at noon, got tick {upgraded.worldState.time.ticks}",
+                    upgraded.worldState.time.ticks == MIGRATED_NOON_TICKS);
+                ok &= Check("the migrated world is not frozen", !upgraded.worldState.time.frozen);
+            }
+
+            // The v14 wind is carried through, not reset to the v13 historical default.
+            ok &= Check($"the document's own wind survives, got ({upgraded.worldState?.environment?.windX}, {upgraded.worldState?.environment?.windZ})",
+                upgraded.worldState?.environment != null &&
+                Mathf.Approximately(upgraded.worldState.environment.windX, 1.5f) &&
+                Mathf.Approximately(upgraded.worldState.environment.windZ, -2.25f));
+
+            ok &= Check("the reported version stays the disk's v14", upgraded.version == 14);
+            ok &= Check("worldName survives", upgraded.worldName == "MigrationProbe14");
+            ok &= Check("seed survives", upgraded.seed == 4321);
+            ok &= Check("borderRadius survives", upgraded.borderRadius == 256);
+            ok &= Check("creation/lastPlayed survive", upgraded.creationDate == 333 && upgraded.lastPlayed == 444);
+            ok &= Check("spawn chunk survives", upgraded.spawnPosition.Chunk.X == 7 && upgraded.spawnPosition.Chunk.Z == -8);
+            ok &= Check("player chunk survives", upgraded.player.position.Chunk.X == 9 && upgraded.player.position.Chunk.Z == 10);
+            ok &= Check("player capabilities survive", upgraded.player.capabilities.isFlying);
+            ok &= Check("inventory survives",
+                upgraded.player.inventory.Count == 1 && upgraded.player.inventory[0].amount == 7);
+
+            // A current-version document passes straight through with its own wind and clock intact.
             WorldSaveData current = new WorldSaveData
             {
                 version = SaveSystem.CURRENT_VERSION,
                 worldName = "CurrentProbe",
-                environment = new EnvironmentData { windX = 1.25f, windZ = -2.5f },
+                worldState = new WorldStateData
+                {
+                    environment = new EnvironmentData { windX = 1.25f, windZ = -2.5f },
+                    time = new WorldTimeData { ticks = 123456L, frozen = true },
+                },
             };
             WorldSaveData passthrough = LevelDatCodec.ReadNormalized(JsonUtility.ToJson(current));
-            ok &= Check($"a v{SaveSystem.CURRENT_VERSION} document keeps its own wind, got ({passthrough.environment.windX}, {passthrough.environment.windZ})",
-                Mathf.Approximately(passthrough.environment.windX, 1.25f) &&
-                Mathf.Approximately(passthrough.environment.windZ, -2.5f));
+            ok &= Check($"a v{SaveSystem.CURRENT_VERSION} document keeps its own wind, got ({passthrough.worldState.environment.windX}, {passthrough.worldState.environment.windZ})",
+                Mathf.Approximately(passthrough.worldState.environment.windX, 1.25f) &&
+                Mathf.Approximately(passthrough.worldState.environment.windZ, -2.5f));
+            ok &= Check($"a v{SaveSystem.CURRENT_VERSION} document keeps its own clock, got tick {passthrough.worldState.time.ticks} frozen {passthrough.worldState.time.frozen}",
+                passthrough.worldState.time.ticks == 123456L && passthrough.worldState.time.frozen);
             return ok;
         }
     }

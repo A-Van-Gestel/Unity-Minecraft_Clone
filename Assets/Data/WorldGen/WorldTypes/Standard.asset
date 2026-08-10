@@ -23,6 +23,7 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 1be67b395810af24d95a353dd5b1b23e, type: 2}
   seaLevel: 54
   solidGroundHeight: 52
+  timeOfDaySettings: {fileID: 0}
   trunkWormConfig:
     enabled: 1
     spawnChance: 0.008

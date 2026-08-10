@@ -46,17 +46,25 @@ public class World : MonoBehaviour, IMeshDrainHost
     /// </summary>
     public WorldTypeDefinition ActiveWorldType { get; private set; }
 
+    /// <summary>
+    /// Normalized brightness of fully-exposed sky, pushed to the <c>GlobalLightLevel</c> shader global.
+    /// A <b>derived output</b> of <see cref="TimeManager"/> since RF-1 — read it freely, but drive it
+    /// through the clock (<c>/time</c>), never by assignment, or the next frame overwrites the change.
+    /// </summary>
+    [HideInInspector]
+    public float globalLightLevel = 1f;
+
     [Header("Lighting")]
-    [Range(0f, 1f)]
-    [Tooltip("Lower value equals darker light level.")]
-    public float globalLightLevel;
-
-    public Color day;
-    public Color night;
-
-    [Tooltip("Sky light color gradient over the day/night cycle. Evaluated at globalLightLevel (0=midnight, 1=noon).")]
+    [Tooltip("Day/night curve and gradients used when the active world type has none assigned. The engine's default look.")]
     [SerializeField]
-    private Gradient _skyLightGradient;
+    private TimeOfDaySettings _defaultTimeOfDaySettings;
+
+    /// <summary>
+    /// The world's day/night clock (RF-1). Non-null from <see cref="StartWorld"/> onward; edit-mode
+    /// fixtures that bypass it read null and must not tick.
+    /// </summary>
+    [NonSerialized]
+    public WorldTimeManager TimeManager;
 
     [Header("Player")]
     public Player player;
@@ -703,6 +711,10 @@ public class World : MonoBehaviour, IMeshDrainHost
         // no readable level.dat to override this.
         ChunkRelativePosition savedPlayerVoxelPosition = WorldOrigin.UnityToRelative(_playerTransform.position);
 
+        // Held across the branch so the day/night clock can be restored once it exists — it is built
+        // from ActiveWorldType further down, long after level.dat is read.
+        WorldSaveData loadedMetadata = null;
+
         if (!isNewGame && settings.EnablePersistence)
         {
             // Load Pending Mods
@@ -715,6 +727,7 @@ public class World : MonoBehaviour, IMeshDrainHost
             if (metadata != null)
             {
                 hasExistingMetadata = true;
+                loadedMetadata = metadata;
                 savedPlayerVoxelPosition = metadata.player.position;
                 SaveSystem.LoadWorldGameState(this, metadata);
                 VoxelData.Seed = metadata.seed; // Re-affirm seed from save just in case
@@ -733,11 +746,12 @@ public class World : MonoBehaviour, IMeshDrainHost
             {
                 hasExistingMetadata = true;
                 isEditorReplay = true;
+                loadedMetadata = existingMeta;
                 loadedWorldType = existingMeta.worldType;
                 SetSpawnPoint(existingMeta.spawnPosition);
                 SetBorderRadius(existingMeta.borderRadius);
-                if (existingMeta.environment != null)
-                    SetWind(existingMeta.environment.windX, existingMeta.environment.windZ);
+                if (existingMeta.worldState?.environment != null)
+                    SetWind(existingMeta.worldState.environment.windX, existingMeta.worldState.environment.windZ);
                 Debug.Log($"[World] Editor re-play detected — restoring persisted spawn point: {WorldSpawnPoint}");
             }
         }
@@ -767,6 +781,12 @@ public class World : MonoBehaviour, IMeshDrainHost
 
         // Initialize World Job Manager with the resolved world type strategy
         JobManager = new WorldJobManager(this, ActiveWorldType, JobDataManager);
+
+        // The day/night clock takes the active world type's authored look, so a future dimension can
+        // ship its own sky without touching this code. Restored to the saved time in
+        // LoadWorldGameState; a fresh world starts at the sunrise the tick counter's zero point is.
+        TimeManager = new WorldTimeManager(ResolveTimeOfDaySettings());
+        RestoreWorldTime(loadedMetadata);
 
         // Initialize global shader properties
         Shader.SetGlobalFloat(s_shaderMinGlobalLightLevel, VoxelData.MinLightLevel);
@@ -1866,17 +1886,82 @@ public class World : MonoBehaviour, IMeshDrainHost
             $"{WorldOrigin.OriginChunk.X},{WorldOrigin.OriginChunk.Z}. (Reported once per session.)");
     }
 
+    /// <summary>
+    /// Restores the saved day/night clock, for both the normal load and the editor-replay path.
+    /// </summary>
+    /// <param name="metadata">The world's loaded level.dat, or null for a genuinely new world.</param>
+    /// <remarks>
+    /// Deliberately separate from <see cref="SaveSystem.LoadWorldGameState"/>, which runs before
+    /// <see cref="TimeManager"/> exists — restoring there would silently discard the saved time.
+    /// </remarks>
+    private void RestoreWorldTime(WorldSaveData metadata)
+    {
+        if (metadata?.worldState?.time == null) return;
+
+        TimeManager.SetTotalTicks(metadata.worldState.time.ticks);
+        TimeManager.IsFrozen = metadata.worldState.time.frozen;
+    }
+
+    /// <summary>
+    /// Advances the day/night clock and republishes the render globals for this frame.
+    /// </summary>
+    /// <remarks>
+    /// The clock is held while the pause menu is open. Note that this makes time-of-day the only system
+    /// that pauses — chunk generation, fluids, and block ticks all keep running behind the menu, since
+    /// nothing in the project touches <c>Time.timeScale</c>.
+    /// </remarks>
+    private void AdvanceWorldTime()
+    {
+        bool paused = WorldUIManager.Instance != null && WorldUIManager.Instance.IsPauseMenuOpen;
+        if (!paused)
+            TimeManager.Tick(Time.deltaTime);
+
+        // Republished unconditionally: a frozen or paused clock still has to survive another system
+        // overwriting the globals (editor previews do exactly that).
+        SetGlobalLightValue();
+    }
+
+    /// <summary>
+    /// Resolves the day/night settings for the active world type, falling back to the engine default
+    /// asset and finally to a code-authored instance, so a clock always has a curve to sample.
+    /// </summary>
+    /// <returns>The settings the clock will read.</returns>
+    private TimeOfDaySettings ResolveTimeOfDaySettings()
+    {
+        if (ActiveWorldType != null && ActiveWorldType.timeOfDaySettings != null)
+            return ActiveWorldType.timeOfDaySettings;
+
+        if (_defaultTimeOfDaySettings != null)
+            return _defaultTimeOfDaySettings;
+
+        // No asset assigned anywhere: build the defaults in memory rather than degrade to a static
+        // sky. ScriptableObject field initializers give the same curve a fresh asset would ship with.
+        Debug.LogWarning("[World] No TimeOfDaySettings assigned on the world type or as the World default — " +
+                         "falling back to the built-in day/night look.");
+        return ScriptableObject.CreateInstance<TimeOfDaySettings>();
+    }
+
+    /// <summary>
+    /// Pushes this frame's day/night state to the render globals and the camera. Called every frame by
+    /// <see cref="Update"/>, and once directly after a load so the first rendered frame is already
+    /// at the restored time rather than the previous world's.
+    /// </summary>
     public void SetGlobalLightValue()
     {
+        // Edit-mode fixtures construct a World without StartWorld; hold the serialized default so the
+        // shader globals stay well-defined instead of pushing a NaN from a null clock.
+        if (TimeManager != null)
+            globalLightLevel = TimeManager.GlobalLightLevel;
+
         Shader.SetGlobalFloat(s_shaderGlobalLightLevel, globalLightLevel);
 
-        // Null before StartWorld binds it (and in headless/suite contexts, e.g. the /time command
-        // baseline) — the shader globals above still apply; only the camera tint is skipped.
-        if (_playerCamera != null)
-            _playerCamera.backgroundColor = Color.Lerp(night, day, globalLightLevel);
-
-        Color skyColor = _skyLightGradient?.Evaluate(globalLightLevel) ?? Color.white;
+        Color skyColor = TimeManager != null ? TimeManager.SkyLightColor : Color.white;
         Shader.SetGlobalColor(s_shaderSkyLightColor, skyColor);
+
+        // Null before StartWorld binds it (and in headless/suite contexts, e.g. the /time command
+        // baseline) — the shader globals above still apply; only the camera color is skipped.
+        if (_playerCamera != null && TimeManager != null)
+            _playerCamera.backgroundColor = TimeManager.BackgroundColor;
     }
 
     /// <summary>
@@ -2023,6 +2108,8 @@ public class World : MonoBehaviour, IMeshDrainHost
         // flight capture has enabled it). Bookends the timed regions below — one per budgeted pass plus the
         // three unbudgeted lighting regions; EndFrame() publishes them at the bottom of Update.
         WorldFrameProfiler.BeginFrame();
+
+        AdvanceWorldTime();
 
         PlayerChunkCoord = WorldOrigin.UnityToChunk(_playerTransform.position);
 

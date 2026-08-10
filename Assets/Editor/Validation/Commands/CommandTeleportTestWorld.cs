@@ -1,6 +1,7 @@
 using System;
 using Commands;
 using Data;
+using Data.WorldTypes;
 using Editor.Validation.Framework;
 using Helpers;
 using Physics;
@@ -27,6 +28,7 @@ namespace Editor.Validation.Commands
         private readonly GameObject _worldGo;
         private readonly GameObject _playerGo;
         private readonly BlockDatabase _stubDatabase;
+        private readonly TimeOfDaySettings _stubTimeOfDay;
         private readonly ChunkCoord _savedOriginChunk;
         private bool _disposed;
 
@@ -62,6 +64,12 @@ namespace Editor.Validation.Commands
             };
             ValidationReflection.SetInstanceField(_world, "_blockDatabase", _stubDatabase);
 
+            // StartWorld builds the day/night clock from the resolved world type; edit-mode fixtures
+            // never run it, so /time would find no clock. The code-authored settings defaults are the
+            // same ones a freshly created asset ships with.
+            _stubTimeOfDay = ScriptableObject.CreateInstance<TimeOfDaySettings>();
+            _world.TimeManager = new WorldTimeManager(_stubTimeOfDay);
+
             _playerGo = new GameObject("Command_StubPlayer");
             Rigidbody = _playerGo.AddComponent<VoxelRigidbody>();
             Player player = _playerGo.GetComponent<Player>() != null
@@ -91,6 +99,7 @@ namespace Editor.Validation.Commands
             if (_playerGo != null) Object.DestroyImmediate(_playerGo);
             if (_worldGo != null) Object.DestroyImmediate(_worldGo);
             if (_stubDatabase != null) Object.DestroyImmediate(_stubDatabase);
+            if (_stubTimeOfDay != null) Object.DestroyImmediate(_stubTimeOfDay);
         }
     }
 }

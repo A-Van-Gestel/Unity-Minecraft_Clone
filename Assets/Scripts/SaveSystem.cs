@@ -48,7 +48,15 @@ public static class SaveSystem
     //            existing worlds take the historical default so their sky is unchanged. The section
     //            is the home RF-7's future weather fields land in.
     //            See Migration_v13_to_v14_EnvironmentWind.cs.
-    public const int CURRENT_VERSION = 14;
+    //            REVISED 2026-08-10 (RF-1): the section now lands under `worldState` rather than at the
+    //            document root. Rewriting a shipped step's output is normally forbidden; authorized
+    //            here because v14 had reached one local test world only.
+    // v14 → v15: Replaced `worldState.timeOfDay` (a stored LIGHT LEVEL, from before a clock existed)
+    //            with `worldState.time` — total elapsed ticks plus the /time freeze flag (RF-1).
+    //            Migrated worlds resume at noon; a brightness cannot be mapped back to a time.
+    //            The first level.dat step that REMOVES a field.
+    //            See Migration_v14_to_v15_TimeOfDay.cs.
+    public const int CURRENT_VERSION = 15;
 
     /// <summary>
     /// Resolves the absolute directory path where a world's save files are stored.
@@ -94,13 +102,19 @@ public static class SaveSystem
 
             worldState = new WorldStateData
             {
-                timeOfDay = world.globalLightLevel,
-            },
+                environment = new EnvironmentData
+                {
+                    windX = world.WindX,
+                    windZ = world.WindZ,
+                },
 
-            environment = new EnvironmentData
-            {
-                windX = world.WindX,
-                windZ = world.WindZ,
+                // The clock is null only in fixtures that never ran StartWorld; persist the world's
+                // starting time rather than a zero that would silently rewind it to sunrise.
+                time = new WorldTimeData
+                {
+                    ticks = world.TimeManager?.TimeTicks ?? 0L,
+                    frozen = world.TimeManager?.IsFrozen ?? false,
+                },
             },
         };
 
@@ -174,9 +188,10 @@ public static class SaveSystem
     {
         if (data == null) return;
 
-        // 1. Apply Global State
-        world.globalLightLevel = data.worldState.timeOfDay;
-        world.SetGlobalLightValue(); // Apply to shader immediately
+        // 1. Apply Global State. The day/night clock is NOT restored here: this runs before
+        //    World.StartWorld builds it (it needs the resolved world type), so World.RestoreWorldTime
+        //    owns that and reads the same level.dat.
+        world.SetGlobalLightValue();
 
         // 2. Restore Spawn Point
         world.SetSpawnPoint(data.spawnPosition);
@@ -186,8 +201,8 @@ public static class SaveSystem
 
         // Restore the environment state (v14+); pre-v14 saves are normalized to the historical
         // default by the migration chain, so this never reads a blank wind.
-        if (data.environment != null)
-            world.SetWind(data.environment.windX, data.environment.windZ);
+        if (data.worldState?.environment != null)
+            world.SetWind(data.worldState.environment.windX, data.worldState.environment.windZ);
 
         // If the player doesn't exist, do nothing
         if (world.player == null) return;

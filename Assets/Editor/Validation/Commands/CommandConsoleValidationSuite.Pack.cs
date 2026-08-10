@@ -18,7 +18,7 @@ namespace Editor.Validation.Commands
             scenarios.Add(new Scenario("B33: /seed prints the world seed; takes no args; errors gracefully without a world (CMD-3 Wave A)", Pack_Seed));
             scenarios.Add(new Scenario("B34: /where prints voxel/chunk/region/origin for the player's position; errors gracefully without a world (CMD-3 Wave A)", Pack_Where));
             scenarios.Add(new Scenario("B35: /origin shows the anchor; '/origin force' re-anchors onto the player's chunk; garbage args error (CMD-3 Wave A)", Pack_Origin));
-            scenarios.Add(new Scenario("B36: /time set — updates globalLightLevel; rejects out-of-range/garbage; graceful without a world (CMD-3 Wave B)", Pack_Time));
+            scenarios.Add(new Scenario("B36: /time — MC-anchored set/add/freeze/resume and the bare query; rejections leave the clock untouched; graceful without a world (CMD-3 Wave B, regrammared by RF-1)", Pack_Time));
             scenarios.Add(new Scenario("B37: /set-world-border — sets/disables the TF-14 radius; shrink-strands-player asks confirmation ('no' leaves it unchanged) (CMD-3 Wave B)", Pack_WorldBorder));
             scenarios.Add(new Scenario("B38: /setspawn + /spawn — round-trip: set spawn at a position, move away, /spawn teleports back with the arrival hold (CMD-3 Wave B)", Pack_SetSpawnAndSpawn));
             scenarios.Add(new Scenario("B39: /fly + /noclip — keybind coupling holds: noclip-on forces fly, fly-off drops noclip; on/off/toggle forms (CMD-3 Wave B)", Pack_FlyNoclipCoupling));
@@ -122,24 +122,65 @@ namespace Editor.Validation.Commands
         {
             using (CommandTeleportTestWorld stub = new CommandTeleportTestWorld())
             {
-                CommandResult result = stub.Engine.Execute("/time set 0.25");
-                bool ok = Expect(result.Lines.Count == 1 && result.Lines[0].Severity == ConsoleLineSeverity.Info,
-                    "/time set 0.25 succeeds");
-                ok &= Expect(UnityEngine.Mathf.Abs(stub.World.globalLightLevel - 0.25f) < 1e-5f,
-                    $"globalLightLevel updated to 0.25, got {stub.World.globalLightLevel}");
+                WorldTimeManager clock = stub.World.TimeManager;
 
-                ok &= ExpectTeleportError(stub.Engine, "/time set 1.5", "in [0, 1]", "out-of-range time is rejected");
-                ok &= ExpectTeleportError(stub.Engine, "/time set night", "in [0, 1]", "non-numeric time is rejected");
-                ok &= ExpectTeleportError(stub.Engine, "/time 0.5", "Usage", "missing 'set' word is a usage error");
-                ok &= Expect(UnityEngine.Mathf.Abs(stub.World.globalLightLevel - 0.25f) < 1e-5f,
-                    "rejected inputs never mutate the light level");
+                CommandResult result = stub.Engine.Execute("/time set noon");
+                bool ok = Expect(result.Lines.Count == 1 && result.Lines[0].Severity == ConsoleLineSeverity.Info,
+                    "/time set noon succeeds");
+                ok &= Expect(clock.DayTicks == 6000, $"'noon' is tick 6000, got {clock.DayTicks}");
+                ok &= Expect(UnityEngine.Mathf.Abs(clock.DayFraction - 0.5f) < 1e-5f,
+                    $"noon is mid-day fraction, got {clock.DayFraction}");
+
+                stub.Engine.Execute("/time set midnight");
+                ok &= Expect(clock.DayTicks == 18000, $"'midnight' is tick 18000, got {clock.DayTicks}");
+                ok &= Expect(clock.SkyDarken == 11, $"midnight is the deepest sky darken, got {clock.SkyDarken}");
+
+                // A raw tick is accepted, and the day count is preserved across a set.
+                stub.Engine.Execute("/time set 12000");
+                ok &= Expect(clock.DayTicks == 12000, $"a raw tick sets the time, got {clock.DayTicks}");
+
+                stub.Engine.Execute("/time add 6000");
+                ok &= Expect(clock.DayTicks == 18000 && clock.ElapsedDays == 0,
+                    $"/time add advances within the day, got tick {clock.DayTicks} day {clock.ElapsedDays}");
+                stub.Engine.Execute("/time add 6000");
+                ok &= Expect(clock.ElapsedDays == 1, $"/time add rolls into the next day, got day {clock.ElapsedDays}");
+
+                stub.Engine.Execute("/time freeze");
+                ok &= Expect(clock.IsFrozen, "/time freeze holds the clock");
+                stub.Engine.Execute("/time resume");
+                ok &= Expect(!clock.IsFrozen, "/time resume releases it");
+
+                // Bare /time is a query, not a usage error.
+                CommandResult query = stub.Engine.Execute("/time");
+                ok &= Expect(query.Lines.Count == 1 && query.Lines[0].Severity == ConsoleLineSeverity.Info &&
+                             query.Lines[0].Text.Contains("Time:"),
+                    $"bare /time reports the clock, got '{(query.Lines.Count > 0 ? query.Lines[0].Text : "")}'");
+
+                // Rejections must leave the clock exactly where it was.
+                stub.Engine.Execute("/time set 6000");
+                long untouched = clock.TimeTicks;
+                ok &= ExpectTeleportError(stub.Engine, "/time set 24000", "or a whole tick", "an out-of-range tick is rejected");
+                ok &= ExpectTeleportError(stub.Engine, "/time set -1", "or a whole tick", "a negative tick is rejected");
+                ok &= ExpectTeleportError(stub.Engine, "/time set 100.5", "or a whole tick", "a fractional tick is rejected");
+                ok &= ExpectTeleportError(stub.Engine, "/time set teatime", "or a whole tick", "an unknown named time is rejected");
+                ok &= ExpectTeleportError(stub.Engine, "/time set", "Usage", "a missing argument is a usage error");
+                ok &= ExpectTeleportError(stub.Engine, "/time gusty", "Usage", "unknown subcommands are rejected");
+                ok &= ExpectTeleportError(stub.Engine, "/time freeze now", "Usage", "freeze takes no argument");
+
+                // Beyond 2^24 a float's neighbours are more than one tick apart, and the cast to long
+                // eventually goes out of range — rejected rather than handed to the clock as garbage.
+                ok &= ExpectTeleportError(stub.Engine, "/time add 1e30", "whole number", "an astronomically large tick delta is rejected");
+                ok &= ExpectTeleportError(stub.Engine, "/time add 99999999", "whole number", "a delta past the exact-float range is rejected");
+                ok &= ExpectTeleportError(stub.Engine, "/time add 1.5", "whole number", "a fractional tick delta is rejected");
+                ok &= Expect(clock.TimeTicks == untouched,
+                    $"no rejected input moved the clock, expected {untouched} got {clock.TimeTicks}");
 
                 if (!ok) return false;
             }
 
             CommandEngine worldless = new CommandEngine();
             ConsoleCommandInstaller.RegisterAll(worldless.Registry);
-            CommandResult noWorld = worldless.Execute("/time set 0.5");
+            CommandResult noWorld = worldless.Execute("/time set noon");
             return Expect(noWorld.Lines.Count == 1 && noWorld.Lines[0].Text.Contains("No world is loaded"),
                 "/time without a world fails gracefully");
         }
