@@ -4607,10 +4607,22 @@ public class World : MonoBehaviour, IMeshDrainHost
     /// Reads a voxel's packed light value.
     /// </summary>
     /// <param name="voxelPos">World voxel position.</param>
-    /// <param name="lightData">The packed light value; 0 when the chunk is not loaded.</param>
-    /// <returns>True when the position resolved to a loaded chunk.</returns>
+    /// <param name="lightData">The packed light value; 0 when the position is out of world or its chunk is not loaded.</param>
+    /// <returns>True when the position is in-world and its chunk is loaded.</returns>
     public bool TryGetLightData(Vector3Int voxelPos, out ushort lightData)
     {
+        // Integer world-bounds check, mirroring WorldData.TryGetVoxel: XZ is unbounded (WS-3), so only
+        // the Y bound remains, and the folded `(uint)y >= ChunkHeight` catches both ends in one test.
+        // Load-bearing, not hygiene — ChunkData.GetLightData indexes SectionUniformSkyLevel[y / 16]
+        // behind an assert that compiles out of release builds, so an unguarded out-of-range Y throws
+        // IndexOutOfRangeException in IL2CPP. Callers sample neighbors (the voxel above a candidate
+        // spawn, say), so they reach y == ChunkHeight and y == -1 by construction.
+        if ((uint)voxelPos.y >= VoxelData.ChunkHeight)
+        {
+            lightData = 0;
+            return false;
+        }
+
         Chunk chunk = GetChunkFromVector3(voxelPos);
         if (chunk?.ChunkData == null)
         {

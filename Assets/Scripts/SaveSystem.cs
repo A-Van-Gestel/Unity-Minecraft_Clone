@@ -108,8 +108,9 @@ public static class SaveSystem
                     windZ = world.WindZ,
                 },
 
-                // The clock is null only in fixtures that never ran StartWorld; persist the world's
-                // starting time rather than a zero that would silently rewind it to sunrise.
+                // The clock is null only in fixtures that never ran StartWorld — a real save always has
+                // one, because _isWorldLoaded (which gates the quit-save) is set after StartWorld builds
+                // it. The fallback is therefore unreachable in play, and writes tick 0 (sunrise).
                 time = new WorldTimeData
                 {
                     ticks = world.TimeManager?.TimeTicks ?? 0L,
