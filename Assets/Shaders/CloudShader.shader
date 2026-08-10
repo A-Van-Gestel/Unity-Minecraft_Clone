@@ -87,11 +87,17 @@ Shader "Minecraft/CloudShader"
                     n.y > 0.5 ? FACE_SHADE_TOP : n.y < -0.5 ? FACE_SHADE_BOTTOM : abs(n.x) > 0.5 ? FACE_SHADE_SIDE_X : FACE_SHADE_SIDE_Z;
                 shade = lerp(1.0, shade, _CloudFaceShading);
 
-                // Day/night brightness: clouds are fully sky-exposed, so run sunLuminance = 1 through
-                // the terrain's shared shade curve, NORMALIZED to its noon value — noon clouds keep the
-                // authored _Color exactly, and night darkens by the same relative factor as sky-lit
-                // terrain. SkyLightColor alone can't do this: it carries the hue, not the brightness.
-                float sunShadow = VoxelLightToShadow(1.0, GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel);
+                // Day/night brightness: clouds are fully sky-exposed, so run an exposure of 1 through
+                // the terrain's shared path — subtract the day/night darkening, then the shade curve —
+                // NORMALIZED to its noon value. Noon clouds keep the authored _Color exactly, and night
+                // darkens by the same relative factor as sky-lit terrain. SkyLightColor alone can't do
+                // this: it carries the hue, not the brightness.
+                //
+                // The day/night term belongs in the EXPOSURE slot, not the curve's globalLight slot
+                // (RF-1 §10): with the subtractive model those two are no longer the same number, and
+                // passing it as globalLight would leave clouds brighter than the terrain beneath them.
+                float litSky = ApplySkyDarken(1.0, GlobalLightLevel);
+                float sunShadow = VoxelLightToShadow(litSky, 1.0, minGlobalLightLevel, maxGlobalLightLevel);
                 float noonShadow = VoxelLightToShadow(1.0, 1.0, minGlobalLightLevel, maxGlobalLightLevel);
                 half dayNight = sunShadow / noonShadow;
 

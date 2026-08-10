@@ -45,6 +45,10 @@ float CalculateLinearVoxelShadow(float shade)
 
 /// Applies the engine's voxel lighting model to a base color.
 ///
+/// NOTE: this scalar entry point still MULTIPLIES by globalLight — the pre-RF-1 model. It has no
+/// callers; the shipped path is ApplyVoxelLightingRGB, which subtracts (see ApplySkyDarken). Any new
+/// surface using this would darken out of step with the terrain around it.
+///
 /// @param color        The base texture color (RGB).
 /// @param lightLevel   Per-vertex light level (vertex color alpha, 0..1).
 /// @param globalLight  The world's global light level (day/night cycle, 0..1).
@@ -72,15 +76,31 @@ float VoxelLightToShadow(float lightLevel,
     return CalculateLinearVoxelShadow(shade);
 }
 
+/// Subtracts the day/night darkening from a stored sky-exposure value (RF-1 §10).
+///
+/// The stored channel is time-invariant sky EXPOSURE, so time of day is applied here, at read time.
+/// Subtracting rather than multiplying is what keeps the render honest: a voxel that looks like
+/// level 4 IS effective level 4, the same number `LightBitMapping.GetEffectiveLight` hands gameplay.
+/// A multiply would scale every level toward zero and agree with that query at only two points.
+///
+/// @param skyExposure  Per-vertex stored sky light, normalized (0..1 = level 0..15).
+/// @param globalLight  Normalized brightness of fully-exposed sky (WorldTimeManager.GlobalLightLevel,
+///                     = 1 - skyDarken/15). Its complement is the darkening to subtract.
+/// @return             The sky light actually reaching this vertex, normalized.
+float ApplySkyDarken(float skyExposure, float globalLight)
+{
+    return max(skyExposure - (1.0 - globalLight), 0.0);
+}
+
 /// Applies the voxel lighting model with separate sunlight and RGB blocklight channels.
 /// Sunlight is a scalar tinted by SkyLightColor (time-of-day gradient).
 /// Blocklight is per-channel RGB, each going through the same shade curve independently.
 ///
 /// @param color            Base texture color (RGB).
-/// @param sunLuminance     Per-vertex sunlight scalar (0..1).
+/// @param sunLuminance     Per-vertex sunlight scalar (0..1) — stored sky EXPOSURE, not brightness.
 /// @param blockRGB         Per-vertex blocklight RGB (0..1 per channel).
 /// @param skyColor         Sky light tint color (from World.cs gradient, white at noon).
-/// @param globalLight      Day/night cycle (0..1) — modulates sunlight only.
+/// @param globalLight      Day/night cycle (0..1) — subtracted from the sky channel only.
 /// @param minLight         Minimum ambient (0.15).
 /// @param maxLight         Maximum light (1.0).
 half3 ApplyVoxelLightingRGB(half3 color,
@@ -88,8 +108,10 @@ half3 ApplyVoxelLightingRGB(half3 color,
                             half3 skyColor,
                             float globalLight, float minLight, float maxLight)
 {
-    // Sunlight: scalar luminance × shade curve × sky color tint
-    float sunShadow = VoxelLightToShadow(sunLuminance, globalLight, minLight, maxLight);
+    // Sunlight: exposure minus the time-of-day darkening, then the shade curve at full intensity
+    // (the curve's own globalLight term stays 1.0 — the day/night term has already been applied).
+    float litSky = ApplySkyDarken(sunLuminance, globalLight);
+    float sunShadow = VoxelLightToShadow(litSky, 1.0, minLight, maxLight);
     half3 sunContrib = color * sunShadow * skyColor;
 
     // Blocklight: RGB channels × same shade curve, always full intensity
