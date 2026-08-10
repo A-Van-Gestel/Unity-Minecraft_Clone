@@ -70,8 +70,8 @@ namespace Commands
         {
             world.SetBorderRadius(radius);
             return CommandResult.Info(radius > 0
-                ? $"World border set to ±{radius} voxels (persisted on the next save)."
-                : "World border disabled (persisted on the next save).");
+                ? $"World border set to ±{radius} voxels."
+                : "World border disabled.");
         }
 
         /// <inheritdoc/>

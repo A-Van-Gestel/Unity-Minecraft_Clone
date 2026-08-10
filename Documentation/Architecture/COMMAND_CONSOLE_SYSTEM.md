@@ -577,8 +577,11 @@ rewritten — and left as-is rather than widening a four-implementer interface.
   negative speed is rejected — an arbitrary maximum was a dev tool second-guessing its user), and the
   trailing "Persisted on the next save." clause was **dropped** from every `/wind` reply for parity
   with `/time set`'s plain confirmation. §8.4 gained a Speed-range subsection; B55 now asserts a
-  100000 blocks/s set *succeeds* where it previously asserted the cap rejected it. Note
-  `/set-world-border` deliberately keeps its own persistence suffix — only `/wind` changed.
+  100000 blocks/s set *succeeds* where it previously asserted the cap rejected it. The same suffix
+  was then stripped from `/set-world-border` (two replies) and `/setspawn`, so **no command reply
+  carries the clause any more** — save timing is engine behavior, not something every confirmation
+  needs to restate. Neither suite scenario was affected: B37 asserts `BorderRadius` state and B38
+  asserts only the `/setspawn` line's severity, never its text.
 * **v1.14** - **`/wind` shipped 2026-08-10** (§8.4): a post-CMD-3 setter+save command for the shared
   wind vector clouds and FL-1 foliage sway read. Compass-`toward` degree convention (0° = north =
   +Z, clockwise) chosen over the meteorological "from" reading; `World.SetWind`/`WindX`/`WindZ` take

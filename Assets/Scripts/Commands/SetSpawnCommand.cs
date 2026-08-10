@@ -32,7 +32,7 @@ namespace Commands
 
             var spawn = WorldOrigin.UnityToRelative(ctx.Player.transform.position);
             ctx.World.SetSpawnPoint(spawn);
-            return CommandResult.Info($"Spawn point set to your position: {spawn} (persisted on the next save).");
+            return CommandResult.Info($"Spawn point set to your position: {spawn}.");
         }
     }
 }
