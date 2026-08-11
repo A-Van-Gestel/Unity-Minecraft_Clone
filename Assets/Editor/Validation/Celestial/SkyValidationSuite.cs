@@ -50,6 +50,10 @@ namespace Editor.Validation.Celestial
     /// <item>Dropping <see cref="AtmosphericFog.DefaultFogCurvePower"/> to 1 (a linear falloff) reds
     /// B14's shape assertion at exactly 50% midpoint fog — the even ramp that paints a visible gradient
     /// across a mountain, which is the in-game artifact the curve was added to remove.</item>
+    /// <item>Setting <see cref="AtmosphericFog.LightFogCurveMultiplier"/> to 1 reds B15's "Light is
+    /// thinner than Full" — the level would exist in the menu but change nothing.</item>
+    /// <item>Ignoring <see cref="FogStyle.Off"/> in <c>ComputeFogRange</c> reds B15's two Off
+    /// assertions, the second reporting fog at 100% where the player asked for none.</item>
     /// </list>
     /// </para>
     /// <para>
@@ -149,6 +153,7 @@ namespace Editor.Validation.Celestial
                 new Scenario("B12 The model is pure - re-evaluating in reverse order reproduces every value", RunB12Determinism),
                 new Scenario("B13 A new world's first night has a full moon, visible above the horizon", RunB13FirstNightFullMoon),
                 new Scenario("B14 Distance fog hides the chunk boundary and follows the view distance", RunB14FogRange),
+                new Scenario("B15 Every fog level still conceals the boundary; Off disables fog entirely", RunB15FogStyles),
             };
             return ValidationSuiteRunner.Execute("Sky & Celestial", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -676,7 +681,7 @@ namespace Editor.Validation.Celestial
         {
             const float farClip = 1000f;
             Vector4 range = AtmosphericFog.ComputeFogRange(10, farClip,
-                AtmosphericFog.DefaultFogStartFraction, AtmosphericFog.DefaultFogCurvePower);
+                AtmosphericFog.DefaultFogStartFraction, AtmosphericFog.DefaultFogCurvePower, FogStyle.Full);
 
             float start = range.x;
             float end = range.y;
@@ -704,6 +709,54 @@ namespace Editor.Validation.Celestial
             ok &= Check("fog never thins out as distance grows", monotonic);
             ok &= Check("beyond the end distance fog stays fully opaque",
                 AtmosphericFog.EvaluateFogFactor(end * 3f, range) >= 1f - FOG_EPSILON);
+            return ok;
+        }
+
+        /// <summary>
+        /// B15 — the graphics setting's fog levels. The load-bearing assertion is that <b>every enabled
+        /// level still reaches full opacity at the fog end</b>: a level that merely dimmed the fog would
+        /// leave terrain visibly ending against open sky, which is the artifact fog exists to prevent.
+        /// </summary>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunB15FogStyles()
+        {
+            const float farClip = 1000f;
+            const int viewDistance = 10;
+            const float start = AtmosphericFog.DefaultFogStartFraction;
+            const float power = AtmosphericFog.DefaultFogCurvePower;
+
+            Vector4 off = AtmosphericFog.ComputeFogRange(viewDistance, farClip, start, power, FogStyle.Off);
+            Vector4 light = AtmosphericFog.ComputeFogRange(viewDistance, farClip, start, power, FogStyle.Light);
+            Vector4 full = AtmosphericFog.ComputeFogRange(viewDistance, farClip, start, power, FogStyle.Full);
+
+            bool ok = Check("Off produces a zero-width range, the shader's disable path",
+                Mathf.Approximately(off.y - off.x, 0f));
+            ok &= Check($"Off renders no fog even far out, got {AtmosphericFog.EvaluateFogFactor(1e4f, off):F3}",
+                AtmosphericFog.EvaluateFogFactor(1e4f, off) <= FOG_EPSILON);
+
+            // The whole point of shaping the curve rather than scaling opacity.
+            ok &= Check($"Light still fully conceals the boundary, got {AtmosphericFog.EvaluateFogFactor(light.y, light):P1}",
+                AtmosphericFog.EvaluateFogFactor(light.y, light) >= 1f - FOG_EPSILON);
+            ok &= Check($"Full still fully conceals the boundary, got {AtmosphericFog.EvaluateFogFactor(full.y, full):P1}",
+                AtmosphericFog.EvaluateFogFactor(full.y, full) >= 1f - FOG_EPSILON);
+
+            ok &= Check("Light and Full share the same fog distances — only the curve differs",
+                Mathf.Approximately(light.x, full.x) && Mathf.Approximately(light.y, full.y));
+
+            // Light must actually be lighter everywhere short of the boundary, or the level is cosmetic.
+            bool lighterThroughout = true;
+            bool bothClearNear = true;
+            for (int i = 1; i < 40; i++)
+            {
+                float distance = Mathf.Lerp(full.x, full.y, i / 40f);
+                float lightFog = AtmosphericFog.EvaluateFogFactor(distance, light);
+                float fullFog = AtmosphericFog.EvaluateFogFactor(distance, full);
+                if (lightFog >= fullFog) lighterThroughout = false;
+                if (AtmosphericFog.EvaluateFogFactor(full.x, light) > FOG_EPSILON) bothClearNear = false;
+            }
+
+            ok &= Check("Light is thinner than Full at every distance short of the boundary", lighterThroughout);
+            ok &= Check("both levels are still clear at the fog start distance", bothClearNear);
             return ok;
         }
 

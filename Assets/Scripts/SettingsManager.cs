@@ -5,6 +5,7 @@ using Data;
 using Data.Enums;
 using MyBox;
 using Serialization;
+using Sky;
 using UI;
 using UI.Attributes;
 using UI.Enums;
@@ -239,6 +240,19 @@ public class Settings
              TooltipTags.BulletOptionStart + "Fast" + TooltipTags.BulletOptionEnd + "2D flat clouds.\n" +
              TooltipTags.BulletOptionStart + "Fancy" + TooltipTags.BulletOptionEnd + "Full 3D clouds.")]
     public CloudStyle clouds = CloudStyle.Fancy;
+
+    /// <summary>
+    /// How heavily distance fog veils the world. The world type authors the fog's shape; this chooses
+    /// how much of it the player sees.
+    /// </summary>
+    [SettingField(SettingsTab.Graphics, Label = "Distance Fog", Order = 5)]
+    [Tooltip("Haze that thickens with distance, hiding the edge of the loaded world.\n\n" +
+             TooltipTags.BulletOptionStart + "Off" + TooltipTags.BulletOptionEnd + "No fog. Terrain ends abruptly against the sky at the view distance.\n" +
+             TooltipTags.BulletOptionStart + "Light" + TooltipTags.BulletOptionEnd + "Held back to the far distance; the middle ground stays clear.\n" +
+             TooltipTags.BulletOptionStart + "Full" + TooltipTags.BulletOptionEnd + "The world's authored fog.\n\n" +
+             TooltipTags.Performance + "A few shader instructions per pixel; no measurable cost.\n" +
+             TooltipTags.DefaultColorStart + "Full" + TooltipTags.DefaultColorEnd)]
+    public FogStyle distanceFog = FogStyle.Full;
 
     /// <summary>
     /// If true, flora (grass blades and future foliage) sways in the wind via shader vertex animation.

@@ -3,6 +3,26 @@ using UnityEngine;
 namespace Sky
 {
     /// <summary>
+    /// How heavily distance fog is applied, as chosen in the graphics settings.
+    /// </summary>
+    /// <remarks>
+    /// The levels change how <i>early</i> fog accumulates, never how opaque it ends up: every enabled
+    /// level still reaches full opacity at the fog end. Capping terminal opacity instead would leave
+    /// terrain partly visible where it stops being loaded, which is the artifact fog exists to hide.
+    /// </remarks>
+    public enum FogStyle
+    {
+        /// <summary>No distance fog. The loaded-chunk boundary becomes visible again.</summary>
+        Off = 0,
+
+        /// <summary>Fog held back to the far distance — atmosphere without veiling the middle ground.</summary>
+        Light = 1,
+
+        /// <summary>The world type's authored fog curve, unmodified.</summary>
+        Full = 2,
+    }
+
+    /// <summary>
     /// Distance-fog range derived from the player's view distance (RF-2 §4) — pure functions with no
     /// Unity state, consumed by <see cref="World"/> when it publishes the fog shader globals.
     /// </summary>
@@ -53,6 +73,16 @@ namespace Sky
         public const float MinFogCurvePower = 1f;
 
         /// <summary>
+        /// Exponent multiplier for <see cref="FogStyle.Light"/>.
+        /// </summary>
+        /// <remarks>
+        /// Steepening the curve is the safe way to thin fog: <c>t^p</c> is 1 at <c>t = 1</c> for every
+        /// exponent, so the far boundary stays fully hidden no matter how high this goes. Scaling the
+        /// resulting opacity instead would uncover that boundary.
+        /// </remarks>
+        public const float LightFogCurveMultiplier = 2f;
+
+        /// <summary>
         /// Distance at which fog fully hides the world.
         /// </summary>
         /// <param name="viewDistanceChunks">The player's view distance, as a radius in chunks.</param>
@@ -85,14 +115,20 @@ namespace Sky
         /// <param name="maxDistance">Hard ceiling, normally the camera's far clip plane.</param>
         /// <param name="startFraction">Fraction of the fog end at which fog begins; higher is thinner.</param>
         /// <param name="curvePower">Exponent shaping accumulation; 1 is linear, higher is back-loaded.</param>
+        /// <param name="style">The player's chosen fog level.</param>
         /// <returns><c>(start, end, curvePower, 0)</c>; a zero-width range means fog is off.</returns>
         public static Vector4 ComputeFogRange(int viewDistanceChunks, float maxDistance, float startFraction,
-            float curvePower)
+            float curvePower, FogStyle style)
         {
+            if (style == FogStyle.Off) return Vector4.zero;
+
+            float power = Mathf.Max(curvePower, MinFogCurvePower);
+            if (style == FogStyle.Light) power *= LightFogCurveMultiplier;
+
             return new Vector4(
                 ComputeFogStart(viewDistanceChunks, maxDistance, startFraction),
                 ComputeFogEnd(viewDistanceChunks, maxDistance),
-                Mathf.Max(curvePower, MinFogCurvePower),
+                power,
                 0f);
         }
 

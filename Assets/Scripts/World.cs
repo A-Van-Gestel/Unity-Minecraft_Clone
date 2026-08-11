@@ -2090,7 +2090,8 @@ public class World : MonoBehaviour, IMeshDrainHost
         float curvePower = authored ? _activeTimeOfDaySettings.FogCurvePower : AtmosphericFog.DefaultFogCurvePower;
 
         Shader.SetGlobalVector(s_shaderFogRange,
-            AtmosphericFog.ComputeFogRange(settings.viewDistance, farClip, startFraction, curvePower));
+            AtmosphericFog.ComputeFogRange(settings.viewDistance, farClip, startFraction, curvePower,
+                settings.distanceFog));
         Shader.SetGlobalColor(s_shaderFogColor, TimeManager.HorizonColor);
     }
 
