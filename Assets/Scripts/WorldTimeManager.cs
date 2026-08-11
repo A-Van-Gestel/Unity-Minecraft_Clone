@@ -1,4 +1,5 @@
 using Data.WorldTypes;
+using Sky;
 using UnityEngine;
 
 /// <summary>
@@ -90,8 +91,32 @@ public class WorldTimeManager
     /// </summary>
     public int SkyDarken => Mathf.Clamp(Mathf.RoundToInt(ContinuousSkyDarken), 0, TimeOfDaySettings.MaxSkyDarken);
 
+    /// <summary>
+    /// Elapsed time as a continuous day count. Its fractional part is exactly <see cref="DayFraction"/>,
+    /// which is what keeps the moon's phase and the sun's position on one clock.
+    /// </summary>
+    public double ContinuousDays => (TimeTicks + SunriseTickOffset) / (double)TicksPerDay;
+
+    /// <summary>Direction of the sun from the observer — a unit vector in Unity render space (RF-2).</summary>
+    public Vector3 SunDirection => CelestialMath.SunDirection(DayFraction, _settings.ObserverLatitude);
+
+    /// <summary>Direction of the moon from the observer — a unit vector in Unity render space (RF-2).</summary>
+    public Vector3 MoonDirection => CelestialMath.MoonDirection(ContinuousDays, _settings.ObserverLatitude);
+
+    /// <summary>Lit fraction of the moon's disc: 0 at new moon, 1 at full.</summary>
+    public float MoonPhase => CelestialMath.MoonIlluminatedFraction(ContinuousDays);
+
+    /// <summary>Orientation of the celestial sphere, which the star field rides.</summary>
+    public Quaternion SkyRotation => CelestialMath.SkyRotation(DayFraction, _settings.ObserverLatitude);
+
     /// <summary>The sky-light tint for the current time.</summary>
     public Color SkyLightColor => _settings.EvaluateSkyLightColor(DayFraction);
+
+    /// <summary>The overhead sky color for the current time.</summary>
+    public Color ZenithColor => _settings.EvaluateZenithColor(DayFraction);
+
+    /// <summary>The horizon sky color for the current time; distance fog adopts this too.</summary>
+    public Color HorizonColor => _settings.EvaluateHorizonColor(DayFraction);
 
     /// <summary>The camera background color for the current time.</summary>
     public Color BackgroundColor => _settings.EvaluateBackgroundColor(DayFraction);

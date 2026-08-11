@@ -57,6 +57,24 @@ namespace Data.WorldTypes
         private static readonly Color s_dusk = new Color(0.75f, 0.32f, 0.22f, 1f);
         private static readonly Color s_paleDay = new Color(0.35f, 0.72f, 0.95f, 1f);
 
+        // Sky (RF-2). The zenith runs darker and more saturated than the horizon at every hour, which
+        // is what reads as depth; night keys stay in the blue family so they agree with the moonlight
+        // tint RF-1 §3 authors into the sky-light gradient.
+        //
+        // These are LINEAR values, not sRGB. The project renders in linear color space and the sky
+        // globals are pushed raw through Shader.SetGlobalColor, which performs no conversion — so a
+        // value here of 0.075 reaches the screen at roughly sRGB 0.30, four times brighter than the
+        // swatch suggests. Judge these numbers by the render, never by the Inspector gradient.
+        private static readonly Color s_zenithNight = new Color(0.004f, 0.005f, 0.024f, 1f);
+        private static readonly Color s_zenithTwilight = new Color(0.16f, 0.14f, 0.33f, 1f);
+        private static readonly Color s_zenithSoftDay = new Color(0.18f, 0.42f, 0.80f, 1f);
+        private static readonly Color s_zenithDay = new Color(0.16f, 0.42f, 0.88f, 1f);
+        private static readonly Color s_horizonNight = new Color(0.010f, 0.013f, 0.042f, 1f);
+        private static readonly Color s_horizonDawn = new Color(0.85f, 0.45f, 0.35f, 1f);
+        private static readonly Color s_horizonSoftDay = new Color(0.62f, 0.78f, 0.93f, 1f);
+        private static readonly Color s_horizonDay = new Color(0.70f, 0.85f, 0.97f, 1f);
+        private static readonly Color s_horizonDusk = new Color(0.92f, 0.42f, 0.20f, 1f);
+
         [Tooltip("Real seconds in one full day/night cycle. 1200 (20 minutes) is Minecraft parity.")]
         [Min(1f)]
         [SerializeField]
@@ -73,6 +91,35 @@ namespace Data.WorldTypes
         [Tooltip("Camera background color over the day. Replaces the old lerp(night, day, lightLevel), which collapsed dawn and dusk onto the same color.")]
         [SerializeField]
         private Gradient _backgroundOverDay = BuildDefaultBackgroundGradient();
+
+        [Header("Sky (RF-2)")]
+        [Tooltip("Observer latitude in degrees; positive is north. Tilts the sun's arc — 0 puts it overhead at noon, 90 keeps it on the horizon all day.")]
+        [Range(-90f, 90f)]
+        [SerializeField]
+        private float _observerLatitude = 45f;
+
+        [Tooltip("Sky color straight overhead, over the day. Evaluated at DayFraction: 0 = midnight, 0.5 = noon.")]
+        [SerializeField]
+        private Gradient _zenithOverDay = BuildDefaultZenithGradient();
+
+        [Tooltip("Sky color at the horizon, over the day. Also drives the fog color when distance fog is enabled.")]
+        [SerializeField]
+        private Gradient _horizonOverDay = BuildDefaultHorizonGradient();
+
+        [Tooltip("Angular radius of the sun disc, in degrees. The real sun is about 0.27; larger reads better at voxel scale.")]
+        [Range(0.1f, 10f)]
+        [SerializeField]
+        private float _sunAngularRadius = 1.5f;
+
+        [Tooltip("Angular radius of the moon disc, in degrees.")]
+        [Range(0.1f, 10f)]
+        [SerializeField]
+        private float _moonAngularRadius = 1.7f;
+
+        [Tooltip("Brightness of the star field at its fullest, once the sun is well below the horizon.")]
+        [Range(0f, 2f)]
+        [SerializeField]
+        private float _starBrightness = 1f;
 
         /// <summary>Real seconds in one full day/night cycle.</summary>
         public float DayLengthSeconds => _dayLengthSeconds;
@@ -97,6 +144,28 @@ namespace Data.WorldTypes
         /// <param name="dayFraction">Position in the day, <c>[0,1)</c>.</param>
         /// <returns>The camera's clear color.</returns>
         public Color EvaluateBackgroundColor(float dayFraction) => _backgroundOverDay.Evaluate(dayFraction);
+
+        /// <summary>Observer latitude in degrees, positive north — the tilt of the celestial arcs.</summary>
+        public float ObserverLatitude => _observerLatitude;
+
+        /// <summary>Angular radius of the sun disc, in degrees.</summary>
+        public float SunAngularRadius => _sunAngularRadius;
+
+        /// <summary>Angular radius of the moon disc, in degrees.</summary>
+        public float MoonAngularRadius => _moonAngularRadius;
+
+        /// <summary>Peak brightness of the star field.</summary>
+        public float StarBrightness => _starBrightness;
+
+        /// <summary>Samples the overhead sky color for a point in the day.</summary>
+        /// <param name="dayFraction">Position in the day, <c>[0,1)</c>.</param>
+        /// <returns>The zenith color.</returns>
+        public Color EvaluateZenithColor(float dayFraction) => _zenithOverDay.Evaluate(dayFraction);
+
+        /// <summary>Samples the horizon sky color for a point in the day.</summary>
+        /// <param name="dayFraction">Position in the day, <c>[0,1)</c>.</param>
+        /// <returns>The horizon color, which distance fog also adopts.</returns>
+        public Color EvaluateHorizonColor(float dayFraction) => _horizonOverDay.Evaluate(dayFraction);
 
         /// <summary>
         /// Builds the default light curve: a night hold, a dawn ramp through twilight and golden hour,
@@ -187,6 +256,63 @@ namespace Data.WorldTypes
                     new GradientColorKey(s_paleDay, AFTERNOON),
                     new GradientColorKey(s_dusk, SUNSET),
                     new GradientColorKey(s_night, NIGHT_HOLD_START),
+                },
+                new[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(1f, 1f) });
+            return gradient;
+        }
+
+        /// <summary>
+        /// The engine's default overhead sky gradient, for editor tooling that re-authors an asset.
+        /// </summary>
+        /// <returns>A fresh gradient; the caller owns it.</returns>
+        /// <remarks>
+        /// Field initializers run only when an instance is <i>created</i>, so editing the defaults in
+        /// code leaves every existing <c>.asset</c> on its serialized values. Tooling needs this entry
+        /// point to push new defaults into an asset that already exists.
+        /// </remarks>
+        public static Gradient CreateDefaultZenithGradient() => BuildDefaultZenithGradient();
+
+        /// <summary>The engine's default horizon gradient, for editor tooling that re-authors an asset.</summary>
+        /// <returns>A fresh gradient; the caller owns it.</returns>
+        public static Gradient CreateDefaultHorizonGradient() => BuildDefaultHorizonGradient();
+
+        /// <summary>Builds the default overhead sky gradient: near-black night through to saturated midday blue.</summary>
+        /// <returns>A gradient over one day.</returns>
+        private static Gradient BuildDefaultZenithGradient()
+        {
+            return BuildDayGradient(s_zenithNight, s_zenithTwilight, s_zenithSoftDay, s_zenithDay, s_zenithTwilight);
+        }
+
+        /// <summary>Builds the default horizon gradient: night blue, warm sunrise, pale day, orange sunset.</summary>
+        /// <returns>A gradient over one day.</returns>
+        private static Gradient BuildDefaultHorizonGradient()
+        {
+            return BuildDayGradient(s_horizonNight, s_horizonDawn, s_horizonSoftDay, s_horizonDay, s_horizonDusk);
+        }
+
+        /// <summary>
+        /// Builds a day-long gradient through the five sky moments, using all eight keys Unity allows.
+        /// </summary>
+        /// <param name="night">Color held through the night.</param>
+        /// <param name="dawn">Color at sunrise.</param>
+        /// <param name="softDay">Color mid-morning and mid-afternoon.</param>
+        /// <param name="day">Color at noon.</param>
+        /// <param name="dusk">Color at sunset.</param>
+        /// <returns>A gradient over one day, whose final key meets the 0.0 key at the same night color.</returns>
+        private static Gradient BuildDayGradient(Color night, Color dawn, Color softDay, Color day, Color dusk)
+        {
+            Gradient gradient = new Gradient();
+            gradient.SetKeys(
+                new[]
+                {
+                    new GradientColorKey(night, 0f),
+                    new GradientColorKey(night, NIGHT_HOLD_END),
+                    new GradientColorKey(dawn, SUNRISE),
+                    new GradientColorKey(softDay, MORNING),
+                    new GradientColorKey(day, 0.5f),
+                    new GradientColorKey(softDay, AFTERNOON),
+                    new GradientColorKey(dusk, SUNSET),
+                    new GradientColorKey(night, NIGHT_HOLD_START),
                 },
                 new[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(1f, 1f) });
             return gradient;

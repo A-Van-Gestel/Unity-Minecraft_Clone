@@ -45,6 +45,17 @@ namespace Sky
         /// </summary>
         public const float SolarDeclinationRadians = 0f;
 
+        /// <summary>
+        /// Phase offset placing a <b>full moon on the world's first night</b> (Minecraft parity).
+        /// </summary>
+        /// <remarks>
+        /// Without it the cycle starts at a new moon, and a new moon is — correctly — beside the sun,
+        /// so it is up by day and below the horizon all night. A fresh world would then have no visible
+        /// moon for roughly ten nights, which reads as a bug however right the geometry is. Tick 0 is
+        /// sunrise, so the first midnight is day 1.0; half a synodic month before that is the full moon.
+        /// </remarks>
+        public const float MoonPhaseEpochDays = SynodicDays * 0.5f - 1f;
+
         /// <summary>Day fraction of solar noon, the anchor the hour angle is measured from.</summary>
         private const float NOON_DAY_FRACTION = 0.5f;
 
@@ -89,7 +100,7 @@ namespace Sky
         /// <returns>The elongation in radians, <c>[0, 2π)</c>; 0 = new moon, π = full moon.</returns>
         public static float ElongationRadians(double continuousDays)
         {
-            double cycles = continuousDays / SynodicDays;
+            double cycles = (continuousDays + MoonPhaseEpochDays) / SynodicDays;
             return (float)(cycles - System.Math.Floor(cycles)) * 2f * Mathf.PI;
         }
 

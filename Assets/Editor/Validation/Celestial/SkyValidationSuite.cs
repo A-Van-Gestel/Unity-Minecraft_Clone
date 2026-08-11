@@ -42,6 +42,9 @@ namespace Editor.Validation.Celestial
     /// <item>Giving <see cref="CelestialMath.MoonIlluminatedFraction"/> a static field that blends each
     /// result with the previous call's reds B12 and B9 — confirming B12 still detects hidden state
     /// after it was rewritten from a self-comparison to a reverse-order re-evaluation.</item>
+    /// <item>Zeroing <see cref="CelestialMath.MoonPhaseEpochDays"/> reds B8, B10 and B13, the last
+    /// reporting the observed defect verbatim: the first night's moon at altitude −0.69. This is the
+    /// in-game bug B13 was written from, so the mutation is the bug itself.</item>
     /// </list>
     /// </para>
     /// <para>
@@ -78,6 +81,13 @@ namespace Editor.Validation.Celestial
         /// together and the whole suite stays green. Verified by running that mutation.
         /// </remarks>
         private const double EXPECTED_SYNODIC_DAYS = 29.53059;
+
+        /// <summary>
+        /// The world's first midnight, as a continuous day count — tick 0 is sunrise, so midnight of
+        /// the first night is day 1.0. B13 pins a full moon here; every other phase scenario counts
+        /// cycles from this anchor rather than from the model's own epoch constant.
+        /// </summary>
+        private const double FIRST_NIGHT_DAYS = 1.0;
 
         /// <summary>
         /// How close to its greatest possible altitude the moon must ride for "it peaks at midnight"
@@ -123,6 +133,7 @@ namespace Editor.Validation.Celestial
                 new Scenario("B10 The full moon peaks at midnight; the new moon peaks at noon", RunB10FullMoonMidnight),
                 new Scenario("B11 The sky rotation is rigid, daily, and carries the sun", RunB11SkyRotation),
                 new Scenario("B12 The model is pure - re-evaluating in reverse order reproduces every value", RunB12Determinism),
+                new Scenario("B13 A new world's first night has a full moon, visible above the horizon", RunB13FirstNightFullMoon),
             };
             return ValidationSuiteRunner.Execute("Sky & Celestial", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -409,15 +420,18 @@ namespace Editor.Validation.Celestial
         /// <returns>True when every assertion holds.</returns>
         private static bool RunB8PhaseCycle()
         {
-            bool ok = Check($"new moon at day 0 is unlit, got {CelestialMath.MoonIlluminatedFraction(0.0):F6}",
-                CelestialMath.MoonIlluminatedFraction(0.0) <= PHASE_EPSILON);
+            // Cycles are counted from the first night (B13's anchor), not from the model's own epoch.
+            const double newMoon = FIRST_NIGHT_DAYS + EXPECTED_SYNODIC_DAYS * 0.5;
+            bool ok = Check($"half a month after the first full moon is a new moon, got {CelestialMath.MoonIlluminatedFraction(newMoon):F6}",
+                CelestialMath.MoonIlluminatedFraction(newMoon) <= PHASE_EPSILON);
 
-            const double fullMoon = EXPECTED_SYNODIC_DAYS * 0.5;
-            ok &= Check($"full moon at half a synodic month is fully lit, got {CelestialMath.MoonIlluminatedFraction(fullMoon):F6}",
-                Mathf.Abs(CelestialMath.MoonIlluminatedFraction(fullMoon) - 1f) <= PHASE_EPSILON);
+            const double nextFullMoon = FIRST_NIGHT_DAYS + EXPECTED_SYNODIC_DAYS;
+            ok &= Check($"the cycle returns to full after one synodic month, got {CelestialMath.MoonIlluminatedFraction(nextFullMoon):F6}",
+                Mathf.Abs(CelestialMath.MoonIlluminatedFraction(nextFullMoon) - 1f) <= PHASE_EPSILON);
 
-            ok &= Check($"the cycle returns to new after one synodic month, got {CelestialMath.MoonIlluminatedFraction(EXPECTED_SYNODIC_DAYS):F6}",
-                CelestialMath.MoonIlluminatedFraction(EXPECTED_SYNODIC_DAYS) <= PHASE_EPSILON);
+            const double firstQuarter = FIRST_NIGHT_DAYS + EXPECTED_SYNODIC_DAYS * 0.25;
+            ok &= Check($"a quarter month past full is half lit, got {CelestialMath.MoonIlluminatedFraction(firstQuarter):F6}",
+                Mathf.Abs(CelestialMath.MoonIlluminatedFraction(firstQuarter) - 0.5f) <= PHASE_EPSILON);
 
             // Exactly one full moon per synodic month over many months: counts the maxima rather than
             // trusting a single sample, so a phase running at double rate cannot pass.
@@ -488,13 +502,13 @@ namespace Editor.Validation.Celestial
             for (int month = 0; month < PHASE_MONTHS; month++)
             {
                 // The midnight nearest this month's full moon: the hour the moonlight floor matters most.
-                double fullMidnight = System.Math.Round(EXPECTED_SYNODIC_DAYS * (month + 0.5));
+                double fullMidnight = System.Math.Round(FIRST_NIGHT_DAYS + EXPECTED_SYNODIC_DAYS * month);
                 float fullMoonAltitude = CelestialMath.MoonDirection(fullMidnight, latitude).y;
                 float fullSunAltitude = CelestialMath.SunDirection(CelestialMath.DayFractionOf(fullMidnight), latitude).y;
                 if (fullMoonAltitude < maxSine * PEAK_ALTITUDE_RATIO || fullSunAltitude >= 0f) fullOk = false;
 
                 // The noon nearest this month's new moon: the moon is up, but washed out by the sun.
-                double newNoon = System.Math.Floor(EXPECTED_SYNODIC_DAYS * (month + 1)) + 0.5;
+                double newNoon = System.Math.Floor(FIRST_NIGHT_DAYS + EXPECTED_SYNODIC_DAYS * (month + 0.5)) + 0.5;
                 float newMoonAltitude = CelestialMath.MoonDirection(newNoon, latitude).y;
                 float newSunAltitude = CelestialMath.SunDirection(CelestialMath.DayFractionOf(newNoon), latitude).y;
                 if (newMoonAltitude < maxSine * PEAK_ALTITUDE_RATIO || newSunAltitude <= 0f) newOk = false;
@@ -546,6 +560,33 @@ namespace Editor.Validation.Celestial
             bool ok = Check("the sky rotation is rigid (preserves lengths and angles)", rigid);
             ok &= Check("the sun is the sky rotation applied to the noon direction", carriesSun);
             ok &= Check("the sky returns to its starting orientation after exactly one day", daily);
+            return ok;
+        }
+
+        /// <summary>
+        /// B13 — the phase epoch. Anchors the player-facing promise that a brand-new world's first
+        /// night is lit by a full moon riding high, rather than by the new moon the raw cycle would
+        /// otherwise start on (correct geometry, but it reads as a missing moon for ten nights).
+        /// </summary>
+        /// <returns>True when every assertion holds.</returns>
+        /// <remarks>
+        /// Deliberately expressed against the literal day 1.0 and an absolute illumination, never
+        /// against <see cref="CelestialMath.MoonPhaseEpochDays"/> — this scenario is what pins that
+        /// constant, so reading it here would be circular.
+        /// </remarks>
+        private static bool RunB13FirstNightFullMoon()
+        {
+            const float latitude = 45f;
+            float illumination = CelestialMath.MoonIlluminatedFraction(FIRST_NIGHT_DAYS);
+            Vector3 moon = CelestialMath.MoonDirection(FIRST_NIGHT_DAYS, latitude);
+            Vector3 sun = CelestialMath.SunDirection(CelestialMath.DayFractionOf(FIRST_NIGHT_DAYS), latitude);
+
+            bool ok = Check($"the first night's moon is full, illumination {illumination:F4}",
+                illumination >= 1f - PHASE_EPSILON);
+            ok &= Check($"the first night's moon is above the horizon, altitude {moon.y:F4}", moon.y > 0f);
+            ok &= Check($"the sun is down at that moment, altitude {sun.y:F4}", sun.y < 0f);
+            ok &= Check($"and it rides near its highest point, {moon.y / MaxAltitudeSine(latitude):F4} of maximum",
+                moon.y >= MaxAltitudeSine(latitude) * PEAK_ALTITUDE_RATIO);
             return ok;
         }
 

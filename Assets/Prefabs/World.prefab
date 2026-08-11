@@ -114,6 +114,7 @@ MonoBehaviour:
   _worldTypeRegistry: {fileID: 11400000, guid: 3038e8b8e1ab9ae44802528aa73aa06a, type: 2}
   globalLightLevel: 1
   _defaultTimeOfDaySettings: {fileID: 11400000, guid: 493ecde5d8375914da95cdf65ad41a9b, type: 2}
+  _skyMaterial: {fileID: 2100000, guid: ec99fa003fd5d7c45a9e62708c6efffb, type: 2}
   player: {fileID: 0}
   spawnPosition:
     _chunkX: 0

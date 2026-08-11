@@ -59,12 +59,35 @@ public class World : MonoBehaviour, IMeshDrainHost
     [SerializeField]
     private TimeOfDaySettings _defaultTimeOfDaySettings;
 
+    [Header("Sky")]
+    [Tooltip("Procedural sky material (RF-2). Create it via Minecraft Clone/Create Sky Material. Leave empty to keep the flat background color.")]
+    [SerializeField]
+    private Material _skyMaterial;
+
+    /// <summary>Scene skybox and clear flags as found at startup, restored on teardown.</summary>
+    /// <remarks>
+    /// <see cref="RenderSettings"/> and the camera are <i>scene</i> state, not this component's. Play
+    /// mode normally reverts them, but that depends on Enter Play Mode options staying as they are, and
+    /// a leaked skybox would then follow the user into the Scene view. Restoring is cheap insurance.
+    /// </remarks>
+    private Material _previousSkybox;
+
+    private CameraClearFlags _previousClearFlags;
+
+    private bool _skyRenderSettingsApplied;
+
     /// <summary>
     /// The world's day/night clock (RF-1). Non-null from <see cref="StartWorld"/> onward; edit-mode
     /// fixtures that bypass it read null and must not tick.
     /// </summary>
     [NonSerialized]
     public WorldTimeManager TimeManager;
+
+    /// <summary>
+    /// The settings asset backing <see cref="TimeManager"/>, kept so the sky globals can read the
+    /// authored disc sizes and star brightness without re-resolving the world type every frame.
+    /// </summary>
+    private TimeOfDaySettings _activeTimeOfDaySettings;
 
     [Header("Player")]
     public Player player;
@@ -256,6 +279,17 @@ public class World : MonoBehaviour, IMeshDrainHost
     private static readonly int s_shaderMaxGlobalLightLevel = Shader.PropertyToID("maxGlobalLightLevel");
     private static readonly int s_shaderSkyLightColor = Shader.PropertyToID("SkyLightColor");
     private static readonly int s_shaderWorldOriginOffset = Shader.PropertyToID("_WorldOriginOffset");
+
+    // --- Sky Shader Properties (RF-2) ---
+    private static readonly int s_shaderSunDirection = Shader.PropertyToID("_SunDirection");
+    private static readonly int s_shaderMoonDirection = Shader.PropertyToID("_MoonDirection");
+    private static readonly int s_shaderMoonPhase = Shader.PropertyToID("_MoonPhase");
+    private static readonly int s_shaderSkyRotation = Shader.PropertyToID("_SkyRotation");
+    private static readonly int s_shaderZenithColor = Shader.PropertyToID("_ZenithColor");
+    private static readonly int s_shaderHorizonColor = Shader.PropertyToID("_HorizonColor");
+    private static readonly int s_shaderSunAngularRadius = Shader.PropertyToID("_SunAngularRadius");
+    private static readonly int s_shaderMoonAngularRadius = Shader.PropertyToID("_MoonAngularRadius");
+    private static readonly int s_shaderStarBrightness = Shader.PropertyToID("_StarBrightness");
 
     // --- Fluid Vertex Data ---
     [NonSerialized]
@@ -573,6 +607,8 @@ public class World : MonoBehaviour, IMeshDrainHost
     {
         if (Instance == this) Instance = null;
 
+        RestoreSkyRenderSettings();
+
         // 1. Complete any running jobs and dispose the generator strategy.
         //    WorldJobManager.Dispose() handles all job completion and NativeArray disposal.
         JobManager?.Dispose();
@@ -785,8 +821,10 @@ public class World : MonoBehaviour, IMeshDrainHost
         // The day/night clock takes the active world type's authored look, so a future dimension can
         // ship its own sky without touching this code. Restored to the saved time in
         // LoadWorldGameState; a fresh world starts at the sunrise the tick counter's zero point is.
-        TimeManager = new WorldTimeManager(ResolveTimeOfDaySettings());
+        _activeTimeOfDaySettings = ResolveTimeOfDaySettings();
+        TimeManager = new WorldTimeManager(_activeTimeOfDaySettings);
         RestoreWorldTime(loadedMetadata);
+        ApplySkyRenderSettings();
 
         // Initialize global shader properties
         Shader.SetGlobalFloat(s_shaderMinGlobalLightLevel, VoxelData.MinLightLevel);
@@ -1958,10 +1996,75 @@ public class World : MonoBehaviour, IMeshDrainHost
         Color skyColor = TimeManager != null ? TimeManager.SkyLightColor : Color.white;
         Shader.SetGlobalColor(s_shaderSkyLightColor, skyColor);
 
+        PublishSkyGlobals();
+
         // Null before StartWorld binds it (and in headless/suite contexts, e.g. the /time command
         // baseline) — the shader globals above still apply; only the camera color is skipped.
         if (_playerCamera != null && TimeManager != null)
             _playerCamera.backgroundColor = TimeManager.BackgroundColor;
+    }
+
+    /// <summary>
+    /// Switches the camera to render the procedural skybox (RF-2), remembering what it replaced.
+    /// </summary>
+    /// <remarks>
+    /// Done from code rather than by editing the scene asset. With no material assigned the camera
+    /// keeps clearing to <see cref="TimeOfDaySettings"/>'s background color, so the sky is additive:
+    /// nothing about the pre-RF-2 look changes until the material exists.
+    /// </remarks>
+    private void ApplySkyRenderSettings()
+    {
+        if (_skyMaterial == null || _playerCamera == null) return;
+
+        _previousSkybox = RenderSettings.skybox;
+        _previousClearFlags = _playerCamera.clearFlags;
+        _skyRenderSettingsApplied = true;
+
+        RenderSettings.skybox = _skyMaterial;
+        _playerCamera.clearFlags = CameraClearFlags.Skybox;
+
+        // Ambient light is derived from the skybox by default, and this one changes every frame —
+        // which would re-bake the ambient probe continuously. The block shaders do not read ambient
+        // (they use the BFS light values), so pinning it costs nothing visually and saves that work.
+        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
+    }
+
+    /// <summary>Puts the scene's skybox and camera clear flags back as they were found.</summary>
+    private void RestoreSkyRenderSettings()
+    {
+        if (!_skyRenderSettingsApplied) return;
+
+        RenderSettings.skybox = _previousSkybox;
+        if (_playerCamera != null) _playerCamera.clearFlags = _previousClearFlags;
+        _skyRenderSettingsApplied = false;
+    }
+
+    /// <summary>
+    /// Pushes this frame's celestial state to the skybox shader globals (RF-2).
+    /// </summary>
+    /// <remarks>
+    /// Skipped entirely without a clock: edit-mode fixtures construct a <see cref="World"/> without
+    /// <c>StartWorld</c>, and a half-published sky (a stale sun direction against a fresh horizon
+    /// color) would be worse than the shader's own defaults.
+    /// </remarks>
+    private void PublishSkyGlobals()
+    {
+        if (TimeManager == null) return;
+
+        // Named for the sky, not just "settings" — the class already has a serialized `settings` field
+        // (the player's Settings), and shadowing it here would make this method read as if it used that.
+        TimeOfDaySettings skySettings = _activeTimeOfDaySettings;
+        if (skySettings == null) return;
+
+        Shader.SetGlobalVector(s_shaderSunDirection, TimeManager.SunDirection);
+        Shader.SetGlobalVector(s_shaderMoonDirection, TimeManager.MoonDirection);
+        Shader.SetGlobalFloat(s_shaderMoonPhase, TimeManager.MoonPhase);
+        Shader.SetGlobalMatrix(s_shaderSkyRotation, Matrix4x4.Rotate(TimeManager.SkyRotation));
+        Shader.SetGlobalColor(s_shaderZenithColor, TimeManager.ZenithColor);
+        Shader.SetGlobalColor(s_shaderHorizonColor, TimeManager.HorizonColor);
+        Shader.SetGlobalFloat(s_shaderSunAngularRadius, skySettings.SunAngularRadius);
+        Shader.SetGlobalFloat(s_shaderMoonAngularRadius, skySettings.MoonAngularRadius);
+        Shader.SetGlobalFloat(s_shaderStarBrightness, skySettings.StarBrightness);
     }
 
     /// <summary>
