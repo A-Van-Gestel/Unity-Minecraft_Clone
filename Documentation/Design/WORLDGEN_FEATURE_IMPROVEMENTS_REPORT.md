@@ -1065,11 +1065,11 @@ items last. RF items are detailed in
 
 | Rank | Item                                        | Why here                                                                                              |
 |------|---------------------------------------------|-------------------------------------------------------------------------------------------------------|
-| 1    | **RF-1** Day/night cycle                    | Highest value-per-effort in either report; independent; unlocks RF-2 and blood-moon events            |
+| 1    | ~~**RF-1** Day/night cycle~~ ✅ SHIPPED      | Done 2026-08-10 (world clock + subtractive sky term); unlocked RF-2 as predicted                      |
 | 2    | **TF-8** Selection-noise ownership          | 🟢 hours; removes an authoring landmine; prerequisite plumbing for TF-1/TF-3                          |
 | 3    | **TF-12** Per-world generation options      | 🟢 correctness fix (live determinism hole); pair with TF-13; coordinate v12 with RF-1/TF-4            |
 | 4    | **TF-13** Worldgen version stamp            | 🟢 write-only metadata that cannot be reconstructed later; same level.dat wave as TF-12               |
-| 5    | **RF-2** Sky rendering (sun/moon/stars/fog) | Completes RF-1 into a shippable player feature; no worldgen coupling                                  |
+| 5    | ~~**RF-2** Sky rendering~~ ✅ SHIPPED        | Done 2026-08-11 (skybox, celestial sun/moon, stars, fog); §6 ambience v2 remains, unranked polish     |
 | 6    | **TF-1** Biome border domain warp           | Biggest visible terrain win per effort; seed break acceptable while Standard is WIP                   |
 | 7    | **TF-9** World orchestration layer (v1)     | Layers 0–1 + sampler API + preview channels — opens the TF-2/3 wave and owns their world-level fields |
 | 8    | **TF-3** Climate biome selection            | Core identity feature; ship together with TF-2 (design-coupled); climate axes live in TF-9            |

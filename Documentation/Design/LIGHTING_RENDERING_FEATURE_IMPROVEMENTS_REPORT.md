@@ -1,7 +1,7 @@
 # Lighting & Rendering Feature Improvements Report
 
-**Version:** 1.3  
-**Date:** 2026-08-10  
+**Version:** 1.4  
+**Date:** 2026-08-11  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified. Owns lighting
 and rendering *features* (`RF-*`); the *performance* counterparts (`LI-*`, `GS-*`) live in
 [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md), and the combined ranked
@@ -92,7 +92,7 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 | ID   | Finding                                                                                   | Effort | Risk | Benefit | Seed | Save |
 |------|-------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
 | RF-1 | Day/night cycle: shader support is wired & modern but nothing advances time               |   🟡   |  🟢  |   🟢    |  ✅   |  ⚠️  |
-| RF-2 | Sky rendering: no skybox (solid clear color), no sun/moon/stars, fog disabled             |   🟡   |  🟢  |   🟢    |  ✅   |  ✅   |
+| RF-2 | ~~Sky rendering: skybox, sun/moon, stars, fog~~ ✅ **§1–§5 SHIPPED**; §6 + 4 riders open   |   🟡   |  🟢  |   🟢    |  ✅   |  ✅   |
 | RF-3 | Bloom / post-processing: URP post stack present but disabled; no HDR emissive path        |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 | RF-4 | Flickering light sources: shader-side global flicker with per-position phase              |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | RF-5 | Animated light sources: RGB emission already shipped; *animation* is BFS-bounded          |   🟡   |  🟡  |    ⚪    |  ✅   |  ✅   |
@@ -302,38 +302,58 @@ hardcoded noon, i.e. `SkyDarken = 0`). Save ⚠️ as described.
 
 ### RF-2 — Sky rendering: procedural skybox, sun/moon, stars, fog sync
 
-**Classification:** Core companion to RF-1 (without it, night is just a darker gray screen).
+**Classification:** Core companion to RF-1. **§1–§5 SHIPPED 2026-08-11** — see
+[`../Architecture/SKY_AND_CELESTIAL_RENDERING.md`](../Architecture/SKY_AND_CELESTIAL_RENDERING.md),
+which is now authoritative for the sky. Only §6 and the deferred items below remain open.
 
-**What exists today.**
+> **What shipped** (commits `4a6fa38d` → `c471766b`, all in-game confirmed):
+>
+> - **Procedural skybox** with zenith/horizon gradients over `DayFraction`, authored on the RF-1
+>   `TimeOfDaySettings` asset. Camera clear flags and `RenderSettings.skybox` are set **from code** and
+>   restored on teardown, so no scene asset is edited.
+> - **A real celestial simulation** (`Sky/CelestialMath.cs`) rather than the `±SunDirection` sketch
+>   below: an equinox model parameterized by observer latitude, so the sun rises due east, sets due
+>   west, and peaks at `90° − |φ|` to the south. The moon rides the same arc at a lagged hour angle,
+>   with position **and** phase derived from one elongation — full-moon-at-midnight falls out rather
+>   than being authored. A phase epoch puts a full moon on the world's first night (MC parity).
+> - **Stars** as hash-placed points sampled in celestial space, so the field rotates with the sky.
+> - **Distance fog** (§4) using the engine's **own** globals, not `RenderSettings.fog` — no
+>   `multi_compile_fog`, hence **no shader variants** (the `GS-4` concern §4 raised is dissolved, not
+>   deferred), no scene state, and a zero-width range as a natural "off". Horizontal (XZ) distance and
+>   a back-loaded curve; a `Distance Fog` setting offers Off / Light / Full.
+> - **15-baseline `Validate Sky` suite.** Note the standing limit: it guards the *model*; the shader
+>   half is capture-verified only.
+>
+> **Corrections to the pre-implementation notes below** (they were written 2026-07-02 and were stale):
+> a skybox material *was* assigned in `RenderSettings` (Unity's built-in default) — only the camera's
+> clear flags stopped it being seen; **no shader in the project supported fog at all**, so §4 was a
+> five-shader edit rather than enabling a checkbox; `SunElevation` was a flat, latitude-free sine that
+> the celestial model supersedes rather than builds on; §2's blood-moon tint has no hook, because
+> RF-1 §4's `SkyEvent` was deliberately never shipped; and the line references had drifted
+> (clear flags `World.unity:3634`, background colour `World.cs:1964`).
 
-- The camera clears to a **solid color** (`m_ClearFlags: 2`, `Assets/Scenes/World.unity:3614`) —
-  there is no skybox material at all; the "sky" is `backgroundColor = lerp(night, day, level)`
-  (`World.cs:1366`).
+**What existed before implementation (verified 2026-07-02).**
+
+- The camera cleared to a **solid color** (`m_ClearFlags: 2`) — the "sky" was
+  `backgroundColor = lerp(night, day, level)`.
 - No sun, no moon, no stars anywhere in the project.
-- Fog is disabled (`m_Fog: 0`, `World.unity:17`).
+- Fog was disabled (`m_Fog: 0`, `World.unity:17`) *and unsupported by every shader*.
 - Clouds exist and are respectable: `Clouds.cs` builds a textured cloud plane at
   `cloudHeight = 100` from a pattern texture (recently modernized — perf item MR-9 ✅).
 
-**Proposed design.**
+**Proposed design.** §1–§4 are shipped; the as-built system differs from these sketches where noted
+above, and the Architecture doc is authoritative.
 
-1. **Procedural gradient skybox** (URP unlit skybox shader, ~40 lines): zenith + horizon colors
-   sampled from two designer gradients over `DayFraction` (same `TimeOfDaySettings` asset as
-   RF-1); camera `ClearFlags → Skybox`. This replaces the flat background color and gives
-   dawn/dusk horizon banding.
-2. **Sun + moon:** rendered *in the skybox shader* (cheapest, no scene objects): a disc at
-   `+SunDirection` and `−SunDirection` where `_SunDirection` is a global set by
-   `WorldTimeManager` from `SunElevation`. Moon gets a phase mask if desired (elapsedDays % 8).
-   During a blood moon (RF-1 §4), tint the moon disc from the event.
-3. **Stars:** hash-based star field in the same shader (screen-stable via view direction),
-   faded in by `saturate(-SunElevation)`. Zero textures needed.
-4. **Fog sync:** enable distance fog; `RenderSettings.fogColor` = horizon color each frame
-   (extend `SetGlobalLightValue()`), fog end ≈ view distance — this doubles as chunk pop-in
-   concealment, a rendering win independent of the cycle. (Per-shader cost of `FOG` variants:
-   fold into the `GS-4` render-tier audit.)
+1. ✅ **Procedural gradient skybox** — shipped.
+2. ✅ **Sun + moon** in the skybox shader — shipped, on a real celestial model.
+3. ✅ **Stars** — shipped, celestial-space hash points.
+4. ✅ **Fog sync** — shipped, as engine-owned fog rather than `RenderSettings.fog`.
 5. **Clouds tint:** ✅ **SHIPPED 2026-07-19** via CL-2 in
    [`CLOUD_RENDERING_IMPROVEMENTS_REPORT.md`](CLOUD_RENDERING_IMPROVEMENTS_REPORT.md) — the
    cloud shader samples the `SkyLightColor` global directly (no `material.SetColor` needed);
    already responsive to `/time`, and upgrades further when RF-1's cycle drives the gradient.
+   *Clouds are deliberately **not** fogged: at the default view distance the fog completes well inside
+   the cloud plane's extent, so fogging it would erase the clouds. Terrain is what pops in.*
 6. **Sky ambience content (v2 — routed here from the VX-* gap sweep, 2026-07-20):** pure
    content additions to the §1–§3 skybox shader, explicitly *after* the core cycle ships:
     - **Aurora:** a night-only scrolling noise ribbon in a horizon-zenith band (two octaves of
@@ -347,12 +367,28 @@ hardcoded noon, i.e. `SkyDarken = 0`). Save ⚠️ as described.
       both ship); a classic sprite-chain flare is deliberately *not* proposed (occlusion
       queries against voxel depth for a stylistic mismatch — skip).
 
-**Dependencies / ordering.** RF-1 first (needs `DayFraction`/`SunDirection`). Ships as pure
-shader/scene work — no voxel pipeline contact. §6 is v2 content after the base skybox.
+**Still open (the RF-2 remainder).** Each is deliberately deferred, not forgotten:
 
-**Risks.** 🟢 — isolated new shader + scene settings. Watch the liquid shader's reliance on the
-camera opaque texture (`GS-2`) when changing clear flags — verify refraction still samples
-correctly with a skybox behind transparents. Seed/Save ✅.
+| Item | Note |
+|------|------|
+| §6 sky ambience v2 (aurora, shooting stars) | Pure content on the shipped skybox shader. Sun flare needs RF-3's bloom to catch the HDR disc. |
+| Richer moon shader | Ships today as four analytic maria patches + limb darkening; a texture/crater treatment is its own pass. |
+| Sky colors in an editor tool, **overridable per biome** | Requested 2026-08-11. The per-biome half **needs a design pass first**: sky color is screen-wide but biomes are per-column, so something must define the boundary rule (blend over distance? sample at the camera? weight nearby columns?). Same class of question as TF-3's climate axis. |
+| Seasonal declination | Blocked on RF-1's curve coupling — see the Architecture doc §2.1 for why zero is load-bearing rather than lazy. |
+| Blood-moon disc tint | Waits on RF-1 §4's `SkyEvent`, which was never shipped. |
+
+**Dependencies / ordering.** RF-1 first (needs `DayFraction`) — satisfied. Shipped as pure
+shader/scene work with no voxel pipeline contact.
+
+**Risks.** 🟢 — borne out. The liquid shader's opaque-texture refraction (`GS-2`) was the one
+watchpoint under a changed clear flag; verified in game and accepted (stars and the sky gradient refract
+through water, which reads correctly). Seed/Save ✅.
+
+**Interaction with RF-9 (important).** RF-2's properly dark night makes RF-9 **more** visible, not less.
+Measured 2026-08-11 at midnight: a fully sky-exposed flat surface renders at brightness 0.0932 while a
+30%-occluded face renders 0.0063 — **14.8× darker, and identical to 50% occlusion** (both clamped to the
+floor, so all shape information is lost). At noon the same pair differs by only 1.5×. Water looked
+"too blue" in game; water was correct and the terrain was crushed. Fog masks this at distance only.
 
 ---
 
@@ -704,14 +740,28 @@ change alters every rendered surface's night appearance. Seed ✅ / Save ✅.
 
 See the **combined ranked roadmap** at the end of
 [`WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md`](WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md) — RF items
-rank: RF-1 (#1 — **shipped 2026-08-10**, awaiting archival once RF-2 no longer references it),
-RF-2 (#5), RF-7 (#17), RF-4 (#18), RF-3 (#19), RF-6 (#20), RF-5 (#21),
+rank: RF-1 (#1 — **shipped 2026-08-10**; RF-2 no longer depends on its unshipped sections, so it is
+archivable — but note RF-2 §2's blood-moon tint still waits on its §4 `SkyEvent`),
+RF-2 (#5 — **§1–§5 shipped 2026-08-11**; the §6 remainder is unranked polish),
+RF-7 (#17), RF-4 (#18), RF-3 (#19), RF-6 (#20), RF-5 (#21),
 RF-8 (#22 — added 2026-07-20), RF-9 (unranked — added 2026-08-10; schedule **with RF-3**, whose
 vertex-channel allocation it shares, rather than on its own merit).
 
 ---
 
 ## Document History
+
+* **v1.4** - **RF-2 §1–§5 shipped and confirmed in game 2026-08-11** (commits `4a6fa38d` → `c471766b`),
+  promoted to [`../Architecture/SKY_AND_CELESTIAL_RENDERING.md`](../Architecture/SKY_AND_CELESTIAL_RENDERING.md);
+  the entry here keeps only §6 and four deferred riders. The as-built system departs from the sketch in
+  three ways worth recording: the sun/moon ride a **real equinox celestial model** parameterized by
+  latitude rather than `±SunDirection`, with moon position and phase derived from one elongation; fog is
+  **engine-owned** rather than `RenderSettings.fog`, which removes the `FOG` shader-variant cost §4 had
+  handed to `GS-4`; and fog uses **horizontal** distance on a back-loaded curve, because a linear ramp
+  painted its own gradient across mountains. Five stale claims in the pre-implementation notes were
+  corrected (a skybox material *was* assigned; **no shader supported fog at all**; `SunElevation` is
+  latitude-free; `SkyEvent` never shipped; line references drifted). **RF-9 confirmed in game with
+  measured numbers** — RF-2's darker night makes it more visible, not less.
 
 *Entries below the newest are reconstructed from git history — this document predates the
 project's Document History convention, so they record what the commits changed rather than
@@ -745,8 +795,11 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-10 (RF-1 Phase 2 shipped; RF-9 added)  
-**Next Review:** when RF-3 is scheduled — RF-9 shares its vertex-channel allocation and the two should be
-decided together, alongside TF-11's claim on the same `Color32` stream. RF-1 is fully shipped and can be
-archived once RF-2 stops referencing its sections; note that no validation suite can observe the shader
-half of §10 — it is capture-verified only.
+**Last Updated:** 2026-08-11 (RF-2 §1–§5 shipped and promoted to Architecture)  
+**Next Review:** when RF-3 is scheduled — **RF-9 is now the most visible open item**, its severity
+measured in game (a 30%-occluded face is 14.8× darker than flat ground at midnight and indistinguishable
+from a sealed cave face). It shares RF-3's vertex-channel allocation and the two should be decided
+together, alongside TF-11's claim on the same `Color32` stream. **Verify that claim before believing
+it:** RF-9's entry calls the stream "double-claimed", but neither TF-11 nor RF-3 has shipped, so
+`SectionRenderer.Layout` may show it free. Note that no validation suite can observe the shader half of
+RF-1 §10 or any of RF-2's rendering — both are capture-verified only.

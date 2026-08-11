@@ -289,10 +289,13 @@ apply-point hooks; WS-4 coordinate rules.
 
 **Classification:** Flagship experimental visual — the item that makes the tier worth building.
 
-**What exists today:** Fog is entirely disabled (`m_Fog: 0`); RF-2 §4 plans classic distance fog
-synced to the sky gradient (cheap, per-vertex/per-fragment analytic — that item stays as the
-default-tier fog). No post-processing volume exists (RF-3). Torch/lava light reaches the eye
-only off surfaces; air is never lit.
+**What exists today:** RF-2 §4's distance fog **shipped 2026-08-11** and is the default-tier fog: an
+engine-owned analytic fog (`Assets/Shaders/Includes/VoxelFog.hlsl`, horizontal distance, back-loaded
+curve, tinted to the horizon color), deliberately *not* Unity's `RenderSettings.fog` — so `m_Fog: 0`
+remains correct and there are no `FOG` shader variants. See
+[`../Architecture/SKY_AND_CELESTIAL_RENDERING.md`](../Architecture/SKY_AND_CELESTIAL_RENDERING.md) §5.
+VX-2 layers above it rather than replacing it. No post-processing volume exists (RF-3). Torch/lava light
+reaches the eye only off surfaces; air is never lit.
 
 **Gap / finding:** light shafts through a forest canopy at dawn, torch glow hanging in cave air,
 a lit doorway spilling into night fog — the single largest "next-gen voxel" read — all require
@@ -479,7 +482,9 @@ bounce color for free).
 **Classification:** Polish. Two rungs; the first does not need any VX substrate.
 
 **What exists today:** The liquid shader refracts via the camera opaque texture (GS-2) but
-reflects nothing — no SSR, no probes; sky is a flat clear color until RF-2.
+reflects nothing — no SSR, no probes. The sky is no longer a flat clear color: RF-2's procedural
+skybox shipped 2026-08-11, so a sky fallback color (and the sun/moon/star field behind it) is now
+available to sample.
 
 **Proposal:**
 
