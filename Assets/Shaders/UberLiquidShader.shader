@@ -72,6 +72,7 @@ Shader "Minecraft/UberLiquidShader"
             // Shared liquid logic (structs, vertex, noise, shore, evaluate)
             #include "Includes/LiquidCore.hlsl"
             #include "Includes/VoxelLighting.hlsl"
+            #include "Includes/VoxelFog.hlsl"
 
             // Game-only: scene refraction via URP Opaque Texture
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareOpaqueTexture.hlsl"
@@ -131,6 +132,11 @@ Shader "Minecraft/UberLiquidShader"
                     // Lava is self-luminous — skip litWhite tinting so the
                     // procedural color (cracks, pulse, crust) renders unmodified.
                     lava_col *= i.shadowMultiplier;
+
+                    // Fog the surface BEFORE blending with the refracted background: that background is
+                    // opaque terrain which the block shaders already fogged, so fogging the blend result
+                    // would apply fog to it twice.
+                    lava_col = ApplyVoxelFog(lava_col, distance(i.worldPos.xz, _WorldSpaceCameraPos.xz));
                     return lerp(background, half4(lava_col, 1.0), 0.95);
                 }
                 else // Water
@@ -167,6 +173,9 @@ Shader "Minecraft/UberLiquidShader"
 
                     final_color *= litWhite;
                     final_color *= i.shadowMultiplier;
+
+                    // Fog the surface BEFORE blending with the refracted background — see the lava branch.
+                    final_color = ApplyVoxelFog(final_color, distance(i.worldPos.xz, _WorldSpaceCameraPos.xz));
 
                     half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.sunLight);
                     return lerp(background, half4(final_color, 1.0), water_base_color.a);

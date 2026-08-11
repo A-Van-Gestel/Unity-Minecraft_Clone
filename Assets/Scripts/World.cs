@@ -21,6 +21,7 @@ using Libraries;
 using MyBox;
 using Physics;
 using Serialization;
+using Sky;
 using Spawn;
 using UI;
 using Unity.Collections;
@@ -290,6 +291,8 @@ public class World : MonoBehaviour, IMeshDrainHost
     private static readonly int s_shaderSunAngularRadius = Shader.PropertyToID("_SunAngularRadius");
     private static readonly int s_shaderMoonAngularRadius = Shader.PropertyToID("_MoonAngularRadius");
     private static readonly int s_shaderStarBrightness = Shader.PropertyToID("_StarBrightness");
+    private static readonly int s_shaderFogRange = Shader.PropertyToID("_VoxelFogRange");
+    private static readonly int s_shaderFogColor = Shader.PropertyToID("_VoxelFogColor");
 
     // --- Fluid Vertex Data ---
     [NonSerialized]
@@ -2065,6 +2068,30 @@ public class World : MonoBehaviour, IMeshDrainHost
         Shader.SetGlobalFloat(s_shaderSunAngularRadius, skySettings.SunAngularRadius);
         Shader.SetGlobalFloat(s_shaderMoonAngularRadius, skySettings.MoonAngularRadius);
         Shader.SetGlobalFloat(s_shaderStarBrightness, skySettings.StarBrightness);
+
+        PublishFogGlobals();
+    }
+
+    /// <summary>
+    /// Pushes the distance-fog range and color to the shader globals (RF-2 §4).
+    /// </summary>
+    /// <remarks>
+    /// Fog adopts the horizon color, which is what makes terrain dissolve into the sky rather than into
+    /// a grey band. The range follows the view-distance setting every frame — the setting is changeable
+    /// at runtime, and recomputing two floats is cheaper than subscribing to it.
+    /// </remarks>
+    private void PublishFogGlobals()
+    {
+        // Without a camera there is no far plane to clamp against; a zero range reads as fog off.
+        float farClip = _playerCamera != null ? _playerCamera.farClipPlane : 0f;
+
+        bool authored = _activeTimeOfDaySettings != null;
+        float startFraction = authored ? _activeTimeOfDaySettings.FogStartFraction : AtmosphericFog.DefaultFogStartFraction;
+        float curvePower = authored ? _activeTimeOfDaySettings.FogCurvePower : AtmosphericFog.DefaultFogCurvePower;
+
+        Shader.SetGlobalVector(s_shaderFogRange,
+            AtmosphericFog.ComputeFogRange(settings.viewDistance, farClip, startFraction, curvePower));
+        Shader.SetGlobalColor(s_shaderFogColor, TimeManager.HorizonColor);
     }
 
     /// <summary>

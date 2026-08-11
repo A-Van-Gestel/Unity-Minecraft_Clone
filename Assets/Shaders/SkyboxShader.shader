@@ -33,6 +33,8 @@ Shader "Minecraft/SkyboxShader"
             #pragma target 2.0
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            // For _VoxelFogRange / _VoxelFogColor: the sky hazes only when the world's fog is on.
+            #include "Includes/VoxelFog.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 float _StarDensity;
@@ -52,7 +54,16 @@ Shader "Minecraft/SkyboxShader"
 
             // How sharply the horizon color gives way to the zenith color. Higher concentrates the
             // warm band nearer the horizon, which is what makes sunrise read as a band rather than a wash.
-            static const float HORIZON_FALLOFF = 2.2;
+            //
+            // Applied as 1 - (1 - |y|)^FALLOFF rather than |y|^(1/FALLOFF). Both concentrate color near
+            // the horizon, but the latter has INFINITE slope at y = 0 — it packs an eighth of the whole
+            // gradient into the first half-degree, which renders as a hard bright line along the horizon.
+            static const float HORIZON_FALLOFF = 3.5;
+
+            // How strongly the sun and moon discs are veiled by haze near the horizon. Without this they
+            // read as sitting in front of the fog, since the sky is drawn behind everything else.
+            static const float HORIZON_HAZE_STRENGTH = 0.92;
+            static const float HORIZON_HAZE_FALLOFF = 2.5;
 
             // Disc edges are feathered by a FRACTION of their own radius, not a fixed angle: a fixed
             // 0.35 degrees is a fifth of the moon's radius, which reads as an out-of-focus blob.
@@ -127,8 +138,14 @@ Shader "Minecraft/SkyboxShader"
                 // --- Base gradient -------------------------------------------------------------
                 // Symmetric about the horizon: below it the same gradient continues, so a player
                 // looking down past the world edge sees sky rather than a hard seam.
-                float heightFactor = pow(saturate(abs(viewDir.y)), 1.0 / HORIZON_FALLOFF);
+                float heightFactor = 1.0 - pow(1.0 - saturate(abs(viewDir.y)), HORIZON_FALLOFF);
                 half3 color = lerp(_HorizonColor.rgb, _ZenithColor.rgb, heightFactor);
+
+                // Haze veiling the celestial discs, strongest at the horizon. Gated on fog being on, so
+                // disabling fog leaves the sky crisp too rather than the two disagreeing.
+                float hazeAmount = 0.0;
+                if (_VoxelFogRange.y > _VoxelFogRange.x)
+                    hazeAmount = pow(saturate(1.0 - viewDir.y), HORIZON_HAZE_FALLOFF) * HORIZON_HAZE_STRENGTH;
 
                 // --- Stars ---------------------------------------------------------------------
                 // Sampled in CELESTIAL space, so the field turns with the sky instead of being pinned
@@ -206,13 +223,15 @@ Shader "Minecraft/SkyboxShader"
 
                     // Composited by the disc mask ALONE, so the whole disc is opaque. Folding `lit` into
                     // the mask made the unlit side transparent, letting the sky and stars show through.
+                    surface = lerp(surface, float3(_VoxelFogColor), hazeAmount);
                     color = lerp(color, half3(surface), moonMask);
                 }
 
                 // --- Sun -----------------------------------------------------------------------
                 // Drawn last so it wins wherever it overlaps the moon (an eclipse reads as the sun).
                 float sunMask = DiscMask(viewDir, _SunDirection, _SunAngularRadius);
-                color = lerp(color, half3(1.0, 0.97, 0.86), sunMask);
+                half3 sunColor = lerp(half3(1.0, 0.97, 0.86), half3(_VoxelFogColor), hazeAmount);
+                color = lerp(color, sunColor, sunMask);
 
                 return half4(color, 1.0);
             }

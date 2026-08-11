@@ -1,3 +1,4 @@
+using Sky;
 using UnityEngine;
 
 namespace Data.WorldTypes
@@ -121,6 +122,16 @@ namespace Data.WorldTypes
         [SerializeField]
         private float _starBrightness = 1f;
 
+        [Tooltip("Where distance fog begins, as a fraction of where it becomes opaque. With a curved falloff this can sit early — the fog stays near-invisible until well past it.")]
+        [Range(0f, 0.95f)]
+        [SerializeField]
+        private float _fogStartFraction = AtmosphericFog.DefaultFogStartFraction;
+
+        [Tooltip("Shape of the fog falloff. 1 = linear (an even ramp, which paints a visible gradient across mountains). Higher = soft near the player and thickening with distance.")]
+        [Range(1f, 6f)]
+        [SerializeField]
+        private float _fogCurvePower = AtmosphericFog.DefaultFogCurvePower;
+
         /// <summary>Real seconds in one full day/night cycle.</summary>
         public float DayLengthSeconds => _dayLengthSeconds;
 
@@ -156,6 +167,12 @@ namespace Data.WorldTypes
 
         /// <summary>Peak brightness of the star field.</summary>
         public float StarBrightness => _starBrightness;
+
+        /// <summary>Where distance fog begins, as a fraction of where it becomes opaque.</summary>
+        public float FogStartFraction => _fogStartFraction;
+
+        /// <summary>Exponent shaping the fog falloff; 1 is linear, higher is back-loaded.</summary>
+        public float FogCurvePower => _fogCurvePower;
 
         /// <summary>Samples the overhead sky color for a point in the day.</summary>
         /// <param name="dayFraction">Position in the day, <c>[0,1)</c>.</param>

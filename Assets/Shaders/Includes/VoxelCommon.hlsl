@@ -28,6 +28,10 @@ struct VoxelV2F
     float2 uv : TEXCOORD0;
     half4 color : COLOR;
     half4 lightData : TEXCOORD1;
+    // Horizontal distance to the camera, for RF-2 §4 fog. Interpolated per-vertex rather than derived
+    // in the fragment because the block shaders keep no world position; consumers that do not fog
+    // simply ignore it.
+    float fogDistance : TEXCOORD2;
 };
 
 // --- Foliage sway globals (FL-1/FL-2) ---
@@ -80,6 +84,7 @@ VoxelV2F VoxelVert(VoxelAppdata v)
     o.uv = v.uv.xy;
     o.color = v.color;
     o.lightData = v.lightData;
+    o.fogDistance = distance(TransformObjectToWorld(v.vertex.xyz).xz, _WorldSpaceCameraPos.xz);
     return o;
 }
 

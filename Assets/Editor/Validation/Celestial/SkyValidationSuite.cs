@@ -45,6 +45,11 @@ namespace Editor.Validation.Celestial
     /// <item>Zeroing <see cref="CelestialMath.MoonPhaseEpochDays"/> reds B8, B10 and B13, the last
     /// reporting the observed defect verbatim: the first night's moon at altitude −0.69. This is the
     /// in-game bug B13 was written from, so the mutation is the bug itself.</item>
+    /// <item>Raising <see cref="AtmosphericFog.FogEndFraction"/> past 1 reds B14 — fog would then finish
+    /// beyond the loaded radius, which is exactly the case where the chunk boundary becomes visible.</item>
+    /// <item>Dropping <see cref="AtmosphericFog.DefaultFogCurvePower"/> to 1 (a linear falloff) reds
+    /// B14's shape assertion at exactly 50% midpoint fog — the even ramp that paints a visible gradient
+    /// across a mountain, which is the in-game artifact the curve was added to remove.</item>
     /// </list>
     /// </para>
     /// <para>
@@ -107,6 +112,15 @@ namespace Editor.Validation.Celestial
         /// <summary>Latitude past which "due south at noon" stops being meaningful.</summary>
         private const float AZIMUTH_MEANINGFUL_LATITUDE = 89f;
 
+        /// <summary>
+        /// Most fog allowed halfway through its range. A linear falloff sits at 0.5 here, so this is the
+        /// threshold that distinguishes a back-loaded curve from an even ramp.
+        /// </summary>
+        private const float MAX_MIDPOINT_FOG = 0.2f;
+
+        /// <summary>Tolerance for a normalized fog-factor comparison.</summary>
+        private const float FOG_EPSILON = 1e-4f;
+
         /// <summary>Runs every scenario and prints a categorized summary via the shared runner.</summary>
         [MenuItem("Minecraft Clone/Dev/Validate Sky")]
         public static void RunAll() => Execute();
@@ -134,6 +148,7 @@ namespace Editor.Validation.Celestial
                 new Scenario("B11 The sky rotation is rigid, daily, and carries the sun", RunB11SkyRotation),
                 new Scenario("B12 The model is pure - re-evaluating in reverse order reproduces every value", RunB12Determinism),
                 new Scenario("B13 A new world's first night has a full moon, visible above the horizon", RunB13FirstNightFullMoon),
+                new Scenario("B14 Distance fog hides the chunk boundary and follows the view distance", RunB14FogRange),
             };
             return ValidationSuiteRunner.Execute("Sky & Celestial", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -587,6 +602,108 @@ namespace Editor.Validation.Celestial
             ok &= Check($"the sun is down at that moment, altitude {sun.y:F4}", sun.y < 0f);
             ok &= Check($"and it rides near its highest point, {moon.y / MaxAltitudeSine(latitude):F4} of maximum",
                 moon.y >= MaxAltitudeSine(latitude) * PEAK_ALTITUDE_RATIO);
+            return ok;
+        }
+
+        /// <summary>
+        /// B14 — the fog range. Its whole job is to conceal the loaded-chunk boundary, so the load-bearing
+        /// assertion is that fog reaches full opacity <i>inside</i> the loaded radius: if it finished at or
+        /// beyond the edge, the player would watch terrain end against clear sky.
+        /// </summary>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunB14FogRange()
+        {
+            const float farClip = 1000f;
+
+            // A zero-width range is the shader's "fog off" signal, and it must be what a world with no
+            // camera or no view distance produces — otherwise an uninitialized frame renders solid fog.
+            const float defaultStart = AtmosphericFog.DefaultFogStartFraction;
+
+            bool ok = Check("view distance 0 disables fog",
+                Mathf.Approximately(AtmosphericFog.ComputeFogEnd(0, farClip), 0f));
+            ok &= Check("a missing camera (far plane 0) disables fog",
+                Mathf.Approximately(AtmosphericFog.ComputeFogEnd(8, 0f), 0f));
+
+            bool insideRadius = true;
+            bool ordered = true;
+            bool monotonic = true;
+            bool withinFarClip = true;
+
+            foreach (float startFraction in new[] { 0f, 0.5f, defaultStart, 0.95f })
+            {
+                float previousEnd = -1f;
+                for (int viewDistance = 1; viewDistance <= 32; viewDistance++)
+                {
+                    float loadedRadius = viewDistance * VoxelData.ChunkWidth;
+                    float start = AtmosphericFog.ComputeFogStart(viewDistance, farClip, startFraction);
+                    float end = AtmosphericFog.ComputeFogEnd(viewDistance, farClip);
+
+                    if (end >= loadedRadius) insideRadius = false;
+                    if (start >= end || start < 0f) ordered = false;
+                    if (end <= previousEnd) monotonic = false;
+                    if (end > farClip) withinFarClip = false;
+                    previousEnd = end;
+                }
+            }
+
+            ok &= Check("fog is fully opaque before the loaded radius ends, at every view distance", insideRadius);
+            ok &= Check("fog starts nearer than it ends, at every view distance", ordered);
+            ok &= Check("a larger view distance always pushes the fog further out", monotonic);
+            ok &= Check("the fog end never exceeds the camera far plane", withinFarClip);
+
+            // The clamp has to bind somewhere, or "never exceeds the far plane" is vacuously true.
+            const float tightClip = 50f;
+            ok &= Check($"a near far-plane clamps the fog end, got {AtmosphericFog.ComputeFogEnd(32, tightClip):F1}",
+                Mathf.Approximately(AtmosphericFog.ComputeFogEnd(32, tightClip), tightClip));
+
+            // A thinner authored fog must start further out — the knob has to actually do something.
+            float thinStart = AtmosphericFog.ComputeFogStart(10, farClip, 0.9f);
+            float thickStart = AtmosphericFog.ComputeFogStart(10, farClip, 0.3f);
+            ok &= Check($"a higher start fraction pushes fog further out ({thickStart:F1} -> {thinStart:F1})",
+                thinStart > thickStart);
+
+            ok &= CheckFogCurveShape();
+            return ok;
+        }
+
+        /// <summary>
+        /// The fog falloff must be <b>back-loaded</b>: soft near the player and thickening with distance.
+        /// A linear ramp spreads the change evenly, which paints a visible gradient across anything large
+        /// enough to span the range — the mountain artifact this curve exists to remove.
+        /// </summary>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool CheckFogCurveShape()
+        {
+            const float farClip = 1000f;
+            Vector4 range = AtmosphericFog.ComputeFogRange(10, farClip,
+                AtmosphericFog.DefaultFogStartFraction, AtmosphericFog.DefaultFogCurvePower);
+
+            float start = range.x;
+            float end = range.y;
+            float midpoint = (start + end) * 0.5f;
+
+            bool ok = Check($"fog is clear at its start distance ({start:F1})",
+                AtmosphericFog.EvaluateFogFactor(start, range) <= FOG_EPSILON);
+            ok &= Check($"fog is opaque at its end distance ({end:F1})",
+                AtmosphericFog.EvaluateFogFactor(end, range) >= 1f - FOG_EPSILON);
+
+            // The shape assertion. Linear would sit at 0.5 here, so this is what a curve buys.
+            float atMidpoint = AtmosphericFog.EvaluateFogFactor(midpoint, range);
+            ok &= Check($"fog is still mostly clear halfway through its range, got {atMidpoint:P1} (linear would be 50%)",
+                atMidpoint <= MAX_MIDPOINT_FOG);
+
+            bool monotonic = true;
+            float previous = -1f;
+            for (int i = 0; i <= 200; i++)
+            {
+                float factor = AtmosphericFog.EvaluateFogFactor(Mathf.Lerp(0f, end * 1.2f, i / 200f), range);
+                if (factor < previous - FOG_EPSILON) monotonic = false;
+                previous = factor;
+            }
+
+            ok &= Check("fog never thins out as distance grows", monotonic);
+            ok &= Check("beyond the end distance fog stays fully opaque",
+                AtmosphericFog.EvaluateFogFactor(end * 3f, range) >= 1f - FOG_EPSILON);
             return ok;
         }
 

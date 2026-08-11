@@ -30,6 +30,7 @@ Shader "Minecraft/Transparent Blocks"
 
             #include "Includes/VoxelCommon.hlsl"
             #include "Includes/VoxelLighting.hlsl"
+            #include "Includes/VoxelFog.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 float _AlphaCutout;
@@ -66,6 +67,9 @@ Shader "Minecraft/Transparent Blocks"
 
                 // Multiply by vertex RGB to support BlockIconGenerator shadows and tinting
                 col.rgb *= i.color.rgb;
+
+                // Fog last, after all lighting — it replaces the surface rather than being lit by it.
+                col.rgb = ApplyVoxelFog(col.rgb, i.fogDistance);
 
                 return col;
             }

@@ -242,3 +242,5 @@ MonoBehaviour:
   _sunAngularRadius: 1.5
   _moonAngularRadius: 1.7
   _starBrightness: 1
+  _fogStartFraction: 0.15
+  _fogCurvePower: 3
