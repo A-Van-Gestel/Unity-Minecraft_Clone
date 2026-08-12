@@ -390,9 +390,15 @@ own item. The authored gradient's `SUNRISE` key sits at day fraction 0.2083 (Min
 §2.2's model puts the true horizon crossing at 0.25 (06:00). Measured: at that key the sun is **10.55°
 below** the horizon while the horizon colour has already reached 0.528 luminance against 0.827 at noon —
 82% of full daylight. It reads in game as the sky brightening for whatever happens to be near the horizon
-at the time. It is a seam between RF-1's authored keys and RF-2's later celestial model, and correcting
-it touches the light curve as well as the gradients — which §2.1 notes would move the World Clock suite's
-B3/B4/B7/B9 — so it needs its own decision rather than a quiet retune.
+at the time. It is a seam between RF-1's authored keys and RF-2's later celestial model.
+
+A dawn/dusk mirror measurement localizes it: at equal sun altitudes the morning horizon is much brighter
+than the evening one (0.528 vs 0.304 at −10.55°; 0.642 vs 0.510 at the crossing), while outside the
+0.15–0.2917 band the two match exactly — and the **global light level is symmetric at those same
+instants**. So `SUNSET = 0.75` already sits on the true crossing and only dawn is misplaced, and the
+defect is in the **gradient** keys rather than the curve. That matters for scope: a gradient-only change
+plausibly leaves the World Clock baselines §2.1 warns about untouched — but that is a hypothesis to test
+by running the suite, not an assumption to build on. Full numbers in the Design report's entry.
 
 **RF-9 interacts with this system.** The darker night sky RF-2 ships makes the crushed-AO defect *more*
 visible, not less: at midnight a 30%-occluded face renders 14.8× darker than flat ground and identical
