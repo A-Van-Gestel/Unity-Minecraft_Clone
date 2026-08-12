@@ -1,6 +1,6 @@
 # Sky & Celestial Rendering
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Date:** 2026-08-12  
 **Status:** **Implemented (Stable)** — RF-2 phases 1 and 2, the `Distance Fog` setting, the richer sun/moon discs, and the Sky Editor are shipped and confirmed (2026-08-11, discs and tool 2026-08-12). Guarded by the `Validate Sky` suite (**15** baselines, model only) and `Validate Sky Render` (**6** baselines on rendered pixels) — see §7. Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -108,6 +108,30 @@ space, so the field turns overhead instead of being pinned to the world.
 
 One simplification: the sphere turns once per **solar** day rather than per sidereal day, so the star
 field does not slowly precess against the calendar over a long-lived world.
+
+### 2.5 The gradients key dawn on the crossing; the curve keys it on the named time
+
+`TimeOfDaySettings` carries two dawn constants, and the split is deliberate. `SUNRISE = 0.2083` is
+Minecraft's named `/time` target (tick 23000) and shapes the **light curve**;
+`DAWN_HORIZON_CROSSING = 0.25` is §2.2's true horizon crossing (tick 0) and keys the **gradients**.
+
+They differ because Minecraft's named `sunrise` falls 1000 ticks *before* the sun actually rises, while
+its named `sunset` (tick 12000) lands exactly on the crossing. The gradients originally inherited both
+named times, so dusk got the crossing for free and dawn did not: the sky finished its sunrise while the
+sun was still **10.55° below** the horizon, at 0.528 horizon luminance against 0.827 at noon — 82% of
+full daylight, which read in game as the sky brightening for whatever happened to be near the horizon.
+
+A **dawn/dusk mirror measurement** is what localized it — comparing day fraction `d` against `1 − d`,
+since the sun's arc is symmetric about noon. It showed the asymmetry confined to the 0.15–0.2917 band and
+the **global light level symmetric at those same instants**, which proved the defect lived in the gradient
+keys rather than the curve, and kept the fix clear of RF-1's locked "curve in GLL units" decision. Moving
+that one key restored an exact mirror (the other seven already matched) and cut the dawn/dusk luminance
+delta at −10.55° from **+0.2242 to +0.0101**.
+
+The residual 0.0174 at the crossing is **not** error: it is exactly the luminance difference between the
+authored dawn and dusk colours. Dawn is pinker and cooler, dusk warmer and more orange — the two halves
+mirror in *shape*, not in hue. `Gradient` permits only eight keys and all eight are used, so a new sky
+moment costs an existing one; that ceiling is why the fix had to move a key rather than add one.
 
 ---
 
@@ -249,8 +273,9 @@ angular radii, star brightness, fog start fraction and fog curve power.
 celestial/fog scalars through `SerializedObject`, against a **live render of the real skybox shader** —
 which is why it is a window and not a custom inspector. An Inspector alone cannot show what is being
 authored here, because the swatch lies (§8); the render is the feature, and the fields are incidental.
-Its time scrubber's *Sunrise* button targets day fraction 0.25, the celestial horizon crossing rather
-than the gradient's own dawn key, so the §9 dawn-timing seam is visible rather than hidden.
+Its time scrubber's *Sunrise* button targets day fraction 0.25, the celestial horizon crossing — which
+is now also where the gradients key dawn (§2.5), the two having been one tick-offset apart until that
+seam was closed.
 
 **Moon phases are browsed by moving the clock, not by setting the phase.** A phase selector could simply
 write `_MoonPhase`, and the state struct allows it — but phase and position come from one elongation
@@ -385,21 +410,6 @@ sky colours in an editor tool with per-biome override (needs a design pass — s
 while biomes are per-column), §6 ambience v2 (aurora, shooting stars, sun flare), seasonal declination,
 and the blood-moon disc tint that waits on RF-1 §4's unshipped `SkyEvent`.
 
-**The sky's dawn runs ahead of the sun**, found while confirming the discs in game and filed there as its
-own item. The authored gradient's `SUNRISE` key sits at day fraction 0.2083 (Minecraft's 05:00) while
-§2.2's model puts the true horizon crossing at 0.25 (06:00). Measured: at that key the sun is **10.55°
-below** the horizon while the horizon colour has already reached 0.528 luminance against 0.827 at noon —
-82% of full daylight. It reads in game as the sky brightening for whatever happens to be near the horizon
-at the time. It is a seam between RF-1's authored keys and RF-2's later celestial model.
-
-A dawn/dusk mirror measurement localizes it: at equal sun altitudes the morning horizon is much brighter
-than the evening one (0.528 vs 0.304 at −10.55°; 0.642 vs 0.510 at the crossing), while outside the
-0.15–0.2917 band the two match exactly — and the **global light level is symmetric at those same
-instants**. So `SUNSET = 0.75` already sits on the true crossing and only dawn is misplaced, and the
-defect is in the **gradient** keys rather than the curve. That matters for scope: a gradient-only change
-plausibly leaves the World Clock baselines §2.1 warns about untouched — but that is a hypothesis to test
-by running the suite, not an assumption to build on. Full numbers in the Design report's entry.
-
 **RF-9 interacts with this system.** The darker night sky RF-2 ships makes the crushed-AO defect *more*
 visible, not less: at midnight a 30%-occluded face renders 14.8× darker than flat ground and identical
 to a sealed cave face, where at noon the same pair differs by 1.5×. Fog masks it at distance only. Do
@@ -409,6 +419,17 @@ not read the atmospheric improvement as having fixed it.
 
 ## Document History
 
+* **v1.4** - **The dawn/sun seam closed** (2026-08-12). New §2.5: the gradients now key dawn on the
+  celestial crossing (`DAWN_HORIZON_CROSSING = 0.25`) while the light curve keeps Minecraft's named
+  `/time` target (`SUNRISE = 0.2083`), which restores an exact dawn/dusk mirror and cuts the luminance
+  delta at −10.55° sun altitude from +0.2242 to +0.0101. The §9 deferred entry is retired. Two things
+  are worth carrying forward. The **dawn/dusk mirror measurement** is the technique that made a vague
+  "the sky brightens too early" into a one-key defect with a bounded blast radius — comparing a quantity
+  against its own reflection localizes an asymmetry without needing a reference to be right about.
+  And the World Clock suite re-ran **bit-identical**, which was the expected result precisely because
+  that suite builds its settings with `CreateInstance` and reads only the curve: it is *structurally
+  blind* to gradients, so its green proved no regression and said nothing whatever about the fix. The
+  fix was judged by rendered pixels, as everything else in this document has been.
 * **v1.3** - **Moon phase browsing and the first rendered-pixel coverage** (2026-08-12). The Sky Editor
   gained a phase selector that moves the *clock* rather than writing the phase, keeping position and phase
   on the one elongation §2.3 describes — measured exact on illumination at all eight phases, each at the

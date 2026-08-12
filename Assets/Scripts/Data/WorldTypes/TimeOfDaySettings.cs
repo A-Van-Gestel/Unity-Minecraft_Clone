@@ -36,6 +36,14 @@ namespace Data.WorldTypes
         // differently from `noon` and `night` from `midnight`.
         private const float NIGHT_HOLD_END = 0.15f;
         private const float SUNRISE = 0.2083f;
+
+        // The sky GRADIENTS key their dawn on the celestial horizon crossing instead, because a color
+        // is judged against the sun disc beside it while a light level is not. SUNRISE above is
+        // Minecraft's named /time target (tick 23000), which falls 1000 ticks BEFORE the sun actually
+        // rises; keying dawn there finished the sunrise while the sun was still 10.55 degrees down.
+        // Dusk needs no such split: SUNSET (tick 12000) already lands on the crossing, so using this
+        // makes the gradients an exact mirror about noon.
+        private const float DAWN_HORIZON_CROSSING = 0.25f;
         private const float MORNING = 0.2917f;
         private const float FULL_DAY_START = 0.40f;
         private const float FULL_DAY_END = 0.60f;
@@ -268,7 +276,7 @@ namespace Data.WorldTypes
                 {
                     new GradientColorKey(s_night, 0f),
                     new GradientColorKey(s_night, NIGHT_HOLD_END),
-                    new GradientColorKey(s_dawn, SUNRISE),
+                    new GradientColorKey(s_dawn, DAWN_HORIZON_CROSSING),
                     new GradientColorKey(s_paleDay, MORNING),
                     new GradientColorKey(s_day, 0.5f),
                     new GradientColorKey(s_paleDay, AFTERNOON),
@@ -320,11 +328,16 @@ namespace Data.WorldTypes
         /// Builds a day-long gradient through the five sky moments, using all eight keys Unity allows.
         /// </summary>
         /// <param name="night">Color held through the night.</param>
-        /// <param name="dawn">Color at sunrise.</param>
+        /// <param name="dawn">Color where the sun crosses the horizon at dawn.</param>
         /// <param name="softDay">Color mid-morning and mid-afternoon.</param>
         /// <param name="day">Color at noon.</param>
-        /// <param name="dusk">Color at sunset.</param>
+        /// <param name="dusk">Color where the sun crosses the horizon at dusk.</param>
         /// <returns>A gradient over one day, whose final key meets the 0.0 key at the same night color.</returns>
+        /// <remarks>
+        /// The eight keys mirror exactly about noon, so dawn and dusk hold their shape in common and
+        /// differ only in hue — dawn cooler and pinker, dusk warmer. Unity allows no ninth key, so a
+        /// new moment here means giving one up rather than adding one.
+        /// </remarks>
         private static Gradient BuildDayGradient(Color night, Color dawn, Color softDay, Color day, Color dusk)
         {
             Gradient gradient = new Gradient();
@@ -333,7 +346,7 @@ namespace Data.WorldTypes
                 {
                     new GradientColorKey(night, 0f),
                     new GradientColorKey(night, NIGHT_HOLD_END),
-                    new GradientColorKey(dawn, SUNRISE),
+                    new GradientColorKey(dawn, DAWN_HORIZON_CROSSING),
                     new GradientColorKey(softDay, MORNING),
                     new GradientColorKey(day, 0.5f),
                     new GradientColorKey(softDay, AFTERNOON),

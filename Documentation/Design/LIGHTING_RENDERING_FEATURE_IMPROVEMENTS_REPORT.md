@@ -1,6 +1,6 @@
 # Lighting & Rendering Feature Improvements Report
 
-**Version:** 1.7  
+**Version:** 1.8  
 **Date:** 2026-08-12  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified. Owns lighting
 and rendering *features* (`RF-*`); the *performance* counterparts (`LI-*`, `GS-*`) live in
@@ -372,7 +372,6 @@ above, and the Architecture doc is authoritative.
 | Item | Note |
 |------|------|
 | §6 sky ambience v2 (aurora, shooting stars) | Pure content on the shipped skybox shader. Sun flare needs RF-3's bloom to catch the HDR disc. |
-| **The sky's dawn runs ahead of the sun** | **Found 2026-08-12** while confirming the richer discs in game. The authored `SUNRISE` gradient key sits at day fraction 0.2083 (MC's 05:00) while the celestial model puts the true horizon crossing at 0.25 (06:00). Measured: at that key the sun is **10.55° below** the horizon while the horizon color is already at 0.528 luminance against 0.827 at noon — **82% of full daylight**. In game the sky finishes its sunrise for whatever is near the horizon at the time (a rising moon, in the report that surfaced it). A seam between RF-1's authored keys and RF-2's later celestial model.<br><br>**Localized 2026-08-12 by a dawn/dusk mirror measurement** (mirror of day fraction `d` is `1 − d`; the sun's arc is symmetric about noon). Horizon color at equal sun altitudes: at −10.55° dawn reads **0.528** against dusk's **0.304**; at the horizon crossing itself, **0.642** against **0.510**. Outside the band 0.15–0.2917 the two match exactly (0.0145 and 0.7568, delta 0.0000). **The global light level is symmetric at those same instants** (0.350/0.350 and 0.615/0.620). Two consequences: `SUNSET = 0.75` already sits on the true crossing while `SUNRISE = 0.2083` does not, so **dusk is correct and only dawn is wrong**; and because the *curve* is symmetric, the defect lives in the **gradient keys alone** — a gradient-only fix plausibly leaves World Clock B3/B4/B7/B9 untouched, which must be **verified by running the suite, not assumed**. Note also that dawn and dusk are not mirror-shaped in the curve either: dusk goes golden *at* sunset then twilight after, while dawn goes twilight before sunrise then straight to soft day, with no golden step. Trap: the keys live in an existing `.asset`, so editing the code defaults alone changes nothing in game. |
 | Per-biome sky color override | The editor-tool half **shipped 2026-08-12** as `Minecraft Clone/Sky Editor` (Architecture §6); only the per-biome override remains. It **needs a design pass first**: sky color is screen-wide but biomes are per-column, so something must define the boundary rule (blend over distance? sample at the camera? weight nearby columns?). Same class of question as TF-3's climate axis. Route to `create-design-doc`, not to implementation. |
 | Seasonal declination | Blocked on RF-1's curve coupling — see the Architecture doc §2.1 for why zero is load-bearing rather than lazy. |
 | Blood-moon disc tint | Waits on RF-1 §4's `SkyEvent`, which was never shipped. |
@@ -751,6 +750,21 @@ vertex-channel allocation it shares, rather than on its own merit).
 
 ## Document History
 
+* **v1.8** - **The dawn-runs-ahead-of-the-sun row shipped and is removed** (2026-08-12). The sky
+  gradients now key dawn on the celestial horizon crossing (0.25) via a new `DAWN_HORIZON_CROSSING`
+  constant, while the light curve keeps Minecraft's named `/time` target (0.2083) — see
+  [`../Architecture/SKY_AND_CELESTIAL_RENDERING.md`](../Architecture/SKY_AND_CELESTIAL_RENDERING.md)
+  §2.5. The dawn/dusk luminance delta at −10.55° sun altitude fell from **+0.2242 to +0.0101**, and the
+  remaining 0.0174 at the crossing is exactly the authored pink-dawn/orange-dusk hue difference, kept on
+  purpose: the halves mirror in **shape, not hue**. Three things this row got right and one it framed
+  loosely. Right: the mirror measurement localized the defect to the gradient keys; `SUNSET` really was
+  already correct; and the trap it flagged was real — the fix reached the game only through
+  `SkyGradientDefaults.Reset` writing the `.asset`, not through the code defaults. Loosely framed: the
+  row called a gradient-only fix "plausibly" baseline-safe and demanded the suite be run. It was run,
+  before and after, and came back **bit-identical** — but the reason is stronger than "plausible" and
+  weaker as evidence: `WorldClockValidationSuite` builds its settings via `CreateInstance` and reads only
+  the curve, so it is **structurally incapable** of observing a gradient change. That green is a
+  no-regression signal and nothing more. `Validate All` held at 21 suites / 475 baselines / 0 failed.
 * **v1.7** - **Moon phase browsing + `Validate Sky Render`** (2026-08-12). The Sky Editor can now step
   through all eight named phases, and the sky's *shader* half has automated coverage for the first time —
   6 rendered-pixel baselines, `Validate All` now **21 suites / 475 baselines**. See
@@ -821,7 +835,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-12 (RF-2 disc detail, Sky Editor + phase browsing, rendered-pixel suite; dawn-timing seam filed)  
+**Last Updated:** 2026-08-12 (RF-2 disc detail, Sky Editor + phase browsing, rendered-pixel suite; dawn-timing seam closed)  
 **Next Review:** when RF-3 is scheduled — **RF-9 is now the most visible open item**, its severity
 measured in game (a 30%-occluded face is 14.8× darker than flat ground at midnight and indistinguishable
 from a sealed cave face). It shares RF-3's vertex-channel allocation and the two should be decided
