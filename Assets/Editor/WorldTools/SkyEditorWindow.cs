@@ -53,6 +53,16 @@ namespace Editor.WorldTools
         /// <summary>Width of the labels in the control column.</summary>
         private const float LABEL_WIDTH = 150f;
 
+        /// <summary>
+        /// Panel inset assumed before the first repaint has reported the preview's real rect.
+        /// </summary>
+        /// <remarks>
+        /// Only the very first render uses it: the window's margins plus a scrollbar that may or may
+        /// not be present cannot be predicted to the pixel, and a guess that disagrees with the drawn
+        /// rect is what <see cref="RenderSizeChanged"/> would otherwise read as a resize every frame.
+        /// </remarks>
+        private const float PANEL_WIDTH_FALLBACK_INSET = 24f;
+
         // Named day fractions the quick-jump buttons target. Dawn and dusk sit at the CELESTIAL horizon
         // crossings (0.25 / 0.75), not at the gradient's own dawn keys — the point of this tool is to
         // show where the sky actually is when the sun rises, and those two disagree today.
@@ -99,6 +109,13 @@ namespace Editor.WorldTools
         private float _previewHeight = PREVIEW_HEIGHT_DEFAULT;
         private float _renderedWidth;
         private float _renderedHeight;
+
+        /// <summary>The preview's on-screen rect as last drawn, and the size the render is sized to.</summary>
+        /// <remarks>
+        /// Recorded on repaint only. The layout pass reports a placeholder rect, and rendering off that
+        /// would produce a preview at the minimum size.
+        /// </remarks>
+        private Rect _lastPreviewRect;
 
         /// <summary>
         /// Set when something the preview depends on changed; consumed on the next editor tick.
@@ -239,7 +256,10 @@ namespace Editor.WorldTools
             DrawResizeHandle(rect);
 
             // The render resolution follows the panel, so enlarging it buys detail rather than upscaling.
-            if (Event.current.type == EventType.Repaint && RenderSizeChanged(rect)) MarkPreviewDirty();
+            if (Event.current.type != EventType.Repaint) return;
+
+            _lastPreviewRect = rect;
+            if (RenderSizeChanged(rect)) MarkPreviewDirty();
         }
 
         /// <summary>Draws the draggable strip that resizes the preview.</summary>
@@ -599,10 +619,19 @@ namespace Editor.WorldTools
         /// </summary>
         /// <param name="width">Receives the render width in pixels.</param>
         /// <param name="height">Receives the render height in pixels.</param>
+        /// <remarks>
+        /// Sized from the rect the panel was last drawn at, which is the same quantity
+        /// <see cref="RenderSizeChanged"/> compares against — so a settled window reports no change.
+        /// Deriving it from the window width instead leaves the two permanently disagreeing by the
+        /// panel's insets, which reads as a resize on every repaint and re-renders forever.
+        /// </remarks>
         private void ResolveRenderSize(out int width, out int height)
         {
-            float panelWidth = Mathf.Max(position.width - 24f, 64f);
-            float panelHeight = Mathf.Max(_previewHeight, 64f);
+            bool drawn = _lastPreviewRect.width >= 1f && _lastPreviewRect.height >= 1f;
+
+            float panelWidth = Mathf.Max(
+                drawn ? _lastPreviewRect.width : position.width - PANEL_WIDTH_FALLBACK_INSET, 64f);
+            float panelHeight = Mathf.Max(drawn ? _lastPreviewRect.height : _previewHeight, 64f);
 
             // Uniform downscale past the cap, so the aspect the panel shows is the aspect rendered.
             float scale = Mathf.Min(1f, Mathf.Sqrt(MAX_PREVIEW_PIXELS / (panelWidth * panelHeight)));
