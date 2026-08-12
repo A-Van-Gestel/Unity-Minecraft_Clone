@@ -54,6 +54,10 @@ namespace Editor.Validation.Celestial
     /// thinner than Full" — the level would exist in the menu but change nothing.</item>
     /// <item>Ignoring <see cref="FogStyle.Off"/> in <c>ComputeFogRange</c> reds B15's two Off
     /// assertions, the second reporting fog at 100% where the player asked for none.</item>
+    /// <item>Flooring <c>EvaluateFogFactor</c>'s interpolant at 0.1 reds B15's "clear at the fog start
+    /// distance" (and B14's) — the near haze that would wash out everything in front of the player.
+    /// It reds on <b>Full</b>, at 0.0010 against Light's 0.0000: while that assertion evaluated Light
+    /// alone, which the steeper curve keeps under the epsilon, this mutation passed it green.</item>
     /// </list>
     /// </para>
     /// <para>
@@ -745,18 +749,24 @@ namespace Editor.Validation.Celestial
 
             // Light must actually be lighter everywhere short of the boundary, or the level is cosmetic.
             bool lighterThroughout = true;
-            bool bothClearNear = true;
             for (int i = 1; i < 40; i++)
             {
                 float distance = Mathf.Lerp(full.x, full.y, i / 40f);
                 float lightFog = AtmosphericFog.EvaluateFogFactor(distance, light);
                 float fullFog = AtmosphericFog.EvaluateFogFactor(distance, full);
                 if (lightFog >= fullFog) lighterThroughout = false;
-                if (AtmosphericFog.EvaluateFogFactor(full.x, light) > FOG_EPSILON) bothClearNear = false;
             }
 
+            // Each level is checked against ITS OWN start distance. The two ranges are asserted equal
+            // above, so this reads as one distance — but a regression that moved them apart must red
+            // here rather than leave one level unchecked.
+            float lightAtStart = AtmosphericFog.EvaluateFogFactor(light.x, light);
+            float fullAtStart = AtmosphericFog.EvaluateFogFactor(full.x, full);
+
             ok &= Check("Light is thinner than Full at every distance short of the boundary", lighterThroughout);
-            ok &= Check("both levels are still clear at the fog start distance", bothClearNear);
+            ok &= Check($"both levels are still clear at the fog start distance " +
+                        $"(Light {lightAtStart:F4}, Full {fullAtStart:F4})",
+                lightAtStart <= FOG_EPSILON && fullAtStart <= FOG_EPSILON);
             return ok;
         }
 
