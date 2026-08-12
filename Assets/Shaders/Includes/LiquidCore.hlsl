@@ -76,6 +76,7 @@ struct LiquidV2F
     float2 shorePush : TEXCOORD7; // Normalized push direction from C# mesher
     float packedShoreMask : TEXCOORD8; // Bit-packed 8-bit wall neighbor flags (constant across quad)
     half3 blockRGB : TEXCOORD9;
+    half emissive : TEXCOORD10; // RF-3 emissive strength (lava emits; water does not)
 };
 
 // =============================================================================
@@ -137,6 +138,7 @@ LiquidV2F LiquidVert(LiquidAppdata v)
     o.localFlowVector = v.uv.xy; // flow XZ
     o.shorePush = v.uv.zw; // shore push direction (normalized)
     o.packedShoreMask = v.color.g; // packed 8-bit wall neighbor flags
+    o.emissive = v.color.a; // RF-3: stamped by MeshGenerationJob.StampEmissiveStrength
     return o;
 }
 

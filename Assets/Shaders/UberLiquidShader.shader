@@ -133,6 +133,11 @@ Shader "Minecraft/UberLiquidShader"
                     // procedural color (cracks, pulse, crust) renders unmodified.
                     lava_col *= i.shadowMultiplier;
 
+                    // RF-3: push the crust past 1.0 so bloom catches it. Applied here, before fog, for the
+                    // same reason as the block shaders — distant lava should fade into the haze, not glow
+                    // through it.
+                    lava_col = ApplyVoxelEmissive(lava_col, i.emissive);
+
                     // Fog the surface BEFORE blending with the refracted background: that background is
                     // opaque terrain which the block shaders already fogged, so fogging the blend result
                     // would apply fog to it twice.
@@ -173,6 +178,10 @@ Shader "Minecraft/UberLiquidShader"
 
                     final_color *= litWhite;
                     final_color *= i.shadowMultiplier;
+
+                    // RF-3: a no-op for water, whose emission is 0. Wired anyway so any future emissive
+                    // water-like fluid glows without needing this branch revisited.
+                    final_color = ApplyVoxelEmissive(final_color, i.emissive);
 
                     // Fog the surface BEFORE blending with the refracted background — see the lava branch.
                     final_color = ApplyVoxelFog(final_color, distance(i.worldPos.xz, _WorldSpaceCameraPos.xz));
