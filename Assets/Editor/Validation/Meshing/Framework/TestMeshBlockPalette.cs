@@ -103,8 +103,22 @@ namespace Editor.Validation.Meshing.Framework
         /// </summary>
         public const ushort Post = 9;
 
+        /// <summary>
+        /// An opaque cube that emits light, for the RF-3 emissive-strength channel (B61). Identical to
+        /// <see cref="SolidOpaque"/> apart from its emission, so a comparison against that block isolates
+        /// the emissive stamp from every other property.
+        /// <para>
+        /// Appended last on purpose: every palette ID below it keeps its value, so no pre-existing
+        /// baseline sees a different world.
+        /// </para>
+        /// </summary>
+        public const ushort EmissiveOpaque = 10;
+
+        /// <summary>Light emission authored on <see cref="EmissiveOpaque"/>, on the engine's 0-15 scale.</summary>
+        public const byte EmissiveLevel = 12;
+
         /// <summary>Total number of block types in the palette.</summary>
-        public const int Count = 10;
+        public const int Count = 11;
 
         /// <summary>
         /// Builds the palette as managed <see cref="BlockType"/> instances and converts them to the
@@ -139,6 +153,9 @@ namespace Editor.Validation.Meshing.Framework
             jobData[Post] = new BlockTypeJobData(
                 MakeCustomBox("TestPost", opacity: 15, TestCustomMeshLibrary.PostBounds),
                 TestCustomMeshLibrary.PostMeshIndex);
+            BlockType emissive = MakeCube("TestEmissiveOpaque", isSolid: true, opacity: 15, renderNeighborFaces: false, MetadataSchema.None);
+            emissive.lightEmission = EmissiveLevel;
+            jobData[EmissiveOpaque] = new BlockTypeJobData(emissive);
             return jobData;
         }
 

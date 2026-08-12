@@ -574,8 +574,15 @@ namespace Data
         public NativeList<int> Triangles;
         public NativeList<int> TransparentTriangles;
         public NativeList<int> FluidTriangles;
+
         public NativeList<half4> Uvs; // MR-2: Float16×4. xy = flow/atlas UV, zw = shore push (fluid top face) or (0,0)
-        public NativeList<Color32> Colors; // MR-2: UNorm8×4. White for blocks; fluid encodes (FluidShaderID, shoreMask, shadowMul, 0)
+
+        // MR-2: UNorm8×4. RGB = white for blocks; fluid encodes (FluidShaderID, shoreMask, shadowMul).
+        // Alpha = RF-3 emissive strength (block emission 0-15 scaled ×17), stamped by
+        // MeshGenerationJob.StampEmissiveStrength on every shape path. It was the only channel free on
+        // all three submeshes, so RGB stays available for TF-11's climate foliage tint — together they
+        // fill the stream exactly, and RF-9 must find capacity elsewhere.
+        public NativeList<Color32> Colors;
         public NativeList<Vector3> Normals; // Full-precision working buffer; packed to SNorm8×4 in MeshPostProcessJob
         public NativeList<Color32> LightData; // TexCoord1 UNorm8: (sunlight, reserved, reserved, blocklight)
         public NativeList<NormalLightVertex> InterleavedStream3; // Packed Normal + LightData interleaved for GPU upload

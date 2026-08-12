@@ -68,6 +68,10 @@ Shader "Minecraft/Transparent Blocks"
                 // Multiply by vertex RGB to support BlockIconGenerator shadows and tinting
                 col.rgb *= i.color.rgb;
 
+                // Emission rides on top of the lit color, before fog — so a distant lamp still fades
+                // into the fog instead of glowing through it.
+                col.rgb = ApplyVoxelEmissive(col.rgb, i.color.a);
+
                 // Fog last, after all lighting — it replaces the surface rather than being lit by it.
                 col.rgb = ApplyVoxelFog(col.rgb, i.fogDistance);
 

@@ -56,7 +56,10 @@ struct LiquidAppdata
     float4 vertex : POSITION;
     float3 normal : NORMAL;
     float4 uv : TEXCOORD0; // xy = localFlowVector, zw = shorePush (normalized direction)
-    half4 color : COLOR; // MR-2 UNorm8: r=LiquidType/255 (×255 below), g=PackedShoreMask (8-bit wall flags), b=ShadowMultiplier, a=unused
+    // MR-2 UNorm8: r=LiquidType/255 (×255 below), g=PackedShoreMask (8-bit wall flags), b=ShadowMultiplier.
+    // a=RF-3 emissive strength — stamped by the mesher for lava, but not yet read here: this shader
+    // composes color along two separate paths, so wiring it lands with the post stack rather than blind.
+    half4 color : COLOR;
     half4 lightData : TEXCOORD1; // UNorm8: (skyLight, blocklightR, blocklightG, blocklightB)
 };
 

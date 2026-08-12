@@ -47,7 +47,7 @@ float CalculateLinearVoxelShadow(float shade)
 ///
 /// NOTE: this scalar entry point still MULTIPLIES by globalLight — the pre-RF-1 model. It has no
 /// callers; the shipped path is ApplyVoxelLightingRGB, which subtracts (see ApplySkyDarken). Any new
-/// surface using this would darken out of step with the terrain around it.
+/// surface using this would darken out of step with the surrounding terrain.
 ///
 /// @param color        The base texture color (RGB).
 /// @param lightLevel   Per-vertex light level (vertex color alpha, 0..1).
@@ -121,6 +121,29 @@ half3 ApplyVoxelLightingRGB(half3 color,
     half3 blockContrib = color * half3(blockR_shadow, blockG_shadow, blockB_shadow);
 
     return max(sunContrib, blockContrib);
+}
+
+// --- RF-3: HDR emissive ---
+
+/// Multiplier turning a vertex's stored emissive strength into HDR headroom above 1.0, so the bloom
+/// threshold has something to catch. Set per frame by GraphicsSettingsController; the 0 default keeps
+/// every shader that includes this file bit-identical until the post stack is actually enabled (and
+/// keeps editor previews, which never set it, unchanged).
+float _EmissiveBoost;
+
+/// Adds a block's own emission on top of its lit color.
+///
+/// Emitters are lit by their own blocklight and so already sit near 1.0; this pushes them past it,
+/// which is the entire point — below 1.0 nothing blooms. Deliberately independent of the day/night
+/// cycle: a lamp emits the same at noon as at midnight, and the bloom threshold decides what reads
+/// as glowing.
+///
+/// @param litColor  The surface color after voxel lighting has been applied.
+/// @param strength  Per-vertex emissive strength (vertex color alpha, 0..1 = emission level 0..15).
+/// @return          The lit color plus its emissive contribution, potentially above 1.0.
+half3 ApplyVoxelEmissive(half3 litColor, half strength)
+{
+    return litColor + litColor * strength * _EmissiveBoost;
 }
 
 #endif // VOXEL_LIGHTING_INCLUDED

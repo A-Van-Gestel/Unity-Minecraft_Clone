@@ -47,6 +47,8 @@ public class SectionRenderer
     {
         new VertexAttributeDescriptor(VertexAttribute.Position), // Float32×3, 12B
         new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float16, 4, stream: 1), // 8B
+        // RGB: white for blocks, (FluidShaderID, shoreMask, shadowMul) for fluids. Alpha: RF-3 emissive
+        // strength. See Data.MeshDataJobOutput.Colors for the full channel allocation.
         new VertexAttributeDescriptor(VertexAttribute.Color, VertexAttributeFormat.UNorm8, 4, stream: 2), // 4B
         new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.SNorm8, 4, stream: 3), // 4B
         new VertexAttributeDescriptor(VertexAttribute.TexCoord1, VertexAttributeFormat.UNorm8, 4, stream: 3), // 4B

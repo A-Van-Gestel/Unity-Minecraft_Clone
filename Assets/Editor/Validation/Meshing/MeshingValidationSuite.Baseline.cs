@@ -60,6 +60,74 @@ namespace Editor.Validation.Meshing
 
             // --- SS-0 custom-mesh fixture integrity (B50) lives in MeshingValidationSuite.MeshFixtures.cs. ---
             AddMeshFixtureBaselineScenarios(scenarios);
+
+            scenarios.Add(new Scenario("B61: emitter stamps its emission into vertex-color alpha; non-emitter keeps 255 and RGB is untouched (RF-3 guard)", B61_EmissiveStrengthChannel));
+        }
+
+        /// <summary>
+        /// B61 (RF-3): the mesher writes a block's light emission into the alpha channel of the vertex
+        /// color stream, scaled from the engine's 0-15 range to a full byte.
+        /// </summary>
+        /// <remarks>
+        /// The non-emitting control cube in the same scene is the point of the scenario, not padding: a
+        /// blanket write of the emissive value to every vertex would satisfy an emitter-only assertion,
+        /// so the control is what makes the check unsatisfiable by the wrong implementation. The RGB
+        /// assertions likewise pin that only alpha moved — RGB stays available for TF-11.
+        /// </remarks>
+        private static bool B61_EmissiveStrengthChannel()
+        {
+            using MeshingTestWorld world = new MeshingTestWorld();
+            Vector3Int emitterPos = new Vector3Int(4, 8, 4);
+            Vector3Int controlPos = new Vector3Int(12, 8, 12);
+            world.SetBlock(emitterPos.x, emitterPos.y, emitterPos.z, TestMeshBlockPalette.EmissiveOpaque);
+            world.SetBlock(controlPos.x, controlPos.y, controlPos.z, TestMeshBlockPalette.SolidOpaque);
+            MeshDataJobOutput o = world.Run();
+
+            // Two isolated opaque cubes, 6 faces × 4 verts each.
+            bool passed = MeshAssert.VertexCount("B61 vertex count (2 cubes)", o, 48);
+            passed &= MeshAssert.StructuralInvariants("B61 structural", o);
+            if (o.Vertices.Length != 48) return false;
+
+            const byte expectedEmissive = TestMeshBlockPalette.EmissiveLevel * 17;
+            passed &= CheckCubeEmissiveChannel("B61 emitter", o, emitterPos, expectedEmissive);
+            passed &= CheckCubeEmissiveChannel("B61 non-emitter control", o, controlPos, 255);
+            return passed;
+        }
+
+        /// <summary>
+        /// Asserts every vertex inside <paramref name="pos"/>'s cell carries the expected color alpha and
+        /// an untouched white RGB.
+        /// </summary>
+        /// <param name="label">Prefix for the assertion messages.</param>
+        /// <param name="o">Mesh output to inspect.</param>
+        /// <param name="pos">Cell whose 24 vertices are checked.</param>
+        /// <param name="expectedAlpha">Alpha every vertex in the cell must carry.</param>
+        /// <returns>True when the cell's vertex colors match.</returns>
+        private static bool CheckCubeEmissiveChannel(string label, MeshDataJobOutput o, Vector3Int pos, byte expectedAlpha)
+        {
+            int vertsSeen = 0;
+            bool alphaOk = true, rgbOk = true;
+            byte firstAlpha = 0;
+
+            for (int i = 0; i < o.Vertices.Length; i++)
+            {
+                Vector3 v = o.Vertices[i];
+                if (v.x < pos.x || v.x > pos.x + 1 || v.z < pos.z || v.z > pos.z + 1 ||
+                    v.y < pos.y || v.y > pos.y + 1)
+                    continue;
+
+                Color32 c = o.Colors[i];
+                if (vertsSeen == 0) firstAlpha = c.a;
+                vertsSeen++;
+                if (c.a != expectedAlpha) alphaOk = false;
+                if (c.r != 255 || c.g != 255 || c.b != 255) rgbOk = false;
+            }
+
+            bool passed = MeshAssert.IsTrue($"{label}: 24 verts found in cell", vertsSeen == 24, $"found {vertsSeen}");
+            passed &= MeshAssert.IsTrue($"{label}: color alpha == {expectedAlpha} on every vert", alphaOk,
+                $"first alpha={firstAlpha}, expected {expectedAlpha}");
+            passed &= MeshAssert.IsTrue($"{label}: color RGB left white", rgbOk, "RGB was modified");
+            return passed;
         }
 
         /// <summary>Hook for the cross-chunk border-culling baselines (implemented in MeshingValidationSuite.CrossChunk.cs).</summary>

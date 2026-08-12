@@ -324,6 +324,44 @@ namespace Jobs
         }
 
         /// <summary>
+        /// Meshes one block: emits its geometry, then stamps its emissive strength onto those vertices.
+        /// </summary>
+        private void GenerateVoxelMeshData(Vector3Int pos, uint packedData, BlockTypeJobData voxelProps,
+            ref NativeArray<OptionalVoxelState> neighbors, ref NativeArray<ushort> neighborLights)
+        {
+            int startVertex = _vertexIndex;
+            GenerateVoxelGeometry(pos, packedData, voxelProps, ref neighbors, ref neighborLights);
+            StampEmissiveStrength(in voxelProps, startVertex);
+        }
+
+        /// <summary>
+        /// Writes this block's emission into the alpha channel of the vertices it just produced (RF-3).
+        /// </summary>
+        /// <remarks>
+        /// Stamped here rather than threaded through the <see cref="VoxelMeshHelper"/> writers because
+        /// <see cref="GenerateVoxelMeshData"/> is the single router and <see cref="_vertexIndex"/> brackets
+        /// every shape path — so one pass covers standard cubes, custom meshes, cross meshes and fluids
+        /// alike, including any path added later. Alpha is the only vertex-color channel free on all three
+        /// submeshes (blocks write 255, fluids write 0, and no shader read it before RF-3); RGB stays
+        /// untouched and is claimed by TF-11. Emission is 0-15, scaled by 17 to fill the byte.
+        /// Non-emitters return immediately, so the overwhelming majority of blocks pay nothing.
+        /// </remarks>
+        /// <param name="voxelProps">Properties of the block whose geometry was just emitted.</param>
+        /// <param name="startVertex">Vertex index recorded before the block emitted any geometry.</param>
+        private void StampEmissiveStrength(in BlockTypeJobData voxelProps, int startVertex)
+        {
+            if (voxelProps.LightEmission == 0) return;
+
+            byte strength = (byte)(voxelProps.LightEmission * 17);
+            for (int v = startVertex; v < _vertexIndex; v++)
+            {
+                Color32 packed = Output.Colors[v];
+                packed.a = strength;
+                Output.Colors[v] = packed;
+            }
+        }
+
+        /// <summary>
         /// The main router that decides how to mesh a block (Standard, Custom, Cross, or Fluid).
         /// </summary>
         /// <remarks>
@@ -336,7 +374,7 @@ namespace Jobs
         /// always interpret the meta byte as a fluid level via the existing <c>GenerateFluidMeshData</c>
         /// path, and cross meshes do not use orientation at all.</para>
         /// </remarks>
-        private void GenerateVoxelMeshData(Vector3Int pos, uint packedData, BlockTypeJobData voxelProps,
+        private void GenerateVoxelGeometry(Vector3Int pos, uint packedData, BlockTypeJobData voxelProps,
             ref NativeArray<OptionalVoxelState> neighbors, ref NativeArray<ushort> neighborLights)
         {
             ushort id = BurstVoxelDataBitMapping.GetId(packedData);
