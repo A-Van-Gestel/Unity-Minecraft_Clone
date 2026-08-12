@@ -255,6 +255,20 @@ public class Settings
     public FogStyle distanceFog = FogStyle.Full;
 
     /// <summary>
+    /// If true, the camera runs the post-processing stack and light sources render brighter than white
+    /// so bloom can catch them.
+    /// </summary>
+    [SettingField(SettingsTab.Graphics, Label = "Bloom", Order = 5)]
+    [Tooltip("Makes light sources glow — lamps and lava render brighter than white and bleed into the " +
+             "surrounding pixels.\n\n" +
+             "Turning this off also stops emitters rendering above full brightness, so they look exactly " +
+             "as they did before.\n\n" +
+             TooltipTags.Performance + "Enables the post-processing stack: one full-screen pass plus an " +
+             "intermediate render target.\n" +
+             TooltipTags.DefaultColorStart + "On" + TooltipTags.DefaultColorEnd)]
+    public bool bloom = true;
+
+    /// <summary>
     /// If true, flora (grass blades and future foliage) sways in the wind via shader vertex animation.
     /// </summary>
     [SettingField(SettingsTab.Graphics, Label = "Foliage Sway", Order = 6)]

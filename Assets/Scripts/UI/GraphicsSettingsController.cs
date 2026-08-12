@@ -1,14 +1,30 @@
 using UI.Enums;
 using UnityEngine;
+using UnityEngine.Rendering.Universal;
 
 namespace UI
 {
     /// <summary>
-    /// Applies window mode, resolution, FOV, VSync, Max FPS, fluid quality, and fluid refraction settings at startup and whenever they change.
+    /// Applies window mode, resolution, FOV, VSync, Max FPS, fluid quality, fluid refraction, and bloom
+    /// settings at startup and whenever they change.
     /// Subscribes to <see cref="SettingsManager.OnSettingChanged"/> for live updates.
     /// </summary>
     public class GraphicsSettingsController : MonoBehaviour
     {
+        // Must match the global declared in VoxelLighting.hlsl.
+        private static readonly int s_emissiveBoostId = Shader.PropertyToID("_EmissiveBoost");
+
+        /// <summary>
+        /// How far above full brightness a maximum-emission block renders when bloom is on.
+        /// </summary>
+        /// <remarks>
+        /// A level-15 emitter is already lit to ~1.0 by its own blocklight, so this is the headroom the
+        /// bloom threshold (1.1) actually sees — a full emitter lands at roughly 2.0. Chosen against the
+        /// RF-3 reference captures; too low and only the brightest emitters glow, too high and lava
+        /// blows out into a featureless white blob.
+        /// </remarks>
+        private const float EMISSIVE_BOOST = 1.0f;
+
         // Must match the keywords in UberLiquidShader.shader: #pragma multi_compile _ _FLUID_QUALITY_LOW _FLUID_QUALITY_MED
         private const string KEYWORD_FLUID_QUALITY_LOW = "_FLUID_QUALITY_LOW";
         private const string KEYWORD_FLUID_QUALITY_MED = "_FLUID_QUALITY_MED";
@@ -34,6 +50,7 @@ namespace UI
             ApplyFrameRate(settings);
             ApplyFluidQuality(settings.fluidQuality);
             ApplyFluidRefraction(settings.fluidRefraction);
+            ApplyBloom(settings.bloom);
         }
 
         private void OnEnable()
@@ -74,7 +91,31 @@ namespace UI
                 case nameof(Settings.fluidRefraction):
                     ApplyFluidRefraction(settings.fluidRefraction);
                     break;
+                case nameof(Settings.bloom):
+                    ApplyBloom(settings.bloom);
+                    break;
             }
+        }
+
+        /// <summary>
+        /// Turns the post-processing stack and the HDR emissive path on or off together.
+        /// </summary>
+        /// <remarks>
+        /// The two are deliberately one setting. Emissive output above 1.0 is only meaningful because
+        /// bloom catches it; with the post stack off it would simply clip to white and make emitters look
+        /// flat and blown out. Pushing the boost as a global (rather than per-material) also covers the
+        /// opaque, transparent and liquid shaders in one write.
+        /// </remarks>
+        /// <param name="enabled">True to enable bloom and HDR emissives.</param>
+        public static void ApplyBloom(bool enabled)
+        {
+            Shader.SetGlobalFloat(s_emissiveBoostId, enabled ? EMISSIVE_BOOST : 0f);
+
+            Camera cam = Camera.main;
+            if (cam == null) return;
+
+            UniversalAdditionalCameraData data = cam.GetUniversalAdditionalCameraData();
+            if (data != null) data.renderPostProcessing = enabled;
         }
 
         /// <summary>

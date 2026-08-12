@@ -61,6 +61,7 @@ MonoBehaviour:
     fullBlockContactShadows: 0
     clouds: 2
     distanceFog: 2
+    bloom: 1
     enableFoliageSway: 1
     vSync: 1
     unlimitedFps: 0
