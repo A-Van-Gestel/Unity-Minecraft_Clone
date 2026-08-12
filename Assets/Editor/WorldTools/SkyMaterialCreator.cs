@@ -15,7 +15,11 @@ namespace Editor.WorldTools
         private const string SKY_SHADER_NAME = "Minecraft/SkyboxShader";
 
         /// <summary>Where the material is written; <see cref="World"/> loads it from here at startup.</summary>
-        private const string SKY_MATERIAL_PATH = "Assets/Materials/Sky.mat";
+        /// <remarks>
+        /// Public so editor tooling that renders the sky loads the same material the game does, rather
+        /// than repeating the path and drifting from it.
+        /// </remarks>
+        public const string SKY_MATERIAL_PATH = "Assets/Materials/Sky.mat";
 
         /// <summary>
         /// Creates (or refreshes) the sky material asset and selects it.

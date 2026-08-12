@@ -1,7 +1,7 @@
 # Lighting & Rendering Feature Improvements Report
 
-**Version:** 1.4  
-**Date:** 2026-08-11  
+**Version:** 1.5  
+**Date:** 2026-08-12  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified. Owns lighting
 and rendering *features* (`RF-*`); the *performance* counterparts (`LI-*`, `GS-*`) live in
 [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md), and the combined ranked
@@ -92,7 +92,7 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 | ID   | Finding                                                                                   | Effort | Risk | Benefit | Seed | Save |
 |------|-------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
 | RF-1 | Day/night cycle: shader support is wired & modern but nothing advances time               |   🟡   |  🟢  |   🟢    |  ✅   |  ⚠️  |
-| RF-2 | ~~Sky rendering: skybox, sun/moon, stars, fog~~ ✅ **§1–§5 SHIPPED**; §6 + 4 riders open   |   🟡   |  🟢  |   🟢    |  ✅   |  ✅   |
+| RF-2 | ~~Sky rendering: skybox, sun/moon, stars, fog, disc detail~~ ✅ **SHIPPED**; §6 + 4 riders open |   🟡   |  🟢  |   🟢    |  ✅   |  ✅   |
 | RF-3 | Bloom / post-processing: URP post stack present but disabled; no HDR emissive path        |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 | RF-4 | Flickering light sources: shader-side global flicker with per-position phase              |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | RF-5 | Animated light sources: RGB emission already shipped; *animation* is BFS-bounded          |   🟡   |  🟡  |    ⚪    |  ✅   |  ✅   |
@@ -372,7 +372,7 @@ above, and the Architecture doc is authoritative.
 | Item | Note |
 |------|------|
 | §6 sky ambience v2 (aurora, shooting stars) | Pure content on the shipped skybox shader. Sun flare needs RF-3's bloom to catch the HDR disc. |
-| Richer moon shader | Ships today as four analytic maria patches + limb darkening; a texture/crater treatment is its own pass. |
+| **The sky's dawn runs ahead of the sun** | **Found 2026-08-12** while confirming the richer discs in game. The authored `SUNRISE` gradient key sits at day fraction 0.2083 (MC's 05:00) while the celestial model puts the true horizon crossing at 0.25 (06:00). Measured: at that key the sun is **10.55° below** the horizon while the horizon color is already at 0.528 luminance against 0.827 at noon — **82% of full daylight**. In game the sky finishes its sunrise for whatever is near the horizon at the time (a rising moon, in the report that surfaced it). A seam between RF-1's authored keys and RF-2's later celestial model; correcting it touches the **light curve** as well as the gradients, which Architecture §2.1 notes would move World Clock baselines B3/B4/B7/B9 — so it needs its own decision, not a quiet retune. Note the ScriptableObject trap: the keys live in an existing `.asset`, so changing the code defaults alone changes nothing in game. |
 | Sky colors in an editor tool, **overridable per biome** | Requested 2026-08-11. The per-biome half **needs a design pass first**: sky color is screen-wide but biomes are per-column, so something must define the boundary rule (blend over distance? sample at the camera? weight nearby columns?). Same class of question as TF-3's climate axis. |
 | Seasonal declination | Blocked on RF-1's curve coupling — see the Architecture doc §2.1 for why zero is load-bearing rather than lazy. |
 | Blood-moon disc tint | Waits on RF-1 §4's `SkyEvent`, which was never shipped. |
@@ -751,6 +751,16 @@ vertex-channel allocation it shares, rather than on its own merit).
 
 ## Document History
 
+* **v1.5** - **RF-2's richer sun and moon discs shipped and confirmed in game 2026-08-12** — procedural
+  craters and mottling, sun limb darkening, a third degeneracy guard, and an atmosphere model for the
+  discs (extinction + airlight). The "richer moon shader" row leaves the remainder table; see
+  [`../Architecture/SKY_AND_CELESTIAL_RENDERING.md`](../Architecture/SKY_AND_CELESTIAL_RENDERING.md) v1.1.  
+  **A new row was added rather than removed:** the sky's dawn runs ahead of the sun by design accident —
+  the `SUNRISE` gradient key is at day fraction 0.2083 while the sun crosses the horizon at 0.25, so the
+  sky reaches 82% of noon brightness while the sun is still 10.55° down. Found only by looking at the game;
+  no suite could have. Two claims made during this work were **wrong and are recorded as such**: a "new-moon
+  limb ring" defect that turned out to be a probe measuring the sun's sub-pixel disc, and a shader-target
+  bump justified by a compile limit that did not exist.
 * **v1.4** - **RF-2 §1–§5 shipped and confirmed in game 2026-08-11** (commits `4a6fa38d` → `c471766b`),
   promoted to [`../Architecture/SKY_AND_CELESTIAL_RENDERING.md`](../Architecture/SKY_AND_CELESTIAL_RENDERING.md);
   the entry here keeps only §6 and four deferred riders. The as-built system departs from the sketch in
@@ -795,7 +805,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-11 (RF-2 §1–§5 shipped and promoted to Architecture)  
+**Last Updated:** 2026-08-12 (RF-2 disc detail shipped; dawn-timing seam filed)  
 **Next Review:** when RF-3 is scheduled — **RF-9 is now the most visible open item**, its severity
 measured in game (a 30%-occluded face is 14.8× darker than flat ground at midnight and indistinguishable
 from a sealed cave face). It shares RF-3's vertex-channel allocation and the two should be decided

@@ -1,8 +1,8 @@
 # Sky & Celestial Rendering
 
-**Version:** 1.0  
-**Date:** 2026-08-11  
-**Status:** **Implemented (Stable)** — RF-2 phases 1 and 2 plus the `Distance Fog` setting are shipped and in-game confirmed (2026-08-11). Guarded by the `Validate Sky` suite (**15** baselines). Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
+**Version:** 1.1  
+**Date:** 2026-08-12  
+**Status:** **Implemented (Stable)** — RF-2 phases 1 and 2, the `Distance Fog` setting, and the richer sun/moon discs are shipped and in-game confirmed (2026-08-11, discs 2026-08-12). Guarded by the `Validate Sky` suite (**15** baselines, none of which observes a pixel — see §7). Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The procedural sky: a zenith/horizon gradient, a sun and moon on **real celestial arcs** driven by a
@@ -36,8 +36,9 @@
 | `Assets/Scripts/Data/WorldTypes/TimeOfDaySettings.cs` | The authored sky asset, linked from `WorldTypeDefinition`. |
 | `Assets/Shaders/SkyboxShader.shader` | Gradient, sun, moon, stars. |
 | `Assets/Shaders/Includes/VoxelFog.hlsl` | Shared fog, included by the block, transparent and liquid shaders. |
-| `Assets/Editor/WorldTools/SkyMaterialCreator.cs` | `Minecraft Clone/Create Sky Material`. |
+| `Assets/Editor/WorldTools/SkyMaterialCreator.cs` | `Minecraft Clone/Create Sky Material`. Owns the sky material's asset path. |
 | `Assets/Editor/WorldTools/SkyGradientDefaults.cs` | `Minecraft Clone/Dev/Reset Sky Gradients To Code Defaults`. |
+| `Assets/Editor/WorldTools/Libraries/SkyPreviewRenderer.cs` | Renders the skybox to a texture in edit mode, so sky work is judged by pixels rather than by a swatch (§8). |
 
 ---
 
@@ -151,8 +152,41 @@ and renders as a hard bright line along the horizon. Measured at 0.29° elevatio
 **The moon is opaque.** The disc composites by its mask alone, with a near-black night side; folding the
 lit term into the mask made the unlit side transparent and let stars show *through* the moon. The
 terminator is the correct **ellipse** `x > (1 − 2·phase)·√(1 − y²)`, which is what makes a quarter moon
-read as a crescent rather than a half-disc. Both degeneracies are guarded: the disc centre and, at new
-moon, a sun collinear with the moon would each `normalize(0)` into a NaN.
+read as a crescent rather than a half-disc. **Three** degeneracies are guarded, each a `normalize(0)`:
+the disc centre; a sun collinear with the moon, at new and full; and — added later — world up collinear
+with the moon at the **zenith**, which collapses the surface frame the markings live in. The third fires
+only at *exact* collinearity (a ten-thousandth of a degree away is indistinguishable from any other
+angle), but unguarded it flattens the disc to featureless grey, measured at a detail spread of 0.05
+against a normal 0.35.
+
+**Surface detail is procedural, never sampled.** Four analytic maria patches give the large-scale
+structure; three octaves of value noise from the same hash the stars use perturb *which* terrain type a
+point reads as, so the patch edges break up instead of staying clean circles; and a hashed crater field
+over a 3×3 cell neighbourhood adds a darkened floor with a raised bright rim — a plain dark disc reads as
+a stain, and it is the rim that reads as a crater. A texture fetch was rejected: at ~1.7° angular radius
+it would buy an authored asset, a sampler in a `Background`-queue pass, and mip decisions, for detail
+that no suite can check either way. All of it multiplies into the **lit** surface only, which is what
+keeps the night side and the disc's opacity correct by construction rather than by retesting them.
+The sun, previously a flat fill, has limb darkening with a warmer rim — the real effect is stronger at
+short wavelengths, so the edge reddens rather than merely dimming.
+
+**Atmosphere in front of the discs is one model in two halves.** The moon's own light is *extinguished*
+by the horizon haze, and the sky's airlight is then *added* back. Together a fully hazed disc resolves to
+exactly the sky beside it, so a low moon settles into the horizon instead of standing out against it —
+and a daylight new moon disappears, which is what it does in reality, since the unlit side is seen
+through the whole atmosphere and reflects nothing of its own. Applying these in the other order is a real
+trap: haze blending toward the fog colour and airlight then added *on top* pays for the same air twice,
+and measured, it lit a low moon to 1.24 against a 0.60 sky. The tell that the model is coherent is that
+the unlit disc holds a **constant** ratio to the sky at every elevation.
+
+`MOON_NIGHT_SIDE` is a stand-in for **earthshine**, exaggerated roughly 200× over the real thing so the
+unlit side reads against a night sky, and it fades out as the sky brightens. The fade is keyed to sky
+*luminance*, not to sun elevation: elevation is a poor proxy at exactly the wrong moment, because at
+sunrise the sun sits near zero while the sky has already reached 0.5 luminance. What survives by day is a
+deliberate slight **silhouette** — the disc carries a few percent less airlight than the open sky. That
+direction is chosen, not incidental: darker-than-sky is noticed calmly, where brighter-than-sky demands
+attention, and the daytime moon is meant to be a detail a player finds rather than one that announces
+itself.
 
 **Stars are points, not cells.** `floor(dir · density)` lighting a whole cell paints axis-aligned
 squares; each star is a jittered point inside its cell with a smooth radial falloff.
@@ -216,6 +250,21 @@ Two editor commands support it:
 - `Minecraft Clone/Dev/Reset Sky Gradients To Code Defaults` — pushes the code-authored gradients into
   existing assets (see §8).
 
+`SkyPreviewRenderer` supports it from the other side: it renders the sky to a texture in edit mode, given
+either a settings asset and a world time or a hand-authored `SkyPreviewState`. The struct exists so a
+caller can build a sky the clock cannot produce — a moon parked at the zenith, a sky with no stars —
+which is the only way the degenerate cases above are reachable at all. It is a **mirror** of
+`World.PublishSkyGlobals`, in the same sense as `AtmosphericFog.EvaluateFogFactor` (§7): the game
+publishes those globals from a private method on a live `World` that edit-mode tooling cannot reach, so a
+global added there must be added here too.
+
+Two properties of it are load-bearing. It renders to a **half-float, linear** target — the format, not
+the `RenderTextureReadWrite` argument, is what keeps the round trip linear; dropping to 8-bit reproduces
+the §8 colour-space lie inside the measuring tool itself, reading back an authored 0.075 as 0.302. And it
+snapshots and restores every shader global it drives plus `RenderSettings.skybox`/`ambientMode` in a
+`finally`, because all of that is process-wide and a preview would otherwise leave the user's Scene view
+at whatever hour was last previewed.
+
 ---
 
 ## 7. Validation coverage
@@ -240,6 +289,13 @@ RF-1 §10's subtractive sky term carries. `AtmosphericFog.EvaluateFogFactor` is 
 of `VoxelFog.hlsl`'s `VoxelFogFactor`; changing one without the other silently desynchronizes them, and
 only the C# half is guarded.
 
+`SkyPreviewRenderer` (§6) narrows that gap without closing it: rendered pixels are now *measurable* in
+edit mode, and every claim in §4 above is a measured number rather than an argument. But **no baseline
+observes a pixel** — the suite is still 15 scenarios of pure C#. Until one does, a shader regression is
+caught only by someone looking, and every visual defect in this system's history was in fact caught by
+eye. Note also that a rendering suite could not run under `-nographics`, so it would have to report
+inconclusive there rather than fail.
+
 ---
 
 ## 8. Traps for future work
@@ -256,8 +312,15 @@ Both of these cost real debugging time during RF-2 and will recur:
   reaches the screen at roughly sRGB 0.30 — four times brighter than the Inspector swatch. **The sky
   gradients are authored in linear values**; judge them by the render, never by the swatch.
 
-To measure rendered colour without entering play mode: create a temporary camera and `RenderTexture` in
-edit mode, set `RenderSettings.skybox`, push the globals, `cam.Render()`, and `ReadPixels`.
+To measure rendered colour without entering play mode, use `SkyPreviewRenderer` (§6) — it is that recipe,
+packaged with the linear round trip and the global save/restore already correct.
+
+A third trap, from measuring rather than from authoring: **a probe over a block of disc pixels can be
+measuring the sun.** At a new moon the sun is by definition collinear with the moon, and its feathered
+mask covers a few pixels at the disc's dead centre even at a sub-pixel angular radius. A min/max over
+that block reported a "limb ring" defect that did not exist, and re-running the same flawed probe against
+the pre-change shader produced matching numbers that looked like confirmation. Print a pixel map before
+believing a summary statistic.
 
 Editor previews are unaffected by all of the above — `MeshPreviewWidget` and `BlockIconGenerator` use
 `PreviewRenderUtility` with `CameraClearFlags.SolidColor`, so a global skybox cannot leak into them.
@@ -268,9 +331,18 @@ Editor previews are unaffected by all of the above — `MeshPreviewWidget` and `
 
 These live in the RF-2 entry of
 [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md):
-a richer moon shader, sky colours in an editor tool with per-biome override (needs a design pass — sky
-colour is screen-wide while biomes are per-column), §6 ambience v2 (aurora, shooting stars, sun flare),
-seasonal declination, and the blood-moon disc tint that waits on RF-1 §4's unshipped `SkyEvent`.
+sky colours in an editor tool with per-biome override (needs a design pass — sky colour is screen-wide
+while biomes are per-column), §6 ambience v2 (aurora, shooting stars, sun flare), seasonal declination,
+and the blood-moon disc tint that waits on RF-1 §4's unshipped `SkyEvent`.
+
+**The sky's dawn runs ahead of the sun**, found while confirming the discs in game and filed there as its
+own item. The authored gradient's `SUNRISE` key sits at day fraction 0.2083 (Minecraft's 05:00) while
+§2.2's model puts the true horizon crossing at 0.25 (06:00). Measured: at that key the sun is **10.55°
+below** the horizon while the horizon colour has already reached 0.528 luminance against 0.827 at noon —
+82% of full daylight. It reads in game as the sky brightening for whatever happens to be near the horizon
+at the time. It is a seam between RF-1's authored keys and RF-2's later celestial model, and correcting
+it touches the light curve as well as the gradients — which §2.1 notes would move the World Clock suite's
+B3/B4/B7/B9 — so it needs its own decision rather than a quiet retune.
 
 **RF-9 interacts with this system.** The darker night sky RF-2 ships makes the crushed-AO defect *more*
 visible, not less: at midnight a 30%-occluded face renders 14.8× darker than flat ground and identical
@@ -281,6 +353,17 @@ not read the atmospheric improvement as having fixed it.
 
 ## Document History
 
+* **v1.1** - Richer sun and moon discs shipped and confirmed in game (2026-08-12): procedural craters and
+  mottling, sun limb darkening, and a **third** degeneracy guard for the moon's surface frame at the
+  zenith — §4 had claimed both were guarded. §4 also gained the atmosphere model the in-game passes
+  forced into existence: extinction of the disc's own light plus additive airlight, as one model rather
+  than two, after the original haze-then-add order was found to pay for the same air twice and light a low
+  moon to 1.24 against a 0.60 sky. Earthshine now fades by sky luminance rather than sun elevation, since
+  elevation is a poor proxy at sunrise. `SkyPreviewRenderer` added (§1, §6) — edit-mode rendered pixels,
+  which is what makes every number in §4 measured rather than argued; §7 records that no baseline observes
+  one yet. §8 gained a third trap: a summary statistic over disc pixels can be measuring the sun, which
+  produced a confidently-reported defect that did not exist. §9 gained the dawn-runs-ahead-of-the-sun
+  finding.
 * **v1.0** - Promoted from the RF-2 Design entry (2026-08-11) after phases 1 and 2 and the
   `Distance Fog` setting shipped and were confirmed in game. Records the equinox model and why
   declination is pinned, the one-elongation moon and its first-night epoch, the own-globals fog
