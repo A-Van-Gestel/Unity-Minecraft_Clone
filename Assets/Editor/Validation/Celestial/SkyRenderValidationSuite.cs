@@ -34,6 +34,10 @@ namespace Editor.Validation.Celestial
     /// <item>Swapping the zenith and horizon colors in the gradient lerp reds B5.</item>
     /// <item>Restoring the original haze-then-airlight order reds B6: the unlit moon's ratio to the sky
     /// drifts from 0.94 to 1.42 as it descends, because that order pays for the same atmosphere twice.</item>
+    /// <item>Scaling the moon's airlight by <c>hazeAmount</c> — the more physical reading, and the one
+    /// the term deliberately does not take — reds B7: the slope collapses from 0.941 to 0.017 overhead
+    /// while the horizon keeps 0.801. It reds B6's spread too, so the mutation is caught twice; what B7
+    /// adds is that the LIT disc is where the trade is paid, which B6's phase 0 cannot see.</item>
     /// </list>
     /// </para>
     /// <para>
@@ -104,6 +108,7 @@ namespace Editor.Validation.Celestial
                 new Scenario("B4 The sun disc is brighter than the sky around it", RunB4SunBrighterThanSky),
                 new Scenario("B5 The gradient is the right way up - zenith overhead, horizon at the horizon", RunB5GradientOrientation),
                 new Scenario("B6 The unlit moon is a constant silhouette by day and visible at night", RunB6MoonAirlight),
+                new Scenario("B7 The lit moon carries the sky's airlight at every elevation", RunB7LitMoonAirlight),
             };
 
             return ValidationSuiteRunner.Execute("Sky Render", scenarios, KnownBugChannel.Unimplemented,
@@ -476,6 +481,104 @@ namespace Editor.Validation.Celestial
                         $"({nightDisc:F4} against {nightSky:F4})", nightDisc > nightSky * 2f);
 
             return ok;
+        }
+
+        /// <summary>
+        /// B7 — the airlight the moon carries is the sky's, at full strength, whatever the elevation.
+        /// </summary>
+        /// <returns>True when every assertion holds.</returns>
+        /// <remarks>
+        /// <para>
+        /// <see cref="RunB6MoonAirlight"/> measures phase 0 only, where the disc's own reflectance drops
+        /// out of the composite — so the airlight term is unmeasured on the half of the model where it
+        /// competes with a bright surface. This pins that half.
+        /// </para>
+        /// <para>
+        /// Measured as a <b>differential</b> against two skies rather than as a brightness: the moon's
+        /// own reflectance and its surface detail are identical between the two renders and cancel, so
+        /// the slope isolates the airlight term and survives any re-tuning of the lunar surface
+        /// constants. Both fixtures sit far above <c>MOON_AIRLIGHT_REFERENCE</c>, so the daytime
+        /// silhouette factor is the same in each and does not enter the difference.
+        /// </para>
+        /// <para>
+        /// The second assertion is the one that documents the trade. Airlight is added without being
+        /// scaled by the haze that models it, so the disc takes the sky's full airlight even where the
+        /// sight line holds no air — which is what keeps a daytime new moon from reading as a hole
+        /// punched in the sky, and is why a <i>lit</i> daytime disc brightens with elevation.
+        /// </para>
+        /// </remarks>
+        private static bool RunB7LitMoonAirlight()
+        {
+            if (SkipWithoutGraphics("B7")) return true;
+
+            // Same geometry, two sky brightnesses. Halved rather than dimmed to night: the point is to
+            // move the sky while keeping both ends saturated on the silhouette ramp.
+            Color brightSky = s_daySky;
+            Color dimSky = new Color(s_daySky.r * 0.5f, s_daySky.g * 0.5f, s_daySky.b * 0.5f, 1f);
+
+            Vector4 fog = AtmosphericFog.ComputeFogRange(10, SkyPreviewRenderer.DefaultFarClip,
+                AtmosphericFog.DefaultFogStartFraction, AtmosphericFog.DefaultFogCurvePower, FogStyle.Full);
+
+            using SkyPreviewRenderer renderer = new SkyPreviewRenderer();
+
+            float slopeHigh = AirlightSlope(renderer, 0.90f, brightSky, dimSky, fog);
+            float slopeLow = AirlightSlope(renderer, 0.02f, brightSky, dimSky, fog);
+
+            bool ok = Check($"a lit moon high overhead still tracks the sky's brightness " +
+                            $"(slope {slopeHigh:F3}, and 0 would mean the airlight never reaches it)",
+                slopeHigh >= 0.5f);
+
+            ok &= Check($"and tracks it by the same amount down at the horizon, where the haze is " +
+                        $"(slopes {slopeHigh:F3} high, {slopeLow:F3} low)",
+                Mathf.Abs(slopeHigh - slopeLow) <= 0.15f);
+
+            return ok;
+        }
+
+        /// <summary>
+        /// How much of a change in sky brightness reaches a fully lit moon disc at one elevation.
+        /// </summary>
+        /// <param name="renderer">Renderer to draw with.</param>
+        /// <param name="elevation">Moon height, as the y of its direction before normalization.</param>
+        /// <param name="brightSky">The brighter of the two skies, in linear values.</param>
+        /// <param name="dimSky">The dimmer of the two skies, in linear values.</param>
+        /// <param name="fogRange">Fog range to render under; the horizon haze is gated on a non-empty one.</param>
+        /// <returns>Change in disc luminance divided by change in sky luminance.</returns>
+        private static float AirlightSlope(SkyPreviewRenderer renderer, float elevation,
+            Color brightSky, Color dimSky, Vector4 fogRange)
+        {
+            Vector3 moon = new Vector3(0.3f, elevation, 0.6f).normalized;
+            Vector3 sun = new Vector3(0.3f, 0.9f, 0.3f).normalized;
+
+            float brightDisc = SampleLitDisc(renderer, brightSky, moon, sun, fogRange);
+            float dimDisc = SampleLitDisc(renderer, dimSky, moon, sun, fogRange);
+
+            float skyDelta = Luminance(brightSky) - Luminance(dimSky);
+            return (brightDisc - dimDisc) / Mathf.Max(skyDelta, 1e-6f);
+        }
+
+        /// <summary>Renders a full moon against one sky and returns the disc's luminance.</summary>
+        /// <param name="renderer">Renderer to draw with.</param>
+        /// <param name="sky">Background color, in linear values.</param>
+        /// <param name="moon">Direction to the moon.</param>
+        /// <param name="sun">Direction to the sun.</param>
+        /// <param name="fogRange">Fog range to render under.</param>
+        /// <returns>Luminance of the sampled disc pixel.</returns>
+        /// <remarks>
+        /// Sampled off-centre at the same pixel each time, so the surface markings under it are identical
+        /// between renders and cancel when the two are subtracted.
+        /// </remarks>
+        private static float SampleLitDisc(SkyPreviewRenderer renderer, Color sky, Vector3 moon,
+            Vector3 sun, Vector4 fogRange)
+        {
+            // Phase 1 lights the whole disc: the terminator sits off the near limb, so every sampled
+            // pixel is surface rather than earthshine.
+            SkyPreviewState state = MoonScene(sky, moon, sun, 1f, 0f);
+            state.FogRange = fogRange;
+            state.FogColor = sky;
+
+            renderer.Render(state, moon, DISC_RENDER_SIZE, DISC_RENDER_SIZE, DISC_FIELD_OF_VIEW);
+            return Luminance(renderer.SampleLinear(108, 128));
         }
     }
 }

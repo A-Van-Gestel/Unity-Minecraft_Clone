@@ -381,6 +381,14 @@ Shader "Minecraft/SkyboxShader"
                     // moon settles into the horizon rather than standing out against it. Added and never
                     // blended toward, so the disc still writes over the sky at full mask and the opacity
                     // that occludes stars is untouched.
+                    //
+                    // NOT scaled by hazeAmount, which is the deliberate half of this. Scaling it would be
+                    // the more physical reading — no air in the sight line, no airlight — but it is what
+                    // makes the unlit disc go black overhead, the hole in the sky described above. The
+                    // cost is carried by the LIT side: a daytime full moon brightens with elevation
+                    // (~3x between horizon and zenith) because it keeps its own reflectance AND takes the
+                    // full sky airlight on top. Accepted; B7 in the Sky Render suite pins it, so a future
+                    // haze-scaling of this term reds a test rather than silently changing the look.
                     surface += float3(skyAirlight) * (1.0 - daylight * MOON_DAY_SILHOUETTE);
 
                     // Composited by the disc mask ALONE, so the whole disc is opaque. Folding `lit` into

@@ -1,8 +1,8 @@
 # Sky & Celestial Rendering
 
-**Version:** 1.5  
+**Version:** 1.6  
 **Date:** 2026-08-12  
-**Status:** **Implemented (Stable)** — RF-2 phases 1 and 2, the `Distance Fog` setting, the richer sun/moon discs, and the Sky Editor are shipped and confirmed (2026-08-11, discs and tool 2026-08-12). Guarded by the `Validate Sky` suite (**15** baselines, model only) and `Validate Sky Render` (**6** baselines on rendered pixels) — see §7. Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
+**Status:** **Implemented (Stable)** — RF-2 phases 1 and 2, the `Distance Fog` setting, the richer sun/moon discs, and the Sky Editor are shipped and confirmed (2026-08-11, discs and tool 2026-08-12). Guarded by the `Validate Sky` suite (**15** baselines, model only) and `Validate Sky Render` (**7** baselines on rendered pixels) — see §7. Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The procedural sky: a zenith/horizon gradient, a sun and moon on **real celestial arcs** driven by a
@@ -359,12 +359,21 @@ only the C# half is guarded.
 
 ### 7.1 `Validate Sky Render` — the shader half
 
-`Minecraft Clone/Dev/Validate Sky Render` — 6 baselines in
+`Minecraft Clone/Dev/Validate Sky Render` — 7 baselines in
 `Assets/Editor/Validation/Celestial/SkyRenderValidationSuite.cs`, the first coverage of the sky that
 observes **pixels**. It renders through `SkyPreviewRenderer` and asserts: a linear color survives the
 round trip (B1); the disc occludes the star field (B2); no degenerate configuration renders a NaN, and the
 zenith moon keeps its surface detail (B3); the sun outshines the sky (B4); the gradient is the right way
-up (B5); and the unlit moon is a constant silhouette by day and still visible at night (B6).
+up (B5); the unlit moon is a constant silhouette by day and still visible at night (B6); and the lit moon
+carries the sky's airlight at full strength at every elevation (B7).
+
+**B7 pins a trade rather than a correctness property.** The moon's airlight is added without being scaled
+by the haze that models it (§4), so a lit daytime disc brightens with elevation — accepted, because
+scaling it is what turns a daytime new moon into a hole punched in the sky. B6 measures phase 0 only,
+where the disc's own reflectance drops out, so the lit half went unmeasured until B7. It is measured as a
+differential against two sky brightnesses, which cancels the lunar surface constants and isolates the
+airlight term: 0.941 overhead against 0.940 at the horizon today, collapsing to 0.017 overhead if the term
+is ever haze-scaled.
 
 **No reference images.** GPU output is not bit-reproducible across drivers, machines or engine versions,
 so checked-in goldens would fail for reasons unrelated to the sky. Every assertion is instead a property
@@ -374,7 +383,7 @@ Under `-nographics` every scenario reports **INCONCLUSIVE** and passes, matching
 convention for a runtime that cannot measure. That is a real coverage hole in headless CI, stated rather
 than hidden.
 
-**Three of the six baselines were wrong when first written, and only prove-red revealed it** — each
+**Three of the first six baselines were wrong when first written, and only prove-red revealed it** — each
 passed the very mutation it existed to catch. B2 sampled a region too small to contain any star, so
 "unchanged" meant "nothing was there". B3 sampled a square box wider than the disc, so sky pixels
 dominated its min/max and a collapsed surface frame was invisible. B6 ran with **fog disabled**, and since
@@ -433,6 +442,15 @@ not read the atmospheric improvement as having fixed it.
 
 ## Document History
 
+* **v1.6** - **Review follow-ups: the ambient-mode restore and the lit moon's airlight** (2026-08-12).
+  From a code review of the RF-2 commits. §4's teardown now restores `RenderSettings.ambientMode`
+  alongside the skybox and clear flags — with domain reload disabled, a pinned `Flat` followed the user
+  out of play mode and into the Scene view. New baseline **B7** (§7.1) pins the lit moon's airlight,
+  the half of that model B6's phase 0 cannot observe. Two lessons worth carrying: the airlight's
+  independence from haze is a **trade, not a defect**, and it was undocumented and unguarded until a
+  reviewer computed the 3x elevation swing from the shader source; and a **differential** fixture (two
+  sky brightnesses, same geometry) is what let B7 isolate that term without pinning the lunar surface
+  constants, so re-tuning the moon's albedo cannot false-red it.
 * **v1.5** - **§4 records that the flat background is a fallback, not vestigial code** (2026-08-12).
   Traced while checking whether `World.cs`'s per-frame `_playerCamera.backgroundColor` assignment had
   been superseded by the skybox. It has not: `_skyMaterial` is an advertised opt-out, and the background
