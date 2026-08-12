@@ -342,9 +342,14 @@ namespace Jobs
         /// <see cref="GenerateVoxelMeshData"/> is the single router and <see cref="_vertexIndex"/> brackets
         /// every shape path — so one pass covers standard cubes, custom meshes, cross meshes and fluids
         /// alike, including any path added later. Alpha is the only vertex-color channel free on all three
-        /// submeshes (blocks write 255, fluids write 0, and no shader read it before RF-3); RGB stays
-        /// untouched and is claimed by TF-11. Emission is 0-15, scaled by 17 to fill the byte.
-        /// Non-emitters return immediately, so the overwhelming majority of blocks pay nothing.
+        /// submeshes (no shader read it before RF-3); RGB stays untouched and is claimed by TF-11.
+        /// Emission is 0-15, scaled by 17 to fill the byte.
+        /// <para>
+        /// The writers in <see cref="Helpers.VoxelMeshHelper"/> seed alpha to <b>0</b>, not 255 — the
+        /// shader reads this channel as "no emission at 0", so a 255 fill would make every ordinary block
+        /// in the world render at full emissive boost. That lets non-emitters return here immediately and
+        /// pay nothing.
+        /// </para>
         /// </remarks>
         /// <param name="voxelProps">Properties of the block whose geometry was just emitted.</param>
         /// <param name="startVertex">Vertex index recorded before the block emitted any geometry.</param>

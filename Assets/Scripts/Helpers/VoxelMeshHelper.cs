@@ -251,7 +251,7 @@ namespace Helpers
 
                 vertices.Add(world);
                 normals.Add(BurstVoxelData.FaceChecks.Data[faceIndex]);
-                colors.Add(new Color32(255, 255, 255, 255));
+                colors.Add(new Color32(255, 255, 255, 0));
 
                 // Use the FaceUvOrder array to get the correct UV for this vertex.
                 int uvIndex = s_faceUvOrder[faceIndex * 4 + i];
@@ -448,7 +448,7 @@ namespace Helpers
             for (int i = 0; i < 4; i++)
             {
                 normals.Add(normal);
-                colors.Add(new Color32(255, 255, 255, 255));
+                colors.Add(new Color32(255, 255, 255, 0));
             }
 
             AddTexture(textureID, quad.T0, ref uvs);
@@ -585,7 +585,7 @@ namespace Helpers
                 vertices.Add(position + direction + center);
 
                 normals.Add(BurstVoxelData.FaceChecks.Data[faceIndex]);
-                colors.Add(new Color32(255, 255, 255, 255));
+                colors.Add(new Color32(255, 255, 255, 0));
                 lightData.Add(flatLight);
                 AddTexture(textureID, vertData.UV, ref uvs);
             }
@@ -647,7 +647,7 @@ namespace Helpers
 
                 vertices.Add(position + direction + center);
                 normals.Add(BurstVoxelData.FaceChecks.Data[faceIndex]);
-                colors.Add(new Color32(255, 255, 255, 255));
+                colors.Add(new Color32(255, 255, 255, 0));
 
                 GetCornerUV(worldFaceIndex, blockLocal, out float u, out float v);
                 lightData.Add(BilinearLerpLight(l0, l1, l2, l3, u, v));
@@ -715,7 +715,7 @@ namespace Helpers
                 vertices.Add(position + (Vector3)rotated);
 
                 normals.Add(rotatedNormal);
-                colors.Add(new Color32(255, 255, 255, 255));
+                colors.Add(new Color32(255, 255, 255, 0));
                 lightData.Add(flatLight);
                 AddTexture(textureID, vertData.UV, ref uvs);
             }
@@ -776,7 +776,7 @@ namespace Helpers
                 vertices.Add(position + (Vector3)rotated);
 
                 normals.Add(rotatedNormal);
-                colors.Add(new Color32(255, 255, 255, 255));
+                colors.Add(new Color32(255, 255, 255, 0));
 
                 GetCornerUV(worldFaceIndex, rotated, out float u, out float v);
                 lightData.Add(BilinearLerpLight(l0, l1, l2, l3, u, v));
@@ -857,7 +857,7 @@ namespace Helpers
             ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
             ref NativeList<Color32> lightData)
         {
-            Color32 vertexColor = new Color32(255, 255, 255, 255);
+            Color32 vertexColor = new Color32(255, 255, 255, 0);
 
             // Resolve per-vertex light values from the precomputed struct.
             // Corner layout: L0=(x=0,z=0), L1=(x=0,z=1), L2=(x=1,z=0), L3=(x=1,z=1).

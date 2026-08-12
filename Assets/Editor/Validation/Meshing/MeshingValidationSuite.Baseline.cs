@@ -73,6 +73,11 @@ namespace Editor.Validation.Meshing
         /// blanket write of the emissive value to every vertex would satisfy an emitter-only assertion,
         /// so the control is what makes the check unsatisfiable by the wrong implementation. The RGB
         /// assertions likewise pin that only alpha moved — RGB stays available for TF-11.
+        /// <para>
+        /// The control expects <b>0</b>, which is the whole contract: the shader reads this channel as
+        /// emissive strength, so a non-emitter carrying the historical 255 fill renders at full emissive
+        /// boost. An earlier revision asserted 255 here — it passed, and the world washed out on screen.
+        /// </para>
         /// </remarks>
         private static bool B61_EmissiveStrengthChannel()
         {
@@ -90,7 +95,7 @@ namespace Editor.Validation.Meshing
 
             const byte expectedEmissive = TestMeshBlockPalette.EmissiveLevel * 17;
             passed &= CheckCubeEmissiveChannel("B61 emitter", o, emitterPos, expectedEmissive);
-            passed &= CheckCubeEmissiveChannel("B61 non-emitter control", o, controlPos, 255);
+            passed &= CheckCubeEmissiveChannel("B61 non-emitter control", o, controlPos, 0);
             return passed;
         }
 
