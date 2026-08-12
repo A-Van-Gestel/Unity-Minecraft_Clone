@@ -61,13 +61,34 @@ namespace Editor.WorldTools
         private const float NOON = 0.5f;
         private const float SUNSET = 0.75f;
 
+        /// <summary>Opening time: sunrise on the world's second day (continuous day 1.25).</summary>
+        private const long DEFAULT_TIME_TICKS = 24000L;
+
+        /// <summary>Synodic months searched when locating an instant that shows a requested moon phase.</summary>
+        /// <remarks>
+        /// The phase itself is solved exactly; the search only picks *which* occurrence of it to show.
+        /// Successive occurrences land at different hours, so a few hundred candidates always contain one
+        /// with the moon high — far more than needed, and it is a few hundred trig evaluations.
+        /// </remarks>
+        private const int PHASE_SEARCH_MONTHS = 240;
+
+        /// <summary>The eight named phases, in the order the cycle passes through them.</summary>
+        private static readonly string[] s_moonPhaseNames =
+        {
+            "New", "Waxing Crescent", "First Quarter", "Waxing Gibbous",
+            "Full", "Waning Gibbous", "Last Quarter", "Waning Crescent",
+        };
+
         private TimeOfDaySettings _settings;
         private SerializedObject _serialized;
 
         private SkyPreviewRenderer _renderer;
         private Texture2D _display;
 
-        private float _dayFraction = SUNRISE;
+        private long _timeTicks = DEFAULT_TIME_TICKS;
+        private int _moonPhaseIndex = 4;
+        private bool _freePhase;
+        private float _freePhaseValue = 1f;
         private float _viewYaw;
         private float _viewPitch = 12f;
         private float _fieldOfView = SkyPreviewRenderer.DefaultFieldOfView;
@@ -286,10 +307,15 @@ namespace Editor.WorldTools
             EditorGUILayout.EndHorizontal();
 
             EditorGUI.BeginChangeCheck();
+            float dayFraction = EditorGUILayout.Slider(
+                new GUIContent("Time Of Day", "Day fraction: 0 = midnight, 0.25 = sunrise, 0.5 = noon. Keeps the current day, so the moon phase does not change."),
+                DayFraction, 0f, 1f);
+            if (EditorGUI.EndChangeCheck()) SetDayFraction(dayFraction);
 
-            _dayFraction = EditorGUILayout.Slider(
-                new GUIContent("Time Of Day", "Day fraction: 0 = midnight, 0.25 = sunrise, 0.5 = noon."),
-                _dayFraction, 0f, 1f);
+            DrawMoonControls();
+
+            EditorGUI.BeginChangeCheck();
+
             _viewYaw = EditorGUILayout.Slider(
                 new GUIContent("View Yaw", "Compass direction the preview camera faces, in degrees."),
                 _viewYaw, -180f, 180f);
@@ -306,6 +332,59 @@ namespace Editor.WorldTools
             if (EditorGUI.EndChangeCheck()) MarkPreviewDirty();
 
             EditorUILayoutHelper.DrawSeparator();
+        }
+
+        /// <summary>Draws the moon phase selector, its readout, and the unphysical override.</summary>
+        private void DrawMoonControls()
+        {
+            EditorGUILayout.BeginHorizontal();
+
+            EditorGUI.BeginChangeCheck();
+            _moonPhaseIndex = EditorGUILayout.Popup(
+                new GUIContent("Moon Phase", "Jumps to a real instant showing this phase, with the moon as high as possible."),
+                _moonPhaseIndex, s_moonPhaseNames);
+            if (EditorGUI.EndChangeCheck()) JumpToMoonPhase(_moonPhaseIndex);
+
+            if (GUILayout.Button(new GUIContent("Look At Moon", "Aims the camera at the moon's current position."),
+                    GUILayout.Width(110f)))
+            {
+                LookAtMoon();
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            // The tool shows its work: which day it picked, what the model says the phase is there, and
+            // whether the moon is actually up — so a jump that lands somewhere odd is visible, not silent.
+            Vector3 moon = CelestialMath.MoonDirection(ContinuousDays, Latitude);
+            float illuminated = CelestialMath.MoonIlluminatedFraction(ContinuousDays);
+            float altitude = Mathf.Asin(Mathf.Clamp(moon.y, -1f, 1f)) * Mathf.Rad2Deg;
+            EditorUILayoutHelper.SectionNote(
+                $"Day <b>{ElapsedDays}</b> · illuminated <b>{illuminated:F3}</b> · moon altitude " +
+                $"<b>{altitude:F1}°</b>{(altitude > 0f ? "" : " (below the horizon)")}");
+
+            EditorGUI.BeginChangeCheck();
+            _freePhase = EditorGUILayout.Toggle(
+                new GUIContent("Free Phase (unphysical)",
+                    "Overrides the lit fraction independently of the moon's position. Useful for studying " +
+                    "the terminator, but it paints a sky the engine cannot produce — phase and position " +
+                    "come from one elongation."),
+                _freePhase);
+
+            using (new EditorGUI.DisabledScope(!_freePhase))
+            {
+                _freePhaseValue = EditorGUILayout.Slider(
+                    new GUIContent("Lit Fraction", "0 = new, 1 = full. Applies only while Free Phase is on."),
+                    _freePhaseValue, 0f, 1f);
+            }
+
+            if (EditorGUI.EndChangeCheck()) MarkPreviewDirty();
+
+            if (_freePhase)
+            {
+                EditorUILayoutHelper.ValidationBox(
+                    "Free Phase is on — the disc's lit fraction no longer matches where the moon is. " +
+                    "This is not a sky the game can render.", MessageType.Warning);
+            }
         }
 
         /// <summary>Draws the four authored gradients.</summary>
@@ -383,11 +462,89 @@ namespace Editor.WorldTools
             EditorGUILayout.PropertyField(property, new GUIContent(label, tooltip), true);
         }
 
-        /// <summary>Jumps the preview to a named time.</summary>
+        /// <summary>Elapsed world days as a continuous value; its fractional part is the day fraction.</summary>
+        private double ContinuousDays =>
+            (_timeTicks + WorldTimeManager.SunriseTickOffset) / (double)WorldTimeManager.TicksPerDay;
+
+        /// <summary>Position within the current day, <c>[0,1)</c> — 0 = midnight, 0.5 = noon.</summary>
+        private float DayFraction => (float)(ContinuousDays - System.Math.Floor(ContinuousDays));
+
+        /// <summary>Whole days elapsed since the world's first sunrise.</summary>
+        private long ElapsedDays => (long)System.Math.Floor(ContinuousDays);
+
+        /// <summary>Observer latitude of the bound asset, or the equator when nothing is bound.</summary>
+        private float Latitude => _settings != null ? _settings.ObserverLatitude : 0f;
+
+        /// <summary>Jumps to a time of day, keeping the current calendar day.</summary>
         /// <param name="dayFraction">Target day fraction.</param>
+        /// <remarks>
+        /// The day is preserved because the moon's phase depends on the absolute day count — sliding the
+        /// hour must not silently re-roll the phase the user selected.
+        /// </remarks>
         private void SetDayFraction(float dayFraction)
         {
-            _dayFraction = dayFraction;
+            SetContinuousDays(ElapsedDays + Mathf.Clamp01(dayFraction));
+        }
+
+        /// <summary>Jumps to an absolute instant.</summary>
+        /// <param name="continuousDays">Target continuous day value; clamped at the world's start.</param>
+        private void SetContinuousDays(double continuousDays)
+        {
+            double ticks = continuousDays * WorldTimeManager.TicksPerDay - WorldTimeManager.SunriseTickOffset;
+            _timeTicks = (long)System.Math.Max(0.0, System.Math.Round(ticks));
+            MarkPreviewDirty();
+        }
+
+        /// <summary>
+        /// Moves the preview to an instant showing the requested moon phase, with the moon as high as
+        /// the search finds.
+        /// </summary>
+        /// <param name="phaseIndex">Index into <see cref="s_moonPhaseNames"/>.</param>
+        /// <remarks>
+        /// The phase is solved, not searched. Elongation is
+        /// <c>2π · frac((days + epoch) / synodic)</c>, so a requested fraction <c>u</c> of the cycle
+        /// occurs exactly at <c>days = synodic · (m + u) − epoch</c> for any whole <c>m</c>. Only the
+        /// choice of <c>m</c> is a search, and it optimizes something the phase cannot determine: how
+        /// high the moon rides, since a correct phase below the horizon shows the user nothing.
+        /// <para>
+        /// Deliberately NOT done by writing the phase into the render state. Phase and position come from
+        /// one elongation, which is what makes a full moon necessarily peak at midnight; overriding one
+        /// half would paint a sky the engine cannot produce. That option exists, but as an explicitly
+        /// labeled unphysical toggle rather than as the way this dropdown works.
+        /// </para>
+        /// </remarks>
+        private void JumpToMoonPhase(int phaseIndex)
+        {
+            float cycleFraction = phaseIndex / (float)s_moonPhaseNames.Length;
+            float latitude = Latitude;
+
+            double bestDays = -1.0;
+            float bestAltitude = float.NegativeInfinity;
+
+            for (int month = 0; month < PHASE_SEARCH_MONTHS; month++)
+            {
+                double days = CelestialMath.SynodicDays * (month + cycleFraction) - CelestialMath.MoonPhaseEpochDays;
+                if (days < 0.0) continue;
+
+                float altitude = CelestialMath.MoonDirection(days, latitude).y;
+                if (altitude <= bestAltitude) continue;
+
+                bestAltitude = altitude;
+                bestDays = days;
+            }
+
+            if (bestDays < 0.0) return;
+
+            SetContinuousDays(bestDays);
+            LookAtMoon();
+        }
+
+        /// <summary>Aims the preview camera at the moon, so a chosen phase is actually in frame.</summary>
+        private void LookAtMoon()
+        {
+            Vector3 moon = CelestialMath.MoonDirection(ContinuousDays, Latitude);
+            _viewYaw = Mathf.Atan2(moon.x, moon.z) * Mathf.Rad2Deg;
+            _viewPitch = Mathf.Asin(Mathf.Clamp(moon.y, -1f, 1f)) * Mathf.Rad2Deg;
             MarkPreviewDirty();
         }
 
@@ -419,13 +576,11 @@ namespace Editor.WorldTools
             {
                 _renderer ??= new SkyPreviewRenderer();
 
-                // Ticks rather than the fraction directly, because the moon's phase depends on the
-                // absolute day count. +1 day keeps early fractions positive; the clock clamps below zero.
-                long ticks = (long)(_dayFraction * WorldTimeManager.TicksPerDay)
-                    - WorldTimeManager.SunriseTickOffset + WorldTimeManager.TicksPerDay;
-
-                SkyPreviewState state = SkyPreviewState.FromSettings(_settings, ticks,
+                SkyPreviewState state = SkyPreviewState.FromSettings(_settings, _timeTicks,
                     SkyPreviewRenderer.DefaultViewDistanceChunks, SkyPreviewRenderer.DefaultFarClip, _fogStyle);
+
+                // The one place the preview is allowed to diverge from the model, and only on request.
+                if (_freePhase) state.MoonPhase = _freePhaseValue;
 
                 ResolveRenderSize(out int width, out int height);
                 _display = _renderer.RenderForDisplay(state, ViewDirection(), width, height, _fieldOfView);

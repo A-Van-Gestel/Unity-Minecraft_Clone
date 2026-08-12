@@ -1,6 +1,6 @@
 # Lighting & Rendering Feature Improvements Report
 
-**Version:** 1.6  
+**Version:** 1.7  
 **Date:** 2026-08-12  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified. Owns lighting
 and rendering *features* (`RF-*`); the *performance* counterparts (`LI-*`, `GS-*`) live in
@@ -751,6 +751,14 @@ vertex-channel allocation it shares, rather than on its own merit).
 
 ## Document History
 
+* **v1.7** - **Moon phase browsing + `Validate Sky Render`** (2026-08-12). The Sky Editor can now step
+  through all eight named phases, and the sky's *shader* half has automated coverage for the first time —
+  6 rendered-pixel baselines, `Validate All` now **21 suites / 475 baselines**. See
+  [`../Architecture/SKY_AND_CELESTIAL_RENDERING.md`](../Architecture/SKY_AND_CELESTIAL_RENDERING.md) §7.1
+  v1.3. Recorded there because it generalizes beyond the sky: **three of the six baselines passed the exact
+  mutation they were written to catch** — a sample too small to contain a star, a sample box wider than the
+  disc it measured, and a haze scenario running with fog disabled. All three were found by running the
+  mutations, none by reading the code.
 * **v1.6** - **Sky Editor shipped 2026-08-12** (`Minecraft Clone/Sky Editor`), so the "sky colors in an
   editor tool" row narrows to the per-biome override alone — which still needs its design pass and is
   explicitly not an implementation task. Two findings from building it are recorded in
@@ -813,7 +821,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-12 (RF-2 disc detail + Sky Editor shipped; dawn-timing seam filed)  
+**Last Updated:** 2026-08-12 (RF-2 disc detail, Sky Editor + phase browsing, rendered-pixel suite; dawn-timing seam filed)  
 **Next Review:** when RF-3 is scheduled — **RF-9 is now the most visible open item**, its severity
 measured in game (a 30%-occluded face is 14.8× darker than flat ground at midnight and indistinguishable
 from a sealed cave face). It shares RF-3's vertex-channel allocation and the two should be decided

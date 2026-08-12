@@ -1,8 +1,8 @@
 # Sky & Celestial Rendering
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** 2026-08-12  
-**Status:** **Implemented (Stable)** — RF-2 phases 1 and 2, the `Distance Fog` setting, the richer sun/moon discs, and the Sky Editor are shipped and confirmed (2026-08-11, discs and tool 2026-08-12). Guarded by the `Validate Sky` suite (**15** baselines, none of which observes a pixel — see §7). Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
+**Status:** **Implemented (Stable)** — RF-2 phases 1 and 2, the `Distance Fog` setting, the richer sun/moon discs, and the Sky Editor are shipped and confirmed (2026-08-11, discs and tool 2026-08-12). Guarded by the `Validate Sky` suite (**15** baselines, model only) and `Validate Sky Render` (**6** baselines on rendered pixels) — see §7. Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The procedural sky: a zenith/horizon gradient, a sun and moon on **real celestial arcs** driven by a
@@ -40,6 +40,7 @@
 | `Assets/Editor/WorldTools/SkyGradientDefaults.cs` | `Minecraft Clone/Dev/Reset Sky Gradients To Code Defaults`. |
 | `Assets/Editor/WorldTools/Libraries/SkyPreviewRenderer.cs` | Renders the skybox to a texture in edit mode, so sky work is judged by pixels rather than by a swatch (§8). |
 | `Assets/Editor/WorldTools/SkyEditorWindow.cs` | `Minecraft Clone/Sky Editor` — authors the sky against a live render. |
+| `Assets/Editor/Validation/Celestial/SkyRenderValidationSuite.cs` | `Validate Sky Render` — the shader half, asserted on rendered pixels. |
 
 ---
 
@@ -251,6 +252,16 @@ authored here, because the swatch lies (§8); the render is the feature, and the
 Its time scrubber's *Sunrise* button targets day fraction 0.25, the celestial horizon crossing rather
 than the gradient's own dawn key, so the §9 dawn-timing seam is visible rather than hidden.
 
+**Moon phases are browsed by moving the clock, not by setting the phase.** A phase selector could simply
+write `_MoonPhase`, and the state struct allows it — but phase and position come from one elongation
+(§2.3), so that would paint a full moon beside the sun, a sky the engine cannot produce. Instead the
+requested phase is *solved*: elongation is `2π · frac((days + epoch) / synodic)`, so a cycle fraction `u`
+occurs exactly at `days = synodic · (m + u) − epoch` for any whole `m`. Only the choice of `m` is
+searched, and it optimizes what the phase cannot determine — how high the moon rides, since a correct
+phase below the horizon shows nothing. Measured across all eight named phases: exact on illumination, and
+every one lands at the maximum altitude the latitude allows. A separate, explicitly labelled *Free Phase*
+toggle does decouple the two, for studying the terminator, and warns that the result is not a real sky.
+
 Two commands support it:
 
 - `Minecraft Clone/Create Sky Material` — authors `Assets/Materials/Sky.mat` from the shader, so a
@@ -307,12 +318,33 @@ RF-1 §10's subtractive sky term carries. `AtmosphericFog.EvaluateFogFactor` is 
 of `VoxelFog.hlsl`'s `VoxelFogFactor`; changing one without the other silently desynchronizes them, and
 only the C# half is guarded.
 
-`SkyPreviewRenderer` (§6) narrows that gap without closing it: rendered pixels are now *measurable* in
-edit mode, and every claim in §4 above is a measured number rather than an argument. But **no baseline
-observes a pixel** — the suite is still 15 scenarios of pure C#. Until one does, a shader regression is
-caught only by someone looking, and every visual defect in this system's history was in fact caught by
-eye. Note also that a rendering suite could not run under `-nographics`, so it would have to report
-inconclusive there rather than fail.
+### 7.1 `Validate Sky Render` — the shader half
+
+`Minecraft Clone/Dev/Validate Sky Render` — 6 baselines in
+`Assets/Editor/Validation/Celestial/SkyRenderValidationSuite.cs`, the first coverage of the sky that
+observes **pixels**. It renders through `SkyPreviewRenderer` and asserts: a linear color survives the
+round trip (B1); the disc occludes the star field (B2); no degenerate configuration renders a NaN, and the
+zenith moon keeps its surface detail (B3); the sun outshines the sky (B4); the gradient is the right way
+up (B5); and the unlit moon is a constant silhouette by day and still visible at night (B6).
+
+**No reference images.** GPU output is not bit-reproducible across drivers, machines or engine versions,
+so checked-in goldens would fail for reasons unrelated to the sky. Every assertion is instead a property
+that must hold on any correct renderer — and each corresponds to a defect that actually happened here.
+
+Under `-nographics` every scenario reports **INCONCLUSIVE** and passes, matching the meshing suite's
+convention for a runtime that cannot measure. That is a real coverage hole in headless CI, stated rather
+than hidden.
+
+**Three of the six baselines were wrong when first written, and only prove-red revealed it** — each
+passed the very mutation it existed to catch. B2 sampled a region too small to contain any star, so
+"unchanged" meant "nothing was there". B3 sampled a square box wider than the disc, so sky pixels
+dominated its min/max and a collapsed surface frame was invisible. B6 ran with **fog disabled**, and since
+the horizon haze is gated on a non-empty fog range, the correct and double-counting orderings were
+literally the same expression. Predicting those mutations instead of running them would have shipped three
+baselines that could never fail.
+
+What is still capture-verified only: whether the sky *looks* right. The suite pins invariants, not
+aesthetics, and every visual defect in this system's history was caught by eye.
 
 ---
 
@@ -371,6 +403,14 @@ not read the atmospheric improvement as having fixed it.
 
 ## Document History
 
+* **v1.3** - **Moon phase browsing and the first rendered-pixel coverage** (2026-08-12). The Sky Editor
+  gained a phase selector that moves the *clock* rather than writing the phase, keeping position and phase
+  on the one elongation §2.3 describes — measured exact on illumination at all eight phases, each at the
+  maximum altitude the latitude allows — plus an opt-in Free Phase override that says it is unphysical.
+  New §7.1: `Validate Sky Render`, 6 baselines on rendered pixels, taking `Validate All` to **21 suites /
+  475 baselines**. It records that **three of those six baselines passed the mutation they existed to
+  catch** until prove-red exposed them, which is the strongest argument in this document for running
+  mutations rather than predicting them.
 * **v1.2** - **Sky Editor shipped** (2026-08-12): the sky's colours are now authored against a live render
   rather than through Inspector swatches that misreport them by a factor of four. §6 rewritten around it;
   the reset command widened from two gradients to all four so it undoes exactly what the tool can change,
