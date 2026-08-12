@@ -1,6 +1,6 @@
 # Lighting & Rendering Feature Improvements Report
 
-**Version:** 1.5  
+**Version:** 1.6  
 **Date:** 2026-08-12  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified. Owns lighting
 and rendering *features* (`RF-*`); the *performance* counterparts (`LI-*`, `GS-*`) live in
@@ -373,7 +373,7 @@ above, and the Architecture doc is authoritative.
 |------|------|
 | §6 sky ambience v2 (aurora, shooting stars) | Pure content on the shipped skybox shader. Sun flare needs RF-3's bloom to catch the HDR disc. |
 | **The sky's dawn runs ahead of the sun** | **Found 2026-08-12** while confirming the richer discs in game. The authored `SUNRISE` gradient key sits at day fraction 0.2083 (MC's 05:00) while the celestial model puts the true horizon crossing at 0.25 (06:00). Measured: at that key the sun is **10.55° below** the horizon while the horizon color is already at 0.528 luminance against 0.827 at noon — **82% of full daylight**. In game the sky finishes its sunrise for whatever is near the horizon at the time (a rising moon, in the report that surfaced it). A seam between RF-1's authored keys and RF-2's later celestial model; correcting it touches the **light curve** as well as the gradients, which Architecture §2.1 notes would move World Clock baselines B3/B4/B7/B9 — so it needs its own decision, not a quiet retune. Note the ScriptableObject trap: the keys live in an existing `.asset`, so changing the code defaults alone changes nothing in game. |
-| Sky colors in an editor tool, **overridable per biome** | Requested 2026-08-11. The per-biome half **needs a design pass first**: sky color is screen-wide but biomes are per-column, so something must define the boundary rule (blend over distance? sample at the camera? weight nearby columns?). Same class of question as TF-3's climate axis. |
+| Per-biome sky color override | The editor-tool half **shipped 2026-08-12** as `Minecraft Clone/Sky Editor` (Architecture §6); only the per-biome override remains. It **needs a design pass first**: sky color is screen-wide but biomes are per-column, so something must define the boundary rule (blend over distance? sample at the camera? weight nearby columns?). Same class of question as TF-3's climate axis. Route to `create-design-doc`, not to implementation. |
 | Seasonal declination | Blocked on RF-1's curve coupling — see the Architecture doc §2.1 for why zero is load-bearing rather than lazy. |
 | Blood-moon disc tint | Waits on RF-1 §4's `SkyEvent`, which was never shipped. |
 
@@ -751,6 +751,14 @@ vertex-channel allocation it shares, rather than on its own merit).
 
 ## Document History
 
+* **v1.6** - **Sky Editor shipped 2026-08-12** (`Minecraft Clone/Sky Editor`), so the "sky colors in an
+  editor tool" row narrows to the per-biome override alone — which still needs its design pass and is
+  explicitly not an implementation task. Two findings from building it are recorded in
+  [`../Architecture/SKY_AND_CELESTIAL_RENDERING.md`](../Architecture/SKY_AND_CELESTIAL_RENDERING.md) v1.2:
+  the per-pixel CPU colour conversion, not the GPU render, is what would force a preview to debounce
+  (27 ms vs 3 ms at 640×260); and backlog IDs had leaked into user-facing strings, with an `RF-2` header
+  reaching the tool's own UI. **Editor tooling must not surface backlog IDs** — several remain elsewhere
+  (`BlockEditorWindow`, `Clouds`, `SettingsManager`, benchmark headers) and are unswept.
 * **v1.5** - **RF-2's richer sun and moon discs shipped and confirmed in game 2026-08-12** — procedural
   craters and mottling, sun limb darkening, a third degeneracy guard, and an atmosphere model for the
   discs (extinction + airlight). The "richer moon shader" row leaves the remainder table; see
@@ -805,7 +813,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-12 (RF-2 disc detail shipped; dawn-timing seam filed)  
+**Last Updated:** 2026-08-12 (RF-2 disc detail + Sky Editor shipped; dawn-timing seam filed)  
 **Next Review:** when RF-3 is scheduled — **RF-9 is now the most visible open item**, its severity
 measured in game (a 30%-occluded face is 14.8× darker than flat ground at midnight and indistinguishable
 from a sealed cave face). It shares RF-3's vertex-channel allocation and the two should be decided

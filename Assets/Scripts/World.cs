@@ -61,7 +61,7 @@ public class World : MonoBehaviour, IMeshDrainHost
     private TimeOfDaySettings _defaultTimeOfDaySettings;
 
     [Header("Sky")]
-    [Tooltip("Procedural sky material (RF-2). Create it via Minecraft Clone/Create Sky Material. Leave empty to keep the flat background color.")]
+    [Tooltip("Procedural sky material. Create it via Minecraft Clone/Create Sky Material. Leave empty to keep the flat background color.")]
     [SerializeField]
     private Material _skyMaterial;
 

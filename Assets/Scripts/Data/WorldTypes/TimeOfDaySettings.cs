@@ -93,7 +93,8 @@ namespace Data.WorldTypes
         [SerializeField]
         private Gradient _backgroundOverDay = BuildDefaultBackgroundGradient();
 
-        [Header("Sky (RF-2)")]
+        // Header text is user-facing in the Inspector and the Sky Editor, so it carries no backlog ID.
+        [Header("Sky")]
         [Tooltip("Observer latitude in degrees; positive is north. Tilts the sun's arc — 0 puts it overhead at noon, 90 keeps it on the horizon all day.")]
         [Range(-90f, 90f)]
         [SerializeField]
@@ -292,6 +293,14 @@ namespace Data.WorldTypes
         /// <summary>The engine's default horizon gradient, for editor tooling that re-authors an asset.</summary>
         /// <returns>A fresh gradient; the caller owns it.</returns>
         public static Gradient CreateDefaultHorizonGradient() => BuildDefaultHorizonGradient();
+
+        /// <summary>The engine's default sky-light tint gradient, for editor tooling that re-authors an asset.</summary>
+        /// <returns>A fresh gradient; the caller owns it.</returns>
+        public static Gradient CreateDefaultSkyLightGradient() => BuildDefaultSkyLightGradient();
+
+        /// <summary>The engine's default camera background gradient, for editor tooling that re-authors an asset.</summary>
+        /// <returns>A fresh gradient; the caller owns it.</returns>
+        public static Gradient CreateDefaultBackgroundGradient() => BuildDefaultBackgroundGradient();
 
         /// <summary>Builds the default overhead sky gradient: near-black night through to saturated midday blue.</summary>
         /// <returns>A gradient over one day.</returns>

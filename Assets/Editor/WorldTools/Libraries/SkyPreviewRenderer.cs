@@ -198,6 +198,8 @@ namespace Editor.WorldTools.Libraries
         private Camera _camera;
         private RenderTexture _target;
         private Texture2D _readback;
+        private RenderTexture _displayTarget;
+        private Texture2D _displayReadback;
         private Material _skyMaterial;
 
         /// <summary>
@@ -226,12 +228,56 @@ namespace Editor.WorldTools.Libraries
         public Texture2D Render(in SkyPreviewState state, Vector3 viewDirection, int width, int height,
             float fieldOfView = DefaultFieldOfView)
         {
+            EnsureMeasurementTargets(width, height);
+            RenderInto(state, viewDirection, width, height, fieldOfView, _target, _readback);
+            return _readback;
+        }
+
+        /// <summary>
+        /// Renders the sky ready to draw in editor GUI, in <b>sRGB</b>.
+        /// </summary>
+        /// <param name="state">The globals to render with.</param>
+        /// <param name="viewDirection">Direction the camera looks along; need not be normalized.</param>
+        /// <param name="width">Output width in pixels.</param>
+        /// <param name="height">Output height in pixels.</param>
+        /// <param name="fieldOfView">Vertical field of view in degrees.</param>
+        /// <returns>An sRGB texture owned by this renderer, reused by the next call.</returns>
+        /// <remarks>
+        /// The GPU performs the linear-to-sRGB conversion by writing to an 8-bit sRGB target, so the
+        /// readback is a raw byte copy. This is not a shortcut: converting per pixel in C# instead cost
+        /// <b>27 ms at 640×260 and 302 ms at 1920×900</b> against 3 ms and 17 ms of actual rendering,
+        /// which is the whole difference between a preview that tracks a slider and one that needs a
+        /// debounce. Note this is the same 8-bit sRGB target that would be <i>wrong</i> for
+        /// <see cref="Render(in SkyPreviewState, Vector3, int, int, float)"/> — the conversion this path
+        /// wants is exactly the one measurement must not have.
+        /// </remarks>
+        public Texture2D RenderForDisplay(in SkyPreviewState state, Vector3 viewDirection, int width, int height,
+            float fieldOfView = DefaultFieldOfView)
+        {
+            EnsureDisplayTargets(width, height);
+            RenderInto(state, viewDirection, width, height, fieldOfView, _displayTarget, _displayReadback);
+            return _displayReadback;
+        }
+
+        /// <summary>
+        /// Renders one frame into the given target pair, restoring all shared state afterwards.
+        /// </summary>
+        /// <param name="state">The globals to render with.</param>
+        /// <param name="viewDirection">Direction the camera looks along.</param>
+        /// <param name="width">Output width in pixels.</param>
+        /// <param name="height">Output height in pixels.</param>
+        /// <param name="fieldOfView">Vertical field of view in degrees.</param>
+        /// <param name="target">Render target to draw into.</param>
+        /// <param name="readback">Texture receiving the pixels.</param>
+        /// <exception cref="InvalidOperationException">Thrown when there is no graphics device, or the sky material is missing.</exception>
+        private void RenderInto(in SkyPreviewState state, Vector3 viewDirection, int width, int height,
+            float fieldOfView, RenderTexture target, Texture2D readback)
+        {
             if (!IsSupported)
                 throw new InvalidOperationException("[SkyPreviewRenderer] No graphics device — cannot render (running with -nographics?).");
 
             EnsureMaterial();
             EnsureCamera();
-            EnsureTargets(width, height);
 
             _cameraObject.transform.rotation = LookAlong(viewDirection);
             _camera.fieldOfView = fieldOfView;
@@ -250,12 +296,12 @@ namespace Editor.WorldTools.Libraries
                 // would re-bake continuously for a preview nothing reads ambient light from.
                 RenderSettings.ambientMode = AmbientMode.Flat;
 
-                _camera.targetTexture = _target;
+                _camera.targetTexture = target;
                 _camera.Render();
 
-                RenderTexture.active = _target;
-                _readback.ReadPixels(new Rect(0f, 0f, width, height), 0, 0, false);
-                _readback.Apply(false);
+                RenderTexture.active = target;
+                readback.ReadPixels(new Rect(0f, 0f, width, height), 0, 0, false);
+                readback.Apply(false);
             }
             finally
             {
@@ -265,8 +311,6 @@ namespace Editor.WorldTools.Libraries
                 RenderSettings.ambientMode = previousAmbient;
                 RestoreGlobals();
             }
-
-            return _readback;
         }
 
         /// <summary>
@@ -303,21 +347,11 @@ namespace Editor.WorldTools.Libraries
             return _readback.GetPixel(x, y);
         }
 
-        /// <summary>Releases the camera, render target and readback texture.</summary>
+        /// <summary>Releases the camera, render targets and readback textures.</summary>
         public void Dispose()
         {
-            if (_readback != null)
-            {
-                UnityEngine.Object.DestroyImmediate(_readback);
-                _readback = null;
-            }
-
-            if (_target != null)
-            {
-                _target.Release();
-                UnityEngine.Object.DestroyImmediate(_target);
-                _target = null;
-            }
+            DestroyTargets(ref _target, ref _readback);
+            DestroyTargets(ref _displayTarget, ref _displayReadback);
 
             if (_cameraObject != null)
             {
@@ -383,6 +417,8 @@ namespace Editor.WorldTools.Libraries
         /// <param name="width">Requested width in pixels.</param>
         /// <param name="height">Requested height in pixels.</param>
         /// <remarks>
+        /// This is the <b>measurement</b> pair, kept separate from the display one because their correct
+        /// formats are opposites.
         /// <b>The half-float format is what keeps the round trip linear</b>, not the
         /// <c>RenderTextureReadWrite.Linear</c> argument — that flag governs 8-bit targets and is inert
         /// here; it is passed for intent, and changing it alone measurably does nothing. Dropping to
@@ -391,39 +427,89 @@ namespace Editor.WorldTools.Libraries
         /// Inspector swatch tells. Half-float also spares the night sky, authored near 0.004, from
         /// 8-bit quantization it could not survive.
         /// </remarks>
-        private void EnsureTargets(int width, int height)
+        private void EnsureMeasurementTargets(int width, int height)
         {
-            if (_target != null && (_target.width != width || _target.height != height))
-            {
-                _target.Release();
-                UnityEngine.Object.DestroyImmediate(_target);
-                _target = null;
-            }
+            EnsureTargetPair(ref _target, ref _readback, width, height,
+                RenderTextureFormat.ARGBHalf, RenderTextureReadWrite.Linear,
+                TextureFormat.RGBAHalf, true, "SkyPreviewLinear");
+        }
 
-            if (_target == null)
+        /// <summary>Creates or resizes the sRGB pair that editor GUI draws.</summary>
+        /// <param name="width">Requested width in pixels.</param>
+        /// <param name="height">Requested height in pixels.</param>
+        /// <remarks>
+        /// 8-bit sRGB — the exact configuration that would corrupt a measurement — because here the GPU's
+        /// linear-to-sRGB conversion on write is precisely the work needed, and it is free. Editor GUI
+        /// textures in this project are <c>RGBA32</c> (the <c>CrossSectionPanelHelper.EnsureTexture</c>
+        /// precedent), so the readback is a straight byte copy with nothing to convert on the CPU.
+        /// </remarks>
+        private void EnsureDisplayTargets(int width, int height)
+        {
+            EnsureTargetPair(ref _displayTarget, ref _displayReadback, width, height,
+                RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB,
+                TextureFormat.RGBA32, false, "SkyPreviewDisplay");
+        }
+
+        /// <summary>Creates or resizes one render target and its readback texture.</summary>
+        /// <param name="target">Render target field.</param>
+        /// <param name="readback">Readback texture field.</param>
+        /// <param name="width">Requested width in pixels.</param>
+        /// <param name="height">Requested height in pixels.</param>
+        /// <param name="targetFormat">Render-target format.</param>
+        /// <param name="readWrite">Render-target color space handling.</param>
+        /// <param name="readbackFormat">Readback texture format.</param>
+        /// <param name="readbackLinear">Whether the readback texture holds linear data.</param>
+        /// <param name="name">Debug name applied to both.</param>
+        private static void EnsureTargetPair(ref RenderTexture target, ref Texture2D readback,
+            int width, int height, RenderTextureFormat targetFormat, RenderTextureReadWrite readWrite,
+            TextureFormat readbackFormat, bool readbackLinear, string name)
+        {
+            if (target != null && (target.width != width || target.height != height))
+                DestroyTargets(ref target, ref readback);
+
+            if (target == null)
             {
-                _target = new RenderTexture(width, height, DEPTH_BITS, RenderTextureFormat.ARGBHalf,
-                    RenderTextureReadWrite.Linear)
+                target = new RenderTexture(width, height, DEPTH_BITS, targetFormat, readWrite)
                 {
-                    name = "SkyPreviewTarget",
+                    name = name + "Target",
                     hideFlags = HideFlags.HideAndDontSave,
                 };
-                _target.Create();
+                target.Create();
             }
 
-            if (_readback != null && (_readback.width != width || _readback.height != height))
+            if (readback != null && (readback.width != width || readback.height != height))
             {
-                UnityEngine.Object.DestroyImmediate(_readback);
-                _readback = null;
+                UnityEngine.Object.DestroyImmediate(readback);
+                readback = null;
             }
 
-            if (_readback == null)
+            if (readback == null)
             {
-                _readback = new Texture2D(width, height, TextureFormat.RGBAHalf, false, true)
+                readback = new Texture2D(width, height, readbackFormat, false, readbackLinear)
                 {
-                    name = "SkyPreviewResult",
+                    name = name + "Result",
                     hideFlags = HideFlags.HideAndDontSave,
+                    filterMode = FilterMode.Bilinear,
                 };
+            }
+        }
+
+        /// <summary>Releases one target pair.</summary>
+        /// <param name="target">Render target field; nulled.</param>
+        /// <param name="readback">Readback texture field; nulled.</param>
+        private static void DestroyTargets(ref RenderTexture target, ref Texture2D readback)
+        {
+            if (readback != null)
+            {
+                UnityEngine.Object.DestroyImmediate(readback);
+                readback = null;
+            }
+
+            if (target != null)
+            {
+                target.Release();
+                UnityEngine.Object.DestroyImmediate(target);
+                target = null;
             }
         }
 

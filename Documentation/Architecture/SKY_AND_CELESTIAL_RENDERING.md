@@ -1,8 +1,8 @@
 # Sky & Celestial Rendering
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-08-12  
-**Status:** **Implemented (Stable)** — RF-2 phases 1 and 2, the `Distance Fog` setting, and the richer sun/moon discs are shipped and in-game confirmed (2026-08-11, discs 2026-08-12). Guarded by the `Validate Sky` suite (**15** baselines, none of which observes a pixel — see §7). Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
+**Status:** **Implemented (Stable)** — RF-2 phases 1 and 2, the `Distance Fog` setting, the richer sun/moon discs, and the Sky Editor are shipped and confirmed (2026-08-11, discs and tool 2026-08-12). Guarded by the `Validate Sky` suite (**15** baselines, none of which observes a pixel — see §7). Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The procedural sky: a zenith/horizon gradient, a sun and moon on **real celestial arcs** driven by a
@@ -39,6 +39,7 @@
 | `Assets/Editor/WorldTools/SkyMaterialCreator.cs` | `Minecraft Clone/Create Sky Material`. Owns the sky material's asset path. |
 | `Assets/Editor/WorldTools/SkyGradientDefaults.cs` | `Minecraft Clone/Dev/Reset Sky Gradients To Code Defaults`. |
 | `Assets/Editor/WorldTools/Libraries/SkyPreviewRenderer.cs` | Renders the skybox to a texture in edit mode, so sky work is judged by pixels rather than by a swatch (§8). |
+| `Assets/Editor/WorldTools/SkyEditorWindow.cs` | `Minecraft Clone/Sky Editor` — authors the sky against a live render. |
 
 ---
 
@@ -243,12 +244,22 @@ All sky art lives on the `TimeOfDaySettings` asset, linked from `WorldTypeDefini
 (and later a dimension) ships its own sky: observer latitude, zenith/horizon gradients, sun and moon
 angular radii, star brightness, fog start fraction and fog curve power.
 
-Two editor commands support it:
+**`Minecraft Clone/Sky Editor`** is where that art is authored. It edits the four gradients and the six
+celestial/fog scalars through `SerializedObject`, against a **live render of the real skybox shader** —
+which is why it is a window and not a custom inspector. An Inspector alone cannot show what is being
+authored here, because the swatch lies (§8); the render is the feature, and the fields are incidental.
+Its time scrubber's *Sunrise* button targets day fraction 0.25, the celestial horizon crossing rather
+than the gradient's own dawn key, so the §9 dawn-timing seam is visible rather than hidden.
+
+Two commands support it:
 
 - `Minecraft Clone/Create Sky Material` — authors `Assets/Materials/Sky.mat` from the shader, so a
   fresh clone reproduces it without hand-wiring.
 - `Minecraft Clone/Dev/Reset Sky Gradients To Code Defaults` — pushes the code-authored gradients into
-  existing assets (see §8).
+  existing assets (see §8). It covers **all four** gradients, exactly what the Sky Editor can change, so
+  "reset" undoes everything that tool touches and nothing else — the RF-1 light curve is deliberately
+  outside both. Because it discards authored art across every asset at once, it confirms first, naming
+  each file, and auto-accepts under `Application.isBatchMode` where a modal would hang a headless run.
 
 `SkyPreviewRenderer` supports it from the other side: it renders the sky to a texture in edit mode, given
 either a settings asset and a world time or a hand-authored `SkyPreviewState`. The struct exists so a
@@ -264,6 +275,13 @@ the §8 colour-space lie inside the measuring tool itself, reading back an autho
 snapshots and restores every shader global it drives plus `RenderSettings.skybox`/`ambientMode` in a
 `finally`, because all of that is process-wide and a preview would otherwise leave the user's Scene view
 at whatever hour was last previewed.
+
+It keeps **two** target pairs, and the distinction is the interesting part. `Render` produces the linear
+half-float pair above, for measurement. `RenderForDisplay` produces an **8-bit sRGB** pair — the very
+configuration that would corrupt a measurement — because there the GPU's linear-to-sRGB conversion on
+write is exactly the work the GUI needs, and it is free. Converting per pixel in C# instead was measured
+at **27 ms at 640×260 and 302 ms at 1920×900**, against 3 ms and 17 ms of actual rendering: the CPU
+conversion, not the rendering, is what would force a preview to debounce rather than track a slider.
 
 ---
 
@@ -353,6 +371,14 @@ not read the atmospheric improvement as having fixed it.
 
 ## Document History
 
+* **v1.2** - **Sky Editor shipped** (2026-08-12): the sky's colours are now authored against a live render
+  rather than through Inspector swatches that misreport them by a factor of four. §6 rewritten around it;
+  the reset command widened from two gradients to all four so it undoes exactly what the tool can change,
+  and gained a confirmation naming each asset (batch-mode exempt). §1 lists the window. The renderer gained
+  a second, deliberately **sRGB** target pair for display — the configuration that is wrong for measurement
+  is the right one for the GUI, and moving that conversion to the GPU took the preview from 27 ms to 1.9 ms
+  at 640×260, which is the difference between a debounced preview and one that tracks a slider. Backlog IDs
+  were also removed from user-facing strings in this system (an `RF-2` header reached the tool's own UI).
 * **v1.1** - Richer sun and moon discs shipped and confirmed in game (2026-08-12): procedural craters and
   mottling, sun limb darkening, and a **third** degeneracy guard for the moon's surface frame at the
   zenith — §4 had claimed both were guarded. §4 also gained the atmosphere model the in-game passes
