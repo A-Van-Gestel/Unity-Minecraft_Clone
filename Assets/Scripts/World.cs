@@ -65,7 +65,7 @@ public class World : MonoBehaviour, IMeshDrainHost
     [SerializeField]
     private Material _skyMaterial;
 
-    /// <summary>Scene skybox and clear flags as found at startup, restored on teardown.</summary>
+    /// <summary>Scene skybox, ambient mode and clear flags as found at startup, restored on teardown.</summary>
     /// <remarks>
     /// <see cref="RenderSettings"/> and the camera are <i>scene</i> state, not this component's. Play
     /// mode normally reverts them, but that depends on Enter Play Mode options staying as they are, and
@@ -74,6 +74,8 @@ public class World : MonoBehaviour, IMeshDrainHost
     private Material _previousSkybox;
 
     private CameraClearFlags _previousClearFlags;
+
+    private UnityEngine.Rendering.AmbientMode _previousAmbientMode;
 
     private bool _skyRenderSettingsApplied;
 
@@ -2019,9 +2021,15 @@ public class World : MonoBehaviour, IMeshDrainHost
     {
         if (_skyMaterial == null || _playerCamera == null) return;
 
-        _previousSkybox = RenderSettings.skybox;
-        _previousClearFlags = _playerCamera.clearFlags;
-        _skyRenderSettingsApplied = true;
+        // Snapshotted once. A second apply without an intervening restore would capture this method's
+        // OWN values as the originals, which turns the restore into a permanent no-op.
+        if (!_skyRenderSettingsApplied)
+        {
+            _previousSkybox = RenderSettings.skybox;
+            _previousClearFlags = _playerCamera.clearFlags;
+            _previousAmbientMode = RenderSettings.ambientMode;
+            _skyRenderSettingsApplied = true;
+        }
 
         RenderSettings.skybox = _skyMaterial;
         _playerCamera.clearFlags = CameraClearFlags.Skybox;
@@ -2032,12 +2040,13 @@ public class World : MonoBehaviour, IMeshDrainHost
         RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
     }
 
-    /// <summary>Puts the scene's skybox and camera clear flags back as they were found.</summary>
+    /// <summary>Puts the scene's skybox, ambient mode and camera clear flags back as they were found.</summary>
     private void RestoreSkyRenderSettings()
     {
         if (!_skyRenderSettingsApplied) return;
 
         RenderSettings.skybox = _previousSkybox;
+        RenderSettings.ambientMode = _previousAmbientMode;
         if (_playerCamera != null) _playerCamera.clearFlags = _previousClearFlags;
         _skyRenderSettingsApplied = false;
     }
@@ -2077,7 +2086,7 @@ public class World : MonoBehaviour, IMeshDrainHost
     /// </summary>
     /// <remarks>
     /// Fog adopts the horizon color, which is what makes terrain dissolve into the sky rather than into
-    /// a grey band. The range follows the view-distance setting every frame — the setting is changeable
+    /// a gray band. The range follows the view-distance setting every frame — the setting is changeable
     /// at runtime, and recomputing two floats is cheaper than subscribing to it.
     /// </remarks>
     private void PublishFogGlobals()
@@ -2560,7 +2569,7 @@ public class World : MonoBehaviour, IMeshDrainHost
 
             // P9-0: what the quota was and what it bought. The stop reason alone cannot say — a Quota stop
             // reports that the cap bound, never how many items it admitted. Recorded only when the pass had
-            // work available, matching the mesh drain's population so the two utilisations are comparable.
+            // work available, matching the mesh drain's population so the two utilizations are comparable.
             if (lightWorkAvailable > 0)
                 PipelineTelemetry.RecordPassWork(PipelinePass.LightSchedule, lightJobsScheduled, lightQuota);
 
@@ -2589,7 +2598,7 @@ public class World : MonoBehaviour, IMeshDrainHost
         int inFlightMeshCap = Mathf.Max(1, settings.maxInFlightMeshJobs);
 
         // P-4 §3.4: rate quota, same shape as the lighting throttle above. Derived HERE rather than inside
-        // the drain arm only because P9-0's utilisation needs the granted quota on every frame that had work
+        // the drain arm only because P9-0's utilization needs the granted quota on every frame that had work
         // — including the in-flight-cap arm, where work existed and none of it was served. Pure arithmetic
         // with no side effect (unlike StartWindow, which timestamps and therefore stays in the drain arm).
         int meshQuota = settings.enablePipelineTimeBudgets
@@ -2600,7 +2609,7 @@ public class World : MonoBehaviour, IMeshDrainHost
         {
             // FP-2: the pass is skipped, but "no work queued" is a real, healthy outcome — record it rather
             // than letting the frame default to NotRun, which would hide an idle pipeline from the histogram.
-            // No work-record: an idle frame has no utilisation to report, only a stop reason.
+            // No work-record: an idle frame has no utilization to report, only a stop reason.
             PipelineTelemetry.RecordPassStop(PipelinePass.MeshSchedule, PassStopReason.OutOfWork);
         }
         else if (JobManager.MeshJobs.Count >= inFlightMeshCap)
@@ -2610,7 +2619,7 @@ public class World : MonoBehaviour, IMeshDrainHost
             // admission-bound signal from the capture (design §5.1).
             PipelineTelemetry.RecordPassStop(PipelinePass.MeshSchedule, PassStopReason.InFlightCap);
 
-            // P9-0: work existed and the quota bought nothing — a real 0 % utilisation frame. Omitting it
+            // P9-0: work existed and the quota bought nothing — a real 0 % utilization frame. Omitting it
             // would flatter the mesh pass by counting only frames it was allowed to serve.
             PipelineTelemetry.RecordPassWork(PipelinePass.MeshSchedule, 0, meshQuota);
         }

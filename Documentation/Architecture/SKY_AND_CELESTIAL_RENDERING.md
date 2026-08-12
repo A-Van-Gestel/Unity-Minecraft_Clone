@@ -177,9 +177,11 @@ stands between a broken sky shader and an undefined screen. Consequence for auth
 gradient must be kept in step with the zenith/horizon gradients (§2.5) rather than treated as legacy,
 because it is what a player sees on that fallback.
 
-`RenderSettings.ambientMode` is pinned to `Flat`. Ambient light is skybox-derived by default and this
-skybox changes every frame, which would re-bake the ambient probe continuously; the block shaders read
-BFS light, not ambient, so pinning costs nothing visually.
+`RenderSettings.ambientMode` is pinned to `Flat` while a world is live. Ambient light is skybox-derived
+by default and this skybox changes every frame, which would re-bake the ambient probe continuously; the
+block shaders read BFS light, not ambient, so pinning costs nothing visually. It is snapshotted and
+restored on teardown alongside the skybox and clear flags, for the same reason those are: with domain
+reload disabled a pinned mode would otherwise follow the user out of play mode and into the Scene view.
 
 **Gradient falloff.** The horizon-to-zenith blend is `1 − (1 − |viewDir.y|)^3.5`, *not*
 `|viewDir.y|^(1/2.2)`. Both concentrate colour near the horizon, but an exponent below 1 has **infinite
