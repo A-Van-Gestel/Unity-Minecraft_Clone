@@ -60,6 +60,7 @@ MonoBehaviour:
     smoothLighting: 1
     fullBlockContactShadows: 0
     clouds: 2
+    distanceFog: 2
     enableFoliageSway: 1
     vSync: 1
     unlimitedFps: 0
