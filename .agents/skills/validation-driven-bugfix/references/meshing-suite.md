@@ -49,7 +49,7 @@ Namespace: suite = `Editor.Validation.Meshing`, framework = `Editor.Validation.M
 > **B1–B16**. **MR-* Wave 2 (2026-06-20):** MR-2 (32 B/vertex) + MR-6 (pre-size + pool the `MeshDataJobOutput`
 > buffers) landed; MR-6's build-alongside guard **MH-2** closed as **B17** (a pooled output reused across two
 > scenes == a fresh buffer, via `MeshOutputPool` + `MeshingTestWorld.Run(reuseOutput:)`) → baselines **B1–B17**.  
-> **Since then the suite grew past the job harness — tip is now B60 (56 baselines, 2026-08-09;
+> **Since then the suite grew past the job harness — tip is now B61 (57 baselines, 2026-08-12;
 > B51–B53 and B55 were never issued, so the numbering has gaps):** B18–B21
 > (cross-chunk culling), B22/B23 (FL sway), and the **MP-\* orchestration arc** B24–B27 (schedule decision,
 > drain policy, in-flight fix, completion skeleton — none of which use `MeshingTestWorld`) plus MP-5's
@@ -79,7 +79,13 @@ Namespace: suite = `Editor.Validation.Meshing`, framework = `Editor.Validation.M
 > local, and a sealed cell does not also feed the light mean; B58 is the suite's first **non-uniform**
 > light field, which is the only way those two models can be told apart), and B59/B60 (SS-3a — a
 > straight wall's shadow does not scallop at cell seams; a partial occluder that casts nothing does not
-> subdivide the face it stands over).  
+> subdivide the face it stands over).
+>
+> **`RF-3` added B61 (2026-08-12)** — an emitter stamps its emission into vertex-colour **alpha**, a
+> non-emitter stays at **0**, and RGB is untouched in both. Read its docstring before writing a scenario
+> of the same shape: B61 passed, reddened under both prove-red mutations, and its expected value was
+> *still wrong*, because the contract lives in the shader and this suite never runs one. A prove-red shows
+> the assertion reads the value under test — not that the value is right.  
 > When adding a scenario, put it in the partial that matches its *unit*, not the next free file.
 > The forward **execution-wave plan** (§6 — harness Waves 1–3 DONE; MH-7 build-alongside; MH-8
 > gated) and the per-gap detail (`MH-7/8`) are in

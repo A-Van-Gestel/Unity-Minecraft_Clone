@@ -618,6 +618,51 @@ The existing quality-tier keywords (`_FLUID_QUALITY_LOW/MED`, refraction opt-out
 **Recommendation:** Make these per-tier: a mobile URP asset (or runtime overrides via
 `UniversalRenderPipelineAsset` properties) with shadows-unsupported, MSAA off/2×, render scale exposed as a setting, plus the GS-2 opaque-texture toggle. Desktop keeps the current values.
 
+> **CORRECTIONS + LOCKED DECISIONS (2026-08-12).** Verified against code while shipping RF-3, which shares
+> this entry's files. Nothing here is implemented yet — this is the executable spec for the next session.
+>
+> **Corrections to the observations above:**
+>
+> - **MSAA is already inert during gameplay.** The World camera has `m_AllowMSAA: 0`, and URP gates on
+>   `camera.allowMSAA && asset.msaaSampleCount > 1 && rendererSupportsMSAA`
+>   (`UniversalRenderPipeline.cs:1508`). Only MainMenu's camera (`m_AllowMSAA: 1`) resolves the asset's
+>   2×. So `m_MSAA: 2` costs nothing in game today, and enabling MSAA requires flipping the *camera*
+>   flag, not just the asset.
+> - **`supportsMainLightShadows` cannot be a runtime override** — its setter is `internal`. Variant
+>   stripping is an **asset edit only**. By contrast `renderScale`, `msaaSampleCount`, `shadowDistance`,
+>   `colorGradingMode` and `supportsCameraOpaqueTexture` all have public setters and *are* runtime-settable.
+> - **`ShadowCastingMode.TwoSided` (`SectionRenderer.cs:121`) is inert today** because `m_ShadowDistance: 0`
+>   means no shadow pass runs at all. It costs nothing until shadows are enabled — see the pairing warning below.
+> - **This entry's frame-time benefit on desktop is ≈ 0.** Its real payoff is variant count, build size and
+>   load time. Any GO/NO-GO must be measured on an **IL2CPP build**, not in the editor.
+>
+> **Decisions (user-locked, do not re-litigate):**
+>
+> 1. **Render scale → a Graphics setting, range 30 %–200 %, default 100 %.** URP hard-clamps to
+>    **[0.1, 3.0]** (`UniversalRenderPipeline.minRenderScale`/`maxRenderScale` via `ValidateRenderScale`),
+>    so **400 % is impossible** — a 4.0 silently stores 3.0. Capped at 200 % (already 4× the pixels at
+>    1440p) rather than the engine's 300 %; tooltip must warn that render scale **multiplies with MSAA**.
+> 2. **MSAA → a Graphics setting with four levels** (Off / 2× / 4× / 8×, mapping to URP's `MsaaQuality`),
+>    and it must actually take effect in game. Drive **both** `asset.msaaSampleCount` and
+>    `Camera.main.allowMSAA` from the controller — "Off" sets `allowMSAA = false` so the resolve is skipped
+>    entirely. Deliberately *not* a scene edit: keeping both terms in code leaves the URP asset and
+>    `World.unity` diff-clean and avoids two sources of truth. Expectation to set with the user: MSAA
+>    cleans up block silhouettes against the sky but does **nothing** for alpha-tested cross-mesh foliage
+>    (no alpha-to-coverage), which is where voxel aliasing is most visible.
+> 3. **Strip the shadow variants** (`m_MainLightShadowsSupported: 1 → 0`) **and document the pairing.**
+>    Shadow distance 0 + `TwoSided` on every section is a coupled pair: a future session that raises the
+>    distance without also fixing `SectionRenderer.cs:121` renders the entire voxel world twice-sided into
+>    a 2048 shadow map. Leave `TwoSided` as-is (inert), record the pair.
+> 4. **Runtime overrides need an authored-default guard.** Mutating a `UniversalRenderPipelineAsset` in
+>    editor play mode **dirties the asset and persists across sessions** — the same class of bug as
+>    `65a57ef0` (play-mode teardown pinned the scene's ambient mode). Capture authored values on first
+>    apply, restore on play-mode exit, and gate the work with `git diff --stat` on
+>    `Assets/settings/Rendering/` coming back **empty** after a play session. The static holding those
+>    defaults needs a `[RuntimeInitializeOnLoadMethod]` reset; `GraphicsSettingsController` has none today,
+>    so adding one is UDR0005-legal.
+>
+> **Not in scope:** a second mobile URP asset, and the GS-2 opaque-texture toggle.
+
 > **Impact Analysis:**
 > - **Effort:** 🟢 Low — settings/asset configuration, no engine code.
 > - **Risk:** 🟢 Low.
@@ -1201,6 +1246,15 @@ inherit a one-click `Validate All` that also flags stale-code runs automatically
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.4** - `GS-4` gained a **corrections + locked-decisions block** (2026-08-12), no scope change and
+  no implementation. Written while shipping `RF-3`, which shares this entry's files. Four observations
+  were corrected against code — MSAA is already inert in game (`m_AllowMSAA: 0` on the World camera),
+  `supportsMainLightShadows` is asset-only (`internal` setter), `TwoSided` is inert at shadow distance 0,
+  and the entry's desktop frame-time benefit is ≈ 0 so its GO/NO-GO must be an IL2CPP build. Four
+  decisions were locked by the owner: render scale 30–200 % (URP clamps at 3.0, so **400 % is
+  impossible**), MSAA as four levels driving both the asset and the camera flag from code, strip the
+  shadow variants while documenting the distance-0/`TwoSided` pair, and guard every runtime URP-asset
+  override with an authored-default restore.
 * **v1.3** - `MR-8` annotated with the `SS-*` **D7 decision** (2026-08-09), no scope change. Constraint (a) — the *AO* merge predicate — now has a named, owner-endorsed escape hatch: **analytic per-pixel AO on `VX-1`'s volumes**. The v1.2 note that AO cannot follow light into the volume argues from *interpolation* and does not reach a shader evaluating AO analytically per fragment, where a merged quad is correct by construction. Also recorded, at the owner's prompting and deliberately **not banked**: this item's 60–90 % vertex cut is the obvious way to pay for the larger, view-distance-aware volume that per-pixel AO needs (VX-1 scales quadratically — 9.4 MB at view distance 5, 150 MB at 20), but both sides are unbuilt and the costs sit in different budgets
 * **v1.2** - `MR-8` annotated with two interlocks (2026-08-09), no scope change. (1) Its route-(b) escape hatch is owned by `VX-1`/`VX-8`, and that route unblocks **light only** — AO cannot follow it into a filtered volume, because trilinear filtering is the separable product that produces the engine's round-blob AO (`SILHOUETTE_CONTACT_SHADOWS.md` **S2**), so constraint (a) survives reworded as an *AO* predicate and keeps most of the win. (2) `SS-*`'s sub-cell tessellation is **merge-neutral** and partitions the face set with this item — a face with an occluder in range has non-uniform corner AO and was never mergeable
 * **v1.1** - `SL-1` annotated with a corroboration note pointing at the new
@@ -1235,7 +1289,9 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-09 (`MR-8` VX-8 / `SS-*` interlocks; 2026-08-05: `SL-1` corroboration note; 2026-07-26: header completed, completed
+**Last Updated:** 2026-08-12 (`GS-4` corrections + locked decisions; 2026-08-09: `MR-8` VX-8 / `SS-*` interlocks; 2026-07-26: header completed, completed
 items archived, 2,100 → 1,126 lines)  
-**Next Review:** on the next implementation wave — move each newly-finished item's detail section to the
+**Next Review:** **`GS-4` is execution-ready** — its decisions are locked and its corrections verified, so
+the next session can implement it directly from the block in its entry rather than re-auditing the URP
+asset. Otherwise: on the next implementation wave, move each newly-finished item's detail section to the
 archive and leave its ✅ row behind. A fresh audit pass is also due: the last one was 2026-07-02.

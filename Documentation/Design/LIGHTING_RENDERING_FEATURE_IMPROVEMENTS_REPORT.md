@@ -93,7 +93,7 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 |------|-------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
 | RF-1 | Day/night cycle: shader support is wired & modern but nothing advances time               |   🟡   |  🟢  |   🟢    |  ✅   |  ⚠️  |
 | RF-2 | ~~Sky rendering: skybox, sun/moon, stars, fog, disc detail~~ ✅ **SHIPPED**; §6 + 4 riders open |   🟡   |  🟢  |   🟢    |  ✅   |  ✅   |
-| RF-3 | Bloom / post-processing: URP post stack present but disabled; no HDR emissive path        |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+| RF-3 | ~~Bloom / post-processing: URP post stack present but disabled; no HDR emissive path~~ ✅ **SHIPPED**; §1 tonemapping + §5 effects open |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 | RF-4 | Flickering light sources: shader-side global flicker with per-position phase              |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | RF-5 | Animated light sources: RGB emission already shipped; *animation* is BFS-bounded          |   🟡   |  🟡  |    ⚪    |  ✅   |  ✅   |
 | RF-6 | "Some form of GI": SSAO is the pragmatic option; colored sky-bounce rejected with reasons |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
@@ -393,9 +393,55 @@ floor, so all shape information is lost). At noon the same pair differs by only 
 
 ### RF-3 — Bloom & post-processing enablement (HDR emissive path)
 
-**Classification:** Polish.
+**Classification:** Polish. **§1 (stack) + §2 (HDR emissive) + §3 (gating) SHIPPED 2026-08-12**, confirmed in
+game. Tonemapping (§1's second half) and the §5 effects remain open, each still its own art decision.
 
-**What exists today.**
+> **As built.** Four commits on `feat/world-scaling`: `b981ec44` (emissive path, default-inert),
+> `3b246bc2` (alpha-sentinel fix), `c1748d15` (liquid emissive read), `95bae9a0` (bloom + setting).
+>
+> - **Channel:** emissive strength lives in **`Color32.a`** of the mesh colour stream — the only channel
+>   free on all three submeshes. Block emission (0-15) is scaled ×17 and stamped by
+>   `MeshGenerationJob.StampEmissiveStrength`, a single pass at the shape router, so standard cubes,
+>   custom meshes, cross meshes and fluids are all covered by one code path. RGB is untouched and
+>   remains TF-11's; see the allocation registry note below.
+> - **Shader:** `ApplyVoxelEmissive` in `VoxelLighting.hlsl`, applied after lighting and **before fog**
+>   (so distant emitters fade into haze rather than glowing through it), in the standard, transparent and
+>   liquid shaders. Driven by the global `_EmissiveBoost`.
+> - **Post stack:** a global `Volume` (priority 1) in `World.unity` → `VoxelEngine-Post-Profile.asset`
+>   with Bloom (threshold **1.1**, intensity **0.25**, scatter 0.6). `DefaultVolumeProfile.asset` was
+>   deliberately left untouched so editor previews, MainMenu and the Sky Render suite are unaffected.
+> - **Gating:** one `Bloom` Graphics setting drives the camera's `renderPostProcessing` **and**
+>   `_EmissiveBoost` (1.0 on, 0 off) together — emissive above 1.0 is only meaningful because bloom
+>   catches it, so the two must never disagree. Default on.
+> - **Guard:** meshing baseline **B61**; `Validate All` 477/477 across 21 suites.
+
+**Corrections to this entry's original analysis** (verified against code 2026-08-12):
+
+- The `Color32` stream was **not** free tint. Its RGB is white for blocks but the *fluid* submesh already
+  encodes `(FluidShaderID, shoreMask, shadowMultiplier)` there. Only **alpha** was free across all three
+  submeshes — which is also what let lava glow without competing with TF-11.
+- The meshing job needed **no new input**: `BlockTypeJobData.LightEmission` was already available.
+- A `Volume` component existed in no scene, but `Assets/DefaultVolumeProfile.asset` (wired into URP
+  Global Settings) **did** exist, carrying every override neutralized.
+- `m_ColorGradingMode: 0` (**LDR**) is unmentioned by the original entry and still in force: HDR
+  highlights past the bloom hard-clip rather than rolling off. Deliberate — see "open" below.
+- The camera flag is at `World.unity:3714`, not `:3694`.
+
+**Open / known limitations.**
+
+1. **Tonemapping + HDR colour grading not adopted.** Shipped with `m_ColorGradingMode` at LDR and no
+   tonemapper, so exactly one variable changed and the A/B captures stayed readable. ACES visibly shifts
+   every existing colour and still needs its own capture pass and sign-off.
+2. **Bloom does not appear in the UI blur backdrop.** `UIBlurRendererFeature` injects at
+   `RenderPassEvent.AfterRenderingTransparents` (`UIBlurRendererFeature.cs:69`), and URP composites the
+   post stack *after* that — so the blur snapshots scene colour one stage before bloom exists. Verified in
+   game and **accepted**; changing it means moving the injection point past post-processing.
+3. **No performance capture was taken.** Bloom ships default-on without a measured frame cost; the
+   post stack adds a full-screen pass plus an intermediate target. Waived by the user for desktop.
+4. **§5 effects** (vignette, DoF, motion blur) remain unstarted — the Volume now exists, so each is one
+   override plus a sign-off.
+
+**What exists today.** *(pre-implementation analysis, retained for context)*
 
 - URP is configured with HDR on (`m_SupportsHDR: 1`,
   `Assets/Settings/Rendering/VoxelEngine-URP-Asset.asset`) and the renderer has the default
@@ -406,7 +452,9 @@ floor, so all shape information is lost). At noon the same pair differs by only 
   they are *lit* by their own blocklight via the standard shade curve, never HDR-bright. Bloom
   enabled today would only ever catch the sky/sun.
 
-**Proposed design.**
+**Proposed design.** *(the original proposal — §1–§3 shipped, with the deviations noted in the as-built
+block above; §2's "reuse the tint stream" reasoning in particular was corrected to alpha-only. Retained
+because §1's tonemapping half and §5 are still open and still describe intended work.)*
 
 1. **Enable the stack:** camera `renderPostProcessing = true` + a global `Volume` with Bloom
    (threshold ≥ 1.1 so nothing LDR blooms) and — as a *separate, deliberate art decision* —
@@ -425,6 +473,25 @@ floor, so all shape information is lost). At noon the same pair differs by only 
    Allocation registry note: the *other* spare stream, `TexCoord0.zw` (half2), is **consumed
    since 2026-07-19** by FL-1 foliage sway (z = sway weight, w = per-voxel phase; fluid submesh
    keeps its own shore-push meaning) — the `Color32` stream is the only spare capacity left.
+
+   > **ALLOCATION REGISTRY — `Color32` stream, as of 2026-08-12.** The single source of truth is the
+   > pair of comments on `SectionRenderer.Layout` and `Data.MeshDataJobOutput.Colors`; this is the
+   > design-side mirror.
+   >
+   > | Channel | Blocks (opaque + transparent) | Fluid submesh | Owner |
+   > |---|---|---|---|
+   > | R, G, B | white (`255`) — **unclaimed** | `FluidShaderID`, `shoreMask`, `shadowMultiplier` | TF-11 claims the block side |
+   > | A | **RF-3 emissive strength** (emission 0-15 ×17) | **RF-3 emissive strength** | RF-3 — **SHIPPED** |
+   >
+   > Consequences for anyone reading this next: **alpha is gone.** TF-11 can still take block-side RGB,
+   > and doing so fills the stream exactly. **RF-9 must find capacity elsewhere** — its entry calls this
+   > stream "double-claimed", which was speculative when written and is now half true in fact.
+   > A new attribute grows the MR-2 32-byte vertex and re-pins the B-series baselines; budget for that.
+   >
+   > **Alpha's zero value is load-bearing.** Non-emitters seed `Color32(255, 255, 255, 0)`, not the
+   > historical `…, 255`. The shader reads this channel as emissive strength, so a 255 fill renders every
+   > ordinary block at full emissive boost — this shipped briefly and washed out the whole world
+   > (`3b246bc2`). Any future writer added to `VoxelMeshHelper` must seed alpha 0.
 3. **Quality gating:** bloom + the post stack cost real GPU time on mobile — gate behind the
    settings/device-tier system (`OM1_DEVICE_CALIBRATION.md` budgets; `DATA_DRIVEN_SETTINGS_UI`
    for the toggle). Desktop default on, mobile default off.
@@ -713,10 +780,12 @@ the AO ratio stays constant at every hour.
 **Why it is not a one-line fix.** The vertex holds only the product, so the shader cannot recover the
 two terms. Separating them needs occlusion in its own vertex channel, and **there is no spare
 capacity**: `TexCoord0.zw` (half2) went to FL-1 foliage sway (2026-07-19), and the `Color32` tint
-stream is already double-claimed by TF-11 (climate foliage tint, RGB) and RF-3 §2 (emissive strength).
-RF-9 therefore lands in the same vertex-format allocation decision as RF-3 and should be scheduled
-with it — `SectionRenderer.Layout` is the single source of truth, and any change rides the meshing
-suite's B-series baselines.
+stream's **alpha is now spent** — RF-3 shipped emissive strength there on 2026-08-12, leaving only the
+block-side RGB, which TF-11 (climate foliage tint) claims. **This is no longer a decision RF-9 can share
+with RF-3; RF-3 is decided.** RF-9's realistic options are now (a) take the block-side RGB ahead of
+TF-11, or (b) grow the MR-2 32-byte vertex with a new attribute. See RF-3 §2's allocation registry for
+the channel-by-channel state. `SectionRenderer.Layout` is the single source of truth, and any change
+rides the meshing suite's B-series baselines.
 
 **Options (not yet evaluated — this entry is the analysis, not the decision).**
 
@@ -750,6 +819,15 @@ vertex-channel allocation it shares, rather than on its own merit).
 
 ## Document History
 
+* **v1.9** - **RF-3 shipped** (2026-08-12; `b981ec44`, `3b246bc2`, `c1748d15`, `95bae9a0`). §1 stack,
+  §2 HDR emissive and §3 gating are in game behind one `Bloom` Graphics setting; tonemapping and the §5
+  effects stay open. The entry gained an as-built block, five corrections to its original analysis (the
+  `Color32` stream was never free tint — only **alpha** was; the meshing job already had
+  `LightEmission`; a global default volume profile did exist; `m_ColorGradingMode` is LDR; the camera
+  line number moved), a **channel allocation registry** for the `Color32` stream, and four stated
+  limitations — of which the load-bearing one is that **alpha's zero value is a contract with the
+  shader**, briefly violated in `b981ec44` and fixed in `3b246bc2`. RF-9's entry and the Next Review
+  were corrected: the vertex-channel decision is no longer shared with RF-3, because RF-3 made it.
 * **v1.8** - **The dawn-runs-ahead-of-the-sun row shipped and is removed** (2026-08-12). The sky
   gradients now key dawn on the celestial horizon crossing (0.25) via a new `DAWN_HORIZON_CROSSING`
   constant, while the light curve keeps Minecraft's named `/time` target (0.2083) — see
@@ -835,11 +913,11 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-12 (RF-2 disc detail, Sky Editor + phase browsing, rendered-pixel suite; dawn-timing seam closed)  
-**Next Review:** when RF-3 is scheduled — **RF-9 is now the most visible open item**, its severity
-measured in game (a 30%-occluded face is 14.8× darker than flat ground at midnight and indistinguishable
-from a sealed cave face). It shares RF-3's vertex-channel allocation and the two should be decided
-together, alongside TF-11's claim on the same `Color32` stream. **Verify that claim before believing
-it:** RF-9's entry calls the stream "double-claimed", but neither TF-11 nor RF-3 has shipped, so
-`SectionRenderer.Layout` may show it free. Note that no validation suite can observe the shader half of
-RF-1 §10 or any of RF-2's rendering — both are capture-verified only.
+**Last Updated:** 2026-08-12 (RF-3 shipped: HDR emissive path, bloom, `Color32.a` allocation registry)  
+**Next Review:** **RF-9 is the most visible open item**, its severity measured in game (a 30%-occluded
+face is 14.8× darker than flat ground at midnight and indistinguishable from a sealed cave face). Its
+vertex-channel question is **no longer shared with RF-3** — RF-3 spent `Color32.a` on 2026-08-12, so
+RF-9 now chooses between taking block-side RGB ahead of TF-11 or growing the MR-2 vertex; see RF-3 §2's
+allocation registry for the current channel state rather than re-deriving it. Note that no validation
+suite can observe the shader half of RF-1 §10, any of RF-2's rendering, or RF-3's emissive *render* (B61
+guards only the vertex data) — all are capture-verified only.

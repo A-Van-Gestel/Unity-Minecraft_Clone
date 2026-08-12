@@ -294,8 +294,9 @@ engine-owned analytic fog (`Assets/Shaders/Includes/VoxelFog.hlsl`, horizontal d
 curve, tinted to the horizon color), deliberately *not* Unity's `RenderSettings.fog` — so `m_Fog: 0`
 remains correct and there are no `FOG` shader variants. See
 [`../Architecture/SKY_AND_CELESTIAL_RENDERING.md`](../Architecture/SKY_AND_CELESTIAL_RENDERING.md) §5.
-VX-2 layers above it rather than replacing it. No post-processing volume exists (RF-3). Torch/lava light
-reaches the eye only off surfaces; air is never lit.
+VX-2 layers above it rather than replacing it. A post-processing volume **now exists** — RF-3 shipped a
+global `Volume` + Bloom in `World.unity` on 2026-08-12, so VX passes needing the post stack no longer
+have to stand it up first. Torch/lava light reaches the eye only off surfaces; air is never lit.
 
 **Gap / finding:** light shafts through a forest canopy at dawn, torch glow hanging in cave air,
 a lit doorway spilling into night fog — the single largest "next-gen voxel" read — all require
