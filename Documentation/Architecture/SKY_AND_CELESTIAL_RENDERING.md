@@ -1,6 +1,6 @@
 # Sky & Celestial Rendering
 
-**Version:** 1.4  
+**Version:** 1.5  
 **Date:** 2026-08-12  
 **Status:** **Implemented (Stable)** — RF-2 phases 1 and 2, the `Distance Fog` setting, the richer sun/moon discs, and the Sky Editor are shipped and confirmed (2026-08-11, discs and tool 2026-08-12). Guarded by the `Validate Sky` suite (**15** baselines, model only) and `Validate Sky Render` (**6** baselines on rendered pixels) — see §7. Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -164,6 +164,18 @@ what keeps the moon's phase and the sun's position on one clock.
 Camera clear flags and `RenderSettings.skybox` are set **from code** at `StartWorld`, never by editing
 `World.unity`. Both are captured and restored in `OnDestroy` — they are *scene* state, and a leaked
 skybox would follow the user into the Scene view.
+
+**The skybox is opt-out, and the flat background is its fallback — not dead code.**
+`World.ApplySkyRenderSettings` returns early when `_skyMaterial` is unassigned, so the clear flags are
+never switched and the camera keeps clearing to `TimeOfDaySettings._backgroundOverDay`; the field's
+tooltip offers exactly that ("Leave empty to keep the flat background color"). The shipped `World.prefab`
+does bind `Sky.mat`, which makes the background colour invisible **in the default configuration only** —
+it still renders whenever the material is cleared, whenever `Camera.main` is null at `StartWorld`, after
+teardown restores the scene's original flags, and under Unity's own degradation when a skybox material is
+missing or its shader failed to compile. That last case is why the path is worth keeping: it is what
+stands between a broken sky shader and an undefined screen. Consequence for authoring: the background
+gradient must be kept in step with the zenith/horizon gradients (§2.5) rather than treated as legacy,
+because it is what a player sees on that fallback.
 
 `RenderSettings.ambientMode` is pinned to `Flat`. Ambient light is skybox-derived by default and this
 skybox changes every frame, which would re-bake the ambient probe continuously; the block shaders read
@@ -419,6 +431,15 @@ not read the atmospheric improvement as having fixed it.
 
 ## Document History
 
+* **v1.5** - **§4 records that the flat background is a fallback, not vestigial code** (2026-08-12).
+  Traced while checking whether `World.cs`'s per-frame `_playerCamera.backgroundColor` assignment had
+  been superseded by the skybox. It has not: `_skyMaterial` is an advertised opt-out, and the background
+  colour is also what Unity falls back to when a skybox material is missing or its shader failed. The
+  suspicion that prompted the trace — that the assignment was now dead — was **wrong**, and it is
+  recorded because the wrong conclusion is the tempting one: the field looks superseded from the call
+  site, and deleting it would have removed a documented option and the degradation path that keeps a
+  broken sky shader from rendering an undefined screen. It also retroactively justifies moving the
+  background gradient's dawn key together with the sky gradients in v1.4 (§2.5).
 * **v1.4** - **The dawn/sun seam closed** (2026-08-12). New §2.5: the gradients now key dawn on the
   celestial crossing (`DAWN_HORIZON_CROSSING = 0.25`) while the light curve keeps Minecraft's named
   `/time` target (`SUNRISE = 0.2083`), which restores an exact dawn/dusk mirror and cuts the luminance
