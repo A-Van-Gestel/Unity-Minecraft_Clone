@@ -74,8 +74,14 @@ tessellation hardware in order to draw water.
 
 ### 1.3 Count your interpolators when adding a varying
 
-The budget is per-tier and silent when exceeded on a platform that does not enforce it — a shader can
-compile clean on desktop D3D11 and fail only on a stricter backend. When adding a field to a `v2f` struct:
+Exceeding the declared budget is silent in practice: `UberLiquidShader` shipped `LiquidV2F` at 11
+interpolators under `#pragma target 3.0` (budget 10) and compiled clean with zero shader messages on
+**both** desktop D3D11 and the Android target (Vulkan + OpenGLES3, tested 2026-08-14). Unity did not
+enforce the cap on any platform this project builds for. Treat the budget as a contract you keep because
+the declaration should describe what the shader uses — **not** as something the compiler will catch for
+you. Whether a stricter backend or a real player build would reject it is untested.
+
+When adding a field to a `v2f` struct:
 
 - **`SV_POSITION` does not count**, but **`COLOR` does** — it occupies a slot exactly like a `TEXCOORD`.
 - A `half`/`float` scalar costs a **whole** slot, same as a `float4`. Prefer widening a neighbouring vector

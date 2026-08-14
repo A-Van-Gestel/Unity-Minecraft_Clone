@@ -29,8 +29,11 @@ a declared `target 3.0`.
 
 **Why it mattered:** A uniformity change, not a correctness one — none of the ten needed more than 3.5
 (`VoxelV2F` uses 4 interpolators). One number across the fleet removes per-shader capability guesswork and
-pre-empts the next silent interpolator overflow, which is a platform-conditional failure that compiles
-clean on desktop D3D11. The cost is dropping DX11 feature level 9, which this project does not target.
+keeps each declaration honest about what its shader uses. Note the overflow that prompted this was **not**
+a reproducible failure: `target 3.0` with 11 interpolators compiled clean on desktop D3D11 *and* on the
+Android target (Vulkan + OpenGLES3) with zero shader messages, so the original review finding's
+"platform-conditional compile failure" was overstated. The cost is dropping DX11 feature level 9, which
+this project does not target.
 The rule itself lives in [`../Guides/SHADER_CONVENTIONS.md`](../Guides/SHADER_CONVENTIONS.md) §1 and
 outlives this entry.
 

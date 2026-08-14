@@ -417,7 +417,8 @@ game. Tonemapping (§1's second half) and the §5 effects remain open, each stil
 >   (`GraphicsSettingsController.ApplyBloom`): `MainMenu.unity` hosts the same controller but has no
 >   `Volume`, so without the gate the default-on setting forced a full-screen post pass and an
 >   intermediate target there for no visual effect. `_EmissiveBoost` stays unconditional — it is inert
->   without emissive geometry.
+>   without emissive geometry. Confirmed in game 2026-08-14: no main-menu regression, bloom unchanged
+>   in world.
 > - **Shader model:** the liquid path went to `#pragma target 3.5` (from 3.0) because `LiquidV2F` now
 >   carries 11 interpolators and 3.0 only guarantees 10 (`interpolators10`); 3.5 is the tier that raises
 >   it to `interpolators15`. Free on this project's targets — 3.0 and 3.5 have identical platform support
