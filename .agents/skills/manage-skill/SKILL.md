@@ -1,15 +1,19 @@
 ---
-name: create-skill
-description: Author a new agent skill under .agents/skills/ following the Agent Skills specification and this project's conventions — frontmatter rules, trigger-rich descriptions, progressive disclosure, and never-stale references/ files. Use when the user asks to create, write, or scaffold a new skill, turn a workflow or protocol into a skill, or asks "should this be a skill?".
+name: manage-skill
+description: Create, edit, or audit an agent skill under .agents/skills/ following the Agent Skills specification and this project's conventions — frontmatter rules, trigger-rich descriptions, the description-token budget, progressive disclosure, bidirectional seams, and never-stale references/ files. Use when the user asks to create, write, or scaffold a new skill, edit or audit an existing SKILL.md, turn a workflow or protocol into a skill, or asks "should this be a skill?".
 ---
 
-# Create Skill
+# Manage a skill
 
-Authoring protocol for new skills in `.agents/skills/`. Skills are auto-discovered from that
-directory; a correctly-formed skill appears in the agent's available-skills list with no other
-registration step. The format follows the **Agent Skills specification** — the condensed spec
-lives in [references/agent-skills-spec.md](references/agent-skills-spec.md); read it when unsure
-about a constraint instead of guessing.
+Authoring and maintenance protocol for skills in `.agents/skills/` — creating a new one, and
+editing or auditing an existing one. Skills are auto-discovered from that directory; a
+correctly-formed skill appears in the agent's available-skills list with no other registration
+step. The format follows the **Agent Skills specification** — the condensed spec lives in
+[references/agent-skills-spec.md](references/agent-skills-spec.md); read it when unsure about a
+constraint instead of guessing.
+
+Creating a new skill is Steps 1–5 below; **Editing an existing skill** is a separate short
+section after them.
 
 ## Step 1 — Decide it should be a skill at all
 
@@ -21,8 +25,18 @@ in full only when a matching task appears. It is the wrong container for:
 - **System knowledge** → `Documentation/` (skills may *point* there, not duplicate it).
 
 Also check the existing skills list first: extending a sibling skill (or splitting one) may beat
-adding a near-duplicate. Every new skill permanently costs ~100 tokens of description in every
-session, so the description must earn its seat.
+adding a near-duplicate. Every new skill's description is loaded into **every** session forever,
+whether or not it fires, so measure the standing cost before adding to it:
+
+```bash
+# total always-loaded description cost across all skills
+grep -h '^description: ' .agents/skills/*/SKILL.md | wc -c
+```
+
+Re-measure rather than trusting a remembered number. A near-duplicate costs every future session
+real context *and* dilutes activation — two similar descriptions compete for the same trigger.
+**Prefer extending or splitting a sibling over adding a near-duplicate.** If the new capability
+is one section long, it is a section in an existing skill.
 
 ## Step 2 — Name and scaffold
 
@@ -86,6 +100,8 @@ when needed — this is the cheap place for templates, specs, and lookup tables.
 line numbers, current backlog items) in `SKILL.md` — they get promoted, moved, and archived.
 Either describe how to *find* the artifact (grep/glob/graph query) or put a stable
 template/snapshot in `references/`. Naming stable *directories* and *conventions* is fine.
+Same rule for counts and versions: if a number will drift, say how to re-measure it rather than
+baking in today's value.
 
 **Scripts:** anything executable goes in `scripts/`, self-contained or with dependencies stated
 at the top; per the repo's Python protocol, substantial persistent tooling belongs in
@@ -99,13 +115,43 @@ at the top; per the repo's Python protocol, substantial persistent tooling belon
    reference covers what it checks.
 2. **Read the file back once** and confirm: no BOM, frontmatter opens at byte 0, `name` matches
    the directory, description under 1024 chars.
-3. **Cross-reference seams**: if the new skill borders an existing one (shared trigger surface),
-   edit the sibling's body (not description, unless it misroutes) to name the split.
+3. **Cross-reference seams, both directions.** If the new skill borders an existing one (shared
+   trigger surface), name the split in **both** bodies — add a routing line to the new skill, then
+   edit the sibling's body to name the new one. A one-way seam is how two skills end up both
+   half-owning a concern, and the older skill is the one an agent is more likely to already be
+   inside. If a user could plausibly invoke the wrong one, put the routing line in the
+   **description** too (`For X use <other-skill> instead`) — the only surface available before
+   either body loads.
 4. **Update `CLAUDE.md` only if** the skill must be discoverable from a rule that already lives
    there (e.g. it gates a workflow like serialization changes). Most skills need no CLAUDE.md
    mention — the description is the discovery mechanism.
 5. Offer a commit message in the project's single-line `Verb: description` style; never
    auto-commit.
+
+## Editing an existing skill
+
+Most changes to a skill are edits, not new skills. The discipline differs from authoring:
+
+- **If the edit adds capability, extend the description too.** The description is the only
+  always-loaded surface (Step 3) — a skill that grows a new section nobody can trigger has gained
+  nothing. Add the new trigger phrasing to the `description`.
+- **If the edit changes what the skill owns, re-check the seam** (Step 5.3) in the *other*
+  direction — a sibling's routing line may now name the wrong owner.
+- **Preserve the description's trigger phrases.** They are load-bearing for activation; never tidy
+  them out to make the line read more cleanly. A tidier description that stops matching is a skill
+  that never runs.
+- **Read the file back** after editing: no BOM, frontmatter still opens at byte 0, `name` still
+  equals the directory, description still under 1024 chars, and every fenced code block is still
+  valid (see Gotchas).
+
+## Gotchas (from real incidents)
+
+- **IDE auto-reflow corrupts SKILL.md code blocks.** An editor reformat has mangled fenced code
+  examples into one-token-per-line garbage. After any IDE-side save of a `SKILL.md`, re-check that
+  its code blocks are still valid.
+- **Don't write generic knowledge.** Ask of every line: *would the agent get this wrong without
+  it?* If no, cut it. A skill is the corrections and conventions specific to this repo, not a
+  restatement of what a capable model already knows.
 
 ## Constraints
 
