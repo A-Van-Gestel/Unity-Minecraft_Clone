@@ -29,9 +29,12 @@ adding a near-duplicate. Every new skill's description is loaded into **every** 
 whether or not it fires, so measure the standing cost before adding to it:
 
 ```bash
-# total always-loaded description cost across all skills
-grep -h '^description: ' .agents/skills/*/SKILL.md | wc -c
+# total always-loaded description cost across all skills, in BYTES (÷4 ≈ tokens)
+for f in .agents/skills/*/SKILL.md; do grep -m1 '^description: ' "$f"; done | wc -c
 ```
+
+The per-file `-m1` matters: a plain `grep -h` over all files also counts every scaffold or example
+`description:` line sitting in a skill *body* (this file has one), inflating the total.
 
 Re-measure rather than trusting a remembered number. A near-duplicate costs every future session
 real context *and* dilutes activation — two similar descriptions compete for the same trigger.
