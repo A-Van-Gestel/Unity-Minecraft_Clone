@@ -21,21 +21,21 @@ This skill codifies the conventions and workflow for producing release notes ent
 2. **List existing release notes** in `Documentation/Release Notes/` to find the most recent entry — its structure takes precedence for formatting decisions.
 3. **Read the two most recent release notes files** to internalize the current style and the "previous releases" carry-forward list.
 4. **Get the full commit log** between the two tags:
-   ```
+   ```bash
    git log <from-tag>..<to-tag> --pretty=format:"%h %s" --no-merges --reverse
    ```
-   Use `--reverse` so commits appear in chronological order (oldest first), making it easier to trace feature arcs. For large ranges, paginate with `Select-Object -Skip N -First M` (PowerShell) or `head`/`tail` (Unix) to avoid truncation.
+   Use `--reverse` so commits appear in chronological order (oldest first), making it easier to trace feature arcs. For large ranges, paginate with `--skip=N -n M` (git's own flags, so no shell dependency) to avoid truncation.
 5. **Count total commits** for the summary header context:
-   ```
-   git log <from-tag>..<to-tag> --oneline --no-merges | Measure-Object -Line
+   ```bash
+   git rev-list --count <from-tag>..<to-tag> --no-merges
    ```
 6. **Get the changed-file stats** for the range — the paths a change touched are a second,
    independent signal for classification (see Step 2):
-   ```
+   ```bash
    git diff --stat <from-tag>..<to-tag>
    ```
    When a single commit's intent is ambiguous from its subject, inspect that commit's own paths:
-   ```
+   ```bash
    git show --stat <hash>
    ```
 
