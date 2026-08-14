@@ -110,18 +110,28 @@ For each doc identified, the change is exactly one of these:
 Two checks. The first runs **every time** this skill runs; the second only when a doc's path or
 name changed.
 
-**Always — `@Documentation/` reference integrity.** This repo wires ~40 `@Documentation/...`
-references from `CLAUDE.md`, `AGENTS.md`, and `.agents/skills/` into the doc tree, and a broken
-one silently degrades agent context — nothing errors. It is cheap to list them and confirm each
-target resolves, so do it regardless of what you changed:
+**Always — `@Documentation/` reference integrity.** This repo wires several dozen
+`@Documentation/...` references from `CLAUDE.md`, `AGENTS.md`, and `.agents/skills/` into the doc
+tree, and a broken one silently degrades agent context — nothing errors. It is cheap to check, so
+do it regardless of what you changed:
 
 ```bash
-grep -rn '@Documentation/' CLAUDE.md AGENTS.md .agents/ Documentation/
+python Tools/Python/check_doc_refs.py
 ```
 
-Confirm each referenced file exists — mind the two subfolders whose names contain spaces
-(`Architecture/World Generation/`, `Architecture/Testing Framework/`). A reference to a moved or
-renamed file is the failure to fix. This is the check that catches breakage from moves made
+It prints the number of references it found and lists any that do not resolve, exiting non-zero
+on failure. **A "0 unresolved" result only means something if the found-count is plausible** — a
+run reporting zero references found is a broken scan, not a clean tree. Re-measure rather than
+trusting a remembered total; the count grows as skills and docs are added.
+
+Globs and `{PLACEHOLDER}` segments are deliberately ignored as non-references — today that is one
+reference, the `@Documentation/Bugs/{FILE}` slot in a handoff template. (A bare
+`Documentation/Bugs/*.md` in prose is not an `@`-reference and never enters the scan.) If you
+want the raw list instead, `grep -rn
+'@Documentation/' CLAUDE.md AGENTS.md .agents/ Documentation/` gives it — mind the two subfolders
+whose names contain spaces (`Architecture/World Generation/`, `Architecture/Testing Framework/`).
+A reference to a moved or renamed file is the failure to fix. This is the check that catches
+breakage from moves made
 **outside** a docs-sync run, which is where most stale `@`-refs come from — so it is not gated on
 having renamed anything yourself.
 
