@@ -119,11 +119,17 @@ The recurring shapes in this engine:
   uncovered
 
 **How to check.** Read the `-` lines directly rather than inferring them from the
-new code:
+new code. **Pass the range you resolved in `SKILL.md` step 1** — a bare `git diff`
+sees only unstaged work, so on a pre-merge or staged review it silently reports
+nothing and the gate passes for the wrong reason:
 
 ```bash
-git diff -U5 | grep -nE '^-.*(FormerlySerializedAs|RuntimeInitializeOnLoadMethod|BurstCompile|\.Release\(|\.Complete\(|await |IsCreated|return;|DomainReset)'
+# $RANGE is whatever step 1 resolved: "" (unstaged), --staged, @{u}...HEAD, <base>...HEAD
+git diff -U5 $RANGE | grep -nE '^-.*(FormerlySerializedAs|RuntimeInitializeOnLoadMethod|BurstCompile|\.Release\(|\.Complete\(|await |IsCreated|return;|DomainReset)'
 ```
+
+A new (untracked) file has no `-` side at all, so this gate is a no-op there —
+that is correct, not a gap.
 
 For every hit, ask the two-part question: **what did this line enforce, and where
 does the new code enforce it instead?** A plain move (the reset is now folded into
