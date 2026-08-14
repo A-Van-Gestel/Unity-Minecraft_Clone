@@ -74,7 +74,7 @@ Shader "Hidden/Editor/FluidPreview"
             HLSLPROGRAM
             #pragma vertex vertFunction
             #pragma fragment fragFunction
-            #pragma target 3.0
+            #pragma target 3.5
 
             // Shared liquid logic (identical to the game shader)
             #include "../Includes/LiquidCore.hlsl"
