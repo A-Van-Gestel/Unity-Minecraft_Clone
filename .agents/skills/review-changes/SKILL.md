@@ -1,6 +1,6 @@
 ---
 name: review-changes
-description: Reviews a working diff against this voxel engine's project-specific invariants — the data-oriented architecture constraints, Burst compliance in job code, hot-path GC and pool usage, region serialization and AOT migration, [SerializeField] rename safety, chunk-pipeline invariants, mutable-static domain-reload resets, known-bug collisions, doc impact, and deleted guards. Refutes each candidate, ranks findings Blockers→Low, and gives one verdict — CONTINUE/FIX FIRST on a cheap intermediate run mid-work, MERGE/HOLD before merge. Built to be run repeatedly while the work is in progress. Use when the user says "review my changes", "review the diff", "pre-merge check", "is this ready to merge", "review before commit", "check my work", or before offering a commit on a non-trivial change. Layers on top of your tool's own generic code review (in Claude Code, /code-review) — it does not replace it.
+description: Reviews a working diff against this voxel engine's project-specific invariants — the data-oriented architecture constraints, Burst compliance in job code, hot-path GC and pool usage, region serialization and AOT migration, [SerializeField] rename safety, chunk-pipeline invariants, mutable-static domain-reload resets, known-bug collisions, doc impact, and deleted guards. Refutes each candidate, ranks findings Blockers→Low, and gives one verdict — CONTINUE/FIX FIRST on a cheap intermediate run mid-work, MERGE/HOLD before merge. Built to be run repeatedly while the work is in progress. Use when the user says "review my changes", "review the diff", "pre-merge check", "is this ready to merge", "review before commit", "check my work", or before offering a commit on a non-trivial change.
 ---
 
 # Review changes
@@ -169,10 +169,24 @@ about what the change was "about".
 | `references/gates-core.md` | 1, 2, 3, 4 | **always** |
 | `references/gates-jobs.md` | 5, 6, 7 | `Assets/Scripts/Jobs/`, an `Update`/`LateUpdate`/`FixedUpdate`, a meshing / chunk-loop body, or a job-dispatch wrapper |
 | `references/gates-serialization.md` | 8, 9 | `Assets/Scripts/Serialization/`, `ChunkData.cs`, `ChunkStorageManager.cs`, or a `[SerializeField]` / public field on a `MonoBehaviour` / `ScriptableObject` |
-| `references/gates-pipeline.md` | 10, 11, 12 | `World.cs`, `WorldJobManager.cs`, `ChunkPoolManager.cs`, lighting / fluid / meshing / chunk-management code, or a newly added mutable `static` |
+| `references/gates-pipeline.md` | 10, 11, 12 | `World.cs`, `WorldJobManager.cs`, `ChunkPoolManager.cs`, a pooled type (`Chunk.cs`, `Data/ChunkData.cs`, `Data/ChunkSection.cs`, `VisualizerChunkData.cs`), lighting / fluid / meshing / chunk-management code, or a newly added mutable `static` |
 
 Most diffs load core plus one or two shards. A diff that touches everything loads
 everything — that is correct, not a failure of the router.
+
+One trigger is **content-based, not path-based**: the serialization shard's
+`[SerializeField]` / public-field condition cannot be settled from the file list,
+because any `MonoBehaviour` or `ScriptableObject` in the diff might carry one.
+Scan the diff before deciding to skip it — `git diff $RANGE | grep -nE
+'^[-+].*(\[SerializeField\]|public\s+\w+\s+\w+\s*;)'`. No hits means the shard is
+genuinely not earned; not checking means you do not know.
+
+**The shards summarize `.agents/rules/*.md`; the rules are the source of truth.**
+Those rule files are glob-attached by other harnesses while you *edit* a matching
+file — nothing auto-loads them during a review here, so a gate that names one is
+telling you to open it. Gates 5, 8 and 10 each carry conventions and carve-outs
+the summary deliberately does not repeat, and reviewing from the summary alone is
+how a `MarshalAs`-less `bool` or an unreset pooled field ships.
 
 Do not review from memory of the gate titles. The baselines and the exceptions
 are the part that matters, and the exceptions are where false positives come from.
