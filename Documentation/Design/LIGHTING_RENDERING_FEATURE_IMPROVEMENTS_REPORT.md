@@ -1,6 +1,6 @@
 # Lighting & Rendering Feature Improvements Report
 
-**Version:** 1.8  
+**Version:** 2.0  
 **Date:** 2026-08-12  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified. Owns lighting
 and rendering *features* (`RF-*`); the *performance* counterparts (`LI-*`, `GS-*`) live in
@@ -444,13 +444,27 @@ game. Tonemapping (§1's second half) and the §5 effects remain open, each stil
    tonemapper, so exactly one variable changed and the A/B captures stayed readable. ACES visibly shifts
    every existing colour and still needs its own capture pass and sign-off.
 2. **Bloom does not appear in the UI blur backdrop.** `UIBlurRendererFeature` injects at
-   `RenderPassEvent.AfterRenderingTransparents` (`UIBlurRendererFeature.cs:69`), and URP composites the
+   `RenderPassEvent.AfterRenderingTransparents` (`UIBlurRendererFeature.cs:73`), and URP composites the
    post stack *after* that — so the blur snapshots scene colour one stage before bloom exists. Verified in
    game and **accepted**; changing it means moving the injection point past post-processing.
 3. **No performance capture was taken.** Bloom ships default-on without a measured frame cost; the
    post stack adds a full-screen pass plus an intermediate target. Waived by the user for desktop.
 4. **§5 effects** (vignette, DoF, motion blur) remain unstarted — the Volume now exists, so each is one
    override plus a sign-off.
+5. **The UI blur target must stay a persistent per-camera resource** — never a render graph texture.
+   Enabling bloom turned the pause-menu backdrop near-black with the lava still blazing through it
+   (fixed 2026-08-14, confirmed in game). `UIBlurRenderPass` published its blurred result as the global
+   `_UIBlurTexture`, but that result was a graph-created texture, and the render graph returns
+   non-imported resources to its pool **at their last-used pass** mid-frame
+   (`NativePassCompiler.cs:1930-1949`). Every canvas here is Screen Space - Overlay, so the UI samples
+   `_UIBlurTexture` *after* the graph has finished. With bloom off nothing else claimed that memory and
+   the blur survived by luck; with bloom on, URP's bloom **prefilter** — same half resolution, same
+   `B10G11R11_UFloatPack32` — was handed the identical texture, so the UI sampled the scene thresholded
+   at 1.1: emitters intact, everything below gone. Proven by dropping `threshold` to 0, which made the
+   backdrop show the full scene, sharp and unblurred. The target is now `UIBlurHistory`, a
+   `CameraHistoryItem` imported into the graph each frame, keyed per camera so a Game and a Scene view
+   at different sizes do not reallocate each other's; a feature-owned handle covers cameras with no
+   history manager. Independent of limitation 2 — the blur still samples one stage before bloom.
 
 **What exists today.** *(pre-implementation analysis, retained for context)*
 
@@ -830,6 +844,14 @@ vertex-channel allocation it shares, rather than on its own merit).
 
 ## Document History
 
+* **v2.0** - **RF-3 limitation 5 added** (2026-08-14): the UI blur target must remain a persistent
+  per-camera resource. Bloom being enabled made the pause-menu backdrop near-black because
+  `UIBlurRenderPass` published a render-graph-pooled texture as `_UIBlurTexture`, and the bloom
+  prefilter — identical descriptor — was handed that memory after the pool released it at its last-used
+  pass, while Overlay canvases sample the global *after* the graph. Diagnosed by dropping bloom's
+  `threshold` to 0 (backdrop then showed the full sharp scene), fixed with a per-camera `UIBlurHistory`
+  imported into the graph, confirmed in game. Limitation 2 is unchanged and unrelated; its line
+  reference was corrected (`:69` → `:73`).
 * **v1.9** - **RF-3 shipped** (2026-08-12; `b981ec44`, `3b246bc2`, `c1748d15`, `95bae9a0`). §1 stack,
   §2 HDR emissive and §3 gating are in game behind one `Bloom` Graphics setting; tonemapping and the §5
   effects stay open. The entry gained an as-built block, five corrections to its original analysis (the

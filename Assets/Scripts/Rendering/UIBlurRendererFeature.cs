@@ -58,15 +58,36 @@ namespace Rendering
         /// <inheritdoc/>
         public override void Create()
         {
+            // Runs again on domain reload and on every inspector edit, with no matching Dispose, so it
+            // must both clear stale state and stay idempotent.
             if (_settings.blurShader == null)
             {
+                ReleaseResources();
                 Debug.LogWarning("UIBlurRendererFeature: No blur shader assigned. Feature disabled.");
                 return;
             }
 
+            // Only a shader swap needs a rebuild — the pass caches the material. Iteration and downsample
+            // edits need none: the pass holds this same Settings instance, so it already reads them.
+            if (_blurPass != null && _blurMaterial != null && _blurMaterial.shader == _settings.blurShader)
+                return;
+
+            ReleaseResources();
             _blurMaterial = CoreUtils.CreateEngineMaterial(_settings.blurShader);
             _blurPass = new UIBlurRenderPass(_blurMaterial, _settings);
             _blurPass.renderPassEvent = RenderPassEvent.AfterRenderingTransparents;
+        }
+
+        /// <summary>
+        /// Releases the pass's blur target and the blit material, leaving the feature inert until the
+        /// next <see cref="Create"/>.
+        /// </summary>
+        private void ReleaseResources()
+        {
+            _blurPass?.Dispose();
+            _blurPass = null;
+            CoreUtils.Destroy(_blurMaterial);
+            _blurMaterial = null;
         }
 
         /// <inheritdoc/>
@@ -85,7 +106,7 @@ namespace Rendering
         /// <inheritdoc/>
         protected override void Dispose(bool disposing)
         {
-            CoreUtils.Destroy(_blurMaterial);
+            ReleaseResources();
         }
 
         /// <summary>
@@ -102,6 +123,17 @@ namespace Rendering
         {
             private readonly Material _material;
             private readonly Settings _settings;
+
+            /// <summary>
+            /// Blur target for cameras that expose no history manager. Shared by all such cameras,
+            /// so it reallocates if two of them differ in size.
+            /// </summary>
+            /// <remarks>
+            /// <see cref="UIBlurHistory"/> is the normal path and documents why the target must not
+            /// be a render graph texture. This handle only covers the case where URP hands us a
+            /// camera without one.
+            /// </remarks>
+            private RTHandle _fallbackResult;
 
             private static readonly int s_blurOffsetId = Shader.PropertyToID("_BlurOffset");
             private static readonly int s_globalBlurTexId = Shader.PropertyToID("_UIBlurTexture");
@@ -132,6 +164,16 @@ namespace Rendering
                 _settings = settings;
             }
 
+            /// <summary>
+            /// Releases the fallback blur target. Per-camera targets are owned by URP's history
+            /// system, which releases them with their camera.
+            /// </summary>
+            public void Dispose()
+            {
+                _fallbackResult?.Release();
+                _fallbackResult = null;
+            }
+
             /// <inheritdoc/>
             public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
             {
@@ -151,10 +193,16 @@ namespace Rendering
                 TextureHandle tempB = UniversalRenderer.CreateRenderGraphTexture(
                     renderGraph, desc, "_UIBlurTempB", false, FilterMode.Bilinear);
 
+                // The last iteration writes into a persistent per-camera target instead of a pooled one,
+                // so the result survives past the graph for the overlay UI to sample.
+                TextureHandle blurResult = renderGraph.ImportTexture(GetBlurTarget(cameraData, ref desc));
+                int lastIteration = _settings.iterations - 1;
+
                 TextureHandle cameraColor = resourceData.activeColorTexture;
 
-                // First iteration: blit camera → tempA
-                AddKawaseBlitPass(renderGraph, cameraColor, tempA, 0.5f, "UI Blur Iter 0");
+                // First iteration: blit camera → tempA (or straight to the result at a single iteration)
+                AddKawaseBlitPass(renderGraph, cameraColor, lastIteration == 0 ? blurResult : tempA,
+                    0.5f, "UI Blur Iter 0");
 
                 // Subsequent iterations: ping-pong between tempA ↔ tempB.
                 // Use a gentle offset progression: [0.5, 0.5, 1.5, 1.5, 2.5, 2.5, ...]
@@ -166,23 +214,42 @@ namespace Rendering
                     int step = i / 2; // Intentional integer division: [0, 0, 1, 1, 2, 2, ...]
                     float offset = 0.5f + step;
                     TextureHandle src = i % 2 == 1 ? tempA : tempB;
-                    TextureHandle dst = i % 2 == 1 ? tempB : tempA;
+                    TextureHandle dst = i == lastIteration ? blurResult : (i % 2 == 1 ? tempB : tempA);
                     AddKawaseBlitPass(renderGraph, src, dst, offset, $"UI Blur Iter {i}");
                 }
-
-                // Determine which buffer has the final result
-                TextureHandle finalResult = _settings.iterations % 2 == 1 ? tempA : tempB;
 
                 // Set the result as a global texture so UI shaders can sample _UIBlurTexture.
                 // Must use AddUnsafePass because SetGlobalTexture modifies global state,
                 // which is not permitted inside AddRasterRenderPass.
                 using IUnsafeRenderGraphBuilder builder = renderGraph.AddUnsafePass(
                     "Set UI Blur Global", out SetGlobalPassData globalData);
-                globalData.BlurredTexture = finalResult;
-                builder.UseTexture(finalResult, AccessFlags.Read);
+                globalData.BlurredTexture = blurResult;
+                builder.UseTexture(blurResult, AccessFlags.Read);
                 builder.AllowPassCulling(false);
 
                 builder.SetRenderFunc(static (SetGlobalPassData data, UnsafeGraphContext context) => { context.cmd.SetGlobalTexture(s_globalBlurTexId, data.BlurredTexture); });
+            }
+
+            /// <summary>
+            /// Resolves this camera's persistent blur target, allocating or resizing it as needed.
+            /// </summary>
+            /// <param name="cameraData">Frame data for the camera being rendered.</param>
+            /// <param name="descriptor">Descriptor of the downsampled blur target.</param>
+            /// <returns>The target to render the final blur iteration into.</returns>
+            private RTHandle GetBlurTarget(UniversalCameraData cameraData, ref RenderTextureDescriptor descriptor)
+            {
+                UniversalCameraHistory history = cameraData.historyManager;
+                if (history != null)
+                {
+                    history.RequestAccess<UIBlurHistory>();
+                    RTHandle target = history.GetHistoryForWrite<UIBlurHistory>()?.Update(ref descriptor);
+                    if (target != null) return target;
+                }
+
+                // Named apart from the history target so the active path is visible in the Frame Debugger.
+                RenderingUtils.ReAllocateHandleIfNeeded(ref _fallbackResult, descriptor, FilterMode.Bilinear,
+                    TextureWrapMode.Clamp, name: "_UIBlurTextureFallback");
+                return _fallbackResult;
             }
 
             /// <summary>
