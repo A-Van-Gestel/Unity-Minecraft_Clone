@@ -29,10 +29,28 @@ This skill codifies the conventions and workflow for producing release notes ent
    ```
    git log <from-tag>..<to-tag> --oneline --no-merges | Measure-Object -Line
    ```
+6. **Get the changed-file stats** for the range — the paths a change touched are a second,
+   independent signal for classification (see Step 2):
+   ```
+   git diff --stat <from-tag>..<to-tag>
+   ```
+   When a single commit's intent is ambiguous from its subject, inspect that commit's own paths:
+   ```
+   git show --stat <hash>
+   ```
 
 ### Step 2 — Classify and bundle commits
 
-Read through every commit subject line and classify each into one of these categories:
+Classify each commit using **both** signals together — its subject/body **and** the files it
+touched. This repo's commit messages are clean and carry the real intent (the `WS-4` / `CL-3` /
+`Bug 19` IDs, phase labels, and `→` fix summaries the notes are built from), so the subject is the
+**primary** signal here, not a fallback. The changed paths from the `git diff --stat` pass are the
+**corroborating** signal: they confirm which subsystem a change actually lands in and catch the
+occasional commit whose wording describes intent while the diff touches a different area. When the
+two disagree, read the diff before classifying — the paths win on *where*, the message wins on
+*why*.
+
+Classify each into one of these categories:
 
 | Category                                  | Bundling rule                                                                                                                                                                                            | Example                                                                                                                                  |
 |-------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------|
@@ -66,5 +84,11 @@ over the template if they differ.
 - **Never include**: version bump commits, agent/skill config changes, doc-only commits (unless they represent a major new architecture doc), or chore commits.
 - **Preserve the existing carry-forward chain.** The "previous releases" section is an append-only accumulator — never drop items from earlier releases.
 - **Do not fabricate measured numbers.** Only include performance figures (−47%, 3× speedup) if they appear in the commit messages or linked benchmark reports. If no number is available, say "benchmark-confirmed" or omit the metric.
-- **One file per release.** Never modify a previous release notes file when creating a new one.
+- **One file per release; a shipped note is frozen.** While the current release's note is still
+  WIP (uncommitted), edit it freely — that is expected. Once a release note is committed, treat it
+  as historical: never edit it in place to fix or update something, because a reader may already
+  have acted on the shipped text. Publish the correction as its own dated note/addendum (or an
+  explicit correction entry in the next release's notes) stating what changed and why. Never
+  silently rewrite a shipped note, and never modify an earlier release's file when creating a new
+  one.
 - **Ask before assuming.** If the tag range is ambiguous, or if a commit's intent is unclear from the subject line alone, ask the user rather than guessing.
