@@ -255,6 +255,11 @@ a=0.7, `s_resultsOverlayColor` a=0.85) record the intended translucency.
 **Not the cause:** the two separate `Material` instances the benchmark creates. A single shared material
 behaves identically — the defect is in the shader's vertex-color contract, not in instancing.
 
+**The system these panels belong to is documented in**
+[`../Architecture/UI_BLUR_BACKDROP_SYSTEM.md`](../Architecture/UI_BLUR_BACKDROP_SYSTEM.md) — its §4
+carries the authoring rules (alpha is sharp-bleed, not transparency; material colors are gamma-converted
+but vertex colors are not; RGB must be white) that this entry's fix established.
+
 **Distinct from `#05`,** which concerns the blur *producer* (`UIBlurBlit.shader` + the renderer feature) and
 its resolution dependence. This entry is about the *consumer* shader's compositing. They are being fixed
 separately, on the user's decision, because `#05`'s acceptance test needs a matched two-resolution capture.
