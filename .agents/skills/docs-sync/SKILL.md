@@ -1,6 +1,6 @@
 ---
 name: docs-sync
-description: Keep Documentation/Architecture, Design, Guides, and Performance docs in sync with code changes that alter documented behavior. Use whenever a change modifies a system that has a corresponding architecture/design/guide document, when a Design doc's described feature has just shipped (promote to Architecture or flip status to "Implemented"), or when the user asks to "update the docs" / "check what doc this affects".
+description: Keep Documentation/Architecture, Design, Guides, and Performance docs in sync with code changes that alter documented behavior. Use whenever a change modifies a system that has a corresponding architecture/design/guide document, when a Design doc's described feature has just shipped (promote to Architecture or flip status to "Implemented"), or when the user asks to "update the docs" / "check what doc this affects" / "is this area documented at all".
 ---
 
 # Documentation Sync Protocol
@@ -76,24 +76,71 @@ Grep pattern="<OldClassName>|<old_concept>" path="Documentation/"
 
 Any hit is a doc that references your change and may need updating.
 
+**Where there is deliberately no owning doc.** The tree covers the **DOTS engine core** — chunk
+lifecycle, world generation, lighting, meshing, serialization, block-behavior tick, sub-voxel
+collision, floating origin, sky rendering, the command console, and the reflection settings UI.
+It deliberately does **not** cover the gameplay/glue layers, so "no match" there is a real answer,
+not a lookup failure:
+
+- Player input & controls (`Assets/Scripts/Input/`), spawning (`Spawn/`), block placement &
+  interaction (`Placement/`), and general UI/HUD beyond the settings generator.
+- Utility and debug glue — `Helpers/`, `Config/`, `Attributes/`, `DebugVisualizations/`.
+- Most of `Assets/Editor/` tooling (`BlockEditor/`, `AtlasPacker/`, `StructureEditor/`,
+  `WorldTools/`, `DataGeneration/`, `PropertyDrawers/`, …). The exception is
+  `Assets/Editor/Validation/` (lighting harness), which has a fidelity doc and the
+  `validation-driven-bugfix` skill.
+- `Legacy/` and third-party `Libraries/` — undocumented by design.
+
+When a change lands only in these areas and alters no documented system, the verdict is
+**no-op / surface-the-gap**, never `needs-new-doc` on reflex. This list is category-level, not
+exhaustive — confirm with `codegraph_search` if unsure whether a system quietly grew a doc since
+it was written.
+
 ### Step 2 — Classify the doc impact
 
 For each doc identified, the change is exactly one of these:
 
 1. **No-op** — doc still accurately describes the system. Note this and move on; do not edit a doc just to touch it.
 2. **Targeted edit** — a specific section, diagram, file/class name, or invariant in the doc is now wrong. Apply the **smallest** diff that restores accuracy. Do not rewrite surrounding paragraphs that are still correct (matches the `CLAUDE.md` "Modification: do not rewrite entire files to make minor changes" rule).
-3. **Status promotion** (Design docs only) — the design has shipped. Update the front-matter / status line to "Implemented" and add a one-line pointer to the new Architecture doc if one exists. Use the same pattern as commit `0818b51`.
+3. **Status promotion** (Design docs only) — the design has shipped. Update **only** the status line (to "Implemented") and add a one-line pointer to the new Architecture doc if one exists — do **not** rewrite the doc's body to describe the final implementation; that belongs in the Architecture doc, not the now-historical Design doc. Use the same pattern as commit `0818b51`.
 4. **New Architecture doc needed** — a substantial new system was introduced and there is no doc for it. Stop and ask the user whether to author one in this commit or open a follow-up — do not unilaterally create a new architecture document, since they are load-bearing and need user sign-off on tone/scope.
 
 ### Step 3 — Verify cross-references
 
-After editing a doc, check that other docs and `CLAUDE.md` still link to it correctly:
+Two checks. The first runs **every time** this skill runs; the second only when a doc's path or
+name changed.
 
-```
-Grep pattern="<DocFileName>" path="."   # finds @-references and links
+**Always — `@Documentation/` reference integrity.** This repo wires ~40 `@Documentation/...`
+references from `CLAUDE.md`, `AGENTS.md`, and `.agents/skills/` into the doc tree, and a broken
+one silently degrades agent context — nothing errors. It is cheap to list them and confirm each
+target resolves, so do it regardless of what you changed:
+
+```bash
+grep -rn '@Documentation/' CLAUDE.md AGENTS.md .agents/ Documentation/
 ```
 
-If you renamed or moved a doc, update every `@Documentation/...` reference in `CLAUDE.md`, `AGENTS.md`, sibling docs, and any `.agents/skills/*.md` that names it. Broken `@`-refs silently degrade agent context windows.
+Confirm each referenced file exists — mind the two subfolders whose names contain spaces
+(`Architecture/World Generation/`, `Architecture/Testing Framework/`). A reference to a moved or
+renamed file is the failure to fix. This is the check that catches breakage from moves made
+**outside** a docs-sync run, which is where most stale `@`-refs come from — so it is not gated on
+having renamed anything yourself.
+
+**On rename / move / split only — sweep the doc's inbound references.** When *this* change
+renamed, moved, or split a doc, find everything that points at it and fix it in the same commit.
+Sweep on the **bare filename**, because references come in two shapes and a link-only grep misses
+one:
+
+```bash
+grep -rn "OldDocName.md" CLAUDE.md AGENTS.md Documentation/ .agents/
+```
+
+- **`@Documentation/...` references and markdown links** are relative, so they break on a *move*
+  even when the filename is unchanged — check the relative path, not just the name.
+- **Prose mentions** — a backticked path in a table or sentence. Skill files and guides cite docs
+  this way rather than as links, so a name-only grep is what catches them.
+
+Fix every hit in the same commit as the rename. Broken `@`-refs silently degrade agent context
+windows.
 
 ### Step 4 — Commit alongside the code change
 
@@ -105,10 +152,28 @@ Updated: Lighting BFS to skip neighbor chunks + LIGHTING_SYSTEM_OVERVIEW.md
 
 Status-only flips on Design docs may stand alone (the `0818b51` precedent), but behavior changes must travel with their docs.
 
+## Output shape
+
+End with a short block, not prose — state the verdict explicitly, because a silent skip is
+indistinguishable from an oversight:
+
+```
+Doc impact: targeted edit
+  Architecture/LIGHTING_SYSTEM_OVERVIEW.md — BFS neighbor-skip note (1 paragraph)
+Not documented: Assets/Scripts/Input/ has no owning doc (gameplay glue — surface-the-gap)
+Reported, not fixed: CHUNK_LIFECYCLE_PIPELINE.md still cites the old flag name near line 120
+```
+
+`Reported, not fixed` is a required line whenever you noticed drift **outside** the change's own
+blast radius. Finding a stale doc is expected; fixing an unrelated one in the same commit is scope
+creep — report it and let the next targeted pass own it.
+
 ## Constraints
 
 - **Do not invent documentation.** If a code area has no matching doc and the change is small, do not write one — surface the gap to the user and let them decide. Speculative architecture docs rot faster than no docs at all.
 - **Do not mass-rewrite.** Apply targeted diffs. Preserve existing tone, headings, ASCII diagrams, and `#region`-style structure. Never delete a section just because a *different* section is now wrong.
+- **Never restate a claim about code you did not read this session.** A targeted edit must not regenerate prose about behavior you did not verify — that silently launders an unverified claim into an authoritative doc. If a neighbouring claim looks wrong but you cannot confirm it, report it (see Output shape); do not fix it and do not delete it.
+- **Do not restamp a date header for a targeted edit.** Many Architecture and Design docs carry a `Last Updated:` / `Date:` / `Analysis Date:` line, which means *the whole doc was verified at that date*. Restamping after a one-line fix makes the rest of the doc look fresher than it is — only move the stamp when you actually re-verified the whole doc.
 - **Do not edit `Documentation/Bugs/` or `Documentation/Archived/` from this skill.** Those are handled by `archive-fixed-bug` and the `voxel-debugging` workflow respectively.
 - **Do not duplicate content.** If the same fact lives in `CLAUDE.md` and an Architecture doc, link from `CLAUDE.md` to the doc — do not copy the doc's body into `CLAUDE.md`.
 - **Performance docs are append-only snapshots.** `Documentation/Performance/PHASE_*` files capture a benchmark moment; never retroactively edit a phase report. Add a new phase file instead.
