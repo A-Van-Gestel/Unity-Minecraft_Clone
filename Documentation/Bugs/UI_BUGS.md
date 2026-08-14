@@ -132,3 +132,56 @@ the death frame — cross-reference it against a `ShiftOrigin` / arrival-hold / 
 adjacent frames to finally name the destroyer. (If deeper capture is again needed, re-add scaffolding then.)
 
 ---
+
+## 05. UI Blur Strength Scales With Screen Resolution
+
+**Severity:** Bug (cosmetic) — **open, unfixed**  
+**Status:** **Reported, not started.** Reproduced 2026-08-14; deferred by the user as non-blocking. Wants a
+full implementation plan before any code change, because both candidate fixes alter the blur's *look* and
+need a visual sign-off.  
+**Files:** `Assets/Shaders/UIBlurBlit.shader` (kernel), `Assets/Scripts/Rendering/UIBlurRendererFeature.cs`
+(offset progression + blur target size)
+
+**Description:**
+
+The UI blur backdrop (pause menu, console, any `Custom/MaskedUIBlur` panel) gets **blurrier at low
+resolutions and sharper at high ones**. The kernel is specified in *texels* rather than in screen-normalized
+units, so its radius as a fraction of the screen is inversely proportional to render resolution.
+
+**Repro:** open the pause menu (large blur canvas), then change the resolution — in the editor, resizing the
+Game view is enough. The backdrop's blur strength visibly shifts as the resolution changes.
+
+**Mechanism (read from code, not inferred):**
+
+`UIBlurBlit.shader:31` reads `_BlitTexture_TexelSize.xy` (`1/width`, `1/height` of the source) and lines
+37-40 place the four Kawase taps at `(±offset ± 0.5) * texelSize`. The UV-space radius is therefore
+`offset / width`. `UIBlurRendererFeature.cs` derives the blur target from `cameraTargetDescriptor` divided by
+`downsample`, so the `downsample` setting shifts the constant but not the proportionality.
+
+With `downsample: 2` and 4 iterations (max offset ~2 texels):
+
+| Resolution | Blur target width | Max tap radius (screen width) |
+|---|---|---|
+| 2560x1440 | 1280 | ~0.16% |
+| 1280x720  | 640  | ~0.31% |
+
+**Not a regression of `fa9ac4bc`** (the pooled-render-graph-texture fix). That commit changed *which* texture
+the final blur iteration writes into; the per-camera history target takes the identical descriptor the pooled
+temps did, so texel size is untouched. The tap offsets predate this session's work. The defect went unnoticed
+because resolution never changes mid-session in normal play.
+
+**Candidate fixes (not yet decided — this is the plan's job):**
+
+1. **Scale the offsets by resolution** — multiply the `0.5f + step` progression by
+   `blurTargetWidth / referenceWidth`. Smallest diff. Risk: at high resolutions the taps grow large in texels,
+   which is the regime the existing comment in `RecordRenderGraph` warns produces blocky artifacts, so it may
+   need an iteration-count bump to hold quality at 4K.
+2. **Fix the blur target's pixel dimensions** — size it to a constant (~960px wide) instead of dividing by
+   `downsample`. Taps stay small in texels, the UV radius is constant for free, and blur cost stops scaling
+   with resolution. Costs: it redefines what the `downsample` inspector setting means, and softness at the
+   current resolution shifts, so it needs a before/after capture.
+
+Whichever is chosen, the acceptance test is a **matched capture at two resolutions** showing equal blur
+softness as a fraction of the screen — a single-resolution capture cannot observe this defect at all.
+
+---
