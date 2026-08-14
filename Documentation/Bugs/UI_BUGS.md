@@ -185,3 +185,78 @@ Whichever is chosen, the acceptance test is a **matched capture at two resolutio
 softness as a fraction of the screen — a single-resolution capture cannot observe this defect at all.
 
 ---
+
+## 06. UI Blur Panels Are Opaque and Cannot Stack
+
+**Severity:** Bug — **open, unfixed**  
+**Status:** **Reported 2026-08-14, fix planned and approved.** Found while scoping the command console's
+opt-in to the blur backdrop. Fix decided: give `MaskedUIBlur` standard UI vertex-color semantics (full RGBA
+multiply) plus UI clipping support, re-author the five scene panel colors in the same commit, and pin the
+behaviour with a new rendered-pixel validation suite.  
+**Files:** `Assets/Shaders/MaskedUIBlur.shader` (root cause), `Assets/Scenes/World.unity` (five authored
+colors), `Assets/Scripts/Benchmarks/BenchmarkUIBuilder.cs` (same defect, built in code)
+
+**Description:**
+
+Every `Custom/MaskedUIBlur` panel renders **fully opaque**, regardless of the alpha it was authored with.
+Two visible consequences:
+
+1. **A blurred panel hides whatever UI is beneath it.** With the pause menu open, the creative inventory is
+   invisible — not closed, *painted over* by the full-screen pause backdrop.
+2. **Blurred panels cannot stack.** An opaque blur panel is a hole back to the pre-UI frame: it replaces
+   those pixels with world blur instead of compositing over what is already there. The benchmark HUD
+   therefore appears to float *above* the pause menu, showing un-dimmed world where the surrounding screen
+   is dimmed.
+
+**Repro:** open the creative inventory, then open the pause menu — the inventory vanishes. Or run a
+benchmark and pause mid-run — the HUD strip stays visibly lighter than the dimmed screen around it.
+
+**Mechanism (read from code, not inferred):**
+
+`MaskedUIBlur.shader:37-41` declares `appdata_t` with only `POSITION` and `TEXCOORD0` — there is **no
+`COLOR` semantic**, so the UI vertex color is structurally unreachable by the shader. Output alpha comes
+solely from `_MainTex.a` (`:85`), and all five scene panels have `m_Sprite: {fileID: 0}`, so `_MainTex` is
+the default white texture and alpha is **always 1**.
+
+The five panels are nonetheless authored `m_Color = (0, 0, 0, 0.72)` — the classic "dim the screen 72 %"
+overlay, silently promoted to 100 % by the shader. The RGB is black, a leftover from before the Built-in-RP
+GrabPass version was replaced; it is equally ignored today.
+
+The stacking half has a second contributing cause: `UIBlurRendererFeature.cs:78` captures `_UIBlurTexture`
+at `RenderPassEvent.AfterRenderingTransparents`, **before any ScreenSpaceOverlay canvas draws**. Every blur
+panel in the frame samples the same UI-free snapshot, so an opaque one cannot show anything drawn between it
+and the world.
+
+The inventory is genuinely still active while hidden: `WorldUIManager.UpdateUIState()` (`:245-255`) touches
+only `InUI` and the cursor, and never deactivates `creativeInventoryWindow`.
+
+**Evidence — draw order and coverage (`World.unity`, single Canvas at `sortingOrder` 0, so paint order is
+hierarchy order):**
+
+| Panel | Sibling index under `SafeArea` | Rect |
+|---|---|---|
+| `Toolbar` | 1 | 218x26 at scale 3, bottom-centre |
+| `CreativeInventory` | 2 | 216x168 at scale 3, centred |
+| `PauseMenuContainer` -> `PauseMenu` | **5** | anchors (0,0)-(1,1), sizeDelta 0 — **full screen** |
+
+The fifth blurred `Image` is an in-scene added component on the `SettingsMenu` prefab instance
+(`m_PrefabInstance: {fileID: 0}` on the component), so it is a scene-local edit, not a prefab change.
+
+**Impact beyond the two reported symptoms:** the shader also declares no `_Stencil*` properties and no
+`UNITY_UI_CLIP_RECT` / `_ClipRect`, so a blurred graphic inside a `Mask` or `RectMask2D` does not clip at
+all. This blocks the command console from adopting the backdrop: its panel (`ConsoleUI.cs:26-28`, x 12-692)
+overlaps the toolbar (x ~633-1287) by roughly 59 reference px at default UI scale, and would punch the same
+hole through it. `UIScaleController` rescales only the scene canvas, so a Large UI scale widens the overlap.
+
+The benchmark HUD reaches the same end state by a different route — `BenchmarkUIBuilder.cs:53` sets
+`color = Color.white` at **alpha 1**, while its own non-blur fallback constants (`s_hudBackgroundColor`
+a=0.7, `s_resultsOverlayColor` a=0.85) record the intended translucency.
+
+**Not the cause:** the two separate `Material` instances the benchmark creates. A single shared material
+behaves identically — the defect is in the shader's vertex-color contract, not in instancing.
+
+**Distinct from `#05`,** which concerns the blur *producer* (`UIBlurBlit.shader` + the renderer feature) and
+its resolution dependence. This entry is about the *consumer* shader's compositing. They are being fixed
+separately, on the user's decision, because `#05`'s acceptance test needs a matched two-resolution capture.
+
+---
