@@ -30,7 +30,7 @@ Shader "Minecraft/SkyboxShader"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
-            #pragma target 2.0
+            #pragma target 3.5
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             // For _VoxelFogRange / _VoxelFogColor: the sky hazes only when the world's fog is on.

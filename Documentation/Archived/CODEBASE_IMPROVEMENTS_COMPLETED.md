@@ -15,6 +15,31 @@
 
 ---
 
+## 1.4 Shader `#pragma target` sweep to the 3.5 floor  `[DONE]`
+
+**What:** Raised every project-owned shader to an explicit `#pragma target 3.5`. Three declared `2.0`
+(`SkyboxShader`, `StandardBlockShader`, `TransparentBlockShader`) and seven declared nothing at all —
+which is not neutral, since Unity defaults to `2.5` and its 8-interpolator budget. The two liquid shaders
+were already at 3.5, moved there when RF-3's emissive read pushed `LiquidV2F` to 11 interpolators against
+a declared `target 3.0`.
+
+**Files changed:** `BorderWallShader`, `CloudShader`, `DebugVoxelShader`, `MaskedUIBlur`, `UIBlurBlit`,
+`SkyboxShader`, `StandardBlockShader`, `TransparentBlockShader`, `Editor/BlockPreviewShader`,
+`Editor/ChunkPreviewShader`.
+
+**Why it mattered:** A uniformity change, not a correctness one — none of the ten needed more than 3.5
+(`VoxelV2F` uses 4 interpolators). One number across the fleet removes per-shader capability guesswork and
+pre-empts the next silent interpolator overflow, which is a platform-conditional failure that compiles
+clean on desktop D3D11. The cost is dropping DX11 feature level 9, which this project does not target.
+The rule itself lives in [`../Guides/SHADER_CONVENTIONS.md`](../Guides/SHADER_CONVENTIONS.md) §1 and
+outlives this entry.
+
+**Verified:** all ten reimported with `isSupported=true` and zero shader messages; `Validate All`
+477/477 baselines across 21 suites, including Sky Render 7/7 and Meshing 57/57 (the rendered-pixel and
+mesh-output guards over the shaders touched).
+
+---
+
 ## 2.1 `.material` / `.mesh` Implicit Cloning  `[DONE]`
 
 **What:** `SectionRenderer.cs` was migrated to the Advanced Mesh API (`SetVertexBufferParams`, `SetVertexBufferData`, `SetIndexBufferParams`, `SetSubMeshes`) — no implicit cloning. `ChunkLoadAnimation.cs` no longer references `.mesh` or `.sharedMesh` at all (only manipulates `transform.position`).

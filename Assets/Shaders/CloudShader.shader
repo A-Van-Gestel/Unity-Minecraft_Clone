@@ -28,6 +28,7 @@ Shader "Minecraft/CloudShader"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+            #pragma target 3.5
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Includes/VoxelLighting.hlsl"

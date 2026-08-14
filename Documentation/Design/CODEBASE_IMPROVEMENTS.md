@@ -1,6 +1,6 @@
 # Codebase Improvement Backlog
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-07-26  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -78,35 +78,6 @@ by CP-4. No new findings were added — this was a fact check of the existing en
 
 ---
 
-### 1.4 Shader `#pragma target` sweep to the 3.5 floor  `[Improvement]`
-
-The rule and its reasoning live in [`../Guides/SHADER_CONVENTIONS.md`](../Guides/SHADER_CONVENTIONS.md)
-§1 — **3.5 is the project floor**, it is the tier guaranteeing 15 interpolators, and it costs no platform
-reach (identical support list to 3.0). This entry tracks only the un-swept files.
-
-`UberLiquidShader.shader` and `Editor/FluidPreviewShader.shader` were moved 3.0 → 3.5 when
-[RF-3](LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md)'s emissive read pushed `LiquidV2F` to 11
-interpolators. The rest of the fleet was never revisited:
-
-| Shader (project-owned; `Assets/TextMesh Pro/` is vendored and excluded)                                                                       | Declared target                         |
-|-----------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------|
-| `UberLiquidShader.shader`, `Editor/FluidPreviewShader.shader`                                                                                 | **3.5** ✅                               |
-| `SkyboxShader.shader`, `StandardBlockShader.shader`, `TransparentBlockShader.shader`                                                          | 2.0                                     |
-| `BorderWallShader`, `CloudShader`, `DebugVoxelShader`, `MaskedUIBlur`, `UIBlurBlit`, `Editor/BlockPreviewShader`, `Editor/ChunkPreviewShader` | *none declared* (Unity defaults to 2.5) |
-
-**Recommendation:** sweep those ten to an explicit `#pragma target 3.5`, in its **own commit**, separate
-from any behavior change. None of them needs more than 3.5 today (`VoxelV2F` uses 4 interpolators), so
-this is a **uniformity** decision rather than a correctness one: one number across the fleet, no
-per-shader capability analysis, and headroom to 15 interpolators covered before a struct next grows. The
-cost is dropping DX11 feature level 9 — hardware this project does not target.
-
-> **Impact Analysis:**
-> - **Effort:** 🟢 Low — one line per file, ten files.
-> - **Risk:** 🟢 Low — 3.5's support list is a superset of what the project ships to; no shader logic changes.
-> - **Benefit:** 🟡 Medium — removes per-shader capability guesswork and pre-empts the next silent interpolator overflow.
-
----
-
 ## 2. Architecture
 
 ### 2.1 `World.cs` God-Object Decomposition  `[Refactor]`
@@ -161,6 +132,11 @@ carries a commented-out `SaveSystem.LoadChunk` block plus two stacked TODOs ("PH
 *Entries before v1.0 are reconstructed from git history — this document predates the project's
 Document History convention, so they record what the commits changed, not contemporaneous notes.*
 
+* **v1.2** - §1.4 implemented and **archived** to
+  [`../Archived/CODEBASE_IMPROVEMENTS_COMPLETED.md`](../Archived/CODEBASE_IMPROVEMENTS_COMPLETED.md)
+  (2026-08-14): all ten project-owned shaders now declare `#pragma target 3.5`. Verified by reimport
+  (10/10 supported, zero shader messages) and `Validate All` 477/477. Opened and closed the same day —
+  the rule survives in [`../Guides/SHADER_CONVENTIONS.md`](../Guides/SHADER_CONVENTIONS.md) §1.
 * **v1.1** - Added §1.4 (shader `#pragma target` sweep, 2026-08-14): the ten project-owned shaders still
   below the 3.5 floor, to be raised in a standalone commit. Prompted by RF-3's liquid emissive read
   pushing `LiquidV2F` to 11 interpolators against a declared `target 3.0`. The **rule** itself (why 3.5,

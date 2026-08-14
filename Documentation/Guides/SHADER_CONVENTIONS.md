@@ -45,6 +45,9 @@ feature level 10+, OpenGL 3.2+, OpenGL ES 3+, Vulkan, Metal. Adopting it costs n
 Omitting the directive is not neutral: Unity defaults to **2.5**, which guarantees only 8 interpolators.
 Declare it explicitly.
 
+As of 2026-08-14 **every project-owned shader declares 3.5** — a new shader that departs from it should
+say why in a comment at the pragma.
+
 ### 1.2 Do not raise above 3.5 for interpolators — it does not help
 
 4.5 and 5.0 grant **zero** additional interpolators over 3.5. Unity deliberately excludes `interpolators32`

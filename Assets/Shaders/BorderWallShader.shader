@@ -28,6 +28,7 @@ Shader "Minecraft/BorderWall"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+            #pragma target 3.5
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
