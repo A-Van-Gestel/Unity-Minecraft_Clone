@@ -57,6 +57,7 @@ namespace UI
             set
             {
                 _isPauseMenuOpen = value;
+
                 if (pauseMenuController != null)
                 {
                     if (_isPauseMenuOpen)
@@ -235,7 +236,16 @@ namespace UI
             {
                 IsPauseMenuOpen = false;
             }
-            // 3. Otherwise, open Pause Menu
+            // 4. If the inventory is open, Escape dismisses it and stops there (Minecraft's behavior) —
+            // reaching the pause menu from the inventory takes a second press. Together with the
+            // !IsPauseMenuOpen gate on the inventory toggle, this keeps the two from ever being open at
+            // once, which matters because the pause backdrop is opaque and would leave the inventory
+            // invisible but still clickable (UI_BUGS #06).
+            else if (IsCreativeInventoryOpen)
+            {
+                IsCreativeInventoryOpen = false;
+            }
+            // 5. Otherwise, open Pause Menu
             else
             {
                 IsPauseMenuOpen = true;
