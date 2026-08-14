@@ -20,6 +20,14 @@ to a mechanical lens that pass one skipped, and the user reversed the model's de
 the 6 judgment calls once they were surfaced. Before/after snapshot:
 [references/vs2-worked-example.md](references/vs2-worked-example.md).
 
+The six phases, of which only Step 4 is visible to the user (Step 5 executes the approved plan):
+
+```
+0 Entry  →  1 Research  →  2 Draft  →  3 Adversarial  →  4 Present  →  5 Bake in & execute
+ (warm or   (verified      (internal,    (7 lenses +       (decision menu +   (restate, then
+  cold?)     facts only)    never shown)  matching packs)   labeled assumptions) run the gates)
+```
+
 ## When to use / when to skip
 
 - **Use** for session-scale planning: implementing one backlog/design item (warm start), a
@@ -40,6 +48,8 @@ the 6 judgment calls once they were surfaced. Before/after snapshot:
   every count, name, menu item, and API claim against the current code before the plan repeats
   it. (VS-2 example: the report said "2 nightly fuzz" menu items; the code had 3.) Corrections
   found here surface in Step 4's limitations/drift notes and feed `docs-sync` later.
+- **Never re-plan what the doc already scoped.** If its plan is still sound, your deliverable is
+  "execute step N of that doc", not a new plan — say so and stop.
 
 **Cold start** (verbal request only):
 
@@ -56,7 +66,9 @@ the 6 judgment calls once they were surfaced. Before/after snapshot:
   code paths the plan will build on (per the CodeGraph workflow in `CLAUDE.md`).
 - Build an **environment-facts list**. Every fact carries its verification ("no .asmdef under
   Assets/Editor/ — checked", "package X installed — checked manifest") or is tagged
-  **ASSUMPTION** in so many words.
+  **ASSUMPTION** in so many words. A list that comes back with no assumptions on a non-trivial
+  plan means you did not look hard enough, not that everything was verified — these assumptions
+  become the labeled list in Step 4.
 - **Read-before-claim rule:** no behavioral claim about existing code enters the draft unless
   that code path was read this session. "It should compose fine" without reading the callee is
   how plans acquire load-bearing fiction.
@@ -80,31 +92,94 @@ This draft is internal. Presenting it now is the failure mode this skill exists 
 ## Step 3 — Adversarial self-review (mandatory, internal)
 
 Re-read the draft as a hostile reviewer, worst-first, against
-[references/lenses.md](references/lenses.md): the 7 **core lenses** always, plus the **domain
-packs** matching the task shape (hot-path, chunk pipeline, on-disk format, editor tooling,
-documented bug, warm start). Each lens produces one of four dispositions:
+[references/lenses.md](references/lenses.md) — **read that file now, every time, not only when
+the change looks risky.** Run the 7 **core lenses** always, plus the **domain packs** matching
+the task shape (hot-path, chunk pipeline, on-disk format, editor tooling, documented bug, warm
+start). Run them adversarially: a pass that produces no changes to the draft is a failed pass,
+not a clean one.
 
-- **Mechanical fix** → fold into the plan silently (nested-progress-bar class of defect).
-- **Taste decision** → trade-off table, goes to Step 4's decision menu.
-- **Assumption** that can't be verified this session → assumptions list, with the step that
-  will verify it.
-- **Limitation** → stated consequence in the final presentation.
+| # | Lens | Asks |
+|---|---|---|
+| L1 | Composition & shared state | who else is standing on what I am changing |
+| L2 | Read-before-claim | is every behavioral claim here something I actually read |
+| L3 | False-green audit | could my verification pass while the change is broken |
+| L4 | Taste vs mechanical | am I silently defaulting a call that is the user's |
+| L5 | Conventions | does this violate a rule already written down in this repo |
+| L6 | Fragility ranking & matched gate | what is most likely to break, and does my gate exercise *that* |
+| L7 | Limitations & drift | what does this not do, and what did I find broken on the way |
+
+### Give every hit exactly one disposition
+
+A finding is not resolved by noticing it. Each one is exactly one of these four, and the
+disposition decides where it surfaces in Step 4:
+
+| Disposition | When | Where it goes |
+|---|---|---|
+| **Mechanical fix** | one defensible answer given the constraints | folded into the plan silently — no need to narrate it (the nested-progress-bar class of defect) |
+| **Taste decision** | a reasonable person could choose differently | the decision menu, with a recommendation |
+| **Assumption** | the plan depends on it and you cannot verify it this session | the assumptions list, **naming the step that will verify it** |
+| **Limitation** | true, unfixable in scope, and the user should know | the plan's limitations, stated as a consequence |
+
+Two failure modes this prevents. A finding with *no* disposition gets noticed and then quietly
+dropped — the review ran and changed nothing. A finding with the *wrong* disposition is worse: a
+taste call filed as a mechanical fix is exactly the silent defaulting the decision menu exists to
+stop, and an assumption filed as mechanical becomes a design claim the plan asserts without
+evidence.
+
+When torn between mechanical and taste, choose taste. Over-surfacing costs the user one line;
+under-surfacing costs them the decision.
 
 Calibration: if this pass finds nothing, it wasn't actually run — on a plan the size of VS-2
 it found ten items, three of them implementation-breaking.
 
 ## Step 4 — Present: revised plan + decision menu
 
-One message containing, in order:
+One message, in this shape. Keep it tight — a plan nobody finishes reading is skimmed, not
+approved.
 
-1. The **revised plan** (post-review, mechanical fixes already folded in).
-2. The **decision menu**: every surviving taste call, each with a compact pros/cons table and
-   a recommended option listed first. Use `AskUserQuestion` when the options fit its shape;
-   numbered list otherwise. Do not silently default these — in the VS-2 session the user
-   reversed the recommended option twice.
-3. **Assumptions** the plan rests on that could not be verified, and where they get tested.
-4. **Limitations** — what the deliverable does NOT do, stated as consequences ("an entry point,
-   not a running CI gate"), plus any doc-drift corrections from Step 0.
+```markdown
+## Goal
+One or two sentences. What is true after this lands that is not true now.
+
+## Verified
+- <path> — what it actually does, read this session
+
+## Plan
+1. <step> — <file(s)>, ending in its verification gate
+2. …
+
+## Decisions I need from you
+1. **<the call>** — Option A … / Option B … · **Recommend A**, because …
+
+## Assumptions
+- <assumption> — unverified because …; wrong ⇒ <consequence for the plan>
+
+## Verification
+<the exact command(s) — which dotnet build target(s), which suite>, and what result proves it.
+
+## Not doing
+- <adjacent thing> — <why it is out of scope>
+
+## Doc drift found
+- <doc> — says <X>, code says <Y>. Reporting, not fixing here.
+```
+
+Drop `Doc drift found` when Step 0 turned up nothing. Never drop the others.
+
+Rules for the visible plan:
+
+- **Decision menu = genuine judgment calls only.** Every surviving taste call gets a compact
+  pros/cons table with the recommended option first. Use `AskUserQuestion` when the options fit
+  its shape, a numbered list otherwise. Do not silently default these — in the VS-2 session the
+  user reversed the recommended option twice.
+- **Never present options without a recommendation.** "A or B?" with no lean is the reviewer
+  doing your analysis.
+- **Assumptions are labeled, not buried.** Each names its consequence if wrong, and the step
+  that will test it.
+- **The verification line is a command, not an intention.** "Run the suite" is not a gate; the
+  exact invocation plus the result that would falsify the change is.
+- **"Not doing" is mandatory.** Every plan has an edge; stating it is how the user catches a
+  scope mismatch before the work, not after. Fold in any doc-drift corrections from Step 0.
 
 Implementation does not start while decision-menu items are open (an empty menu may proceed
 directly).
@@ -130,3 +205,21 @@ directly).
   to `create-design-doc` / `create-refactor-plan` rather than growing sections here.
 - **Findings that contradict a documented deliberate choice** (memory/docs "don't re-suggest"
   items) are dropped, not re-litigated.
+
+## Anti-patterns
+
+- **Planning what a doc already planned.** Step 0 exists to catch this. The cost is not just
+  wasted effort — a second plan that diverges from the filed one leaves two conflicting records.
+- **Repeating a doc's numbers without re-checking them.** A warm start that copies counts,
+  versions, or file names forward is how stale docs propagate into new work.
+- **Presenting the first draft.** The tell is a plan with no assumptions section and no "not
+  doing" section — nothing was stress-tested.
+- **Research theater.** Listing files you opened without saying what they do. "Verified" means a
+  claim, not a path.
+- **A gate that tests the easy half.** See L6: the gate must exercise the thing most likely to
+  break, not the thing easiest to assert.
+- **Plans that are really commentary.** If the steps do not name files, it is not a plan yet.
+- **Padding the decision menu** with questions you can answer yourself, to look collaborative.
+- **Skipping Step 3 because the change is small.** A change under `Assets/Scripts/Jobs/` or in the
+  chunk gen → lighting → meshing pipeline has the widest blast radius in this engine — that is
+  exactly when L1 earns its keep.
