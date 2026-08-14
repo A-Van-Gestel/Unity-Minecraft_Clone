@@ -8,6 +8,11 @@ scale, in a Burst-compiled job, or in the IL2CPP player. Reference
 `BURST_COMPILER_GUIDE.md` and `GENERAL_OPTIMIZATION_GUIDE.md` for the sanctioned
 patterns; route to `burst-optimization` for the rewrite.
 
+**Source of truth: `.agents/rules/burst-jobs.md`.** Gate 5 below is a summary of
+it, not a replacement — the rule carries the project conventions (`MarshalAs` on
+`bool`, `[ReadOnly]`/`[NoAlias]`, the `FunctionPointer<T>` carve-out) at a
+precision this shard does not. Read it when gate 5 fires.
+
 Each gate carries **what fails**, **how to check**, **severity**, and whether it
 is **delta-based** or absolute. Severities are ceilings — an allocation in
 editor-only or one-shot init code is not a hot-path finding.
@@ -20,13 +25,20 @@ editor-only or one-shot init code is not a hot-path finding.
 struct) uses something Burst cannot compile, so it silently falls back to managed
 execution or fails AOT in the player:
 
-- a **managed reference field** or any non-blittable type on the job struct
+- a **managed reference field** or any non-blittable type on the job struct — a
+  raw `bool` included: project convention is `[MarshalAs(UnmanagedType.U1)] public
+  bool` (Burst may silently accept it unannotated, which is why this needs a human)
+- **any Unity API** — `GameObject`, `Transform`, `GetComponent`, `MonoBehaviour`,
+  or a scene-graph call. Data is passed into the struct from the main thread
 - `string`, `$"..."` interpolation, or `Debug.Log($"...")` inside the job
   (use `FixedString`, or string *literals* only)
-- non-`Unity.Mathematics` math — `Mathf.*`, `System.Math.*` (use `math.*`)
-- `try`/`catch` or any exception type
-- LINQ, `virtual` calls, delegates, or a `class` field
-- `new` of a managed type
+- non-`Unity.Mathematics` math — `Mathf.*`, `System.Math.*`, or a `Vector2`/
+  `Vector3`/`Vector3Int` where `float3`/`int3` belongs (use `math.*`)
+- `try`/`catch`/`finally` or any exception type
+- LINQ, `virtual` calls, `interface` dispatch, or a `class` field — delegates too,
+  **except `FunctionPointer<T>`**, which is the sanctioned escape hatch
+- `new` of a managed type, including a managed array (`new int[]`) — use
+  `NativeArray<T>`/`NativeList<T>` or a `static readonly` array for constants
 
 **How to check.** Read the added lines inside the job. `Unity_ValidateScript` on
 the file corroborates but does not replace this — if the Editor is not running,

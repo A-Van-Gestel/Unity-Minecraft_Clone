@@ -10,6 +10,10 @@ save, a wired-up prefab. Reference `INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARC
 and `AOT_WORLD_MIGRATION_SYSTEM.md`; route to `serialization-migration` (gate 8)
 and `refactor-safely` / `unity-file-ops` (gate 9).
 
+**Source of truth: `.agents/rules/serialization-safety.md`.** It carries the
+five-step AOT migration protocol and the frozen-DTO rule that gate 8 only
+summarizes. Read it when gate 8 fires.
+
 Each gate carries **what fails**, **how to check**, **severity**, and its
 delta/absolute nature.
 
@@ -34,6 +38,20 @@ with no migration *plan* is still a finding, it just may not be fully written ye
 
 A change that only touches **in-memory** structure, or bumps a version number and
 adds a migration branch, is not a violation — that is the sanctioned path.
+
+Three failures that are *not* layout changes and would otherwise slip past this
+gate, all from `serialization-safety.md`:
+
+- a migration step that **imports a live engine type** (`ChunkData`,
+  `ChunkSection`, `VoxelState`) instead of a frozen DTO — the step silently
+  changes meaning the next time that type is rewritten
+- a chunk-layout change that bumps `CURRENT_VERSION` but **not**
+  `TargetChunkFormatVersion`, or that overrides `MigrateChunk` without writing the
+  new version byte first (the manager fail-fasts with `InvalidDataException`)
+- an edit to an **already-shipped** migration step that changes what it
+  *produces*. Its byte transform must stay bit-identical for every input it
+  previously handled; semantic changes go in a new step. Non-semantic hardening
+  (error handling, fault isolation, logging, retries) is allowed.
 
 **Absolute** (for the layout break). The migration-authoring half is the only
 part that defers.

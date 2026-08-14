@@ -1,13 +1,20 @@
 # Chunk-pipeline, domain-reload & known-bug gates
 
 Load when the diff touches `World.cs`, `WorldJobManager.cs`, `ChunkPoolManager.cs`,
-lighting / fluid / meshing / chunk-management code, or adds a mutable `static`.
+a pooled type (`Chunk.cs`, `Data/ChunkData.cs`, `Data/ChunkSection.cs`,
+`VisualizerChunkData.cs`), lighting / fluid / meshing / chunk-management code, or
+adds a mutable `static`.
 
 The chunk generation → lighting → meshing pipeline has a recurring deadlock and
 stale-state history; these gates guard the invariants that history is made of.
-Reference the `chunk-pipeline` and `pool-reset-safety` rules under `.agents/rules/`;
-route to `chunk-lifecycle` (gate 10) and `validation-driven-bugfix` /
+Route to `chunk-lifecycle` (gate 10) and `validation-driven-bugfix` /
 `run-validation-suite` (gate 12).
+
+**Source of truth: `.agents/rules/chunk-pipeline.md` and
+`.agents/rules/pool-reset-safety.md`.** Gate 10 summarizes both; the rules carry
+the named flags, the two distinct readiness gates, and the pooled-type reset table
+plus its verification checklist. Read them when gate 10 fires — `pool-reset-safety.md`
+in particular, whenever a field is added to a pooled type.
 
 Each gate carries **what fails**, **how to check**, **severity**, and its
 delta/absolute nature.
@@ -24,9 +31,22 @@ or `ChunkData.cs` breaks one of the pipeline's ordering/ownership invariants:
 - **gate ordering** — meshing or lighting scheduled before its precondition
   (`AreNeighborsReadyAndLit` and friends) holds, so work runs on a half-built
   neighbourhood
-- **pool recycle safety** — a chunk/buffer returned to the pool while a job still
-  holds its `NativeArray`, or reused before the previous job `Complete()`d, so two
-  consumers alias the same memory
+- **conflated readiness gates** — `AreNeighborsDataReady` (neighbor terrain exists,
+  for initial lighting) swapped for `AreNeighborsReadyAndLit` (neighbors fully lit
+  and stable, for meshing), or vice versa. They are different gates
+- **off-main-thread flag mutation** — state flags are mutated only on the main
+  thread in `World.Update()`; a job reads a snapshot. A job that writes a flag is
+  a race
+- **immediacy assumption** — the pipeline throttles jobs per frame, so code that
+  assumes a scheduled job ran by the next line fails under load
+- **pool recycle safety**, two distinct failures: a chunk/buffer returned to the
+  pool while a job still holds its `NativeArray` (aliasing), **and** a transient
+  field added to a pooled type with no matching line in `Reset()`/`Release()` —
+  the recycled object inherits stale state. The second is the one with a bug
+  history (`RemainingEdgeCheckRounds`); note the carve-outs in
+  `pool-reset-safety.md`: monotonic counters *increment* rather than reset,
+  counters with a non-zero default reset to that default, and the `ChunkData`
+  lighting flags must be reset **through the property**, not the backing field
 
 **How to check.** Read the changed region with the surrounding scheduling code in
 view — a hunk alone will not show you the ordering. `codegraph_callers` on the
