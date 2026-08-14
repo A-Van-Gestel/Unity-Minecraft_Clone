@@ -1,5 +1,6 @@
 using UI.Enums;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
 namespace UI
@@ -115,7 +116,12 @@ namespace UI
             if (cam == null) return;
 
             UniversalAdditionalCameraData data = cam.GetUniversalAdditionalCameraData();
-            if (data != null) data.renderPostProcessing = enabled;
+            if (data == null) return;
+
+            // A scene with no Volume (the main menu) has nothing for the post stack to render, but
+            // enabling it would still cost a full-screen pass and an intermediate target — exactly the
+            // cost this setting's tooltip warns about, for no visual effect.
+            data.renderPostProcessing = enabled && FindAnyObjectByType<Volume>() != null;
         }
 
         /// <summary>

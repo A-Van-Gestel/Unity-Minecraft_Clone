@@ -413,6 +413,11 @@ game. Tonemapping (§1's second half) and the §5 effects remain open, each stil
 > - **Gating:** one `Bloom` Graphics setting drives the camera's `renderPostProcessing` **and**
 >   `_EmissiveBoost` (1.0 on, 0 off) together — emissive above 1.0 is only meaningful because bloom
 >   catches it, so the two must never disagree. Default on.
+>   **The camera half is additionally gated on a `Volume` existing in the loaded scenes**
+>   (`GraphicsSettingsController.ApplyBloom`): `MainMenu.unity` hosts the same controller but has no
+>   `Volume`, so without the gate the default-on setting forced a full-screen post pass and an
+>   intermediate target there for no visual effect. `_EmissiveBoost` stays unconditional — it is inert
+>   without emissive geometry.
 > - **Guard:** meshing baseline **B61**; `Validate All` 477/477 across 21 suites.
 
 **Corrections to this entry's original analysis** (verified against code 2026-08-12):
