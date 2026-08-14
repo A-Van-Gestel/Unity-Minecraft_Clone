@@ -81,6 +81,7 @@ When a change touches the chunk generation → lighting → meshing pipeline spe
 
 - **Directory Structure:** Place new files in their exact architectural folder. See `@Documentation/Guides/PROJECT_STRUCTURE.md`.
 - **Styling:** Adhere strictly to the rules in `@Documentation/Guides/CODING_STYLE_GUIDE.md`.
+- **Shaders:** Hand-written HLSL under `Assets/Shaders/` follows `@Documentation/Guides/SHADER_CONVENTIONS.md` (the C# style guide does not apply). Notably: declare `#pragma target 3.5` — the project floor — and count interpolators when adding a varying.
 - **Coordinate spaces (WS-4):** The engine has five distinct spaces (Unity/render, voxel world, chunk index, chunk-local, chunk-relative persisted). Never mix them in one value; name variables/parameters for their space (`unityPos` vs `voxelPos`/`voxelCell` vs `chunkCoord` vs `localPos`); convert only at boundaries via `WorldOrigin`/`ChunkMath`/`ChunkCoord`. Rules + conversion table: `@Documentation/Guides/COORDINATE_SPACES_GUIDE.md`.
 - **No Magic Numbers:** Extract inline magic numbers into named constants.
     - `public const` fields must use `PascalCase` (e.g., `public const int ChunkWidth = 16;`).
