@@ -16,6 +16,7 @@ using Editor.Validation.PhysicsSolver;
 using Editor.Validation.PipelineBackpressure;
 using Editor.Validation.PoolPrune;
 using Editor.Validation.SaveDurability;
+using Editor.Validation.UIBlur;
 using Editor.Validation.WorldClock;
 
 namespace Editor.Validation.Framework
@@ -56,7 +57,7 @@ namespace Editor.Validation.Framework
     public static class ValidationSuiteRegistry
     {
         /// <summary>The number of standard suites expected on the list — a floor the aggregate runner asserts against.</summary>
-        public const int ExpectedSuiteCount = 21;
+        public const int ExpectedSuiteCount = 22;
 
         /// <summary>The registered suites, in run/report order.</summary>
         public static readonly IReadOnlyList<RegisteredSuite> Suites = new[]
@@ -80,6 +81,7 @@ namespace Editor.Validation.Framework
             new RegisteredSuite("World Clock", WorldClockValidationSuite.Execute),
             new RegisteredSuite("Sky & Celestial", SkyValidationSuite.Execute),
             new RegisteredSuite("Sky Render", SkyRenderValidationSuite.Execute),
+            new RegisteredSuite("UI Blur Render", UIBlurRenderValidationSuite.Execute),
             new RegisteredSuite("Worm Carver", WormCarverValidationSuite.Execute),
             new RegisteredSuite("Validation Framework", ValidationFrameworkSelfTest.Execute),
         };
