@@ -1,6 +1,6 @@
 ---
 name: create-handoff-prompt
-description: Author a self-contained continuation prompt that a future, cold session can execute — anchored on durable @-referenced artifacts (never conversation state), scope pinned in AND out, acceptance tests / prove-red obligations restated, session-discovered traps encoded, and plan-approval + verification gates set. Use when the user asks to "write a prompt for the next/future session", "prepare a handoff", "hand this off", asks for a "continuation prompt", or when a multi-session work arc pauses with its next step already planned. The prompt is a pointer + contract, not a payload — bulky content must be persisted to Documentation/ first (via docs-sync or create-design-doc), and writing the prompt doubles as the audit that everything WAS persisted.
+description: Author a self-contained continuation prompt that a future, cold session can execute — anchored on durable @-referenced artifacts (never conversation state), scope pinned in AND out, acceptance tests / prove-red obligations restated, session-discovered traps encoded, plan-approval + verification gates set, and non-git state + disproved-claim corrections carried forward. Use when the user asks to "write a prompt for the next/future session", "prepare a handoff", "hand this off", asks for a "continuation prompt", or when a multi-session work arc pauses with its next step already planned. The prompt is a pointer + contract, not a payload — bulky content must be persisted to Documentation/ first (via docs-sync or create-design-doc), and writing the prompt doubles as the audit that everything WAS persisted.
 ---
 
 # Create Handoff Prompt
@@ -49,6 +49,12 @@ Every handoff prompt, regardless of template, must satisfy all seven:
 
 1. **Anchor on durable artifacts.** `@`-reference the docs/files/entries that carry the content
    (with section numbers or finding IDs). Assume the reader has the repo and nothing else.
+   - **Do not point at `AGENTS.md` or `CLAUDE.md`** — they load automatically; listing them spends
+     the reader's attention on what is already in front of them.
+   - **Flag local-only files explicitly.** Anything untracked via `.git/info/exclude` (a local
+     plan tracker, a scratch note) will not exist in a fresh clone — say so, and say what is lost
+     without it. Check with `git ls-files --error-unmatch <path>`.
+   - Prefer a path plus *what to look for* over a line number — line numbers rot.
 2. **Pin scope both ways.** What is in scope, and what is explicitly out — *with the reason*
    ("X folds into item Y"), so the cold session neither re-litigates nor scope-creeps.
 3. **Restate the acceptance tests.** The verification obligations that give the work its meaning
@@ -60,19 +66,76 @@ Every handoff prompt, regardless of template, must satisfy all seven:
    see Step 1 — the prompt line is the pointer that makes sure it gets read.)
 5. **Set the gates.** Where the session must stop for approval (plan-before-code), what must stay
    green between phases (the relevant validation suite / build), and what ends the session
-   (user confirmation points).
+   (user confirmation points). A gate needs a **consequence**, not just a preference — "stop after
+   the plan and wait" is a gate; "check in when convenient" is not.
 6. **Route to governing skills/protocols by name** so their full procedure loads in the new
    session instead of being half-remembered from the prompt.
 7. **Pointer, not payload.** Recap in one or two sentences at most; everything else is a
    reference. If you feel the urge to explain, the explanation belongs in a doc (Step 1).
+   Symptoms of payload creep: explaining how a subsystem works, restating a doc's contents,
+   listing every file you touched, recapping the conversation. A good prompt is mostly proper
+   nouns — paths, commands, commits, skill names — with short glue between them.
+
+Two obligations are large enough to stand on their own, in the sections below: **non-git state**
+(the top loss risk) and **corrections** (a disproved earlier claim must be retracted, not deleted).
+
+## Non-git state is the top loss risk
+
+Everything committed survives; everything else is one wiped clone away from gone. Enumerate it
+explicitly, with a recovery step each:
+
+| State | What the prompt must say |
+|---|---|
+| Uncommitted working changes | which files, and whether they are needed or discardable |
+| `git stash` entries | the stash message, `git stash pop` to recover, and `git stash branch <name>` if it will sit for a while |
+| Unpushed commits | the branch, and that it exists only locally |
+| Local-only excluded files | the path, that it is untracked (`.git/info/exclude`), and what is lost without it |
+| Manual / in-editor verification | what was verified in which scene or play-mode run — unreproducible from the repo alone |
+| Anything skipped because it needed the user | the specific question, so it can be asked again |
+
+Where the parked work is small, include **recreate-from-scratch steps** as insurance, not just a
+recovery command — a recovery step assumes the stash or branch still exists; the rebuild steps
+survive even if it does not.
+
+## Corrections must travel
+
+If something you asserted earlier in the arc was later disproved, **say so explicitly and name the
+cause.** A fresh session inherits your confident wrong claim with no way to know it was retracted,
+and will build on it.
+
+Format that works:
+
+```
+❌ Earlier claim: "<the wrong statement>" — FALSE. <what is actually true>.
+   Cause: <how the mistake was made>.
+```
+
+Keep the retraction; do not just delete the claim. The reasoning trail is what stops the next
+session from re-deriving the same error.
 
 ## Step 4 — Cold-read verification and delivery
 
-Re-read the draft *as the future session*: every noun must resolve from the repo alone — no
-"as discussed", "the earlier fix", or "the usual suite" without a path or ID. Check that the
-`@`-referenced files exist (they may have been renamed/promoted since the plan was filed — e.g.
-a scenario file moving into a `Baselines/` folder). Deliver the prompt in a fenced code block so
-the user can copy it verbatim, followed by at most a few sentences on why its key lines matter.
+Re-read the draft *as the future session*: every noun must resolve from the repo alone. Hunt the
+phrases that only work while the context is warm — "as discussed", "the earlier fix", "the usual
+suite", "that bug", "the doc I mentioned" — and give each one a path, a commit hash, a branch, or
+an ID. This is the single most common handoff defect, because the writer cannot feel it.
+
+Then verify the anchors still resolve — files get renamed, promoted, and moved between filing and
+execution (e.g. a scenario file moving into a `Baselines/` folder), and a pointer to a moved file
+is worse than none because it reads as authoritative:
+
+```bash
+ls <every path the prompt names>
+git log --oneline -1 <every commit hash the prompt cites>
+git branch --list <every branch the prompt names>
+```
+
+Confirm each named skill still exists too (`ls .agents/skills/`) — routing by a remembered name
+that was since renamed sends the next session nowhere.
+
+**Deliver in a fenced code block** so the user can copy it verbatim, followed by at most a few
+sentences on why its key lines matter. A handoff mixed into prose gets partially copied, and the
+part left behind is usually the gates.
 
 ## Constraints
 
@@ -83,3 +146,19 @@ the user can copy it verbatim, followed by at most a few sentences on why its ke
   the user), note its provenance in the template, and keep placeholders structural.
 - **Prompts parameterize protocols; they never replace them.** If the prompt contradicts a
   governing skill, fix the prompt (or the skill via its own change process).
+
+## Anti-patterns
+
+- **The briefing.** Paragraphs of explanation the repo should already hold. The tell: the prompt
+  is longer than the doc it points at.
+- **Traps as generalities.** "Be careful with async context" teaches nothing; name the call, the
+  mechanism, and the symptom.
+- **Scope with no reasons.** Guarantees the exclusions get revisited.
+- **A gate with no consequence.** "Let me know how it goes" is not a gate.
+- **Silent retraction.** Deleting a wrong claim instead of marking it wrong — the next session
+  re-derives it.
+- **Pointing at chat.** "As we discussed" is unresolvable for a cold start.
+- **Anchoring on a path you did not check.** A confident pointer to a moved file wastes the next
+  session's first minutes and undermines the rest of the prompt.
+- **Restating a skill.** If `validation-driven-bugfix` covers it, name it — do not paraphrase the
+  procedure.
