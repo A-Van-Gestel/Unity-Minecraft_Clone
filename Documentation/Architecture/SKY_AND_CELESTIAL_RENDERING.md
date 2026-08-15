@@ -1,8 +1,8 @@
 # Sky & Celestial Rendering
 
-**Version:** 1.7  
+**Version:** 1.8  
 **Date:** 2026-08-15  
-**Status:** **Implemented (Stable)** — RF-2 phases 1 and 2, the `Distance Fog` setting, the richer sun/moon discs, and the Sky Editor are shipped and confirmed (2026-08-11, discs and tool 2026-08-12). Guarded by the `Validate Sky` suite (**15** baselines, model only) and `Validate Sky Render` (**8** baselines on rendered pixels) — see §7. Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
+**Status:** **Implemented (Stable)** — RF-2 phases 1 and 2, the `Distance Fog` setting, the richer sun/moon discs, and the Sky Editor are shipped and confirmed (2026-08-11, discs and tool 2026-08-12). Guarded by the `Validate Sky` suite (**15** baselines, model only) and `Validate Sky Render` (**9** baselines on rendered pixels) — see §7. Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The procedural sky: a zenith/horizon gradient, a sun and moon on **real celestial arcs** driven by a
@@ -359,15 +359,16 @@ only the C# half is guarded.
 
 ### 7.1 `Validate Sky Render` — the shader half
 
-`Minecraft Clone/Dev/Validate Sky Render` — 8 baselines in
+`Minecraft Clone/Dev/Validate Sky Render` — 9 baselines in
 `Assets/Editor/Validation/Celestial/SkyRenderValidationSuite.cs`, the first coverage of the sky that
 observes **pixels**. It renders through `SkyPreviewRenderer` and asserts: a linear color survives the
 round trip (B1); the disc occludes the star field (B2); no degenerate configuration renders a NaN, and the
 zenith moon keeps its surface detail (B3); the sun outshines the sky (B4); the gradient is the right way
 up (B5); the unlit moon is a constant silhouette by day and still visible at night (B6); the lit moon
-carries the sky's airlight at full strength at every elevation (B7); and the sky glows toward the sun
-while that glow dies with it (B8, added with the sun aureole — see
-[`../Design/SUN_APPEARANCE_IMPROVEMENTS.md`](../Design/SUN_APPEARANCE_IMPROVEMENTS.md) §7.1).
+carries the sky's airlight at full strength at every elevation (B7); the sky glows toward the sun
+while that glow dies with it (B8); and the sun's disc reddens as it descends and is never bluer than it
+is red (B9). B8 and B9 arrived with the sun aureole and its per-channel extinction — see
+[`../Design/SUN_APPEARANCE_IMPROVEMENTS.md`](../Design/SUN_APPEARANCE_IMPROVEMENTS.md) §7.1 and §7.2.
 
 **B7 pins a trade rather than a correctness property.** The moon's airlight is added without being scaled
 by the haze that models it (§4), so a lit daytime disc brightens with elevation — accepted, because
@@ -461,6 +462,17 @@ not read the atmospheric improvement as having fixed it.
 
 ## Document History
 
+* **v1.8** - **Per-channel sun extinction and B9** (2026-08-15). The sun disc's scalar blend toward the
+  fog colour — the last survivor of the model §4's moon abandoned — is replaced by per-channel
+  extinction, and the aureole's tint now derives from that same transmitted sunlight so glow and disc
+  redden from one formula. New baseline **B9**. Two things §7.1's rule earns again: B9's first fixture
+  measured the suite's **blue** `s_daySky` rather than the shader, so a threshold able to separate the
+  correct and mutated shaders barely existed and the draft failed both — a new achromatic `s_neutralSky`
+  fixes it; and its "never bluer than red" assertion was **unfalsifiable** against grey, since no grey
+  background can tint a disc blue, so that one probe runs against the blue sky where the defect arose.
+  B9 also **cannot isolate** the disc's extinction, by design, and its remarks say so with the
+  measurement. The number to carry forward is in the Design doc §7.2: at the horizon the disc is only
+  1.27x the sky beside it, and the LDR ceiling caps that at 1.75x however the atmosphere is tuned.
 * **v1.7** - **The sun aureole and B8** (2026-08-15). SN-0 of
   [`../Design/SUN_APPEARANCE_IMPROVEMENTS.md`](../Design/SUN_APPEARANCE_IMPROVEMENTS.md) gave the sky a
   forward-scattered glow around the sun, which the elevation-only gradient of §3 could not express — the

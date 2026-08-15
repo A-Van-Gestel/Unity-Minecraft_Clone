@@ -41,6 +41,13 @@ namespace Editor.Validation.Celestial
     /// <item>Zeroing the aureole's two lobe strengths reds B8's first assertion; removing its twilight
     /// fade reds B8's second, which is the only thing standing between the shader and a sky that glows
     /// around the anti-sun point at midnight.</item>
+    /// <item>Deriving the aureole's tint from the authored <c>_HorizonColor</c> instead of from
+    /// transmitted sunlight reds ALL THREE of B9's assertions: the reddening reverses below 12 degrees
+    /// (1.28 there, then 1.24 and 1.19 at the horizon) and the disc turns bluer than it is red against
+    /// a blue sky, because that global goes pale blue well before the sun stops being warm. The same
+    /// mutation leaves DUSK looking correct, which is why B9 sweeps the whole descent instead of
+    /// sampling one time of day. Replacing the disc's per-channel extinction with a scalar haze, by
+    /// contrast, does NOT red B9 — see its remarks for that measurement and why it is accepted.</item>
     /// <item>Giving the aureole to the sky but not to the sun disc reds B4 — a regression that shipped
     /// briefly and that B4's <i>previous</i> fixture passed, because it ran with fog off (so the disc's
     /// haze term was a no-op), at a mid-elevation sun (where haze is weak), and sampled the sky at a
@@ -96,6 +103,15 @@ namespace Editor.Validation.Celestial
         /// <summary>A daylight sky, in linear values.</summary>
         private static readonly Color s_daySky = new Color(0.180f, 0.340f, 0.700f, 1f);
 
+        /// <summary>A colorless sky, for scenarios that measure the sky's effect on <i>hue</i>.</summary>
+        /// <remarks>
+        /// Deliberately achromatic. Any scenario asserting that something reddens or cools has to run
+        /// against a background that pushes no color of its own, or the background's hue rather than
+        /// the shader's is what gets measured — see <see cref="RunB9SunReddening"/>, whose first draft
+        /// was defeated exactly that way by <see cref="s_daySky"/>'s blue.
+        /// </remarks>
+        private static readonly Color s_neutralSky = new Color(0.400f, 0.400f, 0.400f, 1f);
+
         /// <summary>Runs every scenario and prints a categorized summary via the shared runner.</summary>
         [MenuItem("Minecraft Clone/Dev/Validate Sky Render")]
         public static void RunAll() => Execute();
@@ -118,6 +134,7 @@ namespace Editor.Validation.Celestial
                 new Scenario("B6 The unlit moon is a constant silhouette by day and visible at night", RunB6MoonAirlight),
                 new Scenario("B7 The lit moon carries the sky's airlight at every elevation", RunB7LitMoonAirlight),
                 new Scenario("B8 The sky glows toward the sun and the glow dies with it", RunB8SunAureole),
+                new Scenario("B9 The sun reddens as it descends, and is never bluer than it is red", RunB9SunReddening),
             };
 
             return ValidationSuiteRunner.Execute("Sky Render", scenarios, KnownBugChannel.Unimplemented,
@@ -489,6 +506,122 @@ namespace Editor.Validation.Celestial
                 Mathf.Abs(nightNear - nightFar) < 0.005f);
 
             return ok;
+        }
+
+        /// <summary>B9 — the sun's disc reddens as it descends (SN-1's per-channel extinction).</summary>
+        /// <returns>True when every assertion holds.</returns>
+        /// <remarks>
+        /// <para>
+        /// Asserted as a change in the red-to-blue <b>ratio</b>, never as absolute channel values.
+        /// Reddening is a shift in the balance between channels, so a ratio is the thing the feature
+        /// actually claims; pinning the channels would pin `SUN_EXTINCTION_BETA` and `_DEPTH` instead,
+        /// and any future re-tune of the look would false-red a test that was never about the look.
+        /// </para>
+        /// <para>
+        /// The second assertion exists because a real defect took the opposite sign. When the aureole's
+        /// tint was derived from the authored `_HorizonColor`, a sun at 10 degrees rendered with
+        /// <b>R:B 0.95</b> — bluer than it was red — because the horizon global turns pale blue well
+        /// before the sun stops being warm. Dusk looked correct throughout, so a dusk-only check would
+        /// have passed it. The sweep runs the whole descent for that reason.
+        /// </para>
+        /// <para>
+        /// Fog is ON: extinction scales with `hazeAmount`, which `SkyPreviewState.Uniform` zeroes.
+        /// Without it every elevation returns the same color and both assertions are vacuous.
+        /// </para>
+        /// <para>
+        /// The sky and fog are a NEUTRAL GRAY, not the suite's usual <c>s_daySky</c>, and that is what
+        /// makes the third assertion mean anything. Against the blue day sky the disc mixes toward a
+        /// blue fog as it descends, and that mixing dominates the channel balance completely: measured,
+        /// the ratio went 1.41 without per-channel extinction and 1.64 with it, so a threshold able to
+        /// separate them barely existed and the first draft's 1.5x failed BOTH. Against gray, the fog
+        /// contributes equally to every channel, so any imbalance in the result can only have come from
+        /// <see cref="SUN_EXTINCTION_BETA"/> — which is precisely the feature under test.
+        /// </para>
+        /// <para>
+        /// <b>What this scenario does NOT isolate, measured rather than assumed.</b> Two separate paths
+        /// redden the disc and both read the same <c>SUN_EXTINCTION_BETA</c>: the disc's own extinction,
+        /// and the aureole tint blended over it (which is derived from transmitted sunlight so that glow
+        /// and disc redden together — a deliberate coupling). At the disc center the aureole blend is
+        /// roughly 0.47, so about half the reddening arrives by the second path. Replacing the disc's
+        /// per-channel extinction with the old scalar haze moves the 0-degree ratio only from 2.20 to
+        /// 1.95, and this scenario stays GREEN. So B9 guards the visible property — the sun reddens as
+        /// it descends and never turns cold — and it would catch that property vanishing outright, but
+        /// it cannot attribute the reddening to one path or witness the loss of one alone.
+        /// The 1.5x floor is left loose on purpose: a threshold tight enough to separate 2.20 from 1.95
+        /// would be pinning a 13 % gap, and any re-tune of the desaturation or the beta ratios would
+        /// then false-red a test that was never about those constants.
+        /// </para>
+        /// </remarks>
+        private static bool RunB9SunReddening()
+        {
+            if (SkipWithoutGraphics("B9")) return true;
+
+            // Descending, so each step must be at least as red as the one above it.
+            float[] elevations = { 60f, 40f, 25f, 12f, 5f, 0f };
+            float previousRatio = 0f;
+            bool monotonic = true;
+            bool everCold = false;
+            string trace = string.Empty;
+
+            using SkyPreviewRenderer renderer = new SkyPreviewRenderer();
+
+            foreach (float elevation in elevations)
+            {
+                Color disc = SampleSunDisc(renderer, elevation, s_neutralSky);
+                float ratio = disc.b > 1e-4f ? disc.r / disc.b : float.MaxValue;
+
+                if (ratio < previousRatio - 0.01f) monotonic = false;
+                previousRatio = ratio;
+
+                trace += $"{elevation:F0}deg={ratio:F2}  ";
+
+                // The cold-sun check runs against a BLUE sky, not the gray one. A gray background
+                // cannot tint the disc blue no matter what the shader does, so this assertion was
+                // unfalsifiable there — green for want of anything able to make it fail. The defect it
+                // guards arose precisely because a blue-ish sky global reached the aureole tint.
+                Color againstBlue = SampleSunDisc(renderer, elevation, s_daySky);
+                if (againstBlue.r < againstBlue.b) everCold = true;
+            }
+
+            bool ok = Check($"the disc reddens monotonically as the sun descends ({trace.TrimEnd()})", monotonic);
+
+            ok &= Check("against a blue sky the sun is still never bluer than it is red", !everCold);
+
+            // A real spread, not merely a non-decreasing one. This is a magnitude FLOOR on the visible
+            // effect, and deliberately not tighter — see the remarks on what it cannot isolate.
+            Color high = SampleSunDisc(renderer, 60f, s_neutralSky);
+            Color low = SampleSunDisc(renderer, 0f, s_neutralSky);
+            float highRatio = high.b > 1e-4f ? high.r / high.b : float.MaxValue;
+            float lowRatio = low.b > 1e-4f ? low.r / low.b : float.MaxValue;
+
+            ok &= Check($"a setting sun is markedly redder than a high one ({lowRatio:F2} against {highRatio:F2})",
+                lowRatio > highRatio * 1.5f);
+
+            return ok;
+        }
+
+        /// <summary>Renders the center pixel of the sun's disc with the sun at a given elevation.</summary>
+        /// <param name="renderer">The renderer to draw with.</param>
+        /// <param name="sunElevationDegrees">Sun elevation in degrees.</param>
+        /// <param name="sky">Sky and fog color to render against.</param>
+        /// <returns>The linear color at the disc's center.</returns>
+        private static Color SampleSunDisc(SkyPreviewRenderer renderer, float sunElevationDegrees, Color sky)
+        {
+            Vector3 sun = SphericalDirection(0f, sunElevationDegrees);
+
+            SkyPreviewState state = SkyPreviewState.Uniform(s_neutralSky);
+            state.SunDirection = sun;
+            state.SunAngularRadius = 1.5f;
+
+            // Fog ON — extinction scales with hazeAmount, which Uniform zeroes.
+            state.FogRange = new Vector4(0f, 160f, 0f, 0f);
+            state.FogColor = sky;
+
+            state.MoonDirection = -sun;
+            state.MoonAngularRadius = 0.001f;
+
+            renderer.Render(state, sun, DISC_RENDER_SIZE, DISC_RENDER_SIZE, DISC_FIELD_OF_VIEW);
+            return renderer.SampleLinear(DISC_RENDER_SIZE / 2, DISC_RENDER_SIZE / 2);
         }
 
         /// <summary>Renders one sky pixel at an azimuth/elevation, with the sun at a given elevation.</summary>
