@@ -1,8 +1,8 @@
 # Sky & Celestial Rendering
 
-**Version:** 1.6  
-**Date:** 2026-08-12  
-**Status:** **Implemented (Stable)** — RF-2 phases 1 and 2, the `Distance Fog` setting, the richer sun/moon discs, and the Sky Editor are shipped and confirmed (2026-08-11, discs and tool 2026-08-12). Guarded by the `Validate Sky` suite (**15** baselines, model only) and `Validate Sky Render` (**7** baselines on rendered pixels) — see §7. Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
+**Version:** 1.7  
+**Date:** 2026-08-15  
+**Status:** **Implemented (Stable)** — RF-2 phases 1 and 2, the `Distance Fog` setting, the richer sun/moon discs, and the Sky Editor are shipped and confirmed (2026-08-11, discs and tool 2026-08-12). Guarded by the `Validate Sky` suite (**15** baselines, model only) and `Validate Sky Render` (**8** baselines on rendered pixels) — see §7. Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The procedural sky: a zenith/horizon gradient, a sun and moon on **real celestial arcs** driven by a
@@ -359,13 +359,15 @@ only the C# half is guarded.
 
 ### 7.1 `Validate Sky Render` — the shader half
 
-`Minecraft Clone/Dev/Validate Sky Render` — 7 baselines in
+`Minecraft Clone/Dev/Validate Sky Render` — 8 baselines in
 `Assets/Editor/Validation/Celestial/SkyRenderValidationSuite.cs`, the first coverage of the sky that
 observes **pixels**. It renders through `SkyPreviewRenderer` and asserts: a linear color survives the
 round trip (B1); the disc occludes the star field (B2); no degenerate configuration renders a NaN, and the
 zenith moon keeps its surface detail (B3); the sun outshines the sky (B4); the gradient is the right way
-up (B5); the unlit moon is a constant silhouette by day and still visible at night (B6); and the lit moon
-carries the sky's airlight at full strength at every elevation (B7).
+up (B5); the unlit moon is a constant silhouette by day and still visible at night (B6); the lit moon
+carries the sky's airlight at full strength at every elevation (B7); and the sky glows toward the sun
+while that glow dies with it (B8, added with the sun aureole — see
+[`../Design/SUN_APPEARANCE_IMPROVEMENTS.md`](../Design/SUN_APPEARANCE_IMPROVEMENTS.md) §7.1).
 
 **B7 pins a trade rather than a correctness property.** The moon's airlight is added without being scaled
 by the haze that models it (§4), so a lit daytime disc brightens with elevation — accepted, because
@@ -390,6 +392,23 @@ dominated its min/max and a collapsed surface frame was invisible. B6 ran with *
 the horizon haze is gated on a non-empty fog range, the correct and double-counting orderings were
 literally the same expression. Predicting those mutations instead of running them would have shipped three
 baselines that could never fail.
+
+**Then it happened twice more, on the aureole work (2026-08-15).** B4 — "the sun disc is brighter than
+the sky around it" — **passed a shipped regression that was obvious in a screenshot**, the sun rendering
+as a hole in its own glow, while reporting `centre 0.9682 outshines sky 0.4803`. Three independent
+fixture faults, any one sufficient: it built its state with `SkyPreviewState.Uniform`, which zeroes
+`FogRange` and made the disc's haze term a **no-op** (the same fog-disabled trap as B6, met a second
+time); its sun sat at mid elevation, where the haze it needed to exercise is weak; and it sampled the sky
+at a **frame corner** rather than beside the disc, where the aureole has already fallen off. And B8's own
+night assertion passed the twilight-fade mutation on its first draft, because probes placed at a fixed
+elevation sit more than 90° from a sun 80° below the horizon, where `saturate(dot(view, sun))` is zero
+whatever the fade does.
+
+**The generalizable rule from all of this: place probes by TRUE ANGULAR ROTATION from the direction under
+test, never by azimuth or elevation.** An azimuth step shrinks by cos(elevation), so near the poles a
+nominal 3° probe covers almost no arc — during this work that put a probe *inside* the 1.5° sun disc and
+reported the disc as though it were sky, the same class of error as the phantom limb ring in §8.
+`AngularOffset` in the suite exists for exactly this and should be preferred by any new scenario.
 
 What is still capture-verified only: whether the sky *looks* right. The suite pins invariants, not
 aesthetics, and every visual defect in this system's history was caught by eye.
@@ -442,6 +461,16 @@ not read the atmospheric improvement as having fixed it.
 
 ## Document History
 
+* **v1.7** - **The sun aureole and B8** (2026-08-15). SN-0 of
+  [`../Design/SUN_APPEARANCE_IMPROVEMENTS.md`](../Design/SUN_APPEARANCE_IMPROVEMENTS.md) gave the sky a
+  forward-scattered glow around the sun, which the elevation-only gradient of §3 could not express — the
+  air beside the sun had rendered identically to the air 180 degrees away. §7.1 gains **B8** and, more
+  importantly, two more false greens: **B4 passed a regression visible in a screenshot** for three
+  independent fixture reasons, and B8's own night assertion passed its mutation on the first draft. The
+  rule those produced is worth more than the phase — **place probes by true angular rotation, never by
+  azimuth or elevation** — and is now stated in §7.1 for any future scenario. Also recorded there: the
+  glow had to be a **blend** rather than an addition, because the authored sky beside the sun already
+  occupies 0.78-0.88 of an LDR range with no tonemapper, leaving no headroom to add into.
 * **v1.6** - **Review follow-ups: the ambient-mode restore and the lit moon's airlight** (2026-08-12).
   From a code review of the RF-2 commits. §4's teardown now restores `RenderSettings.ambientMode`
   alongside the skybox and clear flags — with domain reload disabled, a pinned `Flat` followed the user

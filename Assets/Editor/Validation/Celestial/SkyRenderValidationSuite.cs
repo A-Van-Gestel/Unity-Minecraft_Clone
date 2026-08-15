@@ -38,6 +38,14 @@ namespace Editor.Validation.Celestial
     /// the term deliberately does not take — reds B7: the slope collapses from 0.941 to 0.017 overhead
     /// while the horizon keeps 0.801. It reds B6's spread too, so the mutation is caught twice; what B7
     /// adds is that the LIT disc is where the trade is paid, which B6's phase 0 cannot see.</item>
+    /// <item>Zeroing the aureole's two lobe strengths reds B8's first assertion; removing its twilight
+    /// fade reds B8's second, which is the only thing standing between the shader and a sky that glows
+    /// around the anti-sun point at midnight.</item>
+    /// <item>Giving the aureole to the sky but not to the sun disc reds B4 — a regression that shipped
+    /// briefly and that B4's <i>previous</i> fixture passed, because it ran with fog off (so the disc's
+    /// haze term was a no-op), at a mid-elevation sun (where haze is weak), and sampled the sky at a
+    /// frame corner rather than beside the disc. All three are now fixed; the episode is why B4 carries
+    /// the longest remarks block in this file.</item>
     /// </list>
     /// </para>
     /// <para>
@@ -109,6 +117,7 @@ namespace Editor.Validation.Celestial
                 new Scenario("B5 The gradient is the right way up - zenith overhead, horizon at the horizon", RunB5GradientOrientation),
                 new Scenario("B6 The unlit moon is a constant silhouette by day and visible at night", RunB6MoonAirlight),
                 new Scenario("B7 The lit moon carries the sky's airlight at every elevation", RunB7LitMoonAirlight),
+                new Scenario("B8 The sky glows toward the sun and the glow dies with it", RunB8SunAureole),
             };
 
             return ValidationSuiteRunner.Execute("Sky Render", scenarios, KnownBugChannel.Unimplemented,
@@ -358,28 +367,194 @@ namespace Editor.Validation.Celestial
 
         /// <summary>B4 — the sun reads as a light source rather than as a disc lost in the sky.</summary>
         /// <returns>True when every assertion holds.</returns>
+        /// <remarks>
+        /// <para>
+        /// Three details of this fixture are load-bearing, and an earlier draft had all three wrong — it
+        /// passed a shipped regression that was obvious in a screenshot (the sun rendering as a hole in
+        /// its own glow, reported PASS at "center 0.9682 outshines sky 0.4803").
+        /// </para>
+        /// <para>
+        /// <b>Fog is ON.</b> <see cref="SkyPreviewState.Uniform"/> zeroes <c>FogRange</c>, which zeroes
+        /// <c>hazeAmount</c> and makes the shader's disc-haze term a no-op — so the fixture could not
+        /// reach the code that caused the defect. This is the same trap Architecture §7.1 already records
+        /// for the haze scenario, met a second time.
+        /// </para>
+        /// <para>
+        /// <b>The sun is LOW.</b> Haze scales with <c>1 - viewDir.y</c>, so a mid-elevation sun barely
+        /// exercises it; the defect only became visible near the horizon.
+        /// </para>
+        /// <para>
+        /// <b>The sky is sampled just OUTSIDE the disc rim</b>, not at a frame corner. The defect was that
+        /// the immediately-adjacent sky outran the disc while the sky further out did not — a corner
+        /// sample sits where the aureole has already fallen off and reports the comparison the wrong way.
+        /// </para>
+        /// </remarks>
         private static bool RunB4SunBrighterThanSky()
         {
             if (SkipWithoutGraphics("B4")) return true;
 
-            Vector3 sun = new Vector3(0f, 0.5f, 1f).normalized;
+            const int centre = DISC_RENDER_SIZE / 2;
+            using SkyPreviewRenderer renderer = new SkyPreviewRenderer();
+
+            // --- The original, unchanged: a mid-elevation sun against a fog-free sky. Its 1.5x margin
+            // is calibrated to THIS fixture, so it stays on it rather than being re-tuned to survive the
+            // harder one below — a low sun is legitimately closer to its sky, and moving the constant to
+            // absorb that would have quietly weakened the guard instead of adding to it.
+            Vector3 highSun = new Vector3(0f, 0.5f, 1f).normalized;
+            SkyPreviewState high = SkyPreviewState.Uniform(s_daySky);
+            high.SunDirection = highSun;
+            high.SunAngularRadius = 1.5f;
+            high.MoonDirection = -highSun;
+            high.MoonAngularRadius = 0.001f;
+
+            renderer.Render(high, highSun, DISC_RENDER_SIZE, DISC_RENDER_SIZE, DISC_FIELD_OF_VIEW);
+            float highDisc = Luminance(renderer.SampleLinear(centre, centre));
+            float highFarSky = Luminance(renderer.SampleLinear(4, 4));
+
+            bool ok = Check($"the sun's centre ({highDisc:F4}) outshines the distant sky ({highFarSky:F4})",
+                highDisc > highFarSky * 1.5f);
+
+            // --- The case the original could not reach: a low sun with fog ON, sampled at the rim.
+            Vector3 lowSun = new Vector3(0f, 0.09f, 1f).normalized;
+            SkyPreviewState low = SkyPreviewState.Uniform(s_daySky);
+            low.SunDirection = lowSun;
+            low.SunAngularRadius = 1.5f;
+            low.FogRange = new Vector4(0f, 160f, 0f, 0f);
+            low.FogColor = s_daySky;
+            low.MoonDirection = -lowSun;
+            low.MoonAngularRadius = 0.001f;
+
+            renderer.Render(low, lowSun, DISC_RENDER_SIZE, DISC_RENDER_SIZE, DISC_FIELD_OF_VIEW);
+            float lowDisc = Luminance(renderer.SampleLinear(centre, centre));
+
+            // At DISC_FIELD_OF_VIEW a 1.5 degree disc is ~64 px in radius; DISC_SAMPLE_RADIUS (55) is
+            // inside it and the rim sits just beyond, so 72 px clears the feather and lands on sky.
+            float lowRimSky = Luminance(renderer.SampleLinear(centre + 72, centre));
+
+            ok &= Check($"a low sun's centre ({lowDisc:F4}) still outshines the sky just outside its rim ({lowRimSky:F4})",
+                lowDisc > lowRimSky * 1.05f);
+
+            return ok;
+        }
+
+        /// <summary>B8 — the sky is brighter toward the sun than away from it (the SN-0 aureole).</summary>
+        /// <returns>True when every assertion holds.</returns>
+        /// <remarks>
+        /// <para>
+        /// A <b>differential</b> rather than an absolute sample, so re-tuning the glow's strength cannot
+        /// false-red it — the same reasoning that shaped B7.
+        /// </para>
+        /// <para>
+        /// Both probes sit at the <b>same elevation</b>, which is what makes the assertion airtight: the
+        /// base gradient is a function of view elevation alone, so it contributes an identical amount to
+        /// each and cancels exactly. Any surviving difference is the aureole and nothing else. An
+        /// angular offset from the sun would not do — it moves the probe in elevation too, and at low sun
+        /// the gradient then swamps the term under test.
+        /// </para>
+        /// <para>
+        /// Note the probes are separated in <b>azimuth</b>, which is only safe because both sit well away
+        /// from the poles: near the zenith an azimuth offset collapses to almost no true arc, which during
+        /// development put a nominal 3-degree probe <i>inside</i> the 1.5-degree sun disc and reported the
+        /// disc as though it were sky.
+        /// </para>
+        /// </remarks>
+        private static bool RunB8SunAureole()
+        {
+            if (SkipWithoutGraphics("B8")) return true;
+
+            const float probeElevation = 30f;
+            const float probeAzimuth = 15f;
 
             using SkyPreviewRenderer renderer = new SkyPreviewRenderer();
-            SkyPreviewState state = SkyPreviewState.Uniform(s_daySky);
-            state.SunDirection = sun;
-            state.SunAngularRadius = 1.5f;
 
-            // Keep the moon out of frame so this measures the sun alone.
-            state.MoonDirection = -sun;
+            float near = SampleSkyAt(renderer, probeAzimuth, probeElevation);
+            float far = SampleSkyAt(renderer, 180f, probeElevation);
+
+            bool ok = Check($"the sky toward the sun ({near:F4}) is brighter than the same elevation away from it ({far:F4})",
+                near > far * 1.03f);
+
+            // The aureole must die with the sun, or the sky glows around the sun's direction at midnight.
+            //
+            // These probes are placed by a TRUE angular rotation away from the sun axis, not at a fixed
+            // elevation, and that is the whole assertion. A fixed-elevation pair sits more than 90
+            // degrees from a deeply-buried sun, where saturate(dot(view, sun)) is zero on BOTH probes
+            // whatever the fade does — the first draft of this check was written that way, passed the
+            // mutation it exists to catch, and only prove-red exposed it. 4 degrees also clears the
+            // 1.5 degree disc, so the sample is sky rather than the sun itself.
+            Vector3 buriedSun = SphericalDirection(0f, -80f);
+            float nightNear = SampleSkyDirection(renderer, AngularOffset(buriedSun, 4f), -80f);
+            float nightFar = SampleSkyDirection(renderer, AngularOffset(-buriedSun, 4f), -80f);
+
+            ok &= Check($"with the sun 80 degrees below the horizon the glow is gone ({nightNear:F4} vs {nightFar:F4})",
+                Mathf.Abs(nightNear - nightFar) < 0.005f);
+
+            return ok;
+        }
+
+        /// <summary>Renders one sky pixel at an azimuth/elevation, with the sun at a given elevation.</summary>
+        /// <param name="renderer">The renderer to draw with.</param>
+        /// <param name="azimuthDegrees">View azimuth, 0 pointing at the sun's azimuth.</param>
+        /// <param name="elevationDegrees">View elevation.</param>
+        /// <param name="sunElevationDegrees">Sun elevation; the sun always sits at azimuth 0.</param>
+        /// <returns>Luminance of the center pixel of that view.</returns>
+        private static float SampleSkyAt(SkyPreviewRenderer renderer, float azimuthDegrees,
+            float elevationDegrees, float sunElevationDegrees = 30f)
+        {
+            return SampleSkyDirection(renderer, SphericalDirection(azimuthDegrees, elevationDegrees),
+                sunElevationDegrees);
+        }
+
+        /// <summary>Rotates a direction by a true angular offset, about an axis perpendicular to it.</summary>
+        /// <param name="axis">The direction to rotate away from.</param>
+        /// <param name="degrees">How far to rotate, in degrees of real arc.</param>
+        /// <returns>A unit vector exactly <paramref name="degrees"/> away from <paramref name="axis"/>.</returns>
+        /// <remarks>
+        /// Offsetting in azimuth instead would not be equivalent: an azimuth step shrinks by cos(elevation),
+        /// so near the poles a nominally several-degree probe covers almost no arc and can land inside the
+        /// sun disc it was meant to sit outside of.
+        /// </remarks>
+        private static Vector3 AngularOffset(Vector3 axis, float degrees)
+        {
+            Vector3 perpendicular = Vector3.Cross(axis, Vector3.up);
+            if (perpendicular.sqrMagnitude < 1e-6f) perpendicular = Vector3.Cross(axis, Vector3.forward);
+            return (Quaternion.AngleAxis(degrees, perpendicular.normalized) * axis).normalized;
+        }
+
+        /// <summary>Renders one sky pixel along an explicit view direction.</summary>
+        /// <param name="renderer">The renderer to draw with.</param>
+        /// <param name="viewDirection">Direction to look along.</param>
+        /// <param name="sunElevationDegrees">Sun elevation; the sun always sits at azimuth 0.</param>
+        /// <returns>Luminance of the center pixel of that view.</returns>
+        private static float SampleSkyDirection(SkyPreviewRenderer renderer, Vector3 viewDirection,
+            float sunElevationDegrees)
+        {
+            SkyPreviewState state = SkyPreviewState.Uniform(s_daySky);
+            state.SunDirection = SphericalDirection(0f, sunElevationDegrees);
+            state.SunAngularRadius = 1.5f;
+            state.FogRange = new Vector4(0f, 160f, 0f, 0f);
+            state.FogColor = s_daySky;
+
+            // Park the moon opposite the probes so it cannot contribute to either sample.
+            state.MoonDirection = SphericalDirection(90f, -60f);
             state.MoonAngularRadius = 0.001f;
 
-            renderer.Render(state, sun, DISC_RENDER_SIZE, DISC_RENDER_SIZE, DISC_FIELD_OF_VIEW);
+            renderer.Render(state, viewDirection, DISC_RENDER_SIZE, DISC_RENDER_SIZE, DISC_FIELD_OF_VIEW);
 
-            float disc = Luminance(renderer.SampleLinear(DISC_RENDER_SIZE / 2, DISC_RENDER_SIZE / 2));
-            float sky = Luminance(renderer.SampleLinear(4, 4));
+            return Luminance(renderer.SampleLinear(DISC_RENDER_SIZE / 2, DISC_RENDER_SIZE / 2));
+        }
 
-            return Check($"the sun's centre ({disc:F4}) outshines the sky beside it ({sky:F4})",
-                disc > sky * 1.5f);
+        /// <summary>Builds a unit direction from azimuth (0 = +Z) and elevation, both in degrees.</summary>
+        /// <param name="azimuthDegrees">Azimuth in degrees, measured from +Z toward +X.</param>
+        /// <param name="elevationDegrees">Elevation in degrees above the horizon.</param>
+        /// <returns>The corresponding unit vector in Unity render space.</returns>
+        private static Vector3 SphericalDirection(float azimuthDegrees, float elevationDegrees)
+        {
+            float azimuth = azimuthDegrees * Mathf.Deg2Rad;
+            float elevation = elevationDegrees * Mathf.Deg2Rad;
+            return new Vector3(
+                Mathf.Sin(azimuth) * Mathf.Cos(elevation),
+                Mathf.Sin(elevation),
+                Mathf.Cos(azimuth) * Mathf.Cos(elevation)).normalized;
         }
 
         /// <summary>B5 — the gradient's ends are not swapped.</summary>
