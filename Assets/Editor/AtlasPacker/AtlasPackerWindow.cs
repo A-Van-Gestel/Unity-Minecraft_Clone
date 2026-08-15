@@ -24,8 +24,14 @@ namespace Editor.AtlasPacker
         [SerializeField]
         private string _saveLocation = "Assets/Textures/packed_texture_atlas.png";
 
+        /// <summary>
+        /// Project-relative folder holding the individual block tiles.
+        /// <para>Deliberately NOT under <c>Resources/</c>: everything in a Resources folder is force-included
+        /// in the player build and is unreachable by the stripper, so these editor-only source tiles would
+        /// ship inside the game despite only ever being read to bake the atlas.</para>
+        /// </summary>
         [SerializeField]
-        private string _resourceLoadPath = "AtlasPacker";
+        private string _sourceTextureFolder = "Assets/Editor/AtlasPacker/SourceTextures";
 
         private Vector2 _scrollPos;
         private ReorderableList _reorderableList;
@@ -86,8 +92,8 @@ namespace Editor.AtlasPacker
             _config.blockSize = EditorGUILayout.IntField("Block Size (Pixels)", _config.blockSize);
             EditorGUILayout.LabelField("Save Path");
             _saveLocation = EditorGUILayout.TextField(_saveLocation);
-            EditorGUILayout.LabelField("Auto-Populate Folder (Resources/)");
-            _resourceLoadPath = EditorGUILayout.TextField(_resourceLoadPath);
+            EditorGUILayout.LabelField("Auto-Populate Folder (project path)");
+            _sourceTextureFolder = EditorGUILayout.TextField(_sourceTextureFolder);
 
             EditorGUILayout.Space();
 
@@ -95,7 +101,7 @@ namespace Editor.AtlasPacker
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Auto-Populate Array", GUILayout.Height(30)))
             {
-                AutoPopulateFromResources();
+                AutoPopulateFromSourceFolder();
                 _reorderableList = null; // Force rebuild after populate
                 GUIUtility.ExitGUI(); // Safely exit the current GUI pass to avoid layout errors
                 return;
@@ -265,15 +271,28 @@ namespace Editor.AtlasPacker
         #region Auto-Populate
 
         /// <summary>
-        /// Scans the Resources folder for textures with a numeric prefix (e.g., "000-stone")
+        /// Scans <see cref="_sourceTextureFolder"/> for textures with a numeric prefix (e.g., "000-stone")
         /// and assigns them to the configuration array at their corresponding index.
         /// </summary>
-        private void AutoPopulateFromResources()
+        private void AutoPopulateFromSourceFolder()
         {
-            Texture2D[] loadedTextures = Resources.LoadAll<Texture2D>(_resourceLoadPath);
+            if (!AssetDatabase.IsValidFolder(_sourceTextureFolder))
+            {
+                EditorUtility.DisplayDialog("Warning", $"Folder not found: {_sourceTextureFolder}", "OK");
+                return;
+            }
+
+            string[] guids = AssetDatabase.FindAssets("t:Texture2D", new[] { _sourceTextureFolder });
+            Texture2D[] loadedTextures = new Texture2D[guids.Length];
+            for (int i = 0; i < guids.Length; i++)
+            {
+                loadedTextures[i] = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                    AssetDatabase.GUIDToAssetPath(guids[i]));
+            }
+
             if (loadedTextures.Length == 0)
             {
-                EditorUtility.DisplayDialog("Warning", $"No textures found in Resources/{_resourceLoadPath}", "OK");
+                EditorUtility.DisplayDialog("Warning", $"No textures found in {_sourceTextureFolder}", "OK");
                 return;
             }
 
