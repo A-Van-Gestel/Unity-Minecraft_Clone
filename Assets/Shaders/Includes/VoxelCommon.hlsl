@@ -22,12 +22,15 @@ struct VoxelAppdata
 };
 
 // --- Fragment Input ---
+// MSAA shades an edge pixel at the pixel center, which can lie outside the covered primitive; plain
+// interpolation then extrapolates, walking `uv` off its atlas tile into the neighbor's texels. Centroid
+// samples inside the primitive and costs no interpolators. `fogDistance` is exempt — a smooth ramp.
 struct VoxelV2F
 {
     float4 vertex : SV_POSITION;
-    float2 uv : TEXCOORD0;
-    half4 color : COLOR;
-    half4 lightData : TEXCOORD1;
+    centroid float2 uv : TEXCOORD0;
+    centroid half4 color : COLOR;
+    centroid half4 lightData : TEXCOORD1;
     // Horizontal distance to the camera, for RF-2 §4 fog. Interpolated per-vertex rather than derived
     // in the fragment because the block shaders keep no world position; consumers that do not fog
     // simply ignore it.

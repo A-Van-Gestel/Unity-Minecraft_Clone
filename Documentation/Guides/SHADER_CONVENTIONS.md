@@ -92,10 +92,30 @@ When adding a field to a `v2f` struct:
 Current state: `LiquidV2F` (`LiquidCore.hlsl`) uses **11** interpolators, which is what moved
 `UberLiquidShader` and `Editor/FluidPreviewShader` from 3.0 to 3.5. `VoxelV2F` (`VoxelCommon.hlsl`) uses 4.
 
+### 1.4 Mark shading inputs `centroid` — MSAA is user-selectable
+
+Since `GS-4` shipped MSAA as a Graphics setting, **any varying a fragment shades with must carry the
+`centroid` modifier.** Under MSAA a partially-covered edge pixel is still shaded at the pixel **center**,
+which can lie outside the covered primitive; plain interpolation therefore *extrapolates* past the vertex
+data. On a texture atlas that is not a subtle error — the UV walks off the quad's tile and, with the
+project atlas on point filtering and no mips (`packed_texture_atlas.png`), snaps to the neighboring
+tile's texels, drawing a one-pixel seam of the wrong block along every silhouette edge. It scales with
+render scale: at 30 % the seam is one render-target pixel upscaled ~3×.
+
+- `centroid` moves the sample to the centroid of the covered samples, always inside the primitive.
+- It is a **modifier, not a varying** — it costs **zero** interpolators, so §1.3's budget is unaffected.
+- It compiles clean at `#pragma target 3.5` (verified on desktop D3D11, 2026-08-15; GLES3/Vulkan untested).
+- **Exempt:** smooth, low-frequency ramps where a one-pixel extrapolation is invisible — `fogDistance` in
+  `VoxelV2F` is left plain for this reason. Anything sampling a texture or driving lighting is not exempt.
+
+Found the expensive way: the artifact is invisible without MSAA (the pixel center is always inside the
+primitive), so it lay latent in these shaders for as long as the engine had no MSAA path.
+
 ---
 
 ## Document History
 
 | Version | Date       | Changes                                                                                                                                                                             |
 |---------|------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1.1     | 2026-08-15 | Added §1.4: shading inputs must be `centroid` now that `GS-4` made MSAA user-selectable. Written after 8x MSAA drew one-pixel wrong-block seams along every silhouette edge, worsening at low render scale; `uv`/`color`/`lightData` in `VoxelV2F` were marked centroid and the artifact went away. Costs no interpolators, so §1.3 is unaffected. |
 | 1.0     | 2026-08-14 | Initial guide: `#pragma target` floor of 3.5, why higher tiers do not help, the Unity 6.6 / 4.5 item, and the interpolator-counting rule. Extracted from `CODEBASE_IMPROVEMENTS.md` §1.4 after RF-3's liquid emissive read pushed `LiquidV2F` to 11 interpolators against a declared `target 3.0`. |
