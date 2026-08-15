@@ -157,6 +157,17 @@ Shader "Minecraft/SkyboxShader"
             // strengthened without re-balancing the channels against each other.
             static const float SUN_EXTINCTION_DEPTH = 1.6;
 
+            // How the sun's own optical depth falls off with its elevation. Steeper than
+            // HORIZON_HAZE_FALLOFF, and deliberately NOT that constant, because the two model different
+            // things: the shared one is calibrated for VEILING — how much air hides a body, which is
+            // also what the moon and the disc haze use — while this stands in for AIRMASS, which barely
+            // doubles between the zenith and 30 degrees and only climbs steeply in the last few.
+            // Reusing the veiling curve put the sun at 18% of full optical depth at 30 degrees, about
+            // three times too much, and it rendered as an orange ball against a blue sky where a real
+            // sun is still near-white. At the horizon both curves reach the same place, so sunrise and
+            // sunset are unaffected.
+            static const float SUN_PATH_FALLOFF = 5.0;
+
             // Sun aureole (SN-0) — the forward-scattered halo of sunlight around the disc. Its
             // absence is why a correct disc still read as a sticker: the gradient above is a
             // function of view ELEVATION alone, so the air beside the sun rendered identically to
@@ -169,6 +180,19 @@ Shader "Minecraft/SkyboxShader"
             static const float AUREOLE_CORE_STRENGTH = 0.35;
             static const float AUREOLE_HALO_EXPONENT = 8.0;
             static const float AUREOLE_HALO_STRENGTH = 0.12;
+
+            // A third and tightest lobe: the GLARE that makes the sun read as a light source rather
+            // than a bright patch. This is where the sun's glow is produced, and deliberately so — an
+            // HDR disc driving URP's post-process bloom was built and refuted, because that bloom is a
+            // single global instance whose radius is sized for the block emitters and cannot also suit
+            // a 3-degree disc (design doc §7.3). Produced here, the falloff is angular, costs no HDR
+            // headroom, and shares no tuning with anything else in the world.
+            //
+            // Broader than the core lobe and much tighter than the halo, so the three together read as
+            // one falloff rather than three rings: roughly 0.73 of the blend at the disc's rim, 0.45 a
+            // degree and a half beyond it, 0.16 at six degrees.
+            static const float AUREOLE_GLARE_EXPONENT = 400.0;
+            static const float AUREOLE_GLARE_STRENGTH = 0.40;
 
             // Aerosol broadens the aureole, so only the WIDE lobe takes the haze boost. Applying it
             // to the core as well just brightens the few degrees the sun disc draws over anyway.
@@ -342,7 +366,8 @@ Shader "Minecraft/SkyboxShader"
                 // sun must see the glow too. Adding the aureole after the discs instead would punch
                 // the moon out of it as a dark hole.
                 float sunward = max(saturate(dot(viewDir, _SunDirection)), AUREOLE_POW_EPSILON);
-                float aureole = AUREOLE_CORE_STRENGTH * pow(sunward, AUREOLE_CORE_EXPONENT)
+                float aureole = AUREOLE_GLARE_STRENGTH * pow(sunward, AUREOLE_GLARE_EXPONENT)
+                    + AUREOLE_CORE_STRENGTH * pow(sunward, AUREOLE_CORE_EXPONENT)
                     + AUREOLE_HALO_STRENGTH * pow(sunward, AUREOLE_HALO_EXPONENT)
                     * (1.0 + hazeAmount * AUREOLE_HAZE_BOOST);
                 aureole *= saturate(1.0 + _SunDirection.y / AUREOLE_TWILIGHT_FADE);
@@ -350,7 +375,7 @@ Shader "Minecraft/SkyboxShader"
                 // Warmth keys on the SUN's own path, not the view's: the glow belongs to the sun, so a
                 // low sun reddens the whole halo rather than only the half nearer the horizon. Same
                 // optical-depth curve the view uses, evaluated at the sun's elevation instead.
-                float sunPathHaze = pow(saturate(1.0 - _SunDirection.y), HORIZON_HAZE_FALLOFF)
+                float sunPathHaze = pow(saturate(1.0 - _SunDirection.y), SUN_PATH_FALLOFF)
                                     * HORIZON_HAZE_STRENGTH;
                 float3 sunTransmittance = exp(-sunPathHaze * SUN_EXTINCTION_DEPTH * SUN_EXTINCTION_BETA);
                 float3 transmittedSun = float3(SUN_CORE_COLOR) * sunTransmittance;
@@ -528,7 +553,10 @@ Shader "Minecraft/SkyboxShader"
                     // clip. The literal "multiply, then add airlight" spelling overflows immediately
                     // here: colour grading is LDR with no tonemapper, and the authored sky beside the
                     // sun already occupies most of the range (design doc §7.1).
-                    float3 transmittance = exp(-hazeAmount * SUN_EXTINCTION_DEPTH * SUN_EXTINCTION_BETA);
+                    // Uses the SUN's own path depth, not the view's. For disc pixels the two are nearly
+                    // the same direction anyway, but they must not use different falloff curves or the
+                    // disc reddens on a different schedule from the glow around it.
+                    float3 transmittance = exp(-sunPathHaze * SUN_EXTINCTION_DEPTH * SUN_EXTINCTION_BETA);
                     sunColor = half3(float3(sunColor) * transmittance
                                      + float3(_VoxelFogColor) * (1.0 - transmittance));
 

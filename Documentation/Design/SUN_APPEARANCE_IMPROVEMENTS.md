@@ -1,24 +1,25 @@
 # Sun Appearance Improvements Design
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Date:** 2026-08-15  
-**Status:** **Partially implemented; SN-2 and SN-3 refuted.** SN-0 and SN-1 shipped and confirmed in game 2026-08-15. **SN-2 was built, judged in game and reverted in full (§7.3)**, which blocks SN-3 with it.  
+**Status:** **Implemented.** SN-0, SN-1 and **SN-4** shipped and confirmed in game 2026-08-15. **SN-2 was built, judged in game and reverted in full (§7.3)**, taking SN-3 with it — and **SN-4 (§7.4) delivers what SN-2 was for**, in the shader.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
-> Four changes proposed to turn the sun from a flat disc into a body seen through air. **Two
-> shipped** — an **angular aureole** around the disc (SN-0) and **per-channel extinction** so it
-> reddens as it sets (SN-1). **Two are refuted**: the **HDR core** meant to let post-process bloom
-> see the sun (SN-2) was built, judged in game and reverted in full, and the screen-space lens
-> flare (SN-3) reads the bloom pyramid and falls with it.
+> Turning the sun from a flat disc into a body seen through air. **Three phases shipped** — an
+> **angular aureole** around the disc (SN-0), **per-channel extinction** so it reddens as it sets
+> (SN-1), and a **shader-side glare** that makes it read as a light source (SN-4). **Two were
+> refuted**: the **HDR core** meant to let post-process bloom see the sun (SN-2) was built, judged
+> in game and reverted in full, and the screen-space lens flare (SN-3) reads the bloom pyramid and
+> fell with it.
 >
-> **The pivotal finding, and the one the refutation strengthened: the sun's glow must be produced
-> in the skybox shader as an angular term, not by post-process bloom.** This doc originally allowed
-> bloom as an *accent* on top of that. It cannot even be that. URP has one global `Bloom` override
-> whose `scatter` sets the halo radius for the sun and for RF-3's lava and lamps alike, and those
-> want different answers from the same number — so a sun bright enough to bloom gets a halo sized
-> for a lamp, which reads as a fuzzy ball rather than a sun. §7.3 has the measurements. The
-> recommended successor is glare produced **in the shader**, as a refinement of SN-0's existing
-> lobes.
+> **The pivotal finding, which the refutation settled: the sun's glow must be produced in the
+> skybox shader as an angular term, not by post-process bloom.** This doc originally allowed bloom
+> as an *accent* on top of that. It cannot even be that. URP has one global `Bloom` override whose
+> `scatter` sets the halo radius for the sun and for RF-3's lava and lamps alike, and those want
+> different answers from the same number — so a sun bright enough to bloom gets a halo sized for a
+> lamp, which reads as a fuzzy ball rather than a sun (§7.3). SN-4 produces that glare in the shader
+> instead, as a third lobe on SN-0's existing falloff: angular, so invariant to resolution and
+> render scale, sharing no tuning with the block emitters, and needing no HDR headroom (§7.4).
 
 **Audited:** 2026-08-15, at commit `9e4b264f` (branch `feat/world-scaling`).
 Findings are from static review of `Assets/Shaders/SkyboxShader.shader` (read in full),
@@ -28,6 +29,11 @@ authored assets `VoxelEngine-Post-Profile.asset`, `VoxelEngine-URP-Asset.asset` 
 `Shaders/PostProcessing/Bloom.shader:108-112` for the threshold semantics quoted in §2.
 The threshold arithmetic in §2 is computed from those two sources, not assumed. No runtime
 state was inspected; nothing here depends on runtime state.
+
+**Amended:** 2026-08-15 — **SN-4 shipped**: §7.3's recommended successor, built and confirmed the same
+day. A third, tightest lobe on SN-0's falloff produces the sun's glare in the shader, and a separate
+airmass falloff stops the disc reading orange high in the sky. New §7.4. The arc's goal is met without
+post-processing.
 
 **Amended:** 2026-08-15 — **SN-2 built and REFUTED**, reverted in full; SN-3 blocked with it. New §7.3
 carries the evidence. The disc reached every number the design asked for and the picture was still
@@ -71,8 +77,8 @@ demonstrated by mutation rather than argued.
 3. ~~**Bloom sees the sun**~~ — **WITHDRAWN 2026-08-15 (§7.3).** §2.1's arithmetic for *why* bloom
    cannot see the sun is still correct and still worth keeping; making it see the sun turned out not
    to be desirable, because the halo URP's shared bloom produces is sized for block emitters. The goal
-   this replaces it with is that the sun should read as a **light source** — which SN-0 and SN-1
-   partly deliver, and which the §7.3 shader-side glare successor is meant to finish.
+   this replaces it with is that the sun should read as a **light source**, which SN-0 and SN-1
+   partly delivered and **SN-4 finished** (§7.4) — in the shader, with no post-processing involved.
 4. **Every change stays inside the skybox shader plus authored volume settings** — no voxel
    pipeline contact, no new globals unless named here.
 
@@ -352,6 +358,7 @@ aureole is at its weakest — but it is the one interaction between SN-0 and exi
 | **SN-1 — Per-channel extinction** ✅ **SHIPPED** | Replaced `:416`'s `lerp`-to-fog with per-channel `exp(-opticalDepth * beta)`, written as a per-channel lerp so it cannot clip. The aureole tint is now derived from the same transmitted sunlight, so glow and disc redden together (§7.2). Guarded by **B9**. | 🟢 | — |
 | **SN-2 — HDR core + bloom coupling** ❌ **BUILT AND REFUTED** | Built exactly as specified, judged in game, and **reverted in full** — shader, baseline and the bloom `clamp` alike. URP's single global bloom cannot serve both the sun and RF-3's block emitters. See §7.3. | 🟡 | — |
 | **SN-3 — Screen-space lens flare** ❌ **BLOCKED by SN-2** | URP's screen-space flare reads the bloom pyramid, so it inherits SN-2's verdict exactly. Not attempted. | 🟢 | SN-2 |
+| **SN-4 — Shader-side glare** ✅ **SHIPPED** | SN-2's successor, and what actually delivers the goal SN-2 was meant to. A third, tightest lobe on SN-0's falloff produces the sun's glare **in the skybox shader**, plus an airmass falloff for the sun's own optical depth so it stops reading orange high in the sky (§7.4). Guarded by **B10** and a new assertion in **B9**. | 🟢 | SN-0, SN-1 |
 
 **SN-0 alone delivers standalone value** and is the recommended first commit: it is the change that
 most directly answers "it looks like a yellow circle", it is independent of the HDR decision in
@@ -512,6 +519,58 @@ is why SN-2 reached an in-game capture before anyone could see it was wrong, and
 property of the harness rather than an oversight: any future work whose output *is* the post stack has
 to be judged by capture from the first iteration.
 
+### 7.4 SN-4 — the shader-side glare, and what SN-2's failure was worth
+
+**Shipped and confirmed in game 2026-08-15**, directly from §7.3's recommended successor. It delivers
+the goal SN-2 was built for — the sun reading as a light source rather than a bright patch — and it does
+so with no post-processing at all.
+
+**A third lobe, not a new system.** SN-0's aureole was already two cosine-power lobes; the glare is a
+third and tightest one (exponent 400, strength 0.40) summed into the same falloff. Measured on a uniform
+fixture at 40° elevation, the three together give 0.80 at the disc's rim, 0.58 at 4°, 0.50 at 6° and
+0.40 in open sky — one continuous falloff, no ring or seam where the lobes hand over.
+
+**Why this could never hit SN-2's wall.** The falloff is angular, so it is invariant to resolution,
+render scale and MSAA; it shares no tuning with RF-3's block emitters; and it needs no HDR headroom, so
+it works inside the LDR constraint instead of fighting it. It is also safe by construction against the
+hole SN-0 fixed: sky and disc take the *same* blend factor, so `disc′ − sky′ = (1 − b)(disc − sky)` and
+the ordering survives any glare strength. That is what makes a strong glare affordable here and not in
+an additive formulation.
+
+**A second defect the glare exposed.** With the glare in, the sun read as an orange ball against a blue
+sky at mid elevations. The cause was that the sun's optical depth reused `HORIZON_HAZE_FALLOFF`, which
+is calibrated for **veiling** — how much air hides a body — where what was wanted is **airmass**, which
+barely doubles between the zenith and 30° and only climbs steeply in the last few degrees. The veiling
+curve put the sun at 18 % of full optical depth at 30°, roughly three times too much. A separate
+`SUN_PATH_FALLOFF = 5.0` fixes the middle and leaves the horizon untouched, since both curves meet
+there:
+
+| Sun elevation | On the veiling curve | On the airmass curve |
+|---------------|---------------------|----------------------|
+| 45°           | 1.18                | **1.11**             |
+| 30°           | 1.39                | **1.16**             |
+| 20.7°         | 1.66                | **1.29**             |
+| 10.5°         | 2.09                | 1.75                 |
+| 0°            | 2.59                | 2.59 (unchanged)     |
+
+**Accepted trade.** The disc now merges into its own glare — at noon it is only ~1.2× the sky
+immediately outside it, where before it was 2.04× against sky further out. That is correct for a
+glaring sun (a real one has no crisp edge) but it is the *opposite* of the disc-outshines-its-
+surroundings property SN-0 and SN-1 were built around, so it is recorded rather than left to be
+rediscovered. `AUREOLE_GLARE_EXPONENT` tightens the glare off the rim if a harder edge is ever wanted.
+
+**The LDR ceiling is unchanged and this does not lift it.** Sun-plus-glare peaks around 2.4× the open
+sky at noon. It reads as a bright sun, not a blinding one; only tonemapping changes that, and that is
+still its own document.
+
+**Two more baseline lessons, both from mutations that passed.** B10's obvious assertion — the sky at the
+rim is much brighter than open sky — **survived deleting the glare lobe entirely** (1.51 against the
+shipped 1.99), because the two older lobes already produce a strong near-to-far ratio. What actually
+observes the glare is how much amplitude is spent in the *near band*: 0.139 without it against 0.307
+with it. And B9's monotonic-reddening assertion could not have caught the airmass defect at all — a
+curve that is already orange at 30° climbs just as monotonically as a correct one — so B9 gained an
+explicit "still neutral at 30°" check, whose threshold sits between the two measured states.
+
 ### Extension roadmap (post-SN-3, in intended order)
 
 | Version | Extension |
@@ -545,6 +604,15 @@ One remains, and it is deliberately **not** resolvable on paper.
 
 ## Document History
 
+* **v1.4** - **SN-4 shipped** (2026-08-15), confirmed in game. New §7.4. The glare that SN-2 tried to
+  get from post-process bloom is produced in the skybox shader instead, as a third lobe on SN-0's
+  existing falloff — angular, so invariant to resolution and render scale, sharing no tuning with RF-3's
+  emitters and needing no HDR headroom. Ships with a second fix the glare exposed: the sun's optical
+  depth had been reusing the **veiling** falloff where **airmass** was wanted, which made the disc read
+  orange at 30 degrees; a separate `SUN_PATH_FALLOFF` takes 30-degree red:blue from 1.39 to 1.16 while
+  leaving the horizon untouched. Two more baselines-that-passed-their-own-mutation are recorded there:
+  B10's near-to-far ratio survived deleting the glare outright, and B9's monotonic reddening was
+  structurally unable to see the airmass defect.
 * **v1.3** - **SN-2 built, refuted and reverted** (2026-08-15); SN-3 blocked with it. New §7.3. The
   HDR core did everything the design specified — disc peak 0.9941 flat -> 4.64 at noon, contrast
   2.04x -> 7.44x, warm at dusk rather than blown white — and bloom still turned it into a broad salmon
@@ -576,4 +644,4 @@ One remains, and it is deliberately **not** resolvable on paper.
 ---
 
 **Last Updated:** 2026-08-15  
-**Next Review:** when the shader-side glare successor in §7.3 is scoped, or when the tonemapping doc is written
+**Next Review:** when the tonemapping doc is written — it is the only remaining lever on §7.4's LDR ceiling
