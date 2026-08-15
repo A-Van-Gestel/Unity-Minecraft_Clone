@@ -778,7 +778,7 @@ PlayerSettings:
   il2cppCodeGeneration: {}
   il2cppLTOMode: {}
   il2cppStacktraceInformation:
-    Android: 1
+    Android: 0
     Standalone: 0
   managedStrippingLevel:
     Android: 1

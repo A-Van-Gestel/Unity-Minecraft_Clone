@@ -675,6 +675,25 @@ when the menu is generated, as a control that quietly fails to appear (or an
 `Activator.CreateInstance` throw) in a player build that compiled and linked cleanly. It cannot be
 reproduced in the Editor or in any build below Medium.
 
+#### Which platforms this covers
+
+`managedStrippingLevel` is a **per-platform** setting, and only the `Standalone` entry was raised to
+Medium. Two consequences worth knowing before trusting the validation:
+
+* **`Standalone` is one shared value for Windows, macOS *and* Linux** — Unity offers no way to split
+  them. So macOS and Linux players already ship at Medium, while the manual settings-menu pass that
+  validated it has only ever run on **Windows**. Anything that roots a member for Windows roots it
+  everywhere, so this is a testing gap rather than a behavioural difference — but a first macOS or
+  Linux build should repeat the menu pass rather than inherit the Windows verdict.
+* **Android is deliberately still at `Low`.** The rooting work is already platform-agnostic
+  (`link.xml` applies to every platform and `[Preserve]` travels with the type), so raising Android
+  is a one-key change — but it must be paid for with the same manual menu pass on a device build
+  first, because nothing below Medium can reveal the failure.
+
+The `il2cppStacktraceInformation` setting is per-platform in the same way; both Standalone and
+Android are set to `MethodOnly`. It is independent of stripping and carries no reflection risk — the
+trade is smaller binaries against losing file and line numbers in managed stack traces.
+
 > **Future consideration:** If reflection proves problematic at scale, the system could be augmented with an editor-time "Bake" step that uses Roslyn source generators to emit concrete binding code. This would eliminate runtime reflection entirely but would require two test rounds (Editor reflection + Production baked). This optimization is deferred unless IL2CPP testing reveals issues.
 
 ---
