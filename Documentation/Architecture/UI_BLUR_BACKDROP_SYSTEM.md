@@ -1,6 +1,6 @@
 # UI Blur Backdrop System
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-08-15  
 **Status:** **Implemented (Stable)** — the producer (`UIBlurRendererFeature`) and the consumer shader
 (`Custom/MaskedUIBlur`) both ship. The consumer's UI contract was completed in `36b74204` (UI_BUGS #06)
@@ -24,8 +24,8 @@ reading the serialized scene and by rendered-pixel measurement through the valid
 
 - [`../Guides/SHADER_CONVENTIONS.md`](../Guides/SHADER_CONVENTIONS.md) — the `#pragma target 3.5` floor
   and interpolator-counting rule this shader follows.
-- [`../Design/RUNTIME_UI_FACTORY.md`](../Design/RUNTIME_UI_FACTORY.md) — the planned shared UI builder
-  that will own the material-instance lifecycle described in §5.
+- [`RUNTIME_UI_FACTORY.md`](RUNTIME_UI_FACTORY.md) — the shared UI builder that owns the
+  material-instance lifecycle described in §5 for code-built screens.
 - [`../Bugs/UI_BUGS.md`](../Bugs/UI_BUGS.md) — **#05** (blur strength scales with resolution) is open
   against the producer; **#06** was the consumer's missing UI contract, fixed here.
 - [`DATA_DRIVEN_SETTINGS_UI.md`](DATA_DRIVEN_SETTINGS_UI.md) — the settings menu, one of the five
@@ -141,24 +141,39 @@ can share one material and vary `Image.color.a`.
 
 Runtime-built UI creates its instance with `Shader.Find("Custom/MaskedUIBlur")` — safe in player builds
 because the shader is listed in **Always Included Shaders** (`ProjectSettings/GraphicsSettings.asset`).
-Any code that does this **owns the instance and must destroy it**; `BenchmarkController` is the current
-precedent, and `BenchmarkUIBuilder` also carries the null-material fallback path that renders a flat
-color when no blur material is supplied (used live by `FluidStressController`).
+Any code that does this **owns the instance and must destroy it**.
+
+`RuntimeUIFactory.CreateBlurMaterialInstance` / `ApplyBlurBackground` are the shared entry points for
+code-built screens; creation and application are separate calls so a caller whose build method re-runs
+(`ConsoleUI.BuildPanel`, re-entered by the UI_BUGS #04 self-heal) can still allocate exactly once.
+`ApplyBlurBackground` also carries the fallback path that renders a flat color when no blur material is
+available — used live by `FluidStressController`, which passes none.
 
 ---
 
 ## 6. Current usage
 
-All blurred UI lives in `World.unity` on a single `Canvas` (`sortingOrder` 0), so paint order is
-hierarchy order. All five panels share `UIBlur.mat` (tint `0.415`) and are opaque white.
+The five scene panels live in `World.unity` on a single `Canvas` (`sortingOrder` 0), so paint order is
+hierarchy order. All five share `UIBlur.mat` (tint `0.415`) and are opaque white.
 
 | Panel                                       | Sibling order under `SafeArea` | Notes                                    |
 |---------------------------------------------|--------------------------------|------------------------------------------|
-| `Toolbar`                                   | 1                              | nothing draws above it                   |
+| `Toolbar`                                   | 1                              | the console overlaps its left edge       |
 | `CreativeInventory`                         | 2                              | nothing draws above it                   |
 | `PauseMenuContainer/PauseMenu`              | 5                              | full-screen                              |
 | `PauseMenuContainer/SettingsMenu`           | 5                              | full-screen; an in-scene added component |
 | `PauseMenuContainer/HelpMenu`               | 5                              | full-screen                              |
+
+Three more are built in code on their own canvases, each with its own material instance (§5):
+
+| Panel                          | Canvas `sortingOrder` | Tint    | Notes                                                    |
+|--------------------------------|-----------------------|---------|----------------------------------------------------------|
+| Benchmark HUD                  | **-10**               | `0.7`   | below the scene canvas, so full-screen menus cover it     |
+| Benchmark results overlay      | 200                   | `0.15`  | terminal modal, deliberately above everything             |
+| `ConsoleUI` panel              | 100                   | `0.415` | matches the scene panels; covers the toolbar's left edge  |
+
+The HUD's negative order is load-bearing rather than cosmetic: at a positive order its opaque panel
+punched a hole back to the un-blurred world over the paused screen (UI_BUGS #06).
 
 Because the menus are opaque and full-screen (§4.2), the engine keeps them from ever covering live UI:
 `WorldUIManager.HandleEscape` dismisses the creative inventory on the first Escape and only opens the
@@ -209,8 +224,10 @@ Two properties of the harness are load-bearing:
 
 * **v1.0** - Initial architecture doc, written after the UI_BUGS #06 fix (`36b74204`) completed the
   consumer's UI contract and added the rendered-pixel suite.
+* **v1.1** - `RuntimeUIFactory` took ownership of blur material instances (RUF-1…RUF-3): §5 records the
+  shared entry points, §6 adds the three code-built panels and the HUD's negative sorting order.
 
 ---
 
 **Last Updated:** 2026-08-15  
-**Next Review:** when UI_BUGS #05 is fixed, or when `RuntimeUIFactory` takes ownership of blur material instances
+**Next Review:** when UI_BUGS #05 is fixed

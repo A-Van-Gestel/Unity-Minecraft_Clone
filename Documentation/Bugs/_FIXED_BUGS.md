@@ -1660,3 +1660,77 @@ frame API or switching to `K4os.Compression.LZ4`; any world saved while 0.6.1 wa
 
 ---
 
+
+### ~~06. UI Blur Panels Are Opaque and Cannot Stack~~
+
+**Severity:** Bug  
+**Reported:** August 2026  
+**Fixed:** August 2026  
+**Files:** `Assets/Shaders/MaskedUIBlur.shader` (root cause), `Assets/Scenes/World.unity` (five authored
+colors), `Assets/Scripts/UI/WorldUIManager.cs` (Escape chain),
+`Assets/Scripts/Benchmarks/BenchmarkUIBuilder.cs` (same defect, built in code)
+
+**Symptom:**
+
+Every `Custom/MaskedUIBlur` panel rendered **fully opaque**, regardless of the alpha it was authored
+with. Two visible consequences:
+
+1. **A blurred panel hid whatever UI was beneath it.** With the pause menu open, the creative inventory
+   was invisible — not closed, *painted over* by the full-screen pause backdrop.
+2. **Blurred panels could not stack.** An opaque blur panel is a hole back to the pre-UI frame: it
+   replaces those pixels with world blur instead of compositing over what is already there. The
+   benchmark HUD therefore appeared to float *above* the pause menu, showing un-dimmed world where the
+   surrounding screen was dimmed.
+
+**Repro:** open the creative inventory, then open the pause menu — the inventory vanished. Or run a
+benchmark and pause mid-run — the HUD strip stayed visibly lighter than the dimmed screen around it.
+
+**Root cause:**
+
+`MaskedUIBlur.shader` declared `appdata_t` with only `POSITION` and `TEXCOORD0` — there was **no
+`COLOR` semantic**, so the UI vertex color was structurally unreachable by the shader. Output alpha came
+solely from `_MainTex.a`, and all five scene panels have `m_Sprite: {fileID: 0}`, so `_MainTex` was the
+default white texture and alpha was **always 1**. The panels were nonetheless authored
+`m_Color = (0, 0, 0, 0.72)` — the classic "dim the screen 72 %" overlay, silently promoted to 100 % by
+the shader. The shader also declared no `_Stencil*` and no `UNITY_UI_CLIP_RECT` / `_ClipRect`, so a
+blurred graphic inside a `Mask` or `RectMask2D` did not clip at all.
+
+The stacking half had a second contributing cause: `UIBlurRendererFeature` captures `_UIBlurTexture` at
+`RenderPassEvent.AfterRenderingTransparents`, **before any ScreenSpaceOverlay canvas draws**. Every blur
+panel in the frame samples the same UI-free snapshot, so an opaque one cannot show anything drawn
+between it and the world. That half is intrinsic to a single-capture design and was never going to be
+fixed by compositing.
+
+**Fix:**
+
+- **Shader** (`36b74204`): gave `MaskedUIBlur` the standard UI material surface — a `COLOR` semantic and
+  full RGBA vertex-color multiply, `_Stencil*` + `_ColorMask` (so `Mask` works), `UNITY_UI_CLIP_RECT` +
+  `_ClipRect` via a locally-declared `Get2DClipping` (so `RectMask2D` works), and `UNITY_UI_ALPHACLIP`.
+  Interpolators went 2 → 3 (4 with clipping), still within `#pragma target 3.5`.
+- **Scene** (`36b74204`): re-authored the five panel colors from `(0, 0, 0, 0.72)` to opaque white. The
+  black RGB was a leftover from the Built-in-RP GrabPass version and would have rendered a solid black
+  panel once vertex color started multiplying.
+- **Policy, not translucency, for the two stacking symptoms.** Every panel ships at **alpha 1**: alpha is
+  not transparency here but the fraction of *un-blurred* screen that leaks through, so lowering it
+  destroys the frost without revealing the UI underneath. Instead:
+    - the inventory-behind-pause symptom was closed by the Escape chain (`8c002371`) — Escape now
+      dismisses the inventory first and only opens the pause menu on a second press, which together
+      with the existing `!IsPauseMenuOpen` gate on the inventory toggle makes "both open at once"
+      unreachable;
+    - the benchmark-HUD symptom was closed by sorting order (RUF-2) — the HUD canvas moved from
+      `sortingOrder` 100 to **-10**, below the scene UI canvas, so full-screen menus cover it.
+- **Validation** (`36b74204`): a new rendered-pixel suite, `Minecraft Clone/Dev/Validate UI Blur Render`
+  (5 baselines), pins the consumer's compositing contract — vertex-color tint and fade, both material
+  tints, and clip-rect exclusion — independently of the producer.
+
+**Lessons that outlived the fix:** the authoring rules this bug established live in
+[`../Architecture/UI_BLUR_BACKDROP_SYSTEM.md`](../Architecture/UI_BLUR_BACKDROP_SYSTEM.md) §4 (alpha is
+sharp-bleed, not transparency; material colors are gamma-converted but vertex colors are not; RGB must
+be white). The harness also proved that `Graphics.DrawMeshNow` silently draws nothing depending on
+ambient GL state — it passed standalone and drew nothing inside `Validate All` — so editor render
+harnesses must use an explicit `CommandBuffer`.
+
+**Distinct from `#05`,** which concerns the blur *producer* and its resolution dependence, and remains
+open.
+
+---

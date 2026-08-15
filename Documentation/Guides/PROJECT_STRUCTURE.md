@@ -73,6 +73,8 @@ This is the heart of the project, containing all C# source code. It is organized
 -   **Examples:**
     -   `TitleMenu.cs`: Logic for the main menu screen.
     -   `UIItemSlot.cs`: Manages the visual representation of an item slot in the inventory or toolbar.
+    -   `Builders/`: Shared factory for UI hierarchies built in code rather than in a scene or prefab
+        (`RuntimeUIFactory.cs`).
 
 ### `Assets/Shaders/`
 

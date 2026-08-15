@@ -1,15 +1,15 @@
-# Runtime UI Factory Design
+# Runtime UI Factory
 
-**Version:** 1.0  
+**Version:** 2.0  
 **Date:** 2026-08-15  
-**Status:** Proposed design — not implemented.  
+**Status:** **Implemented (Stable)** — RUF-1…RUF-3 all shipped and confirmed in game 2026-08-15.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > A shared factory for UI hierarchies this project builds **in code** rather than in a scene or prefab,
 > extracted from the benchmark HUD builder and reused by the command console. **The pivotal decision:
-> the factory owns the primitives and the blur-material contract, but never the palette** — the
-> benchmark's tints and the console's tints are independent design choices, and hoisting them into a
-> shared constant would silently couple two unrelated surfaces.
+> the factory owns the primitives and the blur-material contract, but never the palette** — each
+> screen's tints are an independent design choice, and hoisting them into a shared constant would
+> silently couple unrelated surfaces.
 
 **Audited:** 2026-08-15, at commit `8c002371` (branch `feat/world-scaling`).
 Findings are from static review of `BenchmarkUIBuilder.cs`, `BenchmarkController.cs`,
@@ -17,14 +17,17 @@ Findings are from static review of `BenchmarkUIBuilder.cs`, `BenchmarkController
 canvas scalers in `Assets/Scenes/World.unity`. The console/toolbar overlap in §2 was computed from the
 scene's actual anchors and scales, not estimated.
 
+**Amended:** 2026-08-15 — promoted from `Design/` on RUF-3's in-game confirmation. §2 now records the
+shipped state, §5 the shipped phases, and §4 the resolution of the console/toolbar overlap.
+
 **Relationship to other documents:**
 
-- [`../Architecture/UI_BLUR_BACKDROP_SYSTEM.md`](../Architecture/UI_BLUR_BACKDROP_SYSTEM.md) — the blur
-  contract this factory wraps; its §4 authoring rules are binding on every panel built here.
-- [`../Architecture/COMMAND_CONSOLE_SYSTEM.md`](../Architecture/COMMAND_CONSOLE_SYSTEM.md) — the console
-  whose view is the second consumer.
-- [`../Bugs/UI_BUGS.md`](../Bugs/UI_BUGS.md) — **#06**, whose remaining benchmark-HUD symptom is closed
-  by §5 phase RUF-2.
+- [`UI_BLUR_BACKDROP_SYSTEM.md`](UI_BLUR_BACKDROP_SYSTEM.md) — the blur contract this factory wraps;
+  its §4 authoring rules are binding on every panel built here.
+- [`COMMAND_CONSOLE_SYSTEM.md`](COMMAND_CONSOLE_SYSTEM.md) — the console whose view is the second
+  consumer.
+- [`../Bugs/_FIXED_BUGS.md`](../Bugs/_FIXED_BUGS.md) — UI_BUGS **#06**, whose remaining benchmark-HUD
+  symptom was closed by §5 phase RUF-2.
 
 ---
 
@@ -51,22 +54,27 @@ scene's actual anchors and scales, not estimated.
 
 ---
 
-## 2. Current state (what exists today)
+## 2. Structure
 
-| Area                          | State                                                                                                                          |
-|-------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
-| `BenchmarkUIBuilder`          | The only code-built UI library. Mixes three layers: primitives, blur wiring, and benchmark-specific composition + palette.      |
-| `BenchmarkUIBuilder.CreateCanvas` | Always creates a **new** GameObject. Unusable by `ConsoleUI`, which adds canvas components to its own object.               |
-| Benchmark HUD canvas          | `sortingOrder = 100`; the entire scene UI is one canvas at `sortingOrder = 0`, so the HUD paints over the pause menu.           |
-| `FluidStressController.cs:147`| Calls `CreateResultsScreen` with **no** blur material — the null-fallback path is live in production, not dead defensive code.  |
-| `ConsoleUI`                   | Builds its own canvas, panel, scroll view, input field and ghost overlay inline. Panel backdrop is a flat `(0,0,0,0.55)` Image. |
-| Console panel rect            | x 12–692, y 12–452 at a fixed 1920x1080 reference.                                                                             |
-| `Toolbar` rect                | 218x26 at scale 3, bottom-centre, y 5 → spans x ≈ 633–1287, y ≈ 15–93 in reference pixels.                                      |
+| Area                             | State                                                                                                                              |
+|----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
+| `RuntimeUIFactory`               | `Assets/Scripts/UI/Builders/`, namespace `UI.Builders`. Static; holds the primitives, the reference resolution, and the blur helpers. |
+| `RuntimeUIFactory.CreateCanvas`  | Creates a **new** canvas GameObject. `ConfigureCanvas` is the overload that adds the components to an object the caller already owns. |
+| `BenchmarkUIBuilder`             | Composition + palette only; delegates construction. Keeps both public entry points unchanged.                                       |
+| Benchmark HUD canvas             | `sortingOrder = -10` — **below** the scene UI canvas (0), so a full-screen scene panel covers it (see §5 RUF-2).                     |
+| Benchmark results canvas         | `sortingOrder = 200`; a terminal modal, deliberately above everything.                                                               |
+| `FluidStressController.cs:147`   | Calls `CreateResultsScreen` with **no** blur material — the null-fallback path is live in production, not dead defensive code.       |
+| `ConsoleUI`                      | Hosts its canvas on its own GameObject via `ConfigureCanvas` at `sortingOrder = 100`; panel backdrop goes through `ApplyBlurBackground`. |
+| Console panel rect               | x 12–692, y 12–452 at a fixed 1920x1080 reference.                                                                                  |
+| `Toolbar` rect                   | 218x26 at scale 3, bottom-centre, y 5 → spans x ≈ 633–1287, y ≈ 15–93 in reference pixels.                                           |
 
-**The console/toolbar overlap is real: ~59 reference px.** `UIScaleController` rescales only the scene
-canvas, not the console's own, so a Large UI scale widens it. A blurred console panel drawn over the
-blurred toolbar would punch a hole back to the un-blurred world (blur doc §4.2) — which is why the
-console's blur adoption is gated behind that overlap being understood, not merely behind the shader fix.
+**The console/toolbar overlap is real: ~59 reference px** at the default UI scale — see §5's RUF-3
+note for how it is resolved. `UIScaleController` rescales only the scene canvas, not the console's own, so the overlap
+varies with UI scale rather than being fixed (it disappears at Small).
+
+Canvas scaler match differs by screen and is deliberate: the benchmark canvases use `0.5` (balanced),
+the console uses `0` (width-matched) because it is anchored to the bottom-left corner and height
+scaling would drift it away from that corner.
 
 ---
 
@@ -111,36 +119,45 @@ If a future session wants Option A, the prerequisite is a suite scenario that re
 
 ---
 
-## 5. Phased implementation plan
+## 5. Implementation phases (all shipped)
 
-Validation baselines are not added per phase here: the blur contract is already pinned by
+Validation baselines were not added per phase: the blur contract is already pinned by
 `Validate UI Blur Render`, and this work is construction plumbing rather than new rendering behaviour.
-Each phase's gate is a build plus the aggregate suite staying green, and RUF-2/RUF-3 additionally need
-in-game confirmation because no suite covers a built hierarchy.
+Each phase's gate was a build plus the aggregate suite staying green (482/482 across 22 suites), and
+RUF-2/RUF-3 additionally needed in-game confirmation because no suite covers a built hierarchy.
 
 | Phase     | Scope                                                                                                                                                        | Effort | Depends on |
 |-----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------|--------|------------|
-| **RUF-1** | Create `Assets/Scripts/UI/Builders/RuntimeUIFactory.cs` (namespace `UI.Builders`) with the primitives lifted verbatim, **plus a `CreateCanvas` overload taking an existing GameObject**. Add the blur helpers: `CreateBlurMaterialInstance(multiply, additive)` and `ApplyBlurBackground(Image, multiply, fallbackColor)` returning false when it applied the fallback. | 🟢     | —          |
-| **RUF-2** | Rewire `BenchmarkUIBuilder` to delegate, keeping its two public entry points and its palette. Drop the HUD canvas's `sortingOrder` below the scene canvas so the pause menu covers it. Preserve `FluidStressController`'s null-material path.                                    | 🟢     | RUF-1      |
-| **RUF-3** | Wire `ConsoleUI`'s panel backdrop through `ApplyBlurBackground`. Material instance allocated **once** and destroyed in `OnDestroy`.                            | 🟡     | RUF-1      |
+| **RUF-1** | Created `Assets/Scripts/UI/Builders/RuntimeUIFactory.cs` (namespace `UI.Builders`) with the primitives lifted verbatim, plus `ConfigureCanvas` for an existing GameObject. Blur helpers: `CreateBlurMaterialInstance` and `ApplyBlurBackground`, the latter returning false when it applied the fallback. | 🟢     | —          |
+| **RUF-2** | Rewired `BenchmarkUIBuilder` to delegate, keeping its two public entry points and its palette. Dropped the HUD canvas's `sortingOrder` to -10 so the pause menu covers it. Preserved `FluidStressController`'s null-material path.                                    | 🟢     | RUF-1      |
+| **RUF-3** | Wired `ConsoleUI`'s panel backdrop through `ApplyBlurBackground`. Material instance allocated **once** and destroyed in `OnDestroy`.                            | 🟡     | RUF-1      |
+
+### RUF-1 note — why `ApplyBlurBackground` does not allocate
+
+The helper takes an already-created material instance rather than creating one. An
+internally-allocating helper cannot serve a caller whose build method re-runs, which is exactly
+RUF-3's situation — so creation and application are separate calls.
 
 ### RUF-2 note — the HUD's opacity
 
 `BenchmarkUIBuilder` sets `panelImage.color = Color.white` at **alpha 1** on the blur path, while its own
 fallback constants record the intended translucency (`s_hudBackgroundColor` a=0.7,
-`s_resultsOverlayColor` a=0.85). Whether to bring the blur path in line with those alphas is a look
-question, not a mechanical one: lowering alpha trades frost for reveal exactly as the blur doc's §4.1
-describes. The sorting-order change alone closes the reported symptom, so alpha may stay at 1.
+`s_resultsOverlayColor` a=0.85). Alpha stayed at 1: lowering it trades frost for reveal exactly as the
+blur doc's §4.1 describes, and the sorting-order change alone closes the reported symptom.
 
-### RUF-3 note — re-entrancy
+### RUF-3 note — re-entrancy, and the toolbar overlap
 
 `ConsoleUI.BuildPanel` is re-entrant: the UI_BUGS #04 self-heal path (`RebuildMissingChildren`) calls it
 again when the panel is destroyed out from under the view. A material instance created inside
-`BuildPanel` therefore leaks one material per heal. Allocate it in `Awake` (or lazily, once) and destroy
-it in `OnDestroy`.
+`BuildPanel` would therefore leak one material per heal, so it is allocated in `Awake` and destroyed in
+`OnDestroy`.
 
-The console's own tint and alpha should follow the blur doc's §4: the console panel has nothing drawn
-above it, so it has no reason to run below alpha 1.
+The console panel runs at alpha 1 with the same `0.415` tint as the scene panels, per the blur doc's
+§4. Being opaque, it covers the toolbar's leftmost slot region where the two overlap — **accepted
+deliberately** (user decision, 2026-08-15) over raising the panel, hiding the toolbar, or leaving the
+console flat. The hotbar is inert while the console holds input focus (the Gameplay action map is
+disabled), the overlap shrinks to nothing at Small UI scale, and every alternative would have meant a
+layout or policy change the arc's non-goals rule out.
 
 ---
 
@@ -171,8 +188,11 @@ above it, so it has no reason to run below alpha 1.
 
 * **v1.0** - Initial design, split out of the UI_BUGS #06 fix arc so the factory and console wiring
   survive as a plan rather than as session context.
+* **v2.0** - RUF-1…RUF-3 shipped and confirmed in game; promoted from `Design/` to `Architecture/`.
+  §2 rewritten to the shipped structure, §5 to the shipped phases, and the console/toolbar overlap
+  decision recorded in RUF-3's note.
 
 ---
 
 **Last Updated:** 2026-08-15  
-**Next Review:** when RUF-1 starts, or on promotion to Architecture after RUF-3 is confirmed in game
+**Next Review:** when a third screen adopts the factory, or when §7's vertex-color tinting is measured

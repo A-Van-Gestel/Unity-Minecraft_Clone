@@ -195,8 +195,9 @@ public interface IConsoleCommand
 
 ### 4.2 `ConsoleUI` (MonoBehaviour)
 
-Left-anchored translucent panel: `ScrollRect` history (autoscroll to newest, free scrollback)
-over a `TMP_InputField`. Opened by a new `ToggleConsole` gameplay action bound to `T`
+Left-anchored frosted-glass panel (`RuntimeUIFactory.ApplyBlurBackground`, see
+[`RUNTIME_UI_FACTORY.md`](RUNTIME_UI_FACTORY.md)): `ScrollRect` history (autoscroll to newest, free
+scrollback) over a `TMP_InputField`. Opened by a new `ToggleConsole` gameplay action bound to `T`
 (verified unbound); closed by `Esc` (first in `WorldUIManager.HandleEscape`'s priority chain)
 or after submit-on-empty. The input field is focused on open; **the opening `T` press must not
 leak a "t" into the field** (activate the field on the frame after open, or clear on focus —
