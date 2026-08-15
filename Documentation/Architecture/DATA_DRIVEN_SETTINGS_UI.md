@@ -194,6 +194,14 @@ public int maxFps = 120;
 | `enum`     | —                   | Dropdown (populated from enum values, respects `[InspectorName]`) |
 | `string`   | —                   | InputField (text)                                                 |
 
+> ⚠ **Enum settings must be 0-based and contiguous.** The dropdown binds by *position*: the generator
+> seeds the control with `Convert.ToInt32(field.GetValue(...))` as an option index, and writes the
+> selected index straight back with `Enum.ToObject(fieldType, index)`. An enum with gaps or a non-zero
+> first value therefore desyncs the stored value from the shown option, silently. When a setting must
+> carry externally-defined numbers (URP sample counts, Unity mode constants), declare the enum 0-based
+> and convert in an extension method — `WindowMode.ToFullScreenMode()` and `MsaaLevel.ToMsaaQuality()`
+> are the two examples in the codebase.
+
 ---
 
 ## 3. UI Layout & Scene Hierarchy

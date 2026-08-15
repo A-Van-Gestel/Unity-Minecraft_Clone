@@ -686,6 +686,10 @@ public class World : MonoBehaviour, IMeshDrainHost
         GraphicsSettingsController.ApplyFluidQuality(loadedSettings.fluidQuality);
         GraphicsSettingsController.ApplyFluidRefraction(loadedSettings.fluidRefraction);
 
+        // Same reason, for the camera half of the MSAA setting: the controller's Start() may have run
+        // before Camera.main existed, and the asset half alone renders no samples.
+        GraphicsSettingsController.ApplyMsaa(loadedSettings.msaa);
+
         // Initialize World
         StartCoroutine(StartWorld());
     }

@@ -120,6 +120,11 @@ public class SectionRenderer
 
         MeshFilter meshFilter = GameObject.AddComponent<MeshFilter>();
         _meshRenderer = GameObject.AddComponent<MeshRenderer>();
+        // Inert today, and deliberately left so. The URP asset disables the main light
+        // (m_MainLightRenderingMode: 0), sets m_ShadowDistance: 0, and no longer compiles shadow variants
+        // (m_MainLightShadowsSupported: 0), so no shadow pass runs and TwoSided costs nothing. Those four
+        // settings are one coupled group: re-enabling shadows without first tiering THIS line renders every
+        // loaded section twice-sided into a 2048 shadow map.
         _meshRenderer.shadowCastingMode = ShadowCastingMode.TwoSided;
 
         _mesh = new Mesh();

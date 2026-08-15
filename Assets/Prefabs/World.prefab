@@ -55,6 +55,8 @@ MonoBehaviour:
     lookSensitivity: 1.2
     fieldOfView: 70
     viewDistance: 5
+    renderScalePercent: 100
+    msaa: 0
     fluidQuality: 2
     fluidRefraction: 100
     smoothLighting: 1

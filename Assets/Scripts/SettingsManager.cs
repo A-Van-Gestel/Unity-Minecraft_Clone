@@ -169,6 +169,41 @@ public class Settings
     public int viewDistance = 5;
 
     /// <summary>
+    /// Resolution the world is rendered at, as a percentage of the window resolution.
+    /// Below 100 the render target is smaller than the window and upscaled; above 100 it is
+    /// supersampled down. The UI is a screen-space overlay and is never scaled.
+    /// </summary>
+    [SubHeader("Resolution")]
+    [SettingField(SettingsTab.Graphics, Label = "Render Scale", Format = "f0", Order = 1)]
+    [Range(30, 200)]
+    [Tooltip("Renders the world at a fraction (or multiple) of your window resolution.\n\n" +
+             TooltipTags.BulletOptionStart + "Below 100" + TooltipTags.BulletOptionEnd +
+             "Renders smaller and upscales. The cheapest way to buy frame rate on a weak GPU.\n" +
+             TooltipTags.BulletOptionStart + "Above 100" + TooltipTags.BulletOptionEnd +
+             "Renders larger and downsamples for a sharper image.\n\n" +
+             TooltipTags.Note + "Menus and the HUD stay at full resolution either way.\n" +
+             TooltipTags.Warning + "This multiplies with Anti-Aliasing: 200 with 4x samples every " +
+             "pixel 16 times over.\n" +
+             TooltipTags.Performance + "The single most effective GPU lever available.\n" +
+             TooltipTags.DefaultColorStart + "100" + TooltipTags.DefaultColorEnd)]
+    public int renderScalePercent = 100;
+
+    /// <summary>
+    /// Multisample anti-aliasing level applied to the world camera.
+    /// </summary>
+    [SettingField(SettingsTab.Graphics, Label = "Anti-Aliasing (MSAA)", Order = 1)]
+    [Tooltip("Smooths the jagged edges of blocks by sampling each pixel several times.\n\n" +
+             TooltipTags.BulletOptionStart + "Off" + TooltipTags.BulletOptionEnd +
+             "No multisampling. The resolve pass is skipped entirely.\n" +
+             TooltipTags.BulletOptionStart + "2x / 4x / 8x" + TooltipTags.BulletOptionEnd +
+             "Progressively smoother block silhouettes at progressively higher bandwidth cost.\n\n" +
+             TooltipTags.Note + "Cleans up block edges against the sky, but does nothing for grass and " +
+             "flowers, whose edges come from texture cut-outs rather than geometry.\n" +
+             TooltipTags.Warning + "This multiplies with Render Scale.\n" +
+             TooltipTags.DefaultColorStart + "Off" + TooltipTags.DefaultColorEnd)]
+    public MsaaLevel msaa = MsaaLevel.Off;
+
+    /// <summary>
     /// Controls the visual fidelity of liquid (water and lava) rendering.
     /// Higher tiers enable more expensive shader effects.
     /// </summary>
