@@ -73,7 +73,10 @@ struct LiquidV2F
     float shadowMultiplier : TEXCOORD5;
     float2 localFlowVector : TEXCOORD6; // Physical flow XY vector from mesher
     float2 shorePush : TEXCOORD7; // Normalized push direction from C# mesher
-    float packedShoreMask : TEXCOORD8; // Bit-packed 8-bit wall neighbor flags (constant across quad)
+    // Bit-packed 8-bit wall neighbor flags. `nointerpolation` states the contract the mesher already
+    // keeps (VoxelMeshHelper writes one Color32 to all four verts): a bit field has no meaningful
+    // in-between, so it is passed through flat rather than interpolated and then rounded back.
+    nointerpolation float packedShoreMask : TEXCOORD8;
     half3 blockRGB : TEXCOORD9;
     half emissive : TEXCOORD10; // RF-3 emissive strength (lava emits; water does not)
 };

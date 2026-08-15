@@ -564,12 +564,13 @@ Shader "Minecraft/SkyboxShader"
                     // clip. The literal "multiply, then add airlight" spelling overflows immediately
                     // here: colour grading is LDR with no tonemapper, and the authored sky beside the
                     // sun already occupies most of the range (design doc §7.1).
-                    // Uses the SUN's own path depth, not the view's. For disc pixels the two are nearly
-                    // the same direction anyway, but they must not use different falloff curves or the
-                    // disc reddens on a different schedule from the glow around it.
-                    float3 transmittance = exp(-sunPathHaze * SUN_EXTINCTION_DEPTH * SUN_EXTINCTION_BETA);
-                    sunColor = half3(float3(sunColor) * transmittance
-                                     + float3(_VoxelFogColor) * (1.0 - transmittance));
+                    // Reuses `sunTransmittance` rather than recomputing it: that is the SUN's own path
+                    // depth, not the view's. For disc pixels the two are nearly the same direction
+                    // anyway, but they must not use different falloff curves or the disc reddens on a
+                    // different schedule from the glow around it — sharing the one value makes that
+                    // structural instead of a convention two call sites have to keep.
+                    sunColor = half3(float3(sunColor) * sunTransmittance
+                                     + float3(_VoxelFogColor) * (1.0 - sunTransmittance));
 
                     // The aureole is air in FRONT of the disc, so the disc is veiled by exactly the
                     // same blend the sky beside it received. Applying it to only one of the two is
