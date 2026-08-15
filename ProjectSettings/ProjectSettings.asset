@@ -779,7 +779,7 @@ PlayerSettings:
   il2cppLTOMode: {}
   il2cppStacktraceInformation:
     Android: 1
-    Standalone: 1
+    Standalone: 0
   managedStrippingLevel:
     Android: 1
     EmbeddedLinux: 1
