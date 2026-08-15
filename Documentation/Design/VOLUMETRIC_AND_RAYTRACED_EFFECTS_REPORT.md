@@ -587,8 +587,11 @@ Four points, two of them corrections to this paragraph as first written:
 coordinate if/when greedy meshing starts, and note VX-8 unblocks its *light* constraint but not its
 AO one — see that entry); `SILHOUETTE_CONTACT_SHADOWS.md` (`SS-*` — orthogonal, and the source of
 the AO reasoning above); VX-5 (would widen occupancy enough for per-pixel `SS-*` on partial blocks);
-GS-3 (per-fragment lighting math cost — same audit); meshing suite (baked channels stay
-byte-identical — differential guard).
+GS-3 ⏸️ (per-fragment lighting math cost — same audit, and note the two point in **opposite**
+directions: GS-3 moves the shade curve *out* of the fragment stage, VX-8 moves lighting fully *into*
+it. GS-3 was deferred 2026-08-15, so no conflict exists today; if it is ever resumed, whichever lands
+second inherits the other's varyings); meshing suite (baked channels stay byte-identical —
+differential guard).
 
 ---
 

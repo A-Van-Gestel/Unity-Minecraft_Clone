@@ -54,8 +54,11 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
   blocklight RGB 3×4b), per-channel BFS, shader-only sky tinting. RF-1 builds directly on its
   `SkyLightColor` design; RF-5's feasibility analysis derives from its storage decisions.
 - [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) — cross-linked items:
-  `GS-2` (opaque texture), `GS-3` (per-fragment lighting math), `GS-4` ✅ (render-tier audit — shipped
-  2026-08-15, after RF-3), `GS-5`/`GS-6` (culling/submission), `LI-1`/`LI-2`.
+  `GS-2` (opaque texture), `GS-3` ⏸️ (per-fragment lighting math — analyzed and **deferred**
+  2026-08-15: the vertex-stage move is irreducibly non-neutral, so it is not the free win it reads
+  as), `GS-4` ✅ (render-tier audit — shipped 2026-08-15, after RF-3), `GS-5`/`GS-6`
+  (culling/submission), `GS-7` (cloud shader uniform hoist — exact, split out of GS-3's analysis),
+  `LI-1`/`LI-2`.
 - [`OM1_DEVICE_CALIBRATION.md`](OM1_DEVICE_CALIBRATION.md) — device-tier budgets; RF-3 (post
   processing) must be quality-tier-gated per its model.
 - [`../Architecture/DATA_DRIVEN_SETTINGS_UI.md`](../Architecture/DATA_DRIVEN_SETTINGS_UI.md) —

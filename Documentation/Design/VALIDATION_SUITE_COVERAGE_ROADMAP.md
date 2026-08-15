@@ -163,7 +163,7 @@ what this document ranks.
 
 ## Explicit non-goals
 
-No suites proposed for: **UI/menus and input** (event-driven, low blast radius, visually verified), **clouds and debug tooling** (`DT-*` hygiene items suffice; debug tools are not correctness-critical), **OM-1 device calibration** (device-dependent by design, verified by its own startup probe), and **shaders/GPU output** (needs image-based comparison — a different kind of harness; revisit if GS-1/GS-3 visual refactors recur).
+No suites proposed for: **UI/menus and input** (event-driven, low blast radius, visually verified), **clouds and debug tooling** (`DT-*` hygiene items suffice; debug tools are not correctness-critical), **OM-1 device calibration** (device-dependent by design, verified by its own startup probe), and **shaders/GPU output** (needs image-based comparison — a different kind of harness; revisit if GS-1/GS-3 visual refactors recur). **2026-08-15:** this exclusion was load-bearing in `GS-3`'s deferral — the absence of any block-shader render gate, and the fact that building one exceeds the item itself, was one reason a guaranteed visual change was judged not worth an unmeasured gain. `SkyRenderValidationSuite` shows the harness *shape* that would be needed, but it is built on the skybox-specific `SkyPreviewRenderer`.
 
 ## Sequencing summary
 
