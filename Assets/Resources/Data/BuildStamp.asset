@@ -12,12 +12,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9c04301b2423cdf4a8102ce1422f0b14, type: 3}
   m_Name: BuildStamp
   m_EditorClassIdentifier: Assembly-CSharp::Data.BuildStamp
-  _isBaked: 1
-  _gitCommit: 36ff3f13-dirty
-  _gitBranch: feat/world-scaling
-  _gitDirty: 1
-  _il2CppConfiguration: Master
-  _scriptingBackend: IL2CPP
+  _isBaked: 0
+  _gitCommit: (unstamped build)
+  _gitBranch: (unstamped build)
+  _gitDirty: 0
+  _il2CppConfiguration: (unstamped build)
+  _scriptingBackend: (unstamped build)
   _burstSafetyChecks: 0
-  _burstOptimizations: 1
-  _bakedAtUtc: 2026-08-15T19:35:46.3298794Z
+  _burstOptimizations: 0
+  _bakedAtUtc: (unstamped build)

@@ -24,15 +24,32 @@ namespace Data
         /// <summary>Rendered in place of any field that was never baked.</summary>
         public const string UnknownValue = "(unstamped build)";
 
-        [SerializeField] private bool _isBaked;
-        [SerializeField] private string _gitCommit = UnknownValue;
-        [SerializeField] private string _gitBranch = UnknownValue;
-        [SerializeField] private bool _gitDirty;
-        [SerializeField] private string _il2CppConfiguration = UnknownValue;
-        [SerializeField] private string _scriptingBackend = UnknownValue;
-        [SerializeField] private bool _burstSafetyChecks;
-        [SerializeField] private bool _burstOptimizations;
-        [SerializeField] private string _bakedAtUtc = UnknownValue;
+        [SerializeField]
+        private bool _isBaked;
+
+        [SerializeField]
+        private string _gitCommit = UnknownValue;
+
+        [SerializeField]
+        private string _gitBranch = UnknownValue;
+
+        [SerializeField]
+        private bool _gitDirty;
+
+        [SerializeField]
+        private string _il2CppConfiguration = UnknownValue;
+
+        [SerializeField]
+        private string _scriptingBackend = UnknownValue;
+
+        [SerializeField]
+        private bool _burstSafetyChecks;
+
+        [SerializeField]
+        private bool _burstOptimizations;
+
+        [SerializeField]
+        private string _bakedAtUtc = UnknownValue;
 
         /// <summary>
         /// Whether a build hook actually populated this asset. When <c>false</c> every other member
@@ -62,11 +79,17 @@ namespace Data
         /// <summary>Scripting backend selected for the built platform (IL2CPP or Mono2x).</summary>
         public string ScriptingBackend => _isBaked ? _scriptingBackend : UnknownValue;
 
-        /// <summary>Whether Burst AOT compiled this player with safety checks enabled.</summary>
-        public bool BurstSafetyChecks => _burstSafetyChecks;
+        /// <summary>
+        /// Whether Burst AOT compiled this player with safety checks enabled. A <c>bool</c> cannot
+        /// express "unknown", so check <see cref="IsBaked"/> before reporting this as fact.
+        /// </summary>
+        public bool BurstSafetyChecks => _isBaked && _burstSafetyChecks;
 
-        /// <summary>Whether Burst AOT compiled this player with optimizations enabled.</summary>
-        public bool BurstOptimizations => _burstOptimizations;
+        /// <summary>
+        /// Whether Burst AOT compiled this player with optimizations enabled. A <c>bool</c> cannot
+        /// express "unknown", so check <see cref="IsBaked"/> before reporting this as fact.
+        /// </summary>
+        public bool BurstOptimizations => _isBaked && _burstOptimizations;
 
         /// <summary>UTC timestamp of the build that baked this stamp (round-trip "o" format).</summary>
         public string BakedAtUtc => _isBaked ? _bakedAtUtc : UnknownValue;
