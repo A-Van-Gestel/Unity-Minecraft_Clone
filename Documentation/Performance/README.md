@@ -7,7 +7,7 @@ Versioned performance numbers, captured against a specific commit on a specific 
 | Kind | Suffix | What it is | Count |
 |------|--------|------------|-------|
 | **Baseline** | `*_BASELINE.md` | A "before" number for a system, captured so a later refactor can be shown not to regress it. Has a regression budget. | 5 |
-| **Benchmark / A-B capture** | `*_BENCHMARK.md` | A measurement taken to answer a question — usually "is this change worth shipping?" — ending in an explicit **GO / NO-GO** verdict, or in a **regime verdict** for instrumentation captures that ship no behavior change. | 18 |
+| **Benchmark / A-B capture** | `*_BENCHMARK.md` | A measurement taken to answer a question — usually "is this change worth shipping?" — ending in an explicit **GO / NO-GO** verdict, or in a **regime verdict** for instrumentation captures that ship no behavior change. | 24 |
 
 Baselines came first and the folder was originally named for them; A/B captures are now the large majority. The protocol below covers both, and the `perf-benchmark` skill owns the workflow.
 
@@ -33,6 +33,12 @@ Add `_IL2CPP` when the capture is on the shippable backend, and `_INGAME` when i
 ## Index
 
 Newest first within each arc. **Superseded** means a later capture withdrew or corrected its numbers — the file stays because the successor's argument is built on it.
+
+### Build configuration
+
+| Capture | Date | Status |
+|---------|------|--------|
+| [`BUILD_LEAN_PROD_IL2CPP_2026-08-15`](BUILD_LEAN_PROD_IL2CPP_2026-08-15_BENCHMARK.md) | 2026-08-15 | **GO — on build time, not runtime.** MethodOnly stacktraces + Medium stripping + Resources cleanup: build **−49 %** (~15m → 7m42s), frame-time **neutral** (mixed-sign ~1 % deltas at n = 1), all ten FP regime verdicts identical. Reserved memory consistently down; managed heap up ~2–3 % logged as a watch item. **Its "before" leg carries the pre-stamp header bug — read the ⚠ note before comparing the two headers.** |
 
 ### Chunk pipeline — FP-\* flight-profile telemetry
 
