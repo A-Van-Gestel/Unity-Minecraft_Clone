@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
+using Data;
 using Unity.Burst;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
@@ -54,22 +55,25 @@ namespace Benchmarks
             // interval), so a Development Build's overhead lengthens frames, inflates quotas and shifts the
             // admission regime the capture exists to measure. Two reports that differ only in this line are
             // not comparable, and without it that difference is invisible — the FP-6 defect exactly.
-            sb.AppendLine($"Configuration:  {(Debug.isDebugBuild ? "Development" : "Release")}");
+            sb.AppendLine($"Development:    {(Debug.isDebugBuild ? "Yes" : "No")}");
+
+            // The IL2CPP compiler configuration is an axis INDEPENDENT of the Development flag above
+            // (a Master build and a Release build are both non-Development) and no runtime managed API
+            // exposes it, so it can only come from the stamp.
+            BuildStamp stamp = LoadBuildStamp();
+            sb.AppendLine($"Configuration:  {DescribeConfiguration(stamp)}");
 
             // Application.buildGUID is the all-zeros sentinel in Editor mode and meaningful only in Player builds.
             string buildGUID = Application.buildGUID;
             if (!string.IsNullOrEmpty(buildGUID) && buildGUID != "00000000000000000000000000000000")
                 sb.AppendLine($"Build GUID:     {buildGUID}");
 
-            sb.AppendLine($"Git commit:     {GetGitCommitHash()}");
+            sb.AppendLine($"Git commit:     {DescribeGitCommit(stamp)}");
+            sb.AppendLine($"Git branch:     {DescribeGitBranch(stamp)}");
             sb.AppendLine();
 
             sb.AppendLine("=== Burst ===");
-            BurstCompilerOptions options = BurstCompiler.Options;
-            sb.AppendLine($"Compilation:    {OnOff(options.EnableBurstCompilation)}");
-            sb.AppendLine($"Safety checks:  {OnOff(options.EnableBurstSafetyChecks)}");
-            sb.AppendLine($"Synchronous:    {OnOff(options.EnableBurstCompileSynchronously)}");
-            sb.AppendLine();
+            AppendBurstSection(sb, stamp);
 
             return sb.ToString();
         }
@@ -273,17 +277,144 @@ namespace Benchmarks
 
         private static string OnOff(bool flag) => flag ? "Enabled" : "Disabled";
 
+        // ----- Build Provenance -----
+
+        #region Build provenance
+
         /// <summary>
-        /// Shells out to <c>git rev-parse --short HEAD</c> to obtain the current commit hash.
-        /// Editor-only — player builds have no shell access and return a sentinel string.
+        /// Loads the baked <see cref="BuildStamp"/>, or <c>null</c> when the asset is absent.
         /// </summary>
-        /// <returns>The 7-character short commit hash, or a sentinel describing why it could not be obtained.</returns>
+        private static BuildStamp LoadBuildStamp() => Resources.Load<BuildStamp>(BuildStamp.ResourcePath);
+
+        /// <summary>
+        /// Describes the IL2CPP compiler configuration. In the Editor there is no such configuration
+        /// to report; in a player it is only knowable from the stamp.
+        /// </summary>
+        private static string DescribeConfiguration(BuildStamp stamp)
+        {
+            if (Application.isEditor) return "n/a (Editor)";
+            return stamp && stamp.IsBaked ? stamp.Il2CppConfiguration : BuildStamp.UnknownValue;
+        }
+
+        /// <summary>
+        /// Describes the source commit: queried live in the Editor, read from the stamp in a player.
+        /// </summary>
+        private static string DescribeGitCommit(BuildStamp stamp)
+        {
+            if (Application.isEditor) return GetGitCommitHash();
+            return stamp && stamp.IsBaked ? stamp.GitCommit : BuildStamp.UnknownValue;
+        }
+
+        /// <summary>
+        /// Describes the source branch: queried live in the Editor, read from the stamp in a player.
+        /// </summary>
+        /// <param name="stamp">The baked stamp; unused in the Editor, which queries git directly.</param>
+        // ReSharper disable once UnusedParameter.Local — used only in the non-Editor branch below.
+        private static string DescribeGitBranch(BuildStamp stamp)
+        {
+#if UNITY_EDITOR
+            // `branch` carries its own sentinel when the query fails, so the result is reportable either way.
+            TryQueryGit(out _, out string branch, out _);
+            return branch;
+#else
+            return stamp && stamp.IsBaked ? stamp.GitBranch : BuildStamp.UnknownValue;
+#endif
+        }
+
+        /// <summary>
+        /// Appends the Burst section, sourcing safety-check and optimization state correctly per context.
+        /// </summary>
+        /// <remarks>
+        /// <c>BurstCompilerOptions.EnableBurstSafetyChecks</c> is documented editor-only ("Does not have
+        /// an impact on player mode") and is hardcoded <c>true</c> by the options constructor, so reading
+        /// it in a player reports <c>Enabled</c> for every build regardless of the AOT settings that
+        /// actually governed compilation. Players must use the stamp; the Editor value is authoritative
+        /// only in the Editor.
+        /// </remarks>
+        private static void AppendBurstSection(StringBuilder sb, BuildStamp stamp)
+        {
+            BurstCompilerOptions options = BurstCompiler.Options;
+            sb.AppendLine($"Compilation:    {OnOff(options.EnableBurstCompilation)}");
+
+            if (Application.isEditor)
+            {
+                sb.AppendLine($"Safety checks:  {OnOff(options.EnableBurstSafetyChecks)}");
+                sb.AppendLine($"Synchronous:    {OnOff(options.EnableBurstCompileSynchronously)}");
+            }
+            else if (stamp && stamp.IsBaked)
+            {
+                sb.AppendLine($"Safety checks:  {OnOff(stamp.BurstSafetyChecks)} (AOT)");
+                sb.AppendLine($"Optimizations:  {OnOff(stamp.BurstOptimizations)} (AOT)");
+            }
+            else
+            {
+                sb.AppendLine($"Safety checks:  {BuildStamp.UnknownValue}");
+                sb.AppendLine($"Optimizations:  {BuildStamp.UnknownValue}");
+            }
+
+            sb.AppendLine();
+        }
+
+        #endregion
+
+        /// <summary>
+        /// Shells out to <c>git rev-parse --short HEAD</c> to obtain the current commit hash,
+        /// annotated with <c>-dirty</c> when the working tree has uncommitted changes.
+        /// Editor-only — player builds have no shell access and read the baked
+        /// <see cref="BuildStamp"/> instead.
+        /// </summary>
+        /// <returns>The short commit hash, or a sentinel describing why it could not be obtained.</returns>
         private static string GetGitCommitHash()
         {
 #if UNITY_EDITOR
+            return TryQueryGit(out string commit, out _, out bool dirty)
+                ? (dirty ? commit + "-dirty" : commit)
+                : commit; // On failure `commit` already carries the explanatory sentinel.
+#else
+            return BuildStamp.UnknownValue;
+#endif
+        }
+
+#if UNITY_EDITOR
+        /// <summary>
+        /// Queries the repository for the current commit, branch, and working-tree cleanliness.
+        /// <para>Lives here rather than in the editor assembly so the benchmark harness and the
+        /// build-time <c>BuildStampBaker</c> read git through one implementation and cannot report
+        /// provenance in two different formats.</para>
+        /// </summary>
+        /// <param name="commit">Short commit hash on success; an explanatory sentinel on failure.</param>
+        /// <param name="branch">Current branch name, or <c>HEAD</c> when detached.</param>
+        /// <param name="dirty"><c>true</c> when the working tree has uncommitted changes.</param>
+        /// <returns><c>true</c> when the commit hash was obtained.</returns>
+        public static bool TryQueryGit(out string commit, out string branch, out bool dirty)
+        {
+            branch = "(unknown)";
+            dirty = false;
+
+            if (!TryRunGit("rev-parse --short HEAD", out commit)) return false;
+
+            if (TryRunGit("rev-parse --abbrev-ref HEAD", out string branchOutput))
+                branch = branchOutput;
+
+            // A non-empty porcelain listing means tracked changes, untracked files, or both. Any of
+            // those makes the bare hash an over-claim, so the distinction is not worth splitting.
+            dirty = TryRunGit("status --porcelain", out string statusOutput) &&
+                    !string.IsNullOrWhiteSpace(statusOutput);
+
+            return true;
+        }
+
+        /// <summary>
+        /// Runs a git subcommand and captures its trimmed stdout.
+        /// </summary>
+        /// <param name="arguments">Arguments passed to the <c>git</c> executable.</param>
+        /// <param name="output">Trimmed stdout on success; an explanatory sentinel on failure.</param>
+        /// <returns><c>true</c> when git exited 0 with non-empty output.</returns>
+        private static bool TryRunGit(string arguments, out string output)
+        {
             try
             {
-                ProcessStartInfo psi = new ProcessStartInfo("git", "rev-parse --short HEAD")
+                ProcessStartInfo psi = new ProcessStartInfo("git", arguments)
                 {
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
@@ -294,27 +425,45 @@ namespace Benchmarks
                 };
 
                 using Process proc = Process.Start(psi);
-                if (proc == null) return "(git unavailable)";
+                if (proc == null)
+                {
+                    output = "(git unavailable)";
+                    return false;
+                }
+
+                // Read before waiting: a full stdout pipe buffer deadlocks a process that is still
+                // writing, which `status --porcelain` can hit on a large dirty tree.
+                string stdout = proc.StandardOutput.ReadToEnd();
 
                 if (!proc.WaitForExit(milliseconds: 2000))
                 {
                     proc.Kill();
-                    return "(git timeout)";
+                    output = "(git timeout)";
+                    return false;
                 }
 
-                if (proc.ExitCode != 0) return "(not a git repo)";
+                if (proc.ExitCode != 0)
+                {
+                    output = "(not a git repo)";
+                    return false;
+                }
 
-                string output = proc.StandardOutput.ReadToEnd().Trim();
-                return string.IsNullOrEmpty(output) ? "(empty)" : output;
+                output = stdout.Trim();
+                if (string.IsNullOrEmpty(output))
+                {
+                    output = "(empty)";
+                    return false;
+                }
+
+                return true;
             }
             catch (Exception)
             {
                 // Most commonly: `git` not on PATH. Fall through to sentinel.
-                return "(git unavailable)";
+                output = "(git unavailable)";
+                return false;
             }
-#else
-            return "(player build — record manually)";
-#endif
         }
+#endif
     }
 }

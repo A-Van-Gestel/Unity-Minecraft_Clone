@@ -17,7 +17,7 @@ Large refactors of performance-sensitive systems (meshing, lighting, chunk gener
 
 A capture records:
 
-- **Build context** — Unity version, scripting backend (Mono vs IL2CPP), **Development vs Release configuration**, Burst settings, target platform.
+- **Build context** — Unity version, scripting backend (Mono vs IL2CPP), **Development vs non-Development**, the **IL2CPP compiler configuration** (Debug/Release/Master — an axis independent of the Development flag), Burst AOT settings, source commit/branch, target platform.
 - **Hardware context** — CPU model and core count, RAM, OS. (Same machine should produce comparable numbers across captures.)
 - **The numbers** — raw output of the relevant in-engine benchmark, per scenario, **in full**.
 - **The regression budget** (baselines) or **the verdict** (A/B captures) — see below.
@@ -113,8 +113,27 @@ Newest first within each arc. **Superseded** means a later capture withdrew or c
 
 - **Never edit a captured file in place.** If a capture turns out to be wrong, write a new one and link the two.
 - **Never move, rename, or archive a capture.** This folder is a time series, not a working set — see below.
-- **Always include the commit hash** the capture was taken against, so readers can `git checkout` and reproduce.
-- **Say which backend and configuration** produced the numbers. Editor Mono is screening-only; IL2CPP **Release** is the shipping result. A Development build inflates frame-time-proportional budgets and can measure a regime no player experiences.
+- **Always include the commit hash** the capture was taken against, so readers can `git checkout` and reproduce. Player builds now bake this in (see below), but a `-dirty` suffix means the tree carried uncommitted changes and the hash alone will **not** reproduce the binary.
+- **Say which backend and configuration** produced the numbers. Editor Mono is screening-only; the shipping result is an IL2CPP build at the project's production compiler configuration (**Master**). A Development build inflates frame-time-proportional budgets and can measure a regime no player experiences.
+
+#### Provenance is baked, not queried (from 2026-08-15)
+
+The git commit, IL2CPP compiler configuration, and Burst AOT flags in a capture header are written
+into a `BuildStamp` asset by `BuildStampBaker` at build time. None of the three is knowable from a
+running player: git state is absent from a build, and no runtime managed API exposes the other two.
+
+**Captures taken before this date carry two false header lines in player builds, and must be read
+with that in mind:**
+
+| Header line | What it printed | Why |
+|---|---|---|
+| `Safety checks:` | `Enabled`, always | Read `BurstCompiler.Options.EnableBurstSafetyChecks`, which Burst documents as editor-only ("Does not have an impact on player mode") and whose constructor hardcodes `true`. Player AOT code was in fact compiled with the project's setting — safety checks **off**. |
+| `Configuration:` | `Release`, always | Derived from `Debug.isDebugBuild`, which only distinguishes Development from non-Development and cannot see the IL2CPP compiler configuration. Master and Release both printed `Release`. |
+
+Those captures' **measurements remain valid** — they always ran the real production configuration;
+only the header misdescribed it. Per the append-only rule the affected files are left untouched. But
+a capture whose *reasoning* leaned on either line (e.g. discounting a result as pessimistic because
+"safety checks were on") needs its conclusion revisited even though its numbers stand.
 - Captures from before a system's API stabilized are often not directly comparable to later ones. Note this explicitly in the file.
 
 ### Why superseded captures stay here
