@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Scripting;
 
 namespace UI
 {
@@ -10,6 +11,13 @@ namespace UI
     /// and sorted descending. The serialized value is a string in the format "WIDTHxHEIGHT"
     /// (e.g., "1920x1080"). An empty string maps to the current screen resolution.
     /// </summary>
+    /// <remarks>
+    /// <see cref="PreserveAttribute"/> is required: the only reference to this type is a
+    /// <c>typeof</c> argument on a <c>[DynamicDropdown]</c> attribute, which the managed stripper
+    /// does not treat as a root. Without it the parameterless constructor is stripped above
+    /// stripping level Low and <c>Activator.CreateInstance</c> throws at runtime.
+    /// </remarks>
+    [Preserve]
     public class ResolutionDropdownProvider : IDropdownProvider
     {
         private Resolution[] _resolutions;
@@ -69,7 +77,7 @@ namespace UI
             if (parts.Length != 2) return;
 
             if (int.TryParse(parts[0], out int width) && int.TryParse(parts[1], out int height)
-                && width > 0 && height > 0)
+                                                      && width > 0 && height > 0)
             {
                 Screen.SetResolution(width, height, Screen.fullScreenMode);
             }

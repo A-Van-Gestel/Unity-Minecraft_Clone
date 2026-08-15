@@ -652,6 +652,29 @@ Additionally, `Activator.CreateInstance(Type)` is used once per `[DynamicDropdow
 
 **Validation requirement:** The IL2CPP reflection path must be tested in an actual IL2CPP Development Build early in the implementation phase to catch any edge cases before they become blockers.
 
+### 9.1 Managed stripping
+
+AOT compatibility and managed stripping are separate hazards: the operations above compile fine
+under IL2CPP, but none of them creates a **static reference** the linker can see, so the members
+they reach are strip candidates. Standalone builds at stripping level **Medium**, above which the
+following are removed unless explicitly rooted:
+
+* The `Settings` / `DevSettings` fields the generator enumerates — including **private** fields,
+  which `GetWatchedFieldValue` resolves *by name*.
+* `[SettingAction]` methods, which are only ever invoked reflectively.
+* The `UI.Attributes` marker types read via `GetCustomAttribute<T>()`.
+* `IDropdownProvider` implementations, whose sole reference is a `typeof` argument on a
+  `[DynamicDropdown]` attribute.
+
+The first four are rooted in `Assets/link.xml`. Provider classes instead carry `[Preserve]` on the
+class itself so the root travels with the type — **add `[Preserve]` to any new `IDropdownProvider`
+implementation.**
+
+This failure mode is silent: stripping happens at build time but the missing member only surfaces
+when the menu is generated, as a control that quietly fails to appear (or an
+`Activator.CreateInstance` throw) in a player build that compiled and linked cleanly. It cannot be
+reproduced in the Editor or in any build below Medium.
+
 > **Future consideration:** If reflection proves problematic at scale, the system could be augmented with an editor-time "Bake" step that uses Roslyn source generators to emit concrete binding code. This would eliminate runtime reflection entirely but would require two test rounds (Editor reflection + Production baked). This optimization is deferred unless IL2CPP testing reveals issues.
 
 ---
