@@ -2,13 +2,14 @@ using System.Collections;
 using System.Text;
 using Commands;
 using TMPro;
+using UI.Builders;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace UI
 {
     /// <summary>
-    /// The in-game command console view (CMD-1): a bottom-left translucent panel with a scrollable
+    /// The in-game command console view (CMD-1): a bottom-left frosted-glass panel with a scrollable
     /// TMP history over a <see cref="TMP_InputField"/>, driving a <see cref="CommandEngine"/>.
     /// <para>
     /// A stateless view over the engine — all output/history/confirmation state lives in
@@ -20,9 +21,8 @@ namespace UI
     public class ConsoleUI : MonoBehaviour
     {
         // --- Layout (canvas-scaled reference pixels, 1920×1080) ---
-        private const float REFERENCE_WIDTH = 1920f;
-        private const float REFERENCE_HEIGHT = 1080f;
-        private const int SORT_ORDER = 100; // above the HUD canvas
+        // Reference resolution comes from RuntimeUIFactory, shared with the other code-built canvases.
+        private const int SORT_ORDER = 100; // above the scene UI canvas (0) and the benchmark HUD (-10)
         private const float PANEL_WIDTH = 680f;
         private const float PANEL_HEIGHT = 440f;
         private const float PANEL_MARGIN = 12f;
@@ -31,7 +31,16 @@ namespace UI
         private const float FONT_SIZE = 20f;
 
         // --- Colors ---
-        private static readonly Color s_panelBG = new Color(0f, 0f, 0f, 0.55f);
+        /// <summary>Flat backdrop painted when the blur shader is unavailable.</summary>
+        private static readonly Color s_panelFallbackBG = new Color(0f, 0f, 0f, 0.55f);
+
+        /// <summary>
+        /// The panel's blur tint, matching the scene panels' shared material so the console reads as the
+        /// same frosted glass. A material property, so Unity gamma-converts it on upload — the same 0.415
+        /// set through <c>Image.color</c> would not be converted (blur doc §4.3).
+        /// </summary>
+        private static readonly Color s_panelBlurTint = new Color(0.415f, 0.415f, 0.415f, 1f);
+
         private static readonly Color s_inputBG = new Color(0f, 0f, 0f, 0.75f);
         private static readonly Color s_inputText = new Color(0.95f, 0.95f, 0.95f, 1f);
 
@@ -42,6 +51,14 @@ namespace UI
         private const float AUTOSCROLL_EPSILON = 0.01f;
 
         private CommandEngine _engine;
+
+        /// <summary>
+        /// This view's own blur material instance. Allocated once in <see cref="Awake"/> rather than in
+        /// <see cref="BuildPanel"/>, which the UI_BUGS #04 self-heal re-enters — allocating there would
+        /// leak one material per heal. Destroyed in <see cref="OnDestroy"/>.
+        /// </summary>
+        private Material _blurMaterial;
+
         private GameObject _panel;
         private ScrollRect _scrollRect;
         private TextMeshProUGUI _historyText;
@@ -65,6 +82,8 @@ namespace UI
             _engine = new CommandEngine();
             _engine.LineAppended += OnLineAppended;
 
+            _blurMaterial = RuntimeUIFactory.CreateBlurMaterialInstance(s_panelBlurTint);
+
             BuildHierarchy();
             _panel.SetActive(false);
         }
@@ -73,6 +92,9 @@ namespace UI
         {
             if (_engine != null)
                 _engine.LineAppended -= OnLineAppended;
+
+            if (_blurMaterial != null)
+                Destroy(_blurMaterial);
         }
 
         private void Update()
@@ -372,14 +394,10 @@ namespace UI
         /// <summary>Builds the overlay canvas (once, in <see cref="Awake"/>) then the panel and its contents.</summary>
         private void BuildHierarchy()
         {
-            // Own overlay canvas so the console sorts above the HUD without touching scene objects.
-            Canvas canvas = gameObject.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = SORT_ORDER;
-            CanvasScaler scaler = gameObject.AddComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(REFERENCE_WIDTH, REFERENCE_HEIGHT);
-            gameObject.AddComponent<GraphicRaycaster>();
+            // Own overlay canvas so the console sorts above the scene UI without touching scene objects.
+            // Width-matched (0), unlike the benchmark's balanced canvas — the console is anchored to the
+            // bottom-left corner, so height scaling would drift it away from that corner.
+            RuntimeUIFactory.ConfigureCanvas(gameObject, SORT_ORDER, 0f);
 
             BuildPanel();
         }
@@ -391,7 +409,7 @@ namespace UI
         /// </summary>
         private void BuildPanel()
         {
-            // Panel: bottom-left translucent backdrop.
+            // Panel: bottom-left frosted backdrop.
             _panel = new GameObject("ConsolePanel", typeof(RectTransform), typeof(Image));
             _panel.transform.SetParent(transform, false);
             RectTransform panelRect = (RectTransform)_panel.transform;
@@ -400,7 +418,11 @@ namespace UI
             panelRect.pivot = Vector2.zero;
             panelRect.anchoredPosition = new Vector2(PANEL_MARGIN, PANEL_MARGIN);
             panelRect.sizeDelta = new Vector2(PANEL_WIDTH, PANEL_HEIGHT);
-            _panel.GetComponent<Image>().color = s_panelBG;
+            // Opaque on the blur path: the panel is the topmost thing on screen where it draws, so it has
+            // no UI beneath it to reveal, and lowering alpha would only bleed the un-blurred screen
+            // through and cost the frost (blur doc §4.1). It does cover the toolbar's left edge where the
+            // two overlap — accepted, since the hotbar is inert while the console holds input focus.
+            RuntimeUIFactory.ApplyBlurBackground(_panel.GetComponent<Image>(), _blurMaterial, s_panelFallbackBG);
 
             BuildHistoryView(panelRect);
             BuildInputField(panelRect);

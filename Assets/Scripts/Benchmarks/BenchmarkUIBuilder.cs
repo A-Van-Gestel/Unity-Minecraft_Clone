@@ -1,20 +1,35 @@
 using TMPro;
+using UI.Builders;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace Benchmarks
 {
     /// <summary>
-    /// Static utility that programmatically creates the benchmark HUD and results screen
-    /// UI hierarchies at runtime. Avoids the need to edit scene or prefab files directly.
-    /// All GameObjects are created under a dedicated screen-space overlay Canvas with
-    /// <see cref="CanvasScaler"/> configured for 1920×1080 reference resolution.
+    /// Composes the benchmark HUD and results screen at runtime from <see cref="RuntimeUIFactory"/>
+    /// primitives, so no scene or prefab edit is involved. This class owns the benchmark's palette and
+    /// layout; the factory owns construction and the blur-material contract.
     /// </summary>
     public static class BenchmarkUIBuilder
     {
+        // The scene UI canvas sits at sortingOrder 0, and a blurred panel is opaque — it replaces the
+        // pixels beneath it rather than compositing over them (UI_BLUR_BACKDROP_SYSTEM.md §4.2). Sorting
+        // the HUD *below* the scene canvas is what lets the pause menu cover it (UI_BUGS #06); at a
+        // positive order the HUD punched a hole back to the un-blurred world over the paused screen.
+        private const int HUD_SORT_ORDER = -10;
+        private const int RESULTS_SORT_ORDER = 200;
+
+        private const float BUTTON_HEIGHT = 50f;
+        private const float LABEL_FONT_SIZE = 16f;
+
         private static readonly Color s_hudBackgroundColor = new Color(0f, 0f, 0f, 0.7f);
         private static readonly Color s_resultsOverlayColor = new Color(0f, 0f, 0f, 0.85f);
         private static readonly Color s_resultsPanelColor = new Color(0.15f, 0.15f, 0.15f, 0.95f);
+
+        // Blur tints. Material properties, not vertex colors — Unity gamma-converts these on upload
+        // while leaving Image.color alone, so the two knobs are not interchangeable (blur doc §4.3).
+        private static readonly Color s_hudBlurTint = new Color(0.7f, 0.7f, 0.7f, 1f);
+        private static readonly Color s_resultsBlurTint = new Color(0.15f, 0.15f, 0.15f, 1f);
 
         // Button colors matched to the project's Button.prefab style
         private static readonly Color s_buttonNormalColor = new Color(0.55f, 0.55f, 0.55f, 1f);
@@ -22,23 +37,27 @@ namespace Benchmarks
         private static readonly Color s_buttonPressedColor = new Color(0.4f, 0.4f, 0.4f, 1f);
         private static readonly Color s_buttonTextColor = Color.white;
 
-        // Shader property IDs for UIBlur material tinting
-        private static readonly int s_multiplyColorId = Shader.PropertyToID("_MultiplyColor");
-        // private static readonly int s_additiveColorId = Shader.PropertyToID("_AdditiveColor");
+        private static readonly RuntimeUIFactory.ButtonColors s_buttonColors =
+            new RuntimeUIFactory.ButtonColors(s_buttonNormalColor, s_buttonHighlightColor, s_buttonPressedColor);
+
+        private static readonly RuntimeUIFactory.ScrollAreaChrome s_reportChrome =
+            new RuntimeUIFactory.ScrollAreaChrome(
+                new Color(0.1f, 0.1f, 0.1f, 0.8f),
+                new Color(0.15f, 0.15f, 0.15f, 0.8f),
+                new Color(0.5f, 0.5f, 0.5f, 0.8f));
 
         /// <summary>
         /// Creates the runtime HUD overlay showing benchmark progress and live metrics.
         /// </summary>
         /// <param name="controller">The benchmark controller to wire into the HUD.</param>
+        /// <param name="blurMaterial">Optional UI blur material for the HUD background. Pass null for a flat panel.</param>
         /// <returns>The configured <see cref="BenchmarkHUD"/> component.</returns>
-        /// <param name="blurMaterial">Optional UI blur material for the HUD background. Pass null to skip.</param>
         public static BenchmarkHUD CreateHUD(BenchmarkController controller, Material blurMaterial = null)
         {
-            // Canvas
-            GameObject canvasObj = CreateCanvas("BenchmarkHUD_Canvas", 100);
+            GameObject canvasObj = RuntimeUIFactory.CreateCanvas("BenchmarkHUD_Canvas", HUD_SORT_ORDER);
 
-            // Semi-transparent panel anchored to top-center
-            GameObject panel = CreatePanel("HUD_Panel", canvasObj.transform);
+            // Panel anchored to top-center
+            GameObject panel = RuntimeUIFactory.CreatePanel("HUD_Panel", canvasObj.transform);
             RectTransform panelRect = panel.GetComponent<RectTransform>();
             panelRect.anchorMin = new Vector2(0.2f, 0.85f);
             panelRect.anchorMax = new Vector2(0.8f, 1f);
@@ -46,27 +65,19 @@ namespace Benchmarks
             panelRect.offsetMax = Vector2.zero;
 
             Image panelImage = panel.AddComponent<Image>();
-            if (blurMaterial != null)
-            {
-                panelImage.material = new Material(blurMaterial);
-                panelImage.material.SetColor(s_multiplyColorId, new Color(0.7f, 0.7f, 0.7f, 1f));
-                panelImage.color = Color.white;
-            }
-            else
-            {
-                panelImage.color = s_hudBackgroundColor;
-            }
+            RuntimeUIFactory.ApplyBlurBackground(panelImage,
+                RuntimeUIFactory.CreateBlurMaterialInstance(blurMaterial, s_hudBlurTint),
+                s_hudBackgroundColor);
 
             // Add padding via VerticalLayoutGroup
             VerticalLayoutGroup layout = panel.AddComponent<VerticalLayoutGroup>();
             layout.padding = new RectOffset(16, 16, 8, 8);
             layout.childAlignment = TextAnchor.MiddleCenter;
 
-            // Status text
-            GameObject textObj = CreateTMPText("HUD_StatusText", panel.transform, 16, TextAlignmentOptions.Center);
+            GameObject textObj = RuntimeUIFactory.CreateTMPText("HUD_StatusText", panel.transform, 16,
+                TextAlignmentOptions.Center, Color.white);
             TextMeshProUGUI statusText = textObj.GetComponent<TextMeshProUGUI>();
 
-            // Attach HUD component
             BenchmarkHUD hud = canvasObj.AddComponent<BenchmarkHUD>();
             hud.Initialize(controller, statusText);
 
@@ -78,35 +89,24 @@ namespace Benchmarks
         /// runners. The root GameObject starts inactive.
         /// </summary>
         /// <param name="title">Heading shown above the report (e.g. "Benchmark Complete").</param>
+        /// <param name="blurMaterial">Optional UI blur material for the background overlay. Pass null for a flat overlay.</param>
         /// <returns>The configured <see cref="BenchmarkResultsScreen"/> component.</returns>
-        /// <param name="blurMaterial">Optional UI blur material for the background overlay. Pass null to skip.</param>
-        public static BenchmarkResultsScreen CreateResultsScreen(string title = "Benchmark Complete", Material blurMaterial = null)
+        public static BenchmarkResultsScreen CreateResultsScreen(string title = "Benchmark Complete",
+            Material blurMaterial = null)
         {
-            // Canvas
-            GameObject canvasObj = CreateCanvas("BenchmarkResults_Canvas", 200);
+            GameObject canvasObj = RuntimeUIFactory.CreateCanvas("BenchmarkResults_Canvas", RESULTS_SORT_ORDER);
 
             // Full-screen dark overlay
-            GameObject overlay = CreatePanel("Results_Overlay", canvasObj.transform);
-            RectTransform overlayRect = overlay.GetComponent<RectTransform>();
-            overlayRect.anchorMin = Vector2.zero;
-            overlayRect.anchorMax = Vector2.one;
-            overlayRect.offsetMin = Vector2.zero;
-            overlayRect.offsetMax = Vector2.zero;
+            GameObject overlay = RuntimeUIFactory.CreatePanel("Results_Overlay", canvasObj.transform);
+            RuntimeUIFactory.StretchToParent(overlay.GetComponent<RectTransform>());
 
             Image overlayImage = overlay.AddComponent<Image>();
-            if (blurMaterial != null)
-            {
-                overlayImage.material = new Material(blurMaterial);
-                overlayImage.material.SetColor(s_multiplyColorId, new Color(0.15f, 0.15f, 0.15f, 1f));
-                overlayImage.color = Color.white;
-            }
-            else
-            {
-                overlayImage.color = s_resultsOverlayColor;
-            }
+            RuntimeUIFactory.ApplyBlurBackground(overlayImage,
+                RuntimeUIFactory.CreateBlurMaterialInstance(blurMaterial, s_resultsBlurTint),
+                s_resultsOverlayColor);
 
             // Centered content panel
-            GameObject contentPanel = CreatePanel("Results_ContentPanel", overlay.transform);
+            GameObject contentPanel = RuntimeUIFactory.CreatePanel("Results_ContentPanel", overlay.transform);
             RectTransform contentRect = contentPanel.GetComponent<RectTransform>();
             contentRect.anchorMin = new Vector2(0.05f, 0.05f);
             contentRect.anchorMax = new Vector2(0.95f, 0.95f);
@@ -123,7 +123,8 @@ namespace Benchmarks
             contentLayout.childForceExpandHeight = false;
 
             // Title
-            GameObject titleObj = CreateTMPText("Results_Title", contentPanel.transform, 24, TextAlignmentOptions.Center);
+            GameObject titleObj = RuntimeUIFactory.CreateTMPText("Results_Title", contentPanel.transform, 24,
+                TextAlignmentOptions.Center, Color.white);
             TextMeshProUGUI titleText = titleObj.GetComponent<TextMeshProUGUI>();
             titleText.text = title;
             titleText.fontStyle = FontStyles.Bold;
@@ -132,12 +133,13 @@ namespace Benchmarks
             titleLayout.flexibleHeight = 0;
 
             // Scrollable report text area
-            GameObject scrollArea = CreateScrollableTextArea("Results_ReportScroll", contentPanel.transform, out TextMeshProUGUI reportText);
+            GameObject scrollArea = RuntimeUIFactory.CreateScrollableTextArea("Results_ReportScroll",
+                contentPanel.transform, 14, s_reportChrome, Color.white, out TextMeshProUGUI reportText);
             LayoutElement scrollLayout = scrollArea.AddComponent<LayoutElement>();
             scrollLayout.flexibleHeight = 1;
 
             // Button row
-            GameObject buttonRow = CreatePanel("Results_ButtonRow", contentPanel.transform);
+            GameObject buttonRow = RuntimeUIFactory.CreatePanel("Results_ButtonRow", contentPanel.transform);
             HorizontalLayoutGroup buttonLayout = buttonRow.AddComponent<HorizontalLayoutGroup>();
             buttonLayout.spacing = 20;
             buttonLayout.childAlignment = TextAnchor.MiddleCenter;
@@ -147,193 +149,16 @@ namespace Benchmarks
             buttonRowLayout.preferredHeight = 50;
             buttonRowLayout.flexibleHeight = 0;
 
-            Button openFolderBtn = CreateButton("Open Log Folder", buttonRow.transform, 200);
-            Button returnBtn = CreateButton("Return to Main Menu", buttonRow.transform, 250);
+            Button openFolderBtn = RuntimeUIFactory.CreateButton("Open Log Folder", buttonRow.transform, 200,
+                BUTTON_HEIGHT, s_buttonColors, s_buttonTextColor, LABEL_FONT_SIZE);
+            Button returnBtn = RuntimeUIFactory.CreateButton("Return to Main Menu", buttonRow.transform, 250,
+                BUTTON_HEIGHT, s_buttonColors, s_buttonTextColor, LABEL_FONT_SIZE);
 
-            // Attach results screen component
             BenchmarkResultsScreen screen = canvasObj.AddComponent<BenchmarkResultsScreen>();
             screen.Initialize(reportText, openFolderBtn, returnBtn);
 
             canvasObj.SetActive(false);
             return screen;
-        }
-
-        // ── Primitive Builders ───────────────────────────────────────────
-
-        private static GameObject CreateCanvas(string name, int sortingOrder)
-        {
-            GameObject obj = new GameObject(name);
-            Canvas canvas = obj.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = sortingOrder;
-
-            CanvasScaler scaler = obj.AddComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1920, 1080);
-            scaler.matchWidthOrHeight = 0.5f;
-
-            obj.AddComponent<GraphicRaycaster>();
-            return obj;
-        }
-
-        private static GameObject CreatePanel(string name, Transform parent)
-        {
-            GameObject obj = new GameObject(name, typeof(RectTransform));
-            obj.transform.SetParent(parent, false);
-            return obj;
-        }
-
-        private static GameObject CreateTMPText(string name, Transform parent, int fontSize,
-            TextAlignmentOptions alignment)
-        {
-            GameObject obj = new GameObject(name, typeof(RectTransform));
-            obj.transform.SetParent(parent, false);
-
-            TextMeshProUGUI text = obj.AddComponent<TextMeshProUGUI>();
-            text.fontSize = fontSize;
-            text.alignment = alignment;
-            text.color = Color.white;
-            text.richText = true;
-            text.textWrappingMode = TextWrappingModes.Normal;
-            text.overflowMode = TextOverflowModes.Overflow;
-
-            return obj;
-        }
-
-        private static GameObject CreateScrollableTextArea(string name, Transform parent,
-            out TextMeshProUGUI reportText)
-        {
-            // ScrollRect container
-            GameObject scrollObj = new GameObject(name, typeof(RectTransform));
-            scrollObj.transform.SetParent(parent, false);
-
-            RectTransform scrollRect = scrollObj.GetComponent<RectTransform>();
-            scrollRect.anchorMin = Vector2.zero;
-            scrollRect.anchorMax = Vector2.one;
-            scrollRect.offsetMin = Vector2.zero;
-            scrollRect.offsetMax = Vector2.zero;
-
-            Image scrollBg = scrollObj.AddComponent<Image>();
-            scrollBg.color = new Color(0.1f, 0.1f, 0.1f, 0.8f);
-
-            ScrollRect scroll = scrollObj.AddComponent<ScrollRect>();
-            scroll.horizontal = false;
-            scroll.movementType = ScrollRect.MovementType.Clamped;
-            scroll.scrollSensitivity = 30f;
-
-            const float scrollbarWidth = 12f;
-
-            // Viewport with mask — leaves room on the right for the scrollbar
-            GameObject viewport = CreatePanel("Viewport", scrollObj.transform);
-            RectTransform viewRect = viewport.GetComponent<RectTransform>();
-            viewRect.anchorMin = Vector2.zero;
-            viewRect.anchorMax = Vector2.one;
-            viewRect.offsetMin = new Vector2(10, 10);
-            viewRect.offsetMax = new Vector2(-10 - scrollbarWidth, -10);
-
-            viewport.AddComponent<RectMask2D>();
-
-            scroll.viewport = viewRect;
-
-            // Vertical scrollbar
-            GameObject scrollbarObj = new GameObject("Scrollbar", typeof(RectTransform));
-            scrollbarObj.transform.SetParent(scrollObj.transform, false);
-            RectTransform scrollbarRect = scrollbarObj.GetComponent<RectTransform>();
-            scrollbarRect.anchorMin = new Vector2(1, 0);
-            scrollbarRect.anchorMax = Vector2.one;
-            scrollbarRect.offsetMin = new Vector2(-scrollbarWidth, 10);
-            scrollbarRect.offsetMax = new Vector2(0, -10);
-
-            Image scrollbarBg = scrollbarObj.AddComponent<Image>();
-            scrollbarBg.color = new Color(0.15f, 0.15f, 0.15f, 0.8f);
-
-            // Scrollbar handle
-            GameObject handleArea = CreatePanel("HandleArea", scrollbarObj.transform);
-            RectTransform handleAreaRect = handleArea.GetComponent<RectTransform>();
-            handleAreaRect.anchorMin = Vector2.zero;
-            handleAreaRect.anchorMax = Vector2.one;
-            handleAreaRect.offsetMin = Vector2.zero;
-            handleAreaRect.offsetMax = Vector2.zero;
-
-            GameObject handle = CreatePanel("Handle", handleArea.transform);
-            RectTransform handleRect = handle.GetComponent<RectTransform>();
-            handleRect.anchorMin = Vector2.zero;
-            handleRect.anchorMax = Vector2.one;
-            handleRect.offsetMin = Vector2.zero;
-            handleRect.offsetMax = Vector2.zero;
-
-            Image handleImage = handle.AddComponent<Image>();
-            handleImage.color = new Color(0.5f, 0.5f, 0.5f, 0.8f);
-
-            Scrollbar scrollbar = scrollbarObj.AddComponent<Scrollbar>();
-            scrollbar.handleRect = handleRect;
-            scrollbar.targetGraphic = handleImage;
-            scrollbar.direction = Scrollbar.Direction.BottomToTop;
-
-            scroll.verticalScrollbar = scrollbar;
-            scroll.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHideAndExpandViewport;
-
-            // Content container — uses VerticalLayoutGroup so TMP drives height via preferred size
-            GameObject content = CreatePanel("Content", viewport.transform);
-            RectTransform contentRect = content.GetComponent<RectTransform>();
-            contentRect.anchorMin = new Vector2(0, 1);
-            contentRect.anchorMax = new Vector2(1, 1);
-            contentRect.pivot = new Vector2(0.5f, 1);
-            contentRect.sizeDelta = Vector2.zero;
-
-            VerticalLayoutGroup contentLayout = content.AddComponent<VerticalLayoutGroup>();
-            contentLayout.childForceExpandWidth = true;
-            contentLayout.childForceExpandHeight = false;
-            contentLayout.childControlHeight = true;
-            contentLayout.childControlWidth = true;
-
-            ContentSizeFitter fitter = content.AddComponent<ContentSizeFitter>();
-            fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-            scroll.content = contentRect;
-
-            // TMP text — LayoutElement drives height via TMP's preferred height calculation
-            GameObject textObj = CreateTMPText("ReportText", content.transform, 14, TextAlignmentOptions.TopLeft);
-            reportText = textObj.GetComponent<TextMeshProUGUI>();
-
-            return scrollObj;
-        }
-
-        private static Button CreateButton(string label, Transform parent, float width)
-        {
-            GameObject btnObj = new GameObject($"Button_{label.Replace(" ", "")}", typeof(RectTransform));
-            btnObj.transform.SetParent(parent, false);
-
-            Image btnImage = btnObj.AddComponent<Image>();
-            btnImage.color = s_buttonNormalColor;
-
-            Button button = btnObj.AddComponent<Button>();
-            ColorBlock colors = button.colors;
-            colors.normalColor = s_buttonNormalColor;
-            colors.highlightedColor = s_buttonHighlightColor;
-            colors.pressedColor = s_buttonPressedColor;
-            colors.selectedColor = s_buttonNormalColor;
-            button.colors = colors;
-            button.targetGraphic = btnImage;
-
-            LayoutElement layoutElement = btnObj.AddComponent<LayoutElement>();
-            layoutElement.preferredWidth = width;
-            layoutElement.preferredHeight = 50;
-
-            // Button label
-            GameObject textObj = CreateTMPText("Label", btnObj.transform, 16, TextAlignmentOptions.Center);
-            RectTransform textRect = textObj.GetComponent<RectTransform>();
-            textRect.anchorMin = Vector2.zero;
-            textRect.anchorMax = Vector2.one;
-            textRect.offsetMin = Vector2.zero;
-            textRect.offsetMax = Vector2.zero;
-
-            TextMeshProUGUI text = textObj.GetComponent<TextMeshProUGUI>();
-            text.text = label;
-            text.color = s_buttonTextColor;
-
-            return button;
         }
     }
 }
