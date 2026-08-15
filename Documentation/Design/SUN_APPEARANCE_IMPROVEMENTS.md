@@ -1,19 +1,24 @@
 # Sun Appearance Improvements Design
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** 2026-08-15  
-**Status:** **Partially implemented** — SN-0 and SN-1 shipped and confirmed in game 2026-08-15; SN-2..SN-3 proposed.  
+**Status:** **Partially implemented; SN-2 and SN-3 refuted.** SN-0 and SN-1 shipped and confirmed in game 2026-08-15. **SN-2 was built, judged in game and reverted in full (§7.3)**, which blocks SN-3 with it.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
-> Four changes that turn the sun from a flat disc into a body seen through air, in priority
-> order: an **angular aureole** around the disc, **per-channel extinction** so it reddens as it
-> sets, an **HDR core** so post-process bloom can finally see it, and URP's screen-space lens
-> flare on top. **The pivotal finding: the sun's glow must be produced in the skybox shader as an
-> angular term, not by post-process bloom.** Bloom's radius is screen-space and its tuning is
-> shared globally with RF-3's lava and lamps, so it cannot express an atmosphere — it can only
-> ever be an accent on top of one. The corollary finding is that bloom does not currently see the
-> sun *at all*: the disc's output ceiling is exactly 1.0 against an effective linear threshold of
-> ≈1.23.
+> Four changes proposed to turn the sun from a flat disc into a body seen through air. **Two
+> shipped** — an **angular aureole** around the disc (SN-0) and **per-channel extinction** so it
+> reddens as it sets (SN-1). **Two are refuted**: the **HDR core** meant to let post-process bloom
+> see the sun (SN-2) was built, judged in game and reverted in full, and the screen-space lens
+> flare (SN-3) reads the bloom pyramid and falls with it.
+>
+> **The pivotal finding, and the one the refutation strengthened: the sun's glow must be produced
+> in the skybox shader as an angular term, not by post-process bloom.** This doc originally allowed
+> bloom as an *accent* on top of that. It cannot even be that. URP has one global `Bloom` override
+> whose `scatter` sets the halo radius for the sun and for RF-3's lava and lamps alike, and those
+> want different answers from the same number — so a sun bright enough to bloom gets a halo sized
+> for a lamp, which reads as a fuzzy ball rather than a sun. §7.3 has the measurements. The
+> recommended successor is glare produced **in the shader**, as a refinement of SN-0's existing
+> lobes.
 
 **Audited:** 2026-08-15, at commit `9e4b264f` (branch `feat/world-scaling`).
 Findings are from static review of `Assets/Shaders/SkyboxShader.shader` (read in full),
@@ -23,6 +28,13 @@ authored assets `VoxelEngine-Post-Profile.asset`, `VoxelEngine-URP-Asset.asset` 
 `Shaders/PostProcessing/Bloom.shader:108-112` for the threshold semantics quoted in §2.
 The threshold arithmetic in §2 is computed from those two sources, not assumed. No runtime
 state was inspected; nothing here depends on runtime state.
+
+**Amended:** 2026-08-15 — **SN-2 built and REFUTED**, reverted in full; SN-3 blocked with it. New §7.3
+carries the evidence. The disc reached every number the design asked for and the picture was still
+wrong: URP has one global bloom whose radius is sized for RF-3's block emitters, and the sun wants a
+different answer from the same setting. §3.1's "bloom as an accent" half is retired and goal 3 is
+withdrawn. The recommended successor is the user's own suggestion — **glare produced in the skybox
+shader**, as a refinement of SN-0's existing lobes rather than a new phase.
 
 **Amended:** 2026-08-15 — SN-1 shipped. New §7.2. The reddening this doc ranked highest turned out to
 be nearly invisible end-to-end because the authored sky already supplied it, while the measurement it
@@ -56,8 +68,11 @@ demonstrated by mutation rather than argued.
    the sun differs from the atmosphere away from it.
 2. **The sun reddens as it sets** — wavelength-dependent extinction, the single most recognisable
    "that is a real sun" cue, at the hours players most often look at it.
-3. **Bloom sees the sun** — close the gap between what the RF-2 backlog assumed had shipped and
-   what actually renders.
+3. ~~**Bloom sees the sun**~~ — **WITHDRAWN 2026-08-15 (§7.3).** §2.1's arithmetic for *why* bloom
+   cannot see the sun is still correct and still worth keeping; making it see the sun turned out not
+   to be desirable, because the halo URP's shared bloom produces is sized for block emitters. The goal
+   this replaces it with is that the sun should read as a **light source** — which SN-0 and SN-1
+   partly deliver, and which the §7.3 shader-side glare successor is meant to finish.
 4. **Every change stays inside the skybox shader plus authored volume settings** — no voxel
    pipeline contact, no new globals unless named here.
 
@@ -335,8 +350,8 @@ aureole is at its weakest — but it is the one interaction between SN-0 and exi
 |-------|-------|:------:|------------|
 | **SN-0 — Aureole** ✅ **SHIPPED** | Angular forward-scatter glow around `_SunDirection`, applied to `color` before the discs (§4 ordering) **and to the sun disc by the same operator** (§7.1). Modulated by `hazeAmount` so it swells near the horizon. Guarded by **B8**, plus a repaired **B4**. | 🟢 | — |
 | **SN-1 — Per-channel extinction** ✅ **SHIPPED** | Replaced `:416`'s `lerp`-to-fog with per-channel `exp(-opticalDepth * beta)`, written as a per-channel lerp so it cannot clip. The aureole tint is now derived from the same transmitted sunlight, so glow and disc redden together (§7.2). Guarded by **B9**. | 🟢 | — |
-| **SN-2 — HDR core + bloom coupling** | Radial HDR ramp over the disc's central core (§3.2 Option A), sized to clear the ≈1.23 linear threshold with margin. Set bloom `clamp`. Re-verify RF-3's lava/lamp look is untouched. | 🟡 | SN-0, SN-1 (tune against the finished disc, not a moving one) |
-| **SN-3 — Screen-space lens flare** | Raise `ScreenSpaceLensFlare.intensity` off 0 and tune. Confirm occlusion behaves when a block crosses the sun. | 🟢 | SN-2 |
+| **SN-2 — HDR core + bloom coupling** ❌ **BUILT AND REFUTED** | Built exactly as specified, judged in game, and **reverted in full** — shader, baseline and the bloom `clamp` alike. URP's single global bloom cannot serve both the sun and RF-3's block emitters. See §7.3. | 🟡 | — |
+| **SN-3 — Screen-space lens flare** ❌ **BLOCKED by SN-2** | URP's screen-space flare reads the bloom pyramid, so it inherits SN-2's verdict exactly. Not attempted. | 🟢 | SN-2 |
 
 **SN-0 alone delivers standalone value** and is the recommended first commit: it is the change that
 most directly answers "it looks like a yellow circle", it is independent of the HDR decision in
@@ -446,6 +461,57 @@ change was made and reverted on a **misidentified screenshot**: a pale disc on a
 diagnosed as a washed-out sun and was the *moon*, behaving exactly as RF-2's locked decision 6 intends.
 Confirm which body a capture shows before treating it as evidence.
 
+### 7.3 SN-2 is a NO-GO — URP's bloom cannot serve both the sun and the block emitters
+
+**Built 2026-08-15 exactly as §3.2 Option A specifies, judged in game, and reverted in full** — the
+shader's HDR core, baseline B10, and the bloom `clamp` all removed; the working tree returned to
+byte-identical. This section is the evidence, so the phase is not re-attempted from the same premise.
+
+**The mechanism worked.** A radial gain over the disc's central 55 %, gated on the sun's own
+transmittance, took the disc's peak from a flat **0.9941 all day** to **4.64 at noon** and **1.78 at
+dusk**, clearing URP's ≈1.23 linear threshold at every hour. Disc-to-sky contrast went 2.04× → **7.44×**
+at noon and 1.27× → **2.00×** at the horizon. The core displayed flat white at noon and stayed warm at
+dusk — `(1.000, 0.972, 0.585)` — because the transmittance gate held the gain down there. Every number
+the design asked for was met.
+
+**The picture was wrong anyway.** Bloom turned that disc into a broad salmon halo several disc radii
+wide, which read as a fuzzy ball rather than a sun. Reducing the gain to 2.0 and the core radius to 0.40
+shrank it — noon peak 1.91, and a low sun stopped blooming at all (1.16/1.18, below threshold) — and it
+still did not look right.
+
+**The root cause is structural, not a tuning failure.** There is exactly one `Bloom` override in
+`VoxelEngine-Post-Profile.asset`, and `scatter 0.6` over 6 mips is sized for RF-3's lava and lamps —
+small, local emitters. The sun is a 3°-wide disc. **Both draw their halo radius from the same setting
+and want different answers**, and no value of the sun's own gain changes the radius, only how far down
+that radius the halo stays visible. The one lever that caps the sun without touching its gain is
+`clamp`, and it is global too: at the 6.0 needed to clear the sun it is inert, and dropping it to ~1.5
+would clip RF-3's ~2.0 emitters and change shipped lava and lamps.
+
+**What this retires.** §3.1 chose an in-shader angular aureole with bloom "as an accent"; the accent
+half is now refuted, and SN-0's aureole stands alone as the whole glow. §3.4's screen-space lens flare
+(SN-3) reads the bloom pyramid, so it inherits this verdict without needing its own trial. Goal 3
+("bloom sees the sun") is **withdrawn**: §2.1's arithmetic about why bloom cannot see the sun is still
+correct, but making it see the sun turns out not to be desirable at this bloom tuning.
+
+**Do not re-attempt SN-2 from this premise.** Two routes could genuinely change the answer, and both
+are outside this doc:
+
+1. **Tonemapping** (§3.2 Option B, deferred to its own doc). With highlight rolloff the disc does not
+   need to reach 4.64 to read as bright, so far less energy reaches the bloom pyramid.
+2. **Glare produced in the skybox shader itself**, not by post-processing — which is the same argument
+   §3.1 already won for the aureole, extended from "the sky's glow" to "the disc's glare". A tight,
+   bright inner lobe on SN-0's existing two-lobe falloff would give the sun its glare with no
+   post-process involvement, no shared tuning with the block emitters, and no HDR headroom required.
+   **This is the recommended successor** and should be scoped as an SN-0 refinement rather than a new
+   phase, since the mechanism already exists.
+
+**One process note that limits every measurement above.** `SkyPreviewRenderer` does not run
+post-processing, so bloom is invisible to this project's entire edit-mode measuring apparatus. B10
+asserted that the disc crossed the threshold — it could say nothing about what bloom did next. That gap
+is why SN-2 reached an in-game capture before anyone could see it was wrong, and it is a permanent
+property of the harness rather than an oversight: any future work whose output *is* the post stack has
+to be judged by capture from the first iteration.
+
 ### Extension roadmap (post-SN-3, in intended order)
 
 | Version | Extension |
@@ -479,6 +545,16 @@ One remains, and it is deliberately **not** resolvable on paper.
 
 ## Document History
 
+* **v1.3** - **SN-2 built, refuted and reverted** (2026-08-15); SN-3 blocked with it. New §7.3. The
+  HDR core did everything the design specified — disc peak 0.9941 flat -> 4.64 at noon, contrast
+  2.04x -> 7.44x, warm at dusk rather than blown white — and bloom still turned it into a broad salmon
+  halo that read as a fuzzy ball. Root cause is structural: one global `Bloom` override serves both the
+  sun and RF-3's lava and lamps, `scatter` sets the halo radius for both, and no per-source gain can
+  separate them; `clamp` is global too, inert at the value the sun needs and destructive to the
+  emitters below it. Everything was reverted, asset included, to a byte-identical tree. Recorded so the
+  phase is not retried from the same premise, along with the harness limit that let it get this far:
+  `SkyPreviewRenderer` runs no post-processing, so **bloom is invisible to every edit-mode measurement
+  this project has** and B10 could only ever assert the disc's own value.
 * **v1.2** - **SN-1 shipped** (2026-08-15). Per-channel extinction replaces the scalar fog blend, and
   the aureole tint is now derived from the same transmitted sunlight so glow and disc redden from one
   formula. New §7.2, which corrects this doc's own ranking: SN-1 end-to-end moved dusk red:blue only
@@ -500,4 +576,4 @@ One remains, and it is deliberately **not** resolvable on paper.
 ---
 
 **Last Updated:** 2026-08-15  
-**Next Review:** when SN-1 starts — §7.1 leaves it a specific question about SN-0's disc defence
+**Next Review:** when the shader-side glare successor in §7.3 is scoped, or when the tonemapping doc is written

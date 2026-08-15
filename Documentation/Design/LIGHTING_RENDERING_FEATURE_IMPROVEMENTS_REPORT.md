@@ -1,6 +1,6 @@
 # Lighting & Rendering Feature Improvements Report
 
-**Version:** 2.1  
+**Version:** 2.2  
 **Date:** 2026-08-15  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified. Owns lighting
 and rendering *features* (`RF-*`); the *performance* counterparts (`LI-*`, `GS-*`) live in
@@ -378,7 +378,7 @@ above, and the Architecture doc is authoritative.
 | Item | Note |
 |------|------|
 | §6 sky ambience v2 (aurora, shooting stars) | Pure content on the shipped skybox shader. |
-| Sun appearance (aureole, sunset reddening, HDR core, lens flare) | **Split out into its own design: [`SUN_APPEARANCE_IMPROVEMENTS.md`](SUN_APPEARANCE_IMPROVEMENTS.md)** (`SN-0`..`SN-3`). Takes over the §6 sun-flare bullet and corrects its cost estimate. `SN-0` (the aureole) is independent and standalone. All four phases stay in **LDR** — RF-3's `m_ColorGradingMode: 0` is untouched, and the Neutral-tonemapping upgrade is explicitly out of scope there, owed its own design doc because its blast radius is the four sky gradients plus RF-3's emissive tuning, not the sun. |
+| Sun appearance (aureole, sunset reddening) | **Own design: [`SUN_APPEARANCE_IMPROVEMENTS.md`](SUN_APPEARANCE_IMPROVEMENTS.md)**. `SN-0` (aureole) and `SN-1` (per-channel extinction) **shipped and confirmed in game 2026-08-15**. `SN-2` (HDR core for bloom) was **built and refuted** — reverted in full — and `SN-3` (screen-space lens flare) falls with it, because URP's one global `Bloom` sizes its halo for RF-3's block emitters and the sun wants a different answer from the same setting (that doc's §7.3). **This retires the RF-2 §6 sun-flare bullet entirely**: the answer is not a flare. Everything stays in **LDR**; the Neutral-tonemapping upgrade remains out of scope and owed its own doc. |
 | Per-biome sky color override | The editor-tool half **shipped 2026-08-12** as `Minecraft Clone/Sky Editor` (Architecture §6); only the per-biome override remains. It **needs a design pass first**: sky color is screen-wide but biomes are per-column, so something must define the boundary rule (blend over distance? sample at the camera? weight nearby columns?). Same class of question as TF-3's climate axis. Route to `create-design-doc`, not to implementation. |
 | Seasonal declination | Blocked on RF-1's curve coupling — see the Architecture doc §2.1 for why zero is load-bearing rather than lazy. |
 | Blood-moon disc tint | Waits on RF-1 §4's `SkyEvent`, which was never shipped. |
@@ -851,6 +851,15 @@ vertex-channel allocation it shares, rather than on its own merit).
 
 ## Document History
 
+* **v2.2** - **The sun-flare bullet is retired, not deferred** (2026-08-15). `SN-0` and `SN-1` of
+  [`SUN_APPEARANCE_IMPROVEMENTS.md`](SUN_APPEARANCE_IMPROVEMENTS.md) shipped; `SN-2` and `SN-3` were
+  **refuted**. The HDR core met every number the design asked for — the sun's disc went from a flat
+  0.9941 ceiling to 4.64 at noon, clearing URP's ~1.23 threshold at every hour — and the resulting
+  picture was still wrong, because one global `Bloom` override sizes the halo for RF-3's lava and lamps
+  and a 3-degree disc wants a different radius from the same `scatter`. It was reverted in full,
+  volume-profile asset included. RF-2 §6's "let bloom catch the HDR sun disc" is therefore closed as
+  **the wrong answer**, having already been corrected once in v2.1 as the wrong *cost*. The successor
+  is glare produced in the skybox shader itself.
 * **v2.1** - **Sun appearance split into its own design** (2026-08-15). New
   [`SUN_APPEARANCE_IMPROVEMENTS.md`](SUN_APPEARANCE_IMPROVEMENTS.md) (`SN-0`..`SN-3`) takes over the
   RF-2 §6 sun-flare bullet, which is **struck through and corrected**: "free once both ship" was
@@ -964,7 +973,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-15 (sun appearance split out to `SUN_APPEARANCE_IMPROVEMENTS.md`; RF-2 §6 flare estimate corrected)  
+**Last Updated:** 2026-08-15 (SN-0/SN-1 shipped; SN-2/SN-3 refuted — the RF-2 §6 flare bullet is retired)  
 **Next Review:** **RF-9 is the most visible open item**, its severity measured in game (a 30%-occluded
 face is 14.8× darker than flat ground at midnight and indistinguishable from a sealed cave face). Its
 vertex-channel question is **no longer shared with RF-3** — RF-3 spent `Color32.a` on 2026-08-12, so
