@@ -144,6 +144,19 @@ Shader "Minecraft/SkyboxShader"
             static const float3 SUN_LIMB_COLOR = float3(1.0, 0.86, 0.66);
             static const float SUN_LIMB_DARKENING = 0.18;
 
+            // Sun extinction (SN-1). Air scatters SHORT wavelengths out of the sight line hardest, and
+            // that — not a dimming — is why a setting sun reddens: by the time the light has crossed a
+            // horizon-length column its blue is gone and its red is largely still there. A single scalar
+            // haze cannot express that at all; it can only wash the disc toward one colour.
+            //
+            // Ratios rather than physical Rayleigh coefficients, because the sky these have to agree
+            // with is AUTHORED rather than simulated (design doc §3.3). Picked against a render.
+            static const float3 SUN_EXTINCTION_BETA = float3(0.55, 1.30, 2.40);
+
+            // Scales the whole optical depth. Separated from the ratios above so the reddening can be
+            // strengthened without re-balancing the channels against each other.
+            static const float SUN_EXTINCTION_DEPTH = 1.6;
+
             // Sun aureole (SN-0) — the forward-scattered halo of sunlight around the disc. Its
             // absence is why a correct disc still read as a sticker: the gradient above is a
             // function of view ELEVATION alone, so the air beside the sun rendered identically to
@@ -167,9 +180,35 @@ Shader "Minecraft/SkyboxShader"
             // toward its target, so a dim target would darken the sky near the sun instead of
             // lighting it. Blue sits well below red in both, which is what makes the sky whiten
             // toward the sun the way a real aureole does.
-            static const float3 AUREOLE_COLOR_HIGH = float3(1.00, 0.97, 0.90);
-            static const float3 AUREOLE_COLOR_LOW = float3(1.00, 0.82, 0.62);
-            static const float AUREOLE_WARMTH_ELEVATION = 0.35;
+            // The aureole IS sunlight, scattered — so its colour is the SUN's OWN colour after the same
+            // extinction SN-1 applies to the disc, renormalized back to full brightness. That makes glow
+            // and disc redden together by construction, with no second palette to keep in step.
+            //
+            // Two earlier attempts are worth not repeating. A fixed pale tint (1.00, 0.82, 0.62), R:B
+            // 1.61, sat against a dusk sky at R:B 4.60 and — because the blend peaks at the disc centre —
+            // washed the sun's reddening from R:B 4.36 back to 2.09, spending SN-1's whole effect on a
+            // constant. Deriving it from the authored `_HorizonColor` instead fixed dusk but broke
+            // mid-morning: at 10 degrees elevation the horizon global has already turned pale blue while
+            // the sun is still visibly warm, so the disc rendered BLUER than neutral (R:B 0.95).
+            // Transmitted sunlight is warm at exactly the times the sun is, which neither of those was.
+            //
+            // Renormalized rather than used raw: extinction makes the tint dark as well as red, and a
+            // blend toward a dark target would dim the glow at the hour it should be strongest. Dividing
+            // by the peak channel keeps the hue and discards the dimming, which the disc's own
+            // extinction has already accounted for.
+            static const float AUREOLE_TINT_EPSILON = 1e-4;
+
+            // Pulls the tint back toward white so the glow stays a glow rather than becoming a colour
+            // wash. At 0 the aureole takes the full transmitted hue, which at dusk is nearly monochrome
+            // red; the sky around a real setting sun is warm but not that saturated.
+            //
+            // The value trades colour against SHAPE, measured across a full authored day. Lowering it
+            // deepens the disc (dusk red:blue 3.04 here, 4.18 at 0.20, 5.57 at 0.10) but also flattens
+            // it, because the blend peaks at the disc centre and drags the centre toward the rim: at
+            // 0.15 the horizon limb gradient falls to 1.7% of the disc's luminance against 4.7% here,
+            // giving up the limb detail the disc gained in the RF-2 polish arc. This value keeps the
+            // shaded ball, and the disc is still more saturated than the sky beside it (3.04 vs 2.73).
+            static const float AUREOLE_TINT_DESATURATE = 0.35;
 
             // Sine of sun elevation over which the aureole dies below the horizon. Non-zero because
             // this IS the twilight afterglow — cutting at exactly y = 0 removes the glow that
@@ -308,10 +347,16 @@ Shader "Minecraft/SkyboxShader"
                     * (1.0 + hazeAmount * AUREOLE_HAZE_BOOST);
                 aureole *= saturate(1.0 + _SunDirection.y / AUREOLE_TWILIGHT_FADE);
 
-                // Warmth keys on the SUN's elevation, not the view's: the glow belongs to the sun,
-                // so a low sun reddens the whole halo rather than only the half nearer the horizon.
-                float sunLowness = saturate(1.0 - _SunDirection.y / AUREOLE_WARMTH_ELEVATION);
-                half3 aureoleColor = lerp(half3(AUREOLE_COLOR_HIGH), half3(AUREOLE_COLOR_LOW), sunLowness);
+                // Warmth keys on the SUN's own path, not the view's: the glow belongs to the sun, so a
+                // low sun reddens the whole halo rather than only the half nearer the horizon. Same
+                // optical-depth curve the view uses, evaluated at the sun's elevation instead.
+                float sunPathHaze = pow(saturate(1.0 - _SunDirection.y), HORIZON_HAZE_FALLOFF)
+                                    * HORIZON_HAZE_STRENGTH;
+                float3 sunTransmittance = exp(-sunPathHaze * SUN_EXTINCTION_DEPTH * SUN_EXTINCTION_BETA);
+                float3 transmittedSun = float3(SUN_CORE_COLOR) * sunTransmittance;
+                float tintPeak = max(max(transmittedSun.r, transmittedSun.g), transmittedSun.b);
+                float3 aureoleTint = transmittedSun / max(tintPeak, AUREOLE_TINT_EPSILON);
+                half3 aureoleColor = half3(lerp(aureoleTint, float3(1.0, 1.0, 1.0), AUREOLE_TINT_DESATURATE));
                 float aureoleBlend = saturate(aureole);
 
                 // BLENDED, not added. There is almost no headroom to add into: colour grading is LDR
@@ -474,7 +519,18 @@ Shader "Minecraft/SkyboxShader"
                     half3 sunColor = lerp(half3(SUN_CORE_COLOR), half3(SUN_LIMB_COLOR), limb);
                     sunColor *= 1.0 - SUN_LIMB_DARKENING * limb;
 
-                    sunColor = lerp(sunColor, half3(_VoxelFogColor), hazeAmount);
+                    // Extinction of the disc's own light, then the airlight that same air scatters
+                    // back in — the two-part model §4's moon already uses, replacing a single scalar
+                    // blend toward the fog colour.
+                    //
+                    // Written as a PER-CHANNEL lerp because `own * T + fog * (1 - T)` IS extinction
+                    // plus airlight, and in that form both endpoints are <= 1 so the result cannot
+                    // clip. The literal "multiply, then add airlight" spelling overflows immediately
+                    // here: colour grading is LDR with no tonemapper, and the authored sky beside the
+                    // sun already occupies most of the range (design doc §7.1).
+                    float3 transmittance = exp(-hazeAmount * SUN_EXTINCTION_DEPTH * SUN_EXTINCTION_BETA);
+                    sunColor = half3(float3(sunColor) * transmittance
+                                     + float3(_VoxelFogColor) * (1.0 - transmittance));
 
                     // The aureole is air in FRONT of the disc, so the disc is veiled by exactly the
                     // same blend the sky beside it received. Applying it to only one of the two is

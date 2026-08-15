@@ -1,8 +1,8 @@
 # Sun Appearance Improvements Design
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-08-15  
-**Status:** **Partially implemented** — SN-0 shipped and confirmed in game 2026-08-15; SN-1..SN-3 proposed.  
+**Status:** **Partially implemented** — SN-0 and SN-1 shipped and confirmed in game 2026-08-15; SN-2..SN-3 proposed.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > Four changes that turn the sun from a flat disc into a body seen through air, in priority
@@ -23,6 +23,11 @@ authored assets `VoxelEngine-Post-Profile.asset`, `VoxelEngine-URP-Asset.asset` 
 `Shaders/PostProcessing/Bloom.shader:108-112` for the threshold semantics quoted in §2.
 The threshold arithmetic in §2 is computed from those two sources, not assumed. No runtime
 state was inspected; nothing here depends on runtime state.
+
+**Amended:** 2026-08-15 — SN-1 shipped. New §7.2. The reddening this doc ranked highest turned out to
+be nearly invisible end-to-end because the authored sky already supplied it, while the measurement it
+produced — the disc is only 1.27x the sky at the horizon, against a hard LDR ceiling of 1.75x —
+**promotes SN-2 to the highest-value remaining phase**.
 
 **Amended:** 2026-08-15 — SN-0 shipped. §7 records it, and new §7.1 carries the three findings that
 changed this plan: the glow had to become a **blend** because LDR headroom is already spent by the
@@ -329,7 +334,7 @@ aureole is at its weakest — but it is the one interaction between SN-0 and exi
 | Phase | Scope | Effort | Depends on |
 |-------|-------|:------:|------------|
 | **SN-0 — Aureole** ✅ **SHIPPED** | Angular forward-scatter glow around `_SunDirection`, applied to `color` before the discs (§4 ordering) **and to the sun disc by the same operator** (§7.1). Modulated by `hazeAmount` so it swells near the horizon. Guarded by **B8**, plus a repaired **B4**. | 🟢 | — |
-| **SN-1 — Per-channel extinction** | Replace `:416`'s `lerp`-to-fog with `exp(-opticalDepth * beta)` extinction plus additive airlight, matching the moon's model. Delivers the sunset reddening. | 🟢 | — (independent of SN-0 — but see §7.1: SN-0 had to defend against `:416` to ship at all) |
+| **SN-1 — Per-channel extinction** ✅ **SHIPPED** | Replaced `:416`'s `lerp`-to-fog with per-channel `exp(-opticalDepth * beta)`, written as a per-channel lerp so it cannot clip. The aureole tint is now derived from the same transmitted sunlight, so glow and disc redden together (§7.2). Guarded by **B9**. | 🟢 | — |
 | **SN-2 — HDR core + bloom coupling** | Radial HDR ramp over the disc's central core (§3.2 Option A), sized to clear the ≈1.23 linear threshold with margin. Set bloom `clamp`. Re-verify RF-3's lava/lamp look is untouched. | 🟡 | SN-0, SN-1 (tune against the finished disc, not a moving one) |
 | **SN-3 — Screen-space lens flare** | Raise `ScreenSpaceLensFlare.intensity` off 0 and tune. Confirm occlusion behaves when a block crosses the sun. | 🟢 | SN-2 |
 
@@ -400,6 +405,47 @@ that a probe placed by elevation or azimuth could not reach a defect near the po
 shrinks by cos(elevation), which at −80° put a nominal 3° probe **inside** the 1.5° disc and reported the
 disc as sky. Angular offsets are now the rule in this suite; `AngularOffset` exists for it.
 
+### 7.2 What SN-1 changed about this plan
+
+SN-1 shipped 2026-08-15. Its headline is not the reddening — it is the measurement that reframes SN-2.
+
+**SN-1 alone is nearly invisible, and this doc's ranking of it was wrong.** §3.3 called the reddening
+"probably the most convincing single change on the list". End to end the disc's red:blue ratio moved
+only 2.02 → 2.09 at dusk. The authored horizon gradient was already supplying almost all of the
+reddening a player sees; extinction was arriving on top of a sky that had done the job.
+
+**Isolated, it is strong — the aureole was eating it.** With SN-0's disc blend disabled, SN-1 alone
+takes dusk to **4.36** (against the authored horizon's own 4.60). SN-0's blend then pulled it back to
+2.09, because `AUREOLE_COLOR_LOW` was a fixed pale constant at R:B 1.61 and the blend peaks at the disc
+centre. **The fix unified the two:** the aureole tint is now the sun's own colour after the same
+extinction, renormalized — so glow and disc redden from one formula with no second palette to keep in
+step. Dusk now reads 3.04, above the sky beside it (2.73).
+
+One rejected intermediate is worth not repeating: deriving that tint from the authored `_HorizonColor`
+fixed dusk (3.92) and **broke mid-morning**, rendering a *blue* sun at 10° elevation (R:B 0.95), because
+that global turns pale blue well before the sun stops being warm. Transmitted sunlight is warm exactly
+when the sun is; the authored sky is not.
+
+**The finding that matters most, and it is SN-2's justification.** At the horizon the disc is only
+**1.27×** brighter than the sky beside it (0.5552 against 0.4368) — which is why a sunrise sun reads as
+a faint patch rather than a light source. That is not a tuning failure. With extinction disabled
+*entirely*, the dusk disc reaches **0.7621**: its own colour, capped at 1.0 by LDR. Against a 0.44 sky
+the absolute ceiling is **1.75×**. No amount of extinction tuning can exceed it — SN-2's HDR core is the
+only phase that creates headroom, and it is now the highest-value remaining item rather than the third.
+
+**B9 guards the property, not the mechanism, and says so.** Because the aureole tint and the disc
+extinction both read `SUN_EXTINCTION_BETA` by design, replacing the disc's per-channel extinction with
+the old scalar haze moves the ratio only 2.20 → 1.95 and B9 stays **green**. Measured, not assumed. The
+threshold is deliberately left loose rather than tightened to separate a 13 % gap, which would pin the
+tuning constants a re-tune should be free to move.
+
+Two process notes. `AUREOLE_TINT_DESATURATE` trades colour against **shape** — lowering it deepens the
+disc but flattens it, because the blend peaks at the centre; at 0.15 the horizon limb gradient falls to
+1.7 % of disc luminance against 4.7 % at the shipped 0.35, giving up the polish arc's limb detail. And a
+change was made and reverted on a **misidentified screenshot**: a pale disc on an orange sky was
+diagnosed as a washed-out sun and was the *moon*, behaving exactly as RF-2's locked decision 6 intends.
+Confirm which body a capture shows before treating it as evidence.
+
 ### Extension roadmap (post-SN-3, in intended order)
 
 | Version | Extension |
@@ -433,6 +479,15 @@ One remains, and it is deliberately **not** resolvable on paper.
 
 ## Document History
 
+* **v1.2** - **SN-1 shipped** (2026-08-15). Per-channel extinction replaces the scalar fog blend, and
+  the aureole tint is now derived from the same transmitted sunlight so glow and disc redden from one
+  formula. New §7.2, which corrects this doc's own ranking: SN-1 end-to-end moved dusk red:blue only
+  2.02 -> 2.09 because the authored horizon gradient was already doing the work, and isolated it reaches
+  4.36 only because SN-0's fixed pale aureole tint had been eating it. Records the rejected
+  `_HorizonColor` tint (a blue sun at 10 degrees), that **B9 cannot isolate SN-1** by design and stays
+  green when the disc's extinction is removed, and the colour-versus-shape trade in
+  `AUREOLE_TINT_DESATURATE`. Above all it measures the LDR contrast ceiling that makes **SN-2 the
+  highest-value remaining phase**, not the third.
 * **v1.1** - **SN-0 shipped** (2026-08-15), confirmed in game. New §7.1. The additive glow the design
   assumed was replaced by a **blend** — the authored sky beside the sun already occupies 0.78-0.88 of
   the LDR range, so adding clipped both the sky and the disc flat and destroyed the limb darkening.
