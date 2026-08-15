@@ -48,6 +48,10 @@ namespace Editor.Validation.Celestial
     /// mutation leaves DUSK looking correct, which is why B9 sweeps the whole descent instead of
     /// sampling one time of day. Replacing the disc's per-channel extinction with a scalar haze, by
     /// contrast, does NOT red B9 — see its remarks for that measurement and why it is accepted.</item>
+    /// <item>Gating <c>sunPathHaze</c> on the fog range reds B11's first assertion; ungating the moon's
+    /// <c>hazeAmount</c> reds its second. B11 exists to pin a deliberate ASYMMETRY, so both halves are
+    /// asserted — without the moon control, "the sun ignores fog" would pass equally in a build where
+    /// nothing responds to fog at all.</item>
     /// <item>Giving the aureole to the sky but not to the sun disc reds B4 — a regression that shipped
     /// briefly and that B4's <i>previous</i> fixture passed, because it ran with fog off (so the disc's
     /// haze term was a no-op), at a mid-elevation sun (where haze is weak), and sampled the sky at a
@@ -90,28 +94,55 @@ namespace Editor.Validation.Celestial
 
         /// <summary>Red-to-blue ratio above which a high sun reads as visibly warm rather than white.</summary>
         /// <remarks>
-        /// Placed between two measured states rather than picked: with the sun's optical depth on the
-        /// veiling falloff a 30-degree sun measured 1.39 here, and on the airmass falloff it measures
-        /// 1.16. Loose enough that re-tuning the extinction ratios cannot false-red it, tight enough
-        /// that returning to the veiling curve does.
+        /// Placed between two measured states rather than picked, both measured on B9's OWN fixture:
+        /// with the sun's optical depth on the veiling falloff a 30-degree sun measures <b>1.44</b>
+        /// here, and on the airmass falloff it measures <b>1.16</b>. Loose enough that re-tuning the
+        /// extinction ratios cannot false-red it, tight enough that returning to the veiling curve does.
         /// </remarks>
         private const float MIDDAY_NEUTRAL_LIMIT = 1.27f;
 
         /// <summary>Minimum glow amplitude spent between the disc's rim and six degrees out.</summary>
         /// <remarks>
-        /// Placed between two measured states rather than picked: the shipped three-lobe falloff loses
-        /// 0.307 of luminance across that band on B10's fixture, and the same falloff with the glare
-        /// lobe deleted loses 0.139. This is the assertion that actually observes the glare, after a
-        /// near-to-far ratio turned out to survive deleting it.
+        /// Placed between two measured states rather than picked, both measured on B10's OWN fixture:
+        /// the shipped three-lobe falloff loses <b>0.342</b> of luminance across that band, and the same
+        /// falloff with the glare lobe deleted loses <b>0.155</b>. This is the assertion that actually
+        /// observes the glare, after a near-to-far ratio turned out to survive deleting it.
         /// </remarks>
         private const float GLARE_MIN_NEAR_BAND_DROP = 0.22f;
 
         /// <summary>How much brighter the sky at the disc's rim must be than the open sky.</summary>
         /// <remarks>
-        /// A floor on the glare being present at all, not a pin on its strength — deliberately well
-        /// below the shipped value so tuning the lobes stays free.
+        /// A floor on the <b>aureole as a whole</b>, not on the glare lobe — deleting the glare still
+        /// leaves 1.51 here against the shipped 1.99, so this cannot observe it. B8 owns that coverage;
+        /// this is kept only as a cheap sanity floor and is deliberately well below the shipped value
+        /// so tuning the lobes stays free. The assertion that does observe the glare is
+        /// <see cref="GLARE_MIN_NEAR_BAND_DROP"/>.
         /// </remarks>
         private const float GLARE_MIN_CONTRAST = 1.3f;
+
+        /// <summary>Pixel radius of a sample taken just OUTSIDE the sun's disc.</summary>
+        /// <remarks>
+        /// 1.69 degrees at <see cref="DISC_FIELD_OF_VIEW"/>, which clears the sun's 1.5-degree disc plus
+        /// its feather (1.545) by about six pixels. Distinct from <see cref="DISC_SAMPLE_RADIUS"/>,
+        /// which happens to share the value 72 for an unrelated reason — there it is the MOON's own
+        /// 1.7-degree radius, here it is "just past the sun's rim".
+        /// </remarks>
+        private const int SUN_RIM_SAMPLE_RADIUS = 72;
+
+        /// <summary>Largest red:blue shift the sun may show when Distance Fog is toggled.</summary>
+        /// <remarks>
+        /// Not zero: the sun's own extinction is fog-independent, but the disc still sits on a sky whose
+        /// airlight term the fog gate does touch, so a small residual is expected and correct. Gating
+        /// <c>sunPathHaze</c> moves it far past this.
+        /// </remarks>
+        private const float SUN_FOG_INDEPENDENCE_TOLERANCE = 0.15f;
+
+        /// <summary>Smallest luminance change the moon must show when Distance Fog is toggled.</summary>
+        /// <remarks>
+        /// The control half of B11. Without it, "the sun is the fog-independent one" would pass just as
+        /// well in a build where nothing responds to fog at all.
+        /// </remarks>
+        private const float MOON_FOG_RESPONSE_MINIMUM = 0.05f;
 
         /// <summary>Tolerance for a linear color round trip, allowing half-float quantization.</summary>
         private const float COLOR_EPSILON = 0.002f;
@@ -161,6 +192,7 @@ namespace Editor.Validation.Celestial
                 new Scenario("B8 The sky glows toward the sun and the glow dies with it", RunB8SunAureole),
                 new Scenario("B9 The sun reddens as it descends, and is never bluer than it is red", RunB9SunReddening),
                 new Scenario("B10 The glare falls off monotonically from the disc into the open sky", RunB10GlareFalloff),
+                new Scenario("B11 The sun's colour is independent of the Distance Fog setting, the moon's is not", RunB11SunFogIndependence),
             };
 
             return ValidationSuiteRunner.Execute("Sky Render", scenarios, KnownBugChannel.Unimplemented,
@@ -470,9 +502,7 @@ namespace Editor.Validation.Celestial
             renderer.Render(low, lowSun, DISC_RENDER_SIZE, DISC_RENDER_SIZE, DISC_FIELD_OF_VIEW);
             float lowDisc = Luminance(renderer.SampleLinear(centre, centre));
 
-            // At DISC_FIELD_OF_VIEW a 1.5 degree disc is ~64 px in radius; DISC_SAMPLE_RADIUS (55) is
-            // inside it and the rim sits just beyond, so 72 px clears the feather and lands on sky.
-            float lowRimSky = Luminance(renderer.SampleLinear(centre + 72, centre));
+            float lowRimSky = Luminance(renderer.SampleLinear(centre + SUN_RIM_SAMPLE_RADIUS, centre));
 
             ok &= Check($"a low sun's centre ({lowDisc:F4}) still outshines the sky just outside its rim ({lowRimSky:F4})",
                 lowDisc > lowRimSky * 1.05f);
@@ -648,10 +678,13 @@ namespace Editor.Validation.Celestial
         /// is the shape they make together rather than any one of them.
         /// </para>
         /// <para>
-        /// Run against the <b>uniform</b> neutral sky on purpose: with zenith and horizon the same color
-        /// the base gradient is constant in every direction, so every difference along this walk is the
-        /// aureole and nothing else. Against a real gradient the walk changes elevation as it goes and
-        /// the gradient's own falloff would be measured alongside the glare's.
+        /// Run against a <b>uniform</b> sky on purpose — <see cref="s_daySky"/>, not the achromatic
+        /// <see cref="s_neutralSky"/>, and the distinction matters. It is <i>uniformity</i> that is
+        /// load-bearing here, not neutrality: with zenith and horizon the same color the base gradient
+        /// is constant in every direction, so every difference along this walk is the aureole and
+        /// nothing else. Against a real gradient the walk changes elevation as it goes and the
+        /// gradient's own falloff would be measured alongside the glare's. Neutrality is what a
+        /// <i>hue</i> assertion needs (B9); this one measures luminance, so the sky's color cancels.
         /// </para>
         /// </remarks>
         private static bool RunB10GlareFalloff()
@@ -660,8 +693,13 @@ namespace Editor.Validation.Celestial
 
             using SkyPreviewRenderer renderer = new SkyPreviewRenderer();
 
-            // Clear of the 1.5 degree disc, then outward into open sky.
+            // Clear of the 1.5 degree disc, then outward into open sky. The near band the glare
+            // assertion measures runs from index 0 to NEAR_BAND_END_INDEX, resolved by INDEX rather
+            // than by matching a float: picking the 6-degree entry by value meant that editing this
+            // array left the far end of the band at 0, which turned the drop into the near sample
+            // alone and passed the assertion unconditionally.
             float[] offsets = { 1.7f, 2.5f, 4f, 6f, 12f, 25f, 45f };
+            const int nearBandEndIndex = 3;
             float previous = float.MaxValue;
             bool monotonic = true;
             string trace = string.Empty;
@@ -676,7 +714,7 @@ namespace Editor.Validation.Celestial
                 previous = value;
 
                 if (i == 0) nearGlare = value;
-                if (Mathf.Approximately(offsets[i], 6f)) midGlare = value;
+                if (i == nearBandEndIndex) midGlare = value;
                 if (i == offsets.Length - 1) farSky = value;
 
                 trace += $"{offsets[i]:F0}deg={value:F3}  ";
@@ -696,10 +734,111 @@ namespace Editor.Validation.Celestial
             ok &= Check($"the glow is concentrated near the disc (loses {nearBandDrop:F3} between the rim and 6 degrees)",
                 nearBandDrop > GLARE_MIN_NEAR_BAND_DROP);
 
-            ok &= Check($"and the sky at the rim is brighter than the open sky ({nearGlare:F3} against {farSky:F3})",
+            ok &= Check($"and the aureole as a whole is present ({nearGlare:F3} against {farSky:F3})",
                 nearGlare > farSky * GLARE_MIN_CONTRAST);
 
             return ok;
+        }
+
+        /// <summary>B11 — the sun ignores the Distance Fog setting; the moon obeys it.</summary>
+        /// <returns>True when every assertion holds.</returns>
+        /// <remarks>
+        /// <para>
+        /// Pins a <b>deliberate asymmetry</b> rather than a correctness property, which is why it
+        /// asserts both halves. The sun's optical depth runs on the ungated <c>sunPathHaze</c>: Distance
+        /// Fog is a view-distance setting, while the sun's color is a property of the atmosphere, and
+        /// gating it would render a near-white sun against the authored orange horizon whenever a player
+        /// turned fog off. The moon keeps the fog-gated <c>hazeAmount</c>, because its own atmosphere
+        /// model is pinned by B6/B7 and by RF-2's locked decisions.
+        /// </para>
+        /// <para>
+        /// Nothing guarded this before B11, and it was not a decision anyone made — the sun lost the gate
+        /// incidentally, while its extinction was being moved onto an airmass falloff. So the test exists
+        /// as much to record the choice as to catch a regression: re-gating the sun reds the first
+        /// assertion, and ungating the moon reds the second.
+        /// </para>
+        /// </remarks>
+        private static bool RunB11SunFogIndependence()
+        {
+            if (SkipWithoutGraphics("B11")) return true;
+
+            using SkyPreviewRenderer renderer = new SkyPreviewRenderer();
+
+            // Low, where extinction is strongest and so the on/off difference would be largest.
+            const float lowElevation = 3f;
+
+            Color sunFogOn = SampleSunDisc(renderer, lowElevation, s_neutralSky);
+            Color sunFogOff = SampleSunDiscNoFog(renderer, lowElevation, s_neutralSky);
+            float sunShift = Mathf.Abs(Ratio(sunFogOn) - Ratio(sunFogOff));
+
+            bool ok = Check($"the sun's colour barely moves when fog is switched off (red:blue {Ratio(sunFogOn):F2} against {Ratio(sunFogOff):F2})",
+                sunShift < SUN_FOG_INDEPENDENCE_TOLERANCE);
+
+            // The control, and the half that makes the asymmetry an assertion rather than a claim:
+            // the moon must still respond, or "the sun is the independent one" says nothing.
+            Color moonFogOn = SampleMoonDisc(renderer, lowElevation, s_neutralSky, true);
+            Color moonFogOff = SampleMoonDisc(renderer, lowElevation, s_neutralSky, false);
+            float moonShift = Mathf.Abs(Luminance(moonFogOn) - Luminance(moonFogOff));
+
+            ok &= Check($"the moon's brightness still does move ({Luminance(moonFogOn):F3} against {Luminance(moonFogOff):F3})",
+                moonShift > MOON_FOG_RESPONSE_MINIMUM);
+
+            return ok;
+        }
+
+        /// <summary>Red-to-blue ratio of a color, guarding a zero blue channel.</summary>
+        /// <param name="color">The color to measure.</param>
+        /// <returns>The ratio, or 0 when blue is too small to divide by.</returns>
+        private static float Ratio(Color color) => color.b > 1e-4f ? color.r / color.b : 0f;
+
+        /// <summary>Renders the sun's disc center with Distance Fog switched off.</summary>
+        /// <param name="renderer">The renderer to draw with.</param>
+        /// <param name="sunElevationDegrees">Sun elevation in degrees.</param>
+        /// <param name="sky">Sky color to render against.</param>
+        /// <returns>The linear color at the disc's center.</returns>
+        private static Color SampleSunDiscNoFog(SkyPreviewRenderer renderer, float sunElevationDegrees, Color sky)
+        {
+            Vector3 sun = SphericalDirection(0f, sunElevationDegrees);
+
+            // Uniform already zeroes FogRange, which is exactly "Distance Fog = Off".
+            SkyPreviewState state = SkyPreviewState.Uniform(sky);
+            state.SunDirection = sun;
+            state.SunAngularRadius = 1.5f;
+            state.MoonDirection = -sun;
+            state.MoonAngularRadius = 0.001f;
+
+            renderer.Render(state, sun, DISC_RENDER_SIZE, DISC_RENDER_SIZE, DISC_FIELD_OF_VIEW);
+            return renderer.SampleLinear(DISC_RENDER_SIZE / 2, DISC_RENDER_SIZE / 2);
+        }
+
+        /// <summary>Renders the moon's disc center, fully lit, with fog on or off.</summary>
+        /// <param name="renderer">The renderer to draw with.</param>
+        /// <param name="moonElevationDegrees">Moon elevation in degrees.</param>
+        /// <param name="sky">Sky color to render against.</param>
+        /// <param name="fog">True to render with Distance Fog on.</param>
+        /// <returns>The linear color at the disc's center.</returns>
+        private static Color SampleMoonDisc(SkyPreviewRenderer renderer, float moonElevationDegrees,
+            Color sky, bool fog)
+        {
+            Vector3 moon = SphericalDirection(0f, moonElevationDegrees);
+
+            SkyPreviewState state = SkyPreviewState.Uniform(sky);
+            state.MoonDirection = moon;
+            state.MoonAngularRadius = 1.7f;
+            state.MoonPhase = 1f;
+
+            // Sun opposite and vanishingly small, so the moon reads full and the sun cannot be sampled.
+            state.SunDirection = -moon;
+            state.SunAngularRadius = 0.001f;
+
+            if (fog)
+            {
+                state.FogRange = new Vector4(0f, 160f, 0f, 0f);
+                state.FogColor = sky;
+            }
+
+            renderer.Render(state, moon, DISC_RENDER_SIZE, DISC_RENDER_SIZE, DISC_FIELD_OF_VIEW);
+            return renderer.SampleLinear(DISC_RENDER_SIZE / 2, DISC_RENDER_SIZE / 2);
         }
 
         /// <summary>Renders the center pixel of the sun's disc with the sun at a given elevation.</summary>
