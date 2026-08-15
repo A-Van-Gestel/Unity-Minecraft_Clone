@@ -1,6 +1,6 @@
 # Volumetric & Ray-Traced Effects Report
 
-**Version:** 1.4  
+**Version:** 1.5  
 **Date:** 2026-07-20  
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production), URP 17.5
@@ -44,8 +44,10 @@ that unblocks MR-8's smooth-lighting constraint), VX-9 (heat-haze distortion), V
 - [`FOLIAGE_LIVELINESS_IMPROVEMENTS_REPORT.md`](FOLIAGE_LIVELINESS_IMPROVEMENTS_REPORT.md)
   (`FL-*`) — no direct coupling; FL-6's fireflies pair visually with VX-2's night fog.
 - [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) — `GS-2` (opaque
-  texture) and `GS-4` (render-tier audit) constrain every render-feature addition here; `MR-8`'s
-  "per-chunk 3D light texture" aside describes the same data structure as VX-1.
+  texture) still constrains every render-feature addition here. `GS-4` (render-tier audit) **closed
+  2026-08-15 and constrains nothing**: it shipped Render Scale and MSAA settings but no device-tier
+  mechanism, so each `VX-*` item must carry its own quality gating. `MR-8`'s "per-chunk 3D light
+  texture" aside describes the same data structure as VX-1.
 - [`SILHOUETTE_CONTACT_SHADOWS.md`](SILHOUETTE_CONTACT_SHADOWS.md) (`SS-*`) — **orthogonal to VX-8,
   and the source of the reason VX-8 must keep AO vertex-baked.** VX-8 moves *where* shading is
   stored; `SS-*` fixes *what an occlusion value is*. VX-1's occupancy volume also offers `SS-*` a
@@ -332,7 +334,8 @@ in-scattering along the view ray, which no analytic fog can fake.
    density, enable.
 
 **Dependencies / cross-links:** VX-1 (hard); RF-1/RF-2 (sun direction + colors — soft,
-degrades to fixed noon); RF-7 (weather density — soft); GS-4 tier audit for the pass cost.
+degrades to fixed noon); RF-7 (weather density — soft); a tier capture of its own for the pass cost
+(`GS-4` closed without establishing one).
 
 ---
 
@@ -684,6 +687,9 @@ but v2+ is best scheduled after RF-1 ships.
 
 ## Document History
 
+* **v1.5** - **`GS-4` de-staled** (2026-08-15, no scope change). `GS-4` closed having added Render Scale
+  and MSAA settings but **no device-tier mechanism**, so it constrains nothing here and each `VX-*` item
+  must carry its own quality gating and its own pass-cost capture. `GS-2` remains open and still binds.
 * **v1.4** - **VX-1 gains a committed AO consumer and a requirement it does not yet meet; VX-8's per-pixel-AO aside upgraded from an idea to an endorsed destination** (2026-08-09, no scope change to either item). `SILHOUETTE_CONTACT_SHADOWS.md`'s D7 was decided as "build `SS-3` now, per-pixel on VX-1 later", which makes AO a planned client of these volumes — and a harsher one than fog: it needs **both** volumes (post-`SS-2a` occlusion enters the light weights, so per-cell light is required), it has **no graceful out-of-volume degradation** (corner shadows stop at a fixed radius instead of thinning), and the default ≈ 5-chunk radius is half to a quarter of the view distances `FP-4` swept. Owner steer that the volume be **view-distance aware** is recorded with the quadratic memory it implies (9.4 MB at vd 5 → 37.5 MB at 10 → **150 MB at 20**) and three unchosen answers: cascades, decoupled per-volume radii, and the `MR-8` vertex saving as a possible offset (**explicitly not banked** — different budgets, and MR-8 is gated on MH-8). Also corrected: analytic per-pixel AO **does** retire MR-8's AO merge constraint, because that constraint's justification is about *filtered baked* channels and does not apply to per-fragment evaluation
 * **v1.3** - **VX-8 gains the technical reason behind its "vertex AO stays vertex-baked" line**, supplied by the new `SILHOUETTE_CONTACT_SHADOWS.md` (`SS-*`) design: hardware trilinear filtering is a product of three per-axis linear ramps, which is exactly the separable weighting that produces the engine's round-blob AO artifact, and one texel per voxel cannot locate a partial block inside its cell. So a light volume would reproduce both artifacts rather than fix either — the line is now a constraint with a reason, not a scoping choice. Also recorded on VX-8: a cheap consumer for `VX-5`'s attention — per-pixel evaluation of `SS-*`'s distance field on VX-1's occupancy volume would deliver full-cube contact shadows at zero vertex cost and retire that design's expensive `SS-3` phase, while AO can never be *baked* into a volume because it is face-dependent (~157 MB for six directional volumes at 2x, against VX-1's 3.3 MB). No item added or changed
 * **v1.2** - Routing note: the gap sweep's non-volumetric ideas were documented in their owning
@@ -697,5 +703,5 @@ but v2+ is best scheduled after RF-1 ships.
 
 ---
 
-**Last Updated:** 2026-08-09  
+**Last Updated:** 2026-08-15 (`GS-4` de-staled; 2026-08-09: VX-1 AO consumer)  
 **Next Review:** when VX-0 or VX-4 starts (re-verify `SettingsManager`/`SettingFieldAttribute` and the lighting-suite baseline count) or on the next RF/CL gap sweep

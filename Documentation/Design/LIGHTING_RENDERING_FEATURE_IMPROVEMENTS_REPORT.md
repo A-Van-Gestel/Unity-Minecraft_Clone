@@ -1,6 +1,6 @@
 # Lighting & Rendering Feature Improvements Report
 
-**Version:** 2.2  
+**Version:** 2.3  
 **Date:** 2026-08-15  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified. Owns lighting
 and rendering *features* (`RF-*`); the *performance* counterparts (`LI-*`, `GS-*`) live in
@@ -54,8 +54,8 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
   blocklight RGB 3×4b), per-channel BFS, shader-only sky tinting. RF-1 builds directly on its
   `SkyLightColor` design; RF-5's feasibility analysis derives from its storage decisions.
 - [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) — cross-linked items:
-  `GS-2` (opaque texture), `GS-3` (per-fragment lighting math), `GS-4` (render-tier audit — do
-  together with RF-3), `GS-5`/`GS-6` (culling/submission), `LI-1`/`LI-2`.
+  `GS-2` (opaque texture), `GS-3` (per-fragment lighting math), `GS-4` ✅ (render-tier audit — shipped
+  2026-08-15, after RF-3), `GS-5`/`GS-6` (culling/submission), `LI-1`/`LI-2`.
 - [`OM1_DEVICE_CALIBRATION.md`](OM1_DEVICE_CALIBRATION.md) — device-tier budgets; RF-3 (post
   processing) must be quality-tier-gated per its model.
 - [`../Architecture/DATA_DRIVEN_SETTINGS_UI.md`](../Architecture/DATA_DRIVEN_SETTINGS_UI.md) —
@@ -527,8 +527,9 @@ because §1's tonemapping half and §5 are still open and still describe intende
 3. **Quality gating:** bloom + the post stack cost real GPU time on mobile — gate behind the
    settings/device-tier system (`OM1_DEVICE_CALIBRATION.md` budgets; `DATA_DRIVEN_SETTINGS_UI`
    for the toggle). Desktop default on, mobile default off.
-4. **Do together with `GS-4`** (render-pipeline tier audit) — same files, same testing pass; and
-   note `GS-2`'s opaque-texture concern interacts with any post passes that need scene color.
+4. ✅ **Done alongside `GS-4`** (render-pipeline tier audit, shipped 2026-08-15) — same files, same
+   testing pass. `GS-2`'s opaque-texture concern is still open and still interacts with any post pass
+   that needs scene color.
 5. **Other post effects (routed here from the VX-* gap sweep, 2026-07-20):** once the Volume
    exists, each is one override — and each is a *separate deliberate art decision* with the
    same A/B capture sign-off as tonemapping: **vignette** (subtle, cheap, likely the first
@@ -644,8 +645,9 @@ Seed/Save ✅.
   distance falloff, in RGB, per voxel — most of what players read as "GI" in voxel games.
 - Smooth per-vertex lighting (Phase 1) already provides AO-style corner darkening
   (vertex-averaged light values — `SMOOTH_AND_RGB_LIGHTING.md` §Phase 1).
-- Flat ambient floor `MinLightLevel = 0.15`; no SSAO; no realtime shadow maps (the render-tier
-  state is `GS-4`'s subject).
+- Flat ambient floor `MinLightLevel = 0.15`; no SSAO; no realtime shadow maps — `GS-4` (2026-08-15)
+  settled that state rather than leaving it open: main-light shadows are now *unsupported* in the URP
+  asset, so switching shadows on means undoing four coupled settings (see its archived entry).
 
 **Options evaluated.**
 
@@ -659,10 +661,11 @@ Seed/Save ✅.
 **Proposed design (SSAO).** Add the URP Screen Space Ambient Occlusion renderer feature to
 `VoxelEngine-URP-Renderer.asset` (depth-normals mode; the block shaders are standard URP-lit-style
 enough — verify normals output post-MR-2's `SNorm8x4` packed normals), intensity ~0.4, radius
-tuned to ~0.5–1 block. Quality-tier gate (off on mobile). Do in the same pass as `GS-4` and RF-3
-(same asset, same A/B capture workflow).
+tuned to ~0.5–1 block. Quality-tier gate (off on mobile) — ⚠ **that gate has no existing home**: RF-3
+and `GS-4` have both shipped (2026-08-12 / 2026-08-15) and neither added a device-tier mechanism, so this
+item must bring its own (OM-1 budgets + a `DATA_DRIVEN_SETTINGS_UI` toggle).
 
-**Dependencies / ordering.** None hard; pairs with RF-3/`GS-4`.
+**Dependencies / ordering.** None hard; the RF-3/`GS-4` pairing has passed.
 
 **Deferral home (2026-07-20):** the rejected GI-class options now have an explicit
 experimental-tier landing zone — `VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md` VX-6
@@ -851,6 +854,12 @@ vertex-channel allocation it shares, rather than on its own merit).
 
 ## Document History
 
+* **v2.3** - **`GS-4` cross-references de-staled** (2026-08-15). `GS-4` shipped and closed, so the four
+  sites telling a future session to "do this together with `GS-4`" are now historical. The substantive
+  correction: **`GS-4` added no device-tier gating mechanism** (a second mobile URP asset was explicitly
+  out of its scope), so RF-5's SSAO quality-tier gate has no existing home and must bring its own. Also
+  records what `GS-4` settled about shadows — main-light shadows are now *unsupported* in the URP asset,
+  making "switch shadows on" a four-setting undo. No scope change to any `RF-*` item.
 * **v2.2** - **The sun-flare bullet is retired, not deferred** (2026-08-15). `SN-0` and `SN-1` of
   [`SUN_APPEARANCE_IMPROVEMENTS.md`](SUN_APPEARANCE_IMPROVEMENTS.md) shipped; `SN-2` and `SN-3` were
   **refuted**. The HDR core met every number the design asked for — the sun's disc went from a flat
@@ -973,7 +982,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-15 (SN-0/SN-1 shipped; SN-2/SN-3 refuted — the RF-2 §6 flare bullet is retired)  
+**Last Updated:** 2026-08-15 (`GS-4` cross-refs de-staled; SN-0/SN-1 shipped; SN-2/SN-3 refuted — the RF-2 §6 flare bullet is retired)  
 **Next Review:** **RF-9 is the most visible open item**, its severity measured in game (a 30%-occluded
 face is 14.8× darker than flat ground at midnight and indistinguishable from a sealed cave face). Its
 vertex-channel question is **no longer shared with RF-3** — RF-3 spent `Color32.a` on 2026-08-12, so

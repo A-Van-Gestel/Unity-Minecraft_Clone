@@ -1,6 +1,6 @@
 # Sun Appearance Improvements Design
 
-**Version:** 1.5  
+**Version:** 1.6  
 **Date:** 2026-08-15  
 **Status:** **Implemented.** SN-0, SN-1 and **SN-4** shipped and confirmed in game 2026-08-15. **SN-2 was built, judged in game and reverted in full (§7.3)**, taking SN-3 with it — and **SN-4 (§7.4) delivers what SN-2 was for**, in the shader.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -160,8 +160,8 @@ The pivotal choice, because it determines whether the other phases are polish or
 - ✅ Automatically covers lens flare, since URP's SSLF reads the same pyramid.
 - ❌ **Bloom's radius is screen-space, not angular.** It scales with resolution and render scale,
   not with the atmosphere. The same sun would carry a visibly different halo at 1080p and at 1440p,
-  and GS-4's render-scale slider (30–200 %) would change it again — a sky whose atmosphere depends
-  on a graphics setting.
+  and GS-4's render-scale slider (30–200 %, shipped 2026-08-15) changes it again — a sky whose
+  atmosphere depends on a graphics setting.
 - ❌ **The bloom instance is global and already tuned for RF-3.** `intensity 0.25` / `scatter 0.6`
   were chosen for lava and lamps. There is no per-source bloom, so every knob that makes the sun's
   halo bigger also changes every emissive block in the world.
@@ -636,6 +636,9 @@ One remains, and it is deliberately **not** resolvable on paper.
 
 ## Document History
 
+* **v1.6** - **`GS-4` de-staled** (2026-08-15, no scope change): SN-2's rejection rationale cited the
+  render-scale slider as hypothetical; it shipped that day, which strengthens the refutation rather than
+  altering it.
 * **v1.5** - **Review follow-ups** (2026-08-15). A `/review-changes` pass over the SN-0..SN-4 range
   returned six findings, all actioned. The substantive one: the sun stopped honouring the Distance Fog
   gate as an incidental side effect of SN-4's airmass fix, which nothing recorded. Kept deliberately

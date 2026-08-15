@@ -1,6 +1,6 @@
 # Cloud Rendering Improvements Report
 
-**Version:** 1.7  
+**Version:** 1.8  
 **Date:** 2026-07-20  
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -149,7 +149,8 @@ interiors.
 
 - ✅ The prettiest possible sky.
 - ❌ A per-pixel raymarch bill unrelated to the voxel aesthetic; large shader project; poor fit
-  for the engine's mobile-conscious tiers (GS-4 audit would gate it hard).
+  for the engine's mobile-conscious tiers — and there is no tier gate to hide behind, since `GS-4`
+  closed having added Render Scale and MSAA settings only.
 
 #### Option B — Raymarched **slab** over the existing pattern (✅ **preferred direction**)
 
@@ -168,8 +169,9 @@ use, so switching tiers keeps the same sky layout.
   liquid shader's camera-opaque-texture reliance (same watchpoint as RF-2 §Risks).
 
 **Dependencies / cross-links:** wants CL-3's field-as-texture and the drift offset as a
-uniform; ships behind `CloudStyle.Volumetric` so regressions are opt-in. Quality-tier defaulting folds into
-the GS-4 render-tier audit.
+uniform; ships behind `CloudStyle.Volumetric` so regressions are opt-in. ⚠ Quality-tier defaulting has
+**no home**: `GS-4` closed 2026-08-15 with Render Scale and MSAA settings but no device-tier mechanism
+(a second mobile URP asset was explicitly out of its scope).
 
 ---
 
@@ -193,7 +195,8 @@ uniform (~0.15–0.25). Under a drifting cloud the ground darkens subtly and mov
 
 **Dependencies / cross-links:** CL-3/CL-4's field texture (or a one-off upload of today's
 bool grid), the drift offset. Cost: one texture sample in opaque/transparent block shaders —
-screen it with a GS-4-style tier capture on target hardware.
+screen it with a tier capture on target hardware — `GS-4` established no such workflow, having closed
+with a desktop frame delta of ≈ 0.
 
 ---
 
@@ -241,6 +244,11 @@ too); pairs naturally with CL-5 where the slab shader gives the effect for free 
 * **v1.6** - Wind ownership updated for shipped FL-1 (2026-07-19): `_windBlocksPerSecond` moved
   from `Clouds` to `World.WindBlocksPerSecond` (shared with foliage sway; `Clouds.LayerWind`
   reads it; RF-7 drives the World value later). Motion baseline row + FL relationship updated.
+* **v1.8** - **`GS-4` cross-references de-staled** (2026-08-15). Three sites leaned on the `GS-4`
+  render-tier audit to gate cloud quality per device; `GS-4` has since closed having added only Render
+  Scale and MSAA settings, with **no device-tier mechanism** and no tier-capture workflow. CL-5's
+  quality-tier defaulting therefore has no home, and CL-7's screening needs a capture of its own. No
+  scope change to any `CL-*` item.
 * **v1.7** - Cross-linked the new `VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md` (`VX-*`): CL-5
   stays owned here (shares the raymarch/depth-composite watchpoints with VX-2); CL-7 may later
   read VX-1's sky channel instead of its own 2D upload (optional, no dependency).
@@ -284,5 +292,5 @@ too); pairs naturally with CL-5 where the slab shader gives the effect for free 
 
 ---
 
-**Last Updated:** 2026-07-20  
+**Last Updated:** 2026-08-15 (`GS-4` cross-refs de-staled; 2026-07-20: VX-* cross-links)  
 **Next Review:** when CL-4 or CL-7 starts (re-verify `Clouds.cs`/`CloudPatternJob.cs`/`CloudShader.shader` against the v1.4 baseline) or on the next RF-7 design pass (wind/weather seam)
