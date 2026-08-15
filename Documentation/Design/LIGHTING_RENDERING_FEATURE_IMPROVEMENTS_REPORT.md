@@ -1,7 +1,7 @@
 # Lighting & Rendering Feature Improvements Report
 
-**Version:** 2.0  
-**Date:** 2026-08-12  
+**Version:** 2.1  
+**Date:** 2026-08-15  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified. Owns lighting
 and rendering *features* (`RF-*`); the *performance* counterparts (`LI-*`, `GS-*`) live in
 [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md), and the combined ranked
@@ -363,15 +363,22 @@ above, and the Architecture doc is authoritative.
     - **Shooting stars / meteors:** an occasional seconds-scale streak — hash-seeded start
       direction + time window in the §3 star-field code; zero state, pure shader function of
       (elapsedDays, DayFraction).
-    - **Sun lens flare:** cheapest viable = let RF-3's bloom catch the HDR sun disc (free once
-      both ship); a classic sprite-chain flare is deliberately *not* proposed (occlusion
+    - **Sun lens flare:** ~~cheapest viable = let RF-3's bloom catch the HDR sun disc (free once
+      both ship)~~ — **this estimate was wrong and is superseded by
+      [`SUN_APPEARANCE_IMPROVEMENTS.md`](SUN_APPEARANCE_IMPROVEMENTS.md)**. Both shipped and it is
+      not free: nothing in the sun path was ever made HDR, so the disc's output ceiling is exactly
+      1.0 against an effective linear bloom threshold of ≈1.23 (that doc's §2.1 has the
+      arithmetic). The sprite-chain rejection below still stands, but URP's *screen-space* lens
+      flare escapes it — it reads rendered pixels, so occlusion is inherent.
+      A classic sprite-chain flare remains deliberately *not* proposed (occlusion
       queries against voxel depth for a stylistic mismatch — skip).
 
 **Still open (the RF-2 remainder).** Each is deliberately deferred, not forgotten:
 
 | Item | Note |
 |------|------|
-| §6 sky ambience v2 (aurora, shooting stars) | Pure content on the shipped skybox shader. Sun flare needs RF-3's bloom to catch the HDR disc. |
+| §6 sky ambience v2 (aurora, shooting stars) | Pure content on the shipped skybox shader. |
+| Sun appearance (aureole, sunset reddening, HDR core, lens flare) | **Split out into its own design: [`SUN_APPEARANCE_IMPROVEMENTS.md`](SUN_APPEARANCE_IMPROVEMENTS.md)** (`SN-0`..`SN-3`). Takes over the §6 sun-flare bullet and corrects its cost estimate. `SN-0` (the aureole) is independent and standalone. All four phases stay in **LDR** — RF-3's `m_ColorGradingMode: 0` is untouched, and the Neutral-tonemapping upgrade is explicitly out of scope there, owed its own design doc because its blast radius is the four sky gradients plus RF-3's emissive tuning, not the sun. |
 | Per-biome sky color override | The editor-tool half **shipped 2026-08-12** as `Minecraft Clone/Sky Editor` (Architecture §6); only the per-biome override remains. It **needs a design pass first**: sky color is screen-wide but biomes are per-column, so something must define the boundary rule (blend over distance? sample at the camera? weight nearby columns?). Same class of question as TF-3's climate axis. Route to `create-design-doc`, not to implementation. |
 | Seasonal declination | Blocked on RF-1's curve coupling — see the Architecture doc §2.1 for why zero is load-bearing rather than lazy. |
 | Blood-moon disc tint | Waits on RF-1 §4's `SkyEvent`, which was never shipped. |
@@ -844,6 +851,17 @@ vertex-channel allocation it shares, rather than on its own merit).
 
 ## Document History
 
+* **v2.1** - **Sun appearance split into its own design** (2026-08-15). New
+  [`SUN_APPEARANCE_IMPROVEMENTS.md`](SUN_APPEARANCE_IMPROVEMENTS.md) (`SN-0`..`SN-3`) takes over the
+  RF-2 §6 sun-flare bullet, which is **struck through and corrected**: "free once both ship" was
+  wrong. RF-3's bloom shipped and the sun path was never made HDR, so the disc's ceiling of exactly
+  1.0 sits below URP's ≈1.23 effective linear threshold and contributes ~6 % through the soft knee —
+  visually nothing, and untunable from the shader because the disc is already at its own ceiling.
+  Two findings worth carrying beyond that doc: the skybox gradient is a function of `viewDir.y`
+  **alone**, so there is no aureole and the whole horizon ring warms at sunset; and the sun still
+  runs the blend-toward-fog atmosphere model the RF-2 polish arc refuted and replaced on the moon.
+  The sprite-chain flare rejection stands — URP's screen-space flare simply is not one, since
+  reading rendered pixels makes occlusion inherent.
 * **v2.0** - **RF-3 limitation 5 added** (2026-08-14): the UI blur target must remain a persistent
   per-camera resource. Bloom being enabled made the pause-menu backdrop near-black because
   `UIBlurRenderPass` published a render-graph-pooled texture as `_UIBlurTexture`, and the bloom
@@ -946,7 +964,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-12 (RF-3 shipped: HDR emissive path, bloom, `Color32.a` allocation registry)  
+**Last Updated:** 2026-08-15 (sun appearance split out to `SUN_APPEARANCE_IMPROVEMENTS.md`; RF-2 §6 flare estimate corrected)  
 **Next Review:** **RF-9 is the most visible open item**, its severity measured in game (a 30%-occluded
 face is 14.8× darker than flat ground at midnight and indistinguishable from a sealed cave face). Its
 vertex-channel question is **no longer shared with RF-3** — RF-3 spent `Color32.a` on 2026-08-12, so
