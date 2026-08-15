@@ -92,24 +92,40 @@ When adding a field to a `v2f` struct:
 Current state: `LiquidV2F` (`LiquidCore.hlsl`) uses **11** interpolators, which is what moved
 `UberLiquidShader` and `Editor/FluidPreviewShader` from 3.0 to 3.5. `VoxelV2F` (`VoxelCommon.hlsl`) uses 4.
 
-### 1.4 Mark shading inputs `centroid` — MSAA is user-selectable
+### 1.4 Interpolation modifiers — MSAA is user-selectable
 
-Since `GS-4` shipped MSAA as a Graphics setting, **any varying a fragment shades with must carry the
-`centroid` modifier.** Under MSAA a partially-covered edge pixel is still shaded at the pixel **center**,
-which can lie outside the covered primitive; plain interpolation therefore *extrapolates* past the vertex
-data. On a texture atlas that is not a subtle error — the UV walks off the quad's tile and, with the
-project atlas on point filtering and no mips (`packed_texture_atlas.png`), snaps to the neighboring
-tile's texels, drawing a one-pixel seam of the wrong block along every silhouette edge. It scales with
-render scale: at 30 % the seam is one render-target pixel upscaled ~3×.
+Since `GS-4` shipped MSAA as a Graphics setting, a partially-covered edge pixel is still shaded at the
+pixel **center**, which can lie outside the covered primitive. Plain interpolation therefore
+*extrapolates* past the vertex data. The rule follows from what the extrapolated value is used for:
+
+**The trigger is a hard discontinuity across the primitive edge, not "is it lighting".** A value that
+varies smoothly tolerates extrapolation — being slightly off is invisible. A value with a cliff in it
+does not.
+
+| Varying carries | Modifier | Why |
+|---|---|---|
+| A texture-**atlas** UV | `centroid` | The canonical failure. Extrapolation walks the UV off the quad's tile and, with the project atlas point-filtered and mip-free (`packed_texture_atlas.png`), snaps to the neighboring tile's texels — a one-pixel seam of the **wrong block** along every silhouette edge, widening with render scale (at 30 % it is one render-target pixel upscaled ~3×) |
+| A packed bit field, an ID, a discriminator — anything constant per primitive | `nointerpolation` | A bit field has no meaningful in-between. Flat-passing states the contract instead of interpolating and rounding back. `packedShoreMask` (`LiquidCore.hlsl`) is the worked example |
+| A smooth ramp — distance, per-vertex light, a normal, a flow vector | *(none)* | A sub-pixel overshoot is invisible. `fogDistance` in `VoxelV2F` and the liquid shader's `sunLight`/`blockRGB`/`emissive`/`shadowMultiplier` are deliberately plain |
 
 - `centroid` moves the sample to the centroid of the covered samples, always inside the primitive.
-- It is a **modifier, not a varying** — it costs **zero** interpolators, so §1.3's budget is unaffected.
-- It compiles clean at `#pragma target 3.5` (verified on desktop D3D11, 2026-08-15; GLES3/Vulkan untested).
-- **Exempt:** smooth, low-frequency ramps where a one-pixel extrapolation is invisible — `fogDistance` in
-  `VoxelV2F` is left plain for this reason. Anything sampling a texture or driving lighting is not exempt.
+- Both are **modifiers, not varyings** — they cost **zero** interpolators, so §1.3's budget is unaffected.
+- Both compile clean at `#pragma target 3.5` (verified on desktop D3D11, 2026-08-15; GLES3/Vulkan untested).
+
+**Audit as of 2026-08-15.** `VoxelV2F` marks `uv`, `color` **and** `lightData` centroid. Only `uv` is
+required by the table above; the other two are belt-and-braces at zero cost and are the configuration
+confirmed in game, so they stay. `LiquidV2F` needs nothing beyond `packedShoreMask`'s
+`nointerpolation` — the liquid shader is procedural and samples no atlas, and its `liquidType`
+discriminator is constant across every triangle, where interpolation of a constant is exactly that
+constant inside **or** outside the primitive. (`packedShoreMask` is provably constant per quad:
+`VoxelMeshHelper` builds one `Color32` and writes it to all four verts. Shore foam — the thing that mask
+drives — was confirmed unchanged in game after the modifier landed; no suite covers the liquid shader's
+rendered half.) `BorderWallShader`'s `uv` feeds a `frac()` band pattern
+that could in principle discontinue by one pixel at the wall's silhouette; no artifact has been observed
+and it is left alone.
 
 Found the expensive way: the artifact is invisible without MSAA (the pixel center is always inside the
-primitive), so it lay latent in these shaders for as long as the engine had no MSAA path.
+primitive), so it lay latent for as long as the engine had no MSAA path.
 
 ---
 
@@ -117,5 +133,6 @@ primitive), so it lay latent in these shaders for as long as the engine had no M
 
 | Version | Date       | Changes                                                                                                                                                                             |
 |---------|------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1.2     | 2026-08-15 | **Corrected §1.4's trigger.** v1.1 stated the rule as "anything sampling a texture or driving lighting is not exempt", generalized from a single instance. A review-driven audit of the other shaders showed the real trigger is a **hard discontinuity across the primitive edge** — atlas UVs, packed bit fields, discriminators — while smooth ramps stay exempt whether or not they drive lighting. Added `nointerpolation` as the sibling modifier for flat/constant data and applied it to `LiquidCore.hlsl`'s `packedShoreMask`; recorded the per-shader audit so the next author does not re-derive it. |
 | 1.1     | 2026-08-15 | Added §1.4: shading inputs must be `centroid` now that `GS-4` made MSAA user-selectable. Written after 8x MSAA drew one-pixel wrong-block seams along every silhouette edge, worsening at low render scale; `uv`/`color`/`lightData` in `VoxelV2F` were marked centroid and the artifact went away. Costs no interpolators, so §1.3 is unaffected. |
 | 1.0     | 2026-08-14 | Initial guide: `#pragma target` floor of 3.5, why higher tiers do not help, the Unity 6.6 / 4.5 item, and the interpolator-counting rule. Extracted from `CODEBASE_IMPROVEMENTS.md` §1.4 after RF-3's liquid emissive read pushed `LiquidV2F` to 11 interpolators against a declared `target 3.0`. |

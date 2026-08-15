@@ -2,7 +2,7 @@
 
 **Version:** 1.3  
 **Date:** 2026-07-26  
-**Status:** **Open backlog.** 30 items open, 30 complete. Completed items keep their ✅ row in the master
+**Status:** **Open backlog.** 31 items open, 30 complete. Completed items keep their ✅ row in the master
 summary table; their detail sections live in
 [`../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md`](../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md).  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -277,6 +277,7 @@ plus the standalone test files (`VoxelMetadataUtilityTests`, `FastNoiseLiteTests
 | VS-1 ✅ | **SHIPPED 2026-07-08** — shared `Framework/ValidationSuiteRunner` + `ValidationRunResult` (per-scenario + total timing; `KnownBugChannel` ends the archive-vs-promote drift); six suites + `ChunkRelativePositionTests` migrated, verdicts unchanged; `VoxelMetadataUtilityTests`/`FastNoiseLiteTests` remain a tracked follow-up (assertion-model mismatch)                                                       |   ✅   |  ✅  |   ⚪    |  ✅  |  ✅  |
 | VS-2 ✅ | **SHIPPED 2026-07-09** — `Validate All` aggregate + `ValidationSuiteCI` headless entry (`RunHeadless` exit-code + NUnit3 XML; `RunSelected`/`-validationSuites` subset) over an explicit registry; per-suite `World.Instance` isolation guard (snapshot→force-restore→mark-failed) proven leak-tight; `Validation Framework` self-test suite added (8 suites, 151 baselines, fwd==rev==individual)                 |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  |
 | VS-3 ✅ | **SHIPPED 2026-07-10** — `Framework/StaleAssemblyGuard` diagnostic preamble in the shared runner (warn-only, never fails a baseline, suppressed to warn once per aggregate); 3 signals (isCompiling/isUpdating, source-vs-DLL, domain-vs-disk `[InitializeOnLoadMethod]` capture) over the two project assemblies; 6 self-tests (Validation Framework → 16, aggregate → 159); live-proven stale warning fires once |   🟢   |  🟢  |   ⚪    |  ✅  |  ✅  |
+| VS-4 | **A baseline that could not run reports PASS.** `SkipWithoutGraphics` (`SkyRenderValidationSuite.cs:218`) logs `[INCONCLUSIVE]` and returns `true`, because `ScenarioResult` (`Framework/ValidationRunResult.cs:10-16`) is `Name`/`KnownBugId`/`Passed` — there is **no skipped state**. `NUnitXmlWriter.cs:103` derives `Inconclusive` solely from `IsKnownBug && !Passed`, a different concept reserved for known-bug repros. Consequence: a headless `-nographics` run reports **all-green** while every rendered-pixel baseline observes nothing (12 such call sites in `Sky Render` alone as of 2026-08-15). The console warning is loud, so a human reading the log is fine — the exposure is any automated gate keyed on the exit code or the XML. **Proposal:** a third scenario outcome (`Skipped`, carrying a reason) threaded through `ScenarioResult` → the runner summary → `NUnitXmlWriter` (NUnit3 has a native `Skipped` result) → the aggregate's counts, so an unrunnable baseline is never counted as a passing one. **Deferred 2026-08-15, deliberately:** this is shared infrastructure behind all 22 suites and `ValidationFrameworkSelfTest` pins the current classification, so it is not the small fix its symptom suggests. Pick it up when a headless gate is actually wired to block on, or alongside the next `Framework/` change |   🟡   |  🟢  |   🟡    |  ✅  |  ✅  |
 
 ### World Scaling Enablers
 
@@ -1090,7 +1091,8 @@ runs `postProcessJob.Schedule().Complete()` on the main thread per meshed chunk 
 
 ## Detailed findings — Validation Suites
 
-> **All items in this category are complete** (VS-1 … VS-3). Their detail sections are archived in
+> **VS-1 … VS-3 are complete**; **VS-4 is an open proposal** — see its row in the summary table above,
+> which carries the whole finding (no detail section yet). The completed detail sections are archived in
 > [`../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md`](../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md);
 > their rows remain in the master summary table above. Remaining *coverage* gaps are tracked in
 > [`VALIDATION_SUITE_COVERAGE_ROADMAP.md`](VALIDATION_SUITE_COVERAGE_ROADMAP.md), not here.
@@ -1179,6 +1181,7 @@ inherit a one-click `Validate All` that also flags stale-code runs automatically
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.7** - **`VS-4` filed** (2026-08-15): a validation baseline that could not run reports PASS, because the framework has no skipped state. Found by a code review of the `GS-4` range; deferred the same day as shared-infrastructure work rather than the small fix its symptom suggests. Summary-table row only, no detail section.
 * **v1.6** - `GS-4` **verified and archived** (2026-08-15). Confirmed in the editor and an IL2CPP Windows
   build; detail section moved to `../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md` under a new
   **GPU & Shaders** heading, row marked ✅ (30 open / 30 complete). Two outcomes worth carrying: the shadow
