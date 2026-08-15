@@ -149,6 +149,13 @@ code-built screens; creation and application are separate calls so a caller whos
 `ApplyBlurBackground` also carries the fallback path that renders a flat color when no blur material is
 available — used live by `FluidStressController`, which passes none.
 
+**Where lifetime attaches.** Destroying a panel's GameObject does **not** reclaim the material assigned
+to its `Image.material` — measured in play mode, the instances outlive the hierarchy. Each code-built
+screen therefore hands its instance to the component that lives on the panel's canvas root
+(`BenchmarkHUD`, `BenchmarkResultsScreen`), which destroys it in `OnDestroy`. `ConsoleUI` is the
+deliberate exception: it owns its instance directly because the material must survive `BuildPanel`
+being re-entered by the UI_BUGS #04 self-heal.
+
 ---
 
 ## 6. Current usage

@@ -64,10 +64,12 @@ namespace Benchmarks
             panelRect.offsetMin = Vector2.zero;
             panelRect.offsetMax = Vector2.zero;
 
+            // The instance is handed to the HUD component below, which destroys it in OnDestroy — its
+            // lifetime is the canvas hierarchy's, and nothing else can outlive that to own it.
+            Material panelBlur = RuntimeUIFactory.CreateBlurMaterialInstance(blurMaterial, s_hudBlurTint);
+
             Image panelImage = panel.AddComponent<Image>();
-            RuntimeUIFactory.ApplyBlurBackground(panelImage,
-                RuntimeUIFactory.CreateBlurMaterialInstance(blurMaterial, s_hudBlurTint),
-                s_hudBackgroundColor);
+            RuntimeUIFactory.ApplyBlurBackground(panelImage, panelBlur, s_hudBackgroundColor);
 
             // Add padding via VerticalLayoutGroup
             VerticalLayoutGroup layout = panel.AddComponent<VerticalLayoutGroup>();
@@ -79,7 +81,7 @@ namespace Benchmarks
             TextMeshProUGUI statusText = textObj.GetComponent<TextMeshProUGUI>();
 
             BenchmarkHUD hud = canvasObj.AddComponent<BenchmarkHUD>();
-            hud.Initialize(controller, statusText);
+            hud.Initialize(controller, statusText, panelBlur);
 
             return hud;
         }
@@ -100,10 +102,11 @@ namespace Benchmarks
             GameObject overlay = RuntimeUIFactory.CreatePanel("Results_Overlay", canvasObj.transform);
             RuntimeUIFactory.StretchToParent(overlay.GetComponent<RectTransform>());
 
+            // Handed to the results-screen component below, which owns its destruction.
+            Material overlayBlur = RuntimeUIFactory.CreateBlurMaterialInstance(blurMaterial, s_resultsBlurTint);
+
             Image overlayImage = overlay.AddComponent<Image>();
-            RuntimeUIFactory.ApplyBlurBackground(overlayImage,
-                RuntimeUIFactory.CreateBlurMaterialInstance(blurMaterial, s_resultsBlurTint),
-                s_resultsOverlayColor);
+            RuntimeUIFactory.ApplyBlurBackground(overlayImage, overlayBlur, s_resultsOverlayColor);
 
             // Centered content panel
             GameObject contentPanel = RuntimeUIFactory.CreatePanel("Results_ContentPanel", overlay.transform);
@@ -155,7 +158,7 @@ namespace Benchmarks
                 BUTTON_HEIGHT, s_buttonColors, s_buttonTextColor, LABEL_FONT_SIZE);
 
             BenchmarkResultsScreen screen = canvasObj.AddComponent<BenchmarkResultsScreen>();
-            screen.Initialize(reportText, openFolderBtn, returnBtn);
+            screen.Initialize(reportText, openFolderBtn, returnBtn, overlayBlur);
 
             canvasObj.SetActive(false);
             return screen;

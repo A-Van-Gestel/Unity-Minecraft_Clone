@@ -23,19 +23,35 @@ namespace Benchmarks
         private string _logFolderPath;
 
         /// <summary>
+        /// The overlay's blur material instance, owned by this component so its lifetime matches the
+        /// hierarchy that uses it. Null when the screen was built on the flat-color fallback path
+        /// (which is what <c>FluidStressController</c> uses).
+        /// </summary>
+        private Material _ownedBlurMaterial;
+
+        /// <summary>
         /// Initializes the results screen with its UI components.
         /// </summary>
         /// <param name="reportText">The TMP component to display the report in.</param>
         /// <param name="openFolderButton">Button that opens the log folder.</param>
         /// <param name="returnButton">Button that returns to the main menu.</param>
-        public void Initialize(TextMeshProUGUI reportText, Button openFolderButton, Button returnButton)
+        /// <param name="ownedBlurMaterial">Blur material instance to take ownership of, or null on the flat fallback path.</param>
+        public void Initialize(TextMeshProUGUI reportText, Button openFolderButton, Button returnButton,
+            Material ownedBlurMaterial = null)
         {
             _reportText = reportText;
             _openFolderButton = openFolderButton;
             _returnButton = returnButton;
+            _ownedBlurMaterial = ownedBlurMaterial;
 
             _openFolderButton.onClick.AddListener(OnOpenFolderClicked);
             _returnButton.onClick.AddListener(OnReturnClicked);
+        }
+
+        private void OnDestroy()
+        {
+            if (_ownedBlurMaterial != null)
+                Destroy(_ownedBlurMaterial);
         }
 
         /// <summary>
