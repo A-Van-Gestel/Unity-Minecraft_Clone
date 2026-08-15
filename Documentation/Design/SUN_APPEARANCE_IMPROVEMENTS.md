@@ -1,6 +1,6 @@
 # Sun Appearance Improvements Design
 
-**Version:** 1.4  
+**Version:** 1.5  
 **Date:** 2026-08-15  
 **Status:** **Implemented.** SN-0, SN-1 and **SN-4** shipped and confirmed in game 2026-08-15. **SN-2 was built, judged in game and reverted in full (§7.3)**, taking SN-3 with it — and **SN-4 (§7.4) delivers what SN-2 was for**, in the shader.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -29,6 +29,10 @@ authored assets `VoxelEngine-Post-Profile.asset`, `VoxelEngine-URP-Asset.asset` 
 `Shaders/PostProcessing/Bloom.shader:108-112` for the threshold semantics quoted in §2.
 The threshold arithmetic in §2 is computed from those two sources, not assumed. No runtime
 state was inspected; nothing here depends on runtime state.
+
+**Amended:** 2026-08-15 — **Review follow-ups.** New §7.5: the sun's extinction had silently stopped
+honouring the `Distance Fog` gate during SN-4; the behaviour is **kept and now documented**, with
+**Sky Render B11** asserting both it and the moon's opposite behaviour. Three stale prose sites corrected.
 
 **Amended:** 2026-08-15 — **SN-4 shipped**: §7.3's recommended successor, built and confirmed the same
 day. A third, tightest lobe on SN-0's falloff produces the sun's glare in the shader, and a separate
@@ -250,6 +254,8 @@ stopgap waiting on a tonemapper: the radial ramp is the shipped answer, not scaf
 disc's own light, followed by the additive airlight term — the identical structure the moon
 already uses, so the two bodies stop disagreeing about the same air. `opticalDepth` derives from
 the existing `hazeAmount`, so no new global and no new authored field.
+*(SN-4 later moved it onto its own `sunPathHaze` — a steeper airmass curve, deliberately ungated
+by fog. Still no new global; see §7.4 and §7.5.)*
 
 The wavelength ratio is a **tuning constant, not a physical derivation**: this design deliberately
 does not import Rayleigh coefficients, because the sky it must agree with is authored (Option C),
@@ -571,6 +577,32 @@ with it. And B9's monotonic-reddening assertion could not have caught the airmas
 curve that is already orange at 30° climbs just as monotonically as a correct one — so B9 gained an
 explicit "still neutral at 30°" check, whose threshold sits between the two measured states.
 
+### 7.5 The sun ignores Distance Fog — decided, not drifted
+
+A code review of the SN-0..SN-4 range found that the sun's extinction had stopped honouring the fog
+gate. It was not a decision anyone made: SN-1 wrote the extinction against the fog-gated `hazeAmount`,
+and SN-4 moved it onto the ungated `sunPathHaze` while fixing the airmass curve. Nothing recorded it,
+and the in-file comment still described a gate that no longer applied to the body it named.
+
+**Resolved by keeping the behaviour and writing it down.** `Distance Fog` is a view-distance setting;
+the sun's colour is a property of the atmosphere. Measured at 3° elevation with fog off, re-gating
+would render the disc at red:blue **1.11** — near-white against the authored orange horizon, which is
+the disc-does-not-match-its-sky defect §7.1 and §7.4 exist to prevent — where ungated it holds **2.38**.
+
+**The moon deliberately keeps the gate**, so the two bodies do disagree. That is accepted rather than
+tidied: the moon's atmosphere model is pinned by B6/B7 and by RF-2's locked decisions, so changing it
+is its own decision with its own in-game pass, not a consistency sweep riding along here.
+
+**Sky Render B11 pins both halves.** Re-gating the sun reds its first assertion; ungating the moon reds its
+second. The control half matters — without it, "the sun ignores fog" would pass equally in a build
+where nothing responded to fog at all.
+
+**One process note.** Verifying this ran into a stale editor assembly that the DLL-timestamp gate
+passed: `AssetDatabase.ImportAsset(..., ForceUpdate)` re-stamps the source's mtime, so
+"DLL newer than source" briefly reads true while the compile is still pending. The project's own
+`StaleAssemblyGuard` caught it and the suite result was untrusted until a clean recompile. When a
+timestamp gate and that guard disagree, the guard is right.
+
 ### Extension roadmap (post-SN-3, in intended order)
 
 | Version | Extension |
@@ -604,6 +636,15 @@ One remains, and it is deliberately **not** resolvable on paper.
 
 ## Document History
 
+* **v1.5** - **Review follow-ups** (2026-08-15). A `/review-changes` pass over the SN-0..SN-4 range
+  returned six findings, all actioned. The substantive one: the sun stopped honouring the Distance Fog
+  gate as an incidental side effect of SN-4's airmass fix, which nothing recorded. Kept deliberately
+  (§7.5) — re-gating renders a near-white sun against an orange horizon, measured 1.11 against 2.38 —
+  and pinned by new Sky Render baseline **B11**, whose control half also asserts the moon still responds. The rest
+  were provenance repairs in the suite: two threshold constants cited numbers measured on a *different
+  fixture* than the baselines run against (B9 1.39 -> **1.44**, B10 0.307/0.139 -> **0.342/0.155**),
+  B10's remarks named a neutral fixture it does not use, its near-band sample was resolved by float
+  match rather than index, and a rim-sample literal became a named constant.
 * **v1.4** - **SN-4 shipped** (2026-08-15), confirmed in game. New §7.4. The glare that SN-2 tried to
   get from post-process bloom is produced in the skybox shader instead, as a third lobe on SN-0's
   existing falloff — angular, so invariant to resolution and render scale, sharing no tuning with RF-3's

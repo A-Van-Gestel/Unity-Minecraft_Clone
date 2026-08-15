@@ -1,8 +1,8 @@
 # Sky & Celestial Rendering
 
-**Version:** 1.9  
+**Version:** 1.10  
 **Date:** 2026-08-15  
-**Status:** **Implemented (Stable)** — RF-2 phases 1 and 2, the `Distance Fog` setting, the richer sun/moon discs, and the Sky Editor are shipped and confirmed (2026-08-11, discs and tool 2026-08-12). Guarded by the `Validate Sky` suite (**15** baselines, model only) and `Validate Sky Render` (**10** baselines on rendered pixels) — see §7. Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
+**Status:** **Implemented (Stable)** — RF-2 phases 1 and 2, the `Distance Fog` setting, the richer sun/moon discs, and the Sky Editor are shipped and confirmed (2026-08-11, discs and tool 2026-08-12). Guarded by the `Validate Sky` suite (**15** baselines, model only) and `Validate Sky Render` (**11** baselines on rendered pixels) — see §7. Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The procedural sky: a zenith/horizon gradient, a sun and moon on **real celestial arcs** driven by a
@@ -231,8 +231,19 @@ itself.
 **Stars are points, not cells.** `floor(dir · density)` lighting a whole cell paints axis-aligned
 squares; each star is a jittered point inside its cell with a smooth radial falloff.
 
-**Discs are hazed toward the fog colour** by view elevation, gated on `_VoxelFogRange` being non-empty.
-Without it the sun and moon read as sitting *in front of* the fog, since the sky draws behind everything.
+**The two discs take the atmosphere differently, and the split is deliberate.** The **moon** is hazed
+toward the fog colour by *view* elevation, gated on `_VoxelFogRange` being non-empty — without it the
+moon reads as sitting *in front of* the fog, since the sky draws behind everything. The **sun** instead
+takes per-channel extinction (§4.1) along its own path, on a steeper *airmass* curve, and is **not**
+gated on the fog range at all.
+
+That asymmetry is a choice, not drift. `Distance Fog` is a view-distance setting, while the sun's
+colour is a property of the atmosphere: gating it rendered a near-white sun (red:blue 1.11) against the
+authored orange horizon whenever a player turned fog off, where ungated it holds 2.38. The moon keeps
+the gate because its own model is pinned by B6/B7 and by RF-2's locked decisions, so changing it is a
+separate decision rather than a consistency tidy-up. **Sky Render B11 asserts both halves** — the sun's
+independence and the moon's response — so re-gating the sun, or ungating the moon, reds a test.
+(Distinct from the `Validate Sky` model suite's own B11 in §2.4; the two suites number separately.)
 
 ---
 
@@ -359,7 +370,7 @@ only the C# half is guarded.
 
 ### 7.1 `Validate Sky Render` — the shader half
 
-`Minecraft Clone/Dev/Validate Sky Render` — 10 baselines in
+`Minecraft Clone/Dev/Validate Sky Render` — 11 baselines in
 `Assets/Editor/Validation/Celestial/SkyRenderValidationSuite.cs`, the first coverage of the sky that
 observes **pixels**. It renders through `SkyPreviewRenderer` and asserts: a linear color survives the
 round trip (B1); the disc occludes the star field (B2); no degenerate configuration renders a NaN, and the
@@ -464,6 +475,14 @@ not read the atmospheric improvement as having fixed it.
 
 ## Document History
 
+* **v1.10** - **The sun's fog independence, made deliberate** (2026-08-15). §4 no longer says both discs
+  are hazed toward the fog colour: the moon is, by view elevation and gated on the fog range, while the
+  **sun is not gated at all** and runs per-channel extinction along its own airmass path. That split had
+  arrived incidentally during the shader-side glare work and was recorded only after a code review found
+  it. It is kept because gating renders a near-white sun (red:blue 1.11 against 2.38) over the authored
+  orange horizon, and the moon keeps the gate because B6/B7 and RF-2's locked decisions pin its model.
+  New **Sky Render** baseline **B11** asserts both halves, control included. See
+  [`../Design/SUN_APPEARANCE_IMPROVEMENTS.md`](../Design/SUN_APPEARANCE_IMPROVEMENTS.md) §7.5.
 * **v1.9** - **The sun's glare moved into this shader, and B10** (2026-08-15). The sun's glow is now
   produced entirely here, as a third and tightest lobe on the aureole's falloff, after driving it from
   URP's post-process bloom was built and refuted — one global `Bloom` cannot size its halo for both a

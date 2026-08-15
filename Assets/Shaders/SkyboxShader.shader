@@ -354,8 +354,16 @@ Shader "Minecraft/SkyboxShader"
                 float heightFactor = 1.0 - pow(1.0 - saturate(abs(viewDir.y)), HORIZON_FALLOFF);
                 half3 color = lerp(_HorizonColor.rgb, _ZenithColor.rgb, heightFactor);
 
-                // Haze veiling the celestial discs, strongest at the horizon. Gated on fog being on, so
-                // disabling fog leaves the sky crisp too rather than the two disagreeing.
+                // Haze veiling the MOON, strongest at the horizon, plus the aerosol boost on the
+                // aureole's widest lobe. Gated on fog being on, so disabling fog leaves those crisp.
+                //
+                // The sun deliberately does NOT take this gate — it runs on `sunPathHaze` below, which
+                // is ungated. Distance Fog is a view-distance setting; the sun's colour is a property
+                // of the atmosphere, and tying the two would make a sunset sun render near-white
+                // against the authored orange horizon whenever a player turned fog off. The moon keeps
+                // the gate because its own model is pinned by B6/B7 and RF-2's locked decisions.
+                // B11 asserts the sun's independence, so re-gating it reds a test rather than quietly
+                // changing the look.
                 float hazeAmount = 0.0;
                 if (_VoxelFogRange.y > _VoxelFogRange.x)
                     hazeAmount = pow(saturate(1.0 - viewDir.y), HORIZON_HAZE_FALLOFF) * HORIZON_HAZE_STRENGTH;
@@ -373,8 +381,11 @@ Shader "Minecraft/SkyboxShader"
                 aureole *= saturate(1.0 + _SunDirection.y / AUREOLE_TWILIGHT_FADE);
 
                 // Warmth keys on the SUN's own path, not the view's: the glow belongs to the sun, so a
-                // low sun reddens the whole halo rather than only the half nearer the horizon. Same
-                // optical-depth curve the view uses, evaluated at the sun's elevation instead.
+                // low sun reddens the whole halo rather than only the half nearer the horizon.
+                //
+                // Deliberately UNGATED by fog, unlike `hazeAmount` above — see the note there. This one
+                // value feeds both the aureole's tint and the disc's extinction, so the two redden
+                // together whatever the Distance Fog setting is.
                 float sunPathHaze = pow(saturate(1.0 - _SunDirection.y), SUN_PATH_FALLOFF)
                                     * HORIZON_HAZE_STRENGTH;
                 float3 sunTransmittance = exp(-sunPathHaze * SUN_EXTINCTION_DEPTH * SUN_EXTINCTION_BETA);
