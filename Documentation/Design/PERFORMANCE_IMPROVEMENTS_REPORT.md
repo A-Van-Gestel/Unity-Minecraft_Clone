@@ -1,10 +1,13 @@
 # Performance Improvements Report
 
-**Version:** 1.3  
-**Date:** 2026-07-26  
-**Status:** **Open backlog.** 31 items open, 30 complete. Completed items keep their ✅ row in the master
-summary table; their detail sections live in
-[`../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md`](../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md).  
+**Version:** 1.8  
+**Date:** 2026-08-15  
+**Status:** **Open backlog.** 31 items open, 30 complete, 1 deferred (⏸️). Completed items keep their ✅
+row in the master summary table; their detail sections live in
+[`../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md`](../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md).
+A **⏸️** row is analyzed but deliberately not implemented — its detail section **stays here** (it is not
+complete, so it is not archived) and carries a dated verdict block explaining what would change the
+decision.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The single master backlog for **all open runtime performance improvements** in the VoxelEngine.
@@ -194,10 +197,11 @@ plus the standalone test files (`VoxelMetadataUtilityTests`, `FastNoiseLiteTests
 |------|-----------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
 | GS-1 | Liquid shader: per-pixel procedural 3D simplex FBM (up to ~30 snoise calls/px)    |   🟡   |  🟡  |   🟢    |  ✅  |  ✅  |
 | GS-2 | URP Opaque Texture required globally; `SampleSceneColor` even with refraction off |   🟢   |  🟡  |   🟢    |  ✅  |  ✅  |
-| GS-3 | Voxel lighting math (4× `pow`) runs per-fragment on per-vertex data               |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  |
+| GS-3 ⏸️ | Voxel lighting math (4× `pow`) runs per-fragment on per-vertex data               |   🟢   |  🟡  |   🟡    |  ✅  |  ✅  |
 | GS-4 ✅ | Render pipeline tier audit: shadow variants, TwoSided casting, MSAA, render scale |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  |
 | GS-5 | Section occlusion culling (underground sections render despite being sealed)      |   🔴   |  🟡  |   🟢    |  ✅  |  ✅  |
 | GS-6 | Per-section GameObject + MeshRenderer submission (BatchRendererGroup conversion)  |   🔴   |  🔴  |   🟡    |  ✅  |  ✅  |
+| GS-7 | Cloud shader runs the shade curve (2× `pow`) per-fragment on frame-constant uniforms |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  |
 
 ### CPU-Starved Device / OOM Hardening
 
@@ -591,7 +595,7 @@ The existing quality-tier keywords (`_FLUID_QUALITY_LOW/MED`, refraction opt-out
 
 ---
 
-### GS-3. Voxel lighting math runs per-fragment on purely per-vertex data
+### GS-3 ⏸️. Voxel lighting math runs per-fragment on purely per-vertex data
 
 **Observed:** `ApplyVoxelLightingRGB` (`VoxelLighting.hlsl`) computes 4 independent shade curves, each ending in `pow(x, 2.2)` — **4 `pow` calls per fragment** in the opaque, transparent, and liquid shaders. Every input (per-vertex light data + global uniforms) is available in the vertex shader; only the final `color * multiplier` needs the fragment stage.
 
@@ -599,10 +603,123 @@ The existing quality-tier keywords (`_FLUID_QUALITY_LOW/MED`, refraction opt-out
 
 > **Impact Analysis:**
 > - **Effort:** 🟢 Low — shared include + V2F struct change.
-> - **Risk:** 🟢 Low — minor interpolation differences across large faces; compare side-by-side
->   with the `DEBUG_LIGHTDATA` view.
+> - **Risk:** 🟡 Medium — **raised from 🟢 by the 2026-08-15 analysis below.** The change is not
+>   visually neutral, and no automated gate can observe it.
 > - **Benefit:** 🟡 Medium — meaningful fragment ALU reduction on mobile; small on desktop.
 > - **Seed/Save:** ✅ / ✅.
+
+---
+
+#### ⏸️ DEFERRED 2026-08-15 — analyzed, not implemented
+
+**Verdict (owner):** deferred, not rejected. No GPU-side bottleneck has been observed on ordinary
+non-fluid terrain, so a **guaranteed** visual change is not worth an **unmeasured** desktop gain. The
+item stays open in the ID space and should be revisited when a mobile/IL2CPP capture actually shows
+fragment-bound terrain, or when it can ride along with `GS-1`/`GS-2` on the mobile wave. Nothing was
+implemented; the analysis below is design work only, recorded so a future session starts from the
+conclusion rather than re-deriving it.
+
+**The shade curve.** Both channels reach `VoxelLightToShadow` with `globalLight = 1.0` (the day/night
+term is already spent by `ApplySkyDarken`), `min = 0.15`, `max = 1.0`, which collapses the whole chain
+to one function of normalized light `L`:
+
+```
+m(L) = (0.1 + 0.9·L)^2.2   for L ≤ 0.85
+     = 0.7269              for L ≥ 0.85   (shade clamps at minLight)
+```
+
+Convex over most of its range, then **flat** — light levels 13, 14 and 15 already render identically.
+That shape is the whole visual story, and the flat top is why the error below changes sign.
+
+**1. The refactor half is exact and free.** Because `color ≥ 0` componentwise,
+`max(color·A, color·B) ≡ color · max(A, B)`. `ApplyVoxelLightingRGB` therefore factors *exactly* into a
+colour-independent `half3` multiplier — extractable as `VoxelLightMultiplierRGB` with zero behavioural
+change and zero call-site churn. Any future attempt should land this as its own commit first; it is
+provably a no-op and makes the risky half a one-line diff.
+
+**2. Flat lighting is unaffected.** With Smooth Lighting **off**, all four verts of a face carry the
+same `lightData`, nothing interpolates, and every scheme below is bit-identical to today. The entire
+visual question exists only on the smooth-lighting path.
+
+**3. Moving to the vertex stage is irreducibly non-neutral.** Today interpolates *light* then curves
+it; any vertex-stage scheme curves at the corners then interpolates the *result*. Mid-face, for a face
+whose two corners sit at the given levels (derived from `m(L)`, not measured on GPU):
+
+| Face corner light | Today | Vertex-stage | Δ linear | Δ perceptual |
+|---|---:|---:|---:|---|
+| level 8 → 11 (ordinary terrain) | 0.4143 | 0.4243 | +2 % | +1 % — invisible |
+| level 11 → 14 (near-saturated) | 0.6994 | 0.6369 | −9 % | −4 % — slightly **darker** |
+| level 0 → 8 (torch falloff in darkness) | 0.0932 | 0.1540 | **+65 %** | **+25 % — visible** |
+
+Ordinary terrain gradients are safe. Steep falloff around a light source in darkness gets visibly
+brighter and softer mid-face; gradients near full brightness darken slightly (the flat top makes `m`
+locally concave there). **No vertex-stage scheme avoids this** — `m` is exactly invertible to a linear
+form (`m^(1/2.2) = 0.1 + 0.9L`), so interpolating anything that reproduces today's result requires the
+`pow` back in the fragment, which is the item itself. This is the cost of GS-3, not a tuning knob.
+
+**4. Where to take the `max` — and why the interpolator argument for the cheap option is void.**
+The original recommendation offered two variants. They differ **only** on faces where the sun channel
+dominates at one corner and blocklight at the other (a torch near a cave mouth); with no crossover they
+are identical. At such a face — corner 0 fully sunlit and unlit by torch, corner 1 dark at block level
+8 — mid-face, ignoring `SkyLightColor` tint:
+
+| Scheme | Multiplier | vs. today |
+|---|---:|---|
+| Today (`max` per fragment, on interpolated light) | 0.268 | — |
+| **B** — interpolate both contributions, `max` per pixel | 0.367 | +37 % linear, +15 % perceptual |
+| A — `max` at the vertex, interpolate the result | 0.514 | **+92 % linear, +34 % perceptual** |
+
+A compounds two convexity errors (the curve's *and* `max`'s) and erases the derivative crease where the
+two lighting models cross — it would read as a bright halo band at exactly the sun/torch boundaries
+players look at. A was initially preferred only because B appeared to cost an extra interpolator in both
+`VoxelV2F` and `LiquidV2F`. **It does not.** `SkyLightColor` is a uniform, so the sun contribution can
+be carried as the *scalar* `m(litSky)` and tinted in the fragment, packing into the spare channel of the
+block vector:
+
+```hlsl
+centroid half4 lightShadow; // .rgb = blocklight shadow, .a = sun shadow (pre-tint)
+...
+col.rgb *= max(i.lightShadow.a * SkyLightColor, i.lightShadow.rgb);
+```
+
+`VoxelV2F` stays at **4** interpolators and `LiquidV2F` at **11** — identical to A, and the struct keeps
+its current `half4` shape. **If this item is ever picked up, use packed B.** A is dominated.
+
+**5. `DEBUG_LIGHTDATA` is a false green for this item.** The pre-deferral guidance (and this document's
+own visual-verification note) prescribed comparing gradients through the `DEBUG_LIGHTDATA` view. That
+view renders raw interpolated `lightData`, which this change does not touch — it would be bit-identical
+before and after no matter how badly the multiplier path were broken. Any A/B must be on the **normal
+lit view**, and must include a torch-in-a-dark-cave scene, which is where §3's worst case lives.
+
+**6. There is no gate, and building one is bigger than the item.** Shaders are not compiled by
+`dotnet build` (this change touches zero `.cs` files, so a green runtime build proves nothing); the
+only compile gate is `ShaderUtil.ShaderHasError` after import plus an explicit sweep of the
+`DEBUG_LIGHTDATA` and `_FLUID_QUALITY_*`/`_FLUID_REFRACTION_OFF` variants. `SkyRenderValidationSuite`
+proves a rendered-pixel harness is *possible* in this project, but it is built on the skybox-specific
+`SkyPreviewRenderer`; a block-shader equivalent is a suite-building project, not a 🟢-Low shader edit.
+This is consistent with `VALIDATION_SUITE_COVERAGE_ROADMAP.md`, which excludes shader/GPU output from
+suite coverage and names GS-1/GS-3 as the trigger to revisit.
+
+**Interlocks — and one that runs the opposite way to intuition.** `MR-8` (greedy meshing) does **not**
+make §3 worse. Longer quads would mean longer interpolation spans, but MR-8's constraint (a) merges
+only faces with *identical corner light* (reworded as identical corner **AO** under `VX-8`), and a span
+with identical endpoints interpolates to a constant — so the chord-vs-curve error on a merged quad is
+exactly **zero**. The two are neutral to each other. The interlock that does matter is
+`VX-8`/`VX-1` (per-pixel voxel lighting from a 3D volume) and the `SS-*` **D7** decision that endorses
+analytic per-pixel AO on the same substrate: those move lighting *into* the fragment stage, which is
+the direction GS-3 moves *out of*. **If that direction lands, GS-3 is not merely deferred — it is
+moot**, because there is no per-vertex light multiplier left to hoist. Check `VX-1`/`VX-8` status
+before resuming this item.
+
+**Blast radius, if resumed.** Five shaders consume the two shared V2F structs — `StandardBlockShader`,
+`TransparentBlockShader`, `UberLiquidShader`, `Editor/BlockPreviewShader`, `Editor/FluidPreviewShader`
+(the last two reached via `EditorPreviewMaterialUtility`, so `ChunkPreview3DWindow` and block-icon
+generation are in scope for visual checks). The light uniforms are declared *per shader, after the
+include*, so `VoxelVert`/`LiquidVert` cannot read them — the multiplier must be passed in as a
+parameter rather than computed inside the shared vertex function. `VoxelAppdata`/`LiquidAppdata` are
+untouched, so the mesher, MR-2's vertex layout, seeds and saves stay outside the blast radius. Free
+side-effect: `UberLiquidShader.shader:97` computes `litWhite` before the type branch and **discards it
+on the lava path**, so lava currently pays 4 `pow`/fragment for nothing.
 
 ---
 
@@ -641,6 +758,43 @@ Expected win: the largest single rendering-side improvement available (draw call
 >   re-derived.
 > - **Benefit:** 🟡 Medium on desktop today → 🟢 High at scale (thousands of sections, weak CPUs,
 >   and any Tier A height increase that multiplies section counts).
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
+### GS-7. Cloud shader runs the shade curve per-fragment on frame-constant uniforms
+
+*(Split out of `GS-3`'s 2026-08-15 analysis. Filed separately because it is exact where GS-3 is not —
+if that split is unwanted, fold it back into GS-3 rather than leaving it here unowned.)*
+
+**Observed:** `CloudShader.shader` lines 100–103 compute the day/night factor per fragment:
+
+```hlsl
+float litSky     = ApplySkyDarken(1.0, GlobalLightLevel);
+float sunShadow  = VoxelLightToShadow(litSky, 1.0, minGlobalLightLevel, maxGlobalLightLevel);
+float noonShadow = VoxelLightToShadow(1.0,   1.0, minGlobalLightLevel, maxGlobalLightLevel);
+half  dayNight   = sunShadow / noonShadow;
+```
+
+Every input is a **global uniform**, so `dayNight` is constant across the entire frame — yet it costs
+**2 `pow` per fragment**, on geometry that covers a large fraction of the sky. HLSL compilers do not
+hoist uniform-only expressions out of the fragment stage. The neighbouring `shade` term is likewise
+constant *per face*: it is a ternary chain on `normalWS`, and cloud quads are axis-aligned, so all four
+verts carry the same normal.
+
+**Recommendation:** Move `shade * dayNight * SkyLightColor` into `vert` and interpolate the resulting
+`half3`. Unlike GS-3 this is **mathematically exact** — interpolating a value that is constant across
+the primitive yields that constant — so it carries none of GS-3's gradient-fidelity question and needs
+no visual A/B beyond a smoke check. Compute it in the vertex shader rather than on the CPU: a C#
+implementation of the curve would fork `VoxelLightToShadow` into a second source of truth.
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — one shader, ~5 lines, no struct sharing (`CloudShader` has its own `v2f`).
+> - **Risk:** 🟢 Low — exact by construction; the only assumption is that cloud quads stay
+>   axis-aligned, which `MR-9`'s cloud mesher guarantees today. If that ever changes, keep `dayNight`
+>   at the vertex stage and leave `shade` per-fragment.
+> - **Benefit:** 🟡 Medium — scales with cloud screen coverage, not with terrain complexity, so it is
+>   independent of the "no GPU bottleneck on terrain" observation that deferred GS-3.
 > - **Seed/Save:** ✅ / ✅.
 
 ---
@@ -1127,7 +1281,7 @@ Grouped into waves by value-for-effort; within a wave, order is free. Capture th
 
 1. **Quick wins, near-zero risk (one sitting each):**
    ~~MR-1 (Euler hoist) ✅ done — marginal~~, ~~MR-5 ✅ done — chain post-process~~, ~~MR-3 + MR-4 ✅ done — SectionRenderer~~, ~~MR-6 ✅ done — pre-size + pool~~, ~~MR-7 ✅ done — −18% fluid~~, ~~MR-9 ✅ done — clouds SetVertices/SetTriangles/SetNormals~~, ~~TG-2 ✅ done — jobified emission + bitmask fallback~~, ~~TG-3 ✅ done — seeded Unity.Mathematics.Random (grass + lava)~~, ~~MT-3 ✅ done — zero-alloc DebugScreen refresh~~, ~~MT-5 ✅ done — ToPersistentArray helper, no .ToArray () intermediates~~, ~~MT-4 ✅ done — Dictionary<VoxelMeshData,int> O (1) mesh-index
-   lookup~~, ~~MT-6 ✅ done — enum rename GZip→Deflate, no save breakage~~. All MT-* items complete. GPU side: ~~GS-4 ✅ done — render scale + MSAA settings, shadow variants stripped (build-size win measured at zero)~~; GS-3 (vertex-stage lighting) belongs here too.
+   lookup~~, ~~MT-6 ✅ done — enum rename GZip→Deflate, no save breakage~~. All MT-* items complete. GPU side: ~~GS-4 ✅ done — render scale + MSAA settings, shadow variants stripped (build-size win measured at zero)~~; **GS-7** (cloud shader, uniform-only `pow` pair — exact, no visual question) belongs here. **GS-3 does not**: it was analyzed 2026-08-15 and ⏸️ deferred once the change turned out to be guaranteed-non-neutral rather than the near-free win this wave assumes.
 2. **Android-survivability wave (prerequisite for shipping on weak hardware):**
    OM-1 (device-tier scaling) → P-4 backpressure (pipeline doc §3 — production side; **SU-2** rides along: apply the same in-flight caps to the startup wave) → OM-2 (memory budget + `lowMemory` handler) → OM-3 (bounded save queue; **SL-3** rides along:
    snapshot at dequeue inside the bounded writer) → SL-2 (budgeted load-apply pump — the load-side twin of the generation pump) → SL-1 (pooled load/save buffers) → GS-2 (opaque-texture opt-out — the biggest mobile GPU lever after GS-1). SU-1 (loading-mode budget multiplier) slots anywhere after OM-1 supplies the tier ceiling.
@@ -1169,7 +1323,7 @@ inherit a one-click `Validate All` that also flags stale-code runs automatically
 - **GC:** Profiler GC-allocation capture during sustained streaming (fly in a straight line at max speed) before/after waves 1 and 3 — MR-3/MR-9/TG-3/MT-* should drive steady-state allocations to
   ~zero outside debug UI.
 - **Determinism:** For LI-1 and P-3: dump light maps for a fixed-seed test world before/after and diff — must be byte-identical. For TG-3: confirm worldgen output unchanged (it must be — the change is runtime-only); grass-spread pattern differences are expected and acceptable.
-- **Visual:** MR-1/MR-2/MR-4 visual checks (rotated blocks, fluid rendering, section-culling bounds, smooth-lighting gradients) are **confirmed in-game**. MR-8 still needs eyes-on checks when implemented (merged-quad lighting seams, texture tiling). GS-1/GS-3 need side-by-side comparisons per quality tier (water/lava character, lighting gradients via `DEBUG_LIGHTDATA`).
+- **Visual:** MR-1/MR-2/MR-4 visual checks (rotated blocks, fluid rendering, section-culling bounds, smooth-lighting gradients) are **confirmed in-game**. MR-8 still needs eyes-on checks when implemented (merged-quad lighting seams, texture tiling). GS-1 needs side-by-side comparisons per quality tier (water/lava character). **Correction (2026-08-15):** this note previously named `DEBUG_LIGHTDATA` as GS-3's visual gate — it is a **false green** for that item, which does not touch the raw `lightData` the debug view renders. See GS-3's deferral block §5.
 - **GPU:** For GS-*: profile with the Frame Debugger + platform GPU profiler (Android GPU Inspector / Snapdragon Profiler on device) — record liquid-pass GPU time over a water-heavy view and total frame bandwidth before/after GS-1/GS-2. Desktop GPU timings will *understate* the opaque-texture and ALU wins; only on-device numbers count for mobile decisions.
 - **OOM stress test:** For OM-*: run the benchmark fast-movement scenario on the weakest target device (or a memory-capped Android emulator). Pass criteria: resident memory plateaus instead of climbing, `GenerationJobs`/dirty-set counts stay bounded, no `lowMemory`-driven crash, and the failure mode under sustained overload is reduced view distance — not process death.
 
@@ -1181,6 +1335,24 @@ inherit a one-click `Validate All` that also flags stale-code runs automatically
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.8** - **`GS-3` analyzed and ⏸️ deferred; `GS-7` filed** (2026-08-15). A full implementation
+  analysis was run and the item was **not** implemented — the owner's call, on the grounds that no
+  GPU-side bottleneck has been observed on ordinary non-fluid terrain, so a guaranteed visual change
+  buys an unmeasured desktop gain. Introduces the **⏸️** status (analyzed, deliberately not
+  implemented; detail section stays in this document). Four results are worth carrying forward, all
+  recorded in the entry's deferral block: (1) the colour factors out of `ApplyVoxelLightingRGB`
+  **exactly**, so the refactor half is a provable no-op and should be its own commit; (2) the
+  vertex-stage move is **irreducibly non-neutral** — the shade curve is exactly invertible to a linear
+  form, so no interpolation scheme reproduces today's result without the fragment `pow` — and the error
+  **changes sign**, brightening torch falloff in darkness by ~25 % perceptual while slightly darkening
+  near-saturated gradients; (3) the "which variant" question is **settled for packed B**, because
+  `SkyLightColor` is a uniform and the sun term packs as a scalar into the block vector's spare
+  channel, so B costs the **same** interpolators as A (`VoxelV2F` 4, `LiquidV2F` 11) and A's ~34 %
+  perceptual halo at sun/torch boundaries buys nothing; (4) `DEBUG_LIGHTDATA`, which this document
+  itself prescribed as the visual gate, is a **false green** — it renders the raw `lightData` the change
+  does not touch. `GS-3`'s risk raised 🟢 → 🟡 to match. **`GS-7`** splits out the one finding that is
+  exact rather than approximate: `CloudShader` computes a frame-constant day/night factor with 2 `pow`
+  per fragment, hoistable to the vertex stage with bit-identical output.
 * **v1.7** - **`VS-4` filed** (2026-08-15): a validation baseline that could not run reports PASS, because the framework has no skipped state. Found by a code review of the `GS-4` range; deferred the same day as shared-infrastructure work rather than the small fix its symptom suggests. Summary-table row only, no detail section.
 * **v1.6** - `GS-4` **verified and archived** (2026-08-15). Confirmed in the editor and an IL2CPP Windows
   build; detail section moved to `../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md` under a new
@@ -1243,11 +1415,13 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-15 (`GS-4` verified + archived; 2026-08-12: `GS-4` corrections + locked decisions; 2026-08-09: `MR-8` VX-8 / `SS-*` interlocks; 2026-07-26: header completed, completed
+**Last Updated:** 2026-08-15 (`GS-3` analyzed + ⏸️ deferred, `GS-7` filed; 2026-08-15: `VS-4` filed, `GS-4` verified + archived; 2026-08-12: `GS-4` corrections + locked decisions; 2026-08-09: `MR-8` VX-8 / `SS-*` interlocks; 2026-07-26: header completed, completed
 items archived, 2,100 → 1,126 lines)  
 **Next Review:** the **GPU & Shaders** group is the live front: `GS-1` (pre-baked liquid noise) is the
 largest single GPU win available, `GS-2` (opaque-texture toggle) was deliberately left out of `GS-4`'s
-scope and is still open, and `GS-3` (vertex-stage lighting) remains a quick win. Note `GS-4` closed with
+scope and is still open, and `GS-7` (cloud shader uniform hoist) is the remaining quick win now that
+`GS-3` is ⏸️ deferred — revisit GS-3 only when a capture shows fragment-bound terrain, or fold it into
+the mobile wave alongside GS-1/GS-2. Note `GS-4` closed with
 its *predicted* benefits refuted — variant stripping measured at zero and MSAA offered no bandwidth
 saving — so treat the remaining GPU rows' benefit estimates as unmeasured until a capture says otherwise.
 On the next implementation wave, move each newly-finished item's detail section to the archive and leave
