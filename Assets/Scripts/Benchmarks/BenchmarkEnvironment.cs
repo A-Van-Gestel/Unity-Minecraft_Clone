@@ -8,6 +8,7 @@ using UnityEngine;
 using Debug = UnityEngine.Debug;
 #if UNITY_EDITOR
 using System.Diagnostics;
+using System.Threading.Tasks;
 #endif
 
 namespace Benchmarks
@@ -384,7 +385,10 @@ namespace Benchmarks
         /// </summary>
         /// <param name="commit">Short commit hash on success; an explanatory sentinel on failure.</param>
         /// <param name="branch">Current branch name, or <c>HEAD</c> when detached.</param>
-        /// <param name="dirty"><c>true</c> when the working tree has uncommitted changes.</param>
+        /// <param name="dirty">
+        /// <c>true</c> when the working tree has uncommitted changes, ignoring the build stamp itself
+        /// (see <see cref="STATUS_ARGUMENTS"/>).
+        /// </param>
         /// <returns><c>true</c> when the commit hash was obtained.</returns>
         public static bool TryQueryGit(out string commit, out string branch, out bool dirty)
         {
@@ -398,11 +402,43 @@ namespace Benchmarks
 
             // A non-empty porcelain listing means tracked changes, untracked files, or both. Any of
             // those makes the bare hash an over-claim, so the distinction is not worth splitting.
-            dirty = TryRunGit("status --porcelain", out string statusOutput) &&
+            dirty = TryRunGit(STATUS_ARGUMENTS, out string statusOutput) &&
                     !string.IsNullOrWhiteSpace(statusOutput);
 
             return true;
         }
+
+        /// <summary>
+        /// Working-tree cleanliness query, with the build stamp asset excluded.
+        /// </summary>
+        /// <remarks>
+        /// The stamp is rewritten on every bake (its timestamp field always changes), so counting it
+        /// would make the tree permanently dirty from the previous build onward and <c>-dirty</c> would
+        /// stop distinguishing anything. Excluding it is what keeps the suffix meaningful.
+        /// <para>The <c>:(top)</c> magic prefixes are load-bearing: this runs with a working directory
+        /// of <c>Assets/</c>, so a repo-root-relative pathspec is required — a plain <c>.</c> would
+        /// silently scope the whole query to <c>Assets/</c> and stop seeing changes under
+        /// <c>ProjectSettings/</c> or <c>Documentation/</c>.</para>
+        /// </remarks>
+        private const string STATUS_ARGUMENTS =
+            "status --porcelain -- :(top) :(exclude,top)Assets/Resources/Data/BuildStamp.asset";
+
+        /// <summary>How long a single git invocation may run before it is killed.</summary>
+        private const int GIT_TIMEOUT_MS = 2000;
+
+        /// <summary>
+        /// Grace period for the pipe readers to finish after the process has already exited. Short by
+        /// design: reaching it at all means the reads did not complete despite the pipes being closed.
+        /// </summary>
+        private const int DRAIN_TIMEOUT_MS = 500;
+
+        /// <summary>
+        /// Marks a task's exception as observed so an abandoned pipe read cannot resurface as an
+        /// unobserved task exception. Provenance is never worth a stray error in the console.
+        /// </summary>
+        /// <param name="task">The task to observe; may be incomplete, in which case the continuation observes it later.</param>
+        private static void Observe(Task task) =>
+            task.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
 
         /// <summary>
         /// Runs a git subcommand and captures its trimmed stdout.
@@ -431,16 +467,38 @@ namespace Benchmarks
                     return false;
                 }
 
-                // Read before waiting: a full stdout pipe buffer deadlocks a process that is still
-                // writing, which `status --porcelain` can hit on a large dirty tree.
-                string stdout = proc.StandardOutput.ReadToEnd();
+                // Drain both pipes ASYNCHRONOUSLY, then wait. A full pipe buffer deadlocks a process
+                // that is still writing (`status --porcelain` can hit this on a large dirty tree), but
+                // a blocking ReadToEnd here would trade that for a worse failure: it returns only when
+                // git closes the pipe, so a hung git would never reach the timeout below and would
+                // stall the Editor — and, via BuildStampBaker, a whole player build.
+                Task<string> stdoutTask = proc.StandardOutput.ReadToEndAsync();
+                Task<string> stderrTask = proc.StandardError.ReadToEndAsync();
 
-                if (!proc.WaitForExit(milliseconds: 2000))
+                if (!proc.WaitForExit(GIT_TIMEOUT_MS))
                 {
                     proc.Kill();
+
+                    // Killing closes the pipes, which faults the in-flight reads as the `using` below
+                    // disposes the streams underneath them. Nothing awaits those tasks on this path, so
+                    // observe them here or the failure resurfaces later as an unobserved task exception.
+                    Observe(stdoutTask);
+                    Observe(stderrTask);
+
                     output = "(git timeout)";
                     return false;
                 }
+
+                // The process has exited, so both pipes are closed and the reads are complete or about
+                // to be; the bound is a formality that keeps this method total.
+                Task.WaitAll(new Task[] { stdoutTask, stderrTask }, DRAIN_TIMEOUT_MS);
+                Observe(stderrTask);
+
+                // RanToCompletion, not IsCompleted: a faulted or canceled read is also "completed", and
+                // reading .Result on one throws rather than yielding the empty fallback intended here.
+                string stdout = stdoutTask.Status == TaskStatus.RanToCompletion
+                    ? stdoutTask.Result
+                    : string.Empty;
 
                 if (proc.ExitCode != 0)
                 {
