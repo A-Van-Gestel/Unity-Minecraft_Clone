@@ -1,8 +1,8 @@
 # Sky & Celestial Rendering
 
-**Version:** 1.8  
+**Version:** 1.9  
 **Date:** 2026-08-15  
-**Status:** **Implemented (Stable)** — RF-2 phases 1 and 2, the `Distance Fog` setting, the richer sun/moon discs, and the Sky Editor are shipped and confirmed (2026-08-11, discs and tool 2026-08-12). Guarded by the `Validate Sky` suite (**15** baselines, model only) and `Validate Sky Render` (**9** baselines on rendered pixels) — see §7. Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
+**Status:** **Implemented (Stable)** — RF-2 phases 1 and 2, the `Distance Fog` setting, the richer sun/moon discs, and the Sky Editor are shipped and confirmed (2026-08-11, discs and tool 2026-08-12). Guarded by the `Validate Sky` suite (**15** baselines, model only) and `Validate Sky Render` (**10** baselines on rendered pixels) — see §7. Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The procedural sky: a zenith/horizon gradient, a sun and moon on **real celestial arcs** driven by a
@@ -359,16 +359,18 @@ only the C# half is guarded.
 
 ### 7.1 `Validate Sky Render` — the shader half
 
-`Minecraft Clone/Dev/Validate Sky Render` — 9 baselines in
+`Minecraft Clone/Dev/Validate Sky Render` — 10 baselines in
 `Assets/Editor/Validation/Celestial/SkyRenderValidationSuite.cs`, the first coverage of the sky that
 observes **pixels**. It renders through `SkyPreviewRenderer` and asserts: a linear color survives the
 round trip (B1); the disc occludes the star field (B2); no degenerate configuration renders a NaN, and the
 zenith moon keeps its surface detail (B3); the sun outshines the sky (B4); the gradient is the right way
 up (B5); the unlit moon is a constant silhouette by day and still visible at night (B6); the lit moon
 carries the sky's airlight at full strength at every elevation (B7); the sky glows toward the sun
-while that glow dies with it (B8); and the sun's disc reddens as it descends and is never bluer than it
-is red (B9). B8 and B9 arrived with the sun aureole and its per-channel extinction — see
-[`../Design/SUN_APPEARANCE_IMPROVEMENTS.md`](../Design/SUN_APPEARANCE_IMPROVEMENTS.md) §7.1 and §7.2.
+while that glow dies with it (B8); the sun's disc reddens as it descends, is never bluer than it
+is red, and is still neutral 30 degrees up (B9); and the sun's glare falls off monotonically from the
+disc with its amplitude concentrated near it (B10). B8, B9 and B10 arrived with the sun aureole, its
+per-channel extinction and the shader-side glare — see
+[`../Design/SUN_APPEARANCE_IMPROVEMENTS.md`](../Design/SUN_APPEARANCE_IMPROVEMENTS.md) §7.1, §7.2 and §7.4.
 
 **B7 pins a trade rather than a correctness property.** The moon's airlight is added without being scaled
 by the haze that models it (§4), so a lit daytime disc brightens with elevation — accepted, because
@@ -462,6 +464,19 @@ not read the atmospheric improvement as having fixed it.
 
 ## Document History
 
+* **v1.9** - **The sun's glare moved into this shader, and B10** (2026-08-15). The sun's glow is now
+  produced entirely here, as a third and tightest lobe on the aureole's falloff, after driving it from
+  URP's post-process bloom was built and refuted — one global `Bloom` cannot size its halo for both a
+  3-degree disc and the block emitters (Design §7.3). The sun's own optical depth also stopped reusing
+  `HORIZON_HAZE_FALLOFF`: that curve models **veiling**, and what the disc's extinction wants is
+  **airmass**, which barely doubles between the zenith and 30 degrees. The two are now separate
+  constants, which takes a 30-degree sun's red:blue from 1.39 to 1.16 while leaving the horizon
+  identical. §7.1's run-the-mutation rule earns itself twice more: B10's first assertion — the sky at
+  the rim is much brighter than open sky — **survived deleting the glare lobe outright**, because the
+  two older lobes already produce that ratio, and B9's monotonic reddening was **structurally unable**
+  to see the airmass defect, since a curve that is already orange at 30 degrees climbs just as
+  monotonically as a correct one. Both were replaced with assertions whose thresholds sit between two
+  measured states.
 * **v1.8** - **Per-channel sun extinction and B9** (2026-08-15). The sun disc's scalar blend toward the
   fog colour — the last survivor of the model §4's moon abandoned — is replaced by per-channel
   extinction, and the aureole's tint now derives from that same transmitted sunlight so glow and disc

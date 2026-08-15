@@ -88,6 +88,31 @@ namespace Editor.Validation.Celestial
         /// </remarks>
         private const float DISC_SAMPLE_RADIUS = 55f;
 
+        /// <summary>Red-to-blue ratio above which a high sun reads as visibly warm rather than white.</summary>
+        /// <remarks>
+        /// Placed between two measured states rather than picked: with the sun's optical depth on the
+        /// veiling falloff a 30-degree sun measured 1.39 here, and on the airmass falloff it measures
+        /// 1.16. Loose enough that re-tuning the extinction ratios cannot false-red it, tight enough
+        /// that returning to the veiling curve does.
+        /// </remarks>
+        private const float MIDDAY_NEUTRAL_LIMIT = 1.27f;
+
+        /// <summary>Minimum glow amplitude spent between the disc's rim and six degrees out.</summary>
+        /// <remarks>
+        /// Placed between two measured states rather than picked: the shipped three-lobe falloff loses
+        /// 0.307 of luminance across that band on B10's fixture, and the same falloff with the glare
+        /// lobe deleted loses 0.139. This is the assertion that actually observes the glare, after a
+        /// near-to-far ratio turned out to survive deleting it.
+        /// </remarks>
+        private const float GLARE_MIN_NEAR_BAND_DROP = 0.22f;
+
+        /// <summary>How much brighter the sky at the disc's rim must be than the open sky.</summary>
+        /// <remarks>
+        /// A floor on the glare being present at all, not a pin on its strength — deliberately well
+        /// below the shipped value so tuning the lobes stays free.
+        /// </remarks>
+        private const float GLARE_MIN_CONTRAST = 1.3f;
+
         /// <summary>Tolerance for a linear color round trip, allowing half-float quantization.</summary>
         private const float COLOR_EPSILON = 0.002f;
 
@@ -135,6 +160,7 @@ namespace Editor.Validation.Celestial
                 new Scenario("B7 The lit moon carries the sky's airlight at every elevation", RunB7LitMoonAirlight),
                 new Scenario("B8 The sky glows toward the sun and the glow dies with it", RunB8SunAureole),
                 new Scenario("B9 The sun reddens as it descends, and is never bluer than it is red", RunB9SunReddening),
+                new Scenario("B10 The glare falls off monotonically from the disc into the open sky", RunB10GlareFalloff),
             };
 
             return ValidationSuiteRunner.Execute("Sky Render", scenarios, KnownBugChannel.Unimplemented,
@@ -597,6 +623,82 @@ namespace Editor.Validation.Celestial
             ok &= Check($"a setting sun is markedly redder than a high one ({lowRatio:F2} against {highRatio:F2})",
                 lowRatio > highRatio * 1.5f);
 
+            // And it must still be NEUTRAL well before then. Monotonic reddening says nothing about the
+            // schedule: a curve that is already orange at 30 degrees climbs just as monotonically as a
+            // correct one, and that is exactly the defect that shipped here — the sun's optical depth
+            // reused the veiling falloff, hit 18 % of maximum at 30 degrees against a true airmass
+            // barely twice the zenith's, and rendered an orange ball against a blue sky.
+            Color midday = SampleSunDisc(renderer, 30f, s_neutralSky);
+            float middayRatio = midday.b > 1e-4f ? midday.r / midday.b : float.MaxValue;
+
+            ok &= Check($"a sun 30 degrees up is still close to neutral ({middayRatio:F2})",
+                middayRatio < MIDDAY_NEUTRAL_LIMIT);
+
+            return ok;
+        }
+
+        /// <summary>B10 — the glare reads as one falloff from the disc, not as a ring or a plateau.</summary>
+        /// <returns>True when every assertion holds.</returns>
+        /// <remarks>
+        /// <para>
+        /// The sun's glow is produced <b>in this shader</b> as three cosine-power lobes, after driving it
+        /// from URP's post-process bloom was built and refuted — one global bloom cannot size its halo
+        /// for both a 3-degree disc and the block emitters. Three separate lobes summed together can
+        /// easily read as concentric rings or as a flat plateau that ends abruptly, so what is asserted
+        /// is the shape they make together rather than any one of them.
+        /// </para>
+        /// <para>
+        /// Run against the <b>uniform</b> neutral sky on purpose: with zenith and horizon the same color
+        /// the base gradient is constant in every direction, so every difference along this walk is the
+        /// aureole and nothing else. Against a real gradient the walk changes elevation as it goes and
+        /// the gradient's own falloff would be measured alongside the glare's.
+        /// </para>
+        /// </remarks>
+        private static bool RunB10GlareFalloff()
+        {
+            if (SkipWithoutGraphics("B10")) return true;
+
+            using SkyPreviewRenderer renderer = new SkyPreviewRenderer();
+
+            // Clear of the 1.5 degree disc, then outward into open sky.
+            float[] offsets = { 1.7f, 2.5f, 4f, 6f, 12f, 25f, 45f };
+            float previous = float.MaxValue;
+            bool monotonic = true;
+            string trace = string.Empty;
+            float nearGlare = 0f, midGlare = 0f, farSky = 0f;
+
+            for (int i = 0; i < offsets.Length; i++)
+            {
+                float value = SampleSkyDirection(renderer,
+                    AngularOffset(SphericalDirection(0f, 40f), offsets[i]), 40f);
+
+                if (value > previous + 0.002f) monotonic = false;
+                previous = value;
+
+                if (i == 0) nearGlare = value;
+                if (Mathf.Approximately(offsets[i], 6f)) midGlare = value;
+                if (i == offsets.Length - 1) farSky = value;
+
+                trace += $"{offsets[i]:F0}deg={value:F3}  ";
+            }
+
+            bool ok = Check($"the glow only ever falls off with angle ({trace.TrimEnd()})", monotonic);
+
+            // How much of the glow is spent in the FIRST few degrees, which is the one thing the glare
+            // lobe adds and the broad halo cannot fake.
+            //
+            // A near-to-far ratio was the obvious assertion and it is a false green: the core and halo
+            // lobes alone reach 1.51 against the shipped 1.99, so any threshold loose enough to survive
+            // tuning also survives deleting the glare outright — measured, not argued. The drop across
+            // the near band separates the same two states by 0.139 against 0.307.
+            float nearBandDrop = nearGlare - midGlare;
+
+            ok &= Check($"the glow is concentrated near the disc (loses {nearBandDrop:F3} between the rim and 6 degrees)",
+                nearBandDrop > GLARE_MIN_NEAR_BAND_DROP);
+
+            ok &= Check($"and the sky at the rim is brighter than the open sky ({nearGlare:F3} against {farSky:F3})",
+                nearGlare > farSky * GLARE_MIN_CONTRAST);
+
             return ok;
         }
 
@@ -873,7 +975,7 @@ namespace Editor.Validation.Celestial
         /// <param name="fogRange">Fog range to render under.</param>
         /// <returns>Luminance of the sampled disc pixel.</returns>
         /// <remarks>
-        /// Sampled off-centre at the same pixel each time, so the surface markings under it are identical
+        /// Sampled off-center at the same pixel each time, so the surface markings under it are identical
         /// between renders and cancel when the two are subtracted.
         /// </remarks>
         private static float SampleLitDisc(SkyPreviewRenderer renderer, Color sky, Vector3 moon,
