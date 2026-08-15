@@ -2,7 +2,7 @@
 
 **Version:** 1.3  
 **Date:** 2026-07-26  
-**Status:** **Open backlog.** 31 items open, 29 complete. Completed items keep their ✅ row in the master
+**Status:** **Open backlog.** 30 items open, 30 complete. Completed items keep their ✅ row in the master
 summary table; their detail sections live in
 [`../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md`](../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md).  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -195,7 +195,7 @@ plus the standalone test files (`VoxelMetadataUtilityTests`, `FastNoiseLiteTests
 | GS-1 | Liquid shader: per-pixel procedural 3D simplex FBM (up to ~30 snoise calls/px)    |   🟡   |  🟡  |   🟢    |  ✅  |  ✅  |
 | GS-2 | URP Opaque Texture required globally; `SampleSceneColor` even with refraction off |   🟢   |  🟡  |   🟢    |  ✅  |  ✅  |
 | GS-3 | Voxel lighting math (4× `pow`) runs per-fragment on per-vertex data               |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  |
-| GS-4 | Render pipeline tier audit: shadow variants, TwoSided casting, MSAA, render scale |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  |
+| GS-4 ✅ | Render pipeline tier audit: shadow variants, TwoSided casting, MSAA, render scale |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  |
 | GS-5 | Section occlusion culling (underground sections render despite being sealed)      |   🔴   |  🟡  |   🟢    |  ✅  |  ✅  |
 | GS-6 | Per-section GameObject + MeshRenderer submission (BatchRendererGroup conversion)  |   🔴   |  🔴  |   🟡    |  ✅  |  ✅  |
 
@@ -601,73 +601,6 @@ The existing quality-tier keywords (`_FLUID_QUALITY_LOW/MED`, refraction opt-out
 > - **Risk:** 🟢 Low — minor interpolation differences across large faces; compare side-by-side
 >   with the `DEBUG_LIGHTDATA` view.
 > - **Benefit:** 🟡 Medium — meaningful fragment ALU reduction on mobile; small on desktop.
-> - **Seed/Save:** ✅ / ✅.
-
----
-
-### GS-4. Render pipeline tier audit (shadows, MSAA, render scale, shadow casting mode)
-
-**Observed (current URP asset + code state):**
-
-- `m_MainLightShadowsSupported: 1` with `m_ShadowDistance: 0` — shadows never *render* (distance 0), but the support flag still compiles shadow shader variants and keeps the shadow-map keyword plumbing active. If this is permanent (the voxel sky-light system replaces shadows), set supported = 0 to strip variants; if shadows are ever enabled, note that…
-- `SectionRenderer` sets `ShadowCastingMode.TwoSided` on **every section** — with shadows actually on, the entire voxel world would render twice-sided into a 2048 shadow map; that needs its own tiered decision (e.g. shadows only from a small radius, or baked/none on mobile).
-- `m_MSAA: 2` — MSAA on a voxel world of opaque cubes buys little; on mobile it costs bandwidth (though tilers handle it relatively well). Should be a quality-tier setting, not baked into the asset.
-- `m_RenderScale: 1` — no resolution scaling hook for mobile; exposing render scale in
-  `GraphicsSettingsController` is the single most effective GPU lever on phones.
-
-**Recommendation:** Make these per-tier: a mobile URP asset (or runtime overrides via
-`UniversalRenderPipelineAsset` properties) with shadows-unsupported, MSAA off/2×, render scale exposed as a setting, plus the GS-2 opaque-texture toggle. Desktop keeps the current values.
-
-> **CORRECTIONS + LOCKED DECISIONS (2026-08-12).** Verified against code while shipping RF-3, which shares
-> this entry's files. Nothing here is implemented yet — this is the executable spec for the next session.
->
-> **Corrections to the observations above:**
->
-> - **MSAA is already inert during gameplay.** The World camera has `m_AllowMSAA: 0`, and URP gates on
->   `camera.allowMSAA && asset.msaaSampleCount > 1 && rendererSupportsMSAA`
->   (`UniversalRenderPipeline.cs:1508`). Only MainMenu's camera (`m_AllowMSAA: 1`) resolves the asset's
->   2×. So `m_MSAA: 2` costs nothing in game today, and enabling MSAA requires flipping the *camera*
->   flag, not just the asset.
-> - **`supportsMainLightShadows` cannot be a runtime override** — its setter is `internal`. Variant
->   stripping is an **asset edit only**. By contrast `renderScale`, `msaaSampleCount`, `shadowDistance`,
->   `colorGradingMode` and `supportsCameraOpaqueTexture` all have public setters and *are* runtime-settable.
-> - **`ShadowCastingMode.TwoSided` (`SectionRenderer.cs:121`) is inert today** because `m_ShadowDistance: 0`
->   means no shadow pass runs at all. It costs nothing until shadows are enabled — see the pairing warning below.
-> - **This entry's frame-time benefit on desktop is ≈ 0.** Its real payoff is variant count, build size and
->   load time. Any GO/NO-GO must be measured on an **IL2CPP build**, not in the editor.
->
-> **Decisions (user-locked, do not re-litigate):**
->
-> 1. **Render scale → a Graphics setting, range 30 %–200 %, default 100 %.** URP hard-clamps to
->    **[0.1, 3.0]** (`UniversalRenderPipeline.minRenderScale`/`maxRenderScale` via `ValidateRenderScale`),
->    so **400 % is impossible** — a 4.0 silently stores 3.0. Capped at 200 % (already 4× the pixels at
->    1440p) rather than the engine's 300 %; tooltip must warn that render scale **multiplies with MSAA**.
-> 2. **MSAA → a Graphics setting with four levels** (Off / 2× / 4× / 8×, mapping to URP's `MsaaQuality`),
->    and it must actually take effect in game. Drive **both** `asset.msaaSampleCount` and
->    `Camera.main.allowMSAA` from the controller — "Off" sets `allowMSAA = false` so the resolve is skipped
->    entirely. Deliberately *not* a scene edit: keeping both terms in code leaves the URP asset and
->    `World.unity` diff-clean and avoids two sources of truth. Expectation to set with the user: MSAA
->    cleans up block silhouettes against the sky but does **nothing** for alpha-tested cross-mesh foliage
->    (no alpha-to-coverage), which is where voxel aliasing is most visible.
-> 3. **Strip the shadow variants** (`m_MainLightShadowsSupported: 1 → 0`) **and document the pairing.**
->    Shadow distance 0 + `TwoSided` on every section is a coupled pair: a future session that raises the
->    distance without also fixing `SectionRenderer.cs:121` renders the entire voxel world twice-sided into
->    a 2048 shadow map. Leave `TwoSided` as-is (inert), record the pair.
-> 4. **Runtime overrides need an authored-default guard.** Mutating a `UniversalRenderPipelineAsset` in
->    editor play mode **dirties the asset and persists across sessions** — the same class of bug as
->    `65a57ef0` (play-mode teardown pinned the scene's ambient mode). Capture authored values on first
->    apply, restore on play-mode exit, and gate the work with `git diff --stat` on
->    `Assets/settings/Rendering/` coming back **empty** after a play session. The static holding those
->    defaults needs a `[RuntimeInitializeOnLoadMethod]` reset; `GraphicsSettingsController` has none today,
->    so adding one is UDR0005-legal.
->
-> **Not in scope:** a second mobile URP asset, and the GS-2 opaque-texture toggle.
-
-> **Impact Analysis:**
-> - **Effort:** 🟢 Low — settings/asset configuration, no engine code.
-> - **Risk:** 🟢 Low.
-> - **Benefit:** 🟡 Medium — variant stripping (build size + load time), bandwidth savings, and a
->   render-scale escape hatch on weak GPUs.
 > - **Seed/Save:** ✅ / ✅.
 
 ---
@@ -1192,7 +1125,7 @@ Grouped into waves by value-for-effort; within a wave, order is free. Capture th
 
 1. **Quick wins, near-zero risk (one sitting each):**
    ~~MR-1 (Euler hoist) ✅ done — marginal~~, ~~MR-5 ✅ done — chain post-process~~, ~~MR-3 + MR-4 ✅ done — SectionRenderer~~, ~~MR-6 ✅ done — pre-size + pool~~, ~~MR-7 ✅ done — −18% fluid~~, ~~MR-9 ✅ done — clouds SetVertices/SetTriangles/SetNormals~~, ~~TG-2 ✅ done — jobified emission + bitmask fallback~~, ~~TG-3 ✅ done — seeded Unity.Mathematics.Random (grass + lava)~~, ~~MT-3 ✅ done — zero-alloc DebugScreen refresh~~, ~~MT-5 ✅ done — ToPersistentArray helper, no .ToArray () intermediates~~, ~~MT-4 ✅ done — Dictionary<VoxelMeshData,int> O (1) mesh-index
-   lookup~~, ~~MT-6 ✅ done — enum rename GZip→Deflate, no save breakage~~. All MT-* items complete. GPU side: GS-3 (vertex-stage lighting) and GS-4 (pipeline tier audit) belong here too.
+   lookup~~, ~~MT-6 ✅ done — enum rename GZip→Deflate, no save breakage~~. All MT-* items complete. GPU side: ~~GS-4 ✅ done — render scale + MSAA settings, shadow variants stripped (build-size win measured at zero)~~; GS-3 (vertex-stage lighting) belongs here too.
 2. **Android-survivability wave (prerequisite for shipping on weak hardware):**
    OM-1 (device-tier scaling) → P-4 backpressure (pipeline doc §3 — production side; **SU-2** rides along: apply the same in-flight caps to the startup wave) → OM-2 (memory budget + `lowMemory` handler) → OM-3 (bounded save queue; **SL-3** rides along:
    snapshot at dequeue inside the bounded writer) → SL-2 (budgeted load-apply pump — the load-side twin of the generation pump) → SL-1 (pooled load/save buffers) → GS-2 (opaque-texture opt-out — the biggest mobile GPU lever after GS-1). SU-1 (loading-mode budget multiplier) slots anywhere after OM-1 supplies the tier ceiling.
@@ -1246,6 +1179,24 @@ inherit a one-click `Validate All` that also flags stale-code runs automatically
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.6** - `GS-4` **verified and archived** (2026-08-15). Confirmed in the editor and an IL2CPP Windows
+  build; detail section moved to `../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md` under a new
+  **GPU & Shaders** heading, row marked ✅ (30 open / 30 complete). Two outcomes worth carrying: the shadow
+  strip's build-size win **measured at +7 KB, i.e. nothing** — keep it as dead-capability removal, not a
+  performance item — and enabling MSAA **exposed a latent shader bug**, one-pixel wrong-block seams along
+  every silhouette edge from `VoxelV2F` varyings lacking `centroid`. Fixed in `VoxelCommon.hlsl`, and the
+  rule is now `Guides/SHADER_CONVENTIONS.md` §1.4.
+* **v1.5** - `GS-4` **implemented** (2026-08-15, pending in-game verification) and given an **AS-BUILT
+  block**. Render Scale (30–200 %, default 100) and Anti-Aliasing (Off/2x/4x/8x, **default Off**) ship as
+  Graphics settings under a new Resolution sub-header; main-light shadow variants are stripped from the URP
+  asset; a capture-once authored-default guard restores the asset on `Application.quitting`. Two v1.4 claims
+  were **disproved by measurement** and are recorded rather than silently fixed: runtime URP-asset mutation
+  does **not** dirty the asset or reach disk (so the planned `git diff` gate is a false green — the real
+  leak is the in-memory instance surviving play-mode exit, and the discriminating check is reading
+  `asset.renderScale` after exit), and `m_MainLightRenderingMode: 0` makes the shadow flag inert a *third*
+  way, with no shadow keywords in any project shader to strip. Row stays unmarked in the summary table
+  until in-game confirmation, per the `OM-1` precedent. Also added the enum-index rule to
+  `Architecture/DATA_DRIVEN_SETTINGS_UI.md` §2, an invariant the settings UI always had but never stated.
 * **v1.4** - `GS-4` gained a **corrections + locked-decisions block** (2026-08-12), no scope change and
   no implementation. Written while shipping `RF-3`, which shares this entry's files. Four observations
   were corrected against code — MSAA is already inert in game (`m_AllowMSAA: 0` on the World camera),
@@ -1289,9 +1240,12 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-12 (`GS-4` corrections + locked decisions; 2026-08-09: `MR-8` VX-8 / `SS-*` interlocks; 2026-07-26: header completed, completed
+**Last Updated:** 2026-08-15 (`GS-4` verified + archived; 2026-08-12: `GS-4` corrections + locked decisions; 2026-08-09: `MR-8` VX-8 / `SS-*` interlocks; 2026-07-26: header completed, completed
 items archived, 2,100 → 1,126 lines)  
-**Next Review:** **`GS-4` is execution-ready** — its decisions are locked and its corrections verified, so
-the next session can implement it directly from the block in its entry rather than re-auditing the URP
-asset. Otherwise: on the next implementation wave, move each newly-finished item's detail section to the
-archive and leave its ✅ row behind. A fresh audit pass is also due: the last one was 2026-07-02.
+**Next Review:** the **GPU & Shaders** group is the live front: `GS-1` (pre-baked liquid noise) is the
+largest single GPU win available, `GS-2` (opaque-texture toggle) was deliberately left out of `GS-4`'s
+scope and is still open, and `GS-3` (vertex-stage lighting) remains a quick win. Note `GS-4` closed with
+its *predicted* benefits refuted — variant stripping measured at zero and MSAA offered no bandwidth
+saving — so treat the remaining GPU rows' benefit estimates as unmeasured until a capture says otherwise.
+On the next implementation wave, move each newly-finished item's detail section to the archive and leave
+its ✅ row behind. A fresh audit pass is also due: the last one was 2026-07-02.

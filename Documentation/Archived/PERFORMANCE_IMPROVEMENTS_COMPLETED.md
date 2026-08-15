@@ -1319,3 +1319,145 @@ validation suite (21 scenarios at ship: floor-div/local/region sweeps over ±204
 
 ---
 
+---
+
+## GPU & Shaders
+
+### GS-4. ✅ DONE (2026-08-15) — Render pipeline tier audit (shadows, MSAA, render scale, shadow casting mode)
+
+> **✅ DONE (2026-08-15)** — all four locked decisions shipped, confirmed in the editor and in an IL2CPP
+> Windows build. As-built, the two spec claims the implementation disproved, and the latent shader bug MSAA
+> exposed are in the **AS-BUILT** block below the original findings; the corrections block that preceded it
+> is kept as the historical record of what the session was told to build.
+
+**Observed (current URP asset + code state):**
+
+- `m_MainLightShadowsSupported: 1` with `m_ShadowDistance: 0` — shadows never *render* (distance 0), but the support flag still compiles shadow shader variants and keeps the shadow-map keyword plumbing active. If this is permanent (the voxel sky-light system replaces shadows), set supported = 0 to strip variants; if shadows are ever enabled, note that…
+- `SectionRenderer` sets `ShadowCastingMode.TwoSided` on **every section** — with shadows actually on, the entire voxel world would render twice-sided into a 2048 shadow map; that needs its own tiered decision (e.g. shadows only from a small radius, or baked/none on mobile).
+- `m_MSAA: 2` — MSAA on a voxel world of opaque cubes buys little; on mobile it costs bandwidth (though tilers handle it relatively well). Should be a quality-tier setting, not baked into the asset.
+- `m_RenderScale: 1` — no resolution scaling hook for mobile; exposing render scale in
+  `GraphicsSettingsController` is the single most effective GPU lever on phones.
+
+**Recommendation:** Make these per-tier: a mobile URP asset (or runtime overrides via
+`UniversalRenderPipelineAsset` properties) with shadows-unsupported, MSAA off/2×, render scale exposed as a setting, plus the GS-2 opaque-texture toggle. Desktop keeps the current values.
+
+> **CORRECTIONS + LOCKED DECISIONS (2026-08-12).** Verified against code while shipping RF-3, which shares
+> this entry's files. Nothing here is implemented yet — this is the executable spec for the next session.
+>
+> **Corrections to the observations above:**
+>
+> - **MSAA is already inert during gameplay.** The World camera has `m_AllowMSAA: 0`, and URP gates on
+>   `camera.allowMSAA && asset.msaaSampleCount > 1 && rendererSupportsMSAA`
+>   (`UniversalRenderPipeline.cs:1508`). Only MainMenu's camera (`m_AllowMSAA: 1`) resolves the asset's
+>   2×. So `m_MSAA: 2` costs nothing in game today, and enabling MSAA requires flipping the *camera*
+>   flag, not just the asset.
+> - **`supportsMainLightShadows` cannot be a runtime override** — its setter is `internal`. Variant
+>   stripping is an **asset edit only**. By contrast `renderScale`, `msaaSampleCount`, `shadowDistance`,
+>   `colorGradingMode` and `supportsCameraOpaqueTexture` all have public setters and *are* runtime-settable.
+> - **`ShadowCastingMode.TwoSided` (`SectionRenderer.cs:121`) is inert today** because `m_ShadowDistance: 0`
+>   means no shadow pass runs at all. It costs nothing until shadows are enabled — see the pairing warning below.
+> - **This entry's frame-time benefit on desktop is ≈ 0.** Its real payoff is variant count, build size and
+>   load time. Any GO/NO-GO must be measured on an **IL2CPP build**, not in the editor.
+>
+> **Decisions (user-locked, do not re-litigate):**
+>
+> 1. **Render scale → a Graphics setting, range 30 %–200 %, default 100 %.** URP hard-clamps to
+>    **[0.1, 3.0]** (`UniversalRenderPipeline.minRenderScale`/`maxRenderScale` via `ValidateRenderScale`),
+>    so **400 % is impossible** — a 4.0 silently stores 3.0. Capped at 200 % (already 4× the pixels at
+>    1440p) rather than the engine's 300 %; tooltip must warn that render scale **multiplies with MSAA**.
+> 2. **MSAA → a Graphics setting with four levels** (Off / 2× / 4× / 8×, mapping to URP's `MsaaQuality`),
+>    and it must actually take effect in game. Drive **both** `asset.msaaSampleCount` and
+>    `Camera.main.allowMSAA` from the controller — "Off" sets `allowMSAA = false` so the resolve is skipped
+>    entirely. Deliberately *not* a scene edit: keeping both terms in code leaves the URP asset and
+>    `World.unity` diff-clean and avoids two sources of truth. Expectation to set with the user: MSAA
+>    cleans up block silhouettes against the sky but does **nothing** for alpha-tested cross-mesh foliage
+>    (no alpha-to-coverage), which is where voxel aliasing is most visible.
+> 3. **Strip the shadow variants** (`m_MainLightShadowsSupported: 1 → 0`) **and document the pairing.**
+>    Shadow distance 0 + `TwoSided` on every section is a coupled pair: a future session that raises the
+>    distance without also fixing `SectionRenderer.cs:121` renders the entire voxel world twice-sided into
+>    a 2048 shadow map. Leave `TwoSided` as-is (inert), record the pair.
+> 4. **Runtime overrides need an authored-default guard.** Mutating a `UniversalRenderPipelineAsset` in
+>    editor play mode **dirties the asset and persists across sessions** — the same class of bug as
+>    `65a57ef0` (play-mode teardown pinned the scene's ambient mode). Capture authored values on first
+>    apply, restore on play-mode exit, and gate the work with `git diff --stat` on
+>    `Assets/settings/Rendering/` coming back **empty** after a play session. The static holding those
+>    defaults needs a `[RuntimeInitializeOnLoadMethod]` reset; `GraphicsSettingsController` has none today,
+>    so adding one is UDR0005-legal.
+>
+> **Not in scope:** a second mobile URP asset, and the GS-2 opaque-texture toggle.
+
+> **AS-BUILT (2026-08-15).**
+>
+> - **Render Scale** — `Settings.renderScalePercent` (`int`, `[Range(30, 200)]`, default 100), Graphics tab
+>   under a new **Rendering → Resolution** sub-header. `GraphicsSettingsController.ApplyRenderScale` writes
+>   `UniversalRenderPipeline.asset.renderScale`. Both canvases are `ScreenSpaceOverlay`, so the HUD and menus
+>   are never scaled.
+> - **Anti-Aliasing (MSAA)** — `Settings.msaa` (`UI.Enums.MsaaLevel`, **default `Off`**). `ApplyMsaa` drives
+>   both terms: `asset.msaaSampleCount` and `Camera.main.allowMSAA` (`Off` ⇒ `false`, skipping the resolve).
+>   `MsaaLevel` is 0-based with an `InspectorName` label per level and a `ToMsaaQuality()` extension, because
+>   the settings dropdown binds by index — see the boxed rule in `Architecture/DATA_DRIVEN_SETTINGS_UI.md` §2.
+>   `World.Start` re-applies it beside the fluid settings, since the controller's `Start` can run before
+>   `Camera.main` exists. Verified end-to-end through the real UI binding: index 0/1/2/3 → sample count
+>   1/2/4/8 with `allowMSAA` false/true/true/true.
+> - **Shadow variants stripped** — `m_MainLightShadowsSupported: 1 → 0` plus its editor-side mirror
+>   `m_AnyShadowsSupported: 1 → 0`, applied through `SerializedObject` (the property setter is `internal`).
+>   The coupling is recorded as a comment at the `ShadowCastingMode.TwoSided` line in `SectionRenderer.cs`.
+> - **Authored-default guard** — `GraphicsSettingsController` holds a capture-once static snapshot and
+>   restores it from `Application.quitting` (a static handler, so a play-mode exit during a scene load still
+>   restores). Its new `[RuntimeInitializeOnLoadMethod]` clears the snapshot and re-arms the handler with an
+>   unsubscribe-then-subscribe, since Reload Domain is off.
+>
+> **Two claims above were disproved while building this — do not re-derive them:**
+>
+> 1. **Runtime URP-asset mutation does *not* dirty the asset or reach disk.** Decision 4 predicted the
+>    `65a57ef0` failure mode (a play-mode write persisting to the `.asset` file). Measured: after a play
+>    session that set render scale to 30 % and MSAA to 4×, `EditorUtility.IsDirty` is `false`, a forced
+>    `AssetDatabase.SaveAssets()` writes nothing, and `git diff` on `Assets/settings/Rendering/` is empty —
+>    **with the restore deliberately disabled**. A property setter writes the serialized field without
+>    marking the object dirty. **The real leak is per editor session, in memory:** the loaded asset instance
+>    keeps the override after play-mode exit, so the editor keeps rendering at 30 % and the next session's
+>    capture-once would snapshot the *previous* session's values as "authored". A `ForceUpdate` re-import
+>    does not clear it. The guard is therefore still required — but **`git diff` is a false-green gate for
+>    it**, clean in both legs. The gate that discriminates is reading `asset.renderScale` after play-mode
+>    exit: 0.3 with the restore disabled, 1.0 with it active.
+> 2. **`m_MainLightRenderingMode: 0` (`LightRenderingMode.Disabled`) makes the shadow flag inert a third
+>    way**, alongside `m_ShadowDistance: 0` and `TwoSided`. Re-enabling shadows means undoing *four* coupled
+>    settings, not two. Also note **no shader under `Assets/Shaders/` declares a single shadow keyword**
+>    (`_MAIN_LIGHT_SHADOWS`, `ShadowCaster`: zero hits), so variant stripping only touches URP's
+>    always-included package shaders — the build-size win may round to zero and should be measured, not
+>    assumed. That measurement does not need IL2CPP; the entry's "must be IL2CPP" caveat covers frame time,
+>    which for this item is ≈ 0 either way.
+>
+> **One observation correction:** the entry credits MSAA with "bandwidth savings". It cannot save anything —
+> MSAA was already inert in game (`m_AllowMSAA: 0`), so exposing it can only *add* cost when a player opts
+> in. Default `Off` keeps current behavior byte-for-byte.
+>
+> **Verified (2026-08-15):** editor play mode — no regressions, render scale and MSAA both take effect;
+> `Validate All` 486/486 across 22 suites (a regression guard only — **no suite covers render scale or
+> MSAA**); an IL2CPP Windows build confirms the same in a player.
+>
+> **The variant strip bought nothing measurable.** IL2CPP zips, 7z deflate-9: 58,935,229 B before →
+> 58,942,339 B after, i.e. **+7 KB**. The comparison spans ~16 commits of unrelated feature work so it is
+> confounded, but it caps the win at "undetectable" and matches the prediction above (no project shader
+> declares a shadow keyword). **Keep the strip as dead-capability removal, not as a performance item**, and
+> do not re-open it expecting a build-size win. Frame time at default settings: no meaningful change, as the
+> ≈ 0 prediction required.
+>
+> **MSAA exposed a latent shader bug — fixed here.** At 8x, one-pixel seams of the *wrong block* appeared
+> along every silhouette edge, worsening at low render scale. Cause: `VoxelV2F`'s varyings had no `centroid`
+> modifier, so MSAA's center-shaded edge pixels extrapolated `uv` off the quad's atlas tile into the
+> neighbor's texels (the atlas is point-filtered with no mips, so the wrong texel is sampled cleanly rather
+> than blurred). Confirmed by elimination: at 30 % render scale with MSAA **off** the seams are absent.
+> Fixed by marking `uv`/`color`/`lightData` `centroid` in `VoxelCommon.hlsl` — zero interpolator cost, all
+> three dependent shaders compile clean at `target 3.5`, artifact gone in game. Rule recorded as
+> `Guides/SHADER_CONVENTIONS.md` §1.4. **The bug was latent for as long as the engine had no MSAA path** —
+> without MSAA the pixel center is always inside the primitive, so nothing extrapolates.
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — ~150 lines across four files plus a two-line asset edit. (The original
+>   "settings/asset configuration, no engine code" understated it: the authored-default guard is engine code.)
+> - **Risk:** 🟢 Low — though it surfaced a latent shader bug that had to be fixed alongside.
+> - **Benefit:** 🟡 Medium **as shipped, but not where predicted** — the render-scale escape hatch on weak
+>   GPUs is the whole value. Variant stripping measured at +7 KB (nothing) and the "bandwidth savings" from
+>   MSAA were never available: MSAA was already inert in game, so exposing it can only add cost.
+> - **Seed/Save:** ✅ / ✅.
