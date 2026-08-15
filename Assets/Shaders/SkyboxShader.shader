@@ -144,6 +144,43 @@ Shader "Minecraft/SkyboxShader"
             static const float3 SUN_LIMB_COLOR = float3(1.0, 0.86, 0.66);
             static const float SUN_LIMB_DARKENING = 0.18;
 
+            // Sun aureole (SN-0) — the forward-scattered halo of sunlight around the disc. Its
+            // absence is why a correct disc still read as a sticker: the gradient above is a
+            // function of view ELEVATION alone, so the air beside the sun rendered identically to
+            // the air 180 degrees away from it.
+            //
+            // TWO cosine-power lobes, not one. A single lobe cannot be both tight enough to hug a
+            // 1.5-degree disc and broad enough to be the tens-of-degrees sky brightening a real
+            // aureole is; whichever width is picked, the other half of the effect goes missing.
+            static const float AUREOLE_CORE_EXPONENT = 900.0;
+            static const float AUREOLE_CORE_STRENGTH = 0.35;
+            static const float AUREOLE_HALO_EXPONENT = 8.0;
+            static const float AUREOLE_HALO_STRENGTH = 0.12;
+
+            // Aerosol broadens the aureole, so only the WIDE lobe takes the haze boost. Applying it
+            // to the core as well just brightens the few degrees the sun disc draws over anyway.
+            static const float AUREOLE_HAZE_BOOST = 1.4;
+
+            // The aureole IS sunlight, so it warms as the sun reddens: two bright warm tints, picked
+            // by sun elevation. Both are near the top of the LDR range on purpose — the glow is
+            // BLENDED toward rather than added (see the frag), and a blend can only pull the sky
+            // toward its target, so a dim target would darken the sky near the sun instead of
+            // lighting it. Blue sits well below red in both, which is what makes the sky whiten
+            // toward the sun the way a real aureole does.
+            static const float3 AUREOLE_COLOR_HIGH = float3(1.00, 0.97, 0.90);
+            static const float3 AUREOLE_COLOR_LOW = float3(1.00, 0.82, 0.62);
+            static const float AUREOLE_WARMTH_ELEVATION = 0.35;
+
+            // Sine of sun elevation over which the aureole dies below the horizon. Non-zero because
+            // this IS the twilight afterglow — cutting at exactly y = 0 removes the glow that
+            // rightly outlives the disc. Some fade is mandatory: saturate(dot()) alone would light
+            // the sky around the ANTI-sun point at midnight.
+            static const float AUREOLE_TWILIGHT_FADE = 0.25;
+
+            // pow(0, n) is exp(n * log(0)) and not every compiler resolves that to zero rather than
+            // a NaN. Half the sky sits at exactly zero here, so the guard is not hypothetical.
+            static const float AUREOLE_POW_EPSILON = 1e-4;
+
             struct Attributes
             {
                 float4 positionOS : POSITION;
@@ -260,10 +297,34 @@ Shader "Minecraft/SkyboxShader"
                 if (_VoxelFogRange.y > _VoxelFogRange.x)
                     hazeAmount = pow(saturate(1.0 - viewDir.y), HORIZON_HAZE_FALLOFF) * HORIZON_HAZE_STRENGTH;
 
-                // The gradient alone, kept before the stars are added: this is the airlight the celestial
-                // discs are seen THROUGH. It must exclude the stars — adding a star-bearing colour behind
-                // the moon would let stars shine out of the disc, which is the transparency bug again by
-                // another route.
+                // --- Sun aureole ---------------------------------------------------------------
+                // Added HERE, before the airlight is captured, and that placement is load-bearing:
+                // the moon reads skyAirlight to settle into the sky behind it, so a moon near the
+                // sun must see the glow too. Adding the aureole after the discs instead would punch
+                // the moon out of it as a dark hole.
+                float sunward = max(saturate(dot(viewDir, _SunDirection)), AUREOLE_POW_EPSILON);
+                float aureole = AUREOLE_CORE_STRENGTH * pow(sunward, AUREOLE_CORE_EXPONENT)
+                    + AUREOLE_HALO_STRENGTH * pow(sunward, AUREOLE_HALO_EXPONENT)
+                    * (1.0 + hazeAmount * AUREOLE_HAZE_BOOST);
+                aureole *= saturate(1.0 + _SunDirection.y / AUREOLE_TWILIGHT_FADE);
+
+                // Warmth keys on the SUN's elevation, not the view's: the glow belongs to the sun,
+                // so a low sun reddens the whole halo rather than only the half nearer the horizon.
+                float sunLowness = saturate(1.0 - _SunDirection.y / AUREOLE_WARMTH_ELEVATION);
+                half3 aureoleColor = lerp(half3(AUREOLE_COLOR_HIGH), half3(AUREOLE_COLOR_LOW), sunLowness);
+                float aureoleBlend = saturate(aureole);
+
+                // BLENDED, not added. There is almost no headroom to add into: colour grading is LDR
+                // with no tonemapper, so anything past 1 clips flat, and the authored sky beside the
+                // sun already sits at 0.78-0.88. An additive glow pushed both the sky AND the disc
+                // past 1, which read as a white wash around a sun whose limb detail had been clipped
+                // away. A blend between two values that are each <= 1 cannot exceed 1 by construction.
+                color = lerp(color, aureoleColor, aureoleBlend);
+
+                // The gradient and aureole, kept before the stars are added: this is the airlight the
+                // celestial discs are seen THROUGH. It must exclude the stars — adding a star-bearing
+                // colour behind the moon would let stars shine out of the disc, which is the
+                // transparency bug again by another route.
                 half3 skyAirlight = color;
 
                 // --- Stars ---------------------------------------------------------------------
@@ -414,6 +475,15 @@ Shader "Minecraft/SkyboxShader"
                     sunColor *= 1.0 - SUN_LIMB_DARKENING * limb;
 
                     sunColor = lerp(sunColor, half3(_VoxelFogColor), hazeAmount);
+
+                    // The aureole is air in FRONT of the disc, so the disc is veiled by exactly the
+                    // same blend the sky beside it received. Applying it to only one of the two is
+                    // what put a hole in the sun: near the horizon the haze above paints the disc
+                    // almost pure fog colour, and a sky that then got the glow on top ended up
+                    // BRIGHTER than the sun sitting in it. One veil over both preserves whatever
+                    // ordering the disc and sky already had, at every elevation and every hour.
+                    sunColor = lerp(sunColor, aureoleColor, aureoleBlend);
+
                     color = lerp(color, sunColor, sunMask);
                 }
 

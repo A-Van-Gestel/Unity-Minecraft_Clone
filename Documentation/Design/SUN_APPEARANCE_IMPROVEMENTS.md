@@ -1,8 +1,8 @@
 # Sun Appearance Improvements Design
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-08-15  
-**Status:** Proposed design — not implemented.  
+**Status:** **Partially implemented** — SN-0 shipped and confirmed in game 2026-08-15; SN-1..SN-3 proposed.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > Four changes that turn the sun from a flat disc into a body seen through air, in priority
@@ -23,6 +23,11 @@ authored assets `VoxelEngine-Post-Profile.asset`, `VoxelEngine-URP-Asset.asset` 
 `Shaders/PostProcessing/Bloom.shader:108-112` for the threshold semantics quoted in §2.
 The threshold arithmetic in §2 is computed from those two sources, not assumed. No runtime
 state was inspected; nothing here depends on runtime state.
+
+**Amended:** 2026-08-15 — SN-0 shipped. §7 records it, and new §7.1 carries the three findings that
+changed this plan: the glow had to become a **blend** because LDR headroom is already spent by the
+authored sky; SN-1 is less independent of SN-0 than §7 claimed; and two validation false greens, both
+demonstrated by mutation rather than argued.
 
 **Relationship to other documents:**
 
@@ -323,8 +328,8 @@ aureole is at its weakest — but it is the one interaction between SN-0 and exi
 
 | Phase | Scope | Effort | Depends on |
 |-------|-------|:------:|------------|
-| **SN-0 — Aureole** | Angular forward-scatter glow around `_SunDirection`, added into `color` before the discs (§4 ordering). Modulated by `hazeAmount` so it swells near the horizon. Also resolves the whole-horizon-ring sunset artefact. | 🟢 | — |
-| **SN-1 — Per-channel extinction** | Replace `:416`'s `lerp`-to-fog with `exp(-opticalDepth * beta)` extinction plus additive airlight, matching the moon's model. Delivers the sunset reddening. | 🟢 | — (independent of SN-0; ships better after it) |
+| **SN-0 — Aureole** ✅ **SHIPPED** | Angular forward-scatter glow around `_SunDirection`, applied to `color` before the discs (§4 ordering) **and to the sun disc by the same operator** (§7.1). Modulated by `hazeAmount` so it swells near the horizon. Guarded by **B8**, plus a repaired **B4**. | 🟢 | — |
+| **SN-1 — Per-channel extinction** | Replace `:416`'s `lerp`-to-fog with `exp(-opticalDepth * beta)` extinction plus additive airlight, matching the moon's model. Delivers the sunset reddening. | 🟢 | — (independent of SN-0 — but see §7.1: SN-0 had to defend against `:416` to ship at all) |
 | **SN-2 — HDR core + bloom coupling** | Radial HDR ramp over the disc's central core (§3.2 Option A), sized to clear the ≈1.23 linear threshold with margin. Set bloom `clamp`. Re-verify RF-3's lava/lamp look is untouched. | 🟡 | SN-0, SN-1 (tune against the finished disc, not a moving one) |
 | **SN-3 — Screen-space lens flare** | Raise `ScreenSpaceLensFlare.intensity` off 0 and tune. Confirm occlusion behaves when a block crosses the sun. | 🟢 | SN-2 |
 
@@ -353,6 +358,47 @@ before. **Run the prove-red mutations rather than predicting them** — three of
 passing prove-red does not validate the expected value** when the contract belongs to a consumer
 the suite never runs (RF-3's B61). SN-2's consumer is URP's bloom pass, which no suite executes, so
 **SN-2 cannot be called sound without eyes on real output** regardless of baseline colour.
+
+### 7.1 What SN-0 changed about this plan
+
+SN-0 shipped 2026-08-15 and confirmed in game. Three things it found are worth more than the phase itself.
+
+**The glow is a BLEND, not an addition — and LDR is why.** The design assumed an additive term. It
+cannot be: the authored sky beside the sun already sits at **0.78–0.88**, so an additive glow pushed the
+sky past 1.0 and clipped it flat, and once the disc was lifted to match, *all three channels clipped
+across the whole disc* — a flat white circle with the polish arc's limb darkening destroyed. The shipped
+form blends sky and disc toward a bright warm tint by the same factor, which cannot exceed 1.0 by
+construction. Measured across a full authored day: no hole (disc rim above adjacent sky by +0.046 to
++0.240), limb gradient intact (centre above rim by 0.026–0.119), **max channel anywhere 0.9932**.
+
+This is the strongest evidence yet for §3.2's rejected Option B. The LDR headroom next to the sun is
+*already spent by the authored sky*, so every future sky effect faces the same squeeze. That argument
+belongs in the tonemapping doc when it is written; it is not a reason to reopen §3.2 here.
+
+**SN-1 is not as independent as the table claimed.** `:416`'s `lerp`-to-fog paints the disc ~92 % fog
+colour near the horizon. Give the sky a glow the disc does not get, and the sky beside the sun outruns
+the sun — measured at sunrise, disc 0.557 against 0.784 immediately outside. SN-0 had to apply its blend
+to the disc as well purely to defend against a term SN-1 will delete. When SN-1 lands, re-check whether
+that defence is still doing work or has become redundant.
+
+**`Validate Sky Render` B4 was a false green, demonstrated not argued.** B4 ("the sun disc is brighter
+than the sky around it") **passed the regression above**, reporting `centre 0.9682 outshines sky 0.4803`
+while the sun visibly rendered as a hole in a screenshot. Three independent fixture faults, any one of
+which was sufficient: it ran on `SkyPreviewState.Uniform`, which zeroes `FogRange` and so made the disc's
+haze term a **no-op**; its sun sat at mid elevation, where haze is weak; and it sampled the sky at a
+**frame corner**, where the aureole has fallen off, rather than beside the disc. B4 now runs both
+fixtures — the original mid-sun/no-fog one keeps its original 1.5× margin **unchanged**, and a second
+low-sun/fog-on pass samples just outside the rim. Re-running the regression against the repaired B4
+reds it: `a low sun's centre (0.5054) still outshines the sky just outside its rim (0.7496)`.
+
+**And B8's own night assertion was a false green on its first draft.** Written with both probes at a
+fixed elevation, it passed the twilight-fade removal it exists to catch: with the sun 80° down, both
+probes sit more than 90° away, where `saturate(dot(view, sun))` is zero regardless of the fade, so the
+term under test never entered the expression. Rewritten to place probes by **true angular rotation** from
+the sun axis, the same mutation reds it (0.4893 vs 0.3318). Note this is the *third* time in one session
+that a probe placed by elevation or azimuth could not reach a defect near the poles — an azimuth offset
+shrinks by cos(elevation), which at −80° put a nominal 3° probe **inside** the 1.5° disc and reported the
+disc as sky. Angular offsets are now the rule in this suite; `AngularOffset` exists for it.
 
 ### Extension roadmap (post-SN-3, in intended order)
 
@@ -387,9 +433,16 @@ One remains, and it is deliberately **not** resolvable on paper.
 
 ## Document History
 
+* **v1.1** - **SN-0 shipped** (2026-08-15), confirmed in game. New §7.1. The additive glow the design
+  assumed was replaced by a **blend** — the authored sky beside the sun already occupies 0.78-0.88 of
+  the LDR range, so adding clipped both the sky and the disc flat and destroyed the limb darkening.
+  §7.1 also records that B4 of `Validate Sky Render` **passed a regression visible in a screenshot**
+  (uniform fixture with fog off, mid-elevation sun, corner sample) and that B8's first night assertion
+  passed its own mutation for a fourth reason — probes placed by elevation cannot reach a sun 80 degrees
+  below the horizon. Both repaired and re-reddened by mutation.
 * **v1.0** - Initial design
 
 ---
 
 **Last Updated:** 2026-08-15  
-**Next Review:** after SN-0's in-game pass, which is what settles §8's remaining question
+**Next Review:** when SN-1 starts — §7.1 leaves it a specific question about SN-0's disc defence
