@@ -1,6 +1,6 @@
 # World Generation Feature Improvements Report
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Date:** 2026-07-20  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified. **TF-14 (world
 border) shipped 2026-07-13/17** and the combined ranked TF/RF roadmap lives at the end of this document.
@@ -1083,7 +1083,7 @@ items last. RF items are detailed in
 | 16   | ~~**TF-14** World border~~ ✅ SHIPPED        | Done 2026-07-13 (per-world fence + animated wall); pairs optionally with RF-2's fog                   |
 | 17   | **RF-7** Weather                            | Needs TF-3/TF-11's temperature axis for precipitation type; rendering rides RF-1/RF-2 machinery       |
 | 18   | **RF-4** Torch flicker                      | Polish; 🟢 shader-side, needs a Torch block authored first                                            |
-| 19   | **RF-3** Bloom / post-processing            | Polish; the GS-4 pairing is done (both shipped); tint-channel coordination with TF-11                 |
+| 19   | ~~**RF-3** Bloom / post-processing~~ ✅ SHIPPED | Done 2026-08-12 (bloom + HDR emissive path); §1 tonemapping + §5 effects remain, unranked polish; tint-channel coordination with TF-11 still open |
 | 20   | **RF-6** SSAO ("GI")                        | Polish; drop-in URP feature                                                                           |
 | 21   | **RF-5** Animated light sources             | Polish with an architectural ceiling — budgeted block-swap animation only                             |
 | 22   | **RF-8** Animated block textures            | Polish; MC-style atlas blitting (`Graphics.CopyTexture` per tick) — zero mesh/shader/vertex contact   |
@@ -1096,6 +1096,9 @@ items last. RF items are detailed in
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.4** - **`RF-3` marked shipped in the combined roadmap** (2026-08-15, no scope change): row 19 still
+  ranked it as open polish although it shipped 2026-08-12. Its §1 tonemapping / §5 effects remainder and
+  the TF-11 tint-channel coordination are still open. RF-1/RF-2/TF-14 rows were already correct.
 * **v1.3** - **`GS-4` de-staled** (2026-08-15, no scope change): the RF-3 row's "pair with the GS-4
   render-tier audit" is done, both having shipped.
 * **v1.2** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Status`/`Target` lifted out of
@@ -1114,7 +1117,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-15 (`GS-4` de-staled; 2026-07-26: header completed)  
+**Last Updated:** 2026-08-15 (RF-3 marked shipped; `GS-4` de-staled; 2026-07-26: header completed)  
 **Next Review:** when the next TF item is scheduled, or when the Standard world type stabilizes — at
 that point the seed-stability note's "deliberately seed-breaking is acceptable" premise expires and
 every remaining ⚠️ Seed item needs re-rating.

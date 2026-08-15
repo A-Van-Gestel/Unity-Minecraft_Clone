@@ -1,6 +1,6 @@
 # Lighting & Rendering Feature Improvements Report
 
-**Version:** 2.3  
+**Version:** 2.4  
 **Date:** 2026-08-15  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified. Owns lighting
 and rendering *features* (`RF-*`); the *performance* counterparts (`LI-*`, `GS-*`) live in
@@ -91,7 +91,7 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 
 | ID   | Finding                                                                                   | Effort | Risk | Benefit | Seed | Save |
 |------|-------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| RF-1 | Day/night cycle: shader support is wired & modern but nothing advances time               |   🟡   |  🟢  |   🟢    |  ✅   |  ⚠️  |
+| RF-1 | ~~Day/night cycle: shader support is wired & modern but nothing advances time~~ ✅ **SHIPPED** (both phases) |   🟡   |  🟢  |   🟢    |  ✅   |  ⚠️  |
 | RF-2 | ~~Sky rendering: skybox, sun/moon, stars, fog, disc detail~~ ✅ **SHIPPED**; §6 + 4 riders open |   🟡   |  🟢  |   🟢    |  ✅   |  ✅   |
 | RF-3 | ~~Bloom / post-processing: URP post stack present but disabled; no HDR emissive path~~ ✅ **SHIPPED**; §1 tonemapping + §5 effects open |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 | RF-4 | Flickering light sources: shader-side global flicker with per-position phase              |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
@@ -109,9 +109,9 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 
 **Classification:** Core. Rank #1 in the combined roadmap.
 
-> **Phase 1 SHIPPED + confirmed in game 2026-08-10. Phase 2 (§9 + §10) BUILT the same day, awaiting one
-> in-game confirmation** — the shader half cannot be observed by any validation suite, so it is
-> capture-verified only and the item stays on this backlog until you have looked at it.
+> **Phase 1 and Phase 2 (§9 + §10) both SHIPPED + confirmed in game 2026-08-10.** The shader half cannot
+> be observed by any validation suite, so it stays capture-verified only. That confirmation is what filed
+> RF-9, which remains open.
 >
 > **Phase 2 — what changed:**
 >
@@ -854,10 +854,15 @@ vertex-channel allocation it shares, rather than on its own merit).
 
 ## Document History
 
+* **v2.4** - **`RF-*` status sweep + one correction** (2026-08-15, no scope change). RF-1's detail banner
+  and summary row still read "Phase 2 awaiting one in-game confirmation", contradicting **this document's
+  own** v1.3 entry and RF-9 §, both of which record that confirmation on 2026-08-10 — both now say
+  shipped. Also corrects v2.3, which attributed the homeless SSAO quality-tier gate to **RF-5**; the SSAO
+  item is **RF-6**.
 * **v2.3** - **`GS-4` cross-references de-staled** (2026-08-15). `GS-4` shipped and closed, so the four
   sites telling a future session to "do this together with `GS-4`" are now historical. The substantive
   correction: **`GS-4` added no device-tier gating mechanism** (a second mobile URP asset was explicitly
-  out of its scope), so RF-5's SSAO quality-tier gate has no existing home and must bring its own. Also
+  out of its scope), so RF-6's SSAO quality-tier gate has no existing home and must bring its own. Also
   records what `GS-4` settled about shadows — main-light shadows are now *unsupported* in the URP asset,
   making "switch shadows on" a four-setting undo. No scope change to any `RF-*` item.
 * **v2.2** - **The sun-flare bullet is retired, not deferred** (2026-08-15). `SN-0` and `SN-1` of
@@ -982,7 +987,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-15 (`GS-4` cross-refs de-staled; SN-0/SN-1 shipped; SN-2/SN-3 refuted — the RF-2 §6 flare bullet is retired)  
+**Last Updated:** 2026-08-15 (RF-1 status swept + RF-5/RF-6 correction; `GS-4` cross-refs de-staled; SN-0/SN-1 shipped; SN-2/SN-3 refuted — the RF-2 §6 flare bullet is retired)  
 **Next Review:** **RF-9 is the most visible open item**, its severity measured in game (a 30%-occluded
 face is 14.8× darker than flat ground at midnight and indistinguishable from a sealed cave face). Its
 vertex-channel question is **no longer shared with RF-3** — RF-3 spent `Color32.a` on 2026-08-12, so
