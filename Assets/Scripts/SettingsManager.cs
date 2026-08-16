@@ -697,6 +697,27 @@ public class Settings
     // ═══════════════════════════════════════════════════════════════════
 
     /// <summary>
+    /// Arms the in-world micro-benchmark harnesses that live on the World scene's <c>BenchmarkRunner</c>
+    /// object (chunk generation, mesh generation, lighting job). <b>Default-OFF</b>, so a production build
+    /// ships them inert no matter what the scene has serialized; each harness reads this once in
+    /// <c>Start()</c> and disables itself, which is why a change only lands on the next world load.
+    /// <para>Forced off under <see cref="Data.WorldLaunchState.IsAutomatedMode"/> regardless of this value:
+    /// the automated route and fluid-stress captures run in the same World scene, and a harness triggered
+    /// mid-capture would corrupt that run's numbers.</para>
+    /// </summary>
+    [Header("In-World Micro-Benchmarks")]
+    // Order -1 keeps the master switch above the route fields (which start at 0) without renumbering them.
+    [SettingField(SettingsTab.Benchmark, Label = "Enable Micro-Benchmarks", Order = -1)]
+    [Tooltip("Arms the per-system micro-benchmark harnesses in the world scene, each triggered by its own " +
+             "key: C = chunk generation, M = mesh generation, L = lighting job.\n\n" +
+             TooltipTags.Warning + "Each run freezes the game for minutes and allocates heavily. Leave this " +
+             "off for normal play.\n" +
+             TooltipTags.Note + "Takes effect on the next world load. Always off during automated benchmark " +
+             "and fluid-stress captures.\n" +
+             TooltipTags.DefaultColorStart + "Off" + TooltipTags.DefaultColorEnd)]
+    public bool enableInWorldMicroBenchmarks = false;
+
+    /// <summary>
     /// Waypoints the benchmark's generation sweep emits (two per row). Honored exactly, rounded up to an
     /// even number. The swept region is <b>derived</b> from the configured speeds and phase duration, so
     /// this controls the sweep's shape, not the run's length.

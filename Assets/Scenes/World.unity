@@ -1381,7 +1381,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 75cfad0a9a9644b380b79435eed99e22, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DebugVisualizations.ChunkGenerationBenchmark
-  _benchmarkEnabled: 1
   _chunksToGenerate: 64
   _benchmarkRuns: 50
   _oceanSeaLevel: 110
@@ -1415,7 +1414,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c21ea255961f4b50a20211c8f5dd7e49, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Benchmarks.MeshGenerationBenchmark
-  _benchMarkEnabled: 1
   _runFullComparison: 1
   _benchmarkRuns: 100
   _chunksToMesh: 156
@@ -1440,7 +1438,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ed82d6aae8a442a2a254ee693deddfd4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Benchmarks.LightingBenchmark
-  _benchMarkEnabled: 1
   _runFullComparison: 1
   _benchmarkRuns: 250
   _jobsToRun: 256

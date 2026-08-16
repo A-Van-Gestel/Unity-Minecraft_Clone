@@ -22,6 +22,10 @@ namespace Benchmarks
     /// Tests various scenarios including sunlight propagation, blocklight spread, darkness removal,
     /// edge consistency checks, and complex geometry. Produces structured reports with system info
     /// and optional file output for baseline tracking.
+    /// <para>
+    /// Armed by <see cref="MicroBenchmarkGate"/> (default-off setting, read once in <c>Start</c>); otherwise
+    /// the component disables itself and the trigger key is inert.
+    /// </para>
     /// </summary>
     public class LightingJobBenchmark : MonoBehaviour
     {
@@ -137,10 +141,6 @@ namespace Benchmarks
         #region Serialized Fields
 
         [Header("Benchmark Configuration")]
-        [Tooltip("Whether the benchmark is enabled and allowed to run.")]
-        [SerializeField]
-        private bool _benchMarkEnabled = true;
-
         [Tooltip("If checked, runs all scenarios sequentially and generates a final report.")]
         [SerializeField]
         private bool _runFullComparison = true;
@@ -204,7 +204,7 @@ namespace Benchmarks
 
         private void Start()
         {
-            if (!_benchMarkEnabled)
+            if (!MicroBenchmarkGate.IsArmed())
             {
                 enabled = false;
                 return;

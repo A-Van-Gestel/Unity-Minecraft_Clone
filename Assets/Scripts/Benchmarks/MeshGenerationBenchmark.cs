@@ -21,6 +21,10 @@ namespace Benchmarks
     /// A dedicated benchmark utility for measuring the performance of the MeshGenerationJob.
     /// It can run a single test configuration or a full comparison of all available modes and data types,
     /// generating a detailed report of the findings.
+    /// <para>
+    /// Armed by <see cref="MicroBenchmarkGate"/> (default-off setting, read once in <c>Start</c>); otherwise
+    /// the component disables itself and the trigger key is inert.
+    /// </para>
     /// </summary>
     public class MeshGenerationBenchmark : MonoBehaviour
     {
@@ -80,10 +84,6 @@ namespace Benchmarks
         #region Serialized Fields
 
         [Header("Benchmark Configuration")]
-        [Tooltip("Whether the benchmark is enabled and allowed to run.")]
-        [SerializeField]
-        private bool _benchMarkEnabled = true;
-
         [Tooltip("If checked, runs all combinations of Mode and Data Type and generates a final report.")]
         [SerializeField]
         private bool _runFullComparison = true;
@@ -171,8 +171,8 @@ namespace Benchmarks
 
         private void Start()
         {
-            // Fully disable the benchmark script if benchmark mode is disabled
-            if (!_benchMarkEnabled)
+            // Fully disable the benchmark script if the micro-benchmark harnesses are not armed
+            if (!MicroBenchmarkGate.IsArmed())
             {
                 enabled = false;
                 return;
