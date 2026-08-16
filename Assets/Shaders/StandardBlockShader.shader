@@ -45,8 +45,8 @@ Shader "Minecraft/Blocks"
             half4 fragFunction(VoxelV2F i) : SV_Target
             {
                 #ifdef DEBUG_LIGHTDATA
-                // False-color visualization: R = sunlight (from lightData.r),
-                // G = blocklight (from lightData.a), B = 0.
+                // False-color visualization: R = sunlight (lightData.r), G = block BLUE
+                // (lightData.a — the vector packs (sky, blockR, blockG, blockB)), B = 0.
                 // Smooth lighting produces per-vertex gradients; flat lighting is uniform per face.
                 return half4(i.lightData.r, i.lightData.a, 0.0, 1.0);
                 #endif
