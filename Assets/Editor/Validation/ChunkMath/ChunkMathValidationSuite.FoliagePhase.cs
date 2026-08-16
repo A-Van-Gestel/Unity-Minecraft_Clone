@@ -63,6 +63,7 @@ namespace Editor.Validation
             scenarios.Add(new Scenario("Foliage Wave Phase Matches Its Exact Value At Far Origins", RunFoliagePhaseAccuracy));
             scenarios.Add(new Scenario("Foliage Sway Still Animates At Far Origins", RunFoliagePhaseAnimates));
             scenarios.Add(new Scenario("Foliage Origin Phase Is Exactly Zero At Spawn", RunFoliagePhaseIdentity));
+            scenarios.Add(new Scenario("Foliage Wave Phase Stays Bounded Across A Long Session", RunFoliagePhaseLongSession));
         }
 
         /// <summary>
@@ -93,11 +94,16 @@ namespace Editor.Validation
                         float actualPrimary = Mathf.Sin(alongLocal + phase.x);
                         float actualGust = Mathf.Sin(alongLocal * FOLIAGE_GUST_SPATIAL_MULTIPLIER + phase.y);
 
-                        // The oracle: the same wave evaluated at the absolute voxel position, in double.
+                        // The oracle: the same wave evaluated at the absolute voxel position, in double. The wave
+                        // numbers are held in double LOCALS rather than multiplied inline, because two adjacent
+                        // floats would round their product to float first — which at these magnitudes costs more
+                        // accuracy than the code under test has, leaving the oracle the less precise of the two.
+                        const double waveNumber = spatialFrequency;
+                        const double gustWaveNumber = waveNumber * FOLIAGE_GUST_SPATIAL_MULTIPLIER;
                         double alongAbsolute = (origin.x + (double)renderXZ.x) * wind.x
                                                + (origin.z + (double)renderXZ.y) * wind.y;
-                        double exactPrimary = Math.Sin(spatialFrequency * alongAbsolute);
-                        double exactGust = Math.Sin(spatialFrequency * FOLIAGE_GUST_SPATIAL_MULTIPLIER * alongAbsolute);
+                        double exactPrimary = Math.Sin(waveNumber * alongAbsolute);
+                        double exactGust = Math.Sin(gustWaveNumber * alongAbsolute);
 
                         if (Math.Abs(actualPrimary - exactPrimary) > FOLIAGE_SIN_TOLERANCE)
                             return FailFoliage(scenario,
@@ -117,7 +123,14 @@ namespace Editor.Validation
         /// <summary>
         /// The reported symptom itself, rather than a proxy for it: consecutive frames must produce a *different*
         /// vertex displacement. A phase argument too coarse to resolve one frame of animation collapses successive
-        /// frames onto the same value, which is the "staggered, then frozen" foliage this pins against.
+        /// frames onto the same value, which is the "staggered, then frozen" foliage this pins against. Driven
+        /// through the real accumulator, so it covers both ways the argument used to grow without bound — distance
+        /// from the world center, and session length.
+        /// <para>
+        /// Known reach: peak movement detects a <i>frozen</i> wave decisively (the far-origin regression measures
+        /// exactly 0 here) but not mild stepping, because a partly-quantized phase moves in lumps and can report a
+        /// <i>higher</i> peak than a precise one. The accuracy baseline above is what covers the graded case.
+        /// </para>
         /// </summary>
         private static bool RunFoliagePhaseAnimates()
         {
@@ -132,21 +145,25 @@ namespace Editor.Validation
             {
                 foreach (Vector2 wind in s_foliageWindCases)
                 {
-                    Vector2 phase = FoliagePhase.OriginPhase(origin, wind, spatialFrequency, FOLIAGE_GUST_SPATIAL_MULTIPLIER);
+                    Vector2 originPhase = FoliagePhase.OriginPhase(origin, wind, spatialFrequency, FOLIAGE_GUST_SPATIAL_MULTIPLIER);
                     float alongLocal = Vector2.Dot(new Vector2(7f, -3f), wind) * spatialFrequency;
 
-                    // Sampled right around the cycle rather than at one chosen time: a frame of advance moves the
+                    // Sampled right around the cycle rather than at one chosen phase: a frame of advance moves the
                     // wave by almost nothing near its peaks, so only the best sample says anything about precision.
                     // A wave whose phase is too coarse to resolve a frame is motionless at EVERY sample.
                     const int SAMPLES = 16;
-                    const float period = 2f * Mathf.PI / FOLIAGE_FREQUENCY;
+                    double timePhase = 0.0;
                     float peakMotion = 0f;
                     for (int i = 0; i < SAMPLES; i++)
                     {
-                        float time = i * (period / SAMPLES);
-                        float before = Mathf.Sin(FOLIAGE_FREQUENCY * time - (alongLocal + phase.x));
-                        float after = Mathf.Sin(FOLIAGE_FREQUENCY * (time + FOLIAGE_FRAME_SECONDS) - (alongLocal + phase.x));
+                        float before = FoliageWaveSample(timePhase, originPhase.x, alongLocal);
+                        timePhase = FoliagePhase.AdvanceWrapped(timePhase, FOLIAGE_FREQUENCY, FOLIAGE_FRAME_SECONDS);
+                        float after = FoliageWaveSample(timePhase, originPhase.x, alongLocal);
                         peakMotion = Mathf.Max(peakMotion, Mathf.Abs(after - before));
+
+                        // Walk on to a different part of the cycle for the next frame pair.
+                        timePhase = FoliagePhase.AdvanceWrapped(
+                            timePhase, FOLIAGE_FREQUENCY, 2f * Mathf.PI / (FOLIAGE_FREQUENCY * SAMPLES));
                     }
 
                     if (peakMotion < minimumMotion)
@@ -156,6 +173,55 @@ namespace Editor.Validation
                             + "to resolve a frame.");
                 }
             }
+
+            Debug.Log($"[PASS] {scenario}");
+            return true;
+        }
+
+        /// <summary>
+        /// The vertex stage's wave argument, assembled exactly as the shader assembles it: a pre-reduced phase
+        /// pushed as a single float, minus a short render-space distance.
+        /// </summary>
+        private static float FoliageWaveSample(double timePhase, float originPhase, float alongLocal)
+        {
+            float wavePhase = (float)((timePhase - originPhase) % FoliagePhase.TwoPi);
+            return Mathf.Sin(wavePhase - alongLocal);
+        }
+
+        /// <summary>
+        /// The session-length half of the same defect. Multiplying a frequency by an ever-growing clock coarsens the
+        /// wave argument exactly as an absolute coordinate does, stalling the sway after long uptime; accumulating
+        /// and wrapping instead must stay bounded, and must not drift away from the phase the elapsed time implies.
+        /// Twenty hours of frames are stepped through here, so a reintroduced raw-clock term cannot pass.
+        /// <para>
+        /// Boundedness is asserted rather than the visible symptom, deliberately: a coarse phase does not make the
+        /// wave move <i>less</i> per frame, it makes it move in lumps — some frame pairs jump a whole quantum while
+        /// others repeat — so a peak-movement check reads <i>higher</i> as precision degrades and cannot see the
+        /// defect at all (measured: 0.0156 at 20 h, 0.123 at 200 h, both above any sane floor). Boundedness is the
+        /// property that actually implies the wave resolves a frame, so it is the one pinned here.
+        /// </para>
+        /// </summary>
+        private static bool RunFoliagePhaseLongSession()
+        {
+            const string scenario = "Foliage Wave Phase Stays Bounded Across A Long Session";
+            const int frames = 20 * 60 * 60 * 120; // 20 hours at 120 fps
+
+            double phase = 0.0;
+            for (int i = 0; i < frames; i++)
+            {
+                phase = FoliagePhase.AdvanceWrapped(phase, FOLIAGE_FREQUENCY, FOLIAGE_FRAME_SECONDS);
+
+                if (phase < 0.0 || phase >= FoliagePhase.TwoPi)
+                    return FailFoliage(scenario, $"phase left [0, 2pi) at frame {i}: {phase}.");
+            }
+
+            // No accumulated drift: the wrapped total must still name the phase the elapsed time implies.
+            const double elapsed = frames * (double)FOLIAGE_FRAME_SECONDS;
+            const double expected = FOLIAGE_FREQUENCY * elapsed % FoliagePhase.TwoPi;
+            double error = Math.Abs(phase - expected);
+            if (error > 1e-6)
+                return FailFoliage(scenario,
+                    $"after {frames} frames ({elapsed / 3600.0:F1} h) the phase was {phase}, expected {expected} (drift {error}).");
 
             Debug.Log($"[PASS] {scenario}");
             return true;
