@@ -1109,6 +1109,13 @@ Result: at 10⁷ blocks the reduced origin is `(22, 0, 6)` — as small as at sp
 Spawn unchanged on every statistic; 1e6 statistically indistinguishable from spawn; 1e7 recovered to 86%.
 Guarded by 4 Chunk Math baselines (suite 51 → 55); `Validate All` 494/494 across 22 suites.
 
+⚠️ **Never perf-measured.** No benchmark capture was taken for this change, in either direction. The
+expectation is neutral-to-better — `snoise` and `fbm` are byte-for-byte the shipped originals, and the
+per-sample delta is one `round` plus one multiply in `LiquidSnapScale` against one removed `float3`
+add — but that is reasoning, not a measurement, and the shader runs 17 (water) to 30 (lava) `snoise`
+calls per pixel over potentially large screen areas. If a liquid-shader perf question ever comes up,
+treat this as unmeasured rather than assuming the reasoning above was verified.
+
 **Four things learned the hard way — the most valuable part of this entry:**
 
 1. **Do not make the field periodic by wrapping the lattice index.** The first implementation did exactly that.
