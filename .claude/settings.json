@@ -2,7 +2,7 @@
   "permissions": {
     "allow": [
       "mcp__unity-mcp__Unity_ReadConsole",
-      "mcp__codegraph__codegraph_explore",
+      "mcp__codegraph__*",
       "mcp__unity-api__get_method_signature",
       "mcp__unity-api__get_namespace",
       "mcp__unity-api__get_class_reference",

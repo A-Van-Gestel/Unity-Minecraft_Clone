@@ -23,7 +23,10 @@
             "args": [
                 "serve",
                 "--mcp"
-            ]
+            ],
+            "env": {
+                "CODEGRAPH_NO_INSTALL_REFRESH": "1"
+            }
         }
     }
 }
