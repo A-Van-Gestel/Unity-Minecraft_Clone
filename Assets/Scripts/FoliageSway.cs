@@ -1,8 +1,9 @@
+using Helpers;
 using UnityEngine;
 
 /// <summary>
 /// Drives the FL-1 foliage wind-sway shader globals (<c>FoliageWindVector</c>,
-/// <c>FoliageSwayParams</c>) once per frame. The sway itself runs entirely in the transparent
+/// <c>FoliageSwayParams</c>, <c>FoliageOriginPhase</c>) once per frame. The sway itself runs entirely in the transparent
 /// block shader's vertex stage, displacing verts whose mesh-baked sway weight (UV Z) is non-zero;
 /// this component only owns the art knobs and the bridge from <see cref="World.WindBlocksPerSecond"/>
 /// (the shared wind vector clouds also read) so grass and clouds agree on wind direction.
@@ -13,6 +14,7 @@ public class FoliageSway : MonoBehaviour
     private static readonly int s_shaderFoliageWindVector = Shader.PropertyToID("FoliageWindVector");
     private static readonly int s_shaderFoliageSwayParams = Shader.PropertyToID("FoliageSwayParams");
     private static readonly int s_shaderFoliageSwayParams2 = Shader.PropertyToID("FoliageSwayParams2");
+    private static readonly int s_shaderFoliageOriginPhase = Shader.PropertyToID("FoliageOriginPhase");
 
     [Tooltip("The world whose shared wind vector (and settings) drive the sway.")]
     [SerializeField]
@@ -71,6 +73,7 @@ public class FoliageSway : MonoBehaviour
         if (!swayEnabled)
         {
             Shader.SetGlobalVector(s_shaderFoliageWindVector, Vector2.zero);
+            Shader.SetGlobalVector(s_shaderFoliageOriginPhase, Vector4.zero);
             return;
         }
 
@@ -81,16 +84,39 @@ public class FoliageSway : MonoBehaviour
         Vector2 dir = speed > Mathf.Epsilon ? wind / speed : Vector2.zero;
         float strength = _referenceWindSpeed > Mathf.Epsilon ? Mathf.Clamp01(speed / _referenceWindSpeed) : 0f;
 
-        Shader.SetGlobalVector(s_shaderFoliageWindVector, dir * strength);
+        // Captured as the single-precision values the shader itself receives: the origin phase below must be
+        // built from exactly the same wind vector and spatial frequency the vertex stage multiplies by, or the
+        // two halves of the wave phase would describe subtly different waves.
+        Vector2 windVector = dir * strength;
+        float spatialFrequency = 2f * Mathf.PI / Mathf.Max(_wavelengthBlocks, 0.01f);
+
+        Shader.SetGlobalVector(s_shaderFoliageWindVector, windVector);
         Shader.SetGlobalVector(s_shaderFoliageSwayParams,
             new Vector4(_amplitudeBlocks, _frequency, _gustFraction, _gustFrequency));
         Shader.SetGlobalVector(s_shaderFoliageSwayParams2,
-            new Vector4(2f * Mathf.PI / Mathf.Max(_wavelengthBlocks, 0.01f), _phaseJitter, _verticalBobFraction, _gustSpatialMultiplier));
+            new Vector4(spatialFrequency, _phaseJitter, _verticalBobFraction, _gustSpatialMultiplier));
+        PushOriginPhase(windVector, spatialFrequency);
+    }
+
+    /// <summary>
+    /// Pushes the world origin's contribution to the wave phase, pre-reduced modulo a full cycle in double
+    /// precision. The shader adds this to a render-space-only distance term, so the absolute voxel coordinate —
+    /// whose float32 resolution coarsens in proportion to distance from the world center — never reaches the
+    /// sine argument, and the wave animates identically however far out the player is.
+    /// </summary>
+    /// <param name="windVector">The wind vector exactly as the shader receives it (direction scaled by strength).</param>
+    /// <param name="spatialFrequency">Radians per block along the wind, exactly as the shader receives it.</param>
+    private void PushOriginPhase(Vector2 windVector, float spatialFrequency)
+    {
+        Vector2 phase = FoliagePhase.OriginPhase(
+            WorldOrigin.OriginVoxel, windVector, spatialFrequency, _gustSpatialMultiplier);
+        Shader.SetGlobalVector(s_shaderFoliageOriginPhase, new Vector4(phase.x, phase.y, 0f, 0f));
     }
 
     /// <summary>Freezes all foliage when the driver goes away (globals would otherwise stay stale).</summary>
     private void OnDisable()
     {
         Shader.SetGlobalVector(s_shaderFoliageWindVector, Vector2.zero);
+        Shader.SetGlobalVector(s_shaderFoliageOriginPhase, Vector4.zero);
     }
 }
