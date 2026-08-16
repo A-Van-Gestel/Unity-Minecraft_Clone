@@ -211,8 +211,16 @@ origin behind a single include that exposes only pre-reduced, bounded values (a 
 fields, a `mod 2π` phase for periodic ones) and retiring the `_WorldOriginOffset` name. The stronger guard is a
 **far-origin render baseline** — render a fixed scene at origin `(0,0)` and at `(1<<20, 1<<20)` and assert the
 frames match. That tests the symptom class rather than a forbidden identifier, so it catches any future feature
-that smuggles an absolute coordinate into a shader. RF-2's rendered-pixel suite already provides the machinery,
-and such a baseline would have caught both known instances while correctly leaving clouds green.
+that smuggles an absolute coordinate into a shader, and it would have caught both known instances while
+correctly leaving clouds green.
+
+⚠️ **The harness for it does not exist yet.** The nearest precedent is `SkyRenderValidationSuite`
+(`Assets/Editor/Validation/Celestial/`) driving `SkyPreviewRenderer`
+(`Assets/Editor/WorldTools/Libraries/`) — worth reading for the conventions (256px frames, pixel summary
+statistics, `-nographics` → INCONCLUSIVE rather than FAIL), but it renders the **skybox**, not a world scene
+with terrain and water in it. A far-origin water baseline needs a world-scene capture that suite does not
+provide. Budget for building it, or accept a manual `/teleport` + screenshot comparison for this fix and leave
+the reusable baseline to a later pass.
 
 **Reproduction Steps:**
 
