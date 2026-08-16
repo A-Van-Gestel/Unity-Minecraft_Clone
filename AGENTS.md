@@ -110,47 +110,56 @@ When a change touches the chunk generation → lighting → meshing pipeline spe
 
 ## MCP Tools: CodeGraph
 
-**IMPORTANT: This project uses CodeGraph for semantic code intelligence. ALWAYS use the `codegraph_*` MCP tools BEFORE using Grep/Glob/Read to explore the codebase.** CodeGraph gives you instant structural context (callers, dependents, exact signatures) without expensive and slow file scanning.
+**IMPORTANT: This project uses CodeGraph for semantic code intelligence. ALWAYS reach for CodeGraph BEFORE using Grep/Glob/Read to explore the codebase.** CodeGraph gives you instant structural context (callers, dependents, exact signatures) without expensive and slow file scanning.
+
+**`codegraph_explore` is the only MCP tool.** Narrower structural queries — exhaustive caller/impact audits, symbol lookup, index health — run through the `codegraph` **CLI via Bash** (see Key Tools below).
 
 ### Where CodeGraph excels (use FIRST)
 
 - **Initial orientation**: "How does X work?", "How does X reach Y?", understanding a new area of the codebase. `codegraph_explore` returns verbatim source + relationship maps + blast radius in one call — far better than manually grepping and reading.
-- **Structural questions**: callers, callees, impact analysis, dynamic-dispatch hops (Unity event callbacks, `Action<T>` delegates, job scheduling chains) that grep can't follow.
-- **Architecture overview**: `codegraph_explore` for high-level "how does this area work" + `codegraph_files` for indexed file structure.
-- **Symbol lookup**: `codegraph_search` to quickly locate functions/classes by name.
+- **Structural questions**: callers, callees, impact analysis, dynamic-dispatch hops (Unity event callbacks, `Action<T>` delegates, job scheduling chains) that grep can't follow. Callback *registration* (an `Action<T>` handed to an event or stored in a field) produces real reference edges, so a handler wired up but never called directly still shows its wiring site.
+- **Architecture overview**: `codegraph_explore` for high-level "how does this area work" — one call, verbatim source grouped by file.
+- **Symbol lookup**: name the symbol directly in an `codegraph_explore` query, or `codegraph query <name>` on the CLI.
+- **Constant blast radius**: C# `const` / `static readonly` are indexed as constants and their *readers* count as dependents — so `codegraph impact BlockIDs` (CLI) answers "what actually reads this constant", which grep can only approximate.
 
 ### Where CodeGraph falls short (use Grep/Read instead)
 
+- **Shaders are NOT indexed at all.** CodeGraph has no HLSL support: all `.shader` / `.hlsl` / `.compute` / `.cginc` files under `Assets/Shaders/` are absent from the graph (35 files, 0 indexed). Shader work is Grep/Read-only — see `@Documentation/Guides/SHADER_CONVENTIONS.md`.
+- **`Documentation/` and `.agents/skills/` are not indexed either** (markdown is not a graph language). Finding a doc is a Glob/Grep job, never a CodeGraph one.
 - **Diff-based work** (code reviews, targeted bug fixes): The entry point is `git diff` + `Read` of specific lines, not symbol exploration. CodeGraph is useful for the *tracing* phase (does this change break callers? what behavior does this rely on?) but not for reading the diff itself.
 - **Multi-file implementation tasks**: Tasks spanning many files across layers (e.g., a new block type touching data, meshing, lighting, and serialization) can exhaust token budget during orientation, leaving nothing for the implementation phase. Plan explore calls carefully — use them for the highest-value questions first, then switch to Grep/Read.
 - **Precise surgical edits**: Once you know *what* to change, you need exact line numbers and full file context. Use `Read` directly.
-- **Exhaustive call-site auditing**: When you need to find *every* caller of a changed function (e.g., to verify no call site is broken), `Grep` is more reliable than explore's capped results. Use `codegraph_callers` for a quick overview, but verify with Grep for completeness.
+- **Exhaustive call-site auditing**: `codegraph_explore` caps its results, so it will not enumerate every call site. Use the CLI — `codegraph callers <symbol>` / `codegraph impact <symbol>` — which returns the complete set with `file:line` and costs no context until you read it. Cross-check with `Grep` before a breaking change.
 - **Relevance noise**: Broad explore queries can return irrelevant files (unrelated modules matching common terms), consuming token budget without value. Use specific symbol names rather than vague topic queries.
 
 ### Recommended workflow
 
-1. **Orient with CodeGraph** (1–2 explore calls): Understand the data model, flow, and relationships.
-2. **Switch to Grep/Read for detail work**: Find all call sites, read exact file contents, make edits.
-3. **Use targeted CodeGraph tools as needed**: `codegraph_callers`/`codegraph_callees`/`codegraph_impact` for specific structural queries during implementation.
+1. **Orient with `codegraph_explore`** (1–2 calls): Understand the data model, flow, and relationships.
+2. **Switch to Grep/Read for detail work**: Read exact file contents, make edits.
+3. **Audit with the CLI**: `codegraph callers` / `codegraph impact` via Bash for exhaustive structural queries during implementation.
 
 ### Key Tools
 
-| Tool                            | Use when                                                                                                                                                                                                                              |
-|---------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `codegraph_explore`             | **Primary for orientation.** Answer "how does X work" or survey an area in one call. Returns verbatim source, relationship map, and blast radius. Surfaces dynamic-dispatch hops grep can't follow. Save for highest-value questions. |
-| `codegraph_impact`              | Use before editing to understand the blast radius of changing a core struct or interface (crucial for DOTS/Burst architectures).                                                                                                      |
-| `codegraph_callers` / `callees` | Walk call flows and execution paths. Use `callers` for a quick overview; verify with Grep when exhaustive coverage matters.                                                                                                           |
-| `codegraph_search`              | Find symbols by name across the entire codebase instantly (FTS5 full-text search).                                                                                                                                                    |
-| `codegraph_node`                | Get one specific symbol's full details and source code (returns every overload for ambiguous names).                                                                                                                                  |
-| `codegraph_files`               | Get indexed file structure (faster than filesystem scanning).                                                                                                                                                                         |
-| `codegraph_status`              | Check index health and statistics.                                                                                                                                                                                                    |
+| Tool                                | Use when                                                                                                                                                                                                                              |
+|-------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `codegraph_explore` (MCP)           | **The only MCP tool, and the primary one.** Answer "how does X work" or survey an area in one call. Returns verbatim line-numbered source (safe to `Edit` from), relationship map, and blast radius. Surfaces dynamic-dispatch hops grep can't follow. Save for highest-value questions. |
+| `codegraph impact <sym>` (CLI)      | Blast radius before editing a core struct or interface (crucial for DOTS/Burst architectures). Exhaustive, grouped by file — where `explore`'s blast-radius section is a summary.                                                      |
+| `codegraph callers <sym>` (CLI)     | Every call site of a symbol, with `file:line`. The exhaustive-audit tool; prefer it over Grep for call sites, then cross-check with Grep.                                                                                             |
+| `codegraph callees <sym>` (CLI)     | Walk outward from a function into what it calls.                                                                                                                                                                                      |
+| `codegraph query <name>` (CLI)      | Find symbols by name across the codebase instantly.                                                                                                                                                                                   |
+| `codegraph node <sym\|file>` (CLI)  | One symbol's source + callers (every overload for ambiguous names), or a whole file with line numbers.                                                                                                                                 |
+| `codegraph status` (CLI)            | Index health, file/node/edge counts, pending syncs, and whether a re-index is recommended.                                                                                                                                             |
+
+CLI commands run through Bash and print to your terminal — they do not consume context until you read the output, which makes them the cheap option for wide structural sweeps.
 
 ### Syncing & Staleness
 
-CodeGraph auto-syncs in the background via native OS file watchers — you do not need to run manual update or sync commands. However, there is a brief debounce window (~2s) after edits. During that window, if a tool response references a still-pending file, it will prepend a **⚠️ banner** naming the file and telling you to `Read` it directly for live content. Pending files *not* referenced by the response appear as a small footer instead. **When you see a staleness banner, Read the named file(s) directly** — don't trust the graph's snapshot for those
+CodeGraph auto-syncs in the background via native OS file watchers — you do not need to run manual update or sync commands. A single save reaches the graph in **well under a second** (a ~300ms quiet window, then a sync scoped to just the changed paths); bursts of edits still coalesce under the full debounce, `CODEGRAPH_WATCH_DEBOUNCE_MS` (default 2s), which is the upper bound. During that window, if a tool response references a still-pending file, it will prepend a **⚠️ banner** naming the file and telling you to `Read` it directly for live content. Pending files *not* referenced by the response appear as a small footer instead. **When you see a staleness banner, Read the named file(s) directly** — don't trust the graph's snapshot for those
 specific files until the sync completes.
 
 Trust CodeGraph for structural queries — don't re-verify with Grep unless you need exhaustive call-site coverage (e.g., confirming every caller before a breaking change).
+
+**Do not run `codegraph index` / `init` / `sync` unprompted** — indexing is the user's call, and the watcher already keeps the graph current. `codegraph status` reports `reindexRecommended` if a rebuild is genuinely needed.
 
 For task-specific workflows, see the `voxel-debugging`, `refactor-safely`, and `review-changes` skills under `.agents/skills/`.
 

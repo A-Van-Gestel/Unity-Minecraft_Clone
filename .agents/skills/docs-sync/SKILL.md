@@ -61,11 +61,11 @@ Documentation/
 | Directory layout / new architectural folder                                                                                               | `Guides/PROJECT_STRUCTURE.md`                                                                                             |
 | Naming, bracing, const conventions                                                                                                        | `Guides/CODING_STYLE_GUIDE.md`                                                                                            |
 
-**Use the CodeGraph MCP first.** Per `CLAUDE.md`, prefer graph tools over Grep:
+**Use CodeGraph to understand the changed CODE — not to find the docs.** `Documentation/` is markdown
+and is not in the graph at all, so locating a doc is always a Glob/Grep job. Per `CLAUDE.md`:
 
 ```
-codegraph_explore(query="docs sync for <changed file or feature>")
-codegraph_search(query="<feature name>")  # find related code
+codegraph_explore(query="<changed classes/symbols>")   # what the change actually touches + its blast radius
 ```
 
 Then grep `Documentation/` for the names of any files, classes, or concepts your change renamed or removed:
@@ -93,8 +93,9 @@ not a lookup failure:
 
 When a change lands only in these areas and alters no documented system, the verdict is
 **no-op / surface-the-gap**, never `needs-new-doc` on reflex. This list is category-level, not
-exhaustive — confirm with `codegraph_search` if unsure whether a system quietly grew a doc since
-it was written.
+exhaustive — if unsure whether a system quietly grew a doc since this list was written, Glob
+`Documentation/**/*.md` and Grep it for the system's name (CodeGraph cannot answer this — it does
+not index markdown).
 
 ### Step 2 — Classify the doc impact
 

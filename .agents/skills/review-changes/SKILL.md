@@ -125,8 +125,8 @@ none.
 Get the file list first, then read the changed regions. Do not review from the
 diff hunks alone for anything behavioral: a hunk shows what changed, not what the
 surrounding method now does. Use `codegraph_explore` on the changed symbols to
-see the call flow and blast radius, and `codegraph_impact` before trusting that a
-struct/interface change is local.
+see the call flow and blast radius, and `codegraph impact <sym>` (CLI, via Bash)
+before trusting that a struct/interface change is local.
 
 ## Step 2 — the delta rule
 

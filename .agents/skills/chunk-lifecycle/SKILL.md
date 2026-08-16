@@ -34,10 +34,10 @@ Before editing any pipeline code, read `@Documentation/Architecture/CHUNK_LIFECY
 
 ### Step 3 — Verify with the graph
 
-After your edit, use the CodeGraph MCP:
+After your edit, use the CodeGraph CLI via Bash (exhaustive, and cheaper than an `explore` call):
 
-- `codegraph_callers` on any flag setter you changed — every caller must still be correct.
-- `codegraph_impact` on the modified file — confirm you didn't unintentionally destabilize an adjacent pipeline stage, especially the readiness gates.
+- `codegraph callers <flagSetter>` on any flag setter you changed — every caller must still be correct.
+- `codegraph impact <symbol>` on the modified type — confirm you didn't unintentionally destabilize an adjacent pipeline stage, especially the readiness gates.
 
 ### Step 4 — Inspect live pipeline state (unity-mcp)
 

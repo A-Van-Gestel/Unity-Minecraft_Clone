@@ -34,7 +34,8 @@ path: does it introduce one of the four shapes above? A new `class`/`struct` wit
 managed fields that is *indexed per voxel* is the reference-type violation; the
 same type held once per chunk-section as metadata is not (see
 `PER_BLOCK_METADATA_SCHEMAS.md` for the sanctioned sparse-metadata pattern).
-`codegraph_impact` on the new type tells you how per-voxel its storage really is.
+`codegraph impact <NewType>` (CLI, via Bash) tells you how per-voxel its storage
+really is.
 
 **Delta-based** — a violation the diff introduces or extends. A pre-existing one
 the diff merely moves is not a finding (delta rule).

@@ -359,7 +359,7 @@ production is asymptotic (the standing B3 lesson); the strategy below instead ma
 
 - Add bounds assertions to `GetVoxel` / `GetLightData` / `SetLightData` / `SetVoxel`
   (`ChunkData.cs:853–900`): local x/z in `[0,16)`, y in `[0,128)`; throw with the offending coordinate and chunk position in the message. Must compile to **zero cost in IL2CPP master** — these are the hottest reads in the engine (`[Conditional]`-gated helper or `#if UNITY_EDITOR || DEVELOPMENT_BUILD`).
-- **Prerequisite:** a caller audit (CodeGraph `codegraph_callers` + exhaustive Grep) confirming no caller legitimately relies on the leniency today. Any that do are themselves latent A5-class bugs — fix first.
+- **Prerequisite:** a caller audit (CodeGraph CLI `codegraph callers` + exhaustive Grep) confirming no caller legitimately relies on the leniency today. Any that do are themselves latent A5-class bugs — fix first.
 - **Verification:** re-run B60's prove-red sabotage (remove the Bug-14 `IsInCenterChunk` guard + the verifier bounds-skip) — with HF-1 in place it must go RED at every position, retroactively giving B60 the prove-red it could not have before. Then a full suite run (all baselines green) and an editor play-mode frame-cost sanity check (assertions are branch-only, but measure, don't assume).
 
 > **Outcome (2026-07-05): DONE.** `ChunkData.AssertLocalPositionInChunk` (dual `[Conditional]`

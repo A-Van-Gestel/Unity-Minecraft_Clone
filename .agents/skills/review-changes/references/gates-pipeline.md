@@ -49,8 +49,8 @@ or `ChunkData.cs` breaks one of the pipeline's ordering/ownership invariants:
   lighting flags must be reset **through the property**, not the backing field
 
 **How to check.** Read the changed region with the surrounding scheduling code in
-view — a hunk alone will not show you the ordering. `codegraph_callers` on the
-changed method tells you which pipeline stage reaches it. Cross-check the
+view — a hunk alone will not show you the ordering. `codegraph callers <method>`
+(CLI, via Bash) tells you which pipeline stage reaches it. Cross-check the
 `chunk-pipeline` rule for the specific flag/gate names; consult `chunk-lifecycle`
 for the full pipeline contract. The failure to describe is the *race or deadlock*,
 not the line: "the chunk is recycled before the mesh job completes, so a stale

@@ -17,11 +17,11 @@ When debugging complex systems in this voxel engine, you must act as a Senior Sy
 ## How to use it
 
 0. **CHECK KNOWN BUGS FIRST:** Before anything else, scan the relevant category file in `@Documentation/Bugs/` (e.g. `LIGHTING_BUGS.md`, `FLUID_BUGS.md`, `CHUNK_MANAGEMENT_BUGS.md`, `JOB_SYSTEM_BUGS.md`) and `_FIXED_BUGS.md` to see if the symptom matches an open issue, a known limitation, or a previously-fixed bug that may have regressed.
-1. **LOCATE THE CODE:** Use the CodeGraph MCP to find the suspected surface area before instrumenting.
-    - `codegraph_search` to find code related to the symptom (e.g., "propagateLight", "fluidLevel").
-    - `codegraph_callers` / `codegraph_callees` to trace call chains into and out of the suspected function.
-    - `codegraph_explore` to view the relevant implementations and interfaces grouped contextually.
-    - `codegraph_impact` on suspected files/structs to see what else depends on them before altering them.
+1. **LOCATE THE CODE:** Use CodeGraph to find the suspected surface area before instrumenting.
+    - `codegraph_explore` (the only MCP tool) with the symptom's symbols — e.g. `"propagateLight fluidLevel"` — returns their verbatim source grouped by file, the call flow between them, and a blast-radius summary. Usually the only call you need.
+    - `codegraph callers <sym>` / `codegraph callees <sym>` (CLI, via Bash) to trace call chains exhaustively into and out of the suspected function — `explore`'s results are capped, these are not.
+    - `codegraph impact <sym>` (CLI) on suspected structs to see everything that depends on them before altering them.
+    - Shaders are NOT indexed — if the symptom is visual and lives in `Assets/Shaders/`, go straight to Grep/Read.
 2. **INSPECT LIVE STATE (unity-mcp):** Before guessing, use the Unity MCP to observe what's actually happening:
     - `Unity_ReadConsole` — check for errors/warnings/exceptions that correlate with the symptom. Filter by type (`Error`, `Warning`) and text.
     - `Unity_ManageGameObject` — find the affected chunk/object and inspect its component state, including `[SerializeField]` values not visible from code reads (e.g. `find` by name, then `get_components` with `include_non_public_serialized: true`).
