@@ -276,7 +276,8 @@ drop + validation is WS-3**; the rest are separable riders with the homes noted:
 The far-travel precision follow-up. Independent of WS-2/WS-3 — a bigger near-origin world with
 negative quadrants is fully usable without it. Full design in `WORLD_SCALING_ANALYSIS.md` §3.3
 (periodic origin shift by integer chunk multiples, `ChunkRelativePosition` for player/camera/entities,
-`_WorldOriginOffset` shader global for noise continuity, the "must-not-shift" list). Its natural
+a shader global for noise continuity — shipped as `_LiquidNoiseOrigin`, the origin reduced onto the
+noise period — and the "must-not-shift" list). Its natural
 trigger is the first time a player travels far enough for vertex jitter to be visible (~16k units).
 
 **Rider — generation noise precision (assigned 2026-07-13; was unowned).** WS-4 makes far travel

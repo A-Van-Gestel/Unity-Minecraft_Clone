@@ -58,7 +58,7 @@ that unblocks MR-8's smooth-lighting constraint), VX-9 (heat-haze distortion), V
 - [`../Architecture/LIGHTING_SYSTEM_OVERVIEW.md`](../Architecture/LIGHTING_SYSTEM_OVERVIEW.md) —
   the BFS engine VX-4 modifies (per-channel propagation is the extension point).
 - [`../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md`](../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md) — all
-  GPU volumes are camera-following and sampled in **voxel space** via `_WorldOriginOffset`
+  GPU volumes are camera-following and sampled in **voxel space** (see the WS-4 note below)
   (the LiquidCore/FL-2 precedent); WS-4 coordinate rules apply to every item.
 - [`OM1_DEVICE_CALIBRATION.md`](OM1_DEVICE_CALIBRATION.md) — the experimental tier defaults
   derive from its device-tier model (VX-0).
@@ -101,7 +101,7 @@ that unblocks MR-8's smooth-lighting constraint), VX-9 (heat-haze distortion), V
    already paid for on the CPU.
 3. **The precedent stack exists.** A custom `ScriptableRendererFeature` already ships
    (`UIBlurRendererFeature` on `VoxelEngine-URP-Renderer.asset`); CL-5 has a designed raymarch
-   shader; `_WorldOriginOffset` gives shaders re-anchor-safe voxel-space positions; HDR is on.
+   shader; a re-anchor-safe voxel-space position must be derived per effect (see the WS-4 row); HDR is on.
 
 ### Hardware ray tracing (DXR / `RayTracingAccelerationStructure`) — ❌ rejected
 
@@ -206,7 +206,10 @@ consumer (VX-2), never alone.
 **What exists today:** Per-voxel light lives CPU-side in per-section `ushort` arrays (sky 4b +
 RGB 3×4b, `SMOOTH_AND_RGB_LIGHTING.md`) and reaches the GPU only baked per-vertex at mesh time.
 No 3D texture of any kind exists in the project. Shaders already receive re-anchor-safe
-voxel-space coordinates via `_WorldOriginOffset` (used by LiquidCore, FL-2 sway, planned CL-7).
+voxel-space coordinates. ⚠️ The old `_WorldOriginOffset` global is retired; its replacement
+`_LiquidNoiseOrigin` is **reduced modulo the liquid noise period**, so it is not an absolute voxel
+position. FL-1/FL-2 sway now uses `Helpers/FoliagePhase` instead. A volume needing true voxel-space
+addressing must push its own bounded origin term.
 `MR-8`'s constraints section already floated "lighting moves out of vertex data into a per-chunk
 3D light texture" as a future direction — this item is that data structure, engine-wide.
 
@@ -224,7 +227,7 @@ item would invent its own upload path.
       3.1 MB.
 2. **Toroidal (wrapping) addressing** — the volume never scrolls; world voxel → texel is
    `voxelCell mod volumeSize`. Player movement only dirties the newly-entered slab, and origin
-   re-anchors are free because addressing is in voxel space (WS-4 rules; `_WorldOriginOffset`
+   re-anchors are free because addressing is in voxel space (WS-4 rules; a bounded origin term
    converts fragment positions).
 3. **Update path:** hook the existing per-section apply points (lighting completion + mesh
    apply already know which 16³ sections changed) → enqueue dirty sections → budgeted per-frame
@@ -683,7 +686,7 @@ but v2+ is best scheduled after RF-1 ships.
 | Sub-chunk meshing                          | Untouched — no vertex-format or meshing change anywhere in this report (the `Color32` stream stays reserved for TF-11 + RF-3)                            |
 | Async BFS lighting                         | VX-4 extends propagation *inside* the existing per-channel BFS with suite-proven bit-identity for neutral content; boundary/removal invariants preserved |
 | Serialization                              | Nothing on disk changes in any item — Save ✅ across the table                                                                                            |
-| WS-4 coordinate spaces                     | All volumes voxel-space toroidal, sampled via `_WorldOriginOffset`; no Unity-space world coordinates stored anywhere                                     |
+| WS-4 coordinate spaces                     | All volumes voxel-space toroidal, each pushing its own bounded origin term (`_LiquidNoiseOrigin` is reduced and liquid-specific); no Unity-space world coordinates stored anywhere                                     |
 | Settings via `DATA_DRIVEN_SETTINGS_UI`     | Every knob is a `SettingFieldAttribute` field; VX-0 extends the attribute rather than building bespoke UI                                                |
 
 ---

@@ -95,7 +95,7 @@ FL-1 and FL-2 shipped 2026-07-19 (in-game verified); every remaining sway item b
 |-----------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Channel encoding | Cross-mesh verts carry `uv.z` = sway weight (1 top / 0 bottom — roots planted, FL-1); sway-flagged cubes carry their authored `BlockType.swayStrength` on **every** vert via a per-voxel post-pass in `GenerateVoxelMeshData` (FL-2 — covers all six schema arms in one place; custom meshes excluded). `uv.w` = per-voxel hash. Every other path writes `zw = 0` |
 | Phase hash      | `VoxelMeshHelper.VoxelHash01` (lowbias32-style) over the **voxel-space** cell (`ChunkPosition + pos` in the meshing job) — deterministic across re-mesh and floating-origin re-anchors                                                                    |
-| Sway model      | **Spatially coherent traveling wave** (`ApplyFoliageSway`, `VoxelCommon.hlsl`): the dominant phase is `distance-along-wind` through voxel-space XZ (re-anchor-safe via `_WorldOriginOffset`, the LiquidCore precedent), so gusts ripple across canopies/meadows; the baked `uv.w` is a small jitter only. Plus a slower broad gust wave and a `wave²` vertical settle so extremes read as bending. Transparent shader only; `VoxelAppdata.uv` is `float4` |
+| Sway model      | **Spatially coherent traveling wave** (`ApplyFoliageSway`, `VoxelCommon.hlsl`): the dominant phase is `distance-along-wind` through voxel-space XZ (re-anchor-safe; **as shipped this uses `Helpers/FoliagePhase`**, which reduces the origin's whole contribution mod 2π on the CPU — the shader no longer reads any origin global), so gusts ripple across canopies/meadows; the baked `uv.w` is a small jitter only. Plus a slower broad gust wave and a `wave²` vertical settle so extremes read as bending. Transparent shader only; `VoxelAppdata.uv` is `float4` |
 | Block authoring | `BlockType.swayStrength` (`[Range(0,1)]`, BlockEditor slider; carried into `BlockTypeJobData`); OakLeaves = 0.25. Only transparent-pass blocks visibly sway (opaque shader ignores the channel — documented in the tooltip)                              |
 | Wind ownership  | **Promoted `Clouds` → `World`**: `World._windBlocksPerSecond` (+ public `WindBlocksPerSecond`) is the single wind source; `Clouds.LayerWind` and foliage both read it; RF-7 later drives the value                                                        |
 | Driver          | `FoliageSway` component on the `World` prefab — amplitude/frequency/gust/reference-speed + wave-coherence knobs (wavelength 14 blocks, phase jitter 0.2, vertical bob 0.3, gust spatial 0.35), pushes `FoliageWindVector`/`FoliageSwayParams`/`FoliageSwayParams2` per frame |
@@ -328,8 +328,8 @@ RF-1 effective-light queries; TG-4 cleanup (pending) touches the same scheduler.
   authored 0.25, meshing baseline B23 + `SwayingLeafCube` palette entry (prove-red witnessed).
   Second deviation, after the first in-game pass read as disjointed per-voxel wobble: the shared
   sway model was **reworked to a spatially coherent traveling wave** — dominant phase =
-  distance-along-wind through voxel-space XZ (`_WorldOriginOffset`, the LiquidCore re-anchor
-  precedent), baked phase demoted to a small jitter, plus a broad gust wave and a `wave²` vertical
+  distance-along-wind through voxel-space XZ (shipped via `Helpers/FoliagePhase`, not an origin
+  global), baked phase demoted to a small jitter, plus a broad gust wave and a `wave²` vertical
   settle; new `FoliageSwayParams2` global + wave-coherence knobs on `FoliageSway` (wavelength /
   jitter / bob / gust-spatial). Drive-by fix: BlockEditor `DuplicateSelectedBlock` no longer drops
   `infiniteSourceRegeneration`/`spreadChance`. Substrate table updated to the combined FL-1+FL-2 shape.

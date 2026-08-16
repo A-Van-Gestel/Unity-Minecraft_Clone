@@ -188,8 +188,8 @@ block shaders attenuate only the *sky-light contribution* by a sample at the fra
 voxel XZ (+ the drift offset), softened (bilinear + slight blur) and scaled by a strength
 uniform (~0.15–0.25). Under a drifting cloud the ground darkens subtly and moves with it.
 
-- Requires the fragment's **voxel-space** XZ in the block shaders — available via the
-  existing `_WorldOriginOffset` global (WS-4 §4.6), so origin shifts are already handled.
+- Requires the fragment's **voxel-space** XZ in the block shaders. The existing shader global is
+  `_LiquidNoiseOrigin` (WS-4 §4.6) — **note it is the origin reduced modulo the liquid noise period, not an absolute voxel coordinate**, so it is only safe for sampling a field whose period divides it; anything needing a true voxel-space position must derive it another way. Cloud shadows need a genuine position, so this item owes a derivation of its own.
 - ❌-watch: interacts visually with smooth lighting/AO — tune strength low, capture A/B
   screenshots per `perf-benchmark` visual-verification habits before shipping.
 
@@ -235,7 +235,7 @@ too); pairs naturally with CL-5 where the slab shader gives the effect for free 
 | No hot-path GC         | The drift re-key uses the existing pool + mesh cache; CL-4 remesh budget reuses pooled lists; per-frame paths allocation-free     |
 | Pooling                | Tile GameObject pool + shared-mesh cache from `c7eabd6` are the substrate for every item                                          |
 | Serialization          | Nothing on disk (weather persistence explicitly belongs to RF-7, not here) — Save ✅ across the table                              |
-| WS-4 coordinate spaces | Drift accumulator wrapped mod pattern width; pattern math integer; placement via `VoxelToUnity`; shadows via `_WorldOriginOffset` |
+| WS-4 coordinate spaces | Drift accumulator wrapped mod pattern width; pattern math integer; placement via `VoxelToUnity`; shadows need a voxel-space position that `_LiquidNoiseOrigin` no longer provides (it is reduced) |
 
 ---
 

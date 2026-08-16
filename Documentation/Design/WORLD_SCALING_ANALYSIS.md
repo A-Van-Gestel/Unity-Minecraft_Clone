@@ -215,6 +215,11 @@ Maintain a `WorldOriginChunk` (a `ChunkCoord`); Unity world position of anything
 3. **Shaders:** `LiquidCore.hlsl` uses `worldPos` for noise coordinates, `frac(worldPos)` shore distances, and flow routing. `frac()` itself survives integer shifts, but the *noise field*
    would visibly teleport. Add a `float3 _WorldOriginOffset` global (set alongside
    `GlobalLightLevel` in `World.cs`) and sample noise at `worldPos + _WorldOriginOffset` — the liquid pattern then stays continuous across shifts. Same for any future world-space shader effect. (Note: this reintroduces large values into the noise *input* — see §3.4; acceptable for cosmetic liquid noise, where a `fmod` by the noise period keeps the input small.)
+   <br>**Shipped as (2026-08-16):** the parenthetical above was right, and the raw-offset version it warned about
+   did ship first and degraded exactly as predicted (`_FIXED_BUGS.md` § Fluid #20). The global is now
+   `_LiquidNoiseOrigin` and carries the origin **already reduced** by the noise period, so it is liquid-specific
+   and not a general "voxel-space position" service for other effects. The period is not free to choose: the
+   shipped `snoise` repeats every 867 units of input, and the reduction must land on a multiple of that.
 4. Things that must NOT shift: skybox, directional light, UI. Things that must: clouds plane, chunk borders visualizer, debug visualizations, any cached `Vector3` world positions (`Chunk.ChunkPosition`, `ChunkLoadAnimation` targets — audit for cached absolute positions; prefer deriving from `ChunkCoord` on demand so there is nothing to patch).
 
 A 64-chunk re-anchor radius keeps all rendered geometry within ± (loadDistance+64)·16 ≈ a few thousand units of origin — float precision ~0.1–0.5 mm. Comfortable.
@@ -275,8 +280,10 @@ Honest assessment: Tier A + palettes (§2.2) delivers "tall world with depth" at
 - [ ] **`ushort`/`byte` Y fields**: heightmap values, `LightQueueNode`-style structs, serialized Y bytes in the chunk format — every one is a silent truncation at >255 or <0.
 - [ ] **`Mathf.Abs` on coordinates or seeds** — almost always a quadrant-mirroring bug in disguise.
 - [ ] **Cached absolute `Vector3` positions** (`Chunk.ChunkPosition`, animation targets, debug visualizers) — must be derived or patched on origin shift.
-- [ ] **Shaders consuming `worldPos`** (`LiquidCore.hlsl` noise/shore/flow) — need
-  `_WorldOriginOffset` continuity across origin shifts; keep noise inputs small via period `fmod`.
+- [x] **Shaders consuming `worldPos`** (`LiquidCore.hlsl` noise/shore/flow) — need origin continuity across
+  shifts while keeping noise inputs small. **Done 2026-08-16** via `_LiquidNoiseOrigin`, the origin reduced onto
+  the noise field's own 867-unit period (`_FIXED_BUGS.md` § Fluid #20). `frac()` shore/flow math was already
+  shift-invariant and is untouched.
 - [ ] **Save format**: every tier bumps versions — chunk layout (height/offset), region codec (negative addressing), level.dat (spawn/world-type params). Never reinterpret old bytes in place; always a migration step with frozen DTOs.
 - [ ] **Determinism gates**: Tier A re-anchoring and Tier B noise-precision changes alter generated terrain by definition → these are **world-version-gated generator changes**, not silent updates. Old worlds must keep generating new chunks with the old generator parameters (the modular world-type system is the natural home for "generator profile vX").
 
