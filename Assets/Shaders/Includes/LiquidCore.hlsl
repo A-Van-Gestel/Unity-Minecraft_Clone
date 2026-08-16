@@ -107,18 +107,31 @@ CBUFFER_END
 // Floating Origin (WS-4)
 // =============================================================================
 // Set as a shader global from World.cs (outside UnityPerMaterial, like GlobalLightLevel). Unity render space is
-// offset from voxel world space by an exact multiple of the chunk width; this is that offset. Unset — the editor
-// preview, and any frame before World sets it — leaves it 0, which is the identity.
+// offset from voxel world space by an exact multiple of the chunk width; this is that offset, already reduced
+// modulo LIQUID_NOISE_PERIOD by Helpers/LiquidNoiseOrigin. Unset — the editor preview, and any frame before World
+// sets it — leaves it 0, which is the identity.
+//
+// It is passed wrapped rather than raw because the raw origin is the player's distance from the world center, and
+// a value that large inside a noise coordinate quantizes the sample position until neighboring pixels collapse
+// onto one value: the surface flickers from ~3e5 blocks out and flattens toward a single color beyond ~1e6.
+//
+// The wrap is invisible because it lands on a period the noise ALREADY has. `snoise` folds its lattice index
+// through mod289, so the field repeats every 289 lattice cells — 867 units in v-space, since the 1/3 simplex skew
+// turns a one-axis shift of 867 into a lattice shift of (289, 289, 4*289). Sampling at a coordinate congruent
+// modulo that period is therefore the *same* field value, not a similar one, so no seam can exist. Nothing in the
+// noise function is modified; an earlier attempt that wrapped the lattice itself produced exactly such a seam,
+// on the diagonal plane 4z + x + y = P, because a wrapped field only matches the original inside one period.
 
-float3 _WorldOriginOffset;
+float3 _LiquidNoiseOrigin;
 
-// Voxel-space position for sampling world-anchored noise fields: without it the whole liquid pattern would slide
-// the moment the origin re-anchors. Deliberately NOT used by the frac(worldPos) shore/wall math, which is already
-// invariant under a multiple-of-16 shift.
-float3 LiquidNoisePos(float3 worldPos)
-{
-    return worldPos + _WorldOriginOffset;
-}
+// The period the origin is reduced modulo, in blocks. MUST match Helpers.LiquidNoiseOrigin.PeriodBlocks.
+// Constraint: LIQUID_NOISE_PERIOD * scale must be a whole multiple of 867 (= 3 x 289) at every call site, which
+// is what makes the reduction land on the field's own period. 1734 is two of those periods; the factor of two
+// buys a snapping granularity of 0.5 for the authored scales instead of 1.0.
+#define LIQUID_NOISE_PERIOD 1734.0
+
+// The field's intrinsic period in v-space: 3 (simplex skew) x 289 (mod289). Not a tunable.
+#define LIQUID_NOISE_V_PERIOD 867.0
 
 // =============================================================================
 // Vertex Function
@@ -166,6 +179,9 @@ float snoise(float3 v)
     float3 x1 = x0 - i1 + C.xxx;
     float3 x2 = x0 - i2 + C.yyy;
     float3 x3 = x0 - D.yyy;
+    // mod289 is what makes this field periodic: the hash is its only source of randomness, so folding the lattice
+    // index into 289 cells gives the whole field a period of 289 lattice cells — 867 units in v-space once the
+    // 1/3 simplex skew is accounted for. LiquidNoisePos below relies on that; nothing here is modified for it.
     i = mod289(i);
     float4 p = permute(permute(permute(i.z + float4(0.0, i1.z, i2.z, 1.0)) + i.y + float4(0.0, i1.y, i2.y, 1.0)) + i.x + float4(0.0, i1.x, i2.x, 1.0));
     float n_ = 0.142857142857;
@@ -209,6 +225,33 @@ float fbm(float3 p, int octaves)
         f *= 2.0;
     }
     return v;
+}
+
+// =============================================================================
+// Liquid Noise Position
+// =============================================================================
+// Every noise sample in this file starts from LiquidNoisePos. That is deliberate: the origin reduction is only
+// invisible if the scale it is combined with satisfies the period constraint, and a call site that skipped the
+// snap would seam LIQUID_NOISE_PERIOD blocks from spawn — cheap to introduce, expensive to notice.
+
+/// Snaps an authored scale so `LIQUID_NOISE_PERIOD * scale` is a whole multiple of the field's intrinsic v-space
+/// period. Only then does reducing the origin land on a coordinate where the noise takes the *same* value, rather
+/// than a merely similar one. The correction is at most half a step of 0.5, and every shipped default (2, 4, 5,
+/// 10, 15) is already a multiple of it, so nothing moves at defaults.
+float LiquidSnapScale(float scale)
+{
+    float step = LIQUID_NOISE_V_PERIOD / LIQUID_NOISE_PERIOD; // 0.5 at the shipped period
+    return max(round(scale / step), 1.0) * step;
+}
+
+/// Voxel-space sample position for a world-anchored noise field, reduced onto the field's own period and scaled.
+/// Without the origin term the whole liquid pattern would slide the moment the origin re-anchors; without the
+/// reduction the term would be the player's distance from the world center, which is the precision bug this
+/// exists to remove. Deliberately NOT used by the frac(worldPos) shore/wall math, which is already invariant
+/// under a multiple-of-16 shift.
+float3 LiquidNoisePos(float3 worldPos, float scale)
+{
+    return (worldPos + _LiquidNoiseOrigin) * LiquidSnapScale(scale);
 }
 
 // =============================================================================
@@ -324,15 +367,20 @@ void EvaluateLava(LiquidV2F i, float phaseTime, out float3 lavaCol, out float2 h
     float3 flow3D = RouteFlowTo3D(flow, i.worldNormal);
 
     // Apply the routed 3D flow to the noise coordinates
-    float3 noisePos = LiquidNoisePos(i.worldPos);
-    float3 p1 = noisePos * _NoiseScale + flow3D + float3(0, t_boil, 0);
-    float3 p2 = noisePos * _NoiseScale - flow3D * 0.8 + float3(0, -t_boil * 0.8, 0);
+    float3 drift1 = flow3D + float3(0, t_boil, 0);
+    float3 drift2 = -flow3D * 0.8 + float3(0, -t_boil * 0.8, 0);
+    float3 p1 = LiquidNoisePos(i.worldPos, _NoiseScale) + drift1;
+    float3 p2 = LiquidNoisePos(i.worldPos, _NoiseScale) + drift2;
 
     float base_fbm = fbm(p1, LAVA_FBM_OCTAVES);
     float base_noise = (base_fbm + 1.0) * 0.5;
 
-    float noise1 = fbm(p1 * _CellDensity, LAVA_FBM_OCTAVES);
-    float noise2 = fbm(p2 * _CellDensity, LAVA_FBM_OCTAVES);
+    // The crack pattern samples the same drift at a denser scale. The position is rebuilt at that scale rather
+    // than multiplying p1 through, so the denser sample also lands on the field's period.
+    float3 crack1 = LiquidNoisePos(i.worldPos, _NoiseScale * _CellDensity) + drift1 * _CellDensity;
+    float3 crack2 = LiquidNoisePos(i.worldPos, _NoiseScale * _CellDensity) + drift2 * _CellDensity;
+    float noise1 = fbm(crack1, LAVA_FBM_OCTAVES);
+    float noise2 = fbm(crack2, LAVA_FBM_OCTAVES);
     float crack_pattern = pow(abs(noise1 - noise2), 2.0) * _CrackBrightness;
 
     half3 col = lerp(_DarkColor.rgb, _MidColor.rgb, smoothstep(0.3, 0.7, base_noise));
@@ -345,7 +393,7 @@ void EvaluateLava(LiquidV2F i, float phaseTime, out float3 lavaCol, out float2 h
     float idle = 1.0 - smoothstep(0.1, 0.8, rawSpeed);
 
     // 1. Cooling Crust (Idle Shorelines)
-    float3 crust_p = noisePos * _NoiseScale * 2.0 - flow3D + float3(0, t_boil * 0.5, 0);
+    float3 crust_p = LiquidNoisePos(i.worldPos, _NoiseScale * 2.0) - flow3D + float3(0, t_boil * 0.5, 0);
     float crust_noise = (fbm(crust_p, max(LAVA_FBM_OCTAVES - 2, 2)) + 1.0) * 0.5;
 
     // Multiply by 'idle' so fast-flowing lava rivers don't crust over, even at the shores!
@@ -357,7 +405,7 @@ void EvaluateLava(LiquidV2F i, float phaseTime, out float3 lavaCol, out float2 h
     float turbulence = smoothstep(0.1, 0.8, length(totalFlow));
 
     // 2. Bright Sparks where flow is strong (Turbulence)
-    float3 flow_mask_p = noisePos * _NoiseScale * 2.5 + flow3D * 2.0;
+    float3 flow_mask_p = LiquidNoisePos(i.worldPos, _NoiseScale * 2.5) + flow3D * 2.0;
 
     float flow_mask = (fbm(flow_mask_p, LAVA_FBM_OCTAVES - 1) + 1.0) * 0.5;
     lavaCol += _BrightColor.rgb * smoothstep(0.5, 0.7, flow_mask) * turbulence * _FlowHighlight;
@@ -402,9 +450,8 @@ void EvaluateWater(LiquidV2F i, float phaseTime, out float3 waterCol, out float 
     float3 flow3D = RouteFlowTo3D(flow, i.worldNormal);
 
     // Apply the routed 3D flow to the noise coordinates
-    float3 noisePos = LiquidNoisePos(i.worldPos);
-    float3 wave_p = noisePos * _WaveScale + flow3D + float3(0, _Time.y * _WaveSpeed, 0);
-    float3 ripple_p = noisePos * _RippleScale - flow3D + float3(0, _Time.y * _RippleSpeed, 0);
+    float3 wave_p = LiquidNoisePos(i.worldPos, _WaveScale) + flow3D + float3(0, _Time.y * _WaveSpeed, 0);
+    float3 ripple_p = LiquidNoisePos(i.worldPos, _RippleScale) - flow3D + float3(0, _Time.y * _RippleSpeed, 0);
 
     float wave_fbm = fbm(wave_p, FLUID_FBM_OCTAVES);
     float ripple_noise = fbm(ripple_p, FLUID_FBM_OCTAVES);
@@ -422,7 +469,7 @@ void EvaluateWater(LiquidV2F i, float phaseTime, out float3 waterCol, out float 
     // Combined guard: both features share the stream_noise FBM. The || is intentional so that
     // a future tier enabling stream foam without shore foam still compiles the shared setup.
     #if FLUID_ENABLE_SHORE_FOAM || FLUID_ENABLE_STREAM_FOAM
-    float3 stream_p = noisePos * _WaveScale * 2.0 + flow3D * 3.0;
+    float3 stream_p = LiquidNoisePos(i.worldPos, _WaveScale * 2.0) + flow3D * 3.0;
     float stream_noise = (fbm(stream_p, max(FLUID_FBM_OCTAVES - 1, 2)) + 1.0) * 0.5;
     #endif
 

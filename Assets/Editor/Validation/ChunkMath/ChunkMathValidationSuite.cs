@@ -38,6 +38,7 @@ namespace Editor.Validation
             AddWorldOriginScenarios(scenarios);
             AddRegionCodecScenarios(scenarios);
             AddFoliagePhaseScenarios(scenarios);
+            AddLiquidNoiseScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Chunk Math", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
 
@@ -58,5 +59,8 @@ namespace Editor.Validation
 
         /// <summary>Registers the FL-1 foliage wave-phase far-origin precision baselines (partial file .FoliagePhase.cs).</summary>
         static partial void AddFoliagePhaseScenarios(List<Scenario> scenarios);
+
+        /// <summary>Registers the FLUID #20 liquid-noise wrapped-origin and scale-snapping baselines (partial file .LiquidNoise.cs).</summary>
+        static partial void AddLiquidNoiseScenarios(List<Scenario> scenarios);
     }
 }

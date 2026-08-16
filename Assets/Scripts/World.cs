@@ -281,7 +281,7 @@ public class World : MonoBehaviour, IMeshDrainHost
     private static readonly int s_shaderMinGlobalLightLevel = Shader.PropertyToID("minGlobalLightLevel");
     private static readonly int s_shaderMaxGlobalLightLevel = Shader.PropertyToID("maxGlobalLightLevel");
     private static readonly int s_shaderSkyLightColor = Shader.PropertyToID("SkyLightColor");
-    private static readonly int s_shaderWorldOriginOffset = Shader.PropertyToID("_WorldOriginOffset");
+    private static readonly int s_shaderLiquidNoiseOrigin = Shader.PropertyToID("_LiquidNoiseOrigin");
 
     // --- Sky Shader Properties (RF-2) ---
     private static readonly int s_shaderSunDirection = Shader.PropertyToID("_SunDirection");
@@ -1714,7 +1714,11 @@ public class World : MonoBehaviour, IMeshDrainHost
     private static void AnchorOrigin(ChunkCoord originChunk)
     {
         WorldOrigin.SetOrigin(originChunk);
-        Shader.SetGlobalVector(s_shaderWorldOriginOffset, (Vector3)WorldOrigin.OriginVoxel);
+
+        // Reduced, not raw: the raw origin is a distance from the world center, and handing that to a shader puts a
+        // huge float where the noise needs fine resolution. The reduction is invisible because it lands on a period
+        // the noise field already has, so the shader samples the same value. See Helpers/LiquidNoiseOrigin.
+        Shader.SetGlobalVector(s_shaderLiquidNoiseOrigin, LiquidNoiseOrigin.WrappedOrigin(WorldOrigin.OriginVoxel));
     }
 
     /// <summary>
