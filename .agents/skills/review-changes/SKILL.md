@@ -1,6 +1,6 @@
 ---
 name: review-changes
-description: Reviews a working diff against this voxel engine's project-specific invariants — the data-oriented architecture constraints, Burst compliance in job code, hot-path GC and pool usage, region serialization and AOT migration, [SerializeField] rename safety, chunk-pipeline invariants, mutable-static domain-reload resets, far-distance coordinate precision in shader and world-position math, known-bug collisions, doc impact, and deleted guards. Refutes each candidate, ranks findings Blockers→Low, and gives one verdict — CONTINUE/FIX FIRST on a cheap intermediate run mid-work, MERGE/HOLD before merge. Built to be run repeatedly while the work is in progress. Use when the user says "review my changes", "review the diff", "pre-merge check", "is this ready to merge", "review before commit", "check my work", or before offering a commit on a non-trivial change.
+description: Reviews a working diff against this voxel engine's project-specific invariants — the data-oriented architecture constraints, Burst compliance in job code, hot-path GC and pool usage, region serialization and AOT migration, [SerializeField] rename safety, chunk-pipeline invariants, mutable-static domain-reload resets, far-distance coordinate precision and coordinate-space mixing in shader and world-position math, known-bug collisions, doc impact, and deleted guards. Refutes each candidate, ranks findings Blockers→Low, and gives one verdict — CONTINUE/FIX FIRST on a cheap intermediate run mid-work, MERGE/HOLD before merge. Built to be run repeatedly while the work is in progress. Use when the user says "review my changes", "review the diff", "pre-merge check", "is this ready to merge", "review before commit", "check my work", or before offering a commit on a non-trivial change.
 ---
 
 # Review changes
@@ -158,7 +158,7 @@ class of regression the `+` side cannot show you is a guard the `-` side removed
 
 ## Step 3 — load the shards the diff earns, then run the gates
 
-The thirteen gates are split across five reference files. **Read
+The fourteen gates are split across five reference files. **Read
 `references/gates-core.md` always**, plus each shard the changed-file list
 triggers. Loading a shard the diff cannot trip is wasted context; skipping one it
 does trip is a missed gate, so route from the actual file list, not from a guess
@@ -170,7 +170,7 @@ about what the change was "about".
 | `references/gates-jobs.md` | 5, 6, 7 | `Assets/Scripts/Jobs/`, an `Update`/`LateUpdate`/`FixedUpdate`, a meshing / chunk-loop body, or a job-dispatch wrapper |
 | `references/gates-serialization.md` | 8, 9 | `Assets/Scripts/Serialization/`, `ChunkData.cs`, `ChunkStorageManager.cs`, or a `[SerializeField]` / public field on a `MonoBehaviour` / `ScriptableObject` |
 | `references/gates-pipeline.md` | 10, 11, 12 | `World.cs`, `WorldJobManager.cs`, `ChunkPoolManager.cs`, a pooled type (`Chunk.cs`, `Data/ChunkData.cs`, `Data/ChunkSection.cs`, `VisualizerChunkData.cs`), lighting / fluid / meshing / chunk-management code, or a newly added mutable `static` |
-| `references/gates-coordinates.md` | 13 | `Assets/Shaders/` (any `.shader` / `.hlsl`), `WorldOrigin.cs`, `ChunkMath.cs`, noise sampling, or code converting a world/voxel position to `float` |
+| `references/gates-coordinates.md` | 13, 14 | `Assets/Shaders/` (any `.shader` / `.hlsl`), `WorldOrigin.cs`, `ChunkMath.cs`, `ChunkCoord.cs`, noise sampling, or any code that converts a world/voxel position to `float` or moves one between coordinate spaces |
 
 Most diffs load core plus one or two shards. A diff that touches everything loads
 everything — that is correct, not a failure of the router.
@@ -182,9 +182,9 @@ means the shard is genuinely not earned; not checking means you do not know.
 - **Serialization**, because any `MonoBehaviour` or `ScriptableObject` in the diff
   might carry a `[SerializeField]` or public field:
   `git diff $RANGE | grep -nE '^[-+].*(\[SerializeField\]|public\s+\w+\s+\w+\s*;)'`
-- **Coordinates**, because a world position can be turned into a float anywhere,
-  not only under `Assets/Shaders/`:
-  `git diff $RANGE | grep -nE '^\+.*(OriginVoxel|_WorldOriginOffset|worldPos|positionWS|_Time\.y)'`
+- **Coordinates**, because a world position can be turned into a float, or moved
+  between spaces, anywhere — not only under `Assets/Shaders/`:
+  `git diff $RANGE | grep -nE '^\+.*(OriginVoxel|_WorldOriginOffset|worldPos|positionWS|_Time\.y|FloorToInt|%\s*16)'`
 
 **The shards summarize `.agents/rules/*.md`; the rules are the source of truth.**
 Those rule files are glob-attached by other harnesses while you *edit* a matching
@@ -211,6 +211,7 @@ are the part that matters, and the exceptions are where false positives come fro
 | 11 | Mutable `static` added without a per-play reset, or a second `[RuntimeInitializeOnLoadMethod]` | pipeline |
 | 12 | Change collides with a known bug in `Documentation/Bugs/` | pipeline |
 | 13 | Absolute world coordinate (or an unbounded clock) reaches a `sin`/`cos`/noise argument — correct at spawn, degrades with distance | coordinates |
+| 14 | Coordinate spaces mixed, or a position named for no space — correct until the origin re-anchors | coordinates |
 
 ### On an intermediate run: what may wait, and what may not
 

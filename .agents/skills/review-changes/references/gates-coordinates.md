@@ -1,8 +1,16 @@
-# Gates — coordinate precision
+# Gates — coordinate precision and spaces
 
 Loaded when the diff touches shader code, or any computation that turns a world
-position into a float. One gate, and it is the one this engine keeps re-learning:
-the world is ±2³¹ voxels wide, and float32 does not span it.
+position into a float or moves one between coordinate frames. Two gates, sharing
+one root cause: the world is ±2³¹ voxels wide, float32 does not span it, and the
+floating origin that works around this makes "world position" ambiguous.
+
+Both gates are invisible near spawn — gate 13 because the origin offset is zero,
+gate 14 because the origin has not re-anchored yet. Neither is a bug you catch by
+playing at the spawn point.
+
+`Documentation/Guides/COORDINATE_SPACES_GUIDE.md` is the source of truth for gate
+14 and the five spaces; read it rather than reviewing from the summary here.
 
 ---
 
@@ -78,3 +86,64 @@ without checking, because only half the problem has an exact answer:
 - **A position that only feeds a comparison, a `lerp`, or a distance test.** These
   degrade gracefully; the gate is about functions of *small differences* in a
   *large* value.
+
+---
+
+## Gate 14 — Coordinate spaces mixed, or a position named for no space
+
+**What fails.** The engine has **five** coordinate spaces (guide §1: Unity/render,
+voxel world, chunk index, chunk-local, chunk-relative persisted). They are all
+`Vector3`/`Vector3Int`, so mixing them compiles cleanly and stays correct until
+the origin re-anchors — 64 chunks from spawn — at which point positions land in
+the wrong cell, saves restore to the wrong place, or a query silently reads a
+different chunk.
+
+The shapes the guide names, in rough order of how often they appear:
+
+- **`transform.position + WorldOrigin.OriginVoxel`** — the canonical bug form
+  (guide §1). It is *also* a gate 13 finding: a large float added to a small one.
+  Correct form is `WorldOrigin.UnityToVoxelCell(...)` — floor in small floats,
+  then an exact integer add.
+- **Hand-rolled chunk math** — `Mathf.FloorToInt(pos / 16)`, `% 16` with a
+  negative fixup. `ChunkMath` has the only always-correct negative forms and the
+  Chunk Math suite asserts them (guide §2).
+- **A voxel-space API fed a transform** — e.g. `ChunkCoord.FromVoxelPosition`
+  taking `transform.position`; `WorldOrigin.UnityToChunk` is the transform path.
+- **`WorldOrigin` referenced under `Assets/Scripts/Jobs/`** — guide §3 rule 3
+  makes the job pipeline origin-independent by construction. This one is a hard,
+  greppable rule with no judgement involved.
+- **A Unity-space value reaching disk** — guide §3 rule 4; corrupt the moment the
+  origin re-anchors. Note gate 8 will *not* catch this: the layout is unchanged
+  and the migration is fine, only the value's meaning is wrong. This gate is the
+  only one that sees it.
+- **`OriginVoxel` re-read mid-operation** — a ray march or probe/click pair must
+  read it once and thread it through (guide §3 rule 5).
+- **A new parameter or public API named `pos` / `worldPos`** with no space in the
+  name or docstring. "World" is precisely the ambiguous word.
+
+**How to check.**
+
+```bash
+# $RANGE is whatever step 1 resolved: "" (unstaged), --staged, @{u}...HEAD, <base>...HEAD
+git diff $RANGE | grep -nE '^\+.*(transform\.position\s*[-+]|FloorToInt\([^)]*/\s*16|%\s*16|FromVoxelPosition|OriginVoxel)'
+git diff $RANGE -- 'Assets/Scripts/Jobs/*' | grep -n 'WorldOrigin'
+```
+
+For each hit, name the space of every operand and of the result. If you cannot
+name one from the identifier or its docstring, that is itself the finding — rule 1
+is that the name carries the space, because the type never will.
+
+**Not a finding.**
+
+- **The guide's §4 rename backlog.** `ChunkMath.WorldToChunk`,
+  `ChunkCoord.ToWorldPosition`, `CheckForVoxel(worldPos)` and the rest are *known*
+  legacy misnomers, deliberately not mass-renamed to keep diffs reviewable. Merely
+  touching a file that uses one is not a finding. Flag only a **newly introduced**
+  misnomer — or, if the diff already refactors that surface, note the backlog row
+  as an opportunity and route to `refactor-safely`.
+- **Frozen migration steps.** `Migration_v*` remarks keep era-accurate names by
+  design (guide §4) — annotate, never rewrite.
+- **Y.** The origin is XZ-only, so Y is identical in Unity and voxel space and
+  needs no conversion (guide §3 rule 6).
+- **Deliberate multiple-of-`CHUNK_WIDTH` offsets.** Exact in float by
+  construction; that is the mechanism the design relies on, not a violation.
