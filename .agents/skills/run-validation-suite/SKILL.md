@@ -1,6 +1,6 @@
 ---
 name: run-validation-suite
-description: How to RUN the editor validation suites (a single suite, a subset, or all via "Validate All"/headless CI) and how to READ + interpret their output — the colorized console summary and the NUnit3 XML results file. Use when the user asks to "run the validation suite(s)", "validate the engine/lighting/meshing/etc.", "run Validate All", "run the regression suites", check a change didn't regress, run suites in batch/headless/CI, or asks what a suite's PASS/FAIL/Inconclusive/"fix candidate"/"isolation violation" output means or how to read the results XML. For WRITING new suites/scenarios or fixing a documented bug through a suite, use the validation-driven-bugfix skill instead; for the live-editor MCP mechanics themselves, see the unity-mcp skill.
+description: How to RUN the editor validation suites (one, a subset, or all via "Validate All"/headless CI) and how to READ their console + NUnit3 XML output. Use when the user asks to "run the validation suite(s)", "validate the engine/lighting/meshing/etc.", "run Validate All", "run the regression suites", check a change didn't regress, run suites in batch/headless/CI, or asks what a suite's PASS/FAIL/Inconclusive/"fix candidate"/"isolation violation" output means. For WRITING new suites/scenarios or fixing a documented bug through a suite, use validation-driven-bugfix instead; for live-editor MCP mechanics see unity-mcp.
 ---
 
 # Running & reading the validation suites

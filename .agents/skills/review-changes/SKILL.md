@@ -1,6 +1,6 @@
 ---
 name: review-changes
-description: Reviews a working diff against this voxel engine's project-specific invariants — the data-oriented architecture constraints, Burst compliance in job code, hot-path GC and pool usage, region serialization and AOT migration, [SerializeField] rename safety, chunk-pipeline invariants, mutable-static domain-reload resets, far-distance coordinate precision and coordinate-space mixing in shader and world-position math, known-bug collisions, doc impact, and deleted guards. Refutes each candidate, ranks findings Blockers→Low, and gives one verdict — CONTINUE/FIX FIRST on a cheap intermediate run mid-work, MERGE/HOLD before merge. Built to be run repeatedly while the work is in progress. Use when the user says "review my changes", "review the diff", "pre-merge check", "is this ready to merge", "review before commit", "check my work", or before offering a commit on a non-trivial change.
+description: Reviews a working diff against this voxel engine's project-specific invariants — architecture constraints, Burst, hot-path GC, serialization, chunk pipeline, coordinate spaces, docs — and ends with a single merge verdict. Safe to run repeatedly mid-work. Use when the user says "review my changes", "review the diff", "pre-merge check", "is this ready to merge", "review before commit", "check my work", or before offering a commit on a non-trivial change.
 ---
 
 # Review changes
