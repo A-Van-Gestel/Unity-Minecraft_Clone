@@ -158,7 +158,7 @@ class of regression the `+` side cannot show you is a guard the `-` side removed
 
 ## Step 3 — load the shards the diff earns, then run the gates
 
-The fourteen gates are split across five reference files. **Read
+The nineteen gates are split across six reference files. **Read
 `references/gates-core.md` always**, plus each shard the changed-file list
 triggers. Loading a shard the diff cannot trip is wasted context; skipping one it
 does trip is a missed gate, so route from the actual file list, not from a guess
@@ -171,6 +171,7 @@ about what the change was "about".
 | `references/gates-serialization.md` | 8, 9 | `Assets/Scripts/Serialization/`, `ChunkData.cs`, `ChunkStorageManager.cs`, or a `[SerializeField]` / public field on a `MonoBehaviour` / `ScriptableObject` |
 | `references/gates-pipeline.md` | 10, 11, 12 | `World.cs`, `WorldJobManager.cs`, `ChunkPoolManager.cs`, a pooled type (`Chunk.cs`, `Data/ChunkData.cs`, `Data/ChunkSection.cs`, `VisualizerChunkData.cs`), lighting / fluid / meshing / chunk-management code, or a newly added mutable `static` |
 | `references/gates-coordinates.md` | 13, 14 | `Assets/Shaders/` (any `.shader` / `.hlsl`), `WorldOrigin.cs`, `ChunkMath.cs`, `ChunkCoord.cs`, noise sampling, or any code that converts a world/voxel position to `float` or moves one between coordinate spaces |
+| `references/gates-docs.md` | 15, 16, 17, 18, 19 | `Documentation/`, `.agents/skills/`, `CLAUDE.md`, or `AGENTS.md` — i.e. the diff **edits docs** (gate 3 in `core` covers the opposite case, code changed with no doc edit) |
 
 Most diffs load core plus one or two shards. A diff that touches everything loads
 everything — that is correct, not a failure of the router.
@@ -212,6 +213,11 @@ are the part that matters, and the exceptions are where false positives come fro
 | 12 | Change collides with a known bug in `Documentation/Bugs/` | pipeline |
 | 13 | Absolute world coordinate (or an unbounded clock) reaches a `sin`/`cos`/noise argument — correct at spawn, degrades with distance | coordinates |
 | 14 | Coordinate spaces mixed, or a position named for no space — correct until the origin re-anchors | coordinates |
+| 15 | A doc rewrite silently dropped content (index entry, section, table row) | docs |
+| 16 | A completed (`✅`/`⛔`) phase was patched to track code drift rather than corrected | docs |
+| 17 | A promotion or Architecture rewrite reuses an `Audited:` line it did not re-earn | docs |
+| 18 | An issued ID was deleted from an index table instead of marked superseded | docs |
+| 19 | `Last Updated:` / `Audited:` restamped for a targeted one-section edit | docs |
 
 ### On an intermediate run: what may wait, and what may not
 
@@ -380,6 +386,7 @@ Rules for the report:
 | Situation | Go here |
 |---|---|
 | Gate 3 fired, or you are unsure which doc owns the behavior | `docs-sync` |
+| Gate 16, 17 or 18 fired — a frozen phase was patched, evidence was not re-earned, or an ID was dropped | `docs-sync` (owns the freeze rule, promotion protocol, and ID index) |
 | Gate 5 or 6 fired — Burst break or hot-path alloc, and you want the pooled/`Unity.Mathematics` rewrite | `burst-optimization` |
 | Gate 8 fired — on-disk layout changed | `serialization-migration` |
 | Gate 9 fired — a `[SerializeField]`/prefab-referenced rename or a `.meta` concern | `refactor-safely` and `unity-file-ops` |
