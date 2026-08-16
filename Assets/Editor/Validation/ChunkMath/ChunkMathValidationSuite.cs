@@ -37,6 +37,7 @@ namespace Editor.Validation
             AddVoxelQueryScenarios(scenarios);
             AddWorldOriginScenarios(scenarios);
             AddRegionCodecScenarios(scenarios);
+            AddFoliagePhaseScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Chunk Math", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
 
@@ -54,5 +55,8 @@ namespace Editor.Validation
 
         /// <summary>Registers the NS-5 V1/V2 region-codec pins — expected-value, ±2³¹, and legacy-contract baselines (partial file .RegionCodec.cs).</summary>
         static partial void AddRegionCodecScenarios(List<Scenario> scenarios);
+
+        /// <summary>Registers the FL-1 foliage wave-phase far-origin precision baselines (partial file .FoliagePhase.cs).</summary>
+        static partial void AddFoliagePhaseScenarios(List<Scenario> scenarios);
     }
 }
