@@ -40,9 +40,9 @@ struct VoxelV2F
 // --- Foliage sway globals (FL-1/FL-2) ---
 // Set per frame by FoliageSway.cs; the zero defaults freeze all foliage (edit mode, sway disabled).
 float2 FoliageWindVector; // XZ wind direction, pre-scaled by wind strength (unitless multiplier)
-float4 FoliageSwayParams; // x = amplitude (blocks), y = frequency (rad/s), z = gust fraction, w = gust frequency (rad/s)
+float4 FoliageSwayParams; // x = amplitude (blocks), z = gust fraction; y/w are the wave frequencies, applied CPU-side and not read here
 float4 FoliageSwayParams2; // x = spatial frequency (rad/block along wind), y = per-voxel phase jitter fraction, z = vertical bob fraction, w = gust spatial multiplier
-float4 FoliageOriginPhase; // x = primary wave's origin phase (rad), y = gust's; both already reduced mod 2pi
+float4 FoliageWavePhase; // x = primary wave's phase (rad), y = gust's; time + origin, both already reduced mod 2pi
 
 // --- Foliage Sway (FL-1/FL-2) ---
 /// Displaces a vertex in object space by the global wind. swayData.x is the mesh-baked sway
@@ -51,16 +51,18 @@ float4 FoliageOriginPhase; // x = primary wave's origin phase (rad), y = gust's;
 /// spatial: a wave traveling along the wind through voxel XZ, so neighboring foliage moves
 /// coherently and gusts visibly ripple across canopies and meadows instead of each voxel
 /// oscillating independently. The wave is anchored to voxel space — and so survives a
-/// floating-origin re-anchor (WS-3) — via FoliageOriginPhase rather than an absolute coordinate:
-/// FoliageSway.cs reduces the origin's whole contribution modulo a cycle in double precision, which
-/// is exact for a sine and keeps this argument small however far out the player is. Chunk transforms
-/// are translation-only, so the object-space offset equals a render-space offset.
+/// floating-origin re-anchor (WS-3) — via FoliageWavePhase rather than an absolute coordinate.
+/// FoliageSway.cs folds both unbounded terms, elapsed time and the origin's contribution, into that
+/// one constant and reduces it modulo a cycle in double precision; the reduction is exact for a sine,
+/// so all this stage adds is a short render-space distance and the wave animates identically at any
+/// distance and any session length. Chunk transforms are translation-only, so the object-space offset
+/// equals a render-space offset.
 float3 ApplyFoliageSway(float3 positionOS, float2 swayData)
 {
     float weight = swayData.x;
     float3 positionWS = TransformObjectToWorld(positionOS);
 
-    // Distance along the wind direction, render-space only (the origin's share arrives pre-reduced).
+    // Distance along the wind direction, render-space only (time and the origin arrive pre-reduced).
     // FoliageWindVector is ~unit-length at reference wind strength, so FoliageSwayParams2.x is
     // effectively rad/block. Zero wind → zero spatial term AND zero displacement below, so no
     // normalize (and no NaN risk) is needed.
@@ -68,10 +70,9 @@ float3 ApplyFoliageSway(float3 positionOS, float2 swayData)
     float jitter = swayData.y * TWO_PI * FoliageSwayParams2.y;
 
     // Primary traveling wave + a broader, slower gust wave riding the same wind line. The gust carries
-    // its own origin phase — scaling the primary's reduced value would not survive the reduction.
-    float wave = sin(FoliageSwayParams.y * _Time.y - (alongWind + FoliageOriginPhase.x) + jitter);
-    float gust = sin(FoliageSwayParams.w * _Time.y
-                     - (alongWind * FoliageSwayParams2.w + FoliageOriginPhase.y) + jitter) * FoliageSwayParams.z;
+    // its own phase — scaling the primary's reduced value would not survive the reduction.
+    float wave = sin(FoliageWavePhase.x - alongWind + jitter);
+    float gust = sin(FoliageWavePhase.y - alongWind * FoliageSwayParams2.w + jitter) * FoliageSwayParams.z;
     float sway = (wave + gust) * FoliageSwayParams.x * weight;
 
     positionOS.xz += FoliageWindVector * sway;

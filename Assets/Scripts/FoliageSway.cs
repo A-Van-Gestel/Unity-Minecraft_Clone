@@ -3,7 +3,7 @@ using UnityEngine;
 
 /// <summary>
 /// Drives the FL-1 foliage wind-sway shader globals (<c>FoliageWindVector</c>,
-/// <c>FoliageSwayParams</c>, <c>FoliageOriginPhase</c>) once per frame. The sway itself runs entirely in the transparent
+/// <c>FoliageSwayParams</c>, <c>FoliageWavePhase</c>) once per frame. The sway itself runs entirely in the transparent
 /// block shader's vertex stage, displacing verts whose mesh-baked sway weight (UV Z) is non-zero;
 /// this component only owns the art knobs and the bridge from <see cref="World.WindBlocksPerSecond"/>
 /// (the shared wind vector clouds also read) so grass and clouds agree on wind direction.
@@ -14,7 +14,12 @@ public class FoliageSway : MonoBehaviour
     private static readonly int s_shaderFoliageWindVector = Shader.PropertyToID("FoliageWindVector");
     private static readonly int s_shaderFoliageSwayParams = Shader.PropertyToID("FoliageSwayParams");
     private static readonly int s_shaderFoliageSwayParams2 = Shader.PropertyToID("FoliageSwayParams2");
-    private static readonly int s_shaderFoliageOriginPhase = Shader.PropertyToID("FoliageOriginPhase");
+    private static readonly int s_shaderFoliageWavePhase = Shader.PropertyToID("FoliageWavePhase");
+
+    /// <summary>Running time phase of each wave, in radians and wrapped to one cycle — never a raw elapsed time.</summary>
+    private double _primaryTimePhase;
+
+    private double _gustTimePhase;
 
     [Tooltip("The world whose shared wind vector (and settings) drive the sway.")]
     [SerializeField]
@@ -73,9 +78,14 @@ public class FoliageSway : MonoBehaviour
         if (!swayEnabled)
         {
             Shader.SetGlobalVector(s_shaderFoliageWindVector, Vector2.zero);
-            Shader.SetGlobalVector(s_shaderFoliageOriginPhase, Vector4.zero);
+            Shader.SetGlobalVector(s_shaderFoliageWavePhase, Vector4.zero);
             return;
         }
+
+        // Deliberately not advanced while the sway is off: resuming from where the wave stopped is continuous,
+        // where catching up to a wall clock would snap every blade to a new pose on the frame it is re-enabled.
+        _primaryTimePhase = FoliagePhase.AdvanceWrapped(_primaryTimePhase, _frequency, Time.deltaTime);
+        _gustTimePhase = FoliagePhase.AdvanceWrapped(_gustTimePhase, _gustFrequency, Time.deltaTime);
 
         // Voxel-space and render-space differ only by translation (WS-3), so the wind's
         // direction is valid as-is in the shader's object/render space.
@@ -95,28 +105,32 @@ public class FoliageSway : MonoBehaviour
             new Vector4(_amplitudeBlocks, _frequency, _gustFraction, _gustFrequency));
         Shader.SetGlobalVector(s_shaderFoliageSwayParams2,
             new Vector4(spatialFrequency, _phaseJitter, _verticalBobFraction, _gustSpatialMultiplier));
-        PushOriginPhase(windVector, spatialFrequency);
+        PushWavePhase(windVector, spatialFrequency);
     }
 
     /// <summary>
-    /// Pushes the world origin's contribution to the wave phase, pre-reduced modulo a full cycle in double
-    /// precision. The shader adds this to a render-space-only distance term, so the absolute voxel coordinate —
-    /// whose float32 resolution coarsens in proportion to distance from the world center — never reaches the
-    /// sine argument, and the wave animates identically however far out the player is.
+    /// Pushes each wave's total phase — running time minus the world origin's contribution — with both halves
+    /// already reduced to a single cycle in double precision. Everything that would otherwise grow without bound
+    /// (elapsed time, and the absolute voxel coordinate) is folded into this small constant, leaving the vertex
+    /// stage nothing but a short render-space distance to add. That is what keeps the sway animating identically
+    /// however far out the player is and however long the session has been running.
     /// </summary>
     /// <param name="windVector">The wind vector exactly as the shader receives it (direction scaled by strength).</param>
     /// <param name="spatialFrequency">Radians per block along the wind, exactly as the shader receives it.</param>
-    private void PushOriginPhase(Vector2 windVector, float spatialFrequency)
+    private void PushWavePhase(Vector2 windVector, float spatialFrequency)
     {
-        Vector2 phase = FoliagePhase.OriginPhase(
+        Vector2 originPhase = FoliagePhase.OriginPhase(
             WorldOrigin.OriginVoxel, windVector, spatialFrequency, _gustSpatialMultiplier);
-        Shader.SetGlobalVector(s_shaderFoliageOriginPhase, new Vector4(phase.x, phase.y, 0f, 0f));
+
+        float primary = (float)((_primaryTimePhase - originPhase.x) % FoliagePhase.TwoPi);
+        float gust = (float)((_gustTimePhase - originPhase.y) % FoliagePhase.TwoPi);
+        Shader.SetGlobalVector(s_shaderFoliageWavePhase, new Vector4(primary, gust, 0f, 0f));
     }
 
     /// <summary>Freezes all foliage when the driver goes away (globals would otherwise stay stale).</summary>
     private void OnDisable()
     {
         Shader.SetGlobalVector(s_shaderFoliageWindVector, Vector2.zero);
-        Shader.SetGlobalVector(s_shaderFoliageOriginPhase, Vector4.zero);
+        Shader.SetGlobalVector(s_shaderFoliageWavePhase, Vector4.zero);
     }
 }

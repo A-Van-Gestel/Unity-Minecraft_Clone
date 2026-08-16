@@ -40,5 +40,24 @@ namespace Helpers
 
             return new Vector2((float)primary, (float)gust);
         }
+
+        /// <summary>
+        /// Advances a wave's running time phase by one frame, wrapped to a single cycle.
+        /// </summary>
+        /// <remarks>
+        /// Accumulating and wrapping is what keeps the phase bounded however long a session runs: multiplying a
+        /// frequency by an ever-growing clock instead would coarsen the argument exactly as an absolute position
+        /// does, and stall the wave after long uptime. Advancing by a delta rather than re-deriving from a clock
+        /// also makes a runtime frequency change phase-continuous instead of a jump.
+        /// </remarks>
+        /// <param name="phase">The wave's current phase in radians, in <c>[0, 2pi)</c>.</param>
+        /// <param name="frequency">The wave's angular frequency in radians per second.</param>
+        /// <param name="deltaSeconds">Seconds elapsed since the last advance.</param>
+        /// <returns>The advanced phase, wrapped back into <c>[0, 2pi)</c>.</returns>
+        public static double AdvanceWrapped(double phase, float frequency, float deltaSeconds)
+        {
+            double advanced = (phase + frequency * (double)deltaSeconds) % TwoPi;
+            return advanced < 0.0 ? advanced + TwoPi : advanced;
+        }
     }
 }
