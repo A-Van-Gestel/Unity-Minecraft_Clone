@@ -292,9 +292,24 @@ runtime.
 at `worldPos + _WorldOriginOffset` so the liquid pattern stays continuous across shifts;
 `frac(worldPos)` shore/wall math is left on raw `worldPos` (invariant under multiple-of-16
 shifts). The offset is passed raw — far from origin the noise *input* precision degrades exactly
-as today's absolute `worldPos` does (cosmetic, liquid-only; a periodicity `fmod` does not
-cleanly exist for simplex across the shader's several scales — accepted limitation, §9).
-`BorderWallShader`'s `worldPos` usage is a WS-4a audit item (§8).
+as today's absolute `worldPos` does (a periodicity `fmod` does not cleanly exist for simplex
+across the shader's several scales). That was accepted as cosmetic when WS-4 shipped; it is now
+tracked as `Bugs/FLUID_BUGS.md` **#20**, which reopens the decision on the ground that the onset
+is well inside normal play range rather than at the edge, and proposes making the noise *tile*
+with a wrapped offset instead of trying to reduce an aperiodic field. `BorderWallShader`'s
+`worldPos` usage is a WS-4a audit item (§8).
+
+**FL-1 foliage sway is no longer a consumer of this global (2026-08-16).** It reconstructed the
+same absolute coordinate in the vertex stage — a distance-proportional value inside `sin()`,
+which quantized the phase until the sway stepped and then froze the further out the player flew
+(user-reported, and the shipped symptom this doc's "cosmetic, liquid-only" scope did not
+anticipate). Because a sine *is* periodic, the reduction that simplex cannot have works exactly
+here: `Helpers/FoliagePhase.cs` reduces the origin's whole contribution modulo a cycle in
+`double` on the CPU, and `FoliageSway` pushes one small `FoliageWavePhase` constant that also
+absorbs elapsed time (`_Time.y` was the same cliff in the time axis). The vertex stage now adds
+only a short render-space distance. Bit-identical at the identity origin; in-game confirmed at
+the ±2³¹ border. Guarded by four Chunk Math baselines whose prove-red measured *exactly zero*
+one-frame motion under the previous arithmetic at origin 2³⁰.
 
 ### 4.7 Rule: the origin is read fresh, never stored
 
@@ -574,11 +589,20 @@ graduate to work items).
   investigated — same class, not scheduled). All are Burst-job exceptions, coordinate aliasing, or
   perf collapse at a location where terrain is already maximally degraded (the v2 noise rider caps
   usable radius at ±2²⁴ until it ships, and at ±2³¹ permanently by design).
-- **Liquid noise input precision degrades cosmetically far out** under the raw
-  `_WorldOriginOffset` — same class as today's absolute `worldPos`, liquid-only, accepted.
-  Confirmed in-game near ±2³¹ (2026-07-19 re-test): fluid surfaces render flat blue, the flow
-  vectors having collapsed. Clouds show the same class there — the cloud field generates in
-  stripes near the edge (cosmetic noise-input precision; accepted alongside).
+- **Liquid noise input precision degrades far out** under the raw `_WorldOriginOffset` — same
+  class as today's absolute `worldPos`. Confirmed in-game near ±2³¹ (2026-07-19 re-test): fluid
+  surfaces render flat blue, the flow vectors having collapsed. **No longer "accepted" as of
+  2026-08-16** — the user reports water flattening well before the edge, so it is filed as
+  `Bugs/FLUID_BUGS.md` **#20** with a proposed tiling-noise direction; see §4.6. Clouds show the
+  same class there — the cloud field generates in stripes near the edge (cosmetic noise-input
+  precision; accepted alongside).
+- ~~**Foliage sway shares the liquid-noise limitation**~~ — **closed 2026-08-16**, in-game
+  confirmed at the ±2³¹ border. It was the same defect with a different symptom (a temporal
+  freeze rather than a spatial flattening), and unlike the liquid case it admits an exact fix
+  because a sine is periodic. `_WorldOriginOffset` and `_Time.y` are both gone from
+  `VoxelCommon.hlsl`; §4.6 has the mechanism. Notably this was never listed here as a known
+  residual — FL-1 shipped after this section was written and quietly inherited the same idiom,
+  which is the argument for the far-origin render baseline #20 proposes.
 - ~~**Until WS-4c lands, the saved player position is precise only to ±2²⁴**~~ — **closed 2026-07-17**: it is
   a `ChunkRelativePosition` on disk (v13) and stays chunk-relative all the way to the transform, so it is exact to
   the ±2³¹ edge. The **spawn point** and the terrain height probe still resolve through an absolute `Vector3`
@@ -650,6 +674,17 @@ graduate to work items).
 
 ## Document History
 
+* **v1.18** - **The shader half of §9 splits in two (2026-08-16).** FL-1 foliage sway had inherited
+  §4.6's raw-`_WorldOriginOffset` idiom without being listed as a residual, and the user reported the
+  sway stepping and then freezing with distance. Fixed exactly — a sine is periodic, so the origin's
+  contribution (and elapsed time, the same cliff in the time axis) reduces modulo a cycle in `double`
+  on the CPU and reaches the shader as one small `FoliageWavePhase` constant; `_WorldOriginOffset` and
+  `_Time.y` are both gone from `VoxelCommon.hlsl`. Bit-identical at spawn, in-game confirmed at the
+  ±2³¹ border, guarded by four Chunk Math baselines (47 → 51). The **liquid** half admits no such
+  reduction (simplex is aperiodic) and is no longer recorded as accepted: it is now
+  `Bugs/FLUID_BUGS.md` **#20**, reopened because its onset is inside normal play range, with a
+  tiling-noise direction proposed. §4.6 and §9 updated; the §5 audit table is left alone as the
+  dated pre-WS-4 snapshot it declares itself to be.
 * **v1.17** - **Promoted `Design/` → `Architecture/` (2026-07-26).** Every WS-4 phase is shipped and in-game
   confirmed and `WorldOrigin` is load-bearing engine surface (`COORDINATE_SPACES_GUIDE.md` and CLAUDE.md's WS-4
   rule both route readers here), so this document is now authoritative rather than proposed; title dropped
