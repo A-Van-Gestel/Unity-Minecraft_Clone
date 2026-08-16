@@ -29,6 +29,14 @@ generate benchmark noise for changes nobody will gate on.
 **Rule:** a benchmark that must run under IL2CPP belongs in the runtime assembly. Editor-only
 harnesses can *screen* candidates but cannot produce shippable numbers.
 
+**Arming the in-world harnesses:** `MeshGenerationBenchmark`, `LightingJobBenchmark`, and
+`ChunkGenerationBenchmark` sit on `BenchmarkRunner` in `World.unity` but are **default-off** —
+`MicroBenchmarkGate.IsArmed()` gates them on the Benchmark tab's "Enable Micro-Benchmarks" setting,
+read once in `Start()`. Turn it on and **reload the world**, then trigger with `C` / `M` / `L`.
+They are forced off under `WorldLaunchState.IsAutomatedMode`, so a route or fluid-stress capture
+never sees them. An inert trigger key means the setting is off or the world predates the change —
+not a broken harness.
+
 **World seam:** runtime benchmarks own their world (inert `World`, synthetic chunks, dedicated
 scene) and refuse to run against a live game world — follow `FluidTickBenchmark`'s pattern
 (`CreateInertWorld` + `RegisterSyntheticChunk`) when writing a new one, so the harness controls
