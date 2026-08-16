@@ -1019,6 +1019,172 @@ Sections are walked whole, so an all-air span costs one null check rather than 2
 
 **Harness note (two false greens caught by the prove-red):** BH-B10 first passed with the fix *neutered*, twice, for two independent reasons — `BehaviorTestWorld` evicts a voxel that went inactive only on the *next* tick's bucket sync (so the scenario read last tick's stale bucket as "woken"), and the harness never registered its **center** chunk in the stub `WorldData` (so the production pass looked the chunk up by coord and silently found nothing). Both are fixed in the harness; a green BH-B10 now means the production pass actually ran.
 
+
+### ~~20. Fluid surfaces degrade to a near-uniform color with distance from the world centre~~
+
+**Reported:** August 2026  
+**Fixed:** August 2026  
+**Status:** Resolved — in-game confirmed at spawn, the surrounding region and the ±2³¹ border; near-identical
+surfaces at all three, with no re-anchor snapping observed.  
+**Files:** `Assets/Shaders/Includes/LiquidCore.hlsl`, `Assets/Scripts/Helpers/LiquidNoiseOrigin.cs` (new),
+`Assets/Scripts/World.cs` (`AnchorOrigin`)
+
+**Description:**
+
+Water surfaces progressively lost their surface detail the further the player was from the world centre: the
+wave/ripple pattern flattened and the surface trended toward a single uniform color, with foam disappearing. The
+degradation was gradual and monotone in distance, not a cliff. Near the ±2³¹ edge the endpoint had already been
+recorded as "flat blue". Lava shares the code path.
+
+**A second symptom, found during the bracketing run and not in the original report: the surface _flickered_.**
+From ~3×10⁵ blocks out the water visibly strobed frame to frame rather than merely looking flat — large regions
+snapping between values instead of showing travelling waves. This was the *first* symptom to appear, well before
+the flattening was obvious, and considerably more objectionable than the flattening it preceded.
+
+**Measured onset (supersedes the derived "~1e5–1e6" estimate the entry was filed with):**
+
+Bracketed in-game on `feat/world-scaling`, editor/Mono, fresh world seed 20260816. Method: an identical sealed
+16×16 stone basin of player-placed water built at each site via `World.PlaceBlockCommand`, `/time set noon` +
+`/time freeze` for constant lighting, one fixed camera pose, 1280×720 render of the game camera. "Detail" is the
+RMS difference between horizontally adjacent pixels over a fixed 400×200 band of pure water — a direct measure of
+the fine grain the quantization destroys, and one that (unlike variance) actually falls as the field goes
+piecewise-constant.
+
+| Distance | `ULP(D)` (blocks) | detail | vs spawn | Observed |
+|---------:|------------------:|-------:|---------:|----------|
+|        0 |            1.2e-7 | 0.01309 |     100% | reference |
+|      1e4 |             0.001 | 0.01310 |     100% | indistinguishable from spawn |
+|      1e5 |             0.008 | 0.01362 |     104% | indistinguishable from spawn |
+|      3e5 |             0.031 | 0.01252 |      96% | **flicker begins**; detail still intact |
+|      1e6 |             0.063 | 0.01060 |      81% | fine ripple grain gone |
+|      3e6 |             0.25  | 0.01014 |      77% | coarse blotches only |
+|      1e7 |             1.0   | 0.00706 |      54% | soft, near-featureless |
+
+**Onset ≈ 3×10⁵ blocks** (first symptom: flicker), **≈1×10⁶** for unmistakable loss of detail; nothing measurable
+at or below 1×10⁵. Cross-checked against an independent float32 port of `snoise`/`fbm`/`EvaluateWater`: the
+fraction of horizontally adjacent samples collapsing onto an identical value is 0% up to 1e5, 35% at 3e5, 70% at
+1e6, 98% at 1e7 — the same knee, derived independently of the renderer.
+
+**Root cause:**
+
+`LiquidNoisePos` reconstructed an *absolute* voxel-space position, `worldPos + _WorldOriginOffset`, and fed it
+straight into `fbm`/`snoise`. `_WorldOriginOffset` was `OriginVoxel`, so its magnitude was the player's distance
+from the world centre, passed raw. The float32 ULP of that sum is about `D * 1.2e-7` **blocks** at distance `D`;
+once it exceeds the on-screen pixel footprint, neighbouring pixels quantize onto the same noise input and
+`combined_noise` stops varying across them. Because that single value modulates both the color `lerp` and
+`foamAmt`, the surface flattened and lost foam together.
+
+Note the onset is **not** a function of the authored scales, as the entry originally reasoned. The rounding
+happens at the `worldPos + offset` sum, *before* any `* _WaveScale` multiply, so the spatial resolution of the
+noise input is `ULP(D)` blocks at every call site. The scales control which features die first and hence how
+severe it looks at a given distance — not when quantization starts.
+
+Same defect class as the FL-1 foliage sway freeze (`VoxelCommon.hlsl`), which was the temporal symptom of the
+same idiom and was fixed separately.
+
+**Fix:**
+
+The origin is reduced onto a period **the noise already has**. The noise function itself is unmodified.
+
+- The shipped `snoise` folds its lattice index through `mod289`, making the field repeat every 289 lattice cells —
+  **867 units of sample input**, since the 1/3 simplex skew turns a one-axis shift of 867 into a lattice shift of
+  `(289, 289, 4×289)`. Measured, not assumed: shifting by 867 leaves the field unchanged to float rounding
+  (1.1e-3), while 289 and 578 change it by the full output range (~1.67).
+- `Helpers/LiquidNoiseOrigin.cs` reduces `OriginVoxel` modulo `PeriodBlocks` = 1734 blocks (two intrinsic periods)
+  in integer math, to the representative **nearest zero**, published by `World.AnchorOrigin` as
+  `_LiquidNoiseOrigin`. `_WorldOriginOffset` is retired.
+- `LiquidCore.hlsl` routes every noise sample through `LiquidNoisePos(worldPos, scale)`, which applies the
+  reduction and snaps the scale so `PeriodBlocks × scale` is a whole multiple of 867 — the condition for the
+  reduced origin to sample the *same* field value rather than a similar one. Snap step 0.5; every shipped scale
+  default (2, 4, 5, 10, 15) already satisfies it, so nothing moves at defaults.
+
+Result: at 10⁷ blocks the reduced origin is `(22, 0, 6)` — as small as at spawn.
+
+| Distance | foam | mean | sd | detail | pre-fix detail |
+|---------:|-----:|-----:|---:|-------:|---------------:|
+| 0 | 0.039% | 0.70241 | 0.01696 | 0.01305 | 0.01309 |
+| 1e6 | 0.041% | 0.70233 | 0.01704 | 0.01310 | 0.01060 |
+| 1e7 | 0.005% | 0.70222 | 0.01341 | 0.01125 | 0.00706 |
+
+Spawn unchanged on every statistic; 1e6 statistically indistinguishable from spawn; 1e7 recovered to 86%.
+Guarded by 4 Chunk Math baselines (suite 51 → 55); `Validate All` 494/494 across 22 suites.
+
+**Four things learned the hard way — the most valuable part of this entry:**
+
+1. **Do not make the field periodic by wrapping the lattice index.** The first implementation did exactly that.
+   It tiled, it was continuous across the seam, and its baselines were green — and it still produced a **visible
+   diagonal seam** in play, because a lattice-wrapped field only equals the original *inside one period*. The
+   boundary is the plane `4z + x + y = P`, a line of slope −1/4 in XZ. User-reported, then reproduced
+   numerically: the two fields are bit-identical up to z = 740 at y = 101 and diverge from z = 740 onward,
+   exactly the predicted boundary.
+2. **Tiling and continuity are the wrong properties to verify for an origin reduction.** Both were verified for
+   the failed attempt and both passed. The property that actually matters is **"reducing the origin by a full
+   period is a no-op"** — measured for the shipped fix as a uniform ~6e-3 difference with *no* spatial dependence.
+   Test that.
+3. **Wrap to the representative nearest zero, not into `[0, P)`.** Both are congruent, so it looks like a free
+   choice; it is not. `snoise` recovers its within-cell coordinate as `v - i`, a subtraction of two large similar
+   numbers, so accuracy falls with magnitude. A `[0, P)` wrap sent spawn's origin of −16 to +3056 and cost ~3% of
+   a cell at the finest octave — enough to raise foam at spawn from 0.039% to 0.693%. Only an A/B against the
+   pre-fix shader at an identical scene caught it.
+4. **A visible artifact can hide in a capture its author reads as clean.** The seam and the grid were present in
+   screenshots reported as showing no problem; the user saw them, the author did not. When a user says an
+   artifact is there, believe the report over the reading of the image.
+
+**Limitation:** the scale snap floors at one step (0.5), so a slider set below that — `_NoiseScale` reaches 0.1 —
+is raised to 0.5. Pinned by a baseline rather than left to be discovered.
+
+**Residual — the _time_ axis of the same defect class is untouched (open, deliberately deferred).** This fix
+bounds the *distance* term only. `wave_p`/`ripple_p` still add a raw `_Time.y * _WaveSpeed` to their Y coordinate,
+and lava's `t_boil` likewise, all of which grow without bound exactly as an absolute coordinate grows with
+distance. Pre-existing, not introduced here; the FL-1 sway fix bounded both axes, this one did not need to for the
+reported symptom.
+
+*Measured* threshold — the metric is animation **resolution** (how many representable steps the sample coordinate
+advances per frame at 120 fps), not spatial precision, which is what an earlier draft of this note wrongly quoted:
+
+| Uptime | wave steps/frame | ripple steps/frame |
+|-------:|-----------------:|-------------------:|
+| 1 h | 27.3 | 20.5 |
+| 10 h | 3.4 | 2.6 |
+| 20 h | 1.7 | 1.3 |
+| 40 h | 0.9 | 0.6 |
+| 100 h | 0.2 | 0.3 |
+
+Below ~1 step per frame the surface holds the same value across consecutive frames — the same "steps, then
+freezes" symptom FL-1 had. So the onset is **20–40 h**, not 100 h. It is bounded in practice by `_Time.y` being
+`Time.timeSinceLevelLoad`, which **resets on every non-additive scene load** — this project loads `Scenes/World`
+with `LoadSceneMode.Single`, so the clock restarts each time a world is entered, and reaching 20 h needs one
+continuous session in one world.
+
+**Why it is not fixed here.** The obvious in-shader `fmod` does not work: `_Time.y` is already coarse at large
+`t`, so reducing downstream fixes the coordinate magnitude but not the clock's own resolution. A correct fix is
+the `FoliagePhase` pattern — accumulate in `double` on the CPU and push a bounded phase — but each *effective*
+rate needs its **own** reduction (`_WaveSpeed` 0.4, `_RippleSpeed` 1.2, lava `_Speed` 0.3 and its ×0.8 / ×0.5
+variants), because scaling an already-reduced phase does not survive the reduction. A single shared wrapped clock
+does not work either: bounding one clock for all five rates forces a period so large it reinstates the precision
+loss it was meant to remove, and snapping the rates instead collapses lava's ×0.8 and ×0.5 drifts onto the same
+value. So it needs 3–5 pushed phases, the material speeds read from C#, and a fallback path for
+`FluidPreviewShader`, which shares this include and has no `World` to drive it. That is a scoped change, not a
+patch — deferred rather than rushed into the file that produced two regressions the day this shipped.
+
+⚠️ **The flicker is still not measurable automatically.** A "render twice one frame apart" metric is confounded by
+the ordinary wave animation, and a "nudge the camera 0.01 blocks and diff" metric was *tried and rejected*: it
+reports RMS 0.0116 / worst 0.46 at **spawn** versus 0.0077 / 0.51 at 1e7, i.e. it cannot tell them apart, because
+moving the camera resamples the surface at every distance. Any future far-origin baseline intending to guard the
+flicker needs a metric validated against the D=0 control first.
+
+**A world-scene capture rig now exists**, as a play-mode script rather than a suite: launch a fixed-seed world,
+`/fly` + `/noclip`, `/time set noon` + `/time freeze`, `/teleport`, build a sealed basin with
+`World.PlaceBlockCommand`, set player rotation + camera pitch directly, then render `Camera.main` into a
+`RenderTexture` and `ReadPixels`. That is the scene half of the far-origin render baseline
+`WORLD_SCALING_FLOATING_ORIGIN.md` §9 asks for; what it still lacks is a metric proven to separate near from far.
+
+**Not part of this bug:** the FL-1 foliage sway freeze (same root idiom, fixed separately); the fluid *simulation*
+failing to reactivate at far coordinates (FLUID #17, a CPU-side integer-routing issue); terrain generation noise
+precision past ±2²⁴ (the FNL rider, `WORLD_SCALING_IMPLEMENTATION.md` §6); and the striped cloud *field* near
+±2³¹ (`WORLD_SCALING_FLOATING_ORIGIN.md` §9 — CPU-side pattern generation, not this shader path; cloud *drift* is
+unaffected because `Clouds.cs` wraps it).
+
 ---
 
 ## Chunk Management

@@ -214,7 +214,7 @@ ShiftThresholdChunks`. One frame, main thread, allocation-free (`World.ShiftOrig
       the *target's* delta so the rise continues with identical relative motion. It deliberately does **not** branch
       on `enabled`: a chunk that has been `Reset` but not yet started is disabled while parked underground, and
       snapping it would undo the anti-flash pre-position.
-3. The `_WorldOriginOffset` shader global follows automatically — `AnchorOrigin` pairs it with `SetOrigin` (§4.6),
+3. The `_LiquidNoiseOrigin` shader global follows automatically — `AnchorOrigin` pairs it with `SetOrigin` (§4.6),
    so a re-anchor cannot land without it.
 4. `AssertPlayerNearOrigin` (`UNITY_EDITOR`/`DEVELOPMENT_BUILD`, `[Conditional]`, latched): player Unity-space XZ ≤
    `(ShiftThresholdChunks + 4) × 16` = 1088 units — turns a missed shift or a drifted site into one loud error
@@ -250,7 +250,7 @@ Everything persisted is voxel world space. Two changes:
   derivation lives at the `Spawn.SpawnResolution` chokepoint in `StartWorld` **STEP 1**: `ResolveInitial(...)` →
   `AnchorOrigin(ChunkCoord.FromVoxelPosition(spawnPosition))` → `transform = VoxelToUnity(spawnPosition)`, in that
   order — one site covering all three `SpawnSource`s, not three. `World.AnchorOrigin` is the single permitted entry
-  point (it pairs `WorldOrigin.SetOrigin` with the `_WorldOriginOffset` shader push so a re-anchor cannot land
+  point (it pairs `WorldOrigin.SetOrigin` with the `_LiquidNoiseOrigin` shader push so a re-anchor cannot land
   without the shader following). Y is ignored — the origin is XZ-only — so the unresolved-height sentinel passes
   through harmlessly.
   <br>**No version bump:** the field is unchanged (`Vector3`), only the space of the value written into it. Every
@@ -287,17 +287,49 @@ runtime.
 
 ### 4.6 Shaders
 
-`World.cs` sets a `float3 _WorldOriginOffset` global (= `OriginVoxel`, precedent:
-`s_shaderGlobalLightLevel` at `World.cs:634/:1417`). `LiquidCore.hlsl` samples its noise fields
-at `worldPos + _WorldOriginOffset` so the liquid pattern stays continuous across shifts;
-`frac(worldPos)` shore/wall math is left on raw `worldPos` (invariant under multiple-of-16
-shifts). The offset is passed raw — far from origin the noise *input* precision degrades exactly
-as today's absolute `worldPos` does (a periodicity `fmod` does not cleanly exist for simplex
-across the shader's several scales). That was accepted as cosmetic when WS-4 shipped; it is now
-tracked as `Bugs/FLUID_BUGS.md` **#20**, which reopens the decision on the ground that the onset
-is well inside normal play range rather than at the edge, and proposes making the noise *tile*
-with a wrapped offset instead of trying to reduce an aperiodic field. `BorderWallShader`'s
-`worldPos` usage is a WS-4a audit item (§8).
+`World.cs` sets a `float3 _LiquidNoiseOrigin` global (precedent: `s_shaderGlobalLightLevel` at
+`World.cs:634/:1417`). `LiquidCore.hlsl` samples its noise fields at `worldPos + _LiquidNoiseOrigin`
+so the liquid pattern stays continuous across shifts; `frac(worldPos)` shore/wall math is left on
+raw `worldPos` (invariant under multiple-of-16 shifts). `BorderWallShader`'s `worldPos` usage is a
+WS-4a audit item (§8).
+
+**The offset is no longer passed raw (2026-08-16).** It was, until measurement showed the resulting
+degradation starts at ~3×10⁵ blocks — inside reachable play, not at the edge — and that its leading
+symptom is a *flicker*, not the flattening originally catalogued in §9. The original objection
+("a periodicity `fmod` does not cleanly exist for simplex across the shader's several scales") was
+sound about reducing an *aperiodic* field, but it did not consider making the field **periodic**
+instead. It now is:
+
+The resolution is that **the noise is already periodic**, so nothing about it needs changing:
+
+- `snoise` folds its lattice index through `mod289`, giving the field a period of 289 lattice cells —
+  **867 units of sample input**, since the 1/3 simplex skew turns a one-axis shift of 867 into a
+  lattice shift of `(289, 289, 4×289)`. Measured, not assumed: a shift of 867 leaves the field
+  unchanged to float rounding, while 289 and 578 change it by the full output range.
+- `Helpers/LiquidNoiseOrigin.cs` reduces the origin modulo `PeriodBlocks` (1734 = two intrinsic
+  periods) in integer math, to the representative **nearest zero** rather than into `[0, P)`. Any
+  representative is congruent, but the smallest is what preserves precision: `snoise` recovers its
+  within-cell coordinate as `v - i`, whose accuracy falls with magnitude, so a `[0, P)` wrap would
+  send an origin of -16 to +3056 and measurably change the water at spawn.
+- `LiquidCore.hlsl` routes every sample through `LiquidNoisePos(worldPos, scale)`, which applies the
+  reduction and snaps the scale so `P × scale` is a whole multiple of 867 — the condition for the
+  reduced origin to sample the *same* field value rather than a similar one. The several-scales
+  objection thus became a snapping constraint rather than a blocker; all shipped defaults already
+  satisfy it, so snapping moves nothing.
+
+**A rejected approach worth recording, because it looked correct.** The first implementation made
+the field periodic by wrapping the lattice index inside `snoise`. It tiled exactly, it was continuous
+across the seam, its baselines were green — and it produced a **visible diagonal seam** in play. A
+lattice-wrapped field only equals the original *inside one period*; outside it the field is a
+different realization, and the boundary is the plane `4z + x + y = P`, a line of slope −1/4 in XZ.
+The lesson generalizes: for an origin reduction, tiling and continuity are the wrong properties to
+verify. The one that matters is **"reducing the origin by a full period is a no-op"** — measured here
+as a uniform ~6e-3 difference with no spatial dependence.
+
+Measured: spawn unchanged on every statistic; 10⁶ statistically indistinguishable from spawn (was 81%
+of spawn detail); 10⁷ recovered to 86%. Guarded by four Chunk Math baselines whose prove-red reported
+the sample position resolving to only 0.031 blocks at origin 3×10⁵ — the same figure the in-game
+bracket measured at the distance the flicker began.
 
 **FL-1 foliage sway is no longer a consumer of this global (2026-08-16).** It reconstructed the
 same absolute coordinate in the vertex stage — a distance-proportional value inside `sin()`,
@@ -355,7 +387,7 @@ execution checklist; each row becomes a visible `WorldOrigin.*` call.
 | `BorderWallRenderer.RebuildMesh`                                            | Wall planes at `±ext − OriginVoxel`; keep `uv.x` bands voxel-space for continuity across shifts                                                                                                                                                                                                                                                                                                                                                               |
 | Spawn transform writes (`World.StartWorld` STEP 1 + STEP 4)                 | Since **SP-1** there are exactly two, both fed by `Spawn.SpawnResolution` (`ResolveInitial` / `ResolveFinal`) and both converting one voxel-space value: `_playerTransform.position = VoxelToUnity(spawnPosition)`. The unit is pure voxel space throughout; `SetSpawnPoint(placement.CanonicalSpawn)` builds from voxel space                                                                                                                                |
 | `Clouds` (`PositionRoot`, `UpdateClouds`)                                   | Tiles are root-local, keyed by cloud-space tile index (voxel − wind drift); only the root converts, via the exact `VoxelToUnity(Vector3Int)` overload + a sub-block drift remainder (re-derived class; v1.12 rework). The drift accumulator wraps at the pattern period and the pattern lookup wraps in **integer** space (`WrapToPattern`) — the float-`frac` idiom re-introduces large-float precision loss far out; integer/wrapped math is exact for free |
-| Shader global                                                               | `_WorldOriginOffset` (§4.6)                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Shader global                                                               | `_LiquidNoiseOrigin` — the origin reduced onto the noise period (§4.6)                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ### 5.2 Unity → Voxel (queries from transforms)
 
@@ -589,13 +621,15 @@ graduate to work items).
   investigated — same class, not scheduled). All are Burst-job exceptions, coordinate aliasing, or
   perf collapse at a location where terrain is already maximally degraded (the v2 noise rider caps
   usable radius at ±2²⁴ until it ships, and at ±2³¹ permanently by design).
-- **Liquid noise input precision degrades far out** under the raw `_WorldOriginOffset` — same
-  class as today's absolute `worldPos`. Confirmed in-game near ±2³¹ (2026-07-19 re-test): fluid
-  surfaces render flat blue, the flow vectors having collapsed. **No longer "accepted" as of
-  2026-08-16** — the user reports water flattening well before the edge, so it is filed as
-  `Bugs/FLUID_BUGS.md` **#20** with a proposed tiling-noise direction; see §4.6. Clouds show the
-  same class there — the cloud field generates in stripes near the edge (cosmetic noise-input
-  precision; accepted alongside).
+- ~~**Liquid noise input precision degrades far out** under the raw `_WorldOriginOffset`~~ —
+  **closed 2026-08-16** by making the noise field tile and wrapping the origin into one period; the
+  mechanism is in §4.6. The onset was measured first rather than assumed: nothing is detectable at
+  or below 10⁵ blocks, a flicker begins at ~3×10⁵, and surface detail visibly flattens from ~10⁶ —
+  so this was a reachable-play bug, not the edge-of-the-world curiosity this section had it filed
+  as. Clouds still show the same *class* near the edge — the cloud field generates in stripes
+  (cosmetic, CPU-side pattern generation, accepted alongside and untouched by this fix).
+  <br>**Limitation:** the scale snap floors at one step (0.5), so a `_NoiseScale` slider set below
+  that is raised to 0.5.
 - ~~**Foliage sway shares the liquid-noise limitation**~~ — **closed 2026-08-16**, in-game
   confirmed at the ±2³¹ border. It was the same defect with a different symptom (a temporal
   freeze rather than a spatial flattening), and unlike the liquid case it admits an exact fix
