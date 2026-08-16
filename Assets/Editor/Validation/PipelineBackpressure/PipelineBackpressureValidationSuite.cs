@@ -447,13 +447,13 @@ namespace Editor.Validation.PipelineBackpressure
             ok &= Check("tiny positive budget floors to MinBudgetMs",
                 Mathf.Approximately(PipelinePassBudget.SanitizeBudgetMs(0.001f), PipelinePassBudget.MinBudgetMs));
             ok &= Check("zero budget passes through (no ceiling)",
-                PipelinePassBudget.SanitizeBudgetMs(0f) == 0f);
+                ExactValue.IsZero(PipelinePassBudget.SanitizeBudgetMs(0f)));
             ok &= Check("negative budget passes through (no ceiling)",
-                PipelinePassBudget.SanitizeBudgetMs(-3f) == -3f);
+                ExactValue.Equal(PipelinePassBudget.SanitizeBudgetMs(-3f), -3f));
             ok &= Check("exactly MinBudgetMs passes through untouched",
-                PipelinePassBudget.SanitizeBudgetMs(PipelinePassBudget.MinBudgetMs) == PipelinePassBudget.MinBudgetMs);
+                ExactValue.Equal(PipelinePassBudget.SanitizeBudgetMs(PipelinePassBudget.MinBudgetMs), PipelinePassBudget.MinBudgetMs));
             ok &= Check("budgets above the floor pass through untouched",
-                PipelinePassBudget.SanitizeBudgetMs(8f) == 8f);
+                ExactValue.Equal(PipelinePassBudget.SanitizeBudgetMs(8f), 8f));
             return ok;
         }
 
@@ -467,15 +467,15 @@ namespace Editor.Validation.PipelineBackpressure
             // No cap (interval <= 0): the ceiling is returned verbatim — this is the flag-off / uncapped
             // path and MUST be byte-identical to the legacy fixed ceiling.
             bool ok = Check("no cap (interval 0) returns the ceiling unchanged",
-                PipelinePassBudget.ScaleCeilingMs(6f, 0f) == 6f);
+                ExactValue.Equal(PipelinePassBudget.ScaleCeilingMs(6f, 0f), 6f));
             ok &= Check("negative interval returns the ceiling unchanged",
-                PipelinePassBudget.ScaleCeilingMs(6f, -1f) == 6f);
+                ExactValue.Equal(PipelinePassBudget.ScaleCeilingMs(6f, -1f), 6f));
 
             // A disabled ceiling (<= 0) is never resurrected into a positive budget, at any cap.
             ok &= Check("disabled ceiling (0 ms) stays 0 even under a 15-cap",
-                PipelinePassBudget.ScaleCeilingMs(0f, 1f / 15f) == 0f);
+                ExactValue.IsZero(PipelinePassBudget.ScaleCeilingMs(0f, 1f / 15f)));
             ok &= Check("disabled ceiling (negative ms) passes through under a cap",
-                PipelinePassBudget.ScaleCeilingMs(-3f, 1f / 30f) == -3f);
+                ExactValue.Equal(PipelinePassBudget.ScaleCeilingMs(-3f, 1f / 30f), -3f));
 
             // 60 FPS intent is the anchor: scale exactly 1.
             ok &= Check("60 FPS cap leaves the ceiling at 1x",
@@ -1998,8 +1998,8 @@ namespace Editor.Validation.PipelineBackpressure
 
                 ok &= Check("disabled: Begin returns 0 (no Stopwatch read at all)", disabledStart == 0L);
                 ok &= Check("disabled: published values FREEZE at the last enabled frame, they do not zero",
-                    WorldFrameProfiler.LastFrameLightScheduleMs == frozenSchedule &&
-                    WorldFrameProfiler.LastFrameMeshProcessMs == frozenProcess &&
+                    ExactValue.Equal(WorldFrameProfiler.LastFrameLightScheduleMs, frozenSchedule) &&
+                    ExactValue.Equal(WorldFrameProfiler.LastFrameMeshProcessMs, frozenProcess) &&
                     frozenSchedule > 0 && frozenProcess > 0);
 
                 // --- The false-green guard: an unmeasured phase must NOT render as 0.0 ms. ---

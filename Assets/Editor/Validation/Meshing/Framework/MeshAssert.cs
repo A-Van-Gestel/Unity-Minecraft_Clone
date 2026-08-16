@@ -4,6 +4,7 @@ using Data;
 using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
+using ExactValue = Editor.Validation.Framework.ExactValue;
 
 namespace Editor.Validation.Meshing.Framework
 {
@@ -596,9 +597,7 @@ namespace Editor.Validation.Meshing.Framework
             {
                 // Exact comparison: a determinism guard must catch any bit-level divergence.
                 float4 x = a[i], y = b[i];
-                // ReSharper disable CompareOfFloatsByEqualityOperator
-                if (x.x != y.x || x.y != y.y || x.z != y.z || x.w != y.w)
-                    // ReSharper restore CompareOfFloatsByEqualityOperator
+                if (!ExactValue.Equal(x, y))
                 {
                     diffs.AppendLine($"    {name}[{i}] ({x.x:F4},{x.y:F4},{x.z:F4},{x.w:F4}) vs ({y.x:F4},{y.y:F4},{y.z:F4},{y.w:F4})");
                     diffCount++;

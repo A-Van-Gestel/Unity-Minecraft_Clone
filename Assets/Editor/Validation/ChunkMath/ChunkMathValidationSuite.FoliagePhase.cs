@@ -242,7 +242,7 @@ namespace Editor.Validation
                 Vector2 phase = FoliagePhase.OriginPhase(
                     Vector3Int.zero, wind, spatialFrequency, FOLIAGE_GUST_SPATIAL_MULTIPLIER);
 
-                if (phase.x != 0f || phase.y != 0f)
+                if (!ExactValue.IsZero(phase))
                     return FailFoliage(scenario, $"wind {wind}: phase at the identity origin was {phase}, expected exactly (0, 0).");
             }
 

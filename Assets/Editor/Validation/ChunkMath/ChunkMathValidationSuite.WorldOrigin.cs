@@ -222,7 +222,7 @@ namespace Editor.Validation
                             $"saved {saved} resumed at Unity {unity}, outside the anchor chunk [0,{ChunkMath.CHUNK_WIDTH}).");
 
                     // 2. Y is never shifted by the anchor.
-                    if (unity.y != saved.y)
+                    if (!ExactValue.Equal(unity.y, saved.y))
                         return FailOrigin(scenario, $"saved {saved} resumed at Y {unity.y}, expected {saved.y}.");
 
                     // 3. Round-trip: Player.GetSaveData's `transform + OriginVoxel` must reproduce the saved position

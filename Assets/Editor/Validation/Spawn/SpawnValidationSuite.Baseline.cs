@@ -166,8 +166,8 @@ namespace Editor.Validation
 
             // The sub-voxel XZ offset must be BIT-exact: it is passed straight through, so any drift here is the
             // precision loss this format exists to prevent, not rounding.
-            ok &= Expect(initial.localPosition.x == saved.localPosition.x &&
-                         initial.localPosition.z == saved.localPosition.z,
+            ok &= Expect(ExactValue.Equal(initial.localPosition.x, saved.localPosition.x) &&
+                         ExactValue.Equal(initial.localPosition.z, saved.localPosition.z),
                 $"Far LoadedSave local XZ = ({initial.localPosition.x}, {initial.localPosition.z}), " +
                 $"expected ({saved.localPosition.x}, {saved.localPosition.z}) exactly.");
 

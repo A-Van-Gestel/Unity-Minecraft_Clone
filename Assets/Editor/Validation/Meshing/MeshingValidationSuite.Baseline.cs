@@ -7,6 +7,7 @@ using Jobs.BurstData;
 using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
+using ExactValue = Editor.Validation.Framework.ExactValue;
 using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.Meshing
@@ -996,7 +997,7 @@ namespace Editor.Validation.Meshing
 
             // Anti-constant guard: a hash that collapsed to one value would make every tuft sway in
             // lockstep — and would false-green the per-voxel determinism checks above.
-            passed &= MeshAssert.IsTrue("B22 phase differs between cells", phaseA != phaseB,
+            passed &= MeshAssert.IsTrue("B22 phase differs between cells", !ExactValue.Equal(phaseA, phaseB),
                 $"phaseA={phaseA:G6} phaseB={phaseB:G6}");
 
             // Determinism: a second run over the same map must reproduce the UV stream bit-identically
@@ -1027,7 +1028,7 @@ namespace Editor.Validation.Meshing
             bool cubeZeroZw = true;
             for (int i = 0; i < oc.Uvs.Length; i++)
             {
-                if (oc.Uvs[i].z != 0f || oc.Uvs[i].w != 0f)
+                if (!ExactValue.IsZero(oc.Uvs[i].z) || !ExactValue.IsZero(oc.Uvs[i].w))
                 {
                     cubeZeroZw = false;
                     break;
@@ -1066,11 +1067,11 @@ namespace Editor.Validation.Meshing
                 vertsSeen++;
                 float weight = o.Uvs[i].z;
                 bool isTop = Mathf.Approximately(v.y, pos.y + 1);
-                if (weight != (isTop ? 1f : 0f)) weightsOk = false;
+                if (!ExactValue.Equal(weight, isTop ? 1f : 0f)) weightsOk = false;
 
                 float w = o.Uvs[i].w;
                 if (float.IsNaN(phase)) phase = w;
-                else if (w != phase) phaseUniform = false;
+                else if (!ExactValue.Equal(w, phase)) phaseUniform = false;
             }
 
             bool passed = MeshAssert.IsTrue($"{label}: 16 verts found in cell", vertsSeen == 16, $"found {vertsSeen}");
@@ -1107,9 +1108,9 @@ namespace Editor.Validation.Meshing
             passed &= CheckCubeSwayChannels("B23 sway cube B", o, posB, TestMeshBlockPalette.SwayStrength, out float phaseB);
             passed &= CheckCubeSwayChannels("B23 plain transparent cube", o, posPlain, expectedWeight: 0f, out float phasePlain);
 
-            passed &= MeshAssert.IsTrue("B23 phase differs between cells", phaseA != phaseB,
+            passed &= MeshAssert.IsTrue("B23 phase differs between cells", !ExactValue.Equal(phaseA, phaseB),
                 $"phaseA={phaseA:G6} phaseB={phaseB:G6}");
-            passed &= MeshAssert.IsTrue("B23 zero-strength cube keeps phase channel 0", phasePlain == 0f,
+            passed &= MeshAssert.IsTrue("B23 zero-strength cube keeps phase channel 0", ExactValue.IsZero(phasePlain),
                 $"phase={phasePlain:G6}");
 
             // Determinism: a second run must reproduce the UV stream bit-identically.
@@ -1158,11 +1159,11 @@ namespace Editor.Validation.Meshing
                     continue;
 
                 vertsSeen++;
-                if (o.Uvs[i].z != expectedHalf) weightsOk = false;
+                if (!ExactValue.Equal(o.Uvs[i].z, expectedHalf)) weightsOk = false;
 
                 float w = o.Uvs[i].w;
                 if (float.IsNaN(phase)) phase = w;
-                else if (w != phase) phaseUniform = false;
+                else if (!ExactValue.Equal(w, phase)) phaseUniform = false;
             }
 
             bool passed = MeshAssert.IsTrue($"{label}: 24 verts found in cell", vertsSeen == 24, $"found {vertsSeen}");
