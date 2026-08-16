@@ -28,12 +28,13 @@ The floating origin (WS-4) exists precisely so rendered positions stay small. Th
 gate fires on code that **undoes** it — reconstructing the absolute coordinate
 after the engine went to the trouble of removing it.
 
-Shipped instances, both from the same idiom (`worldPos + _WorldOriginOffset`):
+Shipped instances, both from the same idiom (`worldPos + <raw origin global>`; that global was named
+`_WorldOriginOffset` and is retired — the live one, `_LiquidNoiseOrigin`, is already reduced):
 
 - **FL-1 foliage sway** — froze with distance. Fixed `ad0f28c3` / `df496f14`; see
   `Assets/Scripts/Helpers/FoliagePhase.cs` for the shape of the fix.
-- **`LiquidCore.hlsl`** — water flattens to a uniform colour. Still open:
-  `Documentation/Bugs/FLUID_BUGS.md` #20.
+- **`LiquidCore.hlsl`** — water flickered from ~3e5 blocks out, then flattened to a uniform
+  colour. Fixed 2026-08-16; see `_FIXED_BUGS.md` § Fluid #20 for the mechanism and the traps.
 
 Time is the same axis with a different name: `frequency * _Time.y` grows without
 bound over a session and quantizes identically. Treat an unbounded clock in a
@@ -51,7 +52,7 @@ This is the "hidden identity" that §5 of
 
 ```bash
 # $RANGE is whatever step 1 resolved: "" (unstaged), --staged, @{u}...HEAD, <base>...HEAD
-git diff $RANGE -- '*.hlsl' '*.shader' | grep -nE '^\+.*(_WorldOriginOffset|worldPos|positionWS|_Time)'
+git diff $RANGE -- '*.hlsl' '*.shader' | grep -nE '^\+.*(_LiquidNoiseOrigin|worldPos|positionWS|_Time)'
 git diff $RANGE -- '*.cs'             | grep -nE '^\+.*(OriginVoxel|WorldOrigin|SetGlobalVector|SetGlobalFloat)'
 ```
 
@@ -67,10 +68,15 @@ without checking, because only half the problem has an exact answer:
   modulo the period on the CPU in `double` and push a small constant. Each wave
   needs its **own** reduction — scaling one already-reduced phase by a multiplier
   does not survive the reduction.
-- **Aperiodic** (simplex/Perlin/fbm): no exact reduction exists. The field itself
-  has to be made periodic and the offset wrapped, which is a design decision with
-  real trade-offs — route to `Documentation/Bugs/FLUID_BUGS.md` #20, which holds
-  the open questions, rather than inventing an answer in a review.
+- **Aperiodic** (simplex/Perlin/fbm): there is no reduction modulo a *cycle*, but the
+  field may already have a period of its own. The shipped Ashima `snoise` does —
+  `mod289` makes it repeat every 867 units of input — so the answer is to reduce the
+  origin onto **that** period and snap scales so `P * scale` is a multiple of it.
+  Do **not** make the field periodic by wrapping the lattice index: it tiles, it is
+  continuous, and it still seams on the diagonal plane `4z + x + y = P`, because a
+  wrapped field only equals the original inside one period. The property to verify is
+  "reducing the origin by a full period is a no-op", not tiling. Worked example and
+  measurements: `_FIXED_BUGS.md` § Fluid #20.
 
 **Not a finding.**
 
