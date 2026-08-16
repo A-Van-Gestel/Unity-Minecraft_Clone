@@ -107,10 +107,14 @@ future features that will plug in without restructuring.>
 
 ## 7. Phased implementation plan
 
-| Phase                   | Scope                        | Effort | Depends on |
-|-------------------------|------------------------------|:------:|------------|
-| **<P>0 — <Foundation>** | <Data/foundation work first> |   🟢   | —          |
-| **<P>1 — <...>**        | <...>                        |   🟢   | <P>0       |
+| Phase                   | Scope                        | Effort | Depends on | Status |
+|-------------------------|------------------------------|:------:|------------|--------|
+| **<P>0 — <Foundation>** | <Data/foundation work first> |   🟢   | —          | —      |
+| **<P>1 — <...>**        | <...>                        |   🟢   | <P>0       | —      |
+
+<Status: `—` not started · `In progress` · `✅ YYYY-MM-DD` complete (dated at in-game
+confirmation) · `⏸️ YYYY-MM-DD` deliberately not implemented · `⛔ Superseded YYYY-MM-DD — <by
+what>`. Date every closed phase — an undated completed phase reads as present tense.>
 
 <State which minimal phase set delivers standalone value. For core systems:>
 
@@ -133,6 +137,22 @@ folded into the body instead — never ship "resolved same day" Q&A scaffolding.
 instead title this "Verification checklist (MUST re-verify before implementation)". -->
 
 1. **<Question>** — <what would resolve it and where the answer will land>.
+
+---
+
+## 9. Rejected alternatives
+
+<The standing "do not re-litigate this" list. Distinct from the §3 decision sections above: those
+capture one choice in its context, this is the doc's durable record of what was turned down and
+why — and it is the part that survives promotion to Architecture. Bottom placement is deliberate;
+it is reference material for a rare reader, not part of the current-state description.>
+
+| Alternative      | Why rejected                            | Date         |
+|------------------|-----------------------------------------|--------------|
+| <name/approach>  | <the reason, incl. anything measured>   | <YYYY-MM-DD> |
+
+<Include options refuted by measurement, not only design-time choices — a benchmarked NO-GO is the
+most expensive kind of knowledge to rediscover.>
 
 ---
 

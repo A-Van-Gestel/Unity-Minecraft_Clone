@@ -1,6 +1,6 @@
 ---
 name: docs-sync
-description: Keep Documentation/Architecture, Design, Guides, and Performance docs in sync with code changes that alter documented behavior. Use whenever a change modifies a system that has a corresponding architecture/design/guide document, when a Design doc's described feature has just shipped (promote to Architecture or flip status to "Implemented"), or when the user asks to "update the docs" / "check what doc this affects" / "is this area documented at all".
+description: Keep Documentation/Architecture, Design, Guides, and Performance docs in sync with code changes that alter documented behavior. Use whenever a change modifies a system that has a corresponding architecture/design/guide document, when a Design doc's described feature has just shipped (promote to Architecture or flip status to "Implemented"), when a design's last phase completes and its phased doc must be merged into a current-state Architecture doc, or when the user asks to "update the docs" / "promote this design doc" / "mark this phase complete" / "check what doc this affects" / "is this area documented at all".
 ---
 
 # Documentation Sync Protocol
@@ -103,8 +103,60 @@ For each doc identified, the change is exactly one of these:
 
 1. **No-op** — doc still accurately describes the system. Note this and move on; do not edit a doc just to touch it.
 2. **Targeted edit** — a specific section, diagram, file/class name, or invariant in the doc is now wrong. Apply the **smallest** diff that restores accuracy. Do not rewrite surrounding paragraphs that are still correct (matches the `CLAUDE.md` "Modification: do not rewrite entire files to make minor changes" rule).
-3. **Status promotion** (Design docs only) — the design has shipped. Update **only** the status line (to "Implemented") and add a one-line pointer to the new Architecture doc if one exists — do **not** rewrite the doc's body to describe the final implementation; that belongs in the Architecture doc, not the now-historical Design doc. Use the same pattern as commit `0818b51`.
-4. **New Architecture doc needed** — a substantial new system was introduced and there is no doc for it. Stop and ask the user whether to author one in this commit or open a follow-up — do not unilaterally create a new architecture document, since they are load-bearing and need user sign-off on tone/scope.
+3. **Status flip** (Design docs only) — a phase, or the design as a whole, has shipped. Mark the phase `✅ <date>` in its plan table and update the doc's status line; do **not** rewrite the doc's body to describe the final implementation. That belongs in the Architecture doc, not the now-historical Design doc. Use the same pattern as commit `0818b51`.
+4. **Promotion to Architecture** — the design's *last* phase is complete and in-game confirmed, so the Design doc must be merged into a current-state Architecture doc. This is a rewrite, not an edit: see **Design → Architecture promotion** below.
+5. **New Architecture doc needed** — a substantial new system was introduced and there is no doc for it. Stop and ask the user whether to author one in this commit or open a follow-up — do not unilaterally create a new architecture document, since they are load-bearing and need user sign-off on tone/scope.
+
+### Step 2b — Design docs vs Architecture docs: the two contracts
+
+The two trees make **different promises**, and most doc drift is one being edited as if it were
+the other:
+
+- **`Design/` is a record of intent over time.** Phases stay, and each carries its own dated
+  status (`create-design-doc` owns the format). A reader is expected to read a completed phase as
+  history and use its date to judge how far it has drifted.
+- **`Architecture/` is a description of the codebase right now.** No phase structure, no "we
+  then changed it to" — overlapping or stacked phases are merged into single logical sections
+  describing current behavior only.
+
+Two rules follow, and they are the ones that keep `Design/` honest:
+
+**The freeze rule — patch a completed phase only for what was wrong at completion time.** Broken
+links, wrong file paths, a mis-stated constant, a factual error that was already an error the day
+the phase closed: fix those. **Never edit a completed phase to track code drift.** If the code has
+moved on, that belongs to the Architecture doc, which is the artifact that promises current state.
+A phase marked `⛔ Superseded` is frozen outright — record what replaced it and stop. Repeatedly
+patching a closed phase produces text describing neither what shipped then nor what is true now.
+
+**The promotion trigger — when the last phase is marked complete and in-game confirmed,
+promotion is due.** Not "eventually": it becomes the next action, the way archiving a fixed bug
+does. Without a hard trigger, finished work accumulates in `Design/` and `Architecture/`'s
+current-state guarantee is never exercised. Audit/backlog reports (`Open backlog.` status) are
+**exempt** — partial completion is their normal steady state, and their master table already
+tracks it.
+
+### Step 2c — Design → Architecture promotion
+
+A promotion is a merge, and merges are where confident wrong sentences get written: text that was
+true in phase 1 and superseded in phase 3 reads perfectly plausibly. The full protocol —
+verification discipline, what moves to `Archived/`, what the promoted doc must carry — is in
+[references/promotion-protocol.md](references/promotion-protocol.md). Read it before starting one.
+
+The three rules that decide whether the result can be trusted:
+
+- **Merge against the code, never against the phase text.** The Design doc's own prose is the
+  *least* reliable input — it is exactly the thing suspected of drift. Every claim in the promoted
+  doc must be verified in current code, per claim, and the doc gets a fresh `Audited:` line naming
+  the files actually read at a pinned commit.
+- **Prefer a clean session for a multi-phase merge.** A session that just finished the last phase
+  knows *that* phase well and knows phase 1 — written months earlier, and the most likely to have
+  drifted — no better than a cold reader, so its confidence is highest exactly where it is least
+  earned. Hand off via `create-handoff-prompt` rather than folding a large merge into the session
+  that happened to finish the work. A single-phase doc with nothing to merge may be promoted in
+  place.
+- **Carry the IDs across.** The promoted doc keeps an ID index table (`create-design-doc` Step 4)
+  so `RF-3`-style references in commit messages and code comments still resolve after the phase
+  sections they named are gone.
 
 ### Step 3 — Verify cross-references
 
@@ -179,12 +231,20 @@ Reported, not fixed: CHUNK_LIFECYCLE_PIPELINE.md still cites the old flag name n
 blast radius. Finding a stale doc is expected; fixing an unrelated one in the same commit is scope
 creep — report it and let the next targeted pass own it.
 
+**The doc edits this skill produces are themselves reviewable.** `review-changes` gates 15–19
+(`references/gates-docs.md`) check the diff for a rewrite that silently dropped content, a patched
+frozen phase, a promotion whose `Audited:` line was not re-earned, a dropped ID, and a restamped
+date header. That skill detects; this one owns the fix. Worth running after a promotion or any
+whole-file doc rewrite.
+
 ## Constraints
 
 - **Do not invent documentation.** If a code area has no matching doc and the change is small, do not write one — surface the gap to the user and let them decide. Speculative architecture docs rot faster than no docs at all.
 - **Do not mass-rewrite.** Apply targeted diffs. Preserve existing tone, headings, ASCII diagrams, and `#region`-style structure. Never delete a section just because a *different* section is now wrong.
 - **Never restate a claim about code you did not read this session.** A targeted edit must not regenerate prose about behavior you did not verify — that silently launders an unverified claim into an authoritative doc. If a neighbouring claim looks wrong but you cannot confirm it, report it (see Output shape); do not fix it and do not delete it.
 - **Do not restamp a date header for a targeted edit.** Many Architecture and Design docs carry a `Last Updated:` / `Date:` / `Analysis Date:` line, which means *the whole doc was verified at that date*. Restamping after a one-line fix makes the rest of the doc look fresher than it is — only move the stamp when you actually re-verified the whole doc.
-- **Do not edit `Documentation/Bugs/` or `Documentation/Archived/` from this skill.** Those are handled by `archive-fixed-bug` and the `voxel-debugging` workflow respectively.
+- **Do not edit `Documentation/Bugs/` or `Documentation/Archived/` from this skill** — those are handled by `archive-fixed-bug` and the `voxel-debugging` workflow respectively. The one exception is a **Design → Architecture promotion**, which archives superseded phase detail (see `references/promotion-protocol.md` Step 4).
+- **Do not patch a completed phase to track code drift.** The freeze rule (Step 2b) allows only corrections that were already wrong at completion time. Drift belongs to the Architecture doc, not to a historical phase.
+- **Do not promote by paraphrasing the Design doc.** A promotion's claims come from current code, verified per claim; the design's own prose is the least trustworthy input in the room.
 - **Do not duplicate content.** If the same fact lives in `CLAUDE.md` and an Architecture doc, link from `CLAUDE.md` to the doc — do not copy the doc's body into `CLAUDE.md`.
 - **Performance docs are append-only snapshots.** `Documentation/Performance/PHASE_*` files capture a benchmark moment; never retroactively edit a phase report. Add a new phase file instead.

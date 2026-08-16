@@ -43,6 +43,12 @@ code, not assumed** — see each item's "What exists today".
 
 ## Master summary table
 
+**This table is the report's ID index — the whole ID space, open and closed.** A completed item
+keeps its row (marked ✅) even after its detail section is archived, and an abandoned one is marked
+⛔ rather than deleted. IDs are never recycled and never dropped: commit messages and code comments
+cite them, so this table is what keeps those backlinks resolvable. It is also the part that must
+survive if the report is ever merged into an Architecture doc.
+
 | ID     | Finding            | Effort | Risk | Benefit | Seed | Save |
 |--------|--------------------|:------:|:----:|:-------:|:----:|:----:|
 | <ID>-1 | <One-line finding> |   🟡   |  🟢  |   🟢    |  ✅   |  ✅   |
