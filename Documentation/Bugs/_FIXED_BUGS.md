@@ -1065,6 +1065,13 @@ at or below 1×10⁵. Cross-checked against an independent float32 port of `snoi
 fraction of horizontally adjacent samples collapsing onto an identical value is 0% up to 1e5, 35% at 3e5, 70% at
 1e6, 98% at 1e7 — the same knee, derived independently of the renderer.
 
+**That port is committed as `Tools/Python/verify_liquid_noise_period.py`** and reproduces all three load-bearing
+results on demand: the 867-unit period (and its absence at 289/578), the reduction being a no-op, and the onset
+sweep above. It carries a positive control — periods that are *not* multiples of 867 must disagree, measured at
+82× the valid-period error — so it cannot pass vacuously. Re-run it after any change to `snoise`/`fbm`, to
+`LiquidNoiseOrigin`'s constants, or when choosing a period for a **new** reduction (the time-axis residual below
+needs exactly this).
+
 **Root cause:**
 
 `LiquidNoisePos` reconstructed an *absolute* voxel-space position, `worldPos + _WorldOriginOffset`, and fed it
