@@ -1116,12 +1116,12 @@ Result: at 10⁷ blocks the reduced origin is `(22, 0, 6)` — as small as at sp
 Spawn unchanged on every statistic; 1e6 statistically indistinguishable from spawn; 1e7 recovered to 86%.
 Guarded by 4 Chunk Math baselines (suite 51 → 55); `Validate All` 494/494 across 22 suites.
 
-⚠️ **Never perf-measured.** No benchmark capture was taken for this change, in either direction. The
-expectation is neutral-to-better — `snoise` and `fbm` are byte-for-byte the shipped originals, and the
-per-sample delta is one `round` plus one multiply in `LiquidSnapScale` against one removed `float3`
-add — but that is reasoning, not a measurement, and the shader runs 17 (water) to 30 (lava) `snoise`
-calls per pixel over potentially large screen areas. If a liquid-shader perf question ever comes up,
-treat this as unmeasured rather than assuming the reasoning above was verified.
+**Perf: deliberately not measured, and none is owed (decided 2026-08-16).** A correctness fix for behavior that
+was broken at *playable* distances does not get gated on a benchmark — a correct system beats a marginally
+faster broken one. No frame-rate loss was noticed in play, and the expectation is neutral-to-better anyway:
+`snoise` and `fbm` are byte-for-byte the shipped originals, and the per-sample delta is one `round` plus one
+multiply in `LiquidSnapScale` against one removed `float3` add. Stated so a later reader neither mistakes
+"unmeasured" for "unexamined" nor re-opens it as debt.
 
 **Four things learned the hard way — the most valuable part of this entry:**
 
