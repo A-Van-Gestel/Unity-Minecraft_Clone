@@ -197,6 +197,7 @@ T11
             scenarios.Add(new Scenario("BH-B9: fluids do not spread into an unpopulated placeholder (managed path)", Bh9_NoSpreadIntoPlaceholderManaged));
             scenarios.Add(new Scenario("BH-B10: a seam quiesced against a placeholder wakes when it populates", Bh10_SeamWakesWhenPlaceholderPopulates));
             scenarios.Add(new Scenario("BH-B11: the seam wake covers grass (up-diagonal dirt target)", Bh11_SeamWakeCoversGrass));
+            scenarios.Add(new Scenario("BH-B12: cross-chunk reads resolve the right voxel in the far lands", Bh12_FarCoordinateSeamReadResolves));
 
             // BH-D1 old-vs-new differential (comparator self-test + driver-pair fixtures) — see BehaviorValidationSuite.Differential.cs.
             AddDifferentialScenarios(scenarios);

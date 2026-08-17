@@ -1520,9 +1520,14 @@ namespace Data
                 return new VoxelState(packedData);
             }
 
-            // If it's not in this chunk, ask the world.
-            Vector3 globalPos = new Vector3(localPos.x + Position.x, localPos.y, localPos.z + Position.y);
-            return World.Instance.worldData.GetVoxelState(globalPos);
+            // If it's not in this chunk, ask the world — through the integer fast path, never a Vector3. Forming a
+            // float here rounded the cell away past ±2²⁴ (Bug 19 class), which silently made every cross-chunk
+            // behavior read resolve the wrong voxel in the far lands. TryGetVoxel's false return is exactly this
+            // method's null (out-of-world Y, chunk absent, or chunk present-but-unpopulated).
+            return World.Instance.worldData.TryGetVoxel(
+                localPos.x + Position.x, localPos.y, localPos.z + Position.y, out VoxelState state)
+                ? state
+                : null;
         }
 
         /// <summary>

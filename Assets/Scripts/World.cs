@@ -4606,12 +4606,15 @@ public class World : MonoBehaviour, IMeshDrainHost
     /// This is a coarse grid-level check used for placement previews.
     /// Does NOT evaluate <see cref="BlockTags.REPLACEABLE"/> or specific placement rules.
     /// </summary>
-    /// <param name="pos">The <b>voxel-space</b> position to check.</param>
+    /// <param name="voxelCell">The <b>voxel-space</b> cell to check.</param>
     /// <returns>True if the cell contains a solid block, false otherwise.</returns>
-    public bool IsCellOccupiedForPlacement(Vector3 pos)
+    /// <remarks>Integer-typed on purpose: a <c>Vector3</c> parameter here silently accepted an implicit
+    /// <c>Vector3Int</c> conversion, so past ±2²⁴ the occupancy veto consulted a cell up to ±64 voxels away — it
+    /// read as correct in open air and only misbehaved against geometry (Bug 19 class).</remarks>
+    public bool IsCellOccupiedForPlacement(Vector3Int voxelCell)
     {
-        VoxelState? voxel = worldData.GetVoxelState(pos);
-        return voxel.HasValue && voxel.Value.Properties.isSolid && voxel.Value.Properties.fluidType == FluidType.None;
+        return worldData.TryGetVoxel(voxelCell.x, voxelCell.y, voxelCell.z, out VoxelState voxel) &&
+               voxel.Properties.isSolid && voxel.Properties.fluidType == FluidType.None;
     }
 
     /// <summary>
@@ -4731,13 +4734,17 @@ public class World : MonoBehaviour, IMeshDrainHost
     }
 
     /// <summary>
-    /// Retrieves the full state of a voxel at a given world position.
+    /// Retrieves the full state of a voxel at a given <b>voxel-space</b> cell.
     /// </summary>
-    /// <param name="worldPos">The world-space position.</param>
-    /// <returns>The VoxelState if the position is within world bounds; otherwise, null.</returns>
-    public VoxelState? GetVoxelState(Vector3 worldPos)
+    /// <param name="voxelCell">The voxel-space cell.</param>
+    /// <returns>The VoxelState if the cell is in-world and its chunk is populated; otherwise, null.</returns>
+    /// <remarks>Integer-typed on purpose (Bug 19 class): a <c>Vector3</c> parameter silently accepted an implicit
+    /// <c>Vector3Int</c> conversion and resolved the wrong cell past ±2²⁴. Prefer
+    /// <see cref="TryGetVoxel(int,int,int,out VoxelState)"/> on hot paths — this wrapper exists for callers that
+    /// want the nullable.</remarks>
+    public VoxelState? GetVoxelState(Vector3Int voxelCell)
     {
-        return worldData.GetVoxelState(worldPos);
+        return worldData.TryGetVoxel(voxelCell.x, voxelCell.y, voxelCell.z, out VoxelState voxel) ? voxel : null;
     }
 
     /// <summary>

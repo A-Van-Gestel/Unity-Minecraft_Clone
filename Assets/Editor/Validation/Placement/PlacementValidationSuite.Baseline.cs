@@ -33,6 +33,7 @@ namespace Editor.Validation.Placement
             scenarios.Add(new Scenario("Baseline: lands on top of unbreakable (never replaces)", LandsOnTopOfUnbreakable));
             scenarios.Add(new Scenario("Baseline: REQUIRES_SUPPORT block is placeable above a solid support", SupportNeedingPlaceableAboveSolid));
             scenarios.Add(new Scenario("Baseline: non-support block stays placeable above water (no over-rejection)", NonSupportBlockPlaceableAboveWater));
+            scenarios.Add(new Scenario("Baseline: occupancy veto rejects a solid cell in the far lands", FarCoordinateOccupancyVetoRejectsSolid));
         }
 
         /// <summary>
