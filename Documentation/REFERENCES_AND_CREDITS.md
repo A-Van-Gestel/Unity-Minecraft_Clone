@@ -2,6 +2,12 @@
 
 This document tracks all third-party assets, libraries, algorithms, and resources used in the development of this project.
 
+> [!NOTE]
+> This file is a human-readable **mirror**. The in-game credits screen is driven by
+> `Assets/Resources/CreditsDatabase.asset` (edited via **Minecraft Clone → Credits Editor**), which
+> is the authoritative copy — add an entry there first, then reflect it here. Sections below map to
+> `CreditCategory` values.
+
 ## 🛠️ Libraries & Algorithms
 
 | Name                        | Author                                                                                               | License                                | Usage Details                                                                                                                                                 |
@@ -72,3 +78,28 @@ This document tracks all third-party assets, libraries, algorithms, and resource
 
 * **MaskedUIBlur** based on logic by [cician](https://forum.unity3d.com/threads/simple-optimized-blur-shader.185327/#post-1267642)
     * *Notes:* Optimized grab-pass blur for inventory backgrounds.
+
+## 📚 References & Further Reading
+
+*Published techniques this project implements. No code was taken from these sources — they are
+credited for the ideas, and each entry records where our implementation deliberately differs.*
+
+* [**Domain Warping**](https://iquilezles.org/articles/warp/) by Iñigo Quílez
+    * *Published:* 2002
+    * *License:* N/A — technique only, no code used
+    * *Used for:* Distorting the input coordinates of the 3D density and cave noises
+      (`p' = p + Warp(p)`), breaking up grid-aligned noise structure and producing organic,
+      geologically folded terrain.
+    * *We differ:* a single `DomainWarp()` call per warp source, driven by its own dedicated
+      noise instance — not the article's recursive `fbm(p + fbm(p + fbm(p)))`.
+    * *See:* [Architecture/World Generation/PROCEDURAL_TERRAIN_GENERATION.md](Architecture/World%20Generation/PROCEDURAL_TERRAIN_GENERATION.md) §2.4, §7.1
+
+* [**GPU Gems 3, Chapter 1: Generating Complex Procedural Terrains Using the GPU**](https://developer.nvidia.com/gpugems/gpugems3/part-i-geometry/chapter-1-generating-complex-procedural-terrains-using-gpu) by Ryan Geiss (NVIDIA)
+    * *License:* N/A — technique only, no code used
+    * *Used for:* The 3D density-function terrain model — positive density is solid, negative is
+      air, and the zero-crossing is the surface. This replaced the 2D heightmap and is what makes
+      overhangs, arches and caves possible.
+    * *We differ:* evaluated in Burst on CPU worker threads rather than on the GPU (the voxel grid,
+      not an isosurface, is the authoritative game state), and restricted to the Dynamic Density
+      Band instead of the full volume.
+    * *See:* [Architecture/World Generation/PROCEDURAL_TERRAIN_GENERATION.md](Architecture/World%20Generation/PROCEDURAL_TERRAIN_GENERATION.md) §2.3, §4, §7.2

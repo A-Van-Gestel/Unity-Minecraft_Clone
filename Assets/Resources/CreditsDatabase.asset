@@ -252,3 +252,35 @@ MonoBehaviour:
     - Assets/Shaders/UIBlurBlit.shader
     version: 
     notes: Optimized grab-pass blur for inventory backgrounds.
+  - name: Domain Warping
+    author: "I\xF1igo Qu\xEDlez"
+    category: 5
+    licenseType: 9
+    customLicenseText: 
+    url: https://iquilezles.org/articles/warp/
+    usageDescription: Source of the domain warping technique used to distort 3D density
+      and cave noise coordinates, breaking up grid-aligned noise structure.
+    sourceFiles: []
+    projectFiles:
+    - Assets/Scripts/Jobs/StandardChunkGenerationJob.cs
+    version: 
+    notes: "Article (2002). Technique only \u2014 no code used. Applied as a single
+      DomainWarp() call per warp source rather than the article's recursive fbm(p
+      + fbm(p + fbm(p)))."
+  - name: 'GPU Gems 3, Chapter 1: Generating Complex Procedural Terrains Using the
+      GPU'
+    author: Ryan Geiss (NVIDIA)
+    category: 5
+    licenseType: 9
+    customLicenseText: 
+    url: https://developer.nvidia.com/gpugems/gpugems3/part-i-geometry/chapter-1-generating-complex-procedural-terrains-using-gpu
+    usageDescription: "Source of the 3D density-function terrain model \u2014 positive
+      density is solid, negative is air, the zero-crossing is the surface \u2014
+      which replaced the 2D heightmap and enables overhangs, arches and caves."
+    sourceFiles: []
+    projectFiles:
+    - Assets/Scripts/Jobs/StandardChunkGenerationJob.cs
+    version: 
+    notes: "Book chapter. Technique only \u2014 no code used. Evaluated in Burst
+      on the CPU rather than on the GPU, and restricted to the Dynamic Density Band
+      instead of the full volume."
