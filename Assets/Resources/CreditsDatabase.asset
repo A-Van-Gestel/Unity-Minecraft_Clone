@@ -114,10 +114,11 @@ MonoBehaviour:
     licenseType: 5
     customLicenseText: 
     url: https://opengameart.org/content/60-cc0-vegetation-textures
-    usageDescription: Block Textures
+    usageDescription: Oak leaves texture, packed into the block texture atlas.
     sourceFiles: []
     projectFiles:
-    - Oak Leaves
+    - Assets/Editor/AtlasPacker/SourceTextures/016-oak_leaves.png
+    - Assets/Textures/packed_texture_atlas.png
     version: 
     notes: 
   - name: Terrain textures pack (from Stunt Rally 2.3)
@@ -177,10 +178,12 @@ MonoBehaviour:
     licenseType: 5
     customLicenseText: 
     url: https://opengameart.org/content/grass-2-0
-    usageDescription: Used for the grass blades block.
+    usageDescription: Used for the grass blades block, packed into the block texture
+      atlas.
     sourceFiles: []
     projectFiles:
-    - 255-grass_blades.png
+    - Assets/Editor/AtlasPacker/SourceTextures/255-grass_blades.png
+    - Assets/Textures/packed_texture_atlas.png
     version: 
     notes: 
   - name: Block Icons
@@ -230,7 +233,7 @@ MonoBehaviour:
     - Assets/Fonts/Monocraft/Monocraft.ttc
     version: 4.2.1
     notes: A monospaced font inspired by the Minecraft typeface.
-  - name: FireCuda
+  - name: Fira Code
     author: tonsky
     category: 3
     licenseType: 7
@@ -239,7 +242,7 @@ MonoBehaviour:
     usageDescription: Used as fallback for Monocraft for "Box Drawing" characters.
     sourceFiles: []
     projectFiles:
-    - Assets/Fonts/FireCuda/FireCuda.ttf
+    - Assets/Fonts/FireCode/
     version: 6.2
     notes: Free monospaced font with programming ligatures.
   - name: MaskedUIBlur

@@ -34,7 +34,7 @@ This document tracks all third-party assets, libraries, algorithms, and resource
     * *Files used:* ...
 * **60 CC0 Vegetation textures** by [rubberduck](https://opengameart.org/content/60-cc0-vegetation-textures)
     * *License:* CC0 (Public Domain)
-    * *Files used:* Oak Leaves
+    * *Files used:* `016-oak_leaves.png`
 * **Terrain textures pack (from Stunt Rally 2.3)** by [CryHam](https://opengameart.org/content/terrain-textures-pack-from-stunt-rally-23)
     * *License:* CC0 (Public Domain)
     * *Files used:* ....
@@ -53,7 +53,7 @@ This document tracks all third-party assets, libraries, algorithms, and resource
     * *Files used:* ....
 * **Grass 2** by [virtushda](https://opengameart.org/content/grass-2-0)
     * *License:* CC0 (Public Domain)
-    * *Files used:* 255-grass_blades.png
+    * *Files used:* `255-grass_blades.png`
 
 ### UI Elements
 
@@ -73,10 +73,10 @@ This document tracks all third-party assets, libraries, algorithms, and resource
     * *Source:* `Assets/Fonts/Monocraft/Monocraft.ttc`
     * *Notes:* A monospaced font inspired by the Minecraft typeface.
 
-* [**FireCuda**](https://github.com/tonsky/FiraCode) by [tonsky](https://github.com/tonsky)
+* [**Fira Code**](https://github.com/tonsky/FiraCode) by [tonsky](https://github.com/tonsky)
     * *Version:* v6.2
     * *License:* SIL Open Font License 1.1
-    * *Source:* `Assets/Fonts/FireCuda/FireCuda.ttf`
+    * *Source:* `Assets/Fonts/FireCode/` (Light, Regular, Medium, SemiBold and Bold weights)
     * *Notes:* Free monospaced font with programming ligatures. Used as fallback for Monocraft for "Box Drawing" characters.
 
 ## 📄 Shaders & Technical Art
