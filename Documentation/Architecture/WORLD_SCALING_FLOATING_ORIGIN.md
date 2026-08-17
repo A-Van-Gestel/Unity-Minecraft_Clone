@@ -31,7 +31,8 @@ Findings are from static review of the full presentation/query boundary: `ChunkR
 `PlacementController.MarchRay`/`Probe`, `PlayerInteraction` (mods, highlights, player-AABB veto),
 `World.cs` spawn/load/Update/streaming/visualizer paths, `Clouds`, `BorderWallRenderer`,
 `DebugScreen`, `TerrainGenDebugOverlay`, `ChunkPoolManager.GetBorder`, `VisualizerChunkData`,
-`Player.GetSaveData`/`LoadSaveData`, `SaveDataTypes`, `SaveSystem.CURRENT_VERSION` (= 12),
+`Player.GetSaveData`/`LoadSaveData`, `SaveDataTypes`, `SaveSystem.CURRENT_VERSION` (= 12 **at the time of this audit**; 15 today — later bumps
+are unrelated to floating origin),
 `ChunkMath.WorldToChunk`, `LiquidCore.hlsl`, and shader/tween greps (no DOTween, no particle
 systems, no other runtime `worldPos` consumers except `BorderWallShader.shader` — see §8).
 

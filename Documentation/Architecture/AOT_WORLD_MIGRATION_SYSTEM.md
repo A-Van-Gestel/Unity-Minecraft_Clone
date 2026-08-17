@@ -562,9 +562,14 @@ is registered. Three invariants:
 
 ---
 
-## 5. The "True DTO" Migration Example (`Migration_v1_to_v2_RemoveNeedsLight.cs`)
+## 5. The "True DTO" Migration Example (illustrative — not a real file)
 
-This file is a complete, self-contained historical record of the v1 chunk binary layout. A developer working on this codebase in three years can open this single file and know exactly what a v1 chunk looked like on disk — no other files are needed. Every magic number is
+> **`Migration_v1_to_v2_RemoveNeedsLight` below is a teaching example, not a step in this codebase.** The
+> real v1→v2 step is [`Migration_v1_to_v2_RegionRepack.cs`](../../Assets/Scripts/Serialization/Migration/Steps/Migration_v1_to_v2_RegionRepack.cs)
+> (it repacks region files from the broken voxel-space addressing scheme to chunk-index space). Do not go
+> looking for the filename in this heading — read it as the pattern every step should follow.
+
+A step written this way is a complete, self-contained historical record of the chunk binary layout it reads. A developer working on this codebase in three years can open the single file and know exactly what a chunk of that version looked like on disk — no other files are needed. Every magic number is
 mathematically traced to its source.
 
 ```csharp

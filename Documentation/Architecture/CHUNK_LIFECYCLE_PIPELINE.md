@@ -73,7 +73,7 @@ Checks all **8 horizontal neighbors** (cardinal + diagonal):
 | Check          | Condition                              | Rationale                                                                                                                                                                                                                    |
 |----------------|----------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | World bounds   | `IsChunkInWorld()` → skip if false     | WS-3: `IsChunkInWorld` is now always true (XZ fully unbounded, both signs), so this skip branch never fires — every neighbor is an ordinary frontier chunk that parks until populated. "Out-of-world" no longer exists in XZ |
-| Generation job | `generationJobs.ContainsKey()` → false | Neighbor terrain must be complete                                                                                                                                                                                            |
+| Generation job | `GenerationJobs.ContainsKey()` → false | Neighbor terrain must be complete                                                                                                                                                                                            |
 | Data exists    | `Chunks.TryGetValue()` → exists        | Neighbor must have a ChunkData                                                                                                                                                                                               |
 | Populated      | `IsPopulated` → true                   | Voxel data must be filled                                                                                                                                                                                                    |
 
@@ -88,7 +88,7 @@ Checks all **8 horizontal neighbors** (cardinal + diagonal) with stricter requir
 | Check                          | Condition                             | Rationale                                   |
 |--------------------------------|---------------------------------------|---------------------------------------------|
 | All of `AreNeighborsDataReady` | (see above)                           | Baseline requirement                        |
-| Lighting job                   | `lightingJobs.ContainsKey()` → false  | Neighbor must not be computing light        |
+| Lighting job                   | `LightingJobs.ContainsKey()` → false  | Neighbor must not be computing light        |
 | Pending light changes          | `HasLightChangesToProcess` → false    | Neighbor must not have unscheduled work     |
 | Initial lighting               | `NeedsInitialLighting` → false        | Neighbor must have completed first lighting |
 | Main-thread processing         | `IsAwaitingMainThreadProcess` → false | Neighbor must not be in transitional state  |
@@ -104,7 +104,7 @@ Checks all **8 horizontal neighbors** (cardinal + diagonal) with relaxed require
 | Check                   | Condition                              | Rationale                                                                                                                                   |
 |-------------------------|----------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
 | World bounds            | `IsChunkInWorld()` → skip if false     | WS-3: `IsChunkInWorld` is now always true (XZ fully unbounded) — this skip branch never fires; every neighbor is an ordinary frontier chunk |
-| Generation job          | `generationJobs.ContainsKey()` → false | Neighbor terrain must be complete                                                                                                           |
+| Generation job          | `GenerationJobs.ContainsKey()` → false | Neighbor terrain must be complete                                                                                                           |
 | Data exists + populated | `Chunks.TryGetValue()` + `IsPopulated` | Neighbor must have voxel data                                                                                                               |
 | Initial lighting done   | `NeedsInitialLighting` → false         | Neighbor must have had at least one lighting pass                                                                                           |
 
@@ -295,7 +295,7 @@ foreach pos in snapshot:
 
 > [!IMPORTANT]
 > ### Critical Scheduling Detail
-> When the edge-check path in the lighting scan sets `HasLightChangesToProcess = true` but `ScheduleLightingUpdate()` returns `false` (e.g., job already exists — shouldn't happen due to the earlier `lightingJobs.ContainsKey` guard), the flag would remain set and fall through to the regular path.
+> When the edge-check path in the lighting scan sets `HasLightChangesToProcess = true` but `ScheduleLightingUpdate()` returns `false` (e.g., job already exists — shouldn't happen due to the earlier `LightingJobs.ContainsKey` guard), the flag would remain set and fall through to the regular path.
 > However, because `ScheduleLightingUpdate` reads `NeedsEdgeCheck` internally and clears it, the **fallback path effectively performs the edge check anyway**, but under the weaker `AreNeighborsDataReady` gate instead of `AreNeighborsReadyAndLit`.
 
 ---
