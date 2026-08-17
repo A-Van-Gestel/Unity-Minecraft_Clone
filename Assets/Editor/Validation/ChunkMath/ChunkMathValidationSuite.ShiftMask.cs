@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Data;
 using Editor.Validation.Framework;
 using Helpers;
 using UnityEngine;
@@ -33,6 +34,7 @@ namespace Editor.Validation
             scenarios.Add(new Scenario("ChunkToRegion / RegionLocal Reconstructs Chunk (sweep)", RunRegionSweep));
             scenarios.Add(new Scenario("WorldToChunk == Floor Div (float sweep)", RunWorldToChunkSweep));
             scenarios.Add(new Scenario("Negative-Coordinate Teeth (truncation would fail)", RunNegativeTeeth));
+            scenarios.Add(new Scenario("Far-Coordinate Wake Routing (Bug 17 teeth)", RunFarWakeRoutingTeeth));
             scenarios.Add(new Scenario("FloorDiv == Floor Div Oracle (sweep × spacings)", RunFloorDivOracleSweep));
             scenarios.Add(new Scenario("FloorDiv == Float Idiom In-Band (banded parity)", RunFloorDivFloatParityBands));
             scenarios.Add(new Scenario("FloorDiv Out-Of-Band Teeth (float idiom diverges)", RunFloorDivOutOfBandTeeth));
@@ -293,6 +295,83 @@ namespace Editor.Validation
             }
 
             Debug.Log("[PASS] Negative-Coordinate Teeth (truncation would fail)");
+            return true;
+        }
+
+        /// <summary>
+        /// Teeth for the cross-chunk neighbor-wake routing that <c>World.ApplyModifications</c> step 4 performs —
+        /// the sole path that re-activates a settled generation-time fluid or grass voxel when its neighbor is
+        /// broken (Fluid Bug 17). That step resolves a <b>chunk</b> (<see cref="ChunkCoord.FromVoxelPosition(Vector3Int)"/>,
+        /// behind <c>World.GetChunkFromVector3</c>) and a <b>chunk-local cell</b> (<see cref="ChunkMath.VoxelToLocal"/>,
+        /// behind <c>Chunk.GetVoxelPositionInChunkFromGlobalVector3</c>); both helpers formerly took a
+        /// <c>Vector3</c>, so the integer voxel cell converted implicitly to float and mis-resolved past ±2²⁴.
+        /// </summary>
+        /// <remarks>
+        /// Two assertions per case: the integer routing equals the exact oracle, AND the float routing it replaced
+        /// disagrees — a case where both agree has no teeth. The onset is <b>graded</b>, which is why the two
+        /// divergences are counted separately and each is required at least once: just past ±2²⁴ the float error is
+        /// one voxel, so only the <i>local cell</i> is wrong (the wake hits the wrong voxel in the right chunk),
+        /// while at the ±2.147×10⁹ magnitude Bug 17 was reported at the error reaches ±64 voxels and the
+        /// <i>chunk</i> itself resolves several chunks away.
+        /// </remarks>
+        private static bool RunFarWakeRoutingTeeth()
+        {
+            // Magnitudes spanning the graded onset: the ±2²⁴ float-exactness edge, a mid-magnitude, and the
+            // coordinate Bug 17 was reported at. Signed, because the wake routes negative coordinates too.
+            int[] farCells =
+            {
+                (1 << 24) + 1, -((1 << 24) + 1),
+                (1 << 28) + 17, -((1 << 28) + 17),
+                2147000000, -2147000000,
+            };
+
+            int chunkTeeth = 0;
+            int localTeeth = 0;
+
+            foreach (int cell in farCells)
+            {
+                // The wake resolves X and Z through the same helpers, so one axis exercises both.
+                Vector3Int voxelCell = new Vector3Int(cell, 0, cell);
+
+                // --- Chunk resolution: integer must match the exact oracle. ---
+                int expectedChunk = RefFloorDiv(cell, ChunkMath.CHUNK_WIDTH);
+                ChunkCoord actualChunk = ChunkCoord.FromVoxelPosition(voxelCell);
+                if (actualChunk.X != expectedChunk || actualChunk.Z != expectedChunk)
+                {
+                    Debug.LogError($"[FAIL] Far-Coordinate Wake Routing (Bug 17 teeth) — cell={cell} expected chunk " +
+                                   $"({expectedChunk}, {expectedChunk}), got ({actualChunk.X}, {actualChunk.Z}).");
+                    return false;
+                }
+
+                // --- Local cell: integer must match the exact positive-modulo oracle. ---
+                int expectedLocal = ((cell % ChunkMath.CHUNK_WIDTH) + ChunkMath.CHUNK_WIDTH) % ChunkMath.CHUNK_WIDTH;
+                int actualLocal = ChunkMath.VoxelToLocal(cell);
+                if (actualLocal != expectedLocal)
+                {
+                    Debug.LogError($"[FAIL] Far-Coordinate Wake Routing (Bug 17 teeth) — cell={cell} expected local " +
+                                   $"{expectedLocal}, got {actualLocal}.");
+                    return false;
+                }
+
+                // --- Teeth: the float routing these replaced must disagree at this magnitude. ---
+                int floatChunk = ChunkMath.WorldToChunk(cell);
+                int floatLocal = ChunkMath.VoxelToLocal(Mathf.FloorToInt(cell));
+                if (floatChunk != expectedChunk) chunkTeeth++;
+                if (floatLocal != expectedLocal) localTeeth++;
+            }
+
+            // Both failure shapes must be represented, or the scenario would still pass if the fix only covered
+            // one of the two helpers.
+            if (chunkTeeth == 0 || localTeeth == 0)
+            {
+                Debug.LogError("[FAIL] Far-Coordinate Wake Routing (Bug 17 teeth) — the float routing agreed with the " +
+                               $"integer routing too often (chunk teeth {chunkTeeth}, local teeth {localTeeth}; both " +
+                               "must be > 0). The scenario has no teeth — the far cells no longer straddle the ±2²⁴ " +
+                               "precision onset.");
+                return false;
+            }
+
+            Debug.Log("[PASS] Far-Coordinate Wake Routing (Bug 17 teeth)");
             return true;
         }
 

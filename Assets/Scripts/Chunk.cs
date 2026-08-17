@@ -461,17 +461,20 @@ public class Chunk
     /// <summary>
     /// Converts an absolute <b>voxel-space</b> position into the local voxel position within its chunk.
     /// </summary>
-    /// <param name="pos">The absolute voxel-space position (NOT a Unity transform — callers convert first).</param>
+    /// <param name="voxelCell">The absolute voxel cell (NOT a Unity transform — callers convert first).</param>
     /// <returns>The local 3D position of the voxel (0-15 on X and Z).</returns>
-    /// <example><c>Voxel Pos (17.5f, 50f, -5f)</c> in Chunk at <c>(16, 0, -16)</c> -> <c>Local Pos (1, 50, 11)</c></example>
-    public Vector3Int GetVoxelPositionInChunkFromGlobalVector3(Vector3 pos)
+    /// <example><c>Voxel Cell (17, 50, -5)</c> in Chunk at <c>(16, 0, -16)</c> -> <c>Local Pos (1, 50, 11)</c></example>
+    /// <remarks>Integer-typed on purpose: a <c>Vector3</c> parameter here silently accepted an implicit
+    /// <c>Vector3Int</c> conversion and returned the wrong local cell past ±2²⁴ (Bug 19 class). Pure mask math, so
+    /// this is exact to the ±2³¹ edge and a float caller is now a compile error.</remarks>
+    public Vector3Int GetVoxelPositionInChunkFromGlobalVector3(Vector3Int voxelCell)
     {
         // The chunk's own origin is deliberately not an input: masking the voxel coordinate yields the same local
         // coordinate without it, so this cannot be fed the wrong space. Shares WorldData.TryGetVoxel's idiom.
         return new Vector3Int(
-            ChunkMath.VoxelToLocal(Mathf.FloorToInt(pos.x)),
-            Mathf.FloorToInt(pos.y),
-            ChunkMath.VoxelToLocal(Mathf.FloorToInt(pos.z)));
+            ChunkMath.VoxelToLocal(voxelCell.x),
+            voxelCell.y,
+            ChunkMath.VoxelToLocal(voxelCell.z));
     }
 
     #region Mesh Generation

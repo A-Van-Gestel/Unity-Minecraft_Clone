@@ -3362,14 +3362,17 @@ public class World : MonoBehaviour, IMeshDrainHost
     }
 
     /// <summary>
-    /// Retrieves the active chunk object containing the specified world position.
+    /// Retrieves the active chunk object containing the specified <b>voxel cell</b>.
     /// </summary>
-    /// <param name="pos">The world-space position.</param>
+    /// <param name="voxelCell">The global voxel cell (NOT a Unity transform — convert with <see cref="WorldOrigin.UnityToChunk"/> first).</param>
     /// <returns>The Chunk object if found and in bounds; otherwise, null.</returns>
+    /// <remarks>Integer-typed on purpose: a <c>Vector3</c> parameter here silently accepted an implicit
+    /// <c>Vector3Int</c> conversion and mis-resolved the chunk past ±2²⁴ (Bug 19 class). Pure shift math, so this is
+    /// exact to the ±2³¹ edge and a float caller is now a compile error.</remarks>
     [CanBeNull]
-    public Chunk GetChunkFromVector3(Vector3 pos)
+    public Chunk GetChunkFromVector3(Vector3Int voxelCell)
     {
-        ChunkCoord coord = new ChunkCoord(ChunkMath.WorldToChunk(pos.x), ChunkMath.WorldToChunk(pos.z));
+        ChunkCoord coord = ChunkCoord.FromVoxelPosition(voxelCell);
 
         // "Is in World" bounds check before accessing the array.
         if (!IsChunkInWorld(coord))

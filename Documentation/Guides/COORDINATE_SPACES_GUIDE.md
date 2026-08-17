@@ -88,8 +88,8 @@ completed rows.
 | `ChunkMath.WorldToChunk(float)`                    | fractional **voxel** coord                                                        | `VoxelToChunk(float)` overload                       |
 | `WorldData.GetChunkCoordFor(Vector3)`              | voxel pos → voxel *origin* (misleading: returns `Vector2Int`, not a `ChunkCoord`) | `GetChunkVoxelOriginFor`                             |
 | `WorldData.IsVoxelInWorld(Vector3 worldPos)` param | voxel space                                                                       | `voxelPos`                                           |
-| `Chunk.GetVoxelPositionInChunkFromGlobalVector3`   | voxel → chunk-local                                                               | `VoxelToLocal(Vector3)`                              |
-| `World.GetChunkFromVector3(Vector3 pos)`           | voxel space                                                                       | `GetChunkFromVoxelPosition`                          |
+| `Chunk.GetVoxelPositionInChunkFromGlobalVector3`   | voxel cell → chunk-local (now `Vector3Int`-typed — Fluid Bug 17)                   | `VoxelToLocal(Vector3Int)`                           |
+| `World.GetChunkFromVector3(Vector3Int voxelCell)`  | voxel space (now `Vector3Int`-typed — Fluid Bug 17)                               | `GetChunkFromVoxelCell`                              |
 | `CheckForVoxel(Vector3 worldPos)` param            | voxel space                                                                       | `voxelPos`                                           |
 | `ChunkRelativePosition.ToAbsoluteWorldPosition()`  | absolute **voxel** `Vector3` (lossy past ±2²⁴ — avoid on precision paths)         | `ToAbsoluteVoxelPosition()`                          |
 
