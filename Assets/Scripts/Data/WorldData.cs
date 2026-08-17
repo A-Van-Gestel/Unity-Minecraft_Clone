@@ -1,10 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using Helpers;
-using JetBrains.Annotations;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Pool;
+using Debug = UnityEngine.Debug;
 
 namespace Data
 {
@@ -261,7 +262,7 @@ namespace Data
         /// </summary>
         /// <param name="x">The world-position X.</param>
         /// <param name="z">The world-position Z.</param>
-        [System.Diagnostics.Conditional("UNITY_EDITOR"), System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+        [Conditional("UNITY_EDITOR"), Conditional("DEVELOPMENT_BUILD")]
         private static void AssertWithinFloatPrecision(float x, float z)
         {
             const float MAX_EXACT_INT_FLOAT = 1 << 24;
@@ -359,7 +360,6 @@ namespace Data
             state = new VoxelState(chunkData.GetVoxel(ChunkMath.VoxelToLocal(x), y, ChunkMath.VoxelToLocal(z)));
             return true;
         }
-
 
         /// <summary>
         /// Queues a mesh rebuild for the given chunk.
