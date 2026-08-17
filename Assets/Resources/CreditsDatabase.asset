@@ -30,16 +30,16 @@ MonoBehaviour:
     licenseType: 4
     customLicenseText: 
     url: https://github.com/RelativityMC/ScalableLux
-    usageDescription: Studied as a source of lighting optimization techniques - both its
-      TECHNICAL_DETAILS.md write-up and the implementation behind it - after our own BFS
-      flood-fill engine was already working.
+    usageDescription: Studied as a source of lighting optimization techniques - both
+      its TECHNICAL_DETAILS.md write-up and the implementation behind it - after
+      our own BFS flood-fill engine was already working.
     sourceFiles: []
     projectFiles: []
     version: 
-    notes: Our light engine was built independently, then measured against Starlight to
-      see which optimizations were worth adopting; the edge consistency check and the
-      max(1, opacity) attenuation formula came from it. The shared BFS flood-fill core is
-      convergence on the standard approach to voxel light propagation.
+    notes: Our light engine was built independently, then measured against Starlight
+      to see which optimizations were worth adopting; the edge consistency check
+      and the max(1, opacity) attenuation formula came from it. The shared BFS flood-fill
+      core is convergence on the standard approach to voxel light propagation.
   - name: FastNoiseLite
     author: Auburn
     category: 0
@@ -148,10 +148,10 @@ MonoBehaviour:
     - Assets/Editor/AtlasPacker/SourceTextures/014-oak_log_side.png
     - Assets/Textures/packed_texture_atlas.png
     version: 
-    notes: Offered by the author under GPL 2.0, GPL 3.0 or CC-BY-SA 3.0 (and later versions
-      of those). CC-BY-SA 3.0 is the one selected for this project - it is the content
-      licence of the three, so its share-alike attaches to the artwork and the packed
-      atlas rather than raising scope questions over the engine code.
+    notes: Offered by the author under GPL 2.0, GPL 3.0 or CC-BY-SA 3.0 (and later
+      versions of those). CC-BY-SA 3.0 is the one selected for this project - it
+      is the content licence of the three, so its share-alike attaches to the artwork
+      and the packed atlas rather than raising scope questions over the engine code.
   - name: paramecij's tree trunks and stumps texture pack 1
     author: pare
     category: 1
