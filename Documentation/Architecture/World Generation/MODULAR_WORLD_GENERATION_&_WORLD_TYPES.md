@@ -1,6 +1,6 @@
 # Modular World Generation & World Types
 
-**Version:** 2.5  
+**Version:** 2.6  
 **Date:** 2026-04-03  
 **Status:** Implemented (2026-05-14)  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)  
@@ -9,6 +9,18 @@
 ---
 
 ## Changelog
+
+### v2.6 (from v2.5) — Backlog migration
+
+- **Moved** the forward-looking backlog out of this Architecture doc: former **Section 12** (world-generation
+  enhancements), **Section 13** (editor tooling) and **Section 15** (assembly-definition boundary) now live in
+  [`../../Design/WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md`](../../Design/WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md)
+  as `TF-15`..`TF-19`. Every sketch was status-checked against code first, so only still-open items moved;
+  §12 is now the **disposition mapping table** (what shipped, what an existing `TF-*` already owned, what
+  migrated), retained so other docs' `§12.x`/`§13.x` citations keep resolving.
+- **Renumbered** former Section 14 (Resolved Questions) → **Section 13**. Sections 1–11 and Appendix A are unchanged.
+- **Fixed** §11.3's "adding a new flora type" instruction — structures are authored as pool entries and
+  expanded through `ExpandStructure`, not added as `ExpandFlora` switch cases (see the §2.2 note).
 
 ### v2.5 (from v2.4) — Final Review
 
@@ -270,7 +282,7 @@ namespace Jobs.Generators
 ### 2.3. Legacy Isolation Architecture ("Sealed Legacy Module")
 
 All legacy world generation code will be fully self-contained in `Assets/Scripts/Legacy/`. The main codebase will contain **zero references** to any legacy type — the only bridge is the `IChunkGenerator` interface — with one intentional exception:
-`WorldJobManager`'s factory switch must create `new LegacyChunkGenerator()` (see Section 5 for the caveat and Section 15 for how to eliminate this via the Assembly Definition pattern).
+`WorldJobManager`'s factory switch must create `new LegacyChunkGenerator()` (see Section 5 for the caveat, and `TF-19` in [`WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md`](../../Design/WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md) for how to eliminate it via the Assembly Definition pattern).
 This prevents accidental breakage of legacy worlds when modifying the active (Standard) generation code.
 
 #### Design Rationale
@@ -810,7 +822,7 @@ public class WorldJobManager : IDisposable
         // NOTE: This is the SINGLE intentional exception to the "zero legacy references"
         // rule from Section 2.3. The factory must create concrete generator instances,
         // which requires referencing the Legacy namespace. If the Assembly Definition
-        // boundary (Section 15) is adopted later, this switch is replaced by a
+        // boundary (TF-19) is adopted later, this switch is replaced by a
         // registration pattern (GeneratorRegistry) that eliminates the direct reference.
         _chunkGenerator = activeWorldType.TypeID switch
         {
@@ -1354,330 +1366,61 @@ These are the specific places where new features can be added with minimal archi
 
 3. **Adding a new world type:** Create a new `IChunkGenerator` implementation + job struct. Register in `WorldJobManager`'s factory switch. Add a new `WorldTypeID` enum value. Add biome `ScriptableObject` subclass if needed. No changes to existing generators.
 
-4. **Adding a new flora type:** Add a case to `StandardChunkGenerator.ExpandFlora()`. The detection logic in the job stays the same (it just queues a `VoxelMod` with an index). No changes to `IChunkGenerator` interface or `WorldJobManager`.
+4. **Adding a new structure / flora type:** author a `CompositeStructureTemplate` and add it as a pool entry on the biome — `StandardChunkGenerator.ExpandStructure()` resolves the marker's `PoolEntryIndex` against the flattened pool, so no `switch` arm is added per type. The detection logic in the job stays the same (it queues a `StructureSpawnMarker`). No changes to the `IChunkGenerator` interface or `WorldJobManager`. *(Pre-supersession this was "add a case to `ExpandFlora()`" — see the note in §2.2.)*
 
 5. **Adding a new generation pass:** Add a new `NativeArray` output to `GenerationJobData` (or chain a second job in `ScheduleGeneration()`). `ProcessGenerationJobs()` reads the new output. The interface doesn't change — `GenerationJobData` is the output contract.
 
 ---
 
-## 12. Future Enhancements — World Generation
-
-This section catalogs concrete improvements enabled by the new architecture, organized by terrain feature. Each entry notes the difficulty, which structs/files are affected, and whether it requires interface changes.
-
-### 12.1. Terrain Shape Improvements
-
-#### A. 3D Density Field (Caves, Overhangs, Arches)
-
-The legacy system is a **pure 2D heightmap** — each column has exactly one terrain height from `Noise.Get2DPerlin`, making overhangs and caves physically impossible. Every block below the height is solid, every block above is air.
-
-The Standard system replaces this with a **3D density field** evaluated in a band around the terrain surface. This single change unlocks caves, overhangs, cliff shelves, and arches simultaneously.
-
-**How — Band Evaluation (the "Density Band" pattern):**
-
-```
-For each column (x, z):
-  1. terrainHeight = terrainNoise2D(x, z)                          // cheap 2D eval
-  2. For y in [terrainHeight - CAVE_DEPTH .. terrainHeight + OVERHANG_HEIGHT]:
-       density = (terrainHeight - y) + 3dNoise(x, y, z) * amplitude
-       if density > 0 → solid block (stone/dirt/surface)
-       if density ≤ 0 → air
-  3. Below the band (y < terrainHeight - CAVE_DEPTH) → always solid (stone/ores)
-  4. Above the band (y > terrainHeight + OVERHANG_HEIGHT) → always air (or water)
-```
-
-The `(terrainHeight - y)` term creates a natural bias: blocks well below the surface are strongly positive (always solid), blocks well above are strongly negative (always air).
-The 3D noise only needs to "push" the density across zero near the surface to create features. This is why the band can be narrow — deep underground and high sky don't need 3D evaluation.
-
-**Overhang control via noise type:**
-
-| Noise Config                          | Overhang Style                          |
-|---------------------------------------|-----------------------------------------|
-| `FractalType.Ridged` + low frequency  | Sharp cliff ledges, mesa shelves        |
-| `FractalType.FBm` + medium frequency  | Smooth rounded overhangs, gentle arches |
-| Domain Warp + Ridged                  | Twisted, organic cliff faces            |
-| `NoiseType.Cellular` + `Distance2Sub` | Layered terraced overhangs              |
-
-**Cave control via noise type (underground portion of the band):**
-
-| Noise Config                                         | Cave Style                          |
-|------------------------------------------------------|-------------------------------------|
-| `FractalType.Ridged`                                 | Swiss-cheese interconnected caverns |
-| `FractalType.FBm` + low frequency                    | Large open underground chambers     |
-| `NoiseType.Cellular` + `CellularReturnType.Distance` | Tube-shaped tunnels                 |
-
-**Band parameters** (`CAVE_DEPTH` and `OVERHANG_HEIGHT`) can be per-biome fields on `StandardBiomeAttributesJobData`, allowing mountain biomes to have deep caves and tall overhangs while plains have shallow caves and no overhangs.
-
-**Performance:** The band evaluation is the same "Sky Skip" optimization from Section 10.2.A. Blocks outside the band skip 3D noise entirely. With a typical band of 30 blocks (20 below + 10 above surface) out of 128 total height, ~75% of blocks skip 3D evaluation. This is
-actually **faster** than the legacy system's approach of looping all 128 Y levels with 2D noise per level.
-
-**Affects:** `StandardChunkGenerationJob.Execute()` only. The `GlobalCaveNoise` field already exists in the job definition (Section 4.2). Optionally add `int CaveDepth` and `int OverhangHeight` to `StandardBiomeAttributesJobData` for per-biome control.  
-**Difficulty:** Low — ~15 lines of density math in `Execute()`, plus optional per-biome band parameters. No interface changes.
-
-#### B. Domain-Warped Terrain
-
-**What:** Apply `DomainWarp()` to the X/Z coordinates before evaluating terrain height noise. This distorts the terrain non-linearly, creating organic coastlines, twisted mountain ranges, and non-repetitive landscapes.
-
-**How:** Add a `FastNoiseConfig DomainWarpConfig` to `StandardBiomeAttributesJobData`. In the job, construct a warp instance and call `warpNoise.DomainWarp(ref wx, ref wz)` before `terrainNoise.GetNoise(wx, wz)`.
-
-**Affects:** `StandardBiomeAttributesJobData` + `StandardBiomeAttributes` (new field), `StandardChunkGenerationJob.Execute()` (read warp, apply).  
-**Difficulty:** Low — FastNoiseLite's `DomainWarp` API is already available and Burst-safe.
-
-#### C. Continental Landmass Scale
-
-**What:** Add a very-low-frequency noise layer that controls whether a region is "land" or "ocean" at a macro scale (thousands of blocks). This multiplies the terrain height, creating continents separated by vast oceans.
-
-**How:** Add a `FastNoiseConfig ContinentalNoiseConfig` to `StandardBiomeAttributesJobData` (or as a global field on the job). Evaluate at very low frequency (e.g., `0.0005f`). Use the 0–1 output as a multiplier on terrain height. Values near 0 produce ocean floor; values near 1
-produce full-height terrain.
-
-**Affects:** `StandardBiomeAttributesJobData` or `StandardChunkGenerationJob` (new field), `Execute()` (evaluate + multiply).  
-**Difficulty:** Low — single additional noise evaluation per column.
-
-#### D. River Carving
-
-**What:** Carve river channels into the terrain surface using Cellular noise distance fields.
-
-**How:** Configure a `FastNoiseLite` instance with `NoiseType.Cellular` and `CellularReturnType.Distance`. The distance value represents proximity to cell edges — where distance is low, carve the terrain down to water level. `CellularJitter` controls how winding the rivers are.
-
-**Affects:** `StandardChunkGenerationJob.Execute()` (add a river noise evaluation per column), potentially a new `FastNoiseConfig RiverNoiseConfig` on the biome or job.  
-**Difficulty:** Medium — requires careful integration with the heightmap to avoid floating blocks at river banks.
-
-#### E. Terrain Erosion & Weathering
-
-Natural terrain exhibits erosion patterns — valleys carved by water flow, sediment deposited in basins, cliff faces weathered into slopes. The legacy pure-2D-heightmap system cannot represent these patterns at all. The Standard system enables two approaches, ordered by
-implementation priority.
-
-##### E.1. Noise-Based "Fake" Erosion (Recommended First)
-
-**What:** Use Domain Warp + Ridged fractal noise to *simulate the visual appearance* of hydraulic erosion without running a physics simulation. Ridged noise naturally creates valley-like channels. Domain Warp makes them meander organically. The result is terrain that *looks*
-eroded without the computational cost of a true simulation.
-
-**How:** Layer a secondary noise pass that modifies the 2D terrain height before the density band evaluation:
-
-```
-// Inside StandardChunkGenerationJob.Execute(), per column
-float baseHeight = terrainNoise.GetNoise(x, z);
-
-// Domain warp the coordinates for organic meandering erosion channels
-float wx = x, wz = z;
-erosionWarp.DomainWarp(ref wx, ref wz);
-
-// Evaluate erosion noise at warped coordinates — ridged noise creates valley channels
-float erosion = erosionNoise.GetNoise(wx, wz);  // FractalType.Ridged, low frequency
-
-// Subtract erosion from terrain height — valleys form where ridged noise peaks
-float terrainHeight = baseHeight - erosion * erosionStrength;
-```
-
-Combined with the 3D density band from Section 12.1.A, this produces:
-
-- **Carved valleys** where ridged noise subtracts from the heightmap
-- **Natural overhangs** at valley walls where 3D density keeps upper blocks solid
-- **Winding canyon paths** from domain warp distortion
-- **Weathered cliff faces** where erosion partially carves into steep terrain
-
-**Noise configs for different erosion styles:**
-
-| Config                                                    | Visual Result                                |
-|-----------------------------------------------------------|----------------------------------------------|
-| `FractalType.Ridged` + `Frequency 0.002` + Domain Warp    | Wide, winding river valleys with cliff walls |
-| `FractalType.Ridged` + `Frequency 0.008` + high amplitude | Deep narrow canyons, mesa terrain            |
-| `FractalType.PingPong` + low frequency                    | Terraced hillsides, stepped erosion patterns |
-| `FractalType.FBm` + `Frequency 0.005` + low amplitude     | Gentle rolling hills with subtle weathering  |
-
-**Affects:** `StandardBiomeAttributesJobData` (new `FastNoiseConfig ErosionNoiseConfig` + `FastNoiseConfig ErosionWarpConfig` + `float ErosionStrength`), `StandardBiomeAttributes` (matching authoring fields), `StandardChunkGenerationJob.Execute()` (evaluate + subtract).  
-**Difficulty:** Low — two additional noise evaluations per column plus one domain warp. All Burst-compatible. No interface changes.
-
-##### E.2. True Hydraulic Erosion Simulation (Future Experimental)
-
-**What:** A physics-based erosion pass that simulates water droplets flowing downhill across the terrain heightmap, carving channels and depositing sediment. Produces highly realistic terrain at the cost of significant computation.
-
-**How:** Chain a second Burst job after initial terrain generation:
-
-1. `StandardChunkGenerationJob` produces the raw heightmap (as normal).
-2. A new `ErosionSimulationJob : IJobFor` runs N iterations of droplet simulation on the heightmap:
-    - Each iteration spawns a water droplet at a random position (seeded deterministically).
-    - The droplet follows the steepest descent, accumulating sediment from carved blocks.
-    - When the droplet slows (flat terrain or basin), it deposits sediment.
-    - The heightmap is modified in-place.
-3. The eroded heightmap is then used by the density band evaluation for the final voxel output.
-
-**Job chaining within `StandardChunkGenerator.ScheduleGeneration()`:**
-
-```csharp
-// Phase 1: Generate raw terrain
-JobHandle terrainHandle = terrainJob.Schedule(256, 8);
-
-// Phase 2: Erode the heightmap (depends on Phase 1)
-JobHandle erosionHandle = erosionJob.Schedule(erosionIterations, 16, terrainHandle);
-
-// Return the final handle — WorldJobManager waits on this
-return new GenerationJobData { Handle = erosionHandle, ... };
-```
-
-**Cross-chunk boundary challenge:** Erosion naturally flows across chunk boundaries. Mitigations:
-
-- Generate a slightly larger heightmap (chunk + N-block border from neighbor noise) and only write the inner 16×16 result. The border provides context for water flow direction without requiring neighbor chunk data.
-- Accept minor discontinuities at chunk edges — at voxel scale these are often invisible.
-- Alternatively, run erosion at a larger scale (region-level) as a pre-process, but this significantly complicates the pipeline.
-
-**Performance consideration:** True erosion is expensive. 10,000 droplet iterations on a 16×16 heightmap takes ~0.5–2ms per chunk on a modern CPU with Burst. This is acceptable for initial world generation but may cause hitches during runtime chunk loading. Consider:
-
-- Running erosion only for chunks within the initial load radius (pre-generation).
-- Skipping erosion for runtime-loaded chunks and using the noise-based fake erosion (E.1) as a fallback.
-- Making erosion iteration count configurable per world type (e.g., "Standard" = 0 iterations, "Eroded" = 5000 iterations).
-
-**Affects:** New `ErosionSimulationJob` struct, `StandardChunkGenerator.ScheduleGeneration()` (job chaining), optionally new `ErosionConfig` fields on `WorldTypeDefinition` or `StandardBiomeAttributesJobData`.  
-**Difficulty:** High — new job struct, cross-chunk boundary handling, performance tuning. No interface changes (job chaining is internal to `ScheduleGeneration()`).  
-**Status:** Future experimental. Implement E.1 (noise-based) first for immediate visual improvement at near-zero cost.
-
-### 12.2. Lode / Ore Improvements
-
-#### A. Cellular Vein Patterns
-
-**What:** Replace the current blob-shaped ore deposits with realistic vein/streak patterns using Cellular noise.
-
-**How:** Configure `StandardLode.noiseConfig` with `NoiseType.Cellular` and `CellularReturnType.Distance2Sub` or `Distance2Div`. This produces thin, vein-like patterns along cell boundaries. `CellularJitter` controls vein spacing.
-
-**Affects:** `StandardLode` Inspector tuning only — no code changes needed if the lode evaluation already uses `FastNoiseLite` from the config.  
-**Difficulty:** None (configuration only, once the Standard lode system is implemented).
-
-#### B. Depth-Weighted Density
-
-**What:** Make ore rarity vary by depth — e.g., diamonds only below Y=16, more common the deeper you go.
-
-**How:** Add a `float DepthDensityMultiplier` field to `StandardLode`/`StandardLodeJobData`. In the lode evaluation loop, multiply the noise threshold by a linear or curve-based depth factor:
-`adjustedThreshold = baseThreshold * lerp(1.0, DepthDensityMultiplier, (maxHeight - y) / (maxHeight - minHeight))`.
-
-**Affects:** `StandardLode` + `StandardLodeJobData` (new field), lode evaluation in `StandardChunkGenerationJob.Execute()`.  
-**Difficulty:** Low — single multiply per lode per block.
-
-#### C. Multi-Block Veins
-
-**What:** A single lode generates clusters of two block types (e.g., iron ore mixed with gravel pockets).
-
-**How:** Add `byte SecondaryBlockID` and `float SecondaryRatio` to `StandardLode`/`StandardLodeJobData`. When a lode check passes, use a second noise evaluation or `Unity.Mathematics.Random` to choose between primary and secondary block.
-
-**Affects:** `StandardLode` + `StandardLodeJobData` (new fields), lode evaluation loop.  
-**Difficulty:** Low.
-
-### 12.3. Flora & Decoration Improvements
-
-#### A. Biome-Aware Flora Placement
-
-**What:** Different biomes support different flora types and densities — e.g., dense oak forests in temperate biomes, scattered acacia in savanna, no trees in desert.
-
-**How:** Add `byte[] FloraIndices` and `float[] FloraWeights` arrays to `StandardBiomeAttributes`. The `StandardChunkGenerationJob` selects a flora type from the weighted list using `Unity.Mathematics.Random`. The `ExpandFlora()` method maps flora index to structure generator.
-
-**Affects:** `StandardBiomeAttributes` (new array fields), `StandardBiomeAttributesJobData` (flattened index range, similar to lode pattern), `StandardChunkGenerator.ExpandFlora()` (multi-type dispatch).  
-**Difficulty:** Medium — requires flattening variable-length arrays into NativeArrays using the same start-index/count pattern as lodes.
-
-#### B. Multi-Structure Flora Types
-
-**What:** Add new structure types beyond trees and cacti — bushes, fallen logs, boulders, tall grass clusters, mushrooms.
-
-**How:** Add new cases to `StandardChunkGenerator.ExpandFlora()`. Each case produces a different `IEnumerable<VoxelMod>` pattern. The flora index in the `VoxelMod` dispatches to the correct case.
-
-**Affects:** `StandardChunkGenerator.ExpandFlora()` only. No interface changes.  
-**Difficulty:** Low per structure type.
-
-#### C. Neighbor-Aware Decoration Pass
-
-**What:** Structures that can span chunk boundaries (large trees, villages) are placed only after all neighbor chunks are generated, preventing half-trees at chunk edges.
-
-**How:** Add a second decoration pass in `ProcessGenerationJobs()` that fires only when a chunk and all 8 neighbors have completed generation. The `IChunkGenerator` interface could gain an optional
-`ExpandDeferredStructures(ChunkCoord coord, Func<ChunkCoord, ChunkData> neighborLookup)` method.
-
-**Affects:** `IChunkGenerator` (new optional method), `WorldJobManager.ProcessGenerationJobs()` (state tracking for neighbor completion).  
-**Difficulty:** High — requires state machine tracking "generated but not decorated" vs. "fully decorated" per chunk.
-
-### 12.4. New World Type Ideas
-
-These are enabled by the `IChunkGenerator` strategy pattern with zero changes to existing world types:
-
-| World Type                  | Generator Approach                                                                                                                                                                                                 | Effort   |
-|-----------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------|
-| **Amplified**               | Reuse `StandardChunkGenerator` with scaled terrain height parameters (e.g., `BaseTerrainHeight × 2.5`). Could be as simple as a `WorldTypeDefinition` with different biome assets — no new generator class needed. | Very Low |
-| **Far Lands**               | New generator with extreme domain warp amplitudes (`DomainWarpAmp > 100`) producing wildly distorted terrain. Same biome/lode system as Standard.                                                                  | Low      |
-| **Flat / Creative**         | Trivial generator that returns a fixed heightmap (e.g., grass at Y=64, dirt Y=61-63, stone below). No noise evaluation at all. `GetVoxel()` is a simple Y-comparison.                                              | Very Low |
-| **Void**                    | Returns Air for everything except a small starting platform. `GetVoxel()` returns 0.                                                                                                                               | Trivial  |
-| **Custom Noise Playground** | Exposes all `FastNoiseConfig` fields directly in the `WorldTypeDefinition` for user experimentation. No hardcoded terrain logic — pure noise-to-height mapping.                                                    | Medium   |
+## 12. Enhancement Backlog — Migrated to `WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md`
+
+This document is an **Architecture** doc: it describes the world-generation architecture as built.
+It used to also carry ~360 lines of forward-looking backlog here (§12 world-generation ideas, §13
+editor-tooling ideas, §15 the assembly-definition boundary), which is Design-doc content. On
+**2026-08-17** that backlog moved to
+[`../../Design/WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md`](../../Design/WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md),
+the live worldgen feature backlog, where it is tracked under `TF-*` IDs alongside the rest.
+
+**Every sketch was status-checked against code before moving**, because a large share of it had
+quietly shipped in the two years of worldgen work since it was written — importing that verbatim
+into a live backlog would have re-opened finished features. The table below is the full disposition,
+and it is deliberately kept here so that the `§12.x` / `§13.x` citations other documents already
+make (for example this report's TF-5/TF-6, TF-7 and TF-10 entries) still resolve to something
+meaningful.
+
+| Old §                    | Sketch                                            | Disposition                                                                                                                                                            |
+|--------------------------|---------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **12.1.A**               | 3D density field (caves, overhangs, arches)       | ✅ **Shipped** — as a full 3D volumetric density pipeline plus dedicated worm carvers, not the proposed narrow "density band". See [PROCEDURAL_TERRAIN_GENERATION.md](PROCEDURAL_TERRAIN_GENERATION.md) and [CAVE_GENERATION.md](CAVE_GENERATION.md). The per-biome `CaveDepth`/`OverhangHeight` band parameters were never adopted and do not exist. |
+| **12.1.B**               | Domain-warped terrain                             | ✅ **Shipped** — per-biome density warp + cave warp noises (`StandardChunkGenerator._biomeDensityWarpNoises`, `_caveWarpNoises`).                                        |
+| **12.1.C**               | Continental landmass scale                        | ✅ **Shipped** — as the Multi-Noise **continentalness** channel with per-biome `BurstSpline` curves, not a height multiplier.                                            |
+| **12.1.D**               | River carving (cellular distance field)           | ⏸️ **Open — owned by `TF-7`** (rivers). That entry already cites this sketch.                                                                                           |
+| **12.1.E.1**             | Noise-based "fake" erosion                        | ⛔ **Superseded** — shipped differently, as the Multi-Noise **erosion** channel with per-biome splines, rather than subtracting ridged noise from the heightmap.          |
+| **12.1.E.2**             | True hydraulic erosion simulation                 | ⏸️ **Open — migrated as `TF-15`.**                                                                                                                                      |
+| **12.2.A**               | Cellular vein patterns for lodes                  | ✅ **Available with no code change** — set a lode's noise config to `Cellular` + `Distance2Sub`/`Distance2Div`. Inspector tuning, so not a backlog item.                  |
+| **12.2.B**               | Depth-weighted lode density                       | ⏸️ **Open — migrated as `TF-16`** (with 12.2.C).                                                                                                                        |
+| **12.2.C**               | Multi-block veins                                 | ⏸️ **Open — migrated as `TF-16`.**                                                                                                                                      |
+| **12.3.A**               | Biome-aware flora placement                       | ✅ **Shipped** — flora zones + weighted major/minor structure pools on `StandardBiomeAttributes`, flattened into `StructurePoolEntryJobData`.                             |
+| **12.3.B**               | Multi-structure flora types                       | ✅ **Shipped** — superseded in shape: structures are authored as `CompositeStructureTemplate` pool entries and expanded via `IChunkGenerator.ExpandStructure`, so adding one is authoring work, not a new `switch` case (see §2.2). |
+| **12.3.C**               | Neighbor-aware (deferred) decoration pass         | ⏸️ **Open — owned by `TF-10`** (multi-piece / large structures). That entry already cites this sketch.                                                                   |
+| **12.4** Amplified       | Amplified world type                              | ⏸️ **Open — owned by `TF-5`.** `WorldTypeID.Amplified = 2` is reserved but unimplemented.                                                                                |
+| **12.4** Far Lands       | Far Lands world type                              | ⏸️ **Open — owned by `TF-6`.**                                                                                                                                          |
+| **12.4** Flat/Void/Noise | Flat/Creative, Void, Custom Noise Playground      | ⏸️ **Open — migrated as `TF-17`.**                                                                                                                                      |
+| **13.1**                 | Noise preview inspector                           | ✅ **Shipped** — as the `WorldGenPreviewWindow` **Noise Channels** tab (+ `NoisePreviewJob`), i.e. a window tab rather than the proposed `PropertyDrawer`.                |
+| **13.2**                 | Biome map visualizer                              | ✅ **Shipped** — `WorldGenPreviewWindow` **Biome Editor** / **World Blending** tabs, plus the runtime minimap's `TerrainDebugRenderMode` (`IChunkGenerator.EvaluateTerrainDebugPixels`). |
+| **13.3**                 | World type comparison tool (split view)           | ⏸️ **Open — migrated as `TF-18`.** The existing `WorldType` tab *edits* one definition; it cannot render two side by side.                                               |
+| **13.4**                 | Lode distribution preview                         | ✅ **Shipped** — `WorldGenPreviewWindow` **Cross Section** tab, which has a `Lodes` toggle.                                                                              |
+| **13.5**                 | Seed browser                                      | ⏸️ **Open — migrated as `TF-18`** (with 13.3).                                                                                                                          |
+| **15**                   | `Legacy.asmdef` boundary                          | ⏸️ **Open — migrated as `TF-19`.** Legacy isolation is still folder convention (§2.3), not compile-enforced.                                                             |
+
+**What was dropped rather than moved.** The sketch prose for the ✅/⛔ rows above — including
+§12.1.A's noise-type→cave/overhang style tables and §12.1.E.1's erosion pseudocode — was not
+carried anywhere: it describes designs the engine either implemented differently or did not take,
+and the Architecture docs named in each row now own the as-built behavior. Recover it from git
+history (`git log -- "$THIS_FILE"`, versions ≤ v2.5) if a future item needs the reasoning.
 
 ---
 
-## 13. Future Enhancements — Editor Tooling
-
-Custom editor tools can dramatically speed up biome and world type tuning. All tools listed below are Inspector-only (editor-time) and do not affect runtime performance.
-
-### 13.1. Noise Preview Inspector
-
-**What:** A custom `PropertyDrawer` or `Editor` for `FastNoiseConfig` that renders a live 2D noise texture below the config fields. Changing any parameter (noise type, frequency, octaves, etc.) instantly updates the preview.
-
-**Implementation sketch:**
-
-- Create `FastNoiseConfigDrawer : PropertyDrawer` in an `Editor/` folder.
-- On every `OnGUI`, construct a `FastNoiseLite` from the serialized config fields.
-- Sample a 128×128 grid of `GetNoise(x, y)` values. Map to grayscale. Write to a cached `Texture2D`.
-- Render the texture below the property fields using `EditorGUI.DrawPreviewTexture()`.
-- Optionally overlay contour lines at key thresholds to visualize where ores/caves would activate.
-
-**Benefits:** Currently, tuning noise parameters requires entering play mode, generating chunks, and flying around to observe results. A live preview reduces the iteration loop from minutes to milliseconds.
-
-**Applies to:** Every `FastNoiseConfig` field in the project — `StandardBiomeAttributes.TerrainNoiseConfig`, `StandardBiomeAttributes.BiomeWeightNoiseConfig`, `StandardLode.noiseConfig`, future domain warp configs, etc.
-
-### 13.2. Biome Map Visualizer (Editor Window)
-
-**What:** A standalone `EditorWindow` that renders a top-down biome assignment map for a given seed and world type. Shows which biome is assigned to each column in a configurable area (e.g., 512×512 blocks).
-
-**Implementation sketch:**
-
-- User selects a `WorldTypeDefinition` asset and enters a seed.
-- The tool constructs a `FastNoiseLite` instance with the biome selection noise config (Cellular Voronoi from Section 4.4).
-- Evaluates noise for each column in the grid, maps cell value to biome index, assigns biome color.
-- Renders as a color-coded `Texture2D` in the editor window.
-- Optionally overlay grid lines at chunk boundaries (every 16 blocks) to visualize chunk alignment.
-
-**Benefits:** Lets designers see biome distribution at a macro scale without entering play mode. Useful for tuning `CellularJitter`, frequency, and biome count balance.
-
-### 13.3. World Type Comparison Tool (Editor Window)
-
-**What:** A split-view `EditorWindow` that renders two world types side-by-side for the same seed. Shows heightmap differences, biome assignment differences, and ore distribution differences.
-
-**Implementation sketch:**
-
-- Two panels, each rendering a top-down heightmap (grayscale) for a selected `WorldTypeDefinition`.
-- Shared seed input. Shared camera position (pan/zoom synced).
-- Optionally highlight cells where the two heightmaps differ by more than N blocks (useful for verifying legacy vs. standard divergence during development).
-
-**Benefits:** Critical during Phase 2 verification — confirms that legacy output matches pre-refactor. Later useful for comparing Standard vs. Amplified tuning.
-
-### 13.4. Lode Distribution Preview
-
-**What:** A custom `Editor` for `StandardBiomeAttributes` that renders a vertical cross-section (X/Y slice at fixed Z) showing where each lode would generate blocks. Each lode gets a distinct color.
-
-**Implementation sketch:**
-
-- Render a 256×128 texture (X × Y) representing one chunk-width cross-section.
-- For each pixel, evaluate the terrain height noise to determine if the block is stone.
-- For stone blocks, evaluate each lode's `FastNoiseConfig` and color the pixel if the lode threshold is met.
-- Highest-priority lode (last in the array, matching current behavior) wins color conflicts.
-
-**Benefits:** Visualizes ore density, depth distribution, and how `DepthDensityMultiplier` (Section 12.2.B) affects placement — without entering play mode.
-
-### 13.5. Seed Browser
-
-**What:** An `EditorWindow` that generates thumbnail previews for multiple seeds at once (e.g., seeds 1–100), showing a small heightmap thumbnail per seed. Clicking a thumbnail sets it as the active seed.
-
-**Implementation sketch:**
-
-- Grid of small (64×64) heightmap thumbnails.
-- Background thread evaluates terrain noise for each seed.
-- Useful for finding visually interesting seeds during content creation.
-
-**Benefits:** Seed selection is currently trial-and-error. A visual browser makes it systematic.
-
----
-
-## 14. Resolved Questions
+## 13. Resolved Questions
 
 1. **Biome Blending:** The initial Standard implementation uses hard Voronoi boundaries. Smooth blending is a separate, future enhancement that would be done as part of a full biome system overhaul (temperature/humidity maps,
    cellular distance field interpolation, cross-biome gradient transitions). Tracked in Section 12 as a future improvement — not a blocker for Phase 3.
@@ -1687,44 +1430,6 @@ Custom editor tools can dramatically speed up biome and world type tuning. All t
    This requires reading `WorldSaveData.worldType` from `level.dat` and mapping the `WorldTypeID` to `WorldTypeDefinition.DisplayName` via the registry. Consider also showing it in `WorldListItem.cs` as a subtitle or badge next to the seed.
 
 ---
-
-## 15. Future Enhancement: Assembly Definition Boundary
-
-The legacy isolation in Section 2.3 relies on folder convention and the Phase 2 verification gate to enforce that the main codebase never references legacy types.
-For additional compile-time safety, an **Assembly Definition** (`Legacy.asmdef`) can be added to `Assets/Scripts/Legacy/` in a future pass.
-
-### How It Works
-
-```
-Assets/Scripts/Legacy/Legacy.asmdef       ← References: Main assembly (for shared types like VoxelMod, GenerationJobData)
-Assets/Scripts/VoxelEngine.asmdef         ← Does NOT reference Legacy assembly
-```
-
-The main assembly physically *cannot* `using Legacy;` or reference `LegacyChunkGenerator` because it lacks the assembly reference. The only connection is through `IChunkGenerator`, which is defined in the main assembly.
-
-### The Factory Bridge
-
-If the main assembly can't reference `Legacy`, `WorldJobManager`'s factory switch needs an indirect resolution:
-
-1. **Registration pattern (Recommended):** `LegacyChunkGenerator` self-registers with a shared `GeneratorRegistry` at `[RuntimeInitializeOnLoadMethod]` time. The registry lives in the main assembly and maps `WorldTypeID` → `Func<IChunkGenerator>`. No direct reference needed.
-
-   ```csharp
-   // In Legacy assembly — auto-runs before any scene loads
-   [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-   private static void Register()
-   {
-       GeneratorRegistry.Register(WorldTypeID.Legacy, () => new LegacyChunkGenerator());
-   }
-   ```
-
-2. **ScriptableObject factory:** Each `WorldTypeDefinition` holds a `[SerializeReference] IChunkGeneratorFactory` field. Unity serialization handles the cross-assembly reference via the Inspector.
-
-### When to Adopt
-
-- **Not needed now:** The current team size and discipline level make folder convention sufficient.
-- **Adopt when:** The project gains multiple contributors, or legacy code is accidentally referenced despite the verification gate.
-- **Prerequisite:** The Section 2.3 folder structure is already asmdef-ready — adding the `.asmdef` files is a non-breaking change.
-
 ---
 
 ## Appendix A: Implementation Notes (Post-Review)

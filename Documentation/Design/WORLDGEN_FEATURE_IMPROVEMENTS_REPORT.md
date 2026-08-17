@@ -1,7 +1,7 @@
 # World Generation Feature Improvements Report
 
-**Version:** 1.4  
-**Date:** 2026-07-20  
+**Version:** 1.5  
+**Date:** 2026-08-17  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified. **TF-14 (world
 border) shipped 2026-07-13/17** and the combined ranked TF/RF roadmap lives at the end of this document.
 Several items here are *deliberately* seed-breaking — acceptable while the Standard world type is WIP;
@@ -106,12 +106,23 @@ Findings are from static code review of the Standard generation pipeline
 | TF-12 | Generation feature flags read from global Settings, not the world — persist in level.dat                             |   🟢   |  🟢  |   🟢    |  ✅   |  ⚠️  |
 | TF-13 | No worldgen version stamp — post-freeze terrain changes produce silent seams                                         |   🟢   |  🟢  |    ⚪    |  ✅   |  ⚠️  |
 | TF-14 | ✅ SHIPPED 2026-07-13 — per-world gameplay fence: persist + clamp + minimap + animated border wall (ready to archive) |   🟡   |  🟢  |   🟡    |  ✅   |  ⚠️  |
+| TF-15 | True hydraulic erosion simulation (droplet pass over the heightmap, chained after generation)                         |   🔴   |  🟡  |   🟡    |  ⚠️  |  ✅   |
+| TF-16 | Lode depth-weighting + multi-block veins — ore density is depth-flat and single-block today                           |   🟢   |  🟢  |   🟡    |  ⚠️  |  ✅   |
+| TF-17 | Trivial world types: Flat/Creative, Void, Custom Noise Playground                                                     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| TF-18 | Worldgen authoring gaps: world-type split-view comparison + seed browser                                              |   🟡   |  🟢  |    ⚪    |  ✅   |  ✅   |
+| TF-19 | `Legacy.asmdef` boundary — legacy isolation is folder convention, not compile-enforced                                |   🟡   |  🟡  |    ⚪    |  ✅   |  ✅   |
+
+**TF-15..TF-19 provenance.** Migrated 2026-08-17 from
+[`../Architecture/World Generation/MODULAR_WORLD_GENERATION_&_WORLD_TYPES.md`](../Architecture/World%20Generation/MODULAR_WORLD_GENERATION_&_WORLD_TYPES.md)
+§12/§13/§15, which had accumulated a forward-looking backlog inside an Architecture doc. Only the
+items that are still **open** came across — that doc's §12 mapping table records which of its
+sketches had quietly shipped, and which existing TF item already owned the rest.
 
 ---
 
-## Seed-stability note (TF-1/2/3/7/9/10/11)
+## Seed-stability note (TF-1/2/3/7/9/10/11/15/16)
 
-Seven items are ⚠️ terrain-affecting. **The Standard world type is still WIP and carries no
+Nine items are ⚠️ terrain-affecting (TF-15/16 joined on the 2026-08-17 migration). **The Standard world type is still WIP and carries no
 seed-stability promise, so these may land directly on `Standard`** — no new world type, no asset
 duplication, no migration. The ⚠️ markers remain as information: after each landing, existing
 (dev) worlds will show generation seams at old/new chunk borders — regenerate test worlds rather
@@ -1057,6 +1068,167 @@ in level.dat** (radius/center, off by default is one option — see open questio
 
 ---
 
+### TF-15 — True hydraulic erosion simulation
+
+**Classification:** Situational. The *visual* erosion goal is already met — the shipped Multi-Noise
+pipeline carries an **erosion** parameter with per-biome splines
+([`PROCEDURAL_TERRAIN_GENERATION.md`](../Architecture/World%20Generation/PROCEDURAL_TERRAIN_GENERATION.md)),
+which is a different and cheaper mechanism than the heightmap-subtraction sketch this item grew out
+of. So TF-15 is now only the **physics** variant, wanted for realism rather than to fill a gap.
+
+**Proposed design.** Chain a second Burst job after terrain generation, inside
+`StandardChunkGenerator.ScheduleGeneration()` so the pipeline outside is unchanged:
+
+1. `StandardChunkGenerationJob` produces the raw heightmap as normal.
+2. A new `ErosionSimulationJob : IJobFor` runs N droplet iterations over that heightmap — each
+   droplet spawns at a deterministically seeded position, follows steepest descent accumulating
+   sediment, and deposits when it slows on flat terrain or in a basin. The heightmap is modified
+   in place.
+3. The eroded heightmap feeds the density evaluation for the final voxel output.
+
+**Cross-chunk boundary problem — the real difficulty.** Erosion flows across chunk borders, and the
+engine generates chunks independently. Three mitigations, in preference order: generate a slightly
+larger heightmap (chunk + an N-block border sampled from neighbor noise) and write only the inner
+16×16; accept minor edge discontinuities (often invisible at voxel scale); or run erosion at
+region scale as a pre-process, which significantly complicates the pipeline.
+
+**Cost.** ~0.5–2 ms per chunk for 10 000 droplet iterations on a 16×16 heightmap with Burst — fine
+for pre-generation, a hitch risk for runtime streaming. Mitigate by eroding only within the initial
+load radius, or by making the iteration count a per-world-type setting (Standard = 0, an "Eroded"
+type = 5000). Route any measurement through the `perf-benchmark` skill; the P-4 backpressure
+harness is the relevant baseline since this lands inside the generation pass.
+
+**Risks.** Seed ⚠️ by construction. Determinism is the thing to watch: droplet order must be a pure
+function of seed + chunk coord, or two runs of the same seed diverge. The Behavior/Generation
+validation suites are the guard.
+
+---
+
+### TF-16 — Lode depth-weighting + multi-block veins
+
+**Classification:** Situational, and the cheapest remaining worldgen feature win.
+
+**What exists today.** A lode is one block type at a depth-flat density: `StandardLode` /
+`StandardLodeJobData` carry a noise config and a Y range, and every Y inside that range is equally
+likely. Two consequences — ore cannot get richer with depth (the classic "diamonds below Y=16, more
+common deeper" behavior is impossible), and a lode cannot mix materials (no gravel pockets inside
+an iron vein).
+
+**Proposed design.** Two independent additions, either shippable alone:
+
+1. **Depth weighting** — add `float DepthDensityMultiplier` to `StandardLode` +
+   `StandardLodeJobData`, and scale the threshold by depth in the lode loop:
+   `adjustedThreshold = baseThreshold * lerp(1.0, DepthDensityMultiplier, (maxHeight - y) / (maxHeight - minHeight))`.
+   One multiply per lode per block.
+2. **Multi-block veins** — add `byte SecondaryBlockID` + `float SecondaryRatio`. When a lode check
+   passes, a second noise evaluation (or a seeded `Unity.Mathematics.Random`) picks primary vs.
+   secondary. Prefer noise over RNG if the choice must stay stable under re-generation.
+
+**Already available without code.** Vein *shape* needs no change: setting a lode's noise config to
+`NoiseType.Cellular` with `CellularReturnType.Distance2Sub`/`Distance2Div` already produces
+thin vein/streak patterns along cell boundaries, with `cellularJitter` controlling spacing. That is
+Inspector tuning on existing fields, not a backlog item.
+
+**Verification.** The `WorldGenPreviewWindow` cross-section tab already renders lode placement with
+a **Lodes** toggle, so both changes are inspectable without entering play mode.
+
+**Risks.** Seed ⚠️ (ore placement changes). Low otherwise — the lode loop is self-contained.
+
+---
+
+### TF-17 — Trivial world types: Flat/Creative, Void, Custom Noise Playground
+
+**Classification:** Situational. These exist to exercise the `IChunkGenerator` strategy seam at
+near-zero cost, and to give testing/creative a terrain-free world.
+
+**What exists today.** `WorldTypeID` declares `Legacy = 0`, `Standard = 1`, `Amplified = 2` — the
+last **reserved but unimplemented** (Amplified itself is TF-5). Adding a world type needs no
+pipeline change: a new `IChunkGenerator` plus a `WorldTypeDefinition` asset and a registry entry.
+
+**Proposed design.**
+
+| Type                        | Generator                                                                                                        | Effort   |
+|-----------------------------|------------------------------------------------------------------------------------------------------------------|----------|
+| **Flat / Creative**         | Fixed heightmap (grass Y=64, dirt Y=61–63, stone below), no noise at all; `GetVoxel` is a Y comparison           | Very Low |
+| **Void**                    | Air everywhere except a small spawn platform; `GetVoxel` returns Air                                             | Trivial  |
+| **Custom Noise Playground** | Exposes the `FastNoiseConfig` fields directly on the `WorldTypeDefinition` — pure noise-to-height, no fixed logic | Medium   |
+
+**Why Seed ✅ / Save ✅.** New `WorldTypeID` values do not alter what an existing seed generates on
+an existing type, and `level.dat` already persists `worldType` as a byte — new values need no format
+change. A world type is the *sanctioned* way to add terrain behavior without a seed break, which is
+what makes these safe next to the ⚠️ items in this report.
+
+**Note on the Playground type.** It is the one with a design question rather than just work: fully
+user-driven noise means no guarantee of a playable surface (no spawn-safety, possible all-air or
+all-solid worlds). Decide whether it clamps to a sane envelope or is explicitly "here be dragons".
+
+---
+
+### TF-18 — Worldgen authoring gaps: world-type comparison + seed browser
+
+**Classification:** Minor (authoring-velocity only, editor-time, zero runtime cost).
+
+**What already exists — most of this area is covered.** `WorldGenPreviewWindow` is a multi-tab
+authoring window (cross-section, noise channels, biome editor, world blending, world-type editing)
+backed by `NoisePreviewJob` and `EditorChunkPipelineRunner`; `CaveDensityAnalyzer` covers cave
+density; `BiomeConfigValidator` checks biome assets; and the runtime minimap has
+`TerrainDebugRenderMode` via `IChunkGenerator.EvaluateTerrainDebugPixels`. Live noise preview, biome
+mapping, and lode cross-sections are therefore **done** — see the migration mapping in the modular
+worldgen doc's §12.
+
+**What is still missing — two things:**
+
+1. **World-type split-view comparison.** The `WorldType` tab *edits* one `WorldTypeDefinition`; it
+   cannot render two side by side for one seed. The value is diffing heightmap/biome/ore output
+   between types (Standard vs. Amplified tuning, or a frozen type against a candidate), ideally
+   highlighting columns whose height differs by more than N blocks.
+2. **Seed browser.** Seed selection is trial and error. A grid of small heightmap thumbnails across
+   a seed range, click-to-adopt, would make it systematic.
+
+**Sequencing.** Both are additive tabs on the existing window rather than new tools — build them
+there, and reuse `WorldGenPreviewSettings` + `EditorChunkPipelineRunner` instead of re-deriving a
+preview path. Follow the `editor-tool` skill (shared UI libraries, lifecycle cleanup — these
+generate `Texture2D`s per frame and are exactly the leak shape that skill exists to prevent).
+
+---
+
+### TF-19 — `Legacy.asmdef` boundary
+
+**Classification:** Minor (enabler / guard-rail; no player-facing change).
+
+**What exists today.** Legacy generation is isolated by **folder convention** in
+`Assets/Scripts/Legacy/` plus review discipline. The main assembly can still reference legacy types;
+nothing enforces the boundary at compile time. The one intentional coupling is
+`WorldJobManager`'s factory switch constructing `new LegacyChunkGenerator()`.
+
+**Proposed design.** Add an Assembly Definition so the isolation is mechanical:
+
+```
+Assets/Scripts/Legacy/Legacy.asmdef   ← references the main assembly (VoxelMod, GenerationJobData, IChunkGenerator)
+main assembly                          ← does NOT reference Legacy
+```
+
+The main assembly then *cannot* name a legacy type. That breaks the factory switch, so it needs an
+indirect resolution — two options:
+
+1. **Registration (preferred).** `LegacyChunkGenerator` self-registers at
+   `[RuntimeInitializeOnLoadMethod]` time into a `GeneratorRegistry` (`WorldTypeID → Func<IChunkGenerator>`)
+   living in the main assembly. No direct reference anywhere. **Caveat for this project:** the
+   registry is mutable static state, so it needs a per-play reset and must obey the one
+   `[RuntimeInitializeOnLoadMethod]`-per-class rule (`AGENTS.md`, Domain Reload) — *Reload Domain* is
+   off here, so a registry that accumulates across sessions is a real bug, not a theoretical one.
+2. **ScriptableObject factory.** Each `WorldTypeDefinition` holds a
+   `[SerializeReference] IChunkGeneratorFactory`, letting Unity serialization carry the cross-assembly
+   reference.
+
+**When to adopt.** Not now — folder convention is sufficient at the current contributor count. Adopt
+when the project gains contributors, or the first accidental legacy reference slips through review.
+The existing folder layout is already asmdef-ready, so adding the files is non-breaking; the *only*
+real work is the factory bridge. Note that adding an `.asmdef` changes compilation units, which is
+exactly the situation the Execution Protocol's stale-DLL / phantom-`CS0103` warnings cover.
+
+---
+
 ## Ranked roadmap (combined across TF-* and RF-*)
 
 Ordering optimizes for: player-visible value early, design-coupled items landed together, gated
@@ -1096,6 +1268,16 @@ items last. RF items are detailed in
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.5** - **Absorbed the modular-worldgen doc's enhancement backlog as `TF-15`..`TF-19`** (2026-08-17):
+  `MODULAR_WORLD_GENERATION_&_WORLD_TYPES.md` §12/§13/§15 were a forward-looking backlog living inside an
+  Architecture doc. Each sketch was status-checked against code first, so only the still-open items came
+  across — hydraulic erosion (TF-15), lode depth/multi-block veins (TF-16), the trivial world types
+  (TF-17), the two remaining authoring-tool gaps (TF-18), and the `Legacy.asmdef` boundary (TF-19). The
+  sketches that had **quietly shipped** (3D density band, domain warping, continentalness, biome-aware
+  flora, multi-structure flora, live noise preview, biome mapping, lode cross-section) did **not** enter
+  the backlog, and the ones an existing item already owned were folded into TF-5/TF-6 (world types),
+  TF-7 (rivers) and TF-10 (cross-chunk structures) rather than re-issued. The source doc keeps a §12
+  mapping table so its inbound `§12.x` citations still resolve.
 * **v1.4** - **`RF-3` marked shipped in the combined roadmap** (2026-08-15, no scope change): row 19 still
   ranked it as open polish although it shipped 2026-08-12. Its §1 tonemapping / §5 effects remainder and
   the TF-11 tint-channel coordination are still open. RF-1/RF-2/TF-14 rows were already correct.
@@ -1117,7 +1299,8 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-15 (RF-3 marked shipped; `GS-4` de-staled; 2026-07-26: header completed)  
+**Last Updated:** 2026-08-17 (absorbed the modular-worldgen backlog as TF-15..TF-19; 2026-08-15: RF-3
+marked shipped, `GS-4` de-staled; 2026-07-26: header completed)  
 **Next Review:** when the next TF item is scheduled, or when the Standard world type stabilizes — at
 that point the seed-stability note's "deliberately seed-breaking is acceptable" premise expires and
 every remaining ⚠️ Seed item needs re-rating.
