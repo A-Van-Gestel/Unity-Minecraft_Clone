@@ -213,46 +213,59 @@ namespace Jobs.Generators
     public interface IChunkGenerator
     {
         /// <summary>
-        /// Injects explicit dependencies required for generation.
-        /// Called once during WorldJobManager construction.
+        /// Controls which optional generation passes (caves, lodes, water) are executed.
+        /// Defaults to GenerationFeatureFlags.Default (all passes enabled).
+        /// Set before calling ScheduleGeneration to take effect.
         /// </summary>
-        /// <param name="seed">The deterministic world seed.</param>
-        /// <param name="worldType">The ScriptableObject containing biome configuration.</param>
-        /// <param name="globalJobData">World-type-agnostic data (Blocks, Meshes, etc.).</param>
-        void Initialize(int seed, WorldTypeDefinition worldType, JobDataManager globalJobData);
+        GenerationFeatureFlags FeatureFlags { get; set; }
+
+        /// <summary>Injects explicit dependencies required for generation. Called once during WorldJobManager construction.</summary>
+        void Initialize(int seed, WorldTypeDefinition worldType, JobDataManager globalJobData,
+            bool isSingleBiomeMode = false, StandardBiomeAttributes selectedBiome = null);
 
         /// <summary>
         /// Schedules the generation job and returns a populated GenerationJobData struct.
+        /// <paramref name="activeVoxelPool"/> (TG-6): when supplied, the per-chunk active-voxel list is
+        /// rented from it and flagged so the caller returns it instead of disposing; null on the
+        /// editor / preview / benchmark paths.
         /// </summary>
-        /// <param name="coord">The chunk coordinate to generate.</param>
-        GenerationJobData ScheduleGeneration(ChunkCoord coord);
+        GenerationJobData ScheduleGeneration(ChunkCoord coord,
+            global::Helpers.ActiveVoxelListPool activeVoxelPool = null);
 
-        /// <summary>
-        /// Synchronous main-thread voxel query. Used by World.GetHighestVoxel and spawn-point logic.
-        /// </summary>
-        /// <param name="globalPos">The global voxel position to query.</param>
-        /// <returns>The block ID at the given position.</returns>
+        /// <summary>Synchronous main-thread voxel query. Used by World.GetHighestVoxel and spawn-point logic.</summary>
         byte GetVoxel(Vector3Int globalPos);
 
         /// <summary>
-        /// Expands a flora root point (queued by the generation job) into a full
-        /// set of VoxelMods (trunk + leaves, cactus body, etc.).
-        /// Called on the main thread during WorldJobManager.ProcessGenerationJobs().
-        /// Each generator owns its own noise/random strategy for trunk height determination,
-        /// ensuring legacy worlds use Mathf.PerlinNoise and standard worlds use Unity.Mathematics.Random.
+        /// Expands a structure spawn marker (queued by the generation job) into a full set of VoxelMods
+        /// (trunk + leaves, cactus body, etc.). Called on the main thread during
+        /// WorldJobManager.ProcessGenerationJobs(). Each generator owns its own structure templates and
+        /// random strategy.
         /// </summary>
-        /// <param name="rootMod">The flora root VoxelMod as queued by the generation job.
-        /// The ID field encodes the flora type index (0 = tree, 1 = cactus, etc.).</param>
-        /// <returns>An enumerable of VoxelMods representing the full flora structure.</returns>
-        IEnumerable<VoxelMod> ExpandFlora(VoxelMod rootMod);
+        IEnumerable<VoxelMod> ExpandStructure(StructureSpawnMarker marker);
 
-        /// <summary>
-        /// Disposes of any internal NativeArrays allocated during Initialize.
-        /// </summary>
+        /// <summary>Terrain generation diagnostics for one column. Main-thread only; used by DebugScreen.</summary>
+        TerrainDebugInfo GetTerrainDebugInfo(int globalX, int globalZ);
+
+        /// <summary>Evaluates a batch of pixels for the terrain debug minimap (RGBA32 into outputPixels).</summary>
+        void EvaluateTerrainDebugPixels(int startIndex, int count, int textureSize,
+            int originX, int originZ, int scale, TerrainDebugRenderMode mode,
+            int biomeCount, int sliceY, byte[] outputPixels);
+
+        /// <summary>Disposes of any internal NativeArrays allocated during Initialize.</summary>
         void Dispose();
     }
 }
 ```
+
+> **Structures superseded flora (`ExpandStructure`, not `ExpandFlora`).** The interface originally carried
+> `ExpandFlora(VoxelMod rootMod)`, which encoded the flora type in the mod's `ID` field. It was replaced by
+> the generic **structure-marker** path: the generation job queues a `StructureSpawnMarker`
+> (`int3 Position` + `int PoolEntryIndex`, a flat index into the generator's flattened structure pool), and
+> the main thread resolves that index to a `CompositeStructureTemplate`. Trees, cacti, and minor flora are
+> all pool entries under this one mechanism, selected through the major/minor flora pools and flora-zone
+> noises on `StandardBiomeAttributes`. Sections below that still speak of `ExpandFlora` and of adding "a case
+> per flora type" describe the superseded shape — adding a structure today means authoring a template and
+> adding a pool entry, not editing a `switch`.
 
 ### 2.3. Legacy Isolation Architecture ("Sealed Legacy Module")
 
@@ -373,7 +386,7 @@ Assets/Scripts/
 * **Status:** Active / Default for new worlds.
 * **Compiler:** `[BurstCompile(FloatPrecision.Standard, FloatMode.Default)]` — `FloatMode.Default` ensures cross-platform math determinism for seeds, unlike `FloatMode.Fast`.
 * **Behavior:** Highly optimized, branchless where possible, utilizing CPU vectorization.
-* **Flora:** `StandardChunkGenerator.ExpandFlora()` uses `Unity.Mathematics.Random` (seeded deterministically per-column) for trunk height, instead of `Noise.Get2DPerlin`. New flora types are added here only — the legacy module is frozen.
+* **Structures / flora:** `StandardChunkGenerator.ExpandStructure()` resolves the marker's `PoolEntryIndex` to a `CompositeStructureTemplate` and uses `Unity.Mathematics.Random` (seeded deterministically per-column) for placement variation, instead of `Noise.Get2DPerlin`. New structures are added here only — the legacy module is frozen.
 
 ---
 
@@ -713,8 +726,12 @@ if (random.NextFloat() > biome.MajorFloraPlacementThreshold)
 }
 ```
 
-> **Flora Expansion:** Each `IChunkGenerator` owns its flora expansion via `ExpandFlora()` (Section 2.2). The `StandardChunkGenerator.ExpandFlora()` implementation uses `Unity.Mathematics.Random` (seeded from `math.hash(position, seed)`) for trunk height determination instead of
-`Noise.Get2DPerlin`. The legacy path (`LegacyChunkGenerator.ExpandFlora()`) delegates to `LegacyStructure.GenerateMajorFlora()`, which continues using `LegacyNoise.Get2DPerlin` unchanged. Neither `Noise.cs` nor `Structure.cs` exist in the main codebase — see Section 2.3.
+> **Structure Expansion:** Each `IChunkGenerator` owns its structure expansion via `ExpandStructure()`
+(Section 2.2). The `StandardChunkGenerator` implementation resolves the marker's pool entry to a
+`CompositeStructureTemplate` and uses `Unity.Mathematics.Random` (seeded from `math.hash(position, seed)`) for
+placement variation instead of `Noise.Get2DPerlin`. The legacy path delegates to
+`LegacyStructure.GenerateMajorFlora()`, which continues using `LegacyNoise.Get2DPerlin` unchanged. Neither
+`Noise.cs` nor `Structure.cs` exist in the main codebase — see Section 2.3.
 
 ### 4.4. Standard Biome Blending Strategy
 
