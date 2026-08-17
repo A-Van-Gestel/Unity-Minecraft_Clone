@@ -38,9 +38,6 @@ This document tracks all third-party assets, libraries, algorithms, and resource
 * **Terrain textures pack (from Stunt Rally 2.3)** by [CryHam](https://opengameart.org/content/terrain-textures-pack-from-stunt-rally-23)
     * *License:* CC0 (Public Domain)
     * *Files used:* ....
-* **Tree Bark** by [qubodup](https://opengameart.org/node/8005)
-    * *License:* CC0 (Public Domain)
-    * *Files used:* ....
 * **Seamless, tiling tree bark texture** by [Bart K.](https://opengameart.org/node/7789)
     * *License:* **CC-BY-SA 3.0** — the author offers GPL 2.0, GPL 3.0 or CC-BY-SA 3.0 (and later
       versions of those); CC-BY-SA 3.0 is the one selected for this project, being the content

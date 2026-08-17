@@ -136,18 +136,6 @@ MonoBehaviour:
     projectFiles: []
     version: 
     notes: 
-  - name: Tree Bark
-    author: qubodup
-    category: 1
-    licenseType: 5
-    customLicenseText: 
-    url: https://opengameart.org/node/8005
-    usageDescription: Block Textures
-    sourceFiles: []
-    projectFiles:
-    - Oak Logs
-    version: 
-    notes: 
   - name: Seamless, tiling tree bark texture
     author: Bart K.
     category: 1
