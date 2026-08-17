@@ -149,12 +149,16 @@ MonoBehaviour:
     licenseType: 6
     customLicenseText: 
     url: https://opengameart.org/node/7789
-    usageDescription: Block Textures
+    usageDescription: Oak log side texture, packed into the block texture atlas.
     sourceFiles: []
     projectFiles:
-    - Oak Logs
+    - Assets/Editor/AtlasPacker/SourceTextures/014-oak_log_side.png
+    - Assets/Textures/packed_texture_atlas.png
     version: 
-    notes: 
+    notes: Offered by the author under GPL 2.0, GPL 3.0 or CC-BY-SA 3.0 (and later versions
+      of those). CC-BY-SA 3.0 is the one selected for this project - it is the content
+      licence of the three, so its share-alike attaches to the artwork and the packed
+      atlas rather than raising scope questions over the engine code.
   - name: paramecij's tree trunks and stumps texture pack 1
     author: pare
     category: 1

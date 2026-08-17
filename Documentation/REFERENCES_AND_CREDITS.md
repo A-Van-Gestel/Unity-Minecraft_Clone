@@ -23,7 +23,8 @@ This document tracks all third-party assets, libraries, algorithms, and resource
 
 ### Terrain Textures
 
-*All textures below have been packed into `Textures/Packed_Atlas.png`.*
+*All textures below are sourced from `Assets/Editor/AtlasPacker/SourceTextures/` and packed into
+`Assets/Textures/packed_texture_atlas.png`.*
 
 * **50 free textures 5 (with Normalmaps)** by [rubberduck](https://opengameart.org/content/50-free-textures-5-with-normalmaps)
     * *License:* CC0 (Public Domain)
@@ -41,8 +42,12 @@ This document tracks all third-party assets, libraries, algorithms, and resource
     * *License:* CC0 (Public Domain)
     * *Files used:* ....
 * **Seamless, tiling tree bark texture** by [Bart K.](https://opengameart.org/node/7789)
-    * *License:* GPL 2.0, GPL 3.0, CC-BY-SA 3.0
-    * *Files used:* ....
+    * *License:* **CC-BY-SA 3.0** — the author offers GPL 2.0, GPL 3.0 or CC-BY-SA 3.0 (and later
+      versions of those); CC-BY-SA 3.0 is the one selected for this project, being the content
+      licence of the three, so its share-alike attaches to the artwork and the packed atlas rather
+      than raising scope questions over the engine code.
+    * *Files used:* `Assets/Editor/AtlasPacker/SourceTextures/014-oak_log_side.png` (oak log side),
+      packed into `Assets/Textures/packed_texture_atlas.png`.
 * **paramecij's tree trunks and stumps texture pack 1** by [pare](https://opengameart.org/content/paramecijs-tree-trunks-and-stumps-texture-pack-1)
     * *License:* CC0 (Public Domain)
     * *Files used:* ....
