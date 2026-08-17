@@ -1606,6 +1606,13 @@ the outcome at all, so a far-only failure isolates coordinate magnitude, per the
 missed conversion is invisible. Prove-red confirmed on both: control green, far red, exactly one failure per suite.
 Validate All 495 → 497.
 
+Both fixtures also carry an **in-fixture non-vacuity leg**, so neither can silently stop guarding: BH-B12 asserts the
+grass is *inactive* far out with the neighbor absent (proving the seeded legs' activity comes from the seam read and
+not an unrelated grass predicate), and the placement baseline asserts an *empty* far cell is still placeable (proving
+nothing on the `CanPlaceAt` path — the in-world bound, the TF-14 border — is rejecting far coordinates outright and
+masking the veto). Each far anchor is declared as a chunk index and multiplied up, so its chunk-alignment — which the
+local↔voxel mapping depends on — is unrepresentable-if-wrong rather than merely asserted.
+
 **Left unguarded:** the visualization space fix. No suite covers the debug collision-bounds draw, and it is only
 observable after a floating-origin shift, so it is compile-checked and reasoned-through only.
 

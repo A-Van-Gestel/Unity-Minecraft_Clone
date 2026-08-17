@@ -121,10 +121,12 @@ namespace Editor.Validation.Behavior.Framework
         /// Stands up the stub world + palette and an all-air center chunk at <paramref name="centerChunkVoxelOrigin"/>.
         /// </summary>
         /// <param name="centerChunkVoxelOrigin">
-        /// The center chunk's voxel origin (its <see cref="ChunkData.Position"/>). Defaults to the world origin
-        /// <c>(0,0)</c> — what every single-chunk (Tier-1) fixture uses, where −X/−Z reads fall outside the world
-        /// (void) exactly as before. BH-4 cross-chunk fixtures pass an <b>interior</b> origin so all 8 neighbor coords
-        /// satisfy <see cref="WorldData.IsVoxelInWorld"/> and can be seeded via <see cref="SetNeighborBlock"/>.
+        /// The center chunk's voxel origin (its <see cref="ChunkData.Position"/>), which must be chunk-aligned.
+        /// Defaults to the world origin <c>(0,0)</c> — what every single-chunk (Tier-1) fixture uses, where a −X/−Z
+        /// read resolves to void because no chunk is <i>loaded</i> there (since WS-3 those coordinates are perfectly
+        /// in-world; <see cref="WorldData.IsVoxelInWorld"/> tests only Y). Any origin works, including negative and
+        /// far-lands values — BH-4 passes <c>(128,128)</c> for continuity, and BH-B12 drives one at x≈2.1e9 to guard
+        /// the cross-seam read's integer routing. Neighbors are seeded via <see cref="SetNeighborBlock"/>.
         /// </param>
         public BehaviorTestWorld(Vector2Int centerChunkVoxelOrigin = default)
         {

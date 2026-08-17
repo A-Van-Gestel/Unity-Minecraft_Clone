@@ -22,8 +22,12 @@ namespace Editor.Validation.Behavior
     /// </summary>
     public static partial class BehaviorValidationSuite
     {
-        // Interior center origin: all 8 neighbor coords stay in-world (WorldData.IsVoxelInWorld requires
-        // x,z ∈ [0, WorldSizeInVoxels=1600)), so a chunk at the world origin could not read −X/−Z neighbors.
+        // Center origin for the cross-chunk fixtures. This was originally chosen "interior" because the pre-WS-3
+        // IsVoxelInWorld bounded XZ to [0, 1600) and a chunk at the world origin therefore could not read −X/−Z
+        // neighbors. That is no longer why: WS-3 removed the XZ bounds entirely, so IsVoxelInWorld tests only Y and
+        // any origin — negative or far out — reads its neighbors fine (BH-B12 exercises one at x≈2.1e9). The value is
+        // retained purely for continuity; nothing depends on it, and the two comparisons against it in
+        // BehaviorValidationSuite.Baseline.PlaceholderNeighbor.cs are written relative to whatever it is.
         private static readonly Vector2Int s_bh4CenterOrigin = new Vector2Int(128, 128);
         private const int BH4_FLOOR_Y = 10;
         private const int BH4_MID = 8; // mid-axis lane the seam scenarios center on

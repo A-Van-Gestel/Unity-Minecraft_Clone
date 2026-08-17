@@ -90,7 +90,7 @@ completed rows.
 | `WorldData.IsVoxelInWorld(Vector3 worldPos)` param | voxel space                                                                       | `voxelPos`                                           |
 | `Chunk.GetVoxelPositionInChunkFromGlobalVector3`   | voxel cell → chunk-local (now `Vector3Int`-typed — Fluid Bug 17)                   | `VoxelToLocal(Vector3Int)`                           |
 | `World.GetChunkFromVector3(Vector3Int voxelCell)`  | voxel space (now `Vector3Int`-typed — Fluid Bug 17)                               | `GetChunkFromVoxelCell`                              |
-| `CheckForVoxel(Vector3 worldPos)` param            | voxel space                                                                       | `voxelPos`                                           |
+| ~~`CheckForVoxel(Vector3 worldPos)` param~~        | ~~voxel space~~                                                                   | ~~`voxelPos`~~ — moot: the `Vector3` overload was deleted (BLOCK_BEHAVIOR #05); the surviving `CheckForVoxel(int,int,int)` has no such param |
 | `ChunkRelativePosition.ToAbsoluteWorldPosition()`  | absolute **voxel** `Vector3` (lossy past ±2²⁴ — avoid on precision paths)         | `ToAbsoluteVoxelPosition()`                          |
 
 Historical references inside **frozen** migration steps (`Migration_v12_to_v13_*`'s remarks) keep their
