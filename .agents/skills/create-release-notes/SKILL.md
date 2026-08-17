@@ -58,11 +58,37 @@ Classify each into one of these categories:
 | **Optimization (by ID)**                  | Bundle all commits sharing an optimization ID (e.g., `LI-1`, `MR-2`, `TG-4`) into **one** entry. Include the ID in the heading. Multi-phase optimizations get indented sub-bullets per phase.            | "TG-4: Full Fluid Burst Port (Phases 0–4b)"                                                                                              |
 | **Validation Suite / Testing**            | Bundle all commits for a validation suite into a single `TESTING:` entry. Include key stats: number of subsystems, total baselines, nightly coverage.                                                    | "TESTING: Full Lighting Validation Suite" with "3 subsystems, 55 baselines, nightly 2000-seed fuzz"                                      |
 | **Bug Fix (systematic)**                  | If a set of bugs were fixed as a campaign (e.g., driven by a validation suite), group them under one heading with per-bug sub-bullets using the format `Bug NN: <one-line description> → <fix summary>`. | "Lighting Bug Fixes (Bugs 06–12)"                                                                                                        |
-| **Bug Fix (standalone)**                  | Collect miscellaneous standalone fixes into a single "Bug Fixes" bullet list at the end.                                                                                                                 | "Corrupt LZ4 chunk payloads hanging the loader forever → validate frame magic"                                                           |
+| **Bug Fix (standalone)**                  | Collect miscellaneous standalone fixes into a single "Bug Fixes" bullet list at the end. Only fixes for bugs that **existed in the previous release** qualify — apply the shipped-bug test (Step 2a).    | "Corrupt LZ4 chunk payloads hanging the loader forever → validate frame magic"                                                           |
 | **Refactor**                              | Only mention refactors that are user-visible or architecturally significant (extracted shared helpers, codebase-wide renames). Collect into a single "Refactors" bullet.                                 | "Extracted CrossChunkLightModApplier, ... Renamed neighbour → neighbor codebase-wide."                                                   |
 | **Chore / Docs / Agents / Version bumps** | **Omit entirely** from the release notes. These are internal hygiene. Exception: Unity version upgrades, which get their own bullet.                                                                     | Version bumps, agent config changes, doc-only commits                                                                                    |
 
 **Key principle: one logical change = one entry, regardless of how many commits it took.** Never list individual commits.
+
+### Step 2a — The shipped-bug test (bug fixes only)
+
+A "Bug Fixes" entry describes something a reader could have hit. A fix for a feature introduced in
+*this same range* was never in anyone's hands, so listing it below that feature's own bullet reads
+as shipping a bug and patching it in one breath. This is the same "one logical change = one entry"
+principle: an intra-release fix is part of the feature's arc, not a separate change.
+
+Before writing any bug-fix entry, establish that the bug predates `<from-tag>`:
+
+1. **Feature ID** — `git log <from-tag>..<to-tag> --grep=<ID>`. If every commit introducing that ID
+   is inside the range, the bug is intra-release.
+2. **Path existence** — `git cat-file -e <from-tag>:<path>` on the files the fix touched. A file
+   that did not exist at `<from-tag>` cannot have shipped a bug.
+3. **Line age** — for pre-existing files, blame the changed lines at `<from-tag>` to see whether the
+   buggy lines predate it.
+
+Intra-release fixes are not dropped on the floor — they are **folded**:
+
+- The fix changes the feature's final behavior → make it a sub-bullet of that feature's own entry,
+  phrased as what the feature *does*, not as a bug ("emissive alpha defaults to 255", not "RF-3
+  emissive alpha was seeded to 0").
+- The fix was development churn with no effect on the shipped contract → omit entirely, like a
+  chore commit.
+
+Bugs tracked in `Documentation/Bugs/` almost always pass this test; verify rather than assume.
 
 ### Step 3 — Write the release notes
 
@@ -82,6 +108,8 @@ over the template if they differ.
 
 - **Never list raw commits.** Every entry must be a curated, human-written summary of a logical change.
 - **Never include**: version bump commits, agent/skill config changes, doc-only commits (unless they represent a major new architecture doc), or chore commits.
+- **Bug-fix entries describe shipped bugs.** Never list a fix for a feature introduced in the same
+  range as a standalone bug fix — fold it into that feature's entry or omit it (Step 2a).
 - **Preserve the existing carry-forward chain.** The "previous releases" section is an append-only accumulator — never drop items from earlier releases.
 - **Do not fabricate measured numbers.** Only include performance figures (−47%, 3× speedup) if they appear in the commit messages or linked benchmark reports. If no number is available, say "benchmark-confirmed" or omit the metric.
 - **One file per release; a shipped note is frozen.** While the current release's note is still

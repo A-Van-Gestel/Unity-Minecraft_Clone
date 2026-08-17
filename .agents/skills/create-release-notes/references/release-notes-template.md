@@ -71,6 +71,9 @@ This release also contains the changes & improvements of the previous releases:
 
 ### Bug fix entries
 
+- Only bugs that existed in the previous release appear here — run the shipped-bug test (skill
+  Step 2a) first. A fix for a feature introduced in this same range is folded into that feature's
+  bullet or omitted.
 - Systematic campaigns: group under one heading with per-bug sub-bullets.
 - Standalone fixes: collect under a single "Bug Fixes" bullet.
 - Format: `<What was broken> → <what the fix does>`.
