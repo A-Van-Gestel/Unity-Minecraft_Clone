@@ -1,7 +1,7 @@
 # Release Notes — Document Template & Formatting Conventions
 
 Companion reference for the `create-release-notes` skill: the exact document skeleton and the
-per-section formatting rules. The two most recent files in `Documentation/Release Notes/` take
+per-section formatting rules. The most recent files in `Documentation/Release Notes/` take
 precedence over this template if they differ — **except** on structure: every file up to and
 including `release_notes_2026-08-13.md` predates the section layout and is a flat list. Those are
 frozen; read them for tone and entry phrasing, not for document shape.
@@ -93,6 +93,8 @@ This release also contains the changes & improvements of the previous three rele
 - A single line, `·`-separated, directly above the opening paragraph. No H1 above it — the GitHub
   release is published under its build name (see skill Step 1.7).
 - Omit any field that does not apply or cannot be verified; never guess a version.
+- `**Range**` names the **planned** "to" tag, which does not exist yet — it is cut after these notes
+  are committed. The git commands behind these numbers use `<from-tag>..HEAD`.
 - `**level.dat**` shows the release's *final* version; the full chain goes in `Compatibility`.
 
 ### Opening paragraph
@@ -122,11 +124,17 @@ This release also contains the changes & improvements of the previous three rele
 - Under `## Testing & Validation`, entries are named plainly — `**Sky & Celestial** (15 baselines):`.
   The old `TESTING:` bullet prefix is retired; the heading carries that meaning.
 - In the flat form, keep the `**TESTING: <Suite Name>**:` prefix.
-- Always include: the menu path in backtick-parens (`Minecraft Clone/Dev/Validate Lighting Engine`),
-  the number of subsystems the suite covers, the total baseline count, and what the baselines cover
-  (grouped by ranges with short descriptions).
+- Always include the baseline count and what the baselines cover (grouped by ranges with short
+  descriptions). For a **newly added** suite also give its menu path in backtick-parens
+  (`Minecraft Clone/Dev/Validate Lighting Engine`) — a reader who wants to run it needs it, and an
+  existing suite's path is already in the previous notes. Do not list per-suite subsystem counts;
+  no shipped note has ever carried them.
+- For a suite that grew, state the movement — `**Chunk Math** grew 47 → 56 baselines`.
 - Mention nightly/stress sweep counts if applicable, and list closed harness fidelity findings.
 - End the section with the aggregate: **Validate All now runs N suites / N baselines green.**
+  Both numbers **and** the word "green" come from the Step 1.8 `Validate All` verdict line. If that
+  run did not happen or came back red, do not write this sentence as-is — say what was actually
+  observed.
 
 ### Bug fix entries
 
@@ -155,7 +163,10 @@ This release also contains the changes & improvements of the previous three rele
   headline features at the top, then drop everything older than the three most recent releases.
   The older files remain in `Documentation/Release Notes/` — this list is a rolling window, not an
   archive.
-- Use `**Bold**` for feature names, `&` to join related pairs.
+- Attribute every bullet to the release whose **own** feature list introduced it (skill Step 1.3),
+  not to whichever previous note happened to mention it.
+- Use `**Bold**` for feature names, `&` to join related pairs **from the same release** — never
+  across releases.
 
 ### What's Changed / Full Changelog
 

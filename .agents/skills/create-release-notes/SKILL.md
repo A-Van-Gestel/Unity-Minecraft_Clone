@@ -17,22 +17,38 @@ This skill codifies the conventions and workflow for producing release notes ent
 
 ### Step 1 — Gather inputs
 
-1. **Identify the tag range.** The user provides a "from" tag and a "to" tag (or date). If not given, ask.
+**The "to" tag does not exist yet, and that is the normal case.** The tag is cut *after* the notes
+are committed, so every git command below takes `<from-tag>..HEAD` — never a literal `<to-tag>`
+revision, which would fail to resolve. The release's own name (its date) is still used as text: the
+metadata line's `**Range**` and the `Full Changelog` URL both name the **planned** tag, and creating
+that tag after the commit is what makes the URL resolve.
+
+1. **Identify the tag range.** The user provides a "from" tag and the planned "to" tag (or date). If
+   not given, ask.
 2. **List existing release notes** in `Documentation/Release Notes/` to find the most recent entry — its tone and entry phrasing take precedence for formatting decisions. Its *structure* does not: everything through `release_notes_2026-08-13.md` predates the section layout (Step 2b).
-3. **Read the two most recent release notes files** to internalize the current style and the "previous releases" carry-forward list.
-4. **Get the full commit log** between the two tags:
+3. **Read the three most recent release notes files** to internalize the current style and to build
+   the carry-forward list. Three, not two, because the window is three releases deep and each
+   carried-forward bullet must be attributed to the release that *introduced* it. The previous
+   note's own list will not tell you: every file through `release_notes_2026-08-13.md` predates the
+   rolling-window rule and carries un-trimmed history going back many releases. To place a legacy
+   bullet, find the file whose **own feature list** (above its "previous releases" heading) contains
+   it:
    ```bash
-   git log <from-tag>..<to-tag> --pretty=format:"%h %s" --no-merges --reverse
+   grep -n "<feature name>" "Documentation/Release Notes/"*.md
+   ```
+4. **Get the full commit log** for the range:
+   ```bash
+   git log <from-tag>..HEAD --pretty=format:"%h %s" --no-merges --reverse
    ```
    Use `--reverse` so commits appear in chronological order (oldest first), making it easier to trace feature arcs. For large ranges, paginate with `--skip=N -n M` (git's own flags, so no shell dependency) to avoid truncation.
 5. **Count total commits** for the summary header context:
    ```bash
-   git rev-list --count <from-tag>..<to-tag> --no-merges
+   git rev-list --count <from-tag>..HEAD --no-merges
    ```
 6. **Get the changed-file stats** for the range — the paths a change touched are a second,
    independent signal for classification (see Step 2):
    ```bash
-   git diff --stat <from-tag>..<to-tag>
+   git diff --stat <from-tag>..HEAD
    ```
    When a single commit's intent is ambiguous from its subject, inspect that commit's own paths:
    ```bash
@@ -42,15 +58,41 @@ This skill codifies the conventions and workflow for producing release notes ent
    `Compatibility` section):
     - **Build name** — the release is published under the build's own name, from the builds archive
       at `C:\Projects\Unity\Minecraft Voxel Engine\_builds\` (e.g. `RC 83  World Scaling (WS-1 +
-      WS-2 + WS-3)`). Take the newest entry matching the "to" date; ask if it is ambiguous. If the
-      archive is unreachable (another machine, path moved), omit the `**Build**` field and ask the
-      user for the name — never infer a build name from commit subjects.
+      WS-2 + WS-3)`). Take the newest entry matching the "to" date; ask if it is ambiguous. **Ask
+      the user for the name** — never infer one from commit subjects — when the archive is
+      unreachable (another machine, path moved) **or when it is reachable but holds no entry for
+      this release date**, which is the normal case whenever the build is cut after the notes, the
+      same ordering as the tag. Omit the `**Build**` field only if the user has no name to give.
+      Read a user-supplied name back before writing it: normalize the project's IDs to their real
+      spelling (`RF-3`, `GS-4` — not `RF 3`, `RG-4`), and flag any remaining divergence from the
+      archive's own filename so the artifact and the notes can be reconciled.
     - **Save-format versions** — every on-disk format bump in the range, with its final value:
       ```bash
-      git log <from-tag>..<to-tag> --oneline --grep='v[0-9]\+ *→\|level.dat\|format version'
+      git log <from-tag>..HEAD --oneline --grep='v[0-9]\+ *→\|level.dat\|format version'
       ```
       Cross-check against the migration steps registered under `Assets/Scripts/Serialization/`.
     - **Unity version** — from the Unity upgrade commits in the range, or `ProjectSettings/ProjectVersion.txt`.
+8. **Run `Validate All` to get the testing numbers.** The `Testing & Validation` section quotes a
+   suite count, a baseline count, and the word *green* — three claims that one run settles at once,
+   through its combined-summary verdict line:
+   ```
+   VALIDATE ALL: all <N> baselines across <S> suites PASSED
+   ```
+   Fire `Minecraft Clone/Dev/Validate All` with `Unity_ManageMenuItem`, then read the
+   `=== Validate All — combined summary ===` block with `Unity_ReadConsole`. Mechanics, the
+   programmatic alternatives, and how to read PASS / FAIL / known-bug / Inconclusive lines belong to
+   the `run-validation-suite` skill — follow it there rather than re-deriving them here.
+    - **Budget ~4 minutes**, and start the run early so it finishes while the git passes above run.
+    - **Preconditions:** the editor is not in play mode, and the built assemblies are current (the
+      VS-3 stale-assembly guard reports this) — a stale DLL means the numbers describe old code.
+    - **Per-suite baseline counts** for the section's entries come from the block's
+      `✅ <Suite>: P/T baselines` lines. **Never** derive a baseline count by grepping the suite
+      sources (`new Scenario(` and friends): it silently misses any scenario registered another way,
+      and it cannot tell you whether the suite passes.
+    - **Re-run before the final commit if any code landed after the capture** — otherwise the
+      numbers describe a tree that no longer exists.
+    - **If the run is red, or the editor is unavailable:** report the counts you can verify, drop
+      the word "green", and say plainly what was not confirmed. Never write "green" from a count.
 
 ### Step 2 — Classify and bundle commits
 
@@ -88,14 +130,22 @@ A "Bug Fixes" entry describes something a reader could have hit. A fix for a fea
 as shipping a bug and patching it in one breath. This is the same "one logical change = one entry"
 principle: an intra-release fix is part of the feature's arc, not a separate change.
 
-Before writing any bug-fix entry, establish that the bug predates `<from-tag>`:
+Before writing any bug-fix entry, **run** these checks and keep their output — the test is a command
+you execute, not a judgment you form. Reasoning about "what shipped last release" is not a
+substitute: it is exactly the shortcut this step exists to replace, and it fails silently, because a
+wrong classification still reads as a plausible entry.
 
-1. **Feature ID** — `git log <from-tag>..<to-tag> --grep=<ID>`. If every commit introducing that ID
+1. **Feature ID** — `git log <from-tag>..HEAD --grep=<ID>`. If every commit introducing that ID
    is inside the range, the bug is intra-release.
 2. **Path existence** — `git cat-file -e <from-tag>:<path>` on the files the fix touched. A file
    that did not exist at `<from-tag>` cannot have shipped a bug.
 3. **Line age** — for pre-existing files, blame the changed lines at `<from-tag>` to see whether the
    buggy lines predate it.
+
+**A bug *filed* inside the range can still be a shipped bug.** The filing date says when someone
+noticed it; the test asks when the code could first misbehave. A `Docs: Filed UI_BUGS #06` commit
+sitting in the range proves nothing on its own — if the shader it describes existed at
+`<from-tag>`, the bug shipped, and the entry belongs under `Bug Fixes`.
 
 Intra-release fixes are not dropped on the floor — they are **folded**:
 
@@ -146,7 +196,7 @@ Follow the exact document skeleton and per-section formatting conventions in
 [references/release-notes-template.md](references/release-notes-template.md) — read it before
 writing. It covers the full structure (metadata line → opening paragraph → sections in reading
 order → previous-releases carry-forward → What's Changed), what belongs in each section, and the
-formatting rules for each entry type. The two most recent release notes files take precedence over
+formatting rules for each entry type. The most recent release notes files take precedence over
 the template if they differ — **except** where they predate the section layout (everything up to
 and including `release_notes_2026-08-13.md` is a flat list; those are frozen and are not the model
 for structure, only for tone and entry phrasing).
@@ -166,7 +216,10 @@ for structure, only for tone and entry phrasing).
   window, not an archive: add the previous release's headline features at the top, then **drop
   every item older than the three most recent releases**. Nothing is lost — each older release
   keeps its own file in `Documentation/Release Notes/` — and the list stays short enough to stay
-  relevant instead of growing without bound.
+  relevant instead of growing without bound. Attribute each bullet with the Step 1.3 grep rather
+  than by memory, and **never join features from different releases in one bullet** — the `&`
+  pairing is for related features of the *same* release, and mixing them destroys the provenance
+  that makes the window trimmable next time.
 - **The metadata line and Compatibility section state facts, not summaries.** Format versions,
   Unity versions, and the build name are verifiable values; take them from the repo and the builds
   archive rather than inferring them from commit prose. Omit a field you cannot verify.
