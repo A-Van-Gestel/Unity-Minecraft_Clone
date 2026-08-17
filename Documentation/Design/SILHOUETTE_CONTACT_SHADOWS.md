@@ -2,7 +2,9 @@
 
 **Version:** 2.5  
 **Date:** 2026-08-09  
-**Status:** Proposed design — not implemented.  
+**Status:** **`SS-0`…`SS-3a` implemented and confirmed in game (2026-08-09).** `SS-3` ships behind a
+default-**OFF** Graphics setting (`Full-Block Contact Shadows`) by owner decision — the standing verdict is
+*too flat*, not a performance concern, and its capture is waived. **`SS-4` (custom-mesh faces) not started.**  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > The engine's ambient occlusion darkens a surface by *averaging in the light of the cells around
@@ -983,9 +985,9 @@ get to rely on them.
 |-----------|--------------------------------------------------------------------|:------:|------------|
 | ~~**SS-0**~~ | ✅ Harness fixtures + sub-vertex probe + pre-SS record (suite-only) |   🟢   | —          |
 | ~~**SS-1**~~ | ✅ Silhouette primitive, no consumer                                |   🟢   | SS-0       |
-| **SS-2**  | ⚠️ Contact-shadow term, partial occluders (**observation 1**) — code complete, **rejected in game** |   🟡   | SS-1, D1–D3 |
-| **SS-2a** | ⏳ Fix the corner-darkening artifact SS-2 introduced — fixed, awaiting in-game |   🟡   | SS-2       |
-| ~~**SS-3**~~ | ✅ Extend the gate to full-cube occluders (**observation 2**) — shipped **default-off**, capture owed |   🔴   | SS-2a, D7  |
+| ~~**SS-2**~~  | ✅ Contact-shadow term, partial occluders (**observation 1**) — rejected on its first in-game pass, carried by `SS-2a` |   🟡   | SS-1, D1–D3 |
+| ~~**SS-2a**~~ | ✅ Fix the corner-darkening artifact SS-2 introduced — confirmed in game with SS-3/SS-3a |   🟡   | SS-2       |
+| ~~**SS-3**~~ | ✅ Extend the gate to full-cube occluders (**observation 2**) — shipped **default-off** on taste; capture **waived** (owner: cost is not the concern) |   🔴   | SS-2a, D7  |
 | ~~**SS-3a**~~ | ✅ Bin occlusion by direction, not by cell — confirmed in game; one residual accepted (§10) |   🟡   | SS-3       |
 | **SS-4**  | Subdivide custom-mesh faces (S6)                                    |   🟡   | SS-2a      |
 

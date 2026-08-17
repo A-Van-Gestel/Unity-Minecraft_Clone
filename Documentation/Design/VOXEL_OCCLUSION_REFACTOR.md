@@ -7,8 +7,9 @@ descoped. **VO-8 (per-corner AO coverage) implemented and confirmed in game.** *
 confirmed in game and archived — VO-9's ordering precondition is met.** **VO-9 not started and its
 premise is revised (F17) and it is restated as sub-voxel AO via adaptive tessellation. **VO-9a and VO-9b
 both executed; VO-9b is the substrate and is visually inert (F18).** The visual request itself now needs a
-silhouette-based contact-shadow term, now designed in its own doc
-(`SILHOUETTE_CONTACT_SHADOWS.md`, `SS-*`, 0/5 executed).  
+silhouette-based contact-shadow term, designed and executed in its own doc
+(`SILHOUETTE_CONTACT_SHADOWS.md`, `SS-*` — `SS-0`…`SS-3a` shipped and confirmed in game, `SS-3`
+default-OFF by owner decision; only `SS-4` remains).  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > The engine gained partial blocks (`Stone Half Slab`) without the lighting model gaining a notion
