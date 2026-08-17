@@ -1566,7 +1566,7 @@ coordinate before handing off constraints to the `Structure` generator.
 
 **Reported:** August 2026 — logged 2026-08-17 while fixing Fluid #17, as the "is that class fully closed?" sweep that fix did not perform.  
 **Fixed:** August 2026  
-**Status:** Resolved — suite-confirmed by prove-red at x = 2,147,000,000 (Behavior BH-B12 + a Placement far-coordinate baseline).  
+**Status:** Resolved — suite-confirmed by prove-red at x = 2,147,000,000 (Behavior BH-B12 + a Placement far-coordinate baseline), and **in-game confirmed 2026-08-17 near the ±2³¹ world border**: grass activates correctly on place / break / newly-exposed dirt, the voxel and collision-bounds visualizations render correctly **after a floating-origin shift**, and block break/place showed no regressions.  
 **Files:** `ChunkData.cs` (`GetState`), `World.cs` (`IsCellOccupiedForPlacement`, `GetVoxelState`, `GetCollisionBoundsDataForVisualization`), `WorldData.cs`
 
 **Root Cause:** Fluid #17 fixed the two float-typed helpers on the *wake* path but left the *read* surface alone. Four
@@ -1613,8 +1613,15 @@ nothing on the `CanPlaceAt` path — the in-world bound, the TF-14 border — is
 masking the veto). Each far anchor is declared as a chunk index and multiplied up, so its chunk-alignment — which the
 local↔voxel mapping depends on — is unrepresentable-if-wrong rather than merely asserted.
 
-**Left unguarded:** the visualization space fix. No suite covers the debug collision-bounds draw, and it is only
-observable after a floating-origin shift, so it is compile-checked and reasoned-through only.
+**The visualization space fix has no automated guard** — no suite covers the debug collision-bounds draw, and building
+one would need a harness that can drive `Debug.DrawLine` scanning under a shifted origin. It was **confirmed in-game
+after an origin shift** (2026-08-17), which is the exact condition that made it wrong before, so the fix itself is
+verified; what is missing is standing coverage, so a future regression here will not be caught by `Validate All`.
+
+**The in-game confirmation was performed near the ±2³¹ border**, i.e. at the top of the affected band and roughly
+where float's ULP reaches 128 — so the grass result confirms the cross-seam `GetState` read itself, not merely
+absence of regression at ordinary range. BH-B12 is therefore the standing guard for a fix that is independently
+in-game verified, rather than the sole evidence for it.
 
 ---
 
