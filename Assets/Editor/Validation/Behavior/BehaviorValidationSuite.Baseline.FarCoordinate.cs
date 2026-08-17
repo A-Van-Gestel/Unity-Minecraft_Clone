@@ -1,6 +1,5 @@
 using Data;
 using Editor.Validation.Behavior.Framework;
-using Jobs.BurstData;
 using UnityEngine;
 
 namespace Editor.Validation.Behavior
@@ -13,23 +12,33 @@ namespace Editor.Validation.Behavior
     /// </summary>
     public static partial class BehaviorValidationSuite
     {
-        /// <summary>
-        /// A chunk-aligned voxel origin past ±2²⁴ where <c>float</c> has a 128-unit ULP, so a cross-seam read one
-        /// voxel west of the chunk origin rounds ~3 chunks away instead of into the seeded neighbor. Chosen to match
-        /// the coordinate Fluid #17 was reported at (<c>/teleport 2147000000</c>), and chunk-aligned because
-        /// <see cref="BehaviorTestWorld"/> takes a chunk's voxel origin.
-        /// </summary>
-        private static readonly Vector2Int s_farCenterOrigin = new Vector2Int(2147000000, 128);
+        // The far anchor is declared as a CHUNK INDEX and multiplied up, never as a voxel coordinate divided down:
+        // a chunk's voxel origin must be chunk-aligned for BehaviorTestWorld's local↔voxel mapping to mean anything,
+        // and deriving it this way makes misalignment unrepresentable instead of merely asserted. Chosen to land on
+        // voxel x = 2,147,000,000 — the coordinate Fluid #17 was reported at (/teleport 2147000000), where float's
+        // ULP is 128, so a read one voxel west of the origin rounds several chunks away.
+        // Headroom check: 134,187,500 × 16 = 2,147,000,000, which is 483,647 voxels below int.MaxValue — the
+        // multiply below is where an overflow would hide, so keep that margin in mind before raising this.
+        private const int FAR_CHUNK_X = 134187500;
+        private const int FAR_CHUNK_Z = 8;
+
+        /// <summary>The far-lands center chunk's voxel origin — chunk-aligned by construction (see the note above).</summary>
+        private static readonly Vector2Int s_farCenterOrigin =
+            new Vector2Int(FAR_CHUNK_X * VoxelData.ChunkWidth, FAR_CHUNK_Z * VoxelData.ChunkWidth);
 
         /// <summary>
         /// Builds the BH-B12 fixture at the given center origin: grass on the −X seam whose <b>only</b> possible
-        /// spread target is convertible dirt diagonally up across that seam, in a real (seeded, populated) neighbor.
-        /// Mirrors <c>BH-B11</c>'s geometry, but the neighbor is seeded up front rather than populated mid-scenario —
-        /// here the question is whether the cross-seam read lands on the right voxel at all, not whether a wake fires.
+        /// spread target is convertible dirt diagonally up across that seam.
         /// </summary>
         /// <param name="centerOrigin">The center chunk's voxel origin.</param>
+        /// <param name="seedNeighbor">
+        /// When true the −X neighbor is seeded (populated) with that dirt target, so the grass has exactly one
+        /// reachable target and must evaluate active. When false the neighbor chunk is left <b>absent</b>, so the
+        /// cross-seam read resolves to void and the grass must evaluate inactive — the control that proves the
+        /// activity in the seeded case comes from the seam read and not from some unrelated grass predicate.
+        /// </param>
         /// <returns>A live fixture world; the caller owns disposal.</returns>
-        private static BehaviorTestWorld BuildFarSeamGrassWorld(Vector2Int centerOrigin)
+        private static BehaviorTestWorld BuildFarSeamGrassWorld(Vector2Int centerOrigin, bool seedNeighbor)
         {
             BehaviorTestWorld world = new BehaviorTestWorld(centerOrigin);
             world.Driver = TickDriver.FluidBurstHaloBand;
@@ -42,6 +51,8 @@ namespace Editor.Validation.Behavior
             world.SetBlock(0, PLACEHOLDER_FLOOR_Y + 1, PLACEHOLDER_LANE_Z + 1, BlockIDs.Stone);
             world.SetBlock(0, PLACEHOLDER_FLOOR_Y + 1, PLACEHOLDER_LANE_Z, BlockIDs.Grass);
 
+            if (!seedNeighbor) return world;
+
             // The −X neighbor's facing column: convertible dirt diagonally UP across the seam (air above it, since
             // the neighbor is otherwise all air), plus stone at the grass's own Y so the same-Y read cannot admit it.
             world.SetNeighborBlock(-1, 0, VoxelData.ChunkWidth - 1, PLACEHOLDER_FLOOR_Y + 2, PLACEHOLDER_LANE_Z,
@@ -53,21 +64,26 @@ namespace Editor.Validation.Behavior
         }
 
         /// <summary>
-        /// BH-B12 — the same fixture is asserted at the world origin (control) and in the far lands (the test). The
-        /// grass must stay <b>active</b> in both: its only spread target lives across the seam, so it can only
-        /// evaluate active if the cross-chunk read resolved the seeded neighbor.
-        /// <para>The near/far pairing is the point. A far-only assertion cannot distinguish "the far read is broken"
-        /// from "the fixture geometry never made the grass active anywhere", and — per the WS-4 lesson that at origin
-        /// (0,0) a missed conversion is invisible — only the far half has teeth. Both halves must agree.</para>
-        /// <para><b>Prove-red:</b> restore <c>ChunkData.GetState</c>'s <c>new Vector3(...)</c> construction. The
-        /// control stays green (float is exact at small coordinates) and the far half goes red.</para>
+        /// BH-B12 — three legs, because a single "the grass is active far out" assertion cannot distinguish a working
+        /// cross-seam read from a fixture that would have been active anyway:
+        /// <list type="number">
+        /// <item><b>control</b> — seeded at the world origin: active (proves the geometry produces activity at all,
+        /// and that float is exact at small coordinates);</item>
+        /// <item><b>the test</b> — seeded in the far lands: active (the read must resolve the seeded neighbor);</item>
+        /// <item><b>non-vacuity</b> — <i>unseeded</i> in the far lands: inactive (proves leg 2's activity is caused by
+        /// the across-seam dirt, so the assertion cannot pass for an unrelated reason).</item>
+        /// </list>
+        /// Per the WS-4 lesson that at origin (0,0) a missed conversion is invisible, only leg 2 has teeth — legs 1
+        /// and 3 exist to keep it honest.
+        /// <para><b>Prove-red:</b> restore <c>ChunkData.GetState</c>'s <c>new Vector3(...)</c> construction. Legs 1
+        /// and 3 stay green and leg 2 goes red.</para>
         /// </summary>
-        /// <returns>True when both the control and the far assertion hold.</returns>
+        /// <returns>True when all three legs hold.</returns>
         private static bool Bh12_FarCoordinateSeamReadResolves()
         {
             bool passed;
 
-            using (BehaviorTestWorld control = BuildFarSeamGrassWorld(s_bh4CenterOrigin))
+            using (BehaviorTestWorld control = BuildFarSeamGrassWorld(s_bh4CenterOrigin, seedNeighbor: true))
             {
                 control.RunTicks(1);
                 passed = Check("BH-B12 control (origin chunk) — grass active from its across-seam target",
@@ -76,13 +92,22 @@ namespace Editor.Validation.Behavior
                     "active and the far assertion below would prove nothing");
             }
 
-            using (BehaviorTestWorld far = BuildFarSeamGrassWorld(s_farCenterOrigin))
+            using (BehaviorTestWorld far = BuildFarSeamGrassWorld(s_farCenterOrigin, seedNeighbor: true))
             {
                 far.RunTicks(1);
                 passed &= Check($"BH-B12 far lands (x={s_farCenterOrigin.x.ToString()}) — grass active from its " +
                                 "across-seam target", far.ActiveVoxelCount > 0,
                     "the cross-chunk read resolved the wrong chunk past ±2²⁴, so the across-seam dirt was invisible " +
                     "and the grass evaluated inactive (BLOCK_BEHAVIOR #05)");
+            }
+
+            using (BehaviorTestWorld unseeded = BuildFarSeamGrassWorld(s_farCenterOrigin, seedNeighbor: false))
+            {
+                unseeded.RunTicks(1);
+                passed &= Check("BH-B12 far lands, neighbor absent — grass inactive (non-vacuity control)",
+                    unseeded.ActiveVoxelCount == 0,
+                    "the grass evaluated ACTIVE with no across-seam target, so the seeded legs above prove nothing " +
+                    "about the cross-chunk read — something else is keeping this grass awake");
             }
 
             return passed;
