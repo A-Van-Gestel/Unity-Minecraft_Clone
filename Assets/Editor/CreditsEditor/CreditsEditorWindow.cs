@@ -40,6 +40,10 @@ namespace Editor.CreditsEditor
         /// <summary>
         /// Display names for the category filter dropdown. Index 0 = "All", rest map to enum values.
         /// </summary>
+        /// <remarks>
+        /// Order must match <see cref="CreditCategory"/> declaration order, not the credits screen's
+        /// display order — the dropdown index is cast directly to the enum (<c>newFilter - 1</c>).
+        /// </remarks>
         private static readonly string[] s_categoryFilterNames =
         {
             "All",
@@ -48,6 +52,8 @@ namespace Editor.CreditsEditor
             "UI Element",
             "Font",
             "Shader",
+            "Reference",
+            "Audio",
         };
 
         #endregion

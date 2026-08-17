@@ -16,11 +16,20 @@
 
 ---
 
-## 1. Current Implementation
+## 1. The Baseline This Replaced (historical)
+
+> **⚠️ Read §2 and §3 for current behavior — the whole of §1 is the pre-Phase-1 flat-lighting baseline,**
+> preserved because §1.5 ("The Problem") is the motivation for everything that follows. Nothing in §1
+> describes the engine as it is today. Specifically, all four of these have since changed:
+>
+> | §1 claims                                              | Current reality                                                            |
+> |--------------------------------------------------------|----------------------------------------------------------------------------|
+> | Light packed into the voxel `uint` (bits 16-23)         | Separate `ushort[] LightData` per section; voxel bits 16-23 reserved/zeroed (Phase B, §3.2.2/§3.2.4) |
+> | One scalar light per face, in `Color.a`                 | Per-vertex RGB light in the stream-3 `LightData` (`TexCoord1`, UNorm8×4) — §2.4 |
+> | 4 streams, Float32 throughout, **56 bytes** per vertex  | 32 bytes per vertex (MR-2: Float16 UVs, UNorm8 color, SNorm8 normal) — see `SectionRenderer.Layout` |
+> | `TexCoord1` unused by voxel shaders                     | `TexCoord1` carries the smooth-light values                                |
 
 ### 1.1 Light Storage
-
-> **Note:** This section describes the pre-Phase-2 scalar light system. Since Phase 2 (RGB) and Phase B (legacy bit removal), light is stored in a separate `ushort[] LightData` array per section — see §3.2.2 and §3.2.4. The `uint` voxel no longer carries light bits (bits 16-23 are reserved/zeroed). The content below is preserved for historical context.
 
 Light was packed into each voxel's 32-bit `uint` data alongside block ID and metadata:
 
@@ -35,9 +44,9 @@ The final light value used for rendering was `max(sunlight, blocklight)`, yieldi
 
 ### 1.2 Mesh Generation (Light → Vertex)
 
-In `MeshGenerationJob`, each visible face samples the **neighbor voxel's** light level (the block adjacent to the face, not the block owning the face). This value is converted to a float via `VoxelState.LightAsFloat` (`light * (1/16)`), producing a value in `[0.0, 1.0]`.
+In `MeshGenerationJob`, each visible face sampled the **neighbor voxel's** light level (the block adjacent to the face, not the block owning the face). That value was converted to a float via `VoxelState.LightAsFloat` (`light * (1/16)`), producing a value in `[0.0, 1.0]`.
 
-All 4 vertices of a face quad receive the **same** light value, stored in `Color.a`:
+All 4 vertices of a face quad received the **same** light value, stored in `Color.a`:
 
 ```csharp
 // VoxelMeshHelper.cs — standard cube face

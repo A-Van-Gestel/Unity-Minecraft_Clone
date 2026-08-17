@@ -56,33 +56,35 @@ The canonical tab order is defined in `SettingsUIGenerator` as a private static 
 /// Defines the top-to-bottom order of tabs in the Settings UI.
 /// Every SettingsTab enum value MUST appear in this array.
 /// </summary>
-private static readonly SettingsTab[] TAB_ORDER =
+private static readonly SettingsTab[] s_tabOrder =
 {
     SettingsTab.General,
     SettingsTab.Controls,
     SettingsTab.Graphics,
     SettingsTab.World,
     SettingsTab.Performance,
-    SettingsTab.Dev
+    SettingsTab.Benchmark,
+    SettingsTab.DebugScreen,
+    SettingsTab.Dev,
 };
 ```
 
-On `Awake()`, the generator validates completeness:
+On generation, the generator validates completeness:
 
 ```csharp
 // Validate that every SettingsTab value has a defined order
 SettingsTab[] allTabs = (SettingsTab[])Enum.GetValues(typeof(SettingsTab));
 foreach (SettingsTab tab in allTabs)
 {
-    if (Array.IndexOf(TAB_ORDER, tab) == -1)
+    if (Array.IndexOf(s_tabOrder, tab) == -1)
     {
-        Debug.LogError($"[SettingsUIGenerator] SettingsTab.{tab} is missing from TAB_ORDER! " +
-                       "Add it to the TAB_ORDER array in SettingsUIGenerator.");
+        Debug.LogError($"[SettingsUIGenerator] SettingsTab.{tab} is missing from s_tabOrder! " +
+                       "Add it to the 's_tabOrder' array in SettingsUIGenerator.");
     }
 }
 ```
 
-This ensures that adding a new `SettingsTab` enum value without updating `TAB_ORDER` produces an immediate, actionable error message.
+This ensures that adding a new `SettingsTab` enum value without updating `s_tabOrder` produces an immediate, actionable error message.
 
 ---
 

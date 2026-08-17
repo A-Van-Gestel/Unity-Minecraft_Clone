@@ -62,7 +62,8 @@ the Main Menu where no `World` exists.
 - Not introducing per-world database swapping. (If multiple databases are ever wanted, that is a separate
   feature; this cleanup assumes — and preserves — today's single-shared-database reality.)
 - Not touching the editor windows' independent `_blockDatabase` loads except where they read it *through*
-  `World` (only `WorldEditor` does).
+  `World` (at the time, only the since-deleted `WorldEditor` did — see the Editor note below; no editor
+  window reads the database through `World` today).
 
 ---
 

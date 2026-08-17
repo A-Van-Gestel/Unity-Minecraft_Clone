@@ -1,8 +1,17 @@
 # Design Document: Production-Ready Performance Profiler
 
-**Version:** 2.0 (Implemented)  
-**Target:** Unity 6.4 (Mono)  
-**Context:** Replaced the Voxel Engine's `DebugScreen.cs` performance metrics with a custom `Stopwatch`-based `PerformanceMonitor`.
+**Version:** 2.1 (Implemented)  
+**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)  
+**Context:** Replaced the Voxel Engine's `DebugScreen.cs` performance metrics with a custom `Stopwatch`-based `PerformanceMonitor`.  
+**Partially re-verified:** 2026-08-17, at commit `aad0527c` (branch `feat/world-scaling`) — a **targeted**
+edit, not a whole-doc audit. Only §3.4, §3.5 and §6 were re-derived from code (`PerformanceMonitor.cs`'s
+metric-history members and `DomainReset`, `DebugScreen.cs`'s `DebugMode`/`CurrentMode`, and
+`Benchmarks/BenchmarkMetricsCollector.cs`'s `OnMetricsSampled` subscription). **§2, §3.1–§3.3, §4 and §5 were
+not re-checked** and still carry their original 2.0 evidence.
+
+> **Note on §2 and §4.3.** Those sections name symbols that deliberately do **not** exist in this codebase —
+> the external `FPSCounter` reference plugin, and the `DebugScreen` members this overhaul *removed*. They
+> are historical rationale, not current-state claims.
 
 ## 1. Executive Summary
 
@@ -87,10 +96,31 @@ To measure the exact time Unity spends in each phase without bleeding idle time,
 | **Wall FPS**        | `Stopwatch.Frequency / WallFrameTime.GetAverage()` | Actual visible FPS                                    |
 | **Idle/Other Time** | `WallFrameTime - CpuFrameTime` (in ms)             | VSync waits + GPU stalls + uncaptured Unity internals |
 
-### 3.4. Lifecycle
+### 3.4. Metric History (Rolling Window)
+
+Beyond the smoothed instantaneous values, the monitor keeps a **chronological ring buffer** of
+`FrameMetricSnapshot` samples, so consumers can render graphs and post-hoc summaries rather than a single
+current number.
+
+| Element                              | Role                                                                                              |
+|--------------------------------------|---------------------------------------------------------------------------------------------------|
+| `FrameMetricSnapshot` (struct)       | One sample: `CpuTimeMs`, `WallTimeMs`, `GcAllocKb`, `WallFps`, `CpuFps`, `NativeAllocMb`, `NativeReservedMb`, `ManagedMemMb`, `TotalMemMb` |
+| `MetricsHistory` / `HistoryHeadIndex` / `HistorySize` | The ring buffer and its write cursor — readers must walk it head-relative, not linearly           |
+| `_historyTimeframeSeconds` (10 s) + `_historyPollRate` (0.05 s) | `[SerializeField]` window and cadence; together they size the buffer                              |
+| `event Action<FrameMetricSnapshot> OnMetricsSampled` | Fired on every capture — the push alternative to polling the buffer                               |
+
+Two consumers exist today: `DebugScreen` (the HUD's history graphs) and `BenchmarkMetricsCollector`, which
+subscribes to `OnMetricsSampled` to aggregate a run's metrics for the in-world benchmark harnesses (see the
+`perf-benchmark` skill and `Documentation/Performance/`).
+
+Sampling runs **every frame regardless of whether the HUD is open**, and that is deliberate: a metric history
+that only accumulates while the overlay is visible cannot answer "what happened just before I opened it", and
+the benchmark collector needs samples with no HUD on screen at all.
+
+### 3.5. Lifecycle
 
 - **Scene-scoped:** No `DontDestroyOnLoad`. Metrics reset on scene reload / Play Mode re-entry.
-- **Singleton:** Static `Instance` property. `OnDestroy()` nulls the reference for clean re-entry.
+- **Singleton:** Static `Instance` property, nulled both in `OnDestroy()` and on play-mode entry (the domain-reload reset required when *Reload Domain* is disabled).
 
 ---
 
@@ -231,9 +261,9 @@ GC Gen2 Hits: 0
 
 ---
 
-## 6. Future Enhancement: Performance Debug Mode
+## 6. Performance Debug Mode (Implemented)
 
-A third `DebugMode` enum value is planned that would show only FPS + performance metrics, without the world/player/chunk/voxel debug panels:
+`DebugScreen` exposes a three-value mode selector, read as `CurrentMode` (default `Full`):
 
 ```csharp
 public enum DebugMode
@@ -244,4 +274,5 @@ public enum DebugMode
 }
 ```
 
-This requires only toggling which panels are visible in `SetMode()` — the data infrastructure already supports it.
+The mode only toggles which panels are visible; every mode reads the same always-on `PerformanceMonitor`
+data (§3.4), so cycling modes never loses history.

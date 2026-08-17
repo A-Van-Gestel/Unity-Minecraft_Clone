@@ -9,27 +9,41 @@ using UnityEngine;
 namespace Jobs
 {
     /// <summary>
-    /// TG-4 Phase 3 — runs the <b>Tier-1 interior</b> fluid tick for a single chunk through the Burst
-    /// <see cref="FluidTickJob"/>. Owns reusable native scratch (the voxel snapshot + the index/output lists) so
-    /// the per-tick work allocates nothing after warm-up; <b>one instance is reused across every chunk each tick</b>
-    /// (the behavior tick is serial, so the scratch can be shared). This keeps the per-chunk main-thread cost to a
-    /// snapshot-fill + a bucket partition + the drain — the heavy flow compute runs in the job.
+    /// TG-4 Phase 3–4b — runs one chunk's <b>entire</b> fluid tick (interior AND border voxels) through the Burst
+    /// <see cref="FluidTickJob"/>, border voxels resolving cross-chunk reads from a per-tick Y-banded
+    /// neighbor halo. Owns reusable native scratch (the voxel snapshot, the padded gather destination, the
+    /// 8 neighbor buffers, and the index/output lists) so the per-tick work allocates nothing after
+    /// warm-up. This keeps the per-chunk main-thread cost to a snapshot fill + a bucket partition + the
+    /// drain — the heavy flow compute runs in the job.
     /// <para>
-    /// <b>Not wired into the tick path yet</b> (C4 does the integration: merging the job's mods with the managed
-    /// border path through the canonical drain, applying the inactive drops, and the feature flag). This type is
-    /// the self-contained snapshot → partition → schedule unit. It reads a <i>pre-tick</i> snapshot and never
-    /// mutates the chunk; the caller drains <see cref="Mods"/> + <see cref="InactiveInterior"/> afterward.
+    /// <b>One instance per in-flight chunk, not one shared instance.</b> The production tick
+    /// (<see cref="World.TickChunksParallel"/>) schedules every active-fluid chunk's job concurrently, so
+    /// each rents its own ticker from a <c>DynamicPool&lt;FluidBurstTicker&gt;</c> and returns it after the
+    /// drain. Sharing one ticker across chunks would hand the same scratch to jobs running in parallel —
+    /// the scratch is what makes an instance single-owner while its job is in flight.
+    /// </para>
+    /// <para>
+    /// It reads a <i>pre-tick</i> snapshot and never mutates the chunk: the caller completes the handle,
+    /// then drains <see cref="Mods"/> / <see cref="ModsPerSource"/> / <see cref="InactiveInterior"/>
+    /// serially in snapshot order (<c>Chunk.DrainTick</c>). That split — parallel read+emit, serial apply,
+    /// emission order fixed by the emitting voxel — is what makes the parallel tick byte-identical to the
+    /// original single-threaded loop. Production schedules via <see cref="ScheduleFluids"/>;
+    /// <see cref="RunFluids"/> is the same work run serially and exists as the validation harness's
+    /// determinism oracle (<c>Schedule == Run</c>).
     /// </para>
     /// </summary>
     public sealed class FluidBurstTicker : IDisposable
     {
         private NativeArray<uint> _snapshot;
 
-        // TG-4 Phase 4b: the gather destination (halo-padded, full height) the FluidTickJob reads, plus a created
-        // zero-length array passed for every neighbor on the interior-only path — the gather sentinel-fills it, so
-        // border reads resolve to void exactly as the old out-of-chunk read did (Phase 4b C4 swaps in real neighbors).
+        // TG-4 Phase 4b: the gather destination the FluidTickJob reads — halo-padded and allocated at FULL height
+        // (ChunkMath.PADDED_FLUID_VOLUME), but each tick fills only the active Y-band as a leading prefix. The job's
+        // GetStateLocal offsets its read by BandMinY, so padded row 0 is BandMinY — not Y=0.
         private NativeArray<uint> _paddedVoxels;
 
+        // A created zero-length array standing in for any neighbor that is absent, unloaded, or unpopulated (Fluid
+        // Bug 18 — see PrepareNeighbors): the gather sentinel-fills that neighbor's halo, so those border reads
+        // resolve to void exactly as the old out-of-chunk read did. Loaded neighbors use the real buffers below.
         private NativeArray<uint> _emptyNeighbor;
 
         // TG-4 Phase 4b halo mode: 8 owned full-chunk neighbor snapshot buffers (lazy) + the per-build selection

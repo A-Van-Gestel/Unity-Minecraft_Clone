@@ -1,7 +1,7 @@
 # Lighting System Overview
 
 This document provides a complete technical reference for the voxel lighting engine. The system is asynchronous, multi-threaded (via Unity's C# Job System and Burst), and handles two distinct light channels: **Sky light** (monochrome scalar, tinted by `SkyLightColor` in the shader) and **Blocklight** (per-channel RGB).
-The design is heavily inspired by the **Starlight** lighting engine (now **Moonrise**), a high-performance replacement for Minecraft's vanilla lighting. Where our implementation diverges from Starlight, this document explains why.
+The BFS flood-fill core was designed and built independently. The **Starlight** lighting engine (now **Moonrise**) — a high-performance replacement for Minecraft's vanilla lighting — was studied afterwards as a source of optimization techniques, both its `TECHNICAL_DETAILS.md` write-up and the implementation behind it. Several of those techniques were adopted and are noted where they appear. That the two share a BFS flood-fill core is convergence on the standard approach to voxel light propagation, not shared lineage. Where our implementation diverges from Starlight, this document explains why.
 
 > **Reference implementation:** `_REFERENCES/Moonrise/` contains the full Moonrise source. Key files are in `.../patches/starlight/light/`.
 
@@ -37,7 +37,20 @@ Each `BlockType` defines how it interacts with the lighting system:
 
 - `IsOpaque`: `opacity >= 15` — blocks all light completely.
 - `IsFullyTransparentToLight`: `opacity == 0` — light passes through unchanged (air, glass).
-- `IsLightObstructing`: `opacity > 0` — has some attenuation (used for heightmap).
+- `IsLightObstructing`: `opacity > 0` — has some attenuation.
+- `IsFullyOpaqueCell`: `IsOpaque && !HasCustomBounds` — fills its *whole cell* with opaque material.
+
+> **⚠️ These four are whole-block questions and are the wrong tool for shape-sensitive decisions.** A block's
+> authored volume matters, and two documented bugs came from ignoring that:
+>
+> - **Never use `IsLightObstructing` for the heightmap.** It cannot distinguish a vertical half slab (which
+>   leaves the sky column intact) from the same block laid flat. Use
+>   `LightAttenuation.ObstructsSkyColumn` — using the whole-block property there is `_FIXED_BUGS.md`
+>   Lighting **#25**.
+> - **Gate propagation-source guards on `IsFullyOpaqueCell`, not `IsOpaque`.** A *partial* opaque block (a
+>   slab) still has an open part of its cell holding a real light value it must propagate onward; treating it
+>   as a full blocker is Lighting **#26**.
+> - For per-face questions, use `LightAttenuation.FaceBlocksLight`.
 
 ### 1.3 The Algorithm: Dual-Phase BFS Flood-Fill
 
@@ -251,7 +264,7 @@ live here (`Documentation/Bugs/`: Bugs 05, 08, 09, 11, 12, 13, 14, 15) — for t
 
 ## 4. Cross-Reference: Our System vs. Starlight (Moonrise)
 
-This section documents how our lighting engine compares to the Starlight reference implementation. For each Starlight technique, we note whether it's implemented, applicable, or unnecessary given our architecture.
+This section documents how our lighting engine compares to Starlight. For each Starlight technique, we note whether it's implemented, applicable, or unnecessary given our architecture.
 
 ### 4.1 Techniques We Implement Correctly
 
@@ -403,20 +416,27 @@ Two consequences elsewhere in this document:
 
 These are optimizations from Starlight that *are* applicable to our system, ranked by potential impact.
 
-### 5.1 Branchless Neighbor Lookup (Unified Map Buffer)
+### ~~5.1 Branchless Neighbor Lookup (Unified Map Buffer)~~ (Shipped — LI-1 / LI-2)
 
-**Priority: High** | **Complexity: High**
+The 9-NativeArray `if/else if` chain this proposed to remove is **gone**. `NeighborhoodLightingJob` now
+gathers the 3×3 neighborhood's voxels *and* light into two halo-padded linear volumes — `PaddedVoxels` and
+`PaddedLight`, sized `ChunkMath.PADDED_LIGHTING_VOLUME` (20×128×20) — and indexes them arithmetically via
+`ChunkMath.GetPaddedLightingIndex`.
 
-**Current:** `GetPackedData` in `NeighborhoodLightingJob` uses a chain of `if/else if` branches to determine which of 9 NativeArrays to read from, for *every single neighbor check*.
+Differences from the sketch that was proposed here:
 
-**Starlight approach:** Uses a single contiguous cache array indexed by `(x >> 4) + 5 * (z >> 4) + 25 * (y >> 4)`. No branches — just math.
-
-**Proposed:** Allocate a single `NativeArray<uint>` of size `48 * 128 * 48` (3x1x3 chunks = ~1.2 MB). Copy the 9 chunk maps into the correct offsets at job start. Replace all `GetPackedData` branch logic with:
-
-```csharp
-int index = (localPos.x + 16) + (localPos.z + 16) * 48 + localPos.y * (48 * 48);
-uint data = unifiedMap[index];
-```
+- The halo is **2 voxels** (`ChunkMath.LIGHTING_HALO`, the widest cross-seam read the BFS performs), not a
+  full 16-voxel chunk on each side, so the volume is 20×128×20 rather than 48×128×48. The center chunk's
+  `[0,16)` range lives at padded `[2,18)`.
+- A **missing** neighbor is filled with the `uint`/`ushort` `MaxValue` sentinel at gather time, reproducing
+  the old per-neighbor `!IsCreated || Length == 0` guard.
+- `PaddedLight` is also the job's only writable light store, and doubles as the in-job cross-chunk read-back
+  store: a write into a halo cell is observable by a later read in the same execution. That replaced a
+  separate `NativeHashMap` write-through cache.
+- **P-2 Layer 1** later moved the gather itself onto the worker thread (top of `Execute()`); the main thread
+  only fills the 9 snapshot maps and rents the padded buffers. Since the inputs are unchanged point-in-time
+  snapshots, that move is bit-identical by construction.
+- **LI-2** narrowed the gather and the BFS to the active Y-band rather than full chunk height.
 
 ### 5.2 Direction Bitmask in Queue Entries
 
@@ -532,7 +552,7 @@ The heightmap is still maintained unconditionally (it is cheap and has no downst
 | `Helpers/LightingHelper.cs`                  | Shared lighting utilities (`FillUniformSkyLight`, `StampFullBrightSunlight`)                                                               |
 | `Helpers/CrossChunkLightModApplier.cs`       | Pure per-voxel cross-chunk mod decision (stale-snapshot guards, Bug 11 sky veto, wake-up node semantics); shared with the validation suite |
 | `Helpers/LightingJobProcessor.cs`            | Cross-chunk mod routing (drop / persist / defer / apply) + effective-stability override                                                    |
-| `Jobs/BurstData/LightAttenuation.cs`         | The single shared attenuation formula `max(0, s - max(1, opacity))`                                                                        |
+| `Jobs/BurstData/LightAttenuation.cs`         | The single shared attenuation formula `max(0, s - max(1, opacity))`, plus the **shape-aware** predicates that the whole-block `BlockTypeJobData` properties must not substitute for (§1.2): `ObstructsSkyColumn` (heightmap), `FaceBlocksLight` (per-face), `AmbientOcclusionPlaneSilhouette` (VO-*/SS-* corner shading) |
 | `Helpers/ChunkMath.cs`                       | Coordinate → flat index conversion                                                                                                         |
 | `Serialization/LightingStateManager.cs`      | Persists pending sky light recalculations for unloaded chunks                                                                              |
 | `Jobs/StandardChunkGenerationJob.cs`         | Initial heightmap computation during world generation                                                                                      |

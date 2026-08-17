@@ -193,11 +193,11 @@ The push speed is proportional to flow velocity: calm water pulsates slowly, rap
 
 ## Debug Tools
 
-`World.DebugLogFluidSurfaceMath` (triggered via raycast debug key) outputs:
-
-- **Wall Mask**: hex value + decoded N/S/E/W/diagonal flags + packed `color.g` value
-- **Per-corner push directions**: the 4 normalized push vectors at BL/TL/BR/TR
-- **Seam check**: compares the NE push of this voxel with the NW push of the east neighbor
+**None today.** The `World.DebugLogFluidSurfaceMath` helper this section used to document — a raycast
+debug key that dumped the wall mask (hex + decoded N/S/E/W/diagonal flags + packed `color.g`), the four
+normalized per-corner push vectors, and a seam check against the east neighbor — has been **removed from
+the codebase**, leaving this system with no interactive diagnostic. Anyone re-adding one should treat the
+list above as the specification of what was useful.
 
 ---
 
@@ -207,7 +207,6 @@ The push speed is proportional to flow velocity: calm water pulsates slowly, rap
 |---------------------------------------------|--------------------------------------------------------------------------|
 | `Assets/Scripts/Helpers/VoxelMeshHelper.cs` | `GenerateFluidMeshData` — wall mask encoding, push direction computation |
 | `Assets/Shaders/UberLiquidShader.shader`    | `GetShoreData` — per-pixel wall distance, gradient, and push             |
-| `Assets/Scripts/World.cs`                   | `DebugLogFluidSurfaceMath` — diagnostic logging                          |
 
 ---
 
