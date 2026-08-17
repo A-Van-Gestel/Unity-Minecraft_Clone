@@ -4521,23 +4521,8 @@ public class World : MonoBehaviour, IMeshDrainHost
     }
 
     /// <summary>
-    /// Determines if a voxel at the given <b>voxel-space</b> position should stop a ray or count as a hit.
-    /// </summary>
-    /// <param name="worldPos">The voxel-space position.</param>
-    /// <param name="includeFluids">If true, fluids will also count as a hit.</param>
-    /// <param name="includeNonSolid">If true, non-solid interactable blocks (excluding Air and
-    /// blocks with <see cref="BlockTags.IGNORE_RAYCAST"/>) will also count as a hit.</param>
-    /// <returns>True if the voxel should be treated as a hit; otherwise, false.</returns>
-    public bool CheckForVoxel(Vector3 worldPos, bool includeFluids = false, bool includeNonSolid = false,
-        BlockTags skipTags = BlockTags.NONE)
-    {
-        VoxelState? voxel = worldData.GetVoxelState(worldPos);
-        return voxel.HasValue && IsRayHit(voxel.Value, includeFluids, includeNonSolid, skipTags);
-    }
-
-    /// <summary>
-    /// Integer-cell overload of <see cref="CheckForVoxel(Vector3,bool,bool,BlockTags)"/> — same voxel space, no
-    /// float round-trip. Preferred by callers that already hold a cell, notably the per-step ray march.
+    /// Determines whether the voxel at an integer <b>voxel-space</b> cell should stop a ray or count as a hit.
+    /// Integer throughout — no float round-trip, so it is exact to the ±2³¹ edge. Used by the per-step ray march.
     /// </summary>
     /// <param name="x">Absolute voxel X.</param>
     /// <param name="y">Absolute voxel Y.</param>

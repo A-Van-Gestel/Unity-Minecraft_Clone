@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using Helpers;
 using JetBrains.Annotations;
-using Jobs;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Pool;
@@ -300,7 +299,8 @@ namespace Data
         /// Integer voxel-query fast path (VQ-1): resolves the voxel at an integer world coordinate with one
         /// chunk-coord computation (WS-1 shift/mask helpers), no float round-trip, and no nullable wrap. Backed by
         /// the one-entry last-chunk cache so a burst of queries into the same chunk skips the dictionary lookup.
-        /// Prefer this over <see cref="GetVoxelState(Vector3)"/> for callers that already hold integer coordinates.
+        /// The only voxel-resolution entry point on <see cref="WorldData"/>: the former <c>Vector3</c> wrapper is
+        /// gone, so no caller can reintroduce the ±2²⁴ float round-trip (BLOCK_BEHAVIOR #05).
         /// </summary>
         /// <param name="x">World voxel X.</param>
         /// <param name="y">World voxel Y.</param>
@@ -360,29 +360,6 @@ namespace Data
             return true;
         }
 
-        /// <summary>
-        /// Gets the voxel state at the given world position. Floor-then-delegate wrapper over the integer
-        /// <see cref="TryGetVoxel"/> fast path.
-        /// </summary>
-        /// <param name="worldPos">The world position</param>
-        /// <returns>
-        /// The `voxel state` at the given position, or `null` if the voxel is `outside the world`, its
-        /// `chunk doesn't exist`, or that chunk exists but is `not yet populated` (an unpopulated placeholder
-        /// holds no voxel data — see <see cref="TryGetVoxel"/>).
-        /// </returns>
-        [CanBeNull]
-        public VoxelState? GetVoxelState(Vector3 worldPos)
-        {
-            // If the voxel is outside the world, we don't need to do anything with it and return null.
-            if (!IsVoxelInWorld(worldPos))
-                return null;
-
-            if (TryGetVoxel(Mathf.FloorToInt(worldPos.x), Mathf.FloorToInt(worldPos.y), Mathf.FloorToInt(worldPos.z),
-                    out VoxelState state))
-                return state;
-
-            return null;
-        }
 
         /// <summary>
         /// Queues a mesh rebuild for the given chunk.
@@ -470,52 +447,6 @@ namespace Data
         #endregion
 
         #region Lighting Management
-
-        /// <summary>
-        /// Queues a light update for the given voxel.
-        /// </summary>
-        /// <param name="worldPos">The world position of the voxel</param>
-        /// <param name="oldLightLevel">The old light level of the voxel (Defaults to `0`)</param>
-        /// <param name="channel">The light channel to update (Defaults to `Block Channel`)</param>
-        public void QueueLightUpdate(Vector3 worldPos, byte oldLightLevel = 0, LightChannel channel = LightChannel.Block,
-            byte oldBlockR = 0, byte oldBlockG = 0, byte oldBlockB = 0)
-        {
-            if (!IsVoxelInWorld(worldPos)) return;
-
-            Vector2Int chunkVoxelPos = GetChunkCoordFor(worldPos);
-
-            if (_chunks.TryGetValue(chunkVoxelPos, out ChunkData chunkData) && chunkData.IsPopulated)
-            {
-                Vector3Int localVoxelPos = GetLocalVoxelPositionInChunk(worldPos);
-                if (channel == LightChannel.Block)
-                    chunkData.AddToBlockLightQueue(localVoxelPos, oldLightLevel, oldBlockR, oldBlockG, oldBlockB);
-                else
-                    chunkData.AddToSunLightQueue(localVoxelPos, oldLightLevel);
-
-                // Mark the target chunk as needing a lighting update.
-                chunkData.HasLightChangesToProcess = true;
-            }
-            else
-            {
-                // If chunk is unloaded, tell ModManager to mark this area as dirty.
-                // We don't have exact block tracking for unloaded chunks, so we mark the *Column* for recalculation.
-                ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkVoxelPos);
-
-                // Calculate local column (0-15)
-                Vector3Int localVoxelPos = GetLocalVoxelPositionInChunk(worldPos);
-                Vector2Int localCol = new Vector2Int(localVoxelPos.x, localVoxelPos.z);
-
-                // OPTIMIZATION: Use pool for the temporary set passed to AddPending
-                HashSet<Vector2Int> tempSet = HashSetPool<Vector2Int>.Get();
-                tempSet.Add(localCol);
-
-                // Add to persistent manager
-                World.Instance.LightingStateManager.AddPending(chunkCoord, tempSet);
-
-                // AddPending copies the elements into its own set, so we can immediately release this temp set
-                HashSetPool<Vector2Int>.Release(tempSet);
-            }
-        }
 
         /// <summary>
         /// Queues a sunlight recalculation for the given column.

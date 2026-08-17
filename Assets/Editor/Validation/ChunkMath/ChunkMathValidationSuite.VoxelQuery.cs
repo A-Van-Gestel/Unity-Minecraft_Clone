@@ -14,10 +14,12 @@ namespace Editor.Validation
     {
         static partial void AddVoxelQueryScenarios(List<Scenario> scenarios)
         {
-            // --- VQ-1 GetVoxelState float→int decomposition parity ---
-            // The new integer TryGetVoxel fast path (and its GetVoxelState(Vector3) wrapper) must resolve the SAME
-            // chunk, local voxel, and in-world verdict the old float path did — the floor semantics at fractional
-            // and world-bound edges preserved exactly.
+            // --- VQ-1 float→int decomposition parity ---
+            // The integer TryGetVoxel fast path must resolve the SAME chunk, local voxel, and in-world verdict the
+            // old float path did — the floor semantics at fractional and world-bound edges preserved exactly. The
+            // float-taking wrappers it replaced are gone (BLOCK_BEHAVIOR #05), so this scenario compares against the
+            // surviving float MATH helpers (GetChunkCoordFor / GetLocalVoxelPositionInChunk), which are the reference
+            // the decomposition must reproduce in-band — and which stay float precisely to serve as that reference.
             scenarios.Add(new Scenario("VQ-1 Float↔Int Decomposition Parity (sweep)", RunVoxelQueryDecompositionParity));
 
             // --- WS-2 unbounded positive XZ ---
@@ -39,8 +41,8 @@ namespace Editor.Validation
 
         /// <summary>
         /// Proves the VQ-1 integer decomposition (<c>Mathf.FloorToInt</c> + <see cref="ChunkMath.VoxelToChunk"/>/
-        /// <see cref="ChunkMath.VoxelToLocal"/>, as <c>WorldData.TryGetVoxel</c> and its <c>GetVoxelState(Vector3)</c>
-        /// wrapper use it) yields the SAME in-world verdict, chunk voxel-origin, and local voxel position as the old
+        /// <see cref="ChunkMath.VoxelToLocal"/>, as <c>WorldData.TryGetVoxel</c> uses it) yields the SAME in-world
+        /// verdict, chunk voxel-origin, and local voxel position as the old
         /// float path (<see cref="WorldData.IsVoxelInWorld"/> + <see cref="WorldData.GetChunkCoordFor"/> +
         /// <see cref="WorldData.GetLocalVoxelPositionInChunk"/>). Sweeps quarter-voxel steps straddling the origin
         /// (negative fractions that must resolve out-of-world) and across several chunk boundaries, plus explicit
