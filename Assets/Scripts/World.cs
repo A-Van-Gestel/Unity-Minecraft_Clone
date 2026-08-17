@@ -4187,11 +4187,17 @@ public class World : MonoBehaviour, IMeshDrainHost
                 }
 
                 // --- CULL HIDDEN BLOCKS ---
+                // WS-4: the neighbor LOOKUP is voxel space, derived from the chunk's voxel origin — not from
+                // worldBlockOrigin, which is Unity space and differs from it by OriginVoxel after any origin shift.
+                // Only the draw/cull above uses Unity space.
+                Vector2Int chunkVoxelOrigin = chunk.Coord.ToVoxelOrigin();
+                Vector3Int voxelBlockOrigin = new Vector3Int(chunkVoxelOrigin.x + x, globalY, chunkVoxelOrigin.y + z);
+
                 bool isExposed = false;
                 for (int d = 0; d < 6; d++)
                 {
-                    Vector3 worldNeighborPos = worldBlockOrigin + VoxelData.FaceChecks[d];
-                    VoxelState? neighbor = worldData.GetVoxelState(worldNeighborPos);
+                    Vector3Int voxelNeighborPos = voxelBlockOrigin + VoxelData.FaceChecks[d];
+                    VoxelState? neighbor = GetVoxelState(voxelNeighborPos);
 
                     if (!neighbor.HasValue)
                     {
