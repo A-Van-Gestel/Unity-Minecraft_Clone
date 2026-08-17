@@ -1029,6 +1029,12 @@ enabled *and* disabled after each phase.
    > capture defends any specific maximum, and `viewDistance` remains `[Range]`-editable past every value
    > ever measured. That sub-question stays open.
 
+   > **Follow-through, 2026-08-17: the default was re-set to `10`** — below the 12–15 band stated above,
+   > which is neither retracted nor re-affirmed here. Consequence 2 lands as written: vd 10 is now
+   > literally the default, so every capture's vd 10 leg is the shipping leg.
+   > `GenerationPanicGate.ReferenceResidentWidth` followed the default from 17 to 27, keeping the design
+   > invariant that a default install's gate is the unscaled 256/128 pair (baseline B19).
+
 ---
 
 ## Document History

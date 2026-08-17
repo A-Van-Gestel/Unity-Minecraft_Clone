@@ -72,7 +72,7 @@ it.
 | In-flight mesh cap               | `World.cs:1669` (`JobManager.MeshJobs.Count < 20`)  | hardcoded literal             | `20`                      |
 | `ChunkJobArrayPool` retention    | `ChunkJobArrayPool.cs:31` (`MAX_RETAINED_PER_TYPE`) | `private const`               | `512` (≈96 MB worst case) |
 | Pool prune buffer / multipliers  | `ChunkPoolManager.cs:32,107,113,116`                | `private const`               | `1.25`, ×2, ×8            |
-| `viewDistance` (default + range) | `SettingsManager.cs:167`                            | user setting `[Range(1,32)]`  | default `5`               |
+| `viewDistance` (default + range) | `SettingsManager.cs:169`                            | user setting `[Range(1,32)]`  | default `5` (**`10` since 2026-08-17**) |
 | `maxInitialLoadRadius`           | `SettingsManager.cs:367`                            | user setting                  | `10` (secondary)          |
 | `maxStructureModsPerFrame`       | `SettingsManager.cs:397`                            | user setting                  | `5000` (secondary)        |
 

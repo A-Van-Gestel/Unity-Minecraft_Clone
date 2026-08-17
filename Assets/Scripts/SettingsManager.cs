@@ -165,8 +165,8 @@ public class Settings
     [Range(1, 32)]
     [Tooltip("The radius of chunks around the player that will be visible and rendered.\n\n" +
              TooltipTags.Performance + "Higher values significantly impact memory and rendering times.\n" +
-             TooltipTags.DefaultColorStart + "5" + TooltipTags.DefaultColorEnd)]
-    public int viewDistance = 5;
+             TooltipTags.DefaultColorStart + "10" + TooltipTags.DefaultColorEnd)]
+    public int viewDistance = 10;
 
     /// <summary>
     /// Resolution the world is rendered at, as a percentage of the window resolution.
@@ -658,7 +658,7 @@ public class Settings
     /// <remarks>
     /// The reasoning was sound and the measurement refuted it. The thresholds count backlogged chunks while
     /// the population they guard grows as view distance squared, so a fixed pair looks like an unreachable
-    /// brake at the default view distance and a permanent throttle at high ones. Scaling them buys almost
+    /// brake at low view distance and a permanent throttle at high ones. Scaling them buys almost
     /// nothing, because the backlog simply grows to meet the larger threshold: at view distance 32 a 4.2×
     /// threshold moved gate closure by 0.1 points (94.6 % vs 94.5 %) while admitted work rose 0.2 % and
     /// <i>completions fell 16 %</i>. The binding constraint is the lighting/mesh schedule <c>Quota</c> —

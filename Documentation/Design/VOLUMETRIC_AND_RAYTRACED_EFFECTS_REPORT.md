@@ -254,16 +254,16 @@ occlusion a planned consumer, and AO is a harsher client than fog in three ways:
    distant fog into height fog, which reads as atmosphere. AO has no such graceful form: outside the
    volume every corner shadow simply stops, producing a fixed-radius ring that moves with the camera.
 3. **The default radius is too small for the shipped view distances.** ≈ 160 voxels across is a
-   **5-chunk radius** — today's default `viewDistance`, and half or a quarter of the 10 and 20 that
-   `FP-4`'s IL2CPP sweep used.
+   **5-chunk radius** — half of today's default `viewDistance` of 10, and a quarter of the 20 that
+   `FP-4`'s IL2CPP sweep also used.
 
 **Owner steer (2026-08-09): the volume should be view-distance aware.** The honest counter is that a
 uniform-resolution volume scales **quadratically** in horizontal radius:
 
 | View distance | Volume (voxels) | `_VoxelOccupancyVolume` (R8) | `_VoxelLightVolume` (R16) | Total |
 |---------------|-----------------|-----------------------------:|--------------------------:|------:|
-| 5 (default)   | 160 × 128 × 160 | 3.1 MB                       | 6.3 MB                    | **9.4 MB** |
-| 10            | 320 × 128 × 320 | 12.5 MB                      | 25 MB                     | **37.5 MB** |
+| 5             | 160 × 128 × 160 | 3.1 MB                       | 6.3 MB                    | **9.4 MB** |
+| 10 (default)  | 320 × 128 × 320 | 12.5 MB                      | 25 MB                     | **37.5 MB** |
 | 20            | 640 × 128 × 640 | 50 MB                        | 100 MB                    | **150 MB** |
 
 So "just scale it with view distance" is affordable to about 10 and heavy at 20 — before counting the

@@ -54,7 +54,7 @@ MonoBehaviour:
     enableChunkLoadAnimations: 0
     lookSensitivity: 1.2
     fieldOfView: 70
-    viewDistance: 5
+    viewDistance: 10
     renderScalePercent: 100
     msaa: 0
     fluidQuality: 2

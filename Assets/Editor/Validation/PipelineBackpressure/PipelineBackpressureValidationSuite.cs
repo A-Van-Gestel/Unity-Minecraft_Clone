@@ -1310,7 +1310,7 @@ namespace Editor.Validation.PipelineBackpressure
         /// <para><b>Prove-red (demonstrated by temporary mutation):</b> returning <c>configured</c> unscaled
         /// from the <c>scaleWithResidency</c> branch of
         /// <see cref="GenerationPanicGate.DeriveThresholds"/> reds every scaled row of the table while leaving
-        /// the vd-5 identity, the flag-off rows and all eighteen other baselines green — which is the point:
+        /// the vd-10 identity, the flag-off rows and all eighteen other baselines green — which is the point:
         /// the identity at the reference width is what makes the default configuration byte-identical to
         /// pre-P-8 behavior, so it must NOT move.</para>
         /// </summary>
@@ -1320,7 +1320,7 @@ namespace Editor.Validation.PipelineBackpressure
             const int configuredReopen = 128;
 
             // The invariant the whole design rests on, asserted against the SHIPPED default rather than
-            // against the literal 5 the table below pins. ReferenceResidentWidth encodes
+            // against the literal 10 the table below pins. ReferenceResidentWidth encodes
             // 2 x (default viewDistance + DATA_LOAD_BUFFER) + 1 with no compile-time link to either input, so
             // changing the default view distance would silently hand every default install a scaled pair —
             // the one configuration that must stay byte-identical to pre-P-8 behavior — while every row
@@ -1337,12 +1337,12 @@ namespace Editor.Validation.PipelineBackpressure
             // vd -> resident width -> the effective pair. Hand-computed at review time, frozen here.
             (int viewDistance, int residentWidth, int close, int reopen)[] sweep =
             {
-                (5, 17, 256, 128), // the reference: scaling is an identity, pre-P-8 behavior preserved
-                (8, 23, 346, 173),
-                (10, 27, 407, 203),
-                (15, 37, 557, 279),
-                (20, 47, 708, 354),
-                (32, 71, 1069, 535),
+                (5, 17, 161, 81),
+                (8, 23, 218, 109),
+                (10, 27, 256, 128), // the reference: scaling is an identity, pre-P-8 behavior preserved
+                (15, 37, 351, 175),
+                (20, 47, 446, 223),
+                (32, 71, 673, 337),
             };
 
             foreach ((int viewDistance, int residentWidth, int close, int reopen) row in sweep)
@@ -1399,7 +1399,7 @@ namespace Editor.Validation.PipelineBackpressure
 
             // The effective ratio must now fall as 1/width, not 1/width^2 — the change stated as one number.
             // At vd 5 -> 32 the width grows 71/17 = 4.18x, so the ratio should fall by about that factor
-            // (88.6 % -> 21.2 %) rather than by its square (-> 5.1 %, the pre-P-8 figure FP-10 measured).
+            // (55.7 % -> 13.3 %) rather than by its square (88.6 % -> 5.1 %, the pre-P-8 figures FP-10 measured).
             PipelineSettingsSnapshot near = new PipelineSettingsSnapshot(new Settings
             {
                 viewDistance = 5, panicGateCloseThreshold = configuredClose,

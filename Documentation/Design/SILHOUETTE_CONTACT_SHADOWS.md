@@ -563,8 +563,8 @@ fragment. The "no extra memory, zero vertex cost" claim survives; the "occupancy
 claim does not.
 
 **2. Route B has an AO horizon, and AO tolerates one far worse than fog does.** `VX-1`'s default
-volume spans ≈ 160 voxels — a **5-chunk radius**, which is exactly today's default view distance and
-well short of the 10 and 20 that `FP-4` swept. Beyond the volume there is no occupancy to tap, so
+volume spans ≈ 160 voxels — a **5-chunk radius**, which is half today's default view distance of 10 and
+well short of the 20 that `FP-4` also swept. Beyond the volume there is no occupancy to tap, so
 every corner shadow would pop off at a fixed radius. Fog degrades gracefully to height fog; AO does
 not degrade, it vanishes. **The owner's steer is that the volume should be view-distance aware**, and
 that is filed against `VX-1` (see that entry for the quadratic memory it implies and the cascade

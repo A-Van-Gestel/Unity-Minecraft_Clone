@@ -18,11 +18,13 @@ namespace Helpers
     {
         /// <summary>
         /// Resident-square width (in chunks) the configured thresholds are stated at — the default view
-        /// distance 5, whose load distance 8 gives <c>2 × 8 + 1</c>. P-8's scaling is an identity here, so a
+        /// distance 10, whose load distance 13 gives <c>2 × 13 + 1</c>. P-8's scaling is an identity here, so a
         /// default configuration behaves exactly as it did before the feature, and the two Settings fields
-        /// keep meaning what they always meant at the view distance they were tuned for.
+        /// keep meaning what they always meant at the shipped default. This constant tracks the default view
+        /// distance rather than the vd 5 the FP-* captures measured 256/128 at; baseline B19 reds if the two
+        /// drift apart.
         /// </summary>
-        public const int ReferenceResidentWidth = 17;
+        public const int ReferenceResidentWidth = 27;
 
         /// <summary>The gate's evaluation outcome — the two steady states plus the two loggable transitions.</summary>
         public enum Decision : byte
@@ -84,10 +86,10 @@ namespace Helpers
         /// re-test). The thresholds are counts of backlogged
         /// chunks, but the population they guard is the resident square, which grows as
         /// <c>(2 × LoadDistance + 1)²</c>. A fixed 256 is therefore 88.6 % of residency at view distance 5 and
-        /// 5.1 % at view distance 32 — an unreachable emergency brake at the default and a near-permanent
+        /// 5.1 % at view distance 32 — an unreachable emergency brake at low view distance and a near-permanent
         /// throttle at the top, which is what held admitted work to 1.5–1.7× growth while requests grew
         /// 4.5–4.8× across FP-10's sweep. Scaling with the square's <i>width</i> rather than its area is the
-        /// deliberate middle: it loosens the gate substantially at high view distance (×4.2 at vd 32) while
+        /// deliberate middle: it loosens the gate substantially at high view distance (×2.6 at vd 32) while
         /// keeping it reachable, because the gate is simultaneously succeeding at the other half of its job —
         /// protecting frame time — and an area-proportional threshold would reproduce vd 5's never-closes
         /// behavior everywhere and trade that away.

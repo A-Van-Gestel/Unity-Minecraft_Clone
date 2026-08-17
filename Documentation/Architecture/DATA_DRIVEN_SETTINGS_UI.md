@@ -526,7 +526,7 @@ The `Settings.EnablePersistence` property must be updated to reference `Dev.keep
 ```csharp
 [SettingField(SettingsTab.Graphics, Label = "View Distance", Format = "f0", Order = 0)]
 [Range(1, 32)]
-public int viewDistance = 5;
+public int viewDistance = 10;
 ```
 
 ### 8.5 Example: Fully Annotated Settings Class
@@ -557,7 +557,7 @@ public class Settings
 
     [SettingField(SettingsTab.Graphics, Label = "View Distance", Format = "f0", Order = 1)]
     [Range(1, 32)]
-    public int viewDistance = 5;
+    public int viewDistance = 10;
 
     [SubHeader("Fluids")]
     [SettingField(SettingsTab.Graphics, Label = "Fluid Quality", Order = 2)]
