@@ -4,11 +4,20 @@
 **Created:** 2026-06-13  
 **Scope:** `Assets/Editor/Validation/Lighting/` — the `LightingValidationSuite` + `LightingTestWorld` + `LightingFrameSimulator` harness.
 
+> **Baseline count: 99, verified 2026-08-17** by running the suite (`ALL 99 LIGHTING ENGINE BASELINE
+> TESTS PASSED`, 3 min 25 s). **This number goes stale every time a baseline is added, so do not trust
+> it — re-derive it.** The suite itself is the only authority: run
+> `Minecraft Clone/Dev/Validate Lighting Engine` (or
+> `ValidationSuiteCI.RunSelected("Lighting Engine", true)`) and read the summary line. A rough lower
+> bound without the editor is `grep -rc "new Scenario(" Assets/Editor/Validation/Lighting/`, which
+> currently agrees at 99. The per-section counts further down this document were **not** re-derived on
+> that date and may lag.
+
 ---
 
 ## 1. Why this document exists
 
-The lighting validation suite (84 baselines + frame simulator, menu item **`Minecraft Clone/Dev/Validate Lighting Engine`**; B71–B74 guard the LI-2 band derivation, B75–B78 the banded-vs-full differential + prove-red, B79–B82 the LI-2b bottom-band derivation + emissive metadata, B83–B85 the bottom differential with its engagement assertion + raised-floor prove-red, B86–B88 the Bug-16/17 RGB removal family — simple-form tripwire, runaway-cycle guard, ghost-island guard — B89 the C12 RGB stale-pull-back self-heal guard, and B90 the Bug-18 RGB cross-seam
+The lighting validation suite (**99** baselines + frame simulator, menu item **`Minecraft Clone/Dev/Validate Lighting Engine`**; B71–B74 guard the LI-2 band derivation, B75–B78 the banded-vs-full differential + prove-red, B79–B82 the LI-2b bottom-band derivation + emissive metadata, B83–B85 the bottom differential with its engagement assertion + raised-floor prove-red, B86–B88 the Bug-16/17 RGB removal family — simple-form tripwire, runaway-cycle guard, ghost-island guard — B89 the C12 RGB stale-pull-back self-heal guard, and B90 the Bug-18 RGB cross-seam
 removal initiator guard) is strong where it runs **real production code**:
 it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real `ChunkData` (section / uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision helpers `CrossChunkLightModApplier`, `LightingScheduleDecision`, and `LightingJobProcessor`.
 
