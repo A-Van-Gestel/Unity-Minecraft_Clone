@@ -2,7 +2,7 @@
 
 This document outlines **open** bugs and architectural improvements related to the project's internal libraries and shared utilities. Resolved items are archived in [`_FIXED_BUGS.md`](./_FIXED_BUGS.md).
 
-> **Last reviewed:** May 2026
+> **Last reviewed:** August 2026 (documentation audit — every code-checkable claim re-verified against current source)
 
 ---
 
@@ -28,7 +28,8 @@ Not evaluated in the original LZ4 library research; documented here after the 0.
 - NuGet: `K4os.Compression.LZ4` (block API) + `K4os.Compression.LZ4.Streams` (frame/stream API). MIT.
 - The de-facto standard .NET LZ4 port — widely battle-tested (used by major .NET projects).
 - Pure managed (with unsafe fast paths): **no per-platform native binaries**, which removes the
-  android-arm/arm64/x64/linux/win runtime-package matrix NativeCompressions requires.
+  runtime-package matrix NativeCompressions requires — currently `Core` plus `android-arm64`,
+  `linux-x64` and `win-x64` in `Assets/packages.config`, one more per platform added.
 - Reads/writes the standard LZ4 frame format → compatible with existing 0.6.0-era saves.
 - Trade-off: somewhat lower throughput than a native lz4 binding; chunk loads are not
   decompression-bound, so this is unlikely to matter in practice.
@@ -124,11 +125,13 @@ The following call sites still use `Unity.Mathematics.noise.snoise` instead of `
 
 | File                                            | Usage                     | Priority                                        |
 |-------------------------------------------------|---------------------------|-------------------------------------------------|
-| `StandardChunkGenerationJob.cs` (line ~234-235) | Biome boundary dithering  | Low — 2D noise, fixed frequency, no seed needed |
-| `BiomeBlender.cs` (line ~69)                    | Biome blend radius wiggle | Low — 2D noise, cosmetic, no seed needed        |
+| `StandardChunkGenerationJob.cs` (line ~250-251) | Biome boundary dithering  | Low — 2D noise, fixed frequency, no seed needed  |
+| `BiomeBlender.cs` (line ~80)                    | Biome blend radius wiggle | Low — 2D noise, cosmetic, no seed needed        |
 | `WorldBlendingPreviewJob.cs` (line ~191)        | Editor preview wiggle     | Low — editor-only, mirrors `BiomeBlender`       |
 
 These are all 2D `noise.snoise(float2)` calls with hardcoded offsets acting as ad-hoc seeds. Migration would replace them with `FastNoiseLite.CreateSimple()` for seed consistency, but the visual impact is negligible — they produce small cosmetic perturbations. Migrate opportunistically when touching these files, rather than as a dedicated effort.
+
+> ⚠️ **The dithering row is not purely cosmetic — see [`WORLD_GENERATION_BUGS.md`](./WORLD_GENERATION_BUGS.md) #04.** Unlike the other two, that site feeds `BaseSeed` in as a **float coordinate**, which collapses the dither to a constant for seeds above ~2²⁴. Migrating it is therefore a **seed-breaking** behavior fix rather than an opportunistic tidy-up, and it is gated behind the same world-version moment as `WORLD_GENERATION_BUGS.md` #01. The "no seed needed" rating above applies to `BiomeBlender` / `WorldBlendingPreviewJob` only.
 
 ### Impact on Existing Code
 

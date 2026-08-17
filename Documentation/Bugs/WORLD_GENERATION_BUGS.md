@@ -2,14 +2,14 @@
 
 This document outlines **open** bugs related to world generation, seed handling, and voxel data management. Resolved bugs are archived in [`_FIXED_BUGS.md`](./_FIXED_BUGS.md).
 
-> **Last reviewed:** June 2026 (full codebase audit)
+> **Last reviewed:** August 2026 (documentation audit — every code-checkable claim re-verified against current source)
 
 ---
 
 ## 01. Seed calculation uses `Mathf.Abs(hashCode) / 10000` hack
 
 **Severity:** Bug  
-**Files:** `VoxelData.cs` — `CalculateSeed` (lines 115–144)
+**Files:** `VoxelData.cs` — `CalculateSeed` (line ~151)
 
 > [!CAUTION]
 > **SEED BREAKING:** Fixing this will change the computed seed for all worlds created with **string names** or **random seeds**. Existing save files are unaffected (they store the already-computed integer seed), but the same seed string in a new world would generate entirely different terrain. Only worlds created with a **raw integer seed** remain reproducible.
@@ -30,7 +30,7 @@ This document outlines **open** bugs related to world generation, seed handling,
 
 **Severity:** Bug (visual / generation quality)  
 **Confidence:** Medium-High (mechanism verified by inspection; in-game visual impact not yet reproduced)  
-**Files:** `StandardChunkGenerationJob.cs` — surface biome dithering (lines ~238–241); any other site that adds `BaseSeed` directly to a float noise coordinate
+**Files:** `StandardChunkGenerationJob.cs` — surface biome dithering (lines ~250–251); any other site that adds `BaseSeed` directly to a float noise coordinate
 
 > [!CAUTION]
 > **SEED BREAKING (partial):** Fixing this changes surface-biome dithering (and any other affected noise) for worlds whose seed magnitude exceeds float precision (~16.7M). Terrain shape from `FastNoiseLite` (which takes seed as an `int`, not a coordinate offset) is unaffected.
@@ -68,7 +68,7 @@ database grows; it does not affect the save format.
 ## TODO: Noise Evaluation Duplication — Worm Carver Seek Is a 4th Unsynchronized Path
 
 **Severity:** Technical Debt / Latent Bug  
-**Files:** `Assets/Scripts/Jobs/StandardWormCarverJob.cs` — `EvaluateLayerNoise()` (line ~252)
+**Files:** `Assets/Scripts/Jobs/StandardWormCarverJob.cs` — `EvaluateLayerNoise()` (line ~363)
 
 The worm carver's noise-seeking logic (`EvaluateLayerNoise`) re-implements the Spaghetti2D 6-sample average, Noodle isoband formula, and Spaghetti3D dual zero-crossing formula that already exist in `StandardChunkGenerationJob.cs` and `StandardChunkGenerator.GetVoxel()`. The cave generation architecture doc ([CAVE_GENERATION.md §4.1](../Architecture/World%20Generation/CAVE_GENERATION.md)) identifies three evaluation paths that **must stay in sync** — the worm carver's seek evaluation is now effectively a **4th path** that is not listed there.
 

@@ -2,7 +2,7 @@
 
 This document outlines **open** bugs related to the UI, Menus, Inventory, and HUD. Resolved bugs are archived in [`_FIXED_BUGS.md`](./_FIXED_BUGS.md).
 
-> **Last reviewed:** May 2026
+> **Last reviewed:** August 2026 (documentation audit — every code-checkable claim re-verified against current source)
 
 ---
 

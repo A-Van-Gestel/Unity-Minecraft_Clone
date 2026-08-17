@@ -2,6 +2,20 @@
 
 This file consolidates all bugs that have been resolved. Entries are moved here from their respective bug files when the fix is confirmed working. Each entry is kept for historical reference and to document why the problem occurred and how it was solved.
 
+> **Numbering:** entry numbers are **unique per section and independent of the source file's numbering** — an active
+> bug file retires a number when its entry is archived, so carrying the source number across collides with whatever was
+> archived under it earlier. Number a new entry as the next free one in its section, and keep the source id in the
+> heading (`(BLOCK_BEHAVIOR #05)`, `(LIGHTING_BUGS.md Bug 20)`) so citations written while the bug was open still
+> resolve by search. Match the id string the citing code actually uses.
+>
+> ⚠️ **Two pre-existing collisions predate this rule: `Player` has two `03`, `User Interface` has two `06`.** Both
+> duplicated numbers are heavily cited from code, and which entry owns the citations is ambiguous — for Player, the
+> `PLAYER_BUGS §03` citations mean the *world-gen replacement tags* entry, which is filed here unnumbered, not the
+> Far-Lands entry currently holding `03`. **Resolve each one the next time that section is archived into**, while the
+> owning entry is in hand: pick which entry keeps the number, renumber the other to the next free one, and give both
+> their source id in the heading. Do not renumber either on inspection alone — guessing wrong silently redirects every
+> citation.
+
 ---
 
 ## Lighting
@@ -618,6 +632,81 @@ slabs; it could not confirm the fix itself, because the defect's live trigger do
 
 ---
 
+### ~~26. Partial Blocks Are Uniformly Opaque — Slabs Block All Light and Max-Darken AO~~ (`LIGHTING_BUGS.md` Bug 20)
+
+**Severity:** Medium-High  
+**Files:** `Jobs/NeighborhoodLightingJob.cs`, `Jobs/MeshGenerationJob.cs`, `Helpers/LightAttenuation.cs`, `Helpers/CrossChunkLightModApplier.cs`, `Data/JobData.cs`  
+**Fixed:** August 2026 — both halves confirmed in game 2026-08-08 (`VO-3`/`VO-4` lighting, `VO-5`/`VO-6`/`VO-8` ambient occlusion)  
+**Related:** [`MESHING_BUGS.md`](./MESHING_BUGS.md) Bug M01 — the mesher-side half of the same visual artifact; also fixed and archived (see the Meshing section below)
+
+**Description:**
+The lighting model had one `opacity` value per block type and no concept of a block that occupies only part of its cell
+(`LIGHTING_SYSTEM_OVERVIEW.md` §"Conditionally Opaque Blocks": *"We have no block types with directional transparency. …
+If stairs, slabs, or other partial blocks are added in the future, this optimization would become relevant."*).
+
+A partial block had since been added. `Stone Half Slab` (`BlockIDs.StoneHalfSlab`) is authored in
+`BlockDatabase.asset` with `opacity = 15`, and `IsOpaque => opacity >= 15` (`Data/JobData.cs`, `Data/BlockType.cs`),
+so a half slab was treated as a *full* light blocker despite filling half its cell. Two consequences:
+
+1. **Sky light stopped at the slab.** `LightAttenuation.Attenuate` charges the destination's opacity on entry
+   (`max(0, source - max(1, opacity))`), so entering a slab cell cost the full 15 — the cell stored no propagatable
+   value and everything below a slab went dark, as if it were a solid cube.
+2. **Ambient occlusion darkened at maximum.** The mesher's AO sampling branched on the `IsOpaque` **boolean**: an opaque
+   sample contributed `sun=0, r=g=b=0` and suppressed the corner's diagonal term. Every AO corner touching a slab
+   therefore received the hardest possible darkening, regardless of the fact that light physically reaches that corner
+   through the slab's empty half.
+
+Effect 2 is what made rotated slabs look wrong even where the surrounding cells were fully lit: a ring of slabs around a
+sky-lit cell mutually max-darkened each other's faces.
+
+**Reproduction Steps:**
+
+1. Dig a one-block-deep pit in flat, sky-lit terrain (the centre cell reads sky light 15).
+2. Place a `Stone Half Slab` in each of the four cells around the pit, rotated so each slab's solid half faces the pit
+   (`Facing6Roll2` metadata `0x03`, `0x0B`, `0x13`, `0x1B` — facing 3 = Bottom, rolls 0–3).
+3. Observe with smooth lighting enabled: the slab faces are darkened far below what the neighbouring light levels justify.
+
+**Root Cause:**
+`opacity = 15` on a block that does not fill its cell, combined with a boolean `IsOpaque` gate in both the BFS and the AO
+sampler. The graded part of the model already existed (`LightAttenuation` is a per-level cost, not a boolean), so the
+missing piece was a block-level notion of "does not fill its cell" that keeps such a block out of the `IsOpaque` fast
+paths and gives it a traversal cost below 15.
+
+**Fix — delivered in phases by [`VOXEL_OCCLUSION_REFACTOR.md`](../Design/VOXEL_OCCLUSION_REFACTOR.md) (`VO-*`).** The
+plan's §4 D1 records why a new `VoxelShape` descriptor was rejected in favour of deriving occlusion from the existing
+`BlockCollisionBounds` — do not re-litigate that without reading it.
+
+- **`VO-3`** (commit `f0d12ca2`) made occlusion per-face, derived from the block's rotated `BlockCollisionBounds` via
+  `LightAttenuation.FaceBlocksLight` / `EntryOpacity` / `ExitBlocked`, with propagation-source guards switched to
+  `BlockTypeJobData.IsFullyOpaqueCell` so a partial block re-propagates the light held in the open part of its cell.
+  A first in-game pass found the column still decaying `15/14/13/…` below a *vertical* slab — the `isVerticalSunlight`
+  rule was likewise whole-block — fixed by `LightAttenuation.IsTransparentThroughFace` and confirmed
+  ("15 all the way down").
+- **`VO-4`** made the cross-chunk half directional: the removal veto's support scan (`CrossChunkLightModApplier`, now
+  taking a `TargetEntryCost` and a block-data lookup instead of a whole-block opacity and an `IsOpaque` predicate), the
+  Bug 12/18 removal initiators, the dimmer-seam stamp pull-back, `CheckEdgeVoxel`/`CheckEdgeVoxelRGB`, and
+  `IsVerticallySkyLit` — the last being a site the plan had not listed, and the one that let the Bug 12 initiator fire on
+  a column the BFS holds at an undimmed 15.
+- **`VO-5`** replaced the boolean AO gate with fractional occlusion, **`VO-6`** re-sampled the slab's own surfaces, and
+  **`VO-8`** took coverage per-corner. The AO path is now silhouette-based
+  (`LightAttenuation.AmbientOcclusionPlaneSilhouette` over the 3×3 of cells in front of each face) rather than a boolean
+  `IsOpaque` substitution — the `SampleNeighborLight` this entry originally named no longer exists.
+- **`VO-7`** (world-version bump + relight) was **descoped** by user decision — see its packet.
+
+**Validation suite:** four permanent baselines. **B104** (promoted from repro `K20a`, strengthened to a column
+differential) is the motivating case — a vertical half slab's open half carries the sky column undimmed. **B106**
+(promoted from `K20b`) pins the cross-chunk removal veto crediting a partial block per face, with **B105** guarding the
+settled seam field. The tripwires against "fix this by making slabs transparent" are **B101** (an *unrotated* slab still
+blocks daylight below it), **B102** (a full opaque cube blocks) and **B103** (an uncapped shaft is lit, so the others
+cannot pass vacuously).
+
+**Spawned separately:** `LIGHTING_BUGS.md` **Bug 21** (sealed partial-block shaft never darkens), found while authoring
+B105 — also fixed and archived, as Lighting #25 above.
+
+**Testing environment:** Editor, smooth lighting enabled, August 2026; in-game confirmation 2026-08-08.
+
+---
+
 ## Meshing
 
 ### ~~M02. A custom mesh's mid-plane face is culled by the block-boundary neighbor~~
@@ -758,7 +847,7 @@ self-occludes and would not reproduce this.
 **Reported:** August 2026  
 **Fixed:** August 2026  
 **Status:** Resolved — confirmed in game 2026-08-08. Guarded by baselines **B44** (rotated, `−Z` mid-plane face) and **B45** (unrotated, `+Y`) in `MeshingValidationSuite.SubBlockFaceLight.cs`.  
-**Related:** [`LIGHTING_BUGS.md`](./LIGHTING_BUGS.md) Bug 20 (the lighting-model half of the same visual artifact, fixed first by VO-3/VO-4)
+**Related:** Lighting #26 above (the lighting-model half of the same visual artifact, fixed first by VO-3/VO-4)
 
 **Description:**
 `MeshGenerationJob.GenerateCustomBlockMesh_SchemaAware` computed one smooth-light corner quad per emitted face via
@@ -809,8 +898,9 @@ assertion (the boundary neighbour must *not* reach a mid-plane face).
 handles sub-block geometry (half slabs, fences, stairs)"*. True of the bilinear blend, false of the sampled quad; §2.5.2
 now documents the sampling rule and the step-size constraint.
 
-**Still open:** [`MESHING_BUGS.md`](./MESHING_BUGS.md) **Bug M02** — the same wrong-cell confusion in the *culling*
-decision, which VO-6 deliberately did not touch because it changes emitted vertex counts.
+**Follow-up (was open when this entry was archived, since fixed):** **Bug M02** — the same wrong-cell confusion in the
+*culling* decision, which VO-6 deliberately did not touch because it changes emitted vertex counts. Fixed and archived
+in its own right; see the M02 entry above.
 
 **Testing environment:** Editor, smooth lighting enabled, August 2026.
 
@@ -1562,7 +1652,7 @@ coordinate before handing off constraints to the `Structure` generator.
 
 ## Block Behavior
 
-### ~~05. Residual `Vector3Int`→`Vector3` far-coordinate reads on unguarded float query APIs~~
+### ~~01. Residual `Vector3Int`→`Vector3` far-coordinate reads on unguarded float query APIs~~ (`BLOCK_BEHAVIOR` #05)
 
 **Reported:** August 2026 — logged 2026-08-17 while fixing Fluid #17, as the "is that class fully closed?" sweep that fix did not perform.  
 **Fixed:** August 2026  
@@ -1625,7 +1715,7 @@ in-game verified, rather than the sole evidence for it.
 
 ---
 
-### ~~04. Fluid `FluidLevel` set redundantly in `HandleFluidFlow`~~
+### ~~02. Fluid `FluidLevel` set redundantly in `HandleFluidFlow`~~ (`BLOCK_BEHAVIOR` #04)
 
 **Severity:** Code Quality  
 **Files:** `BlockBehavior.cs` — `HandleFluidFlow`  
@@ -1637,7 +1727,7 @@ in-game verified, rather than the sole evidence for it.
 
 ---
 
-### ~~05. Hardcoded Block IDs throughout the codebase~~
+### ~~03. Hardcoded Block IDs throughout the codebase~~ (`BLOCK_BEHAVIOR` #05)
 
 **Severity:** Improvement  
 **Files:** `BlockBehavior.cs`, `BlockBehavior.Grass.cs`, `BlockBehavior.Fluids.cs`, `Structure.cs`, `MeshGenerationJob.cs`, `World.cs`, `PlayerInteraction.cs`, `LightingJobBenchmark.cs`  
@@ -1656,13 +1746,47 @@ in-game verified, rather than the sole evidence for it.
 
 ---
 
-### ~~01. `BlockBehavior.s_mods` is a shared static list (thread safety / reentrancy hazard)~~
+### ~~04. `BlockBehavior.s_mods` is a shared static list (thread safety / reentrancy hazard)~~ (`BLOCK_BEHAVIOR` #01)
 
 **Severity:** Bug (latent)  
 **Files:** `BlockBehavior.cs`  
 **Fixed:** March 2026
 
 **Symptom:** Race condition if block behavior is evaluated across multiple threads, leading to data corruption as `Behave()` overwrites the returned reusable metadata list. **Root Cause:** The `Behave` method used a single shared static `List<VoxelMod>` (`s_mods`) that was cleared and reused on every call. **Fix:** Replaced the single static list with a `[ThreadStatic]` lazily instantiated backing list mapped to a `Mods` property. This guarantees every thread hitting `Behave()` gets its own private, zero-allocation reusable list.
+
+---
+
+### ~~05. Fluid horizontal flow condition is slightly wrong~~ (`BLOCK_BEHAVIOR` #01)
+
+**Severity:** Bug  
+**Files:** `BlockBehavior.Fluids.cs` — `HandleFluidSpread`; `Jobs/FluidTickJob.cs` — `HandleFluidSpread`  
+**Fixed:** August 2026 (superseded by later work; archived after a documentation audit)
+
+**Symptom (as reported):** the horizontal-spread neighbor test passed when the neighbor was "either non-solid or any fluid block", so a hypothetical *solid* fluid would have passed the gate, and water adjacent to lava silently skipped the spread instead of reacting.
+
+**Resolution:** the condition no longer exists in that form. Both the managed path and the Burst `FluidTickJob` now gate each neighbor on three explicit terms — `neighborIsAir || neighborIsReplaceable || neighborIsSameFluidAndWorse`, where `neighborIsReplaceable` additionally requires `!isSolid && (tags & BlockTags.REPLACEABLE)` and `neighborIsSameFluidAndWorse` requires a matching block id. A solid fluid cannot satisfy any of the three, so the reported hazard is structurally unreachable.
+
+**Not resolved by this, and deliberately so:** water and lava still do not react on contact. That was always the second half of this entry and is tracked on its own as `FLUID_BUGS.md` **#04**, filed as a missing feature rather than a bug.
+
+---
+
+### ~~06. Custom Mesh Collision Support~~ (`BLOCK_BEHAVIOR` #04)
+
+**Severity:** Feature  
+**Files:** `Physics/VoxelRigidbody.cs`, `World.CheckPhysicsCollision`, `Helpers/BlockCollisionBoundsUtility.cs`, `BlockType`, Block Editor  
+**Fixed:** August 2026 (shipped incrementally April–August 2026; archived after a documentation audit)
+
+**Symptom (as reported):** every custom-mesh block collided as a full 1×1×1 cube regardless of its authored shape — a half slab was solid to the ceiling of its cell.
+
+**Resolution:** delivered by the Sub-Voxel Collision System — see [`SUB_VOXEL_COLLISION_SYSTEM.md`](../Architecture/SUB_VOXEL_COLLISION_SYSTEM.md), whose status is *Implemented*. Against this entry's original checklist:
+
+- **Generic collision from authored bounds** — per-block-type `BlockCollisionBounds`, resolved through `BlockCollisionBoundsUtility.GetBounds`. The player stands on the authored surface and walks through the empty half.
+- **Rotation-aware** — bounds are rotated by the block's metadata orientation through the same 90° permutation model as rendering, and the permutation property is load-bearing for the `VQ-3` raycast's hit ordering.
+- **Block Editor authoring + editor preview** — implemented.
+- **In-game debug visualization** — `DebugVisualizationMode.CollisionBounds`.
+- **Regression guard** — the `NS-4` physics-solver suite (`Minecraft Clone/Dev/Validate Physics Solver`), 26 baselines over the real `VoxelRigidbody` and the real `CheckPhysicsCollision`.
+
+**Deliberately still out of scope, tracked elsewhere:** the *simplified collision override* this entry asked for was not needed, because collision is authored as bounds rather than derived from the visual mesh — there is no polygon count to simplify. Shapes that need **more than one AABB** (stairs, wedges, L-shapes) remain unsupported and are tracked as **`VQ-4`** (compound collision bounds), not here.
 
 ---
 
@@ -1910,6 +2034,30 @@ frame API or switching to `K4os.Compression.LZ4`; any world saved while 0.6.1 wa
 `memoryStream.Position` read that computes the payload length. Deflate/LZ4 were unaffected (their wrappers are separate objects, and disposing them is required to flush).
 
 **Fix:** `Serialize` now mirrors `Deserialize`'s existing identity guard: the compression stream is disposed in a `finally` only when it is not the underlying MemoryStream (`if (compressionStream != memoryStream) compressionStream.Dispose();`), preserving the dispose-to-flush behavior for real compression wrappers. Guarded by the Deserialization Robustness suite (B1 round-trips with `None`).
+
+---
+
+### ~~02. Mod Manager depends on Block Database Initialization~~
+
+**Severity:** Architecture  
+**Files:** `ModificationManager.cs`  
+**Fixed:** August 2026 (dissolved by refactor; archived after a documentation audit)
+
+**Symptom (as reported):** `RestoreChunkModifications` relied on `World.Instance.blockDatabase` being loaded before modification data was restored — a tight order-of-initialization coupling between saved-mod replay and block-database startup.
+
+**Resolution:** the coupling no longer exists, and neither does the method. `RestoreChunkModifications` is absent from the codebase, and nothing under `Assets/Scripts/Serialization/` references `blockDatabase` at all. `ModificationManager`'s surface is now `AddPendingMod` / `TryGetModsForChunk` / `Save` / `Load` over a `Dictionary<ChunkCoord, List<VoxelMod>>` — mods are handed to the chunk that consumes them rather than replayed against a live database at restore time, so there is no initialization order left to get wrong.
+
+---
+
+### ~~06. Deserialization failure leaks pooled objects~~
+
+**Severity:** Minor (pool churn, no crash)  
+**Files:** `ChunkSerializer.cs` — `ReadChunkInternal`, `ReadSectionWithFlag`  
+**Fixed:** August 2026 (archived after a documentation audit)
+
+**Symptom:** when `ReadChunkInternal` threw mid-read (corrupt or truncated chunk), the `ChunkData` taken from `World.Instance.ChunkPool` and every section already read into it were abandoned — `Deserialize` caught the exception and returned null without returning them. The objects were GC-reclaimed rather than leaked, but a save with many corrupt chunks defeated the pooling entirely.
+
+**Fix:** exactly the remedy the entry proposed. `ReadChunkInternal` hoists `ChunkData chunk = null` above the `try` *"so the catch can return the pooled shell on a mid-parse throw"*, and its `catch` returns the shell (and with it the sections already attached) via `World.Instance.ChunkPool.ReturnChunkData(chunk)` before the failure propagates to `Deserialize`.
 
 ---
 

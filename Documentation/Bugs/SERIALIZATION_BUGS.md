@@ -2,7 +2,12 @@
 
 This document outlines **open** bugs related to saving, loading, Region files, and Mod Manager. Resolved bugs are archived in [`_FIXED_BUGS.md`](./_FIXED_BUGS.md).
 
-> **Last reviewed:** June 2026 (full codebase audit)
+> **Last reviewed:** August 2026
+>
+> **Numbering note:** `§02`, `§03` and `§06` are **retired, not free** — all three are archived in
+> [`_FIXED_BUGS.md`](./_FIXED_BUGS.md), and `§03` is still cited by name from
+> `CompressionFactory.cs`, `LIBRARY_BUGS.md` and
+> `INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md`. New entries continue from `§10`.
 
 ---
 
@@ -17,15 +22,9 @@ The `_fileLock` works correctly to prevent save data corruption but adds massive
 
 ---
 
-## 02. Mod Manager depends on Block Database Initialization
-
-**Severity:** Architecture  
-**Files:** `ModificationManager.cs`
-
-`RestoreChunkModifications` relies on `World.Instance.blockDatabase` being loaded before data is restored.  
-**Impact:** Tight coupling and order-of-initialization dependency.
-
----
+> Bug 02 (Mod Manager / Block Database initialization coupling) no longer describes live code —
+> `RestoreChunkModifications` was dissolved by a later refactor. Archived to
+> [`_FIXED_BUGS.md`](./_FIXED_BUGS.md).
 
 > Bug 03 (NativeCompressions LZ4Stream asymmetric format hang, June 2026) has been fixed and
 > archived to [`_FIXED_BUGS.md`](./_FIXED_BUGS.md). The 0.6.0 version pin and library follow-ups
@@ -65,15 +64,9 @@ light-only section (`safeSections[i] == null`, sky set), then the sky level flip
 
 ---
 
-## 06. Deserialization failure leaks pooled objects
-
-**Severity:** Minor (pool churn, no crash)  
-**Confidence:** High  
-**Files:** `ChunkSerializer.cs` — `ReadChunkInternal`, `ReadSectionWithFlag`
-
-When `ReadChunkInternal` throws mid-read (corrupt/truncated chunk), the `ChunkData` obtained from `World.Instance.ChunkPool.GetChunkData(...)` and all **sections already read into it** are abandoned — `Deserialize` catches the exception and returns null without returning them to the pool. The per-section `try/catch` in `ReadSectionWithFlag` only returns the section currently being read. The objects are GC-reclaimed, so this is pool-efficiency churn rather than a leak, but on a save with many corrupt chunks it defeats the pooling.
-
-**Proposed fix:** Wrap the body in a `try/catch` that calls `chunk.Reset(...)` + `ReturnChunkData(chunk)` before rethrowing.
+> Bug 06 (deserialization failure leaks pooled objects) has been fixed — `ReadChunkInternal` now
+> hoists the pooled shell above its `try` and returns it in the `catch`. Archived to
+> [`_FIXED_BUGS.md`](./_FIXED_BUGS.md).
 
 ---
 

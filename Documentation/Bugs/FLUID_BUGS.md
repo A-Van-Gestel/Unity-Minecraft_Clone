@@ -22,40 +22,48 @@ Fluid voxels do not currently affect the player:
 ## 04. No fluid interaction between different fluid types — ⚠️ MISSING FEATURE
 
 **Severity:** Missing Feature (not a bug)  
-**Files:** `BlockBehavior.cs` — `HandleFluidFlow` (lines 334–346)
+**Files:** `BlockBehavior.Fluids.cs` — `HandleFluidSpread`; `Jobs/FluidTickJob.cs` — `HandleFluidSpread` (both paths carry the same neighbor gate)
 
 Water and lava currently do not interact with each other. In Minecraft, water touching lava creates cobblestone or obsidian. This is intentionally unimplemented for now — the collision logic is silently skipped (water simply won't flow into lava), which is safe.
 Implementing proper fluid interaction requires a new interaction table and is deferred as a feature, not a bug fix.
 
 ---
 
-## 09. Missing Flow-Blocking Logic for Non-Solid Blocks — ⚠️ MISSING FEATURE
+## 09. Flow-blocking for non-solid blocks is decided by the placement `REPLACEABLE` tag, not a fluid-specific one — ⚠️ MISSING FEATURE
 
 **Severity:** Missing Feature (not a bug)  
-**Files:** `BlockBehavior.Fluids.cs`, `BlockType.cs`
+**Files:** `BlockBehavior.Fluids.cs` — `HandleFluidSpread`; `Jobs/FluidTickJob.cs` — `HandleFluidSpread`; `Data/PlacementRules.cs` (`BlockTags.REPLACEABLE`)
 
-Currently, fluid spread is gated purely by whether the target block is `Air` (id 0). Non-solid blocks (e.g., torches, ladders, signs) will simply be washed away or ignored.
-We need a fluid-interaction tag or explicit list for specific non-solid blocks that should physically block fluid flow identical to a solid block (e.g., doors preventing water from entering a room).
+Both spread paths gate each neighbor on `neighborIsAir || neighborIsReplaceable || neighborIsSameFluidAndWorse`, where `neighborIsReplaceable` is `!isSolid && (tags & BlockTags.REPLACEABLE) != 0`. A non-solid block **without** the tag therefore blocks flow exactly like a solid one — flow-blocking is the default for any untagged block.
+
+The gap is the *distinction*, not the blocking. `BlockTags.REPLACEABLE` is the **placement** tag (`1 << 13`, "tall grass etc. can be replaced by placing a block"), and fluids reuse it verbatim as their wash-away set. One bit answers two unrelated questions, so a block cannot be "replaceable when the player places into it, but watertight against fluid" — or the reverse. Doors are the motivating case: one should stop water while remaining a normal solid.
+
+**Consequence to watch:** anything given `REPLACEABLE` for placement reasons silently becomes fluid-washable in the same edit. A fluid-specific tag (or an explicit interaction table) would decouple the two.
 
 ---
 
 ## 12. Missing Lava Fire Spreading — ⚠️ MISSING FEATURE
 
 **Severity:** Missing Feature (Simulation)  
-**Files:** `BlockBehavior.Fluids.cs`, `BlockStationary.java` (Reference)
+**Files:** `Jobs/FluidTickJob.cs` (the Burst tick since `TG-4`), `BlockBehavior.Fluids.cs` (managed fallback), `BlockStationary.java` (Reference)
 
 In Minecraft, both stationary and flowing lava periodically schedule random ticks that can set nearby air blocks on fire if they are adjacent to flammable blocks.
 Our fluid engine currently has no random ticking for fluids after they settle, and lava does not interact with surrounding blocks to ignite them.
 
 ---
 
-## 13. Missing Block Displacement & Destruction — ⚠️ MISSING FEATURE
+## 13. Displaced blocks are destroyed but never dropped — ⚠️ MISSING FEATURE
 
 **Severity:** Missing Feature (System)  
-**Files:** `BlockBehavior.Fluids.cs`
+**Files:** `BlockBehavior.Fluids.cs`, `Jobs/FluidTickJob.cs`; a drop/item-entity system (does not exist)
 
-Currently, our fluids only spread into `BlockIDs.Air`. In Minecraft, fluids can flow into certain non-solid blocks (e.g., tall grass, flowers, torches, redstone, rails).
-When they do, the fluid displaces the block, destroys it, and drops it as an item entity.
+Displacement and destruction work: the spread gate admits any non-solid neighbor carrying `BlockTags.REPLACEABLE`, so water flowing into tall grass overwrites it with a fluid voxel.
+
+The **drop** is missing. In Minecraft the displaced block is destroyed *and dropped as an item entity*; here it is overwritten and gone. This is not a fluid defect — the engine has no item-entity system at all (no drop, spawn, or pickup path exists in `Assets/Scripts`), so there is nothing for the fluid to hand the block to.
+
+This entry is therefore blocked on a system that does not exist yet, not on fluid work. Once dropped entities land, the fluid side is a one-line hook at the displacement site, and **#14** (entity pushing and buoyancy) becomes reachable at the same moment — dropped items are its first non-player subject.
+
+**See also #09:** which blocks are washable is decided by the *placement* `REPLACEABLE` tag rather than a fluid-specific one.
 
 ---
 

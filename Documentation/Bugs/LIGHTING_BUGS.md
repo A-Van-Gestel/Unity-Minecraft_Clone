@@ -2,7 +2,7 @@
 
 This document outlines **open** bugs related to the current lighting implementation. Resolved bugs are archived in [`_FIXED_BUGS.md`](./_FIXED_BUGS.md).
 
-> **Last reviewed:** June 2026 (full codebase audit)
+> **Last reviewed:** August 2026
 >
 > **Validation suite:** the editor menu item `Minecraft Clone/Dev/Validate Lighting Engine`
 > (`Assets/Editor/Validation/Lighting/`) runs baseline regression scenarios plus deterministic
@@ -11,7 +11,7 @@ This document outlines **open** bugs related to the current lighting implementat
 
 ---
 
-> All previously listed lighting bugs (01–08, 10–19) have been fixed. See [`_FIXED_BUGS.md`](./_FIXED_BUGS.md) for details.
+> All previously listed lighting bugs (01–08, 10–21) have been fixed. See [`_FIXED_BUGS.md`](./_FIXED_BUGS.md) for details.
 
 ## Bug 09: Cross-Chunk Blocklight Lost on Rapid Place/Break at Chunk Border
 
@@ -67,88 +67,4 @@ baseline **B91**) is deliberately scoped to face-adjacent seams and excludes thi
 > must settle through an edge-check-inclusive driver to avoid re-flagging this same artifact.)
 
 **Testing environment:** IL2CPP master build, ocean biome (underwater), June 2026.
-
----
-
-## Bug 20: Partial Blocks Are Uniformly Opaque — Slabs Block All Light and Max-Darken AO
-
-**Severity:** Medium-High  
-**Status:** Sky/blocklight propagation **fixed and confirmed in game** (August 2026). The cross-chunk half
-(`VO-4`) is **fixed in code August 2026 — awaiting in-game confirmation**; **still open** for ambient
-occlusion (`VO-5`). The lighting half is done
-(`VO-3`, commit `f0d12ca2`): occlusion is now per-face, derived from the block's rotated
-`BlockCollisionBounds` via `LightAttenuation.FaceBlocksLight` / `EntryOpacity` / `ExitBlocked`, with
-propagation-source guards switched to `BlockTypeJobData.IsFullyOpaqueCell` so a partial block re-propagates
-the light held in the open part of its cell. A first in-game pass found the column still decaying `15/14/13/…` below a vertical slab — the
-`isVerticalSunlight` rule was likewise whole-block — fixed by `LightAttenuation.IsTransparentThroughFace`
-and confirmed ("15 all the way down"). `K20a` was strengthened to a column-differential and **promoted to
-permanent baseline `B104`**.
-
-`VO-4` (August 2026) then made the cross-chunk half directional: the removal veto's support scan
-(`CrossChunkLightModApplier`, now taking a `TargetEntryCost` and a block-data lookup instead of a
-whole-block opacity and an `IsOpaque` predicate), the Bug 12/18 removal initiators, the dimmer-seam stamp
-pull-back, `CheckEdgeVoxel`/`CheckEdgeVoxelRGB`, and `IsVerticallySkyLit` — the last being a site the plan
-had not listed, and the one that let the Bug 12 initiator fire on a column the BFS holds at an undimmed 15.
-Repro `K20b` (source-side credit, target-side entry cost, with solid-face and full-cube tripwires) flipped
-green and was **promoted to permanent baseline `B106`** after in-game confirmation (no flicker at a slab
-seam); baseline `B105` guards the settled seam field.
-
-**One piece remains before this can be archived:** the ambient-occlusion half of the artifact — partial
-blocks still darken AO at maximum — is `VO-5`. See also **Bug 21**, a separate defect found while
-authoring `B105`.  
-**Related:** [`MESHING_BUGS.md`](./MESHING_BUGS.md) Bug M01 (the mesher-side half of the same visual artifact — fixing M01 requires this entry fixed first)
-
-**Description:**
-The lighting model has one `opacity` value per block type and no concept of a block that occupies only part of its cell
-(`LIGHTING_SYSTEM_OVERVIEW.md` §"Conditionally Opaque Blocks": *"We have no block types with directional transparency. …
-If stairs, slabs, or other partial blocks are added in the future, this optimization would become relevant."*).
-
-A partial block **has** since been added. `Stone Half Slab` (`BlockIDs.StoneHalfSlab`) is authored in
-`BlockDatabase.asset` with `opacity = 15`, and `IsOpaque => opacity >= 15` (`Data/JobData.cs`, `Data/BlockType.cs`),
-so a half slab is treated as a *full* light blocker despite filling half its cell. Two consequences:
-
-1. **Sky light stops at the slab.** `LightAttenuation.Attenuate` charges the destination's opacity on entry
-   (`max(0, source - max(1, opacity))`), so entering a slab cell costs the full 15 — the cell stores no propagatable
-   value and everything below a slab goes dark, as if it were a solid cube.
-2. **Ambient occlusion darkens at maximum.** `MeshGenerationJob.SampleNeighborLight` and `CalculateCornerLights` branch
-   on the `IsOpaque` **boolean**: an opaque sample contributes `sun=0, r=g=b=0` and suppresses the corner's diagonal
-   term. Every AO corner that touches a slab therefore receives the hardest possible darkening, regardless of the fact
-   that light physically reaches that corner through the slab's empty half.
-
-Effect 2 is what makes rotated slabs look wrong even where the surrounding cells are fully lit: a ring of slabs around a
-sky-lit cell mutually max-darken each other's faces.
-
-**Reproduction Steps:**
-
-1. Dig a one-block-deep pit in flat, sky-lit terrain (the centre cell reads sky light 15).
-2. Place a `Stone Half Slab` in each of the four cells around the pit, rotated so each slab's solid half faces the pit
-   (`Facing6Roll2` metadata `0x03`, `0x0B`, `0x13`, `0x1B` — facing 3 = Bottom, rolls 0–3).
-3. Observe with smooth lighting enabled: the slab faces are darkened far below what the neighbouring light levels justify.
-
-**Root Cause:**
-Confirmed by inspection, not yet by a failing scenario. `opacity = 15` on a block that does not fill its cell, combined
-with a boolean `IsOpaque` gate in both the BFS and the AO sampler. The graded part of the model already exists
-(`LightAttenuation` is a per-level cost, not a boolean), so the missing piece is a block-level notion of "does not fill
-its cell" that keeps such a block out of the `IsOpaque` fast paths and gives it a traversal cost below 15.
-
-**Scope note:** full *directional* (per-face) occlusion — the `hasDirectionalOpacity` design the architecture doc
-sketches — is a strictly larger change and is **not** required to fix the artifact above. A non-directional partial-block
-opacity is sufficient; per-face occlusion remains a follow-up.
-
-**Repro scenario:** **`K20a`** (lighting suite, `LightingValidationSuite.PartialBlocks.cs`) — landed
-2026-08-07 by VO-2 and **red for the documented reason**. A two-deep shaft in a superflat floor capped
-by a half slab at metadata `0x03` (vertical): daylight must reach the voxel below the slab's open half,
-and reads sky 0 today. Asserted as reach / no-reach rather than an exact level, so it does not restate
-the cost formula. Shipped with three tripwire baselines that must stay green through the fix — **B101**
-(an *unrotated* slab still blocks daylight below it — the guard against "fix this by making slabs
-transparent"), **B102** (full opaque cube blocks), **B103** (an uncapped shaft is lit, so the other
-three cannot pass vacuously).
-
-**Fix phases:** that same plan — **VO-3** (directional occlusion in the BFS) and **VO-4** (the
-directional cross-chunk support/veto that VO-3 is not shippable without), with **VO-7** owning the
-world-version bump and relight. The plan's §4 D1 records why a new `VoxelShape` descriptor was
-rejected in favour of deriving occlusion from the existing `BlockCollisionBounds` — do not
-re-litigate that without reading it.
-
-**Testing environment:** Editor, smooth lighting enabled, August 2026.
 
