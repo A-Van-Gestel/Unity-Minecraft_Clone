@@ -30,12 +30,16 @@ MonoBehaviour:
     licenseType: 4
     customLicenseText: 
     url: https://github.com/RelativityMC/ScalableLux
-    usageDescription: Reference implementation for the BFS flood-fill lighting propagation
-      and optimization details.
+    usageDescription: Studied as a source of lighting optimization techniques - both its
+      TECHNICAL_DETAILS.md write-up and the implementation behind it - after our own BFS
+      flood-fill engine was already working.
     sourceFiles: []
     projectFiles: []
     version: 
-    notes: 
+    notes: Our light engine was built independently, then measured against Starlight to
+      see which optimizations were worth adopting; the edge consistency check and the
+      max(1, opacity) attenuation formula came from it. The shared BFS flood-fill core is
+      convergence on the standard approach to voxel light propagation.
   - name: FastNoiseLite
     author: Auburn
     category: 0

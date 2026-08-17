@@ -1,7 +1,7 @@
 # Lighting System Overview
 
 This document provides a complete technical reference for the voxel lighting engine. The system is asynchronous, multi-threaded (via Unity's C# Job System and Burst), and handles two distinct light channels: **Sky light** (monochrome scalar, tinted by `SkyLightColor` in the shader) and **Blocklight** (per-channel RGB).
-The design is heavily inspired by the **Starlight** lighting engine (now **Moonrise**), a high-performance replacement for Minecraft's vanilla lighting. Where our implementation diverges from Starlight, this document explains why.
+The BFS flood-fill core was designed and built independently. The **Starlight** lighting engine (now **Moonrise**) — a high-performance replacement for Minecraft's vanilla lighting — was studied afterwards as a source of optimization techniques, both its `TECHNICAL_DETAILS.md` write-up and the implementation behind it. Several of those techniques were adopted and are noted where they appear. That the two share a BFS flood-fill core is convergence on the standard approach to voxel light propagation, not shared lineage. Where our implementation diverges from Starlight, this document explains why.
 
 > **Reference implementation:** `_REFERENCES/Moonrise/` contains the full Moonrise source. Key files are in `.../patches/starlight/light/`.
 
@@ -264,7 +264,7 @@ live here (`Documentation/Bugs/`: Bugs 05, 08, 09, 11, 12, 13, 14, 15) — for t
 
 ## 4. Cross-Reference: Our System vs. Starlight (Moonrise)
 
-This section documents how our lighting engine compares to the Starlight reference implementation. For each Starlight technique, we note whether it's implemented, applicable, or unnecessary given our architecture.
+This section documents how our lighting engine compares to Starlight. For each Starlight technique, we note whether it's implemented, applicable, or unnecessary given our architecture.
 
 ### 4.1 Techniques We Implement Correctly
 
