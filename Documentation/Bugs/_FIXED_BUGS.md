@@ -1562,6 +1562,55 @@ coordinate before handing off constraints to the `Structure` generator.
 
 ## Block Behavior
 
+### ~~05. Residual `Vector3Int`→`Vector3` far-coordinate reads on unguarded float query APIs~~
+
+**Reported:** August 2026 — logged 2026-08-17 while fixing Fluid #17, as the "is that class fully closed?" sweep that fix did not perform.  
+**Fixed:** August 2026  
+**Status:** Resolved — suite-confirmed by prove-red at x = 2,147,000,000 (Behavior BH-B12 + a Placement far-coordinate baseline).  
+**Files:** `ChunkData.cs` (`GetState`), `World.cs` (`IsCellOccupiedForPlacement`, `GetVoxelState`, `GetCollisionBoundsDataForVisualization`), `WorldData.cs`
+
+**Root Cause:** Fluid #17 fixed the two float-typed helpers on the *wake* path but left the *read* surface alone. Four
+sites still converted an integer voxel cell to `Vector3` implicitly (or built one from integers), losing precision past
+±2²⁴ exactly as #17 did. No tripwire fired because `WorldData.AssertWithinFloatPrecision` is reachable only from
+`GetChunkCoordFor(Vector3)`, while the now-deleted `GetVoxelState(Vector3)` went straight to `IsVoxelInWorld`
+(Y-only since WS-3, so XZ magnitude was never inspected) and then `Mathf.FloorToInt`.
+
+**Why casual far-coordinate play testing did not catch it.** The user reported break/place working correctly at the
+32-bit border, and that was accurate — `IsCellOccupiedForPlacement` is only a *veto*; the edit itself routes through
+the integer `ApplyModifications` path, so blocks always landed in the right cell. The veto merely consulted a cell up
+to ±64 voxels away, and in open air both cells are air, so it passed either way. It misbehaves only against geometry —
+allowing a placement into a solid, or refusing a legal one. Breaking never calls it at all. Grass was likewise silent:
+it fails to spread *across chunk seams* far out, which is slow and easy to miss.
+
+**Fixes:**
+
+- `ChunkData.GetState` — the out-of-chunk branch now calls `worldData.TryGetVoxel(int,int,int)` instead of building a
+  `Vector3`. This is the cross-chunk neighbour read behind `BlockBehavior.Behave` (grass unconditionally; the managed
+  fluid fallback too), so it was the read-side twin of #17. `TryGetVoxel`'s `false` is exactly this method's `null`,
+  including the placeholder-vs-populated distinction (Fluid §18 / BH-B9), so the swap is semantics-identical.
+- `World.IsCellOccupiedForPlacement` and `World.GetVoxelState` retyped to `Vector3Int`.
+- `World.GetCollisionBoundsDataForVisualization` — **reclassified**: this was not a precision bug at all but a WS-4
+  *coordinate-space* bug. It passed `worldBlockOrigin` (Unity space, via `WorldOrigin.VoxelToUnity`) into a
+  voxel-space query, so it read the wrong voxel at *any* magnitude once the origin had shifted — invisible only at
+  identity origin. The neighbour lookup now derives from `chunk.Coord.ToVoxelOrigin()`; Unity space is kept for the
+  draw/cull only.
+- **Deleted three dead float APIs** so the class cannot return: `World.CheckForVoxel(Vector3)`,
+  `WorldData.QueueLightUpdate(Vector3)`, `WorldData.GetVoxelState(Vector3)`. `WorldData.TryGetVoxel` is now the sole
+  voxel-resolution entry point. Kept deliberately: `GetChunkCoordFor(Vector3)` and
+  `GetLocalVoxelPositionInChunk(Vector3)` (the VQ-1 parity scenario's float reference, and tripwired) and
+  `IsVoxelInWorld(Vector3)` (Y-only, harmless).
+
+**Guards:** `Validate Behavior` **BH-B12** (cross-chunk grass read at a far origin) and a `Validate Placement`
+far-coordinate occupancy baseline. Both assert a **near/far pair** — the control proves the fixture geometry produces
+the outcome at all, so a far-only failure isolates coordinate magnitude, per the WS-4 lesson that at origin (0,0) a
+missed conversion is invisible. Prove-red confirmed on both: control green, far red, exactly one failure per suite.
+Validate All 495 → 497.
+
+**Left unguarded:** the visualization space fix. No suite covers the debug collision-bounds draw, and it is only
+observable after a floating-origin shift, so it is compile-checked and reasoned-through only.
+
+---
+
 ### ~~04. Fluid `FluidLevel` set redundantly in `HandleFluidFlow`~~
 
 **Severity:** Code Quality  
