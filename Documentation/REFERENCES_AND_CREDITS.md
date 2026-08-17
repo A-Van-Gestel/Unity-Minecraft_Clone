@@ -50,7 +50,7 @@ This document tracks all third-party assets, libraries, algorithms, and resource
       packed into `Assets/Textures/packed_texture_atlas.png`.
 * **paramecij's tree trunks and stumps texture pack 1** by [pare](https://opengameart.org/content/paramecijs-tree-trunks-and-stumps-texture-pack-1)
     * *License:* CC0 (Public Domain)
-    * *Files used:* ....
+    * *Files used:* `stump-end/wood_end_02.png` (from `para - CC0_tex-pack-tree`) → `015-oak_log_top.png`
 * **Grass 2** by [virtushda](https://opengameart.org/content/grass-2-0)
     * *License:* CC0 (Public Domain)
     * *Files used:* `255-grass_blades.png`

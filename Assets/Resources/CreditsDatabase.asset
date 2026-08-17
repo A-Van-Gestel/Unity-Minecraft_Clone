@@ -170,10 +170,12 @@ MonoBehaviour:
     licenseType: 5
     customLicenseText: 
     url: https://opengameart.org/content/paramecijs-tree-trunks-and-stumps-texture-pack-1
-    usageDescription: Block Textures
-    sourceFiles: []
+    usageDescription: Oak log top texture, packed into the block texture atlas.
+    sourceFiles:
+    - para - CC0_tex-pack-tree/stump-end/wood_end_02.png
     projectFiles:
-    - Oak Logs
+    - Assets/Editor/AtlasPacker/SourceTextures/015-oak_log_top.png
+    - Assets/Textures/packed_texture_atlas.png
     version: 
     notes: 
   - name: Grass 2
