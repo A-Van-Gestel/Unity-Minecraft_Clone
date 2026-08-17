@@ -1,6 +1,6 @@
 # World Scaling — WS-4 Floating Origin
 
-**Version:** 1.17  
+**Version:** 1.19  
 **Date:** 2026-07-26  
 **Status:** **Implemented (Stable)** — promoted from `Design/` 2026-07-26; the WS-4 phase plan (§10) and
 extension roadmap are retained as as-built records. Every WS-4 phase is shipped and in-game confirmed: WS-4a (origin plumbing),
@@ -708,6 +708,19 @@ graduate to work items).
 
 ## Document History
 
+* **v1.19** - **FLUID #17 closed — the last `ed8cb69` residual (2026-08-17).** The far-coordinate fluid
+  reactivation bug v1.10 split out is fixed and in-game confirmed at the 32-bit border. Root cause was the
+  same Bug-19 class one layer out: `ed8cb69` gave `WorldData`/`ChunkCoord` their `Vector3Int` overloads but
+  left `World.GetChunkFromVector3(Vector3)` and `Chunk.GetVoxelPositionInChunkFromGlobalVector3(Vector3)`
+  float-typed, and `World.ApplyModifications` step 4 — the sole cross-chunk wake for a settled voxel — routes
+  through both, so mod *routing* was exact while the *wake* was not. Neither helper calls
+  `AssertWithinFloatPrecision`, which is why the v1.9 tripwire never fired. Both now take `Vector3Int`
+  outright rather than gaining an overload: no float caller existed, so deleting the float path makes the
+  class a compile error instead of a silent mis-resolve. Also fixed grass re-activation and
+  `World.TryGetLightData`. Guarded by "Far-Coordinate Wake Routing (Bug 17 teeth)" in the Chunk Math suite
+  (prove-red on both the chunk and local axes). `COORDINATE_SPACES_GUIDE.md`'s naming table is updated for the
+  new signatures; §8's WS-4a audit sweep keeps its era-accurate 2026-07-16 wording, where both helpers were
+  still float-taking.
 * **v1.18** - **The shader half of §9 splits in two (2026-08-16).** FL-1 foliage sway had inherited
   §4.6's raw-`_WorldOriginOffset` idiom without being listed as a residual, and the user reported the
   sway stepping and then freezing with distance. Fixed exactly — a sine is periodic, so the origin's
@@ -762,7 +775,7 @@ graduate to work items).
   edge inventory gained (d) multi-second meshing plus the observed quadrant-wrapped edits working under
   (c); the liquid-noise cosmetic bullet now records the confirmed flat-blue fluid surfaces and striped
   clouds near the edge. One genuinely new far-coordinate bug was split out as `FLUID_BUGS.md` #17
-  (naturally-generated fluids don't reactivate on neighbor break; onset unbracketed).
+  (naturally-generated fluids don't reactivate on neighbor break; onset unbracketed) — **fixed in v1.19**.
 * **v1.9** - **Bug 19 fixed** (2026-07-19): the far-lands sunlight column-recalc crash §7's far
   verification surfaced is closed — root cause was `WorldData.QueueSunlightRecalculation`'s
   int→float round-trip mis-chunking columns past ±2²⁴ (plus implicit `Vector3Int`→`Vector3`

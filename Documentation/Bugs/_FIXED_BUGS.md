@@ -1194,10 +1194,66 @@ flicker needs a metric validated against the D=0 control first.
 `WORLD_SCALING_FLOATING_ORIGIN.md` §9 asks for; what it still lacks is a metric proven to separate near from far.
 
 **Not part of this bug:** the FL-1 foliage sway freeze (same root idiom, fixed separately); the fluid *simulation*
-failing to reactivate at far coordinates (FLUID #17, a CPU-side integer-routing issue); terrain generation noise
+failing to reactivate at far coordinates (FLUID #17, a CPU-side integer-routing issue, **fixed** — see below); terrain generation noise
 precision past ±2²⁴ (the FNL rider, `WORLD_SCALING_IMPLEMENTATION.md` §6); and the striped cloud *field* near
 ±2³¹ (`WORLD_SCALING_FLOATING_ORIGIN.md` §9 — CPU-side pattern generation, not this shader path; cloud *drift* is
 unaffected because `Clouds.cs` wraps it).
+
+---
+
+### ~~17. Naturally-generated fluids don't reactivate on neighbor break at far coordinates~~
+
+**Severity:** Low (far-lands only; normal-play range unaffected)  
+**Reported:** July 2026 — logged 2026-07-19 during the PLAYER_BUGS 03 far-coordinate re-test (fresh world, editor/Mono).  
+**Fixed:** August 2026  
+**Status:** Resolved — in-game confirmed at the 32-bit world border / far-lands region.  
+**Files:** `World.cs` (`GetChunkFromVector3`), `Chunk.cs` (`GetVoxelPositionInChunkFromGlobalVector3`) — both reached from `World.ApplyModifications` step 4
+
+**Symptom:** At `/teleport 2147000000 ~ 0` (≈ +2.147×10⁹ voxels, well inside the ±2³¹ edge), breaking a block
+adjacent to a **naturally-generated** fluid (ocean/lake water) did not wake the fluid — it never flowed into the
+opened cell. **Player-placed fluids at the same location flowed correctly**, so the tick simulation itself worked
+there; the failure was specific to waking *generation-time* fluid voxels.
+
+**Root Cause:** the ±2²⁴ float class. `World.ApplyModifications` step 4 — the *sole* cross-chunk wake for an
+already-settled voxel, as `SeamWakeDecision`'s own remarks state — resolved the neighbor through two
+**float**-signature helpers, `World.GetChunkFromVector3(Vector3)` and
+`Chunk.GetVoxelPositionInChunkFromGlobalVector3(Vector3)`. `neighborPos` is a `Vector3Int`, and Unity's implicit
+`Vector3Int`→`Vector3` conversion made both calls compile silently. `ed8cb69` (Bug 19) gave
+`WorldData`/`ChunkCoord` their integer overloads but never touched these two, so the mod *routing* became exact
+while the *wake* stayed lossy. The lookup returned a real but wrong chunk and a wrong local cell, so the wake
+landed on an unrelated voxel — silent, with no exception.
+
+**Why player-placed fluid worked:** it registers via `ChunkData.ModifyVoxel` → `AddActiveVoxel(localPos, id)` on
+integer local coordinates and never needs step 4. Generation-time fluid is registered at population, then
+`FluidTickJob` reports it settled (`NowInactive`) and it leaves `ActiveFluidsBucket` on its first tick — after
+which only the broken step 4 could wake it.
+
+**Why the tripwire stayed silent:** `WorldData.AssertWithinFloatPrecision` guards the `WorldData` query APIs, and
+neither helper calls it — both read `World._chunkMap` directly.
+
+**Onset is graded, not a cliff** — derived from the precision math and demonstrated by the guard scenario's
+prove-red, not from an in-game onset sweep (the confirmation was at the far magnitude only). Just past ±2²⁴ the
+float error is one voxel, so only the *local cell* is wrong and the wake hits the wrong voxel in the right chunk
+(prove-red: `cell=16777217 expected local 1, got 0`); at ±2.147×10⁹ the ULP is 128, the error reaches ±64 voxels
+and the *chunk* resolves up to 4 chunks away.
+
+**Fix:** both helpers now take `Vector3Int` outright — no float overload retained — so the routing is pure
+shift/mask math exact to ±2³¹ and a future float caller is a compile error rather than a silent mis-resolve. All
+six call sites already passed `Vector3Int`. This also fixed grass re-activation (step 4 is family-agnostic) and
+`World.TryGetLightData`, which had the identical latent defect.
+
+**Guard:** "Far-Coordinate Wake Routing (Bug 17 teeth)" in the Chunk Math validation suite (56 baselines).
+It asserts the integer routing matches an exact oracle **and** that the float idiom it replaced diverges,
+counting chunk-axis and local-axis divergences separately so the scenario cannot pass if only one of the two
+helpers were fixed. Prove-red confirmed independently on both axes.
+
+**Known coverage gap:** the Behavior validation suite cannot see this class. `BehaviorTestWorld` re-implements
+step 4's six-neighbor re-activation with its own integer math and never calls the changed helpers, so it returns
+an identical verdict before and after — blind to the path, not vouching for it. Closing that would mean driving
+the real `World.ApplyModifications` from the harness (a fidelity project, not a bug-fix step).
+
+**Not part of this bug:** the fluid *shader* rendering flat blue at that magnitude — tracked separately as #20
+and fixed above. This entry was the CPU-side simulation half, which that fix did not touch.
 
 ---
 
