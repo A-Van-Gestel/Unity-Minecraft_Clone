@@ -52,8 +52,10 @@ This is the "hidden identity" that §5 of
 
 ```bash
 # $RANGE is whatever step 1 resolved: "" (unstaged), --staged, @{u}...HEAD, <base>...HEAD
-git diff $RANGE -- '*.hlsl' '*.shader' | grep -nE '^\+.*(_LiquidNoiseOrigin|worldPos|positionWS|_Time)'
-git diff $RANGE -- '*.cs'             | grep -nE '^\+.*(OriginVoxel|WorldOrigin|SetGlobalVector|SetGlobalFloat)'
+# --no-color is REQUIRED, not cosmetic: this repo sets color.ui=always, so git emits ANSI escapes
+# even when piped — every ^+ / ^- anchor below then matches NOTHING and the gate passes silently.
+git diff --no-color $RANGE -- '*.hlsl' '*.shader' | grep -nE '^\+.*(_LiquidNoiseOrigin|worldPos|positionWS|_Time)'
+git diff --no-color $RANGE -- '*.cs'             | grep -nE '^\+.*(OriginVoxel|WorldOrigin|SetGlobalVector|SetGlobalFloat)'
 ```
 
 For each hit, follow the value to its consumer and answer one question: **does a
@@ -131,8 +133,10 @@ The shapes the guide names, in rough order of how often they appear:
 
 ```bash
 # $RANGE is whatever step 1 resolved: "" (unstaged), --staged, @{u}...HEAD, <base>...HEAD
-git diff $RANGE | grep -nE '^\+.*(transform\.position\s*[-+]|FloorToInt\([^)]*/\s*16|%\s*16|FromVoxelPosition|OriginVoxel)'
-git diff $RANGE -- 'Assets/Scripts/Jobs/*' | grep -n 'WorldOrigin'
+# --no-color is REQUIRED, not cosmetic: this repo sets color.ui=always, so git emits ANSI escapes
+# even when piped — every ^+ / ^- anchor below then matches NOTHING and the gate passes silently.
+git diff --no-color $RANGE | grep -nE '^\+.*(transform\.position\s*[-+]|FloorToInt\([^)]*/\s*16|%\s*16|FromVoxelPosition|OriginVoxel)'
+git diff --no-color $RANGE -- 'Assets/Scripts/Jobs/*' | grep -n 'WorldOrigin'
 ```
 
 For each hit, name the space of every operand and of the result. If you cannot

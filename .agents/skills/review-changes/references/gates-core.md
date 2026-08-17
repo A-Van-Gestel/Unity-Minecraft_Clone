@@ -126,7 +126,9 @@ nothing and the gate passes for the wrong reason:
 
 ```bash
 # $RANGE is whatever step 1 resolved: "" (unstaged), --staged, @{u}...HEAD, <base>...HEAD
-git diff -U5 $RANGE | grep -nE '^-.*(FormerlySerializedAs|RuntimeInitializeOnLoadMethod|BurstCompile|\.Release\(|\.Complete\(|await |IsCreated|return;|DomainReset)'
+# --no-color is REQUIRED, not cosmetic: this repo sets color.ui=always, so git emits ANSI escapes
+# even when piped — every ^+ / ^- anchor below then matches NOTHING and the gate passes silently.
+git diff --no-color -U5 $RANGE | grep -nE '^-.*(FormerlySerializedAs|RuntimeInitializeOnLoadMethod|BurstCompile|\.Release\(|\.Complete\(|await |IsCreated|return;|DomainReset)'
 ```
 
 A new (untracked) file has no `-` side at all, so this gate is a no-op there —

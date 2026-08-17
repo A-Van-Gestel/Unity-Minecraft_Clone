@@ -45,8 +45,9 @@ rewrite by design.
 # rewrites: files where deletions dwarf additions
 git diff --numstat $RANGE -- '*.md' '*.json'
 
-# headings present before and absent after
-git diff $RANGE -- '*.md' | grep -E '^-#{1,4} '
+# headings present before and absent after (--no-color is REQUIRED: color.ui=always here, so ANSI
+# escapes would break the ^- anchor and the gate would silently find nothing)
+git diff --no-color $RANGE -- '*.md' | grep -E '^-#{1,4} '
 ```
 
 A heading in that second list, with no matching `+` heading and no stated intent
@@ -135,7 +136,7 @@ including for abandoned work.
 **How to check.**
 
 ```bash
-git diff $RANGE -- '*.md' | grep -E '^-.*\|\s*\*{0,2}[A-Z]{1,3}-[0-9]'
+git diff --no-color $RANGE -- '*.md' | grep -E '^-.*\|\s*\*{0,2}[A-Z]{1,3}-[0-9]'
 ```
 
 Any removed ID row is the finding unless the same ID appears on a `+` line

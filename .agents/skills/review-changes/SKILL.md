@@ -182,10 +182,10 @@ means the shard is genuinely not earned; not checking means you do not know.
 
 - **Serialization**, because any `MonoBehaviour` or `ScriptableObject` in the diff
   might carry a `[SerializeField]` or public field:
-  `git diff $RANGE | grep -nE '^[-+].*(\[SerializeField\]|public\s+\w+\s+\w+\s*;)'`
+  `git diff --no-color $RANGE | grep -nE '^[-+].*(\[SerializeField\]|public\s+\w+\s+\w+\s*;)'`
 - **Coordinates**, because a world position can be turned into a float, or moved
   between spaces, anywhere — not only under `Assets/Shaders/`:
-  `git diff $RANGE | grep -nE '^\+.*(OriginVoxel|_LiquidNoiseOrigin|worldPos|positionWS|_Time\.y|FloorToInt|%\s*16)'`
+  `git diff --no-color $RANGE | grep -nE '^\+.*(OriginVoxel|_LiquidNoiseOrigin|worldPos|positionWS|_Time\.y|FloorToInt|%\s*16)'`
 
 **The shards summarize `.agents/rules/*.md`; the rules are the source of truth.**
 Those rule files are glob-attached by other harnesses while you *edit* a matching
