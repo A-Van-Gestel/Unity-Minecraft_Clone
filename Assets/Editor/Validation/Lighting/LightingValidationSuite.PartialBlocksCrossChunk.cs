@@ -7,7 +7,7 @@ namespace Editor.Validation.Lighting
 {
     /// <summary>
     /// Cross-chunk directional occlusion for <b>partial blocks</b> — the <c>VO-4</c> half of
-    /// <c>Documentation/Bugs/LIGHTING_BUGS.md</c> Bug 20, per
+    /// <c>Documentation/Bugs/_FIXED_BUGS.md</c> Lighting #26, per
     /// <c>Documentation/Design/VOXEL_OCCLUSION_REFACTOR.md</c>.
     /// <para>
     /// <b>Why this phase existed.</b> <c>VO-3</c> made the in-chunk BFS deliver light through a partial

@@ -146,7 +146,7 @@ namespace Jobs.BurstData
         /// can never fire — so no full-cube world's heightmap changes by a single entry.
         /// </para>
         /// <para>
-        /// <b>Why the heightmap has to care</b> (<c>LIGHTING_BUGS.md</c> Bug 21): the heightmap is what makes
+        /// <b>Why the heightmap has to care</b> (<c>_FIXED_BUGS.md</c> Lighting #25): the heightmap is what makes
         /// <c>RecalculateSunlightForColumn</c> authoritative for sky <i>removal</i>. A slab that registers
         /// when it should not means sealing it never moves the heightmap, so the recalculation never re-runs
         /// and the orphaned column — being flat, with no decrement chain for <c>PropagateDarkness</c> to

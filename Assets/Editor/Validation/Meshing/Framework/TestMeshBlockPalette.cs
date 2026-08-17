@@ -81,7 +81,7 @@ namespace Editor.Validation.Meshing.Framework
 
         /// <summary>
         /// Same half-slab geometry and schema as <see cref="HalfSlab"/>, but with a sub-15 opacity — the
-        /// partial-block lighting model `LIGHTING_BUGS.md` Bug 20 calls for. Lets a scenario contrast
+        /// partial-block lighting model of `_FIXED_BUGS.md` Lighting #26. Lets a scenario contrast
         /// "treated as a full blocker" against "treated as a partial block" without editing the fixture
         /// the other scenarios share.
         /// </summary>

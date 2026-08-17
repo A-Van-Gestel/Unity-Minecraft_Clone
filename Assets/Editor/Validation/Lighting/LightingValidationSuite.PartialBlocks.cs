@@ -10,17 +10,15 @@ namespace Editor.Validation.Lighting
 {
     /// <summary>
     /// Directional occlusion baselines for <b>partial blocks</b> (half slabs) — the lighting half of
-    /// <c>Documentation/Bugs/LIGHTING_BUGS.md</c> Bug 20, implemented by <c>VO-3</c> of
+    /// <c>Documentation/Bugs/_FIXED_BUGS.md</c> Lighting #26, implemented by <c>VO-3</c> of
     /// <c>Documentation/Design/VOXEL_OCCLUSION_REFACTOR.md</c>.
     /// <para>
-    /// All four are baselines today. <b>B104</b> was authored by VO-2 as known-bug repro <c>K20a</c>
-    /// (expected-red, so a not-yet-implemented behaviour could not mark the suite red) and promoted here
-    /// on 2026-08-07 once VO-3 landed and it was confirmed in game. The other three passed from the start
-    /// and are the tripwires against "fix Bug 20 by making slabs transparent" — <b>B101</b> is the one that
-    /// catches it, verified red under a deliberate sabotage.
+    /// All four are permanent baselines. <b>B104</b> is the motivating case; the other three are its
+    /// tripwires against "make slabs transparent", and <b>B101</b> is the one that catches that,
+    /// verified red under a deliberate sabotage.
     /// </para>
     /// <para>
-    /// <b>Why these assert behaviour, not the oracle (F7).</b> <see cref="LightingOracle"/> calls the
+    /// <b>Why these assert behavior, not the oracle (F7).</b> <see cref="LightingOracle"/> calls the
     /// same <see cref="LightAttenuation"/> the engine does, so an oracle comparison cannot arbitrate
     /// whether the directional model is right — both sides would move together. Every assertion here is
     /// therefore a direct probe of "did light reach this voxel", derived from the geometry rather than
@@ -102,7 +100,7 @@ namespace Editor.Validation.Lighting
 
         /// <summary>
         /// B102 — full-block control. A plain opaque cube caps the shaft; it must block daylight both
-        /// before and after VO-3. This is the "no behaviour change for full cubes" guard in its smallest
+        /// before and after VO-3. This is the "no behavior change for full cubes" guard in its smallest
         /// form: full cubes have coverage 1 on every face, so the directional model must reduce to today's.
         /// </summary>
         /// <returns>True when no light reaches below the cube.</returns>

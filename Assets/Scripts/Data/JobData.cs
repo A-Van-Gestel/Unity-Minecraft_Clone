@@ -318,8 +318,8 @@ namespace Data
         /// <summary>
         /// True when this block fills its whole cell with opaque material — the question the lighting
         /// BFS's propagation-source guards ask. A *partial* opaque block (a slab) is deliberately NOT
-        /// this: the open part of its cell holds a real light value it must be able to propagate onward,
-        /// which is exactly what <c>LIGHTING_BUGS.md</c> Bug 20 is about. Use
+        /// this: the open part of its cell holds a real light value it must be able to propagate onward.
+        /// Gating those guards on whole-block opacity instead is <c>_FIXED_BUGS.md</c> Lighting #26. Use
         /// <see cref="Jobs.BurstData.LightAttenuation.FaceBlocksLight"/> for per-face questions.
         /// </summary>
         public bool IsFullyOpaqueCell
@@ -417,7 +417,7 @@ namespace Data
         /// <b>Not the heightmap test.</b> This is a whole-block question, so it cannot distinguish a
         /// vertical half slab (which leaves the sky column intact) from the same block laid flat. Use
         /// <c>LightAttenuation.ObstructsSkyColumn</c> for anything that decides what belongs in the
-        /// heightmap — using this one there is <c>LIGHTING_BUGS.md</c> Bug 21.
+        /// heightmap — using this one there is <c>_FIXED_BUGS.md</c> Lighting #25.
         /// </para>
         /// </summary>
         public bool IsLightObstructing

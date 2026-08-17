@@ -173,25 +173,23 @@ namespace Editor.Validation.Lighting
             // Baselines/LightingValidationSuite.Baseline.Bug19FarColumns.cs and self-registers here. ---
             AddBug19FarColumnsBaselineScenarios(scenarios);
 
-            // --- VO-2 partial-block directional occlusion: baselines B101 (a floor slab still blocks
-            // daylight) + B102/B103 (full-cube and open-shaft controls), all green today and tripwires
-            // against VO-3 making slabs transparent, PLUS the known-bug repro K20a (a vertical slab must
-            // pass daylight through its open half) which is EXPECTED RED until VO-3 lands. K20a goes to
-            // the known-bug channel deliberately: it asserts behavior the engine does not have yet, so it
-            // must not mark the suite red. Lives in LightingValidationSuite.PartialBlocks.cs. ---
+            // --- Partial-block directional occlusion: B104 asserts a vertical slab passes daylight through
+            // its open half; B101 (a floor slab still blocks daylight), B102 (full cube) and B103 (open
+            // shaft) are its controls — B101 is the tripwire against making slabs transparent, B103 the
+            // one that stops the others passing vacuously.
+            // Lives in LightingValidationSuite.PartialBlocks.cs. ---
             AddPartialBlockOcclusionScenarios(scenarios);
 
-            // --- VO-4 cross-chunk directional occlusion: baselines B106 (the removal veto's support scan
-            // credits a partial block per face on both the source and target sides — promoted from repro
-            // K20b after in-game confirmation) and B105 (the settled seam gradient fed through partial
-            // blocks matches the borderless oracle), plus B107 (sealing a partial-block light shaft darkens
-            // the column beneath it, and opening one re-lights it — promoted from repro K21a for Bug 21, a
-            // SEPARATE defect found while authoring B105 that reproduces with no chunk seam at all).
+            // --- Cross-chunk directional occlusion: B106 asserts the removal veto's support scan credits a
+            // partial block per face, on both the source and target sides; B105 that a settled seam gradient
+            // fed through partial blocks matches the borderless oracle. B107 covers the sky column instead —
+            // sealing a partial-block shaft darkens the column beneath it and opening one re-lights it — and
+            // needs no chunk seam, so it guards a path the other two cannot reach.
             // Lives in LightingValidationSuite.PartialBlocksCrossChunk.cs. ---
             AddPartialBlockCrossChunkScenarios(scenarios);
         }
 
-        /// <summary>Hook for the VO-4 cross-chunk partial-block scenarios K20b + B105 (implemented in LightingValidationSuite.PartialBlocksCrossChunk.cs).</summary>
+        /// <summary>Hook for the VO-4 cross-chunk partial-block baselines B105-B107 (implemented in LightingValidationSuite.PartialBlocksCrossChunk.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddPartialBlockCrossChunkScenarios(List<Scenario> scenarios);
 
@@ -199,7 +197,7 @@ namespace Editor.Validation.Lighting
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddBug19FarColumnsBaselineScenarios(List<Scenario> scenarios);
 
-        /// <summary>Hook for the VO-2 partial-block directional occlusion baselines B101-B104 (implemented in LightingValidationSuite.PartialBlocks.cs).</summary>
+        /// <summary>Hook for the VO-2/VO-3 partial-block directional occlusion baselines B101-B104 (implemented in LightingValidationSuite.PartialBlocks.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddPartialBlockOcclusionScenarios(List<Scenario> scenarios);
 

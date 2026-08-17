@@ -557,7 +557,7 @@ namespace Data
             //    Gated by enableLighting: without the lighting engine, no job will ever process
             //    the recalculation queue or clear HasLightChangesToProcess, permanently blocking meshing.
             //
-            //    Two triggers, because opacity alone is not enough (LIGHTING_BUGS.md Bug 21). Opacity
+            //    Two triggers, because opacity alone is not enough (_FIXED_BUGS.md Lighting #25). Opacity
             //    catches a changed attenuation cost. Obstruction catches a changed SHAPE at equal opacity:
             //    sealing a vertical half slab — by rotating it, or replacing it with any other opacity-15
             //    block — ends the undimmed column it was carrying while leaving `opacity` at 15 the whole
