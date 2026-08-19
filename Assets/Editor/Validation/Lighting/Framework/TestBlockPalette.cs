@@ -61,8 +61,23 @@ namespace Editor.Validation.Lighting.Framework
         /// </summary>
         public const ushort HalfSlab = 11;
 
+        /// <summary>
+        /// Non-solid asymmetric-channel torch (opacity 0, emission 14, color 1.0/0.6/0.2) — light
+        /// <b>(14, 8, 3)</b>. The drop-in mixed-channel twin of <see cref="Torch"/> for the fidelity
+        /// C14 mirrors: R, G and B are distinct and non-zero at every voxel, so any transposition of
+        /// the per-channel triple is observable, and blue clamps to 0 while red is still lit.
+        /// </summary>
+        public const ushort TorchMixed = 12;
+
+        /// <summary>
+        /// Opaque asymmetric-channel lamp (opacity 15, emission 15, color 1.0/0.6/0.2) — light
+        /// <b>(15, 9, 3)</b>. The mixed-channel twin of <see cref="LampWhite"/>; see
+        /// <see cref="TorchMixed"/> for why the channels are deliberately unequal.
+        /// </summary>
+        public const ushort LampMixed = 13;
+
         /// <summary>Total number of block types in the palette.</summary>
-        public const int Count = 12;
+        public const int Count = 14;
 
         /// <summary>
         /// Builds the palette as managed <see cref="BlockType"/> instances and converts them to the
@@ -89,8 +104,17 @@ namespace Editor.Validation.Lighting.Framework
             halfSlab.metadataSchema = MetadataSchema.Facing6Roll2;
             halfSlab.renderShape = RenderShape.CustomMesh;
             jobData[HalfSlab] = ToJobData(halfSlab);
+            jobData[TorchMixed] = ToJobData(MakeBlock("TestTorchMixed", opacity: 0, emission: 14, MixedEmissionColor, isSolid: false));
+            jobData[LampMixed] = ToJobData(MakeBlock("TestLampMixed", opacity: 15, emission: 15, MixedEmissionColor));
             return jobData;
         }
+
+        /// <summary>
+        /// The asymmetric emission color shared by <see cref="TorchMixed"/> and <see cref="LampMixed"/>.
+        /// Scaled by <c>BlockTypeJobData</c> as <c>round(channel * emission / max)</c>, so emission 14
+        /// yields (14, 8, 3) and emission 15 yields (15, 9, 3) — three distinct, non-zero channels.
+        /// </summary>
+        private static Color MixedEmissionColor => new Color(1.0f, 0.6f, 0.2f);
 
         private static BlockType MakeBlock(string name, byte opacity, byte emission, Color emissionColor, bool isSolid = true)
         {
