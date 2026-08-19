@@ -4,8 +4,8 @@
 **Created:** 2026-06-13  
 **Scope:** `Assets/Editor/Validation/Lighting/` — the `LightingValidationSuite` + `LightingTestWorld` + `LightingFrameSimulator` harness.
 
-> **Baseline count: 99, verified 2026-08-17** by running the suite (`ALL 99 LIGHTING ENGINE BASELINE
-> TESTS PASSED`, 3 min 25 s). **This number goes stale every time a baseline is added, so do not trust
+> **Baseline count: 99, verified 2026-08-19** by running the suite inside a full `Validate All`
+> (99 passed / 0 failed, 189 s). **This number goes stale every time a baseline is added, so do not trust
 > it — re-derive it.** The suite itself is the only authority: run
 > `Minecraft Clone/Dev/Validate Lighting Engine` (or
 > `ValidationSuiteCI.RunSelected("Lighting Engine", true)`) and read the summary line. A rough lower
@@ -18,7 +18,9 @@
 ## 1. Why this document exists
 
 The lighting validation suite (**99** baselines + frame simulator, menu item **`Minecraft Clone/Dev/Validate Lighting Engine`**; B71–B74 guard the LI-2 band derivation, B75–B78 the banded-vs-full differential + prove-red, B79–B82 the LI-2b bottom-band derivation + emissive metadata, B83–B85 the bottom differential with its engagement assertion + raised-floor prove-red, B86–B88 the Bug-16/17 RGB removal family — simple-form tripwire, runaway-cycle guard, ghost-island guard — B89 the C12 RGB stale-pull-back self-heal guard, and B90 the Bug-18 RGB cross-seam
-removal initiator guard) is strong where it runs **real production code**:
+removal initiator guard; B91 the C11 interrupted-reconciliation fuzz with B92 its banded-vs-full companion, B93 the
+`LightingBandDecision.ReconcileBand` fail-closed guard, and B94 the C13 mixed-channel extension of the Bug-18
+initiator) is strong where it runs **real production code**:
 it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real `ChunkData` (section / uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision helpers `CrossChunkLightModApplier`, `LightingScheduleDecision`, and `LightingJobProcessor`.
 
 it executes the real persist/replay store (`LightingStateManager` in its disk-free in-memory mode, behind
@@ -353,6 +355,38 @@ conversion on the production mod path would not be caught in-harness (guarded in
 - **Prove-red (demonstrated, not automated):** making the two lamps *symmetric* flips B89 red — that is exactly repro **K18a / Bug 18** (the mutually-equal seam with no removal initiator; a 56-voxel surviving ghost). So the held-flight harness demonstrably detects a surviving cross-seam RGB ghost; B89's *asymmetric* arrangement staying green is what isolates C12 (pull-back, self-heals) from Bug 18 (initiator, the real gap).
 - **Consequence for the fix:** the RGB removal-machinery gap is the missing **initiator** (Bug 12's RGB mirror — [C10](#c10--no-rgb-analog-of-the-bug-12-sourceless-loop-initiator-and-no-scenario-that-would-expose-it) → Bug 18) **only**, not the claim verification. The "one RGB removal-machinery parity work item" is therefore initiator-scoped.
 
+### C13 — The Bug-18 initiator was only ever driven with a single channel lit · **CLOSED (2026-07-12) — verdict GREEN: the all-channel removal mod's over-clear is transient**
+
+- **Was:** [C10](#c10--no-rgb-analog-of-the-bug-12-sourceless-loop-initiator--closed-2026-07-12--the-predicted-latent-bug-was-real-bug-18-fixed--guarded-by-baseline-b90)'s guard **B90** builds its cross-seam 2-cycle from two **equal-color (red)** lamps, so green and blue are 0 at every voxel in the scenario and cannot be spuriously cleared. But `EmitCrossChunkBlocklightRemoval` emits an **all-channel** removal mod (it zeroes R, G and B and lets the Bug-17 veto keep the supported ones). A channel that is backed *only by the emitting chunk* is excluded from `CrossChunkBlocklightSupport`, so the veto cannot protect it — and no scenario had a second channel lit to observe that.
+- **Closed by baseline B94** (`LightingValidationSuite.C13RgbMixedChannel.cs`): B90's sealed x15|16 corridor plus a **green** lamp injected on the Z axis at the west seam column, giving an *asymmetric* green gradient crossing the seam from one chunk while the red pair forms the loop. Breaking both red lamps in the same wave emits the all-channel mod; the green channel **is** observably cleared mid-reconciliation (a precondition assert pins that the mixed-channel setup actually arms).
+- **Verdict: the over-clear is transient, not a persistent dark seam** — the surviving green source re-lights the seam voxel across the boundary on the following wave, and the settled field matches the borderless RGB oracle. A regression that broke that re-light, or an initiator that stopped adjudicating per channel, reds B94.
+- **Consequence:** no per-channel narrowing of the initiator is warranted; the all-channel mod plus the Bug-17 veto is correct as shipped. This is the mixed-channel companion to C12's finding — both closed the "does the RGB removal machinery need more parity with sky" question in the GREEN direction, leaving C10's initiator as the only real gap the arc found.
+
+### C14 — Channel-equal light is the suite's default, so per-channel *indexing* is structurally invisible · **OPEN · MEDIUM**
+
+- **The gap:** of the suite's baselines, only ~11 place a source whose channels differ — B2, B10, B11 (mixed lamps), B86–B88 (C6), B89 (C12), B90 (C10), B91/B92 (C11), B94 (C13) — plus the Bug-09 geometry fuzz (B40), which draws its lamp from `{White, Red, Green, Blue, Torch}` per seed and so covers color only *probabilistically*. Every other blocklight scenario uses `TestBlockPalette.LampWhite` (15,15,15) or `Torch` (14,14,14), where **R == G == B at every voxel, at every step**.
+- **Why this is not covered by "the oracle is per-channel":** it is — `LightingOracle.SolveResult` carries separate `Red`/`Green`/`Blue` arrays and `LightingAssert` compares channel for channel. But comparing three *identical* actual channels against three *identical* expected channels cannot distinguish them. The class of defect this hides is **channel indexing**, not channel arithmetic: a transposed argument, a mask applied to the wrong channel, a veto consulting the wrong support value. Production has the shape that makes this live — three parallel single-channel calls whose arguments are positional:
+    - `NeighborhoodLightingJob.PropagateDarknessRGB` — three `ProcessDarknessChannel` calls, then a **per-channel mask** on the re-enqueued `LightRemovalNode` (`LightR`/`LightG`/`LightB`).
+    - `CrossChunkLightModApplier.ComputeBlocklight` — `ApplyRemovalChannel(oldR, modR, isRemoval, independentR)` ×3, the Bug-17 veto.
+    - `LightBitMapping.SetBlocklightRGB` / `GetBlocklightR|G|B` — per-channel shift constants.
+    - `IPendingLightStore.AddPendingBlocklight(chunkCoord, localPos, byte r, byte g, byte b, bool isRemoval)` — the persist/replay path carries three independent channel bytes.
+- **Distinct from C6.** C6 asked for *removal independence* (break red, green survives) and was closed by B86–B88. C14 is the axis-level observation that the rest of the suite never varies color at all, so families with no removal-independence question — persistence, band derivation, recycle, surface stamps — remain channel-blind. C7 already carries a one-line rider that its corner-spill baseline "should use colored lamps, not white"; C14 generalizes that rider.
+- **Un-mirrored families, ranked** (each is "duplicate the scenario with a `LampRed`/`LampGreen` source, keep the white original"):
+
+  | # | Family | Baselines | Why the mirror earns its place |
+  |---|--------|-----------|--------------------------------|
+  | 1 | Cross-chunk persist → replay | B30, B31, B32 | The only path that writes channels to a store and reads them back; `r`, `g`, `b` are three positional args across `AddPendingBlocklight`, the persist column, and the replay. A transposition round-trips white light perfectly. |
+  | 2 | LI-2 band derivation + differential | B71–B85 (incl. fuzz B77/B84) | The largest white-only block in the suite. Bands derive from emissive section metadata; a band that clips one channel's gradient, or an emissive count that reads one channel, is unobservable. |
+  | 3 | Removal → re-light from an independent cross-border source | B12 | Bug 12's blocklight twin got its RGB mirror (B90); B12's *asymmetric* re-light did not. Drives `ApplyRemovalChannel`'s veto directly. |
+  | 4 | Surface-stamp family | B62, B63 | The stamp is per-channel; both torches are white, including B63's "re-derives from the surviving east torch". |
+  | 5 | Oracle-independent probes | B38, B39 | B38 is titled *"falls off −1 per air voxel **on all channels**"* — a claim asserted only where all channels are equal. A pure-red variant makes the title true and stays A4-compliant (hand-derived constants). |
+  | 6 | Pool recycle / `Reset()` | B33, B34 | Stale-after-recycle is a documented recurring family; a single channel left stale in one of three arrays passes today. |
+  | 7 | Race quadrant (in-flight neighbor) | B7, B15, B16, B22 | B7's removal race is white; only B86's is colored. The *deferred-mod* races are white throughout. |
+
+- **Acceptance rule (do not skip):** a mirror is worth adding only if a prove-red mutation at its target site turns the mirror **red** while the white original stays **green** — e.g. transpose two arguments in the `ApplyRemovalChannel` triple (families 1, 3, 7), or in the `LightRemovalNode` mask (family 7). A mirror that cannot be shown to detect a transposition is decoration; per the C6 lesson, record the mutation used. B94 already demonstrates this shape.
+- **Priority evidence:** every RGB mirror authored so far has been opened *reactively*, after a specific bug was suspected — and two of the four (C6 → Bugs 16+17, C10 → Bug 18) found real shipped defects on authoring. That hit rate is the argument for mirroring the remaining families deliberately rather than one bug at a time.
+- **Effort:** 🟢 small per family (the oracle, palette and assertions all already handle color; families 1 and 5 are near-zero). Family 2 is the only medium one, by volume.
+
 ### C8 — Initial lighting only ever runs as a single simultaneous wave · **OPEN · LOW (was Bug 05's untried axis; Bug 05 fixed via the post-edit axis 2026-07-05, so this drops to belt-and-braces re-verification)**
 
 - Every generation-shaped scenario (B8, the B42 canopy fuzz, the B40 geometry fuzz) lights **all chunks in one concurrent wave** with `neighborsDataReady: true` throughout (the C1 remainder). Production lights a **moving frontier**: chunks join incrementally as generation completes, per-chunk readiness flips over time, and each chunk's 2 `RemainingEdgeCheckRounds` are consumed at *different relative times*. Dense canopies at a frontier are exactly Bug 05's habitat — this scheduling axis, unlike the exhausted geometry axis (C2), has never been fuzzed.
@@ -436,6 +470,8 @@ manual-flight path is not the only guard of that machinery.)
 | A5  | Fail-soft `ChunkData` accessors — out-of-bounds is a position lottery (closed by HF-1)                                                                                                                                                        | **CLOSED**                | —                | done           |
 | B6  | MT-2 `LightWorkScheduler` park/promote layer unmodeled (closed by AS-2 scheduler mode + B66–B70)                                                                                                                                              | **CLOSED**                | —                | done           |
 | B7  | `ProcessLightingJobs` pass bookkeeping production-only (HF-2 near-term; full replay via `JobCompletionPass` + B65, HF-4 #2; skeleton shared with meshing + release-on-fault order pinned by meshing B27, MP-4)                                | **CLOSED (full)**         | —                | done           |
+| C14 | **Channel-equal light is the suite default — per-channel *indexing* is structurally invisible** (7 un-mirrored families; persist/replay B30–B32 and the LI-2 band block B71–B85 are the largest)          | **OPEN**                  | **Medium**       | small–medium   |
+| C13 | Bug-18 initiator only ever driven single-channel (B90 is red-only) — mixed-channel twin **B94**; **verdict GREEN, the all-channel mod's over-clear is transient**                                        | **CLOSED**                | —                | done           |
 | C8  | Single-wave-only initial lighting — staggered-frontier axis unfuzzed (→ roadmap AS-3; Bug 05 fixed via the post-edit axis, so now belt-and-braces)                                                                                            | OPEN                      | Low              | medium         |
 | C9  | Flat scenario worlds never exercise border shadow-casters (B60; HF-3 fuzz shipped 2026-07-05 — found Bug 15 → B62/B63 + the first sync Bug-05 repro)                                                                                          | **CLOSED**                | —                | done           |
 | C6  | Per-channel removal independence (B86–B88 — authoring it found Bugs 16+17, `_FIXED_BUGS.md` #21/#22)                                                                                                                                          | **CLOSED**                | —                | done           |
