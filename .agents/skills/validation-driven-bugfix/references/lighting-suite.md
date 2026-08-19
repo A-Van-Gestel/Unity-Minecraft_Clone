@@ -12,12 +12,13 @@ Everything lives under `Assets/Editor/Validation/Lighting/`. Menu item: **`Minec
 | `LightingValidationSuite.Bug05Canopy.cs`              | Dense-canopy generation fuzz baseline (`B42`) + its standalone menu item                                                                                             |
 | `LightingValidationSuite.Bug09Fuzz.cs`                | Cross-chunk geometry fuzz baseline (`B40`)                                                                                                                           |
 | `Baselines/LightingValidationSuite.Baseline.Bug12.cs` | Bug-12 family baselines (`B50`–`B53`), self-registered via `AddBug12BaselineScenarios` — the first of the `Baselines/` group split                                   |
+| `Baselines/LightingValidationSuite.Baseline.C14ChannelMirrors.cs` | Fidelity **C14** mixed-channel mirrors (`B108`–`B114`), self-registered via `AddC14ChannelMirrorBaselineScenarios` — one per previously channel-blind family, sourced from `TorchMixed`/`LampMixed` |
 | `LightingValidationSuite.KnownBugs.cs`                | `K`-scenarios reproducing open bugs from `LIGHTING_BUGS.md` (expected red); currently none open (Bug 12 promoted to `B53`)                                           |
 | `Framework/LightingTestWorld.cs`                      | Harness core: N×N grid of chunk buffers, runs the real `NeighborhoodLightingJob`, applies cross-chunk mods via the shared `CrossChunkLightModApplier`                |
 | `Framework/LightingTestWorld.Builder.cs`              | Authoring + queries (two write paths, see below)                                                                                                                     |
 | `Framework/LightingOracle.cs`                         | Borderless global flood-fill — the spec                                                                                                                              |
 | `Framework/LightingAssert.cs`                         | `MatchesOracle`, `FieldsEqual`, `Converged`, `NoBlocklightInVolume`, `IsTrue` — all with bounded diffs                                                               |
-| `Framework/TestBlockPalette.cs`                       | Synthetic fixtures: Air(0), Stone, Glass, Leaves, DimGlass(op.5), LampWhite/Red/Green/Blue (opaque emissive 15), Torch (transparent emissive 14)                     |
+| `Framework/TestBlockPalette.cs`                       | Synthetic fixtures: Air(0), Stone, Glass, Leaves, DimGlass(op.5), LampWhite/Red/Green/Blue (opaque emissive 15), Torch (transparent emissive 14), TorchMixed (14,8,3) + LampMixed (15,9,3) — the asymmetric-channel sources the C14 mirrors need (three distinct non-zero channels make a per-channel transposition observable) |
 
 Namespace: suite = `Editor.Validation.Lighting`, framework = `Editor.Validation.Lighting.Framework`.
 

@@ -187,7 +187,19 @@ namespace Editor.Validation.Lighting
             // needs no chunk seam, so it guards a path the other two cannot reach.
             // Lives in LightingValidationSuite.PartialBlocksCrossChunk.cs. ---
             AddPartialBlockCrossChunkScenarios(scenarios);
+
+            // --- C14 mixed-channel mirrors (B108-B114): the suite's white-only blocklight families
+            // duplicated with asymmetric (14,8,3)/(15,9,3) sources, so a per-channel INDEXING defect (a
+            // transposed ApplyRemovalChannel argument, a mask on the wrong LightRemovalNode channel, a
+            // swapped r/g/b through the pending store) stops being invisible. The white originals are
+            // unchanged and still run. Lives in Baselines/LightingValidationSuite.Baseline.C14ChannelMirrors.cs
+            // and self-registers here. ---
+            AddC14ChannelMirrorBaselineScenarios(scenarios);
         }
+
+        /// <summary>Hook for the C14 mixed-channel mirror baselines B108-B114 (implemented in Baselines/LightingValidationSuite.Baseline.C14ChannelMirrors.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddC14ChannelMirrorBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the VO-4 cross-chunk partial-block baselines B105-B107 (implemented in LightingValidationSuite.PartialBlocksCrossChunk.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>

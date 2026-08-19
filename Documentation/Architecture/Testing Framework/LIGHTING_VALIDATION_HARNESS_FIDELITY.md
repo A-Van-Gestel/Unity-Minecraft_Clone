@@ -4,23 +4,24 @@
 **Created:** 2026-06-13  
 **Scope:** `Assets/Editor/Validation/Lighting/` — the `LightingValidationSuite` + `LightingTestWorld` + `LightingFrameSimulator` harness.
 
-> **Baseline count: 99, verified 2026-08-19** by running the suite inside a full `Validate All`
-> (99 passed / 0 failed, 189 s). **This number goes stale every time a baseline is added, so do not trust
+> **Baseline count: 106, verified 2026-08-19** by running the suite inside a full `Validate All`
+> (106 passed / 0 failed, 3 min 5 s). **This number goes stale every time a baseline is added, so do not trust
 > it — re-derive it.** The suite itself is the only authority: run
 > `Minecraft Clone/Dev/Validate Lighting Engine` (or
 > `ValidationSuiteCI.RunSelected("Lighting Engine", true)`) and read the summary line. A rough lower
 > bound without the editor is `grep -rc "new Scenario(" Assets/Editor/Validation/Lighting/`, which
-> currently agrees at 99. The per-section counts further down this document were **not** re-derived on
+> currently agrees at 106. The per-section counts further down this document were **not** re-derived on
 > that date and may lag.
 
 ---
 
 ## 1. Why this document exists
 
-The lighting validation suite (**99** baselines + frame simulator, menu item **`Minecraft Clone/Dev/Validate Lighting Engine`**; B71–B74 guard the LI-2 band derivation, B75–B78 the banded-vs-full differential + prove-red, B79–B82 the LI-2b bottom-band derivation + emissive metadata, B83–B85 the bottom differential with its engagement assertion + raised-floor prove-red, B86–B88 the Bug-16/17 RGB removal family — simple-form tripwire, runaway-cycle guard, ghost-island guard — B89 the C12 RGB stale-pull-back self-heal guard, and B90 the Bug-18 RGB cross-seam
+The lighting validation suite (**106** baselines + frame simulator, menu item **`Minecraft Clone/Dev/Validate Lighting Engine`**; B71–B74 guard the LI-2 band derivation, B75–B78 the banded-vs-full differential + prove-red, B79–B82 the LI-2b bottom-band derivation + emissive metadata, B83–B85 the bottom differential with its engagement assertion + raised-floor prove-red, B86–B88 the Bug-16/17 RGB removal family — simple-form tripwire, runaway-cycle guard, ghost-island guard — B89 the C12 RGB stale-pull-back self-heal guard, and B90 the Bug-18 RGB cross-seam
 removal initiator guard; B91 the C11 interrupted-reconciliation fuzz with B92 its banded-vs-full companion, B93 the
-`LightingBandDecision.ReconcileBand` fail-closed guard, and B94 the C13 mixed-channel extension of the Bug-18
-initiator) is strong where it runs **real production code**:
+`LightingBandDecision.ReconcileBand` fail-closed guard, B94 the C13 mixed-channel extension of the Bug-18
+initiator, and B108–B114 the C14 mixed-channel mirrors — one per previously channel-blind family, sourced from the
+asymmetric `TorchMixed` (14,8,3) / `LampMixed` (15,9,3) palette entries) is strong where it runs **real production code**:
 it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real `ChunkData` (section / uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision helpers `CrossChunkLightModApplier`, `LightingScheduleDecision`, and `LightingJobProcessor`.
 
 it executes the real persist/replay store (`LightingStateManager` in its disk-free in-memory mode, behind
@@ -362,7 +363,7 @@ conversion on the production mod path would not be caught in-harness (guarded in
 - **Verdict: the over-clear is transient, not a persistent dark seam** — the surviving green source re-lights the seam voxel across the boundary on the following wave, and the settled field matches the borderless RGB oracle. A regression that broke that re-light, or an initiator that stopped adjudicating per channel, reds B94.
 - **Consequence:** no per-channel narrowing of the initiator is warranted; the all-channel mod plus the Bug-17 veto is correct as shipped. This is the mixed-channel companion to C12's finding — both closed the "does the RGB removal machinery need more parity with sky" question in the GREEN direction, leaving C10's initiator as the only real gap the arc found.
 
-### C14 — Channel-equal light is the suite's default, so per-channel *indexing* is structurally invisible · **OPEN · MEDIUM**
+### C14 — Channel-equal light is the suite's default, so per-channel *indexing* is structurally invisible · **CLOSED (2026-08-19) — all 7 families mirrored by B108-B114, each prove-red demonstrated**
 
 - **The gap:** of the suite's baselines, only ~11 place a source whose channels differ — B2, B10, B11 (mixed lamps), B86–B88 (C6), B89 (C12), B90 (C10), B91/B92 (C11), B94 (C13) — plus the Bug-09 geometry fuzz (B40), which draws its lamp from `{White, Red, Green, Blue, Torch}` per seed and so covers color only *probabilistically*. Every other blocklight scenario uses `TestBlockPalette.LampWhite` (15,15,15) or `Torch` (14,14,14), where **R == G == B at every voxel, at every step**.
 - **Why this is not covered by "the oracle is per-channel":** it is — `LightingOracle.SolveResult` carries separate `Red`/`Green`/`Blue` arrays and `LightingAssert` compares channel for channel. But comparing three *identical* actual channels against three *identical* expected channels cannot distinguish them. The class of defect this hides is **channel indexing**, not channel arithmetic: a transposed argument, a mask applied to the wrong channel, a veto consulting the wrong support value. Production has the shape that makes this live — three parallel single-channel calls whose arguments are positional:
@@ -383,9 +384,38 @@ conversion on the production mod path would not be caught in-harness (guarded in
   | 6 | Pool recycle / `Reset()` | B33, B34 | Stale-after-recycle is a documented recurring family; a single channel left stale in one of three arrays passes today. |
   | 7 | Race quadrant (in-flight neighbor) | B7, B15, B16, B22 | B7's removal race is white; only B86's is colored. The *deferred-mod* races are white throughout. |
 
-- **Acceptance rule (do not skip):** a mirror is worth adding only if a prove-red mutation at its target site turns the mirror **red** while the white original stays **green** — e.g. transpose two arguments in the `ApplyRemovalChannel` triple (families 1, 3, 7), or in the `LightRemovalNode` mask (family 7). A mirror that cannot be shown to detect a transposition is decoration; per the C6 lesson, record the mutation used. B94 already demonstrates this shape.
-- **Priority evidence:** every RGB mirror authored so far has been opened *reactively*, after a specific bug was suspected — and two of the four (C6 → Bugs 16+17, C10 → Bug 18) found real shipped defects on authoring. That hit rate is the argument for mirroring the remaining families deliberately rather than one bug at a time.
-- **Effort:** 🟢 small per family (the oracle, palette and assertions all already handle color; families 1 and 5 are near-zero). Family 2 is the only medium one, by volume.
+- **Acceptance rule (as applied):** a mirror earns its place only if a prove-red mutation at its target site turns the mirror **red** while the white
+  original stays **green**. Every one of B108-B114 was demonstrated this way on 2026-08-19; the mutations are recorded below and were each applied
+  alone, run, and reverted (`Assets/Scripts/` is byte-identical afterwards).
+- **Closed by baselines B108-B114** (`Baselines/LightingValidationSuite.Baseline.C14ChannelMirrors.cs`), one per family, all additive — **no existing
+  baseline was modified**. Sources are two new palette entries, `TestBlockPalette.TorchMixed` (14,8,3) and `LampMixed` (15,9,3): three distinct
+  non-zero channels, deliberately stronger than this finding's original pure-R/pure-G suggestion, because a pure-red source has G == B == 0 and so
+  cannot observe a green-blue transposition at all. They also drive per-channel **clamping** — blue reaches 0 while red still reads 10.
+
+  | Family | Mirror | Mirrors | Prove-red mutation that reddened it (white original stayed green) |
+  |--------|--------|---------|---------------------------------------------------------------------|
+  | 5 Oracle-independent probes | **B108** | B38, B39 | `BlockTypeJobData` `EmissionG`/`EmissionB` transposed → `(14,3,8)` instead of `(14,8,3)` |
+  | 1 Cross-chunk persist → replay | **B109** | B30 | `ComputeBlocklight` mod-payload `modG`/`modB` transposed → replay read `(12,1,6)` instead of `(12,6,1)` |
+  | 3 Removal → cross-border re-light | **B110** | B12 | same mod-payload transposition (`ApplyRemovalChannel` triple) |
+  | 7 Race quadrant (in-flight neighbor) | **B111** | B7 | `ComputeBlocklight` **support** args `independentG`/`independentB` transposed → surviving blue ghost `B 0/1` |
+  | 6 Pool recycle / `Reset()` | **B112** | B33 | mod-payload transposition (B33 is sunlight-only, so the mirror adds mixed lamps to the same geometry) |
+  | 4 Surface-stamp family | **B113** | B62, B63 | mod-payload transposition (B63 asserted only R; B113 asserts all three against the oracle) |
+  | 2 LI-2 band differential | **B114** | B75, B76 | G/B transposed in `SetBlocklightRGB`'s band-gated store **only when the band is engaged** — banded and full-height legs diverge |
+
+- **Two findings worth keeping from the prove-red pass:**
+  1. The `EmissionG`/`EmissionB` transposition was caught **only by B108's hand-derived constants**. Every `MatchesOracle` comparison passed, because
+     `LightingOracle` seeds its channels from the same `BlockTypeJobData` — a shared engine+oracle defect. This is finding **A4**'s whole argument,
+     demonstrated: an oracle-independent probe is the only thing that sees a defect the oracle shares.
+  2. `LightBitMapping.SetBlocklightRGB` / `GetBlocklightR|G|B` is **structurally not provable** by this method and was deliberately not attempted.
+     The harness reads the field back through the same mapping, so transposing two channels in both setter and getter is a genuine no-op, and
+     transposing one side alone reddens every baseline including the white ones — so it can never demonstrate a single mirror's discriminating power.
+- **Scope note:** the LI-2 band *derivation* unit baselines (B71-B74, B79-B82) are deliberately **not** mirrored. They feed hand-built packed
+  `LightingBandChunkTop` values into a pure decision function, so "color" there is a synthetic constant and a mirror would exercise only
+  `LightBitMapping.PackLightData`. The band *differential* half — where real gradients are gathered — is covered by B114.
+- **C7's rider is NOT discharged by this work.** No B108–B114 mirror touches C7's subject (diagonal/corner spill delivery, in-chunk opaque-placement re-shadow) — the seven families here are persist/replay, band differential, cross-border removal, surface stamp, oracle-independent probes, pool recycle and the race quadrant. What C14 supplies is the *machinery*: the asymmetric palette entries and the mirror-plus-prove-red pattern C7's corner-spill scenario should use when it is finally written. C7 stays **OPEN** and keeps its "use colored lamps" rider.
+- **Priority evidence (retained):** every RGB mirror authored before this one was opened *reactively*, after a specific bug was suspected — and two of
+  the four (C6 → Bugs 16+17, C10 → Bug 18) found real shipped defects on authoring. This deliberate sweep found **no new production defect**: all 106
+  baselines pass unmutated, so the per-channel indexing is correct as shipped. The value delivered is the guard, not a fix.
 
 ### C8 — Initial lighting only ever runs as a single simultaneous wave · **OPEN · LOW (was Bug 05's untried axis; Bug 05 fixed via the post-edit axis 2026-07-05, so this drops to belt-and-braces re-verification)**
 
@@ -470,7 +500,7 @@ manual-flight path is not the only guard of that machinery.)
 | A5  | Fail-soft `ChunkData` accessors — out-of-bounds is a position lottery (closed by HF-1)                                                                                                                                                        | **CLOSED**                | —                | done           |
 | B6  | MT-2 `LightWorkScheduler` park/promote layer unmodeled (closed by AS-2 scheduler mode + B66–B70)                                                                                                                                              | **CLOSED**                | —                | done           |
 | B7  | `ProcessLightingJobs` pass bookkeeping production-only (HF-2 near-term; full replay via `JobCompletionPass` + B65, HF-4 #2; skeleton shared with meshing + release-on-fault order pinned by meshing B27, MP-4)                                | **CLOSED (full)**         | —                | done           |
-| C14 | **Channel-equal light is the suite default — per-channel *indexing* is structurally invisible** (7 un-mirrored families; persist/replay B30–B32 and the LI-2 band block B71–B85 are the largest)          | **OPEN**                  | **Medium**       | small–medium   |
+| C14 | **Channel-equal light is the suite default — per-channel *indexing* is structurally invisible** — all 7 families mirrored by **B108–B114** with asymmetric (14,8,3)/(15,9,3) sources; every prove-red demonstrated, **no production defect found** | **CLOSED**                | —                | done           |
 | C13 | Bug-18 initiator only ever driven single-channel (B90 is red-only) — mixed-channel twin **B94**; **verdict GREEN, the all-channel mod's over-clear is transient**                                        | **CLOSED**                | —                | done           |
 | C8  | Single-wave-only initial lighting — staggered-frontier axis unfuzzed (→ roadmap AS-3; Bug 05 fixed via the post-edit axis, so now belt-and-braces)                                                                                            | OPEN                      | Low              | medium         |
 | C9  | Flat scenario worlds never exercise border shadow-casters (B60; HF-3 fuzz shipped 2026-07-05 — found Bug 15 → B62/B63 + the first sync Bug-05 repro)                                                                                          | **CLOSED**                | —                | done           |
