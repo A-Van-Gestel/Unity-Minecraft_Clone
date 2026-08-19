@@ -1,9 +1,10 @@
 # Validation Suite Coverage Roadmap — Uncovered Systems, Ranked
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-07-02  
 **Status:** **Living backlog.** `NS-4` and `NS-5` are ✅ complete (NS-4 2026-08-03; NS-5 at the CP-2 close-out) and
-`NS-1` is partially seeded (CP-3's robustness slice); `NS-2`, `NS-3` and `NS-6` remain proposals. Existing-coverage
+`NS-1` is partially seeded (CP-3's robustness slice); `NS-2`, `NS-3` and `NS-6` remain proposals, joined 2026-08-19 by
+`NS-7`…`NS-11` from the eighth-pass audit. Existing-coverage
 counts are re-verified against a real `Validate All` run each time they are touched.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
@@ -18,16 +19,16 @@ counts are re-verified against a real `Validate All` run each time they are touc
 > complete (CP-2 close-out, 2026-07-22) and NS-4 is ✅ complete (2026-08-03) — see the per-item status
 > lines; the rest are proposals.
 
-**Existing coverage (for contrast, counts verified 2026-08-04 against a `Validate All` run — 411 baselines / 17 suites):** Lighting (92), Meshing (40, tip B40 — now including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
-**light** maps), Behavior/fluid tick (16, incl. determinism gates), Placement (28 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (26 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19, its promoted repro B20–B23, `PH-1`'s step-0 horizontal-aggregation guard B24 and its gather-envelope guard B25, and `PH-2`'s B26 pinning that `CalculateVelocity` never writes the transform)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (47), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (7), Spawn (10), Command Console (54), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` / `ChunkRelativePosition` tests.
+**Existing coverage (for contrast, counts verified 2026-08-19 against a `Validate All` run — 497 baselines / 22 suites, all green):** Lighting (99), Meshing (57 — including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
+**light** maps), Behavior/fluid tick (17, incl. determinism gates), Placement (29 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (26 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19, its promoted repro B20–B23, `PH-1`'s step-0 horizontal-aggregation guard B24 and its gather-envelope guard B25, and `PH-2`'s B26 pinning that `CalculateVelocity` never writes the transform)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (56), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (9), Spawn (10), Command Console (56), Voxel Occlusion (6), Sky & Celestial (15), Sky Render (11), World Clock (10), UI Blur Render (5), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` tests (the `ChunkRelativePosition` tests are no longer standalone — they are the Chunk Math suite's `.ChunkRelativePosition.cs` partial).
 
 **Build protocol for every suite below:** the `validation-driven-bugfix` skill (deterministic repro first, prove-red before trusting green, promote repros to baselines). New suites should land on the shared `ValidationSuiteRunner` (`VS-1`, ✅ shipped 2026-07-08): register `Scenario`s and return its `ValidationRunResult` from a headless `Execute()`, with a thin `[MenuItem]` wrapper. All suites stay on the custom validation framework: migrating to the Unity Test Framework was evaluated 2026-07-02 and rejected (see the status header in
 [`../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md`](../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md)); the CI/coverage/XML gaps close via the VS-2 extensions instead.
 
 
 
-**Audited:** 2026-07-02 (seventh-pass audit), counts re-verified 2026-08-04 against a `Validate All`
-run — **411 baselines / 17 suites**. The audit found the then-six suites architecturally sound, so the
+**Audited:** 2026-07-02 (seventh-pass audit), counts re-verified 2026-08-19 against a `Validate All`
+run — **497 baselines / 22 suites, 0 failures, 0 known-bug repros outstanding**. The audit found the then-six suites architecturally sound, so the
 `VS-*` items it produced are operational only; the residual risk it identified is *coverage*, which is
 what this document ranks.
 
@@ -161,6 +162,93 @@ what this document ranks.
 
 ---
 
+## NS-7. Migration-chain suite — **Priority 1 (ties NS-1; sharpens its part 6)**
+
+- **Failure class guarded:** the NS-1 class (permanent save corruption), but measured rather than projected. `Assets/Scripts/Serialization/Migration/Steps/` holds **15 files** — 14 numbered steps `v1_to_v2` … `v14_to_v15`, plus `LegacyLevelDat.cs`. **Exactly two of them are exercised** by any suite: `Validate Deserialization Robustness` B8 (v13→v14) and B9 (v14→v15). The twelve older steps — including the three highest-risk rewrites, `v5_to_v6_LegacyToSchemaBased`, `v7_to_v8_RGBLightQueues` and `v9_to_v10_StripLightBitsAndNewFlags` — have no coverage, and `MigrationManager` is never driven.
+- **Why it is separate from NS-1 part 6:** part 6 asks for "frozen mini-region fixtures per historical save version". That is the right shape, but the item reads as future-proofing; the measurement above shows it is a **present** 12-step hole in a system whose own rule is "never edit a shipped migration". Any old world a player still has takes an untested code path today.
+- **Scope sketch:**
+    1. A frozen fixture per historical `level.dat`/region version, run through `MigrationManager`, asserting the expected current-version state — this is part 6, unchanged.
+    2. **The chained upgrade** — one v1 fixture migrated all the way to the current version in a single run, asserting each step's postcondition en route. Per-step fixtures cannot catch a step that is individually correct but composes wrongly with its successor.
+    3. **`Settings.Dev.simulateMigrationCorruption` as the negative control.** The fault seam already exists and no scenario uses it: a migration that silently no-ops must be *caught*, not merely survived.
+- **Effort:** 🟡 — the fixtures are the cost; `MigrationManager` needs no new seam.
+
+---
+
+## NS-8. Chunk-boundary continuity & the generation feature-flag matrix — **Priority 2 (rides NS-2)**
+
+- **Failure class guarded:** seam-breaking terrain — NS-2's class, but a scenario shape NS-2's scope sketch does not name. NS-2 asks for golden voxel-map hashes and **cross-run** determinism (same seed twice → identical). Neither asserts the property that actually produces visible seams: **two adjacent chunks generated independently must agree on their shared column.** A generator that is perfectly deterministic and perfectly reproducible can still disagree across a boundary.
+- **Why it ranks high for its size:** it needs no golden fixtures and no frozen biome assets — it is a self-comparison, so it cannot go stale when biomes are re-authored, which is the design constraint NS-2 carries. It is the cheapest generation scenario in the roadmap and the one most likely to fire.
+- **Second half — the flag matrix.** `enableCaves`, `enableLodes`, `enableWater`, `enableMajorFloraPass` and `enableMinorFloraPass` are five independent generation toggles with **no coverage on either side**. A flag-off path that throws, or that shifts the heightmap relative to flag-on, is undetectable today. The continuity assertion above is the natural oracle to run each flag combination against.
+- **Scope sketch:** generate chunk pairs (and a 2×2 block, for the diagonal case) independently via `EditorChunkPipelineRunner`, assert shared-column agreement; repeat across a seed sweep and across the flag matrix; add one flag-off smoke run per flag asserting no throw and a non-degenerate heightmap.
+- **Effort:** 🟢 for the continuity half, 🟡 with the full flag matrix.
+
+---
+
+## NS-9. Cross-chunk-seam axis for the Physics and Placement suites — **Priority 3**
+
+- **Failure class guarded:** player-facing failures that only exist at a chunk boundary — the classic production shape (fall through the world at a seam, place into a chunk that is not resident).
+- **Measured gap:** every `Validate Physics Solver` scenario runs inside a **single** chunk (`ChunkCoord(100, -100)` is the only chunk coordinate the suite constructs). A collision query straddling a seam, and one against an *unloaded or placeholder* neighbor, are both unmodeled — even though `NS-4`'s own building-block note establishes that `PlacementTestWorld` can seed real voxel data across chunks. `Validate Placement` likewise has no scenario mentioning an unloaded or placeholder chunk; the Behavior suite is the only one that models placeholder neighbors (`BehaviorValidationSuite.Baseline.PlaceholderNeighbor.cs`), and that pattern is the template.
+- **Also missing on the Placement side:** block **breaking** has no coverage at all — `PlayerInteraction`'s removal path, drop/tool rules, and toolbar/inventory selection are unvalidated, while placement is well covered.
+- **Scope sketch:** re-run a representative slice of the existing Physics baselines with the fixture geometry translated onto a seam (landing, wall slide, step-up, the substep chain), then the same against a neighbor that is absent/placeholder, asserting graceful refusal rather than a fall-through. For Placement: place and break across a seam, and into a non-resident neighbor.
+- **Effort:** 🟢 — both suites already have the world stubs; this is fixture placement, not new harness.
+
+---
+
+## NS-10. Feature-flag off-side matrix — **Priority 4 (cross-cutting, not a suite)**
+
+- **Failure class guarded:** a shipped fallback path that no longer works. The engine's settings surface has grown faster than the suites, and the prevailing pattern is that only the **default** side of a toggle is ever exercised. `Validate Pipeline Backpressure` B7 is the counter-example done right — it asserts the *disabled* passthrough of `scaleBudgetCeilingsWithFpsCap` — and it should be the template, not the exception.
+- **Measured one-sided flags** (all verified present in `Assets/Scripts/`):
+
+  | Flag / enum | Suite that should own it | Off-side coverage |
+  |-------------|--------------------------|-------------------|
+  | `enablePipelineTimeBudgets`, `enableGenerationPanicGate` | Pipeline Backpressure | none |
+  | `enableCaves` / `enableLodes` / `enableWater` / `enableMajorFloraPass` / `enableMinorFloraPass` | NS-8 | none, either side |
+  | `SmoothLightingQuality` (Off/Low), `fullBlockContactShadows`, `FluidQuality` | Meshing | none — meshing always runs `High` |
+  | `CompressionAlgorithm` arms (`saveCompression`) | NS-1 part 3 / Save Durability | none |
+  | `keepChunksInMemory` | Chunk Unload Decision | none — it is a live bypass of unload |
+
+- **Not in scope:** `CloudStyle` — clouds are an **explicit non-goal** below and this item does not re-open that.
+- **Scope sketch:** no new suite. Each row is a scenario added to the suite that already owns the system, asserting the off-side path produces a *defined* result (not merely "does not throw"). Where a flag is a pure perf toggle, the correct assertion is a **differential**: on-side and off-side must produce identical output, which is the `LI-2`/`TG-4` pattern already proven in the Lighting and Behavior suites.
+- **Effort:** 🟢 per row; the value is in doing them systematically rather than when a flag breaks.
+
+---
+
+## NS-11. CI-effective coverage — the two render suites contribute nothing headless — **Priority 5**
+
+- **The situation (deliberate, but its aggregate consequence is undocumented):** `Validate Sky Render` (11 baselines) and `Validate UI Blur Render` (5) have no graphics device under `-nographics`, so every scenario reports **INCONCLUSIVE and passes** rather than failing the run. Both suites document this convention in their own class docstrings, and it is the right call — a headless agent must not red a run over a missing GPU. The undocumented part is the consequence: **16 baselines are green in CI regardless of what the code does**, and nothing pins the policy itself — `ValidationSuiteCI` has no self-test asserting that INCONCLUSIVE counts as pass, so a change to that rule (in either direction) is silent.
+- **Scope sketch:** (1) a framework self-test pinning the INCONCLUSIVE→pass policy and the exit-code contract, so the rule is a decision rather than an emergent behavior; (2) have the aggregate runner **report** the inconclusive count per suite in its summary line, so a CI reader sees "16 not evaluated" rather than an unqualified green; (3) optionally, a CI lane with a software/offscreen device that actually runs them — decide explicitly, do not leave it implied.
+- **Effort:** 🟢 for (1) and (2); (3) is an infrastructure call, not a suite.
+
+---
+
+## Deliberate: not every menu-item suite belongs in `Validate All`
+
+`ValidationSuiteRegistry` carries **22** registered suites, pinned by `ExpectedSuiteCount` and guarded
+by `ValidationFrameworkSelfTest.RegistryMeetsExpectedCount` (which reds if a suite is *dropped*) and by
+the aggregate runner's and `ValidationSuiteCI`'s count check. Some validation entry points intentionally
+sit **outside** that registry and therefore outside `Validate All` and CI:
+
+- **`Minecraft Clone/Dev/Validate Fluid Parallel Determinism (Cross-Chunk Halo, Y-band)`**
+  (`Assets/Editor/Validation/Behavior/FluidParallelDeterminismValidation.cs`) — a heavy, hand-rolled
+  determinism sweep rather than a `Scenario` set. Its cheap invariants are already represented in the
+  Behavior suite's `BH-D1` differentials; the standalone run is for deliberate investigation.
+- The **nightly fuzz menu items** — `Validate Lighting Engine (Border Height Fuzz / Bug 05 Canopy Fuzz /
+  Bug 09 Geometry Fuzz / Interrupted Reconciliation Fuzz)`. These are high-seed-count entry points into
+  the *same* Lighting suite that `Validate All` already runs at suite-tier seed counts (the HF-3
+  precedent). Running the nightly counts in every `Validate All` would dominate its runtime for a
+  linear-in-seeds increase in coverage.
+- **Standalone unit tests** with their own `MENU_PATH` — `FastNoiseLiteTests`, `VoxelMetadataUtilityTests`.
+
+This is a **choice, not an oversight**, and it is recorded here because the registry cannot express it:
+`ExpectedSuiteCount` is a hand-maintained constant, so a suite that *should* have been registered and
+was not looks identical to one deliberately left out. The rule that keeps that honest: **a new suite is
+registered by default; leaving it out requires a line in this section saying why.** If the exclusion
+list grows past the three cases above, replace it with a reflection scan over
+`[MenuItem("Minecraft Clone/Dev/Validate *")]` cross-checked against the registry, with this list as
+the explicit allow-list.
+
+---
+
 ## Explicit non-goals
 
 No suites proposed for: **UI/menus and input** (event-driven, low blast radius, visually verified), **clouds and debug tooling** (`DT-*` hygiene items suffice; debug tools are not correctness-critical), **OM-1 device calibration** (device-dependent by design, verified by its own startup probe), and **shaders/GPU output** (needs image-based comparison — a different kind of harness; revisit if GS-1/GS-3 visual refactors recur). **2026-08-15:** this exclusion was load-bearing in `GS-3`'s deferral — the absence of any block-shader render gate, and the fact that building one exceeds the item itself, was one reason a guaranteed visual change was judged not worth an unmeasured gain. `SkyRenderValidationSuite` shows the harness *shape* that would be needed, but it is built on the skybox-specific `SkyPreviewRenderer`.
@@ -168,7 +256,15 @@ No suites proposed for: **UI/menus and input** (event-driven, low blast radius, 
 ## Sequencing summary
 
 `NS-1` (core, parts 1–5) and `NS-2` first — they guard the two irreversible failure classes (data loss, seed breaks) and unblock the most queued work (`SL-*`, `WG-3`, `ET-2`). `NS-5`/`NS-6` are 🟢-sized and should simply ride along with the work that triggers them (WS-1/VQ-1 and the next new pool, respectively). `NS-3` is the biggest investment — start it as repro fixtures for the three historical deadlocks and grow it scenario-wise, ideally before `P-4`/`OM-2` rework the scheduling invariants it guards. ~~`NS-4` lands whenever `PH-1`/`VQ-1` get scheduled,
-using the §2 scenario table as its baseline list.~~ — `NS-4` ✅ **landed 2026-08-03**, deliberately built *before*
+using the §2 scenario table as its baseline list.
+
+**The 2026-08-19 additions slot in as follows.** `NS-7` ties `NS-1` at the top — it is the same failure class,
+but measured rather than projected (12 of 14 migration steps untested *today*), and it should be built as
+`NS-1` part 6 rather than as a separate suite. `NS-8`'s continuity half is the cheapest item in this document
+and needs none of `NS-2`'s frozen-fixture machinery, so it can land **before** `NS-2` and give the generator
+its first gate of any kind. `NS-9` and `NS-10` are fixture-and-scenario work inside suites that already exist —
+they ride along with whatever next touches those systems, exactly as `NS-5`/`NS-6` do. `NS-11` is
+infrastructure hygiene: do (1) and (2) with the next framework change, and treat (3) as a separate call.~~ — `NS-4` ✅ **landed 2026-08-03**, deliberately built *before*
 `PH-1` rather than alongside it, so `PH-1`'s "subtle physics-feel regression" risk has a gate it can fail against.
 
 ---
@@ -179,6 +275,28 @@ using the §2 scenario table as its baseline list.~~ — `NS-4` ✅ **landed 202
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.1** *(2026-08-19)* - **Eighth-pass coverage audit — five items added (`NS-7`…`NS-11`) plus a
+  deliberate-exclusion section.** `NS-7` (migration chain) and `NS-8` (chunk-boundary continuity + generation
+  flag matrix) sharpen `NS-1` part 6 and `NS-2` with measurements rather than projections: **12 of the 14
+  numbered migration steps have no coverage**, and no suite anywhere asserts that two independently generated
+  adjacent chunks agree on their shared column. `NS-9` records that every Physics Solver scenario runs inside a
+  single chunk (`ChunkCoord(100, -100)` is the only coordinate the suite constructs) and that Placement has no
+  unloaded/placeholder-neighbor case and no block-*breaking* coverage. `NS-10` tabulates the one-sided feature
+  flags, with `Pipeline Backpressure` B7 named as the template and clouds explicitly left to the non-goals.
+  `NS-11` records that `Sky Render` + `UI Blur Render` contribute 16 baselines that pass unconditionally under
+  `-nographics` — a deliberate per-suite convention whose *aggregate* consequence was unrecorded and whose
+  policy has no self-test. Separately, the three validation entry points that sit outside
+  `ValidationSuiteRegistry` on purpose (the standalone fluid-determinism sweep, the nightly lighting fuzz menu
+  items, and the two standalone unit-test files) are now written down as a **choice**, with the
+  register-by-default rule that keeps that list honest. **Census re-verified against a real `Validate All` run:
+  411 / 17 → 497 baselines / 22 suites, all green** (0 failures, 0 known-bug repros, 0 fix candidates; 192 s wall
+  clock, of which Lighting is 189 s). The figure matches the `2026-08-17` release notes exactly, so nothing has
+  landed since. Per-suite deltas since the 2026-08-04 census: Lighting 92 → 99, Meshing 40 → 57, Chunk Math
+  47 → 56, Command Console 54 → 56, Behavior 16 → 17, Placement 28 → 29, Deserialization Robustness 7 → 9, and
+  five suites that were absent from the census paragraph entirely are now listed — Voxel Occlusion (6),
+  Sky &amp; Celestial (15), Sky Render (11), World Clock (10), UI Blur Render (5). The `ChunkRelativePosition`
+  tests were removed from the "standalone" tail: they are the Chunk Math suite's `.ChunkRelativePosition.cs`
+  partial and were being double-counted in prose.
 * *(2026-08-03)* - **`NS-4`'s first bug fixed through it** — `PLAYER_BUGS` §04 (fast landing → `IsGrounded` stuck
   false → jumps refused) is fixed, confirmed in game, and archived. Its repro `K04a`–`K04d` was observed red against
   the unfixed solver and promoted to `B20`–`B23`, plus two tripwire baselines `B18`/`B19` that bound the fix from the
@@ -218,6 +336,6 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-04 (`PH-2`: `B26` pins that `CalculateVelocity` resolves the substep chain without writing the transform — proven red by restoring the staged writes, which reddened **only** B26 because re-staging is behavior-neutral; census verified at 411 baselines / 17 suites, Physics Solver 25 → 26)  
+**Last Updated:** 2026-08-19 (eighth-pass audit: `NS-7`…`NS-11` added, plus the deliberate-exclusion section for entry points kept out of `ValidationSuiteRegistry`; census re-verified against a `Validate All` run at **497 baselines / 22 suites, all green** — matching the 2026-08-17 release notes)  
 **Next Review:** whenever a suite is added or a `Validate All` count changes — the existing-coverage
 paragraph is the one part of this document that goes stale silently.
