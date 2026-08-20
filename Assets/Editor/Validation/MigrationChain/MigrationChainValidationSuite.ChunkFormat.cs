@@ -43,6 +43,12 @@ namespace Editor.Validation.MigrationChain
         /// <summary>Blue nibble position inside a <c>LightData</c> entry.</summary>
         private const int LIGHTDATA_B_SHIFT = 12;
 
+        /// <summary>Byte offset of the section bitmask in an era-v2 payload: header(10) + heightmap(512).</summary>
+        private const int FIXTURE_BITMASK_OFFSET = 10 + ERA_V2_HEIGHTMAP_BYTES;
+
+        /// <summary>Byte offset of section 0's non-air count: past the bitmask(4) and the section version byte(1).</summary>
+        private const int FIXTURE_SECTION0_NON_AIR_OFFSET = FIXTURE_BITMASK_OFFSET + 4 + 1;
+
         /// <summary>Golden SHA-256 of the era-v2 fixture payload. Empty string = capture mode.</summary>
         private const string GOLDEN_V2_FIXTURE_HASH =
             "9f5e82893fa965eadc8179e62fac2115651a15eee39362540292eee6c206c141";
@@ -145,8 +151,15 @@ namespace Editor.Validation.MigrationChain
             bool ok = Check($"the era-v2 payload is exactly the length the layout predicts ({expectedLength.ToString()}), got {v2.Length.ToString()}",
                 v2.Length == expectedLength);
             ok &= Check("the payload declares chunk format 2", v2[0] == 2);
-            ok &= Check($"the fixture seeds {FIXTURE_NON_AIR_COUNT.ToString()} non-air voxels (non-vacuity)",
-                FIXTURE_NON_AIR_COUNT > 0);
+            // Read the bitmask and section-0 non-air count back OUT of the payload. Comparing the constants to
+            // each other would be a tautology that never inspects the bytes — the exact vacuous pass this
+            // scenario exists to prevent.
+            int bitmask = System.BitConverter.ToInt32(v2, FIXTURE_BITMASK_OFFSET);
+            ushort nonAir = System.BitConverter.ToUInt16(v2, FIXTURE_SECTION0_NON_AIR_OFFSET);
+            ok &= Check($"the payload's section bitmask marks all {FIXTURE_SECTION_COUNT.ToString()} sections, got 0x{bitmask:X2}",
+                bitmask == (1 << FIXTURE_SECTION_COUNT) - 1);
+            ok &= Check($"the payload's section 0 declares {FIXTURE_NON_AIR_COUNT.ToString()} non-air voxels (non-vacuity), got {nonAir.ToString()}",
+                nonAir == FIXTURE_NON_AIR_COUNT);
 
             byte[] v1 = BuildHistoricalChunkPayload(1);
             ok &= Check($"the era-v1 payload is 256 bytes shorter (byte-per-column heightmap), got {(v2.Length - v1.Length).ToString()}",
@@ -209,8 +222,20 @@ namespace Editor.Validation.MigrationChain
 
             try
             {
-                ok &= Check($"the chunk carries {FIXTURE_SECTION_COUNT.ToString()} sections",
-                    chunk.sections != null && chunk.sections.Length >= 1);
+                // The label used to claim 8 sections while the predicate accepted 1 — so a chain step that
+                // dropped sections 1-7 would log a PASS, and every later assertion only reads section 0.
+                int populated = 0;
+                if (chunk.sections != null)
+                {
+                    foreach (ChunkSection section in chunk.sections)
+                        if (section != null)
+                            populated++;
+                }
+
+                ok &= Check($"the chunk carries {FIXTURE_SECTION_COUNT.ToString()} section slots, got {(chunk.sections?.Length ?? -1).ToString()}",
+                    chunk.sections != null && chunk.sections.Length == FIXTURE_SECTION_COUNT);
+                ok &= Check($"all {FIXTURE_SECTION_COUNT.ToString()} seeded sections survived the chain, got {populated.ToString()}",
+                    populated == FIXTURE_SECTION_COUNT);
 
                 uint[] voxels = chunk.sections[0]?.voxels;
                 ok &= Check("section 0 has a voxel array", voxels != null);
@@ -423,7 +448,7 @@ namespace Editor.Validation.MigrationChain
                 loaded = Task.Run(() => reader.LoadChunkAsync(chunkVoxelPos)).GetAwaiter().GetResult();
                 ok &= Check("the migrated chunk loads through the real storage stack (not regenerated)", loaded != null);
 
-                uint[] voxels = loaded?.sections[0]?.voxels;
+                uint[] voxels = loaded?.sections?[0]?.voxels;
                 ok &= Check("the loaded chunk's section 0 has a voxel array", voxels != null);
                 if (voxels != null)
                 {

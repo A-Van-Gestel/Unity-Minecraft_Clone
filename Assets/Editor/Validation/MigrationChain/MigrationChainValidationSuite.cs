@@ -25,8 +25,9 @@ namespace Editor.Validation.MigrationChain
     /// (v2→v3, v5→v6, v7→v8, v8→v9, v9→v10), the two <c>pending_mods</c> steps and the v1→v2 region-layout
     /// restructure need a historical chunk-format fixture writer per era and are tracked as roadmap NS-7b.
     /// </para>
-    /// <para>All scenarios are <b>baselines</b> (must stay green). No production code is under test through
-    /// a new seam — the manager needed none.</para>
+    /// <para>All scenarios are <b>baselines</b> (must stay green) except <c>K10</c>, which reproduces
+    /// <c>SERIALIZATION_BUGS.md</c> §10 and is expected <b>red</b> until that is fixed. No production code is
+    /// under test through a new seam — the manager needed none.</para>
     /// <para>
     /// <b>Prove-red is recorded, not assumed.</b> These baselines were authored against shipped code, so four
     /// engine mutations were applied (in two pairs with disjoint predicted red-sets) to observe them fail:
@@ -71,8 +72,9 @@ namespace Editor.Validation.MigrationChain
 
         /// <summary>
         /// Builds and runs the migration-chain scenarios, returning the categorized result (the headless/CI
-        /// entry point). Uses <see cref="KnownBugChannel.Unimplemented"/> for parity with the other storage
-        /// suites; the channel is currently unused (baselines only).
+        /// entry point). Uses <see cref="KnownBugChannel.Bug"/> because <c>K10</c> reproduces a documented
+        /// bug: when it starts passing the runner must route the reader to in-game confirmation and the
+        /// archive-fixed-bug workflow, not to "promote an implemented feature to a baseline".
         /// </summary>
         /// <param name="logToConsole">When false, runs silently and only returns the result (for headless/CI use).</param>
         /// <param name="showProgress">When false, suppresses this suite's own progress bar (the aggregate runner drives one).</param>
@@ -107,7 +109,7 @@ namespace Editor.Validation.MigrationChain
                 new Scenario("B24: the v1→v2 repack recovers each chunk index from its broken address and rewrites it at the correct one", RegionRepackMovesChunksToCorrectAddresses),
                 new Scenario("K10: a migrated v1 world's chunks are readable rather than regenerated from seed", V1WorldChunksSurviveMigration, "SERIALIZATION_BUGS §10"),
             };
-            return ValidationSuiteRunner.Execute("Migration Chain", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
+            return ValidationSuiteRunner.Execute("Migration Chain", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
 
         // --- Expected values (frozen, mirroring what each step injects) -----------------------------

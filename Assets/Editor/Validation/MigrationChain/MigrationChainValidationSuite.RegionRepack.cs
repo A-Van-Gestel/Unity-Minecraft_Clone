@@ -103,7 +103,7 @@ namespace Editor.Validation.MigrationChain
 
             // Non-no-op guard: the broken and correct addresses must actually differ.
             Vector2Int chunkVoxelPos = new Vector2Int(REPACK_CHUNK_A * ERA_CHUNK_WIDTH, REPACK_CHUNK_Z * ERA_CHUNK_WIDTH);
-            (Vector2Int correctRegion, int correctLocalX, int _) =
+            (Vector2Int correctRegion, int correctLocalX, int correctLocalZ) =
                 RegionAddressCodec.ForVersion(2).ChunkVoxelPosToRegionAddress(chunkVoxelPos);
             ok &= Check($"the broken address (r{brokenRegion.x.ToString()} slot {brokenLocalX.ToString()}) differs from the correct one (r{correctRegion.x.ToString()} slot {correctLocalX.ToString()}) — so the repack cannot pass as a no-op",
                 brokenRegion != correctRegion || brokenLocalX != correctLocalX);
@@ -120,13 +120,16 @@ namespace Editor.Validation.MigrationChain
             if (File.Exists(newFile))
             {
                 using RegionFile region = new RegionFile(newFile);
-                (byte[] stored, CompressionAlgorithm algorithm) = region.LoadChunkData(correctLocalX, 0);
+                (byte[] stored, CompressionAlgorithm algorithm) = region.LoadChunkData(correctLocalX, correctLocalZ);
                 ok &= Check("the chunk is readable at its corrected slot", stored != null);
                 if (stored != null)
                 {
-                    ok &= Check($"the payload is byte-identical — the repack corrects addressing only, got {stored.Length.ToString()} vs {payload.Length.ToString()} bytes",
-                        algorithm == CompressionAlgorithm.None && stored.Length == payload.Length &&
-                        stored[0] == payload[0]);
+                    // Hash both sides: a length + first-byte check would pass a repack that reordered or
+                    // rewrote any interior byte, under a PASS line claiming the payload was byte-identical.
+                    ok &= Check($"the stored algorithm is preserved, got {algorithm.ToString()}",
+                        algorithm == CompressionAlgorithm.None);
+                    ok &= Check($"the payload is byte-identical — the repack corrects addressing only ({stored.Length.ToString()} vs {payload.Length.ToString()} bytes)",
+                        HashPayload(stored) == HashPayload(payload));
                 }
             }
 

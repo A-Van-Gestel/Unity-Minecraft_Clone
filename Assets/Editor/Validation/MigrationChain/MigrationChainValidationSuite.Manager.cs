@@ -51,15 +51,26 @@ namespace Editor.Validation.MigrationChain
         {
             private readonly bool _previousSimulateCorruption;
 
-            /// <summary>Whether the settings flag was captured — false if the base constructor failed first,
-            /// in which case there is nothing to restore and the captured field still holds its default.</summary>
-            private readonly bool _captured;
-
-            /// <summary>Creates the stub world, capturing the globals the migration pipeline mutates.</summary>
+            /// <summary>
+            /// Creates the stub world, capturing the globals the migration pipeline mutates.
+            /// </summary>
+            /// <remarks>
+            /// The base constructor has already stood up the stub <c>World.Instance</c> and the temp save by
+            /// the time this body runs, so anything thrown here (the settings load touches disk on first call)
+            /// would strand both — leaving <c>World.Instance</c> pointed at a dead stub for every suite that
+            /// runs afterwards in <c>Validate All</c>. Hence, the explicit base teardown before rethrowing.
+            /// </remarks>
             public MigrationFixture() : base("MigrationChainTest")
             {
-                _previousSimulateCorruption = SettingsManager.LoadSettings().Dev.simulateMigrationCorruption;
-                _captured = true;
+                try
+                {
+                    _previousSimulateCorruption = SettingsManager.LoadSettings().Dev.simulateMigrationCorruption;
+                }
+                catch
+                {
+                    base.Dispose();
+                    throw;
+                }
             }
 
             /// <summary>Absolute path of the fixture world's save folder.</summary>
@@ -83,8 +94,7 @@ namespace Editor.Validation.MigrationChain
             /// <summary>Restores the mutated globals, sweeps the migration backups, then tears the base fixture down.</summary>
             public override void Dispose()
             {
-                if (_captured)
-                    SettingsManager.LoadSettings().Dev.simulateMigrationCorruption = _previousSimulateCorruption;
+                SettingsManager.LoadSettings().Dev.simulateMigrationCorruption = _previousSimulateCorruption;
 
                 DeleteBackups();
                 base.Dispose();
@@ -223,8 +233,8 @@ namespace Editor.Validation.MigrationChain
 
                     // SaveChunkAsync serializes its OWN snapshot and returns only that one to the pool, so the
                     // lease above is still ours to give back (the Deserialization Robustness suite pairs its
-                    // MakeEditedChunk with the same explicit return). Without this the seam scenario alone
-                    // strands 40 pooled ChunkData, and no pool-balance assertion could ever be added here.
+                    // MakeEditedChunk with the same explicit return). Without this every seeded chunk strands
+                    // a pooled shell, and no pool-balance assertion could ever be added here.
                     World.Instance.ChunkPool.ReturnChunkData(data);
                     written.Add(pos);
                 }
