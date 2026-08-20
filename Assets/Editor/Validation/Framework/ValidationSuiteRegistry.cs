@@ -10,6 +10,7 @@ using Editor.Validation.Lighting;
 using Editor.Validation.LightScheduler;
 using Editor.Validation.Meshing;
 using Editor.Validation.MeshQueue;
+using Editor.Validation.MigrationChain;
 using Editor.Validation.Occlusion;
 using Editor.Validation.Placement;
 using Editor.Validation.PhysicsSolver;
@@ -57,7 +58,7 @@ namespace Editor.Validation.Framework
     public static class ValidationSuiteRegistry
     {
         /// <summary>The number of standard suites expected on the list — a floor the aggregate runner asserts against.</summary>
-        public const int ExpectedSuiteCount = 22;
+        public const int ExpectedSuiteCount = 23;
 
         /// <summary>The registered suites, in run/report order.</summary>
         public static readonly IReadOnlyList<RegisteredSuite> Suites = new[]
@@ -76,6 +77,7 @@ namespace Editor.Validation.Framework
             new RegisteredSuite("Pipeline Backpressure", PipelineBackpressureValidationSuite.Execute),
             new RegisteredSuite("Save Durability", SaveDurabilityValidationSuite.Execute),
             new RegisteredSuite("Deserialization Robustness", DeserializationRobustnessValidationSuite.Execute),
+            new RegisteredSuite("Migration Chain", MigrationChainValidationSuite.Execute),
             new RegisteredSuite("Spawn", SpawnValidationSuite.Execute),
             new RegisteredSuite("Command Console", CommandConsoleValidationSuite.Execute),
             new RegisteredSuite("World Clock", WorldClockValidationSuite.Execute),

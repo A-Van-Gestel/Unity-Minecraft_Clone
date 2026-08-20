@@ -48,13 +48,23 @@ namespace Editor.Validation.Framework
             }
             catch
             {
-                Dispose();
+                // Deliberately NOT Dispose(): that is virtual, and a subclass override runs against fields its
+                // own constructor body has not assigned yet (a derived ctor runs after this one). Restoring a
+                // default-valued captured global — an unset UnityEngine.Random.State, say — would be worse than
+                // the failure being handled. Base teardown only; the derived ctor never started.
+                TearDownBase();
                 throw;
             }
         }
 
         /// <summary>Disarms all injection seams, tears down the stub world, and deletes the temp save.</summary>
-        public void Dispose()
+        /// <remarks>Virtual so a subclass whose system mutates state outside the save folder (the migration
+        /// suite's sibling backup folders, settings/RNG globals) can restore it and still chain to this
+        /// teardown — hiding it with <c>new</c> would be skipped by a <c>using</c> statement.</remarks>
+        public virtual void Dispose() => TearDownBase();
+
+        /// <summary>The base teardown, callable non-virtually from the constructor's failure path.</summary>
+        private void TearDownBase()
         {
             ChunkStorageManager.InjectSaveFaults(0);
             ChunkStorageManager.InjectZeroLengthSerializes(0);

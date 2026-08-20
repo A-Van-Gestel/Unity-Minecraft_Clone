@@ -726,7 +726,7 @@ bytes in every affected chunk. Read every field explicitly and write them in the
 
 **Do not set the version field in `level.dat` inside `MigrateLevelDat`.** The manager stamps `SaveSystem.CURRENT_VERSION` onto `level.dat` after all steps have run. Setting it inside a step can conflict with multi-step chains and will cause a discrepancy if a step is skipped.
 
-**Register new steps in `MigrationManager._steps` in ascending version order.** Reflection-based auto-registration is not used because it has unreliable behaviour under IL2CPP with Unity's AOT compilation pipeline. Explicit registration is two lines and eliminates a class of
+**Register new steps in `MigrationManager._steps` in ascending version order.** Reflection-based auto-registration is not used because it has unreliable behavior under IL2CPP with Unity's AOT compilation pipeline. Explicit registration is two lines and eliminates a class of
 hard-to-diagnose runtime crashes on mobile and console builds.
 
 **Do not use `World.Instance` anywhere in the migration pipeline.** The migration runs before the World scene loads. Any reference to `World.Instance` will be a null reference exception.
@@ -734,6 +734,25 @@ hard-to-diagnose runtime crashes on mobile and console builds.
 **Do not change what an already-shipped step produces.** A step's byte transform must stay identical for every input it has ever handled; semantic changes belong in a NEW step. Non-semantic hardening (error handling, fault isolation, logging) is fine.
 
 *One authorized exception exists, recorded here so it is not read as precedent.* On 2026-08-10 (RF-1) the shipped `MigrationV13ToV14EnvironmentWind` was revised to emit its `environment` section under `worldState` instead of at the document root, so all world state would share one parent. The project owner authorized it explicitly on the grounds that v14 had reached exactly one local test world, the change is `level.dat`-only, and every affected save was theirs. A v14 document written before the revision keeps its root-level `environment` and reads as calm wind — it is not re-migrated, because it is already stamped v14. **Any future world format that has reached a real save must take the new-step route instead.**
+
+**There is a validation suite now — add your step to it.** `Minecraft Clone/Dev/Validate Migration Chain`
+(`Assets/Editor/Validation/MigrationChain/`) folds the registered steps' `MigrateLevelDat` transforms over frozen
+documents (v1, v3, v12) and drives `MigrationManager` end-to-end over a real volatile-path world: the version stamp,
+the chunk loop, the backup, the corruption prompt, and rollback. A new `level.dat` step should arrive with a
+fully-populated fixture of its source era, asserting both what it injects and every field it must carry through —
+that is the failure class this system has (field loss is silent, and `LevelDatCodec` fails *open* to a raw parse, so
+a broken chain reds nothing at runtime). Two measurements the suite recorded when it landed, worth knowing before
+you touch this file:
+
+- **The manager's post-chain version stamp is redundant for a complete chain.** Deleting
+  `saveData.version = SaveSystem.CURRENT_VERSION` from `MigrateGlobalFiles` leaves every end-to-end scenario green,
+  because each shipped step also sets the version inside `MigrateLevelDat` — the thing this section forbids two
+  paragraphs above. Both halves stay as they are: the rule is right for new steps, and rewriting a shipped step's
+  output is forbidden regardless.
+- **The chunk-payload steps are still untested.** Of the fourteen numbered steps, the seven `level.dat`-only ones are
+  covered; the five that rewrite the chunk payload (v2→v3, v5→v6, v7→v8, v8→v9, v9→v10), the two `pending_mods`
+  steps, and the v1→v2 region-layout restructure are not — they need a historical chunk-format fixture writer per
+  era. Tracked as `NS-7b` in [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md).
 
 **A step that REMOVES a field must mirror the whole target shape in its DTO.** Up to v14 every `level.dat` step was additive, so an incomplete DTO was merely lossy in theory. `MigrationV14ToV15TimeOfDay` is the first removal (`worldState.timeOfDay` → `worldState.time`): whatever its `V15LevelDat` omits is dropped from every migrated document, because the step re-serializes from the DTO.
 

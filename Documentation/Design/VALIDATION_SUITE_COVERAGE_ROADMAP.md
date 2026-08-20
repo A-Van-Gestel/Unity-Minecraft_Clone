@@ -1,10 +1,11 @@
 # Validation Suite Coverage Roadmap — Uncovered Systems, Ranked
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-07-02  
-**Status:** **Living backlog.** `NS-4` and `NS-5` are ✅ complete (NS-4 2026-08-03; NS-5 at the CP-2 close-out) and
-`NS-1` is partially seeded (CP-3's robustness slice); `NS-2`, `NS-3` and `NS-6` remain proposals, joined 2026-08-19 by
-`NS-7`…`NS-11` from the eighth-pass audit. Existing-coverage
+**Status:** **Living backlog.** `NS-4`, `NS-5` and `NS-7` are ✅ complete (NS-4 2026-08-03; NS-5 at the CP-2
+close-out; NS-7 2026-08-20, for the `level.dat` chain and the manager's orchestration — its historical
+chunk-format remainder is filed as `NS-7b`) and `NS-1` is partially seeded (CP-3's robustness slice); `NS-2`,
+`NS-3`, `NS-6` and `NS-8`…`NS-11` remain proposals. Existing-coverage
 counts are re-verified against a real `Validate All` run each time they are touched.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
@@ -15,21 +16,22 @@ counts are re-verified against a real `Validate All` run each time they are touc
 > architecturally excellent (`VS-*` items are operational only) — the remaining risk is *coverage*,
 > and it is concentrated in the systems below.
 >
-> Status: **Living backlog.** NS-1 is partially seeded (CP-3's robustness slice, 2026-07-22), NS-5 is ✅
-> complete (CP-2 close-out, 2026-07-22) and NS-4 is ✅ complete (2026-08-03) — see the per-item status
-> lines; the rest are proposals.
+> Status: **Living backlog.** NS-1 is partially seeded (CP-3's robustness slice, 2026-07-22); NS-5 ✅
+> (CP-2 close-out, 2026-07-22), NS-4 ✅ (2026-08-03) and NS-7 ✅ (2026-08-20, remainder split off as
+> NS-7b) are complete — see the per-item status lines; the rest are proposals.
 
-**Existing coverage (for contrast, counts verified 2026-08-19 against a `Validate All` run — 504 baselines / 22 suites, all green):** Lighting (106 — the last seven are the fidelity **C14** mixed-channel mirrors B108–B114), Meshing (57 — including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
-**light** maps), Behavior/fluid tick (17, incl. determinism gates), Placement (29 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (26 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19, its promoted repro B20–B23, `PH-1`'s step-0 horizontal-aggregation guard B24 and its gather-envelope guard B25, and `PH-2`'s B26 pinning that `CalculateVelocity` never writes the transform)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (56), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (9), Spawn (10), Command Console (56), Voxel Occlusion (6), Sky & Celestial (15), Sky Render (11), World Clock (10), UI Blur Render (5), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` tests (the `ChunkRelativePosition` tests are no longer standalone — they are the Chunk Math suite's `.ChunkRelativePosition.cs` partial).
+**Existing coverage (for contrast, counts verified 2026-08-20 against a `Validate All` run — 517 baselines / 23 suites, all green):** Lighting (106 — the last seven are the fidelity **C14** mixed-channel mirrors B108–B114), Meshing (57 — including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
+**light** maps), Behavior/fluid tick (17, incl. determinism gates), Placement (29 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (26 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19, its promoted repro B20–B23, `PH-1`'s step-0 horizontal-aggregation guard B24 and its gather-envelope guard B25, and `PH-2`'s B26 pinning that `CalculateVelocity` never writes the transform)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (56), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (9), **Migration Chain (13 — NS-7)**, Spawn (10), Command Console (56), Voxel Occlusion (6), Sky & Celestial (15), Sky Render (11), World Clock (10), UI Blur Render (5), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` tests (the `ChunkRelativePosition` tests are no longer standalone — they are the Chunk Math suite's `.ChunkRelativePosition.cs` partial).
 
 **Build protocol for every suite below:** the `validation-driven-bugfix` skill (deterministic repro first, prove-red before trusting green, promote repros to baselines). New suites should land on the shared `ValidationSuiteRunner` (`VS-1`, ✅ shipped 2026-07-08): register `Scenario`s and return its `ValidationRunResult` from a headless `Execute()`, with a thin `[MenuItem]` wrapper. All suites stay on the custom validation framework: migrating to the Unity Test Framework was evaluated 2026-07-02 and rejected (see the status header in
 [`../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md`](../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md)); the CI/coverage/XML gaps close via the VS-2 extensions instead.
 
 
 
-**Audited:** 2026-07-02 (seventh-pass audit), counts re-verified 2026-08-19 against a `Validate All`
-run — **504 baselines / 22 suites, 0 failures, 0 known-bug repros outstanding** (the eighth-pass audit below
-recorded 497; the fidelity **C14** mixed-channel mirrors B108–B114 landed later the same day). The audit found the then-six suites architecturally sound, so the
+**Audited:** 2026-07-02 (seventh-pass audit), counts re-verified 2026-08-20 against a `Validate All`
+run — **517 baselines / 23 suites, 0 failures, 0 known-bug repros outstanding** (the eighth-pass audit below
+recorded 497; the fidelity **C14** mixed-channel mirrors B108–B114 took it to 504, and NS-7's Migration Chain
+suite added the last 13). The audit found the then-six suites architecturally sound, so the
 `VS-*` items it produced are operational only; the residual risk it identified is *coverage*, which is
 what this document ranks.
 
@@ -63,11 +65,13 @@ what this document ranks.
        `ModificationManager` pending mods survive a save → load cycle (Bug 08 history lives here).
     6. **Migration fixtures** — frozen mini-region fixtures per historical save version run through
        `MigrationManager`, asserting expected current-version state (enforces "never edit a shipped migration" mechanically).
+       *(Superseded — `NS-7` took this over 2026-08-20 and shipped the `level.dat`/orchestration half as its own
+       suite; the historical chunk-format fixtures this bullet describes are now `NS-7b`. Nothing to build here.)*
     7. **Concurrency stress (the SL-4 gate)** — parallel load/save hammering one region file with integrity assertions. Trivially green under today's global lock; becomes *the* gate when SL-4 changes the locking.
 - **Building blocks already available:** `ValidationReflection` (ChunkPool stubbing),
   `GoldenMaster`, temp-directory region files (the storage manager already supports a volatile path). Phase **CP-3** of
   [CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) seeds the robustness slice (truncated/garbage/wrong-version payloads → `Deserialize` returns null, no throw, no pooled-shell leak).
-- **Effort:** 🟡 core (1–5) → 🔴 with migration fixtures (6); build 1–5 first.
+- **Effort:** 🟡 core (1–5); part 6 moved to `NS-7`/`NS-7b` — build 1–5 here.
 - **Partial status (2026-07-22):** the CP-3 robustness slice shipped as
   `Minecraft Clone/Dev/Validate Deserialization Robustness` (B1–B7): truncated / garbage / wrong-version / corrupt-tail payloads → null, no throw, no pooled-shell/section leak (pool active-count balance), fault ≠ "not-on-disk" contract at `LoadChunkAsync` (dev-only
   `InjectLoadFaults` seam), corrupt-on-disk → null through the full storage stack. Parts 1–5 above (round-trip identity, golden bytes, compression matrix, `RegionFile` mechanics, pending stores) remain open and should grow in this suite.
@@ -172,6 +176,57 @@ what this document ranks.
     2. **The chained upgrade** — one v1 fixture migrated all the way to the current version in a single run, asserting each step's postcondition en route. Per-step fixtures cannot catch a step that is individually correct but composes wrongly with its successor.
     3. **`Settings.Dev.simulateMigrationCorruption` as the negative control.** The fault seam already exists and no scenario uses it: a migration that silently no-ops must be *caught*, not merely survived.
 - **Effort:** 🟡 — the fixtures are the cost; `MigrationManager` needs no new seam.
+- **Status (2026-08-20): ✅ COMPLETE for the `level.dat` chain and the manager's orchestration** — shipped as
+  `Minecraft Clone/Dev/Validate Migration Chain` (`Assets/Editor/Validation/MigrationChain/`, 13 baselines
+  `B1`–`B13`), registered (`ExpectedSuiteCount` 22 → 23). No production code changed and no new seam was needed, as
+  predicted. Coverage: the chain folded by `LevelDatCodec` over frozen v1 / v3 / v12 documents — every injected
+  historical default (Legacy type, 128/16/100 dimensions, legacy-center spawn, border disabled, `-0.6` wind, noon
+  clock) and every field that must survive fourteen steps (`B1`–`B4`), a gapless-path structural guard for all
+  fourteen source versions (`B5`), and `MigrationManager` driven end-to-end over a real volatile-path world —
+  stamp + content migration + payload survival + backup contents (`B6`), the documented chunkless-world skip
+  (`B7`), the three fail-fast guards via a synthetic misbehaving step swapped into a local manager instance
+  (`B8`–`B10`), abort-then-rollback (`B11`), rollback after success (`B12`), and the shipped
+  `Dev.simulateMigrationCorruption` injector (`B13`).
+    - **Prove-red is recorded, not assumed** — four engine mutations in two disjoint pairs; the map lives in the
+      suite's class docstring. Three findings worth carrying:
+        - **`ToChunkRelative` had no coverage at all** before this suite: the shipped `B8`/`B9` level.dat scenarios
+          in `Validate Deserialization Robustness` both start at v13, *after* the re-type. `B2` is the first
+          scenario to exercise it, and it does so with a **negative** absolute position — the case a truncating
+          divide gets wrong and an all-positive world never reveals.
+        - **The manager's post-chain version stamp is redundant.** Deleting it left `B6`/`B7`/`B12` green, because
+          every shipped step also sets the version inside `MigrateLevelDat`. That is the
+          [AOT_WORLD_MIGRATION_SYSTEM.md](../Architecture/AOT_WORLD_MIGRATION_SYSTEM.md) §6 contradiction, now
+          *measured* rather than argued. Deliberately not "fixed" — rewriting a shipped step's output is forbidden.
+        - **`MigratePendingLighting` is overridden by no step**, so the manager's pending-lighting migration loop is
+          dead code today. Recorded, not removed.
+    - **The seam this item named is not the negative control it looked like.** `Dev.simulateMigrationCorruption`
+      *throws* (a 1%-per-chunk RNG draw, editor-only); it exercises the per-chunk catch, not the "silently no-ops"
+      case part 3 asks about. That case is caught by the manager's **version-byte fail-fast guard**, which `B8` now
+      asserts directly with a synthetic no-op step. `B13` still covers the shipped seam, pinning the accounting
+      invariant (processed + corrupted == total) unconditionally and reporting INCONCLUSIVE rather than failing if
+      the pinned seed happens not to fire.
+
+### NS-7b. Historical chunk-format fixtures — the remainder of NS-7 — **Priority 1**
+
+- **What is left:** the parts of NS-7 that need a *writer* for a historical on-disk layout, which is the whole
+  fixture cost the parent item priced at 🟡. Still uncovered: the **five chunk-payload rewrites** (`v2→v3`,
+  `v5→v6`, `v7→v8`, `v8→v9`, `v9→v10` — including all three of the high-risk rewrites the parent item names), the
+  **two `pending_mods` steps** (`v4→v5`, `v5→v6`), and the **v1→v2 region-layout restructure**
+  (`RequiresRegionLayoutMigration`, the only step that moves chunks between region files).
+- **Why the parent suite could not reach them:** its on-disk fixture is a v12 world, chosen because no step between
+  v12 and v15 touches the chunk payload or the region layout — so real current-format chunks written by
+  `ChunkStorageManager` are a byte-faithful stand-in (v12 and v15 resolve the same V2 address codec). Any earlier
+  source version needs bytes in a layout nothing in the engine can still write.
+- **The one available oracle, and its limit:** each chunk-format step documents its input layout inline
+  ("V2 READ DEFINITION / Historical Reference: ChunkSerializer.cs …") — by design, per §5 of the architecture doc,
+  precisely so the format survives its writer. A fixture builder derived from those read definitions is therefore
+  authoritative-by-construction for regressions and composition faults, but **cannot** detect a step that has always
+  misread its input, since fixture and reader would share the error. Say so in the suite rather than implying more.
+- **Scope sketch:** one frozen fixture builder per chunk era (v1/v2 → v3 → v4 → v5 → v6), assert the chained upgrade
+  reaches chunk v7 with a hand-verified voxel and light value intact; a small `pending_mods` fixture per its two
+  steps (16-byte entries); and a v1 region fixture with mis-scaled addresses for the repack.
+- **Effort:** 🟡–🔴 — the builders are the cost; the harness, fixture and manager plumbing already exist in the
+  parent suite.
 
 ---
 
@@ -259,9 +314,12 @@ No suites proposed for: **UI/menus and input** (event-driven, low blast radius, 
 `NS-1` (core, parts 1–5) and `NS-2` first — they guard the two irreversible failure classes (data loss, seed breaks) and unblock the most queued work (`SL-*`, `WG-3`, `ET-2`). `NS-5`/`NS-6` are 🟢-sized and should simply ride along with the work that triggers them (WS-1/VQ-1 and the next new pool, respectively). `NS-3` is the biggest investment — start it as repro fixtures for the three historical deadlocks and grow it scenario-wise, ideally before `P-4`/`OM-2` rework the scheduling invariants it guards. ~~`NS-4` lands whenever `PH-1`/`VQ-1` get scheduled,
 using the §2 scenario table as its baseline list.
 
-**The 2026-08-19 additions slot in as follows.** `NS-7` ties `NS-1` at the top — it is the same failure class,
+**The 2026-08-19 additions slot in as follows.** ~~`NS-7` ties `NS-1` at the top — it is the same failure class,
 but measured rather than projected (12 of 14 migration steps untested *today*), and it should be built as
-`NS-1` part 6 rather than as a separate suite. `NS-8`'s continuity half is the cheapest item in this document
+`NS-1` part 6 rather than as a separate suite.~~ — `NS-7` ✅ **landed 2026-08-20** as its own suite rather than an
+`NS-1` partial: its fixtures are whole migrated *worlds* on disk, which does not fit the load-boundary charter of
+`Validate Deserialization Robustness`. The seven `level.dat`-only steps are covered; the remainder is `NS-7b`,
+which is now the top-priority unbuilt item alongside `NS-1` parts 1–5. `NS-8`'s continuity half is the cheapest item in this document
 and needs none of `NS-2`'s frozen-fixture machinery, so it can land **before** `NS-2` and give the generator
 its first gate of any kind. `NS-9` and `NS-10` are fixture-and-scenario work inside suites that already exist —
 they ride along with whatever next touches those systems, exactly as `NS-5`/`NS-6` do. `NS-11` is
@@ -276,6 +334,24 @@ infrastructure hygiene: do (1) and (2) with the next framework change, and treat
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.2** *(2026-08-20)* - **`NS-7` COMPLETE for the `level.dat` chain and the manager's orchestration**, shipped as
+  `Minecraft Clone/Dev/Validate Migration Chain` (13 baselines, `Assets/Editor/Validation/MigrationChain/`), the
+  **first coverage `MigrationManager` has had of any kind**. Registered as the 23rd suite (`ExpectedSuiteCount`
+  22 → 23); no production code changed and no new seam was needed, as the item predicted. **Census refreshed:
+  504 → 517 baselines across 23 suites, all green** (3 min 8 s wall clock); every other per-suite count
+  re-verified unchanged. Three corrections to what this item claimed, all from measurement rather than
+  re-reading: (1) the "12 untested steps" hole is **not uniform** — seven are `level.dat`-only and are now
+  covered, five rewrite the chunk payload, two touch `pending_mods`, one restructures the region layout; (2)
+  `Dev.simulateMigrationCorruption` is **not** the negative control part 3 assumed — it *throws*, exercising the
+  per-chunk catch, whereas the silent-no-op case is caught by the manager's version-byte fail-fast guard (now
+  `B8`); (3) the manager's post-chain version stamp is **redundant** — deleting it leaves the end-to-end
+  scenarios green, because every shipped step also stamps inside `MigrateLevelDat`, which is exactly the open
+  `AOT_WORLD_MIGRATION_SYSTEM.md` §6 contradiction, now measured. Also recorded: `ToChunkRelative` (the v13
+  player-position re-type) had **zero** coverage before `B2`, since the shipped `B8`/`B9` level.dat scenarios
+  both start at v13; and `MigratePendingLighting` is overridden by no step, making the manager's
+  pending-lighting loop dead code. The residual chunk-format work is filed as **`NS-7b`** with its fixture-cost
+  estimate and the limit of its only available oracle (fixtures derived from each step's own read definition
+  cannot detect a step that has always misread its input).
 * **v1.1** *(2026-08-19)* - **Eighth-pass coverage audit — five items added (`NS-7`…`NS-11`) plus a
   deliberate-exclusion section.** `NS-7` (migration chain) and `NS-8` (chunk-boundary continuity + generation
   flag matrix) sharpen `NS-1` part 6 and `NS-2` with measurements rather than projections: **12 of the 14
@@ -337,6 +413,6 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-19 (eighth-pass audit: `NS-7`…`NS-11` added, plus the deliberate-exclusion section for entry points kept out of `ValidationSuiteRegistry`; census re-verified against a `Validate All` run at **497 baselines / 22 suites, all green** — matching the 2026-08-17 release notes; superseded later the same day by the C14 mirrors B108–B114, taking Lighting 99 → 106 and the total to **504**)  
+**Last Updated:** 2026-08-20 (NS-7 shipped: `Validate Migration Chain`, 13 baselines, census re-verified at **517 baselines / 23 suites, all green**; the historical chunk-format remainder filed as `NS-7b`. Previously: 2026-08-19 eighth-pass audit: `NS-7`…`NS-11` added, plus the deliberate-exclusion section for entry points kept out of `ValidationSuiteRegistry`; census re-verified against a `Validate All` run at **497 baselines / 22 suites, all green** — matching the 2026-08-17 release notes; superseded later the same day by the C14 mirrors B108–B114, taking Lighting 99 → 106 and the total to **504**)  
 **Next Review:** whenever a suite is added or a `Validate All` count changes — the existing-coverage
 paragraph is the one part of this document that goes stale silently.
