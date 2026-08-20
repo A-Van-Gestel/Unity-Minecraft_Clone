@@ -29,11 +29,9 @@ namespace Editor.Validation.MigrationChain
         /// <summary>Chunks the fixture world carries, so a migration that processes none cannot pass vacuously.</summary>
         private const int FIXTURE_CHUNK_COUNT = 3;
 
-        /// <summary>Chunk count for the fault-seam scenario: enough that its 1%-per-chunk injection lands.</summary>
-        private const int SEAM_CHUNK_COUNT = 40;
-
-        /// <summary>Seed pinning the fault seam's injection sequence, so the scenario is deterministic.</summary>
-        private const int SEAM_RANDOM_SEED = 20260820;
+        /// <summary>Chunks for the fault-seam scenario. Small on purpose: the seam faults every chunk it
+        /// sees (see B13), so volume would buy nothing but runtime.</summary>
+        private const int SEAM_CHUNK_COUNT = 3;
 
         /// <summary>Chunk-local coordinates of the fixture edit, read back after migration to prove the payload survived.</summary>
         private const int EDIT_X = 5, EDIT_Y = 12, EDIT_Z = 9;
@@ -46,24 +44,21 @@ namespace Editor.Validation.MigrationChain
         /// <summary>
         /// Suite fixture: the shared <see cref="StorageValidationFixture"/> plus the teardown the migration
         /// pipeline needs and the base class cannot know about — the sibling backup folders
-        /// <see cref="MigrationManager"/> creates outside the save path, the dev corruption-simulation flag on
-        /// the cached settings singleton, and the global <see cref="UnityEngine.Random"/> state its injection
-        /// consumes. All three outlive a play session if left set.
+        /// <see cref="MigrationManager"/> creates outside the save path, and the dev corruption-simulation
+        /// flag on the cached settings singleton. Both outlive a play session if left set.
         /// </summary>
         private sealed class MigrationFixture : StorageValidationFixture
         {
             private readonly bool _previousSimulateCorruption;
-            private readonly UnityEngine.Random.State _previousRandomState;
 
-            /// <summary>Whether the globals were captured — false if the base constructor failed first, in which
-            /// case there is nothing to restore and the captured fields still hold their defaults.</summary>
+            /// <summary>Whether the settings flag was captured — false if the base constructor failed first,
+            /// in which case there is nothing to restore and the captured field still holds its default.</summary>
             private readonly bool _captured;
 
             /// <summary>Creates the stub world, capturing the globals the migration pipeline mutates.</summary>
             public MigrationFixture() : base("MigrationChainTest")
             {
                 _previousSimulateCorruption = SettingsManager.LoadSettings().Dev.simulateMigrationCorruption;
-                _previousRandomState = UnityEngine.Random.state;
                 _captured = true;
             }
 
@@ -77,23 +72,19 @@ namespace Editor.Validation.MigrationChain
             public string RegionPath => Path.Combine(SavePath, "Region");
 
             /// <summary>
-            /// Arms the dev-only migration corruption injector on the cached settings singleton (in memory —
-            /// nothing is written to the user's settings file) with a pinned RNG sequence.
+            /// Arms the dev-only migration corruption injector on the cached settings singleton — in memory,
+            /// so nothing is written to the user's settings file. No RNG is seeded: the injector's
+            /// <c>Random.value</c> read throws on the worker thread it runs on, so it faults every chunk
+            /// regardless of any seed (see B13).
             /// </summary>
-            public static void ArmCorruptionSeam()
-            {
+            public static void ArmCorruptionSeam() =>
                 SettingsManager.LoadSettings().Dev.simulateMigrationCorruption = true;
-                UnityEngine.Random.InitState(SEAM_RANDOM_SEED);
-            }
 
             /// <summary>Restores the mutated globals, sweeps the migration backups, then tears the base fixture down.</summary>
             public override void Dispose()
             {
                 if (_captured)
-                {
                     SettingsManager.LoadSettings().Dev.simulateMigrationCorruption = _previousSimulateCorruption;
-                    UnityEngine.Random.state = _previousRandomState;
-                }
 
                 DeleteBackups();
                 base.Dispose();

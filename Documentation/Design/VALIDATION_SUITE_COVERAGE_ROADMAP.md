@@ -200,11 +200,12 @@ what this document ranks.
         - **`MigratePendingLighting` is overridden by no step**, so the manager's pending-lighting migration loop is
           dead code today. Recorded, not removed.
     - **The seam this item named is not the negative control it looked like.** `Dev.simulateMigrationCorruption`
-      *throws* (a 1%-per-chunk RNG draw, editor-only); it exercises the per-chunk catch, not the "silently no-ops"
-      case part 3 asks about. That case is caught by the manager's **version-byte fail-fast guard**, which `B8` now
-      asserts directly with a synthetic no-op step. `B13` still covers the shipped seam, pinning the accounting
-      invariant (processed + corrupted == total) unconditionally and reporting INCONCLUSIVE rather than failing if
-      the pinned seed happens not to fire.
+      *throws*, editor-only; it exercises the per-chunk catch, not the "silently no-ops" case part 3 asks about.
+      That case is caught by the manager's **version-byte fail-fast guard**, which `B8` now asserts directly with a
+      synthetic no-op step. *(Amended 2026-08-20 by NS-7b: the seam's `Random.value < 0.01f` reads like a 1%
+      sample, but `MigrateSingleRegion` runs on the ThreadPool where `Random.value` throws — so the throw lands in
+      the per-chunk catch and an armed seam faults **every** chunk. No rate, and no seed matters. `B13` pins that
+      and the accounting invariant, processed + corrupted == total.)*
 
 ### NS-7b. Historical chunk-format fixtures — the remainder of NS-7 — **Priority 1**
 

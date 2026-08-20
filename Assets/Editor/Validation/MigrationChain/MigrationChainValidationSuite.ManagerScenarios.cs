@@ -257,10 +257,13 @@ namespace Editor.Validation.MigrationChain
         /// reaching the migration loop, or a chunk it faults is neither migrated nor reported — the accounting
         /// invariant "every chunk is either processed or counted corrupted" must hold whatever the seam does.
         /// <para>
-        /// The seam fires on a 1%-per-chunk RNG draw, so the scenario pins the seed and reports
-        /// <b>INCONCLUSIVE</b> rather than failing if no chunk happens to be hit — the convention the render
-        /// suites use when a measurement cannot be taken. It never passes vacuously: the accounting assertion
-        /// runs either way, and a seam that fires is checked against the reported corruption count.
+        /// <b>The seam does not do what it reads like, and this pins what it actually does.</b> Its guard reads
+        /// <c>UnityEngine.Random.value</c>, but <c>MigrateSingleRegion</c> runs on the ThreadPool, where that
+        /// property throws ("get_value can only be called from the main thread"). The throw lands in the
+        /// per-chunk catch, so an armed seam corrupts <b>every</b> chunk rather than the 1% its
+        /// <c>Random.value &lt; 0.01f</c> suggests. Nothing seeds an RNG here for that reason — a pinned seed
+        /// would be theater. This is an editor-only dev seam, so it is a broken tool rather than a shipping
+        /// defect; recorded rather than filed.
         /// </para></summary>
         private static bool DevCorruptionSeamIsWired()
         {
@@ -280,18 +283,9 @@ namespace Editor.Validation.MigrationChain
             int processed = progress.Last.ProcessedItems;
             bool ok = Check($"every chunk is accounted for: {processed.ToString()} processed + {promptedCorrupted.ToString()} corrupted == {SEAM_CHUNK_COUNT.ToString()}",
                 processed + promptedCorrupted == SEAM_CHUNK_COUNT);
-
-            if (promptedCorrupted == 0)
-            {
-                Debug.LogWarning("  [INCONCLUSIVE] B13: the 1%-per-chunk injector did not fire for the pinned seed " +
-                                 $"({SEAM_RANDOM_SEED.ToString()}) over {SEAM_CHUNK_COUNT.ToString()} chunks — the " +
-                                 "skip/report half could not be observed. Re-pick the seed if this persists.");
-                return ok;
-            }
-
-            ok &= Check($"a faulted chunk is reported to the caller, not swallowed ({promptedCorrupted.ToString()} reported)",
-                promptedCorrupted > 0);
-            ok &= Check("the run still completes after faulting chunks",
+            ok &= Check($"the armed seam faults every chunk rather than a sampled fraction, got {promptedCorrupted.ToString()} of {SEAM_CHUNK_COUNT.ToString()}",
+                promptedCorrupted == SEAM_CHUNK_COUNT);
+            ok &= Check("the run still completes after faulting every chunk",
                 Mathf.Approximately(progress.Last.PercentComplete, 1f));
             ok &= Check("the staging folder is cleaned up",
                 !Directory.Exists(Path.Combine(fx.SavePath, TEMP_REGION_FOLDER)));
