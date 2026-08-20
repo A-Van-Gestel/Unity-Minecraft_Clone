@@ -42,6 +42,19 @@ namespace Editor.Validation.MigrationChain
     /// <b>B11</b>.</item>
     /// </list>
     /// <para>
+    /// <b>NS-7b's chunk-payload scenarios (B14–B24, K10) added five more mutations</b>, applied in two batches
+    /// with disjoint predicted red-sets; every batch reddened exactly its prediction:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>v8→v9's <c>SUNLIGHT_SHIFT</c> 16→17 → <b>B17</b>.</item>
+    /// <item>v2→v3's v1 heightmap widening zeroed → <b>B19</b>.</item>
+    /// <item>the frozen v4 fluid-id snapshot emptied → <b>B22</b>.</item>
+    /// <item>Facade re-routed from SCHEMA_NONE to KEEP_LEGACY → <b>B16, B20, B23</b> (all three arms that
+    /// depend on it, chunk and pending-mods alike).</item>
+    /// <item>v9→v10's <c>LEGACY_LIGHT_MASK</c> zeroed → <b>B18</b> only; B16 stayed green, confirming the two
+    /// guard different things.</item>
+    /// </list>
+    /// <para>
     /// That last result is a <b>coverage finding worth keeping</b>: B6/B7/B12 do NOT detect a missing manager
     /// stamp, because every shipped step also sets the version itself inside <c>MigrateLevelDat</c> — which
     /// <c>AOT_WORLD_MIGRATION_SYSTEM.md</c> §6 forbids and every step does anyway. So the manager's stamp is
@@ -81,6 +94,18 @@ namespace Editor.Validation.MigrationChain
                 new Scenario("B11: answering the corruption prompt with rollback aborts, and the caller's rollback fully restores the world", AbortRestoresTheWorld),
                 new Scenario("B12: rollback after a SUCCESSFUL migration restores the original level.dat and every chunk", RollbackAfterSuccessRestoresOriginal),
                 new Scenario("B13: the dev corruption injector reaches the migration loop, and every chunk stays accounted for", DevCorruptionSeamIsWired),
+                new Scenario("B14: the authored chunk-format v1/v2 fixture matches the layout the steps read, and a truncated one is rejected", ChunkFixtureIntegrity),
+                new Scenario("B15: every chunk-format step writes its declared version byte, and the chain terminates at the current format", ChunkChainPerStepVersions),
+                new Scenario("B16: the migrated payload is readable by the production deserializer with every seeded probe intact", ChunkChainOutputIsReadable),
+                new Scenario("B17: legacy per-voxel light bits are lifted into the per-section LightData array", LegacyLightIsLiftedIntoLightData),
+                new Scenario("B18: v9→v10 clears the now-reserved legacy light bits without disturbing the id", LegacyLightBitsAreStripped),
+                new Scenario("B19: the v1 byte-per-column heightmap widens to ushorts with its values intact", V1HeightmapWidening),
+                new Scenario("B20: ConvertLegacyMeta's shipped schema table is pinned arm by arm", ConvertLegacyMetaTableIsPinned),
+                new Scenario("B21: the REAL manager applies the chunk-format chain to a v2 world and the chunk still loads", RealManagerAppliesChunkFormatChain),
+                new Scenario("B22: pending_mods v4→v5 collapses orientation+fluid into one meta byte, keyed off the frozen v4 fluid ids", PendingModsV4ToV5),
+                new Scenario("B23: pending_mods v5→v6 re-encodes meta per schema and agrees with the per-voxel converter", PendingModsV5ToV6),
+                new Scenario("B24: the v1→v2 repack recovers each chunk index from its broken address and rewrites it at the correct one", RegionRepackMovesChunksToCorrectAddresses),
+                new Scenario("K10: a migrated v1 world's chunks are readable rather than regenerated from seed", V1WorldChunksSurviveMigration, "SERIALIZATION_BUGS §10"),
             };
             return ValidationSuiteRunner.Execute("Migration Chain", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }

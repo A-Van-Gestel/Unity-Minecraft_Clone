@@ -749,10 +749,18 @@ you touch this file:
   because each shipped step also sets the version inside `MigrateLevelDat` — the thing this section forbids two
   paragraphs above. Both halves stay as they are: the rule is right for new steps, and rewriting a shipped step's
   output is forbidden regardless.
-- **The chunk-payload steps are still untested.** Of the fourteen numbered steps, the seven `level.dat`-only ones are
-  covered; the five that rewrite the chunk payload (v2→v3, v5→v6, v7→v8, v8→v9, v9→v10), the two `pending_mods`
-  steps, and the v1→v2 region-layout restructure are not — they need a historical chunk-format fixture writer per
-  era. Tracked as `NS-7b` in [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md).
+- **Every numbered step now has coverage, but read what kind.** The chunk-payload rewrites are driven from an
+  authored chunk-format **v1/v2** fixture, and one fixture is enough for all five: the manager re-reads the version
+  byte between steps, so a single payload walks v3 → v4 → v5 → v6 → v7. The fixture's *input* layout is derived from
+  the steps' own read definitions, so it cannot catch a step that has always misread its input; the *output* is
+  validated by the real `ChunkSerializer.Deserialize`, which is independent of the fixture.
+- **A v1 world does not get its chunks format-migrated at all.** `RunAOTMigrationAsync` treats the region-layout
+  branch and the per-chunk format branch as mutually exclusive, and `MigrationV1ToV2RegionRepack` is the only step
+  that requests a layout migration — so a v1 world is repacked to correct addresses while its payloads stay
+  chunk-format v1/v2, inside a world stamped current. See
+  [`../Bugs/SERIALIZATION_BUGS.md`](../Bugs/SERIALIZATION_BUGS.md) **§10**, reproduced (expected red) by the suite's
+  `K10`. **Do not "fix" this casually** — the proposed shapes and their trade-off are recorded in that entry, and it
+  needs an in-game load of a real old save.
 
 **A step that REMOVES a field must mirror the whole target shape in its DTO.** Up to v14 every `level.dat` step was additive, so an incomplete DTO was merely lossy in theory. `MigrationV14ToV15TimeOfDay` is the first removal (`worldState.timeOfDay` → `worldState.time`): whatever its `V15LevelDat` omits is dropped from every migrated document, because the step re-serializes from the DTO.
 

@@ -1,10 +1,10 @@
 # Validation Suite Coverage Roadmap — Uncovered Systems, Ranked
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** 2026-07-02  
-**Status:** **Living backlog.** `NS-4`, `NS-5` and `NS-7` are ✅ complete (NS-4 2026-08-03; NS-5 at the CP-2
-close-out; NS-7 2026-08-20, for the `level.dat` chain and the manager's orchestration — its historical
-chunk-format remainder is filed as `NS-7b`) and `NS-1` is partially seeded (CP-3's robustness slice); `NS-2`,
+**Status:** **Living backlog.** `NS-4`, `NS-5`, `NS-7` and `NS-7b` are ✅ complete (NS-4 2026-08-03; NS-5 at the CP-2
+close-out; NS-7 and NS-7b both 2026-08-20 — the migration chain is now covered end to end, and NS-7b's first
+run found `SERIALIZATION_BUGS` §10) and `NS-1` is partially seeded (CP-3's robustness slice); `NS-2`,
 `NS-3`, `NS-6` and `NS-8`…`NS-11` remain proposals. Existing-coverage
 counts are re-verified against a real `Validate All` run each time they are touched.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -17,11 +17,10 @@ counts are re-verified against a real `Validate All` run each time they are touc
 > and it is concentrated in the systems below.
 >
 > Status: **Living backlog.** NS-1 is partially seeded (CP-3's robustness slice, 2026-07-22); NS-5 ✅
-> (CP-2 close-out, 2026-07-22), NS-4 ✅ (2026-08-03) and NS-7 ✅ (2026-08-20, remainder split off as
-> NS-7b) are complete — see the per-item status lines; the rest are proposals.
+> (CP-2 close-out, 2026-07-22), NS-4 ✅ (2026-08-03) and NS-7 + NS-7b ✅ (both 2026-08-20) are complete — see the per-item status lines; the rest are proposals.
 
-**Existing coverage (for contrast, counts verified 2026-08-20 against a `Validate All` run — 517 baselines / 23 suites, all green):** Lighting (106 — the last seven are the fidelity **C14** mixed-channel mirrors B108–B114), Meshing (57 — including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
-**light** maps), Behavior/fluid tick (17, incl. determinism gates), Placement (29 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (26 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19, its promoted repro B20–B23, `PH-1`'s step-0 horizontal-aggregation guard B24 and its gather-envelope guard B25, and `PH-2`'s B26 pinning that `CalculateVelocity` never writes the transform)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (56), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (9), **Migration Chain (13 — NS-7)**, Spawn (10), Command Console (56), Voxel Occlusion (6), Sky & Celestial (15), Sky Render (11), World Clock (10), UI Blur Render (5), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` tests (the `ChunkRelativePosition` tests are no longer standalone — they are the Chunk Math suite's `.ChunkRelativePosition.cs` partial).
+**Existing coverage (for contrast, counts verified 2026-08-20 against a `Validate All` run — 528 baselines / 23 suites, all green, 1 known-bug repro outstanding):** Lighting (106 — the last seven are the fidelity **C14** mixed-channel mirrors B108–B114), Meshing (57 — including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
+**light** maps), Behavior/fluid tick (17, incl. determinism gates), Placement (29 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (26 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19, its promoted repro B20–B23, `PH-1`'s step-0 horizontal-aggregation guard B24 and its gather-envelope guard B25, and `PH-2`'s B26 pinning that `CalculateVelocity` never writes the transform)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (56), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (9), **Migration Chain (24 — NS-7 + NS-7b, plus the `K10` repro of `SERIALIZATION_BUGS` §10)**, Spawn (10), Command Console (56), Voxel Occlusion (6), Sky & Celestial (15), Sky Render (11), World Clock (10), UI Blur Render (5), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` tests (the `ChunkRelativePosition` tests are no longer standalone — they are the Chunk Math suite's `.ChunkRelativePosition.cs` partial).
 
 **Build protocol for every suite below:** the `validation-driven-bugfix` skill (deterministic repro first, prove-red before trusting green, promote repros to baselines). New suites should land on the shared `ValidationSuiteRunner` (`VS-1`, ✅ shipped 2026-07-08): register `Scenario`s and return its `ValidationRunResult` from a headless `Execute()`, with a thin `[MenuItem]` wrapper. All suites stay on the custom validation framework: migrating to the Unity Test Framework was evaluated 2026-07-02 and rejected (see the status header in
 [`../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md`](../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md)); the CI/coverage/XML gaps close via the VS-2 extensions instead.
@@ -29,9 +28,9 @@ counts are re-verified against a real `Validate All` run each time they are touc
 
 
 **Audited:** 2026-07-02 (seventh-pass audit), counts re-verified 2026-08-20 against a `Validate All`
-run — **517 baselines / 23 suites, 0 failures, 0 known-bug repros outstanding** (the eighth-pass audit below
-recorded 497; the fidelity **C14** mixed-channel mirrors B108–B114 took it to 504, and NS-7's Migration Chain
-suite added the last 13). The audit found the then-six suites architecturally sound, so the
+run — **528 baselines / 23 suites, 0 failures, 1 known-bug repro outstanding** (`K10`, `SERIALIZATION_BUGS` §10).
+The eighth-pass audit below recorded 497; the fidelity **C14** mixed-channel mirrors B108–B114 took it to 504,
+NS-7's Migration Chain suite added 13, and NS-7b's chunk-payload scenarios added the last 11. The audit found the then-six suites architecturally sound, so the
 `VS-*` items it produced are operational only; the residual risk it identified is *coverage*, which is
 what this document ranks.
 
@@ -228,6 +227,28 @@ what this document ranks.
   steps (16-byte entries); and a v1 region fixture with mis-scaled addresses for the repack.
 - **Effort:** 🟡–🔴 — the builders are the cost; the harness, fixture and manager plumbing already exist in the
   parent suite.
+- **Status (2026-08-20): ✅ COMPLETE** — shipped into the existing Migration Chain suite as `B14`–`B24` plus the
+  known-bug repro `K10` (suite 13 → **24 baselines + 1 repro**; still 23 registered suites). All five chunk-payload
+  rewrites, both `pending_mods` steps and the v1→v2 region repack now have byte-level coverage.
+    - **The fixture cost was over-estimated 5×.** This item asked for "one frozen fixture builder per chunk era
+      (v1/v2 → v3 → v4 → v5 → v6)". Only **one** builder is needed: the manager re-reads the version byte between
+      steps, so a single authored chunk-format v1/v2 payload walks the whole chain (v2→v3 writes 3, v5→v6 writes 4,
+      v7→v8 writes 5, v8→v9 writes 6, v9→v10 writes 7). Pinned by a SHA-256 golden hash rather than an embedded
+      byte blob.
+    - **The output-side circularity this item warned about is closed.** `ChunkSerializer.Deserialize` is public and
+      accepts `CompressionAlgorithm.None`, so the migrated payload is validated by the **production reader**
+      (`B16`), independent of anything authored in the fixture. The limit now applies to the *input* layout only —
+      a step that has always misread its input is still undetectable, and the fixture says so.
+    - **`pending_mods` record sizes, corrected:** the v4 record is **16 bytes** (3×int32 + ushort + orientation +
+      fluid) and the v5 record is **15**. This item's "16-byte entries" was right for the v4 side.
+    - **Prove-red:** five mutations in two disjoint batches, each reddening exactly its predicted set —
+      `{B17, B19, B22}` and `{B16, B18, B20, B23}`. The map lives in the suite's class docstring.
+    - **It found a real bug on its first run.** `K10` reproduces **[`../Bugs/SERIALIZATION_BUGS.md`](../Bugs/SERIALIZATION_BUGS.md) §10**:
+      `RunAOTMigrationAsync` treats the region-layout branch and the per-chunk format branch as mutually
+      exclusive, and v1 is the only world version whose path contains a layout step — so a **v1 world is repacked
+      but never format-migrated**, leaving chunk-format v1/v2 payloads in a world stamped current. Every chunk
+      then fails the version check and regenerates from seed. Filed, not fixed: the fix touches shipped migration
+      orchestration and needs an in-game load of a real old save.
 
 ---
 
@@ -280,7 +301,7 @@ what this document ranks.
 
 ## Deliberate: not every menu-item suite belongs in `Validate All`
 
-`ValidationSuiteRegistry` carries **22** registered suites, pinned by `ExpectedSuiteCount` and guarded
+`ValidationSuiteRegistry` carries **23** registered suites, pinned by `ExpectedSuiteCount` and guarded
 by `ValidationFrameworkSelfTest.RegistryMeetsExpectedCount` (which reds if a suite is *dropped*) and by
 the aggregate runner's and `ValidationSuiteCI`'s count check. Some validation entry points intentionally
 sit **outside** that registry and therefore outside `Validate All` and CI:
@@ -319,8 +340,8 @@ using the §2 scenario table as its baseline list.
 but measured rather than projected (12 of 14 migration steps untested *today*), and it should be built as
 `NS-1` part 6 rather than as a separate suite.~~ — `NS-7` ✅ **landed 2026-08-20** as its own suite rather than an
 `NS-1` partial: its fixtures are whole migrated *worlds* on disk, which does not fit the load-boundary charter of
-`Validate Deserialization Robustness`. The seven `level.dat`-only steps are covered; the remainder is `NS-7b`,
-which is now the top-priority unbuilt item alongside `NS-1` parts 1–5. `NS-8`'s continuity half is the cheapest item in this document
+`Validate Deserialization Robustness`. `NS-7b` closed the chunk-payload remainder the same day, so `NS-1` parts 1–5 is now the top-priority
+unbuilt item. `NS-8`'s continuity half is the cheapest item in this document
 and needs none of `NS-2`'s frozen-fixture machinery, so it can land **before** `NS-2` and give the generator
 its first gate of any kind. `NS-9` and `NS-10` are fixture-and-scenario work inside suites that already exist —
 they ride along with whatever next touches those systems, exactly as `NS-5`/`NS-6` do. `NS-11` is
@@ -335,6 +356,22 @@ infrastructure hygiene: do (1) and (2) with the next framework change, and treat
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.3** *(2026-08-20)* - **`NS-7b` COMPLETE — and it found a real bug on its first run.** The chunk-payload
+  remainder shipped into the existing Migration Chain suite as `B14`–`B24` plus the known-bug repro `K10`
+  (13 → **24 baselines + 1 repro**; census **517 → 528**, still 23 suites). All five chunk-format rewrites, both
+  `pending_mods` steps and the v1→v2 region repack now have byte-level coverage. **`K10` reproduces
+  `SERIALIZATION_BUGS` §10**: `RunAOTMigrationAsync` treats the region-layout and per-chunk-format branches as
+  mutually exclusive, and v1 is the only world version whose path contains a layout step — so a v1 world is
+  repacked but never format-migrated, and every chunk fails the version check and regenerates from seed. Filed,
+  not fixed. Three corrections to what `NS-7b` claimed: (1) it asked for one fixture builder **per chunk era**,
+  but one suffices — the manager re-reads the version byte between steps, so a single v1/v2 payload walks the
+  whole chain; (2) the output-side circularity it warned about is **closed**, because `ChunkSerializer.Deserialize`
+  is public and takes `CompressionAlgorithm.None`, making the production reader the oracle — the limit now applies
+  to the input layout only; (3) its "16-byte entries" for `pending_mods` was **correct** for the v4 record (the v5
+  record is 15). Also corrected from the NS-7 close-out: `Dev.simulateMigrationCorruption` does **not** sample at
+  1% — its `Random.value` read throws on the worker thread `MigrateSingleRegion` runs on, so an armed seam faults
+  *every* chunk; `B13` now pins that instead of a seeded RNG. Prove-red: five mutations in two disjoint batches,
+  each reddening exactly `{B17, B19, B22}` and `{B16, B18, B20, B23}`.
 * **v1.2** *(2026-08-20)* - **`NS-7` COMPLETE for the `level.dat` chain and the manager's orchestration**, shipped as
   `Minecraft Clone/Dev/Validate Migration Chain` (13 baselines, `Assets/Editor/Validation/MigrationChain/`), the
   **first coverage `MigrationManager` has had of any kind**. Registered as the 23rd suite (`ExpectedSuiteCount`
@@ -414,6 +451,6 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-20 (NS-7 shipped: `Validate Migration Chain`, 13 baselines, census re-verified at **517 baselines / 23 suites, all green**; the historical chunk-format remainder filed as `NS-7b`. Previously: 2026-08-19 eighth-pass audit: `NS-7`…`NS-11` added, plus the deliberate-exclusion section for entry points kept out of `ValidationSuiteRegistry`; census re-verified against a `Validate All` run at **497 baselines / 22 suites, all green** — matching the 2026-08-17 release notes; superseded later the same day by the C14 mirrors B108–B114, taking Lighting 99 → 106 and the total to **504**)  
+**Last Updated:** 2026-08-20 (NS-7 **and** NS-7b shipped: `Validate Migration Chain`, 24 baselines + the `K10` repro of `SERIALIZATION_BUGS` §10, census re-verified at **528 baselines / 23 suites, all green**. Previously: 2026-08-19 eighth-pass audit: `NS-7`…`NS-11` added, plus the deliberate-exclusion section for entry points kept out of `ValidationSuiteRegistry`; census re-verified against a `Validate All` run at **497 baselines / 22 suites, all green** — matching the 2026-08-17 release notes; superseded later the same day by the C14 mirrors B108–B114, taking Lighting 99 → 106 and the total to **504**)  
 **Next Review:** whenever a suite is added or a `Validate All` count changes — the existing-coverage
 paragraph is the one part of this document that goes stale silently.

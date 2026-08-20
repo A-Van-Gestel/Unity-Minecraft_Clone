@@ -119,3 +119,51 @@ which is the intended signal).
 `LoadedSave` arm and falls through to `Fresh` — but it is a behavior change in the save-loading path and wants its
 own decision: silently spawning fresh discards a possibly-recoverable world, so surfacing the failure to the player
 (rather than treating a corrupt save as a new world) is likely the better contract.
+
+---
+
+## 10. A v1 world is repacked but never format-migrated — every chunk regenerates from seed
+
+**Severity:** Bug (silent total data loss, scoped to v1 worlds)  
+**Confidence:** High (mechanism verified by code inspection; reproduced by the Migration Chain suite's `K10`)  
+**Files:** `MigrationManager.cs` — `RunAOTMigrationAsync` (the `needsLayoutMigration` branch), `Migration_v1_to_v2_RegionRepack.cs` — `PerformRegionLayoutMigration` / `ProcessOldRegionFile`
+
+`RunAOTMigrationAsync` chooses **one** of two region strategies:
+
+```csharp
+bool needsLayoutMigration = migrationPath.Any(s => s.RequiresRegionLayoutMigration);
+if (!Directory.Exists(regionPath))        { /* skip */ }
+else if (needsLayoutMigration)            { /* PerformRegionLayoutMigration + directory swap */ }
+else                                      { /* the per-chunk MigrateChunk format chain */ }
+```
+
+The two branches are mutually exclusive, and `MigrationV1ToV2RegionRepack` is the only step that sets
+`RequiresRegionLayoutMigration`. So for a **v1** world — the only version whose migration path contains that step —
+the `else` branch never runs and **the chunk-format chain is skipped entirely**. `ProcessOldRegionFile` only
+decompresses, recompresses and rewrites at the corrected address; its own summary says so ("The chunk binary payload
+is unchanged — only the addressing is corrected").
+
+The result is a world stamped `v15` on disk whose chunk payloads are still **chunk-format v1/v2**. On load,
+`ChunkSerializer.Deserialize` reads a version byte of 1 or 2, takes the wrong-version path (the one
+`Validate Deserialization Robustness` **B4** pins as "→ null, no throw"), and returns null for every chunk — so the
+engine regenerates the whole world from seed. Every player edit is gone, and the pre-migration backup has already
+been rotated by the time it is noticeable.
+
+**Not reachable from v2 or later.** A world at v2–v9 has no layout step in its path, so it takes the `else` branch
+and its chunks *are* format-migrated correctly. The defect is specific to world version 1.
+
+**Live blast radius is probably zero, but the code path is real.** No v1 save is known to survive on this machine
+(the oldest backups present are v6), and any v1 world migrated before this was found would already have lost its
+chunks. That is why this is filed rather than hot-fixed.
+
+**Repro:** `Minecraft Clone/Dev/Validate Migration Chain` → `K10` (a complete v1 fixture world — v1 `level.dat`,
+`pending_mods`, and region files at the historically broken V1 addresses — migrated to current, then every chunk
+read back through the real `ChunkSerializer.Deserialize`). It asserts the chunks are *readable*, which is the
+correct post-migration contract, and is therefore expected **red** until this is fixed.
+
+**Proposed fix (undecided — do not apply without a decision):** run the format chain over the repacked chunks. Two
+shapes, and the choice matters: either `PerformRegionLayoutMigration` receives the remaining `migrationPath` and
+applies `MigrateChunk` as it rewrites each payload, or the manager stops treating the branches as exclusive and runs
+the format loop over the swapped-in region folder afterwards. The second is less invasive to the step contract but
+walks every chunk twice. Either way this touches shipped migration orchestration and needs an in-game load of a real
+old save before it can be trusted — `K10` going green is necessary, not sufficient.
