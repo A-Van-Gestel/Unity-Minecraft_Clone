@@ -125,7 +125,9 @@ own decision: silently spawning fresh discards a possibly-recoverable world, so 
 ## 10. A v1 world is repacked but never format-migrated — every chunk regenerates from seed
 
 **Severity:** Bug (silent total data loss, scoped to v1 worlds)  
-**Confidence:** High (mechanism verified by code inspection; reproduced by the Migration Chain suite's `K10`)  
+**Confidence:** Mechanism High **in current `HEAD`** (verified by code inspection; reproduced by the Migration
+Chain suite's `K10`). **Whether it was ever shipped working is OPEN** — see "Unresolved: was this always
+broken?" below, which must be settled before any fix is designed.  
 **Files:** `MigrationManager.cs` — `RunAOTMigrationAsync` (the `needsLayoutMigration` branch), `Migration_v1_to_v2_RegionRepack.cs` — `PerformRegionLayoutMigration` / `ProcessOldRegionFile`
 
 `RunAOTMigrationAsync` chooses **one** of two region strategies:
@@ -160,6 +162,41 @@ chunks. That is why this is filed rather than hot-fixed.
 `pending_mods`, and region files at the historically broken V1 addresses — migrated to current, then every chunk
 read back through the real `ChunkSerializer.Deserialize`). It asserts the chunks are *readable*, which is the
 correct post-migration contract, and is therefore expected **red** until this is fixed.
+
+### Unresolved: was this always broken, or is it a regression? *(open question, 2026-08-20)*
+
+**The project owner recalls the v1→v2 migration working correctly**, but a long time ago — before the
+Migration Chain suite existed and before several serialization changes landed. So the branch structure above
+may be a **regression introduced after the repack step was written**, not an original defect. Nothing in this
+entry settles that, and the answer changes the fix: a regression is reverted, an original defect is designed
+around.
+
+Established at `HEAD` (do not re-derive): the two region strategies are mutually exclusive, `v1→v2` is the
+only step setting `RequiresRegionLayoutMigration`, `ProcessOldRegionFile` does not format-migrate, and `K10`
+observes 0 of 2 chunks readable after migrating an authored v1 world.
+
+**Not established — the actual open questions:**
+
+1. **Was the branch ever non-exclusive?** `MigrationManager.cs` has ~28 commits (first `2834a572`
+   2026-02-10 "Initial rework of the save system", most recent `e6181f2d` 2026-08-10). Two leads worth
+   walking: `Migration_v1_to_v2_RegionRepack.cs` was authored `0865f6cb` (2026-02-28, "Broken region file
+   usage leading to max 4 sections being used per region file"), and it was last touched by `07609bdd`
+   (2026-07-22, the CP-3 commit — which also touched `MigrationManager.cs` and whose message mentions
+   "migration fault isolation"). Read the region-branch structure as it stood at the repack's authoring
+   commit and diff it forward.
+2. **Did some other mechanism upgrade v1 chunk payloads at the time?** A historical load-time/lazy format
+   upgrade in `ChunkSerializer` or `ChunkStorageManager` would make this a non-bug for the era it shipped in.
+   Today `Deserialize` hard-rejects a wrong version byte (pinned by `Validate Deserialization Robustness`
+   **B4**), but that contract is itself CP-3-era.
+3. **Is `K10`'s fixture faithful to a real v1 world?** Its chunk payload is authored from the migration
+   steps' own inline read definitions (the only surviving record of the layout) — see the limits documented
+   in `MigrationChainValidationSuite.ChunkFixture.cs`. If a real v1 world differed in any way that changes
+   which branch runs, `K10` could be reproducing a fixture artifact rather than the shipped defect.
+
+**What would settle it:** a git-archaeology pass over `MigrationManager.cs`'s region-branch structure across
+the range above, answering "at the commit where the repack shipped, did a v1 world's chunks get
+format-migrated?" — plus, if a genuine v1-era save can be located, one real load. Until then treat the
+severity as conditional.
 
 **Proposed fix (undecided — do not apply without a decision):** run the format chain over the repacked chunks. Two
 shapes, and the choice matters: either `PerformRegionLayoutMigration` receives the remaining `migrationPath` and
