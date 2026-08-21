@@ -20,9 +20,22 @@ namespace Editor.Validation.SerializationRoundTrip
     /// <para><b>Fixture independence.</b> The fixture palette uses test-local voxel ids rather than
     /// <c>BlockIDs</c> constants — this suite pins serialized bytes, so it must not move when
     /// <c>BlockDatabase.asset</c> is re-authored. See the palette block in the <c>.Fixture.cs</c> partial.</para>
-    /// <para><b>Prove-red:</b> recorded per part as each lands; a baseline nobody has observed failing proves
-    /// nothing. Part 1: making <c>WriteSection</c> always emit flag 0x01 must red the flag-classification
-    /// scenarios while leaving the accessor-level round-trip green (which is exactly why both exist).</para>
+    /// <para><b>Prove-red is recorded, not assumed.</b> Every baseline here was authored against shipped code,
+    /// so each was observed failing under a deliberate engine mutation (applied in isolation, then reverted):</para>
+    /// <list type="bullet">
+    /// <item><description><c>WriteSection</c> always taking the full-LightData arm (every voxel section emitted
+    /// as flag 0x01) → <c>{B1}</c>.</description></item>
+    /// <item><description><c>ReadChunkInternal</c> discarding the flag-0x00 uniform-sky byte instead of storing
+    /// it → <c>{B2, B4, B5}</c>; B1 and B3 stay green (B1 only exercises the writer; B3 asserts the 0x02 path).</description></item>
+    /// <item><description><c>ReadChunkInternal</c> materializing a pooled section for a flag-0x02 compact
+    /// section instead of storing the sky byte → <c>{B3}</c> only.</description></item>
+    /// </list>
+    /// <para><b>Two findings worth carrying.</b> (1) B2's accessor-level compare cannot see WHICH of the four
+    /// encodings the writer chose — B1/B4 own that, which is why both exist. (2) B4's byte-identity compare
+    /// does <b>not</b> detect a reader that materializes compact sections: the writer re-compacts them on the
+    /// way out, so the bytes match anyway. <b>B3 is the sole guard</b> of the compact-section contract, and the
+    /// cost it guards is real — a materialized section is 8 KB of pooled <c>LightData</c> for something the
+    /// format stores in 2 bytes.</para>
     /// </summary>
     public static partial class SerializationRoundTripValidationSuite
     {
@@ -42,6 +55,10 @@ namespace Editor.Validation.SerializationRoundTrip
             List<Scenario> scenarios = new List<Scenario>
             {
                 new Scenario("B1: fixture integrity — the reference chunk exercises all four section flags, and data-less sections are excluded", FixtureCoversEverySectionFlag),
+                new Scenario("B2: round-trip identity — every persisted field survives serialize → deserialize", RoundTripPreservesEveryPersistedField),
+                new Scenario("B3: non-persisted state is re-derived on load, and data-less sections are not materialized", RoundTripReDerivesNonPersistedState),
+                new Scenario("B4: re-serializing a reloaded chunk reproduces the original bytes and flag map", ReSerializationIsByteIdentical),
+                new Scenario("B5: randomized chunks round-trip identically and re-serialize byte-identically", FuzzChunksRoundTripIdentically),
             };
             return ValidationSuiteRunner.Execute("Serialization Round-Trip", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
