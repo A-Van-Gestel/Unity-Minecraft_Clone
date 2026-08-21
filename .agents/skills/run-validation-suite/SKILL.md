@@ -78,12 +78,27 @@ call. Route it accordingly:
 
 | Want | Do |
 |---|---|
-| The full aggregate | Run `Minecraft Clone/Dev/Validate All` **from the Editor menu**, read the summary from `Logs/Editor.log` |
+| The full aggregate, agent-driven | **Schedule it, don't run it in the call** (recipe below) |
+| The full aggregate, by hand | `Minecraft Clone/Dev/Validate All` from the Editor menu |
 | A fast agent-side sweep | `Unity_RunCommand` over the registry **skipping `"Lighting Engine"`** (~6 s, safely inside the window) |
-| Lighting specifically | Its own menu run, or accept the ~182 s cost outside MCP |
 
-The same budget applies to any long `Unity_RunCommand` (fuzz sweeps, multi-suite loops): keep each
-call well under the window, or drive it from a menu item instead.
+**Schedule-and-poll recipe** — the reliable way to drive anything long from an agent. The
+`Unity_RunCommand` returns immediately; the work runs on the editor's update loop, outside any request
+window:
+
+```csharp
+EditorApplication.delayCall += () =>
+{
+    AggregateRunResult agg = ValidationSuiteAggregateRunner.Run(false);
+    Debug.Log("[CENSUS] suites=" + agg.Suites.Count + " baselines=" + …);   // one marker line
+};
+result.Log("scheduled");
+```
+
+Then poll the editor log for `[CENSUS]`. **Resolve the log by newest write time** — it is usually
+`<project>/Logs/Editor.log` but some sessions write only `%LOCALAPPDATA%\Unity\Editor\Editor.log`; a
+frozen log looks exactly like a job that never started. Use `Get-Content -Tail N` (that file reaches GB
+scale). The same budget and recipe apply to any long `Unity_RunCommand` — fuzz sweeps, multi-suite loops.
 
 **Batch / headless / CI.** `ValidationSuiteCI.RunHeadless` is the `-executeMethod` target:
 
