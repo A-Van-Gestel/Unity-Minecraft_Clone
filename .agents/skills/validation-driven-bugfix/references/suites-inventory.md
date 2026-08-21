@@ -1,9 +1,14 @@
 # Validation Suites — Inventory & Routing
 
-Companion reference for the `validation-driven-bugfix` skill: every editor validation suite under
-`Assets/Editor/Validation/`, what it guards, and its entry points. Use this to route a bugfix or
-refactor to the right suite. Baseline counts and scenario IDs drift — read the suite's runner and
-`.Baseline.cs` files for the current set; this inventory names only the stable structure.
+Companion reference for the `validation-driven-bugfix` skill: what each editor validation suite under
+`Assets/Editor/Validation/` guards, and its entry points. Use this to route a bugfix or refactor to
+the right suite. Baseline counts and scenario IDs drift — read the suite's runner and `.Baseline.cs`
+files for the current set; this inventory names only the stable structure.
+
+**The authoritative list of registered suites is `Validation/Framework/ValidationSuiteRegistry.cs`**
+(one line per suite, pinned by `ExpectedSuiteCount`) — read it when you need *every* suite. The
+sections below cover the suites with structure worth describing before you open them; a suite absent
+here is not a suite that does not exist.
 
 Deep-dive walkthroughs exist for the two reference implementations:
 [lighting-suite.md](lighting-suite.md) (bug-repro emphasis) and
@@ -21,6 +26,19 @@ output, baseline vs known-bug semantics).
 | **Placement**      | `Placement/`                             | `Validate Placement`                   | Player placement decision (`PlacementController`/`PlacementResolver` tag logic)         |
 | **MeshQueue**      | `MeshQueue/`                             | `Validate Mesh Build Queue`            | MT-1 `MeshBuildQueue` contract (dedup, ordering, immediate-promotion)                   |
 | **LightScheduler** | `LightScheduler/`                        | `Validate Light Work Scheduler`        | MT-2 `LightWorkScheduler` ready/waiting split, promotion events, `PromoteAll` fail-safe |
+
+The three storage-boundary suites split one system by contract, so route a save/load fix by which
+contract it breaks — they share `Framework/StorageValidationFixture` (stub `World.Instance` +
+volatile-path `ChunkStorageManager` + seam disarm):
+
+| Suite | Location | Menu item (`Minecraft Clone/Dev/`) | Owns |
+|---|---|---|---|
+| **Save Durability** | `SaveDurability/` | `Validate Save Durability` | CP-6 retry/staging: fault → surfaced result, snapshot owned by the retry registry, quit/Dispose flush |
+| **Deserialization Robustness** | `DeserializationRobustness/` | `Validate Deserialization Robustness` | CP-3 load-boundary failure paths: truncated/garbage/wrong-version → null, no throw, no pooled leak; fault ≠ "not on disk" |
+| **Serialization Round-Trip** | `SerializationRoundTrip/` | `Validate Serialization Round-Trip` | NS-1 format fidelity: round-trip identity, the four v7 section-flag encodings, golden payload bytes, the compression matrix |
+
+Folder ≠ namespace leaf for the round-trip suite on purpose: `Editor.Validation.Serialization` would
+shadow the production `Serialization` namespace for every file under `Editor.Validation.*`.
 
 Additional standalone menu items: the Lighting suite has separate generation-fuzz runners
 (`Validate Lighting Engine (Bug 05 Canopy Fuzz)` / `(Bug 09 Geometry Fuzz)`); the Behavior folder

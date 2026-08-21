@@ -34,12 +34,14 @@ The `_fileLock` works correctly to prevent save data corruption but adds massive
 
 ## 04. Fixed 256 KB serialization buffer can overflow on dense chunks with large pending light queues
 
-**Severity:** Bug (silent data loss)  
-**Confidence:** High (mechanism verified by code inspection; likelihood in normal play is low–medium)  
-**Files:** `SerializationBufferPool.cs` (BUFFER_SIZE), `ChunkSerializer.cs` — `Serialize`, `WriteChunkInternal`, `WriteLightQueue`, `ChunkStorageManager.cs` — `SaveChunk` / `SaveChunkAsync`
+**Severity:** Bug (data loss)  
+**Confidence:** High (mechanism **reproduced**, 2026-08-21 — no longer inspection-only; likelihood in normal play is low–medium)  
+**Files:** `SerializationBufferPool.cs` (BUFFER_SIZE), `ChunkSerializer.cs` — `Serialize`, `WriteChunkInternal`, `WriteLightQueue`, `ChunkStorageManager.cs` — `SaveChunk` / `SaveChunkAsync`  
+**Repro:** `K04` in `Minecraft Clone/Dev/Validate Serialization Round-Trip` (NS-1). A dense chunk (8 sections × flag 0x01) with 2,500 nodes in each BFS queue, saved under `CompressionAlgorithm.None`. The scenario carries a control leg — the same chunk with 100-node queues — which passes, so the failure is attributable to the queue size rather than to the fixture.
 
-`ChunkSerializer.Serialize` writes into a **non-expandable** `MemoryStream(outputBuffer)` over a pooled fixed 256 KB buffer. The worst-case uncompressed chunk payload is ~197 KB (8 sections × flag 0x01 = voxels 16 KB + LightData 8 KB each, plus header/heightmap/bitmask), leaving only ~65 KB of headroom. The pending BFS light queues are serialized **without any count cap** at 16 bytes per node — roughly **4,000 queued nodes across both queues exhaust the buffer**. When that happens, `MemoryStream` throws `NotSupportedException`, the exception is caught
-and logged in `SaveChunk`/`SaveChunkAsync`, and the chunk is **silently not saved** (reverts to its last saved state, or regenerates, on next load).
+`ChunkSerializer.Serialize` writes into a **non-expandable** `MemoryStream(outputBuffer)` over a pooled fixed 256 KB buffer. The worst-case uncompressed chunk payload is ~197 KB (8 sections × flag 0x01 = voxels 16 KB + LightData 8 KB each, plus header/heightmap/bitmask), leaving only ~65 KB of headroom. The pending BFS light queues are serialized **without any count cap** at 16 bytes per node — roughly **4,000 queued nodes across both queues exhaust the buffer**. When that happens, `MemoryStream` throws `NotSupportedException` (*"Memory stream is not expandable."*), which `SaveChunkAsync` maps to `ChunkSaveResult.Failed`.
+
+**Corrected 2026-08-21 by the `K04` repro:** the outcome is no longer the silent drop this entry originally described — CP-6's durability layer catches the throw and stages the chunk in the retry registry. But the fault is *deterministic* (the buffer is always 256 KB), so every retry fails identically, and the observed end state is the retry loop exhausting into `Dispose`'s final flush, which logs **"this session's edits to that chunk are lost"**. Same data loss, reached through retry exhaustion rather than a swallowed exception — and it is `Failed` (retryable) rather than `FailedPermanent`, so the doomed chunk occupies the retry loop for the whole session.
 
 Most realistic trigger: chunks at the edge of the load area accumulate queue entries via `ModifyVoxel` (each edit enqueues ~7 nodes) while their lighting job can't run (`AreNeighborsDataReady` false), then an autosave fires. `CompressionAlgorithm.None` removes the compression safety margin entirely.
 
