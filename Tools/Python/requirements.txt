@@ -11,3 +11,8 @@
 #   Verified against numpy 2.5.2. Any 1.24+ works: these scripts rely only on IEEE-754
 #   binary32 semantics, which are stable across versions.
 numpy>=1.24
+
+# lz4 — decodes LZ4-frame chunk payloads straight out of region files.
+#   Needed by: inspect_save_chunks.py (optional — Deflate and None saves read on the stdlib alone,
+#   which covers the oldest worlds; without this package LZ4 saves report "undecodable").
+lz4>=4.0
