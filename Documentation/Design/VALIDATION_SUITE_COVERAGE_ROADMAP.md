@@ -4,7 +4,8 @@
 **Date:** 2026-07-02  
 **Status:** **Living backlog.** `NS-4`, `NS-5`, `NS-7` and `NS-7b` are ✅ complete (NS-4 2026-08-03; NS-5 at the CP-2
 close-out; NS-7 and NS-7b both 2026-08-20 — the migration chain is now covered end to end, and NS-7b's first
-run found `SERIALIZATION_BUGS` §10) and `NS-1` is partially seeded (CP-3's robustness slice); `NS-2`,
+run found `SERIALIZATION_BUGS` §10, fixed 2026-08-21 and archived as `_FIXED_BUGS.md` Serialization 07, its `K10`
+repro promoted to baseline `B25`) and `NS-1` is partially seeded (CP-3's robustness slice); `NS-2`,
 `NS-3`, `NS-6` and `NS-8`…`NS-11` remain proposals. Existing-coverage
 counts are re-verified against a real `Validate All` run each time they are touched.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
@@ -20,7 +21,7 @@ counts are re-verified against a real `Validate All` run each time they are touc
 > (CP-2 close-out, 2026-07-22), NS-4 ✅ (2026-08-03) and NS-7 + NS-7b ✅ (both 2026-08-20) are complete — see the per-item status lines; the rest are proposals.
 
 **Existing coverage (for contrast, counts verified 2026-08-20 against a `Validate All` run — 528 baselines / 23 suites, all green, 1 known-bug repro outstanding):** Lighting (106 — the last seven are the fidelity **C14** mixed-channel mirrors B108–B114), Meshing (57 — including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
-**light** maps), Behavior/fluid tick (17, incl. determinism gates), Placement (29 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (26 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19, its promoted repro B20–B23, `PH-1`'s step-0 horizontal-aggregation guard B24 and its gather-envelope guard B25, and `PH-2`'s B26 pinning that `CalculateVelocity` never writes the transform)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (56), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (9), **Migration Chain (24 — NS-7 + NS-7b, plus the `K10` repro of `SERIALIZATION_BUGS` §10)**, Spawn (10), Command Console (56), Voxel Occlusion (6), Sky & Celestial (15), Sky Render (11), World Clock (10), UI Blur Render (5), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` tests (the `ChunkRelativePosition` tests are no longer standalone — they are the Chunk Math suite's `.ChunkRelativePosition.cs` partial).
+**light** maps), Behavior/fluid tick (17, incl. determinism gates), Placement (29 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (26 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19, its promoted repro B20–B23, `PH-1`'s step-0 horizontal-aggregation guard B24 and its gather-envelope guard B25, and `PH-2`'s B26 pinning that `CalculateVelocity` never writes the transform)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (56), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (9), **Migration Chain (25 — NS-7 + NS-7b, incl. `B25`, the promoted `K10` repro of the bug archived as `_FIXED_BUGS.md` Serialization 07)**, Spawn (10), Command Console (56), Voxel Occlusion (6), Sky & Celestial (15), Sky Render (11), World Clock (10), UI Blur Render (5), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` tests (the `ChunkRelativePosition` tests are no longer standalone — they are the Chunk Math suite's `.ChunkRelativePosition.cs` partial).
 
 **Build protocol for every suite below:** the `validation-driven-bugfix` skill (deterministic repro first, prove-red before trusting green, promote repros to baselines). New suites should land on the shared `ValidationSuiteRunner` (`VS-1`, ✅ shipped 2026-07-08): register `Scenario`s and return its `ValidationRunResult` from a headless `Execute()`, with a thin `[MenuItem]` wrapper. All suites stay on the custom validation framework: migrating to the Unity Test Framework was evaluated 2026-07-02 and rejected (see the status header in
 [`../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md`](../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md)); the CI/coverage/XML gaps close via the VS-2 extensions instead.
@@ -29,6 +30,10 @@ counts are re-verified against a real `Validate All` run each time they are touc
 
 **Audited:** 2026-07-02 (seventh-pass audit), counts re-verified 2026-08-20 against a `Validate All`
 run — **528 baselines / 23 suites, 0 failures, 1 known-bug repro outstanding** (`K10`, `SERIALIZATION_BUGS` §10).
+That repro was fixed and promoted on 2026-08-21, so the census is now **529 baselines / 23 suites with 0 outstanding
+repros** — the 528 above counted baselines only, and `K10` becoming `B25` moves it into that count. Migration Chain
+reads 25 baselines instead of 24 + 1. Not re-verified against a fresh `Validate All`; only the three serialization
+suites were re-run.
 The eighth-pass audit below recorded 497; the fidelity **C14** mixed-channel mirrors B108–B114 took it to 504,
 NS-7's Migration Chain suite added 13, and NS-7b's chunk-payload scenarios added the last 11. The audit found the then-six suites architecturally sound, so the
 `VS-*` items it produced are operational only; the residual risk it identified is *coverage*, which is
@@ -247,7 +252,9 @@ what this document ranks.
       `RunAOTMigrationAsync` treats the region-layout branch and the per-chunk format branch as mutually
       exclusive, and v1 is the only world version whose path contains a layout step — so a **v1 world is repacked
       but never format-migrated**, leaving chunk-format v1/v2 payloads in a world stamped current. Every chunk
-      then fails the version check and regenerates from seed. Filed, not fixed: the fix touches shipped migration
+      then fails the version check and regenerates from seed. *(Fixed 2026-08-21 — the two passes now run in
+      sequence; archived as `_FIXED_BUGS.md` Serialization 07 and `K10` promoted to `B25`. The rest of this item
+      records what the first run found, and stands as written.)* Filed, not fixed: the fix touches shipped migration
       orchestration and needs an in-game load of a real old save.
 
 ---
@@ -363,7 +370,8 @@ contemporaneous notes.*
   `SERIALIZATION_BUGS` §10**: `RunAOTMigrationAsync` treats the region-layout and per-chunk-format branches as
   mutually exclusive, and v1 is the only world version whose path contains a layout step — so a v1 world is
   repacked but never format-migrated, and every chunk fails the version check and regenerates from seed. Filed,
-  not fixed. Three corrections to what `NS-7b` claimed: (1) it asked for one fixture builder **per chunk era**,
+  not fixed. *(Fixed 2026-08-21 — archived as `_FIXED_BUGS.md` Serialization 07, `K10` promoted to `B25`, so the
+  suite is now 25 baselines and 0 repros.)* Three corrections to what `NS-7b` claimed: (1) it asked for one fixture builder **per chunk era**,
   but one suffices — the manager re-reads the version byte between steps, so a single v1/v2 payload walks the
   whole chain; (2) the output-side circularity it warned about is **closed**, because `ChunkSerializer.Deserialize`
   is public and takes `CompressionAlgorithm.None`, making the production reader the oracle — the limit now applies
@@ -451,6 +459,6 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-20 (NS-7 **and** NS-7b shipped: `Validate Migration Chain`, 24 baselines + the `K10` repro of `SERIALIZATION_BUGS` §10, census re-verified at **528 baselines / 23 suites, all green**. Previously: 2026-08-19 eighth-pass audit: `NS-7`…`NS-11` added, plus the deliberate-exclusion section for entry points kept out of `ValidationSuiteRegistry`; census re-verified against a `Validate All` run at **497 baselines / 22 suites, all green** — matching the 2026-08-17 release notes; superseded later the same day by the C14 mirrors B108–B114, taking Lighting 99 → 106 and the total to **504**)  
+**Last Updated:** 2026-08-21 (`SERIALIZATION_BUGS` §10 fixed — `RunAOTMigrationAsync`'s region-layout and per-chunk passes now run in sequence instead of exclusively; the bug is archived as `_FIXED_BUGS.md` Serialization 07 and its `K10` repro promoted to baseline `B25`, taking Migration Chain to **25 baselines, 0 repros** and the census to **529 baselines / 23 suites** (the promoted repro joins the baseline count; not re-verified against a fresh `Validate All`). A new `SERIALIZATION_BUGS` §11 was filed for the pre-`needsLight` v1 chunk layout the fix does not cover. Previously: 2026-08-20 (NS-7 **and** NS-7b shipped: `Validate Migration Chain`, 24 baselines + the `K10` repro of `SERIALIZATION_BUGS` §10, census re-verified at **528 baselines / 23 suites, all green**. Previously: 2026-08-19 eighth-pass audit: `NS-7`…`NS-11` added, plus the deliberate-exclusion section for entry points kept out of `ValidationSuiteRegistry`; census re-verified against a `Validate All` run at **497 baselines / 22 suites, all green** — matching the 2026-08-17 release notes; superseded later the same day by the C14 mirrors B108–B114, taking Lighting 99 → 106 and the total to **504**))  
 **Next Review:** whenever a suite is added or a `Validate All` count changes — the existing-coverage
 paragraph is the one part of this document that goes stale silently.

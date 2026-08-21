@@ -4,10 +4,10 @@ This document outlines **open** bugs related to saving, loading, Region files, a
 
 > **Last reviewed:** August 2026
 >
-> **Numbering note:** `§02`, `§03` and `§06` are **retired, not free** — all three are archived in
+> **Numbering note:** `§02`, `§03`, `§06` and `§10` are **retired, not free** — all four are archived in
 > [`_FIXED_BUGS.md`](./_FIXED_BUGS.md), and `§03` is still cited by name from
 > `CompressionFactory.cs`, `LIBRARY_BUGS.md` and
-> `INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md`. New entries continue from `§10`.
+> `INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md`. New entries continue from `§14`.
 
 ---
 
@@ -122,85 +122,123 @@ own decision: silently spawning fresh discards a possibly-recoverable world, so 
 
 ---
 
-## 10. A v1 world is repacked but never format-migrated — every chunk regenerates from seed
+## 11. The earliest v1 chunk layout predates `needsLight` and the light queues, so `v2->v3` misreads it
 
-**Severity:** Bug (silent total data loss, scoped to v1 worlds)  
-**Confidence:** Mechanism High **in current `HEAD`** (verified by code inspection; reproduced by the Migration
-Chain suite's `K10`). **Whether it was ever shipped working is OPEN** — see "Unresolved: was this always
-broken?" below, which must be settled before any fix is designed.  
-**Files:** `MigrationManager.cs` — `RunAOTMigrationAsync` (the `needsLayoutMigration` branch), `Migration_v1_to_v2_RegionRepack.cs` — `PerformRegionLayoutMigration` / `ProcessOldRegionFile`
+**Severity:** Bug (total data loss, scoped to the oldest v1 worlds)  
+**Confidence:** High (observed, not inferred: the shipped step throws on a real payload, and a full migration of a
+real world faulted every one of its 6,163 chunks)  
+**Files:** `Migration_v2_to_v3_RestoreLighting.cs` - the V1/V2 READ DEFINITION
 
-`RunAOTMigrationAsync` chooses **one** of two region strategies:
+`MigrationV2ToV3RestoreLighting` branches on the version byte to handle v1's 256-byte heightmap vs v2's 512-byte
+one, which is correct for the *common* v1 layout. But it unconditionally reads a `needsLight` boolean after the
+coordinates, and two 13-byte-entry light queues after the sections - and **the earliest v1 saves have neither**.
+
+Both fields were added during the world-v1 era without a version bump, so world version 1 covers at least two
+incompatible on-disk chunk layouts that are indistinguishable by their version byte:
+
+| Layout | Header | Trailer | Example payload | Compression |
+|---|---|---|---|---|
+| early v1 (pre-`a951b788`) | no `needsLight` | no light queues | 131,365 B | Deflate |
+| common v1 (post-`d0a015d8`) | `needsLight` | two queues | 131,374 B | LZ4 |
+
+Reading a 9-byte header where the payload has 8 shifts everything after it by one byte, so the section bitmask is
+read out of the middle of section 0 and the parse runs off the end of the stream.
+
+**Observed:** feeding one real early-v1 chunk to the shipped step throws `EndOfStreamException`; the equivalent
+common-v1 chunk migrates cleanly to format 3. Migrating a whole early-v1 world (`New World - orig`, 1,559 region
+files) repacks the addresses correctly and then reports **6,163 of 6,163 chunks corrupted**.
+
+**Not the same bug as the archived §10** (`_FIXED_BUGS.md` Serialization 07), and not fixed by it. §10 was the
+manager skipping the format chain entirely; that is fixed, and it is what makes this one reachable. The failure is
+now loud (per-chunk warnings and the corruption prompt) instead of silent, which is an improvement but not a fix -
+the chunks are still lost.
+
+**Blast radius:** unknown but small. Only one such world has been identified so far, and only the first decodable
+chunk of eight sampled worlds was parsed, so the survey is not exhaustive. A third variant (queues but no
+`needsLight`, from the window between `a951b788` and `d0a015d8`) is possible and unsampled.
+
+**Proposed fix (undecided).** The shipped step cannot be edited to sniff the layout - `AOT_WORLD_MIGRATION_SYSTEM.md`
+§6 forbids changing what an already-shipped step produces, and length-sniffing would change its output for inputs it
+already handles. The plausible shapes are a new pre-step that normalizes an early-v1 payload into the common v1
+shape before the chain runs, or accepting the loss and documenting it. Either way this wants its own decision;
+the affected saves are the oldest on disk and are already backed up by the migration itself.
+
+---
+
+## 12. Chunks dropped by a region-layout step never reach the corruption prompt
+
+**Severity:** Minor (under-reporting, no data loss on its own)  
+**Confidence:** High (verified by inspection)  
+**Files:** `Migration_v1_to_v2_RegionRepack.cs` - `ProcessOldRegionFile`; `MigrationManager.cs` -
+`RunAOTMigrationAsync` (layout pass)
+
+`PerformRegionLayoutMigration` returns only a count of chunks it *succeeded* in repacking. Its per-chunk fault
+isolation catches a failing chunk, emits a `Debug.LogWarning` and moves on, and nothing propagates that failure
+back to the manager. So the layout pass cannot contribute to `corruptedChunksTotal`, which means:
+
+- `onCorruptionDetected` never fires for chunks lost during a layout migration, however many there are;
+- the count the player is shown ("N chunk(s) could not be migrated") silently excludes them;
+- a world can lose chunks in the layout pass and still report a clean migration.
+
+The per-chunk pass has the opposite behaviour - it counts every failure and drives the prompt - so the two
+region passes disagree about what a "corrupted chunk" is worth reporting.
+
+**Not currently reachable in the loud case.** The only shipped layout step is the v1->v2 repack, which merely
+decompresses, re-addresses and recompresses; it fails a chunk only on a genuine I/O or compression fault, not on
+a format mismatch. The early-v1 layout of §11 fails in the *per-chunk* pass, which does report correctly.
+
+**Proposed fix:** give `PerformRegionLayoutMigration` a way to report failures alongside successes (a tuple or a
+small result struct), and fold that count into `corruptedChunksTotal` before the Phase 2 prompt. This changes a
+shipped step's *signature*, not its byte output, so `AOT_WORLD_MIGRATION_SYSTEM.md` §6's rule against altering
+what a shipped step produces is not in the way - but it does touch every implementer of the abstract method.
+
+**Found by:** a code review of the §10 fix (August 2026).
+
+---
+
+## 13. A wholly-unmigratable region is replaced by an empty region file
+
+**Severity:** Bug (data loss on an explicit user "Continue", recoverable only from the backup)  
+**Confidence:** High (mechanism verified; the staged empty shells were observed on disk after a real run)  
+**Files:** `MigrationManager.cs` - `MigrateSingleRegion`, `RunAOTMigrationAsync` Phase 3
+
+`MigrateSingleRegion` opens `new RegionFile(tempFile)` unconditionally, and `RegionFile`'s constructor
+`SetLength`s a new file to two sectors (8,192 bytes). Phase 3 then swaps in any temp file that exists:
 
 ```csharp
-bool needsLayoutMigration = migrationPath.Any(s => s.RequiresRegionLayoutMigration);
-if (!Directory.Exists(regionPath))        { /* skip */ }
-else if (needsLayoutMigration)            { /* PerformRegionLayoutMigration + directory swap */ }
-else                                      { /* the per-chunk MigrateChunk format chain */ }
+if (File.Exists(tempFile)) { File.Delete(oldFile); File.Move(tempFile, oldFile); }
 ```
 
-The two branches are mutually exclusive, and `MigrationV1ToV2RegionRepack` is the only step that sets
-`RequiresRegionLayoutMigration`. So for a **v1** world — the only version whose migration path contains that step —
-the `else` branch never runs and **the chunk-format chain is skipped entirely**. `ProcessOldRegionFile` only
-decompresses, recompresses and rewrites at the corrected address; its own summary says so ("The chunk binary payload
-is unchanged — only the addressing is corrected").
+So a region file whose chunks **all** fail to migrate is replaced by an empty 8 KB shell, and the payloads -
+which were still intact on disk - are gone. Observed concretely while migrating an early-v1 world (§11): 12 temp
+files of exactly 8,192 bytes staged against 50.71 MB of live region data. The swap did not run only because the
+migration was stopped at the corruption prompt.
 
-The result is a world stamped `v15` on disk whose chunk payloads are still **chunk-format v1/v2**. On load,
-`ChunkSerializer.Deserialize` reads a version byte of 1 or 2, takes the wrong-version path (the one
-`Validate Deserialization Robustness` **B4** pins as "→ null, no throw"), and returns null for every chunk — so the
-engine regenerates the whole world from seed. Every player edit is gone, and the pre-migration backup has already
-been rotated by the time it is noticeable.
+**Mitigations already in place, which is why this is filed rather than hot-fixed:**
 
-**Not reachable from v2 or later.** A world at v2–v9 has no layout step in its path, so it takes the `else` branch
-and its chunks *are* format-migrated correctly. The defect is specific to world version 1.
+- The swap only happens after the player explicitly answers **Continue** at the corruption prompt. Answering
+  Rollback throws `MigrationAbortedException`, and `WorldSelectMenu`'s `finally` calls `RollbackMigration`,
+  which restores the pre-migration world.
+- Backups are never removed by the migration system. `_currentBackupPath` is stamped with the source version
+  and a UTC timestamp, so every run leaves its own folder; only `RollbackMigration` consumes one. The data is
+  therefore recoverable - if the player knows to look.
 
-**Live blast radius is probably zero, but the code path is real.** No v1 save is known to survive on this machine
-(the oldest backups present are v6), and any v1 world migrated before this was found would already have lost its
-chunks. That is why this is filed rather than hot-fixed.
+**Why the obvious fix is wrong.** "Discard the temp file and keep the original when a region yields no chunks"
+was tried and **reverts baselines B8, B9 and B10**. Those pin the opposite contract: a misbehaving step must not
+leave payloads that a world stamped current will silently accept as migrated. Preserving the original trades
+recoverable data loss for *silent semantic corruption* in every case where the un-migrated payload still parses
+as the current format - which is the §10 failure mode in reverse. Do not "fix" this by editing B8-B10.
 
-**Repro:** `Minecraft Clone/Dev/Validate Migration Chain` → `K10` (a complete v1 fixture world — v1 `level.dat`,
-`pending_mods`, and region files at the historically broken V1 addresses — migrated to current, then every chunk
-read back through the real `ChunkSerializer.Deserialize`). It asserts the chunks are *readable*, which is the
-correct post-migration contract, and is therefore expected **red** until this is fixed.
+**The real fork (undecided):**
 
-### Unresolved: was this always broken, or is it a regression? *(open question, 2026-08-20)*
+1. **Leave as-is.** The loss needs explicit consent and the backup survives. Cost: the prompt says corrupted
+   chunks will be "regenerated", which is a poor description of "your entire world is discarded".
+2. **Make a wholly-failed region non-continuable** - treat it as a hard failure that only offers Rollback.
+   Satisfies both contracts (nothing is destroyed, nothing un-migrated is left behind), but changes the
+   prompt's meaning and needs B8-B10 re-examined, since they answer Continue and expect completion.
+3. **Preserve the original and refuse to stamp the world current.** Closest to "no data loss", but `level.dat`
+   is stamped before region work begins, so this needs the stamp deferred to the end of a successful run.
 
-**The project owner recalls the v1→v2 migration working correctly**, but a long time ago — before the
-Migration Chain suite existed and before several serialization changes landed. So the branch structure above
-may be a **regression introduced after the repack step was written**, not an original defect. Nothing in this
-entry settles that, and the answer changes the fix: a regression is reverted, an original defect is designed
-around.
+Option 2 looks strongest; it wants its own decision and its own prove-red before anything ships.
 
-Established at `HEAD` (do not re-derive): the two region strategies are mutually exclusive, `v1→v2` is the
-only step setting `RequiresRegionLayoutMigration`, `ProcessOldRegionFile` does not format-migrate, and `K10`
-observes 0 of 2 chunks readable after migrating an authored v1 world.
-
-**Not established — the actual open questions:**
-
-1. **Was the branch ever non-exclusive?** `MigrationManager.cs` has ~28 commits (first `2834a572`
-   2026-02-10 "Initial rework of the save system", most recent `e6181f2d` 2026-08-10). Two leads worth
-   walking: `Migration_v1_to_v2_RegionRepack.cs` was authored `0865f6cb` (2026-02-28, "Broken region file
-   usage leading to max 4 sections being used per region file"), and it was last touched by `07609bdd`
-   (2026-07-22, the CP-3 commit — which also touched `MigrationManager.cs` and whose message mentions
-   "migration fault isolation"). Read the region-branch structure as it stood at the repack's authoring
-   commit and diff it forward.
-2. **Did some other mechanism upgrade v1 chunk payloads at the time?** A historical load-time/lazy format
-   upgrade in `ChunkSerializer` or `ChunkStorageManager` would make this a non-bug for the era it shipped in.
-   Today `Deserialize` hard-rejects a wrong version byte (pinned by `Validate Deserialization Robustness`
-   **B4**), but that contract is itself CP-3-era.
-3. **Is `K10`'s fixture faithful to a real v1 world?** Its chunk payload is authored from the migration
-   steps' own inline read definitions (the only surviving record of the layout) — see the limits documented
-   in `MigrationChainValidationSuite.ChunkFixture.cs`. If a real v1 world differed in any way that changes
-   which branch runs, `K10` could be reproducing a fixture artifact rather than the shipped defect.
-
-**What would settle it:** a git-archaeology pass over `MigrationManager.cs`'s region-branch structure across
-the range above, answering "at the commit where the repack shipped, did a v1 world's chunks get
-format-migrated?" — plus, if a genuine v1-era save can be located, one real load. Until then treat the
-severity as conditional.
-
-**Proposed fix (undecided — do not apply without a decision):** run the format chain over the repacked chunks. Two
-shapes, and the choice matters: either `PerformRegionLayoutMigration` receives the remaining `migrationPath` and
-applies `MigrateChunk` as it rewrites each payload, or the manager stops treating the branches as exclusive and runs
-the format loop over the swapped-in region folder afterwards. The second is less invasive to the step contract but
-walks every chunk twice. Either way this touches shipped migration orchestration and needs an in-game load of a real
-old save before it can be trusted — `K10` going green is necessary, not sufficient.
+**Found by:** a code review of the §10 fix (August 2026).

@@ -2061,6 +2061,29 @@ frame API or switching to `K4os.Compression.LZ4`; any world saved while 0.6.1 wa
 
 ---
 
+### ~~07. A v1 world is repacked but never format-migrated — every chunk regenerates from seed~~ (`SERIALIZATION_BUGS.md` §10)
+
+**Severity:** Bug (silent total data loss, scoped to v1 worlds)  
+**Files:** `MigrationManager.cs` — `RunAOTMigrationAsync`  
+**Reported:** August 2026  
+**Fixed:** August 2026
+
+**Symptom:** `RunAOTMigrationAsync` chose **one** of two region strategies — `if (!Directory.Exists) / else if (needsLayoutMigration) / else`. `MigrationV1ToV2RegionRepack` is the only step setting `RequiresRegionLayoutMigration`, and it is only in a **v1** world's path, so a v1 world took the layout arm and the per-chunk `MigrateChunk` loop never ran. The result was a world stamped `v15` whose payloads were still chunk-format v1: every chunk failed `ChunkSerializer.Deserialize`'s version check and regenerated from seed, silently. (The original entry added "and the pre-migration backup has already been rotated" — that is **wrong**: backup folders are stamped with the source version and a UTC timestamp and are never removed by the migration system, so the pre-migration copy survives. Recovery still depends on the player knowing to reach for it.)
+
+**It was a regression, and the window is dated.** The exclusive branch was present at `0865f6cb` (2026-02-28), the commit that authored the repack — but it was *correct* there, because `SaveSystem.CURRENT_VERSION` was 2 and the repack was the only registered step. Its `TargetChunkFormatVersion` is `null`, so the `else` arm had nothing to do for a v1 world and skipping it cost nothing. The defect was introduced on **2026-03-30 by `752aea12`**, the first commit to register a chunk-format step (`v2→v3`, `TargetChunkFormatVersion => 3`) downstream of the layout step. From then on a v1 world's path was `[repack, v2→v3, …]` and the exclusive branch silently dropped every format step. Nobody edited the branch to break it; it broke by accretion. The working window was therefore **2026-02-28 → 2026-03-30**, which matches the project owner's recollection of the migration working "a long time ago".
+
+There was never a load-time or lazy format upgrade to compensate: `ChunkSerializer.Deserialize` has hard-rejected a wrong version byte since `c672ab2d`.
+
+**Blast radius was not zero.** The original entry recorded "no v1 save is known to survive on this machine (the oldest backups present are v6)". That was wrong — **33 un-migrated v1 worlds** were found in `Saves\`, all with region data, plus one in `Editor_Temp_Saves\`. None had been opened since the regression, which is the only reason they were still intact.
+
+**Fix:** the two region strategies stopped being mutually exclusive. The layout pass runs when a step requests it, then the per-chunk pass runs for **every** world that has a region folder, enumerating the folder the layout pass swapped in. The shipped step was not touched, per §6's rule against changing what an already-shipped step produces.
+
+One subtlety worth keeping: the per-chunk pass must not be gated on "the path contains a chunk-format step". It also recompresses to `targetCompression`, defragments, and detects corrupted chunks, so gating it that way breaks worlds whose path is `level.dat`-only (a v12 world's path has no format step at all) — caught by baselines **B6** and **B13**.
+
+**Verification:** `B25` in `Minecraft Clone/Dev/Validate Migration Chain` (authored as the `K10` repro, promoted after the fix). Confirmed in-game on a real v1 save from 2026-02-28: **1282** broken-addressed region files collapsed to **9** correctly-addressed ones, all **4855** chunks migrated with zero corruption, and the payloads read back at chunk format **7**.
+
+---
+
 ## User Interface
 
 ### ~~02. Shortcut Info Panel~~

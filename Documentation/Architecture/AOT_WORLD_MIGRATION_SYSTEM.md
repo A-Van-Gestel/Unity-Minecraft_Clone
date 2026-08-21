@@ -754,13 +754,17 @@ you touch this file:
   byte between steps, so a single payload walks v3 → v4 → v5 → v6 → v7. The fixture's *input* layout is derived from
   the steps' own read definitions, so it cannot catch a step that has always misread its input; the *output* is
   validated by the real `ChunkSerializer.Deserialize`, which is independent of the fixture.
-- **A v1 world does not get its chunks format-migrated at all.** `RunAOTMigrationAsync` treats the region-layout
-  branch and the per-chunk format branch as mutually exclusive, and `MigrationV1ToV2RegionRepack` is the only step
-  that requests a layout migration — so a v1 world is repacked to correct addresses while its payloads stay
-  chunk-format v1/v2, inside a world stamped current. See
-  [`../Bugs/SERIALIZATION_BUGS.md`](../Bugs/SERIALIZATION_BUGS.md) **§10**, reproduced (expected red) by the suite's
-  `K10`. **Do not "fix" this casually** — the proposed shapes and their trade-off are recorded in that entry, and it
-  needs an in-game load of a real old save.
+- **The two region passes are sequential, not exclusive — do not "optimize" that back.** `RunAOTMigrationAsync`
+  runs the region-layout pass (when a step requests one) and *then* the per-chunk pass over the folder the layout
+  pass swapped in. A v1 world needs both: `MigrationV1ToV2RegionRepack` is the only step requesting a layout
+  migration, and it deliberately leaves the payload bytes alone, so without the second pass a v1 world ends up
+  repacked to correct addresses with chunk-format v1 payloads inside a world stamped current — every chunk then
+  regenerates from seed. That was a real regression (2026-03-30 → 2026-08-21); it is archived as
+  [`../Bugs/_FIXED_BUGS.md`](../Bugs/_FIXED_BUGS.md) **Serialization 07** and guarded by the suite's **B25**.
+  Two things that look like cleanups but are not: gating the per-chunk pass on "the path contains a chunk-format
+  step" (it also recompresses, defragments and detects corrupted chunks — a `level.dat`-only path still needs it),
+  and folding the format chain into `PerformRegionLayoutMigration` (that changes a shipped step's output, which
+  this section forbids).
 
 **A step that REMOVES a field must mirror the whole target shape in its DTO.** Up to v14 every `level.dat` step was additive, so an incomplete DTO was merely lossy in theory. `MigrationV14ToV15TimeOfDay` is the first removal (`worldState.timeOfDay` → `worldState.time`): whatever its `V15LevelDat` omits is dropped from every migrated document, because the step re-serializes from the DTO.
 
