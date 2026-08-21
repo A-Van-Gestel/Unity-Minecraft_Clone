@@ -29,13 +29,22 @@ namespace Editor.Validation.SerializationRoundTrip
     /// it → <c>{B2, B4, B5}</c>; B1 and B3 stay green (B1 only exercises the writer; B3 asserts the 0x02 path).</description></item>
     /// <item><description><c>ReadChunkInternal</c> materializing a pooled section for a flag-0x02 compact
     /// section instead of storing the sky byte → <c>{B3}</c> only.</description></item>
+    /// <item><description>Swapping the light-queue node's R/B byte order in <c>WriteLightQueue</c> <b>and</b>
+    /// <c>ReadLightQueue</c> together — a self-consistent on-disk layout change with no version bump →
+    /// <c>{B6}</c> only.</description></item>
+    /// <item><description><c>LoadChunkAsync</c> deserializing with <c>settings.saveCompression</c> instead of
+    /// the algorithm stored with the record → <c>{B8}</c> only (exactly the six off-diagonal cells).</description></item>
+    /// <item><description><c>ChunkSerializer.Serialize</c> ignoring its <c>algorithm</c> argument and always
+    /// writing uncompressed → <c>{B7, B8}</c>.</description></item>
     /// </list>
     /// <para><b>Two findings worth carrying.</b> (1) B2's accessor-level compare cannot see WHICH of the four
     /// encodings the writer chose — B1/B4 own that, which is why both exist. (2) B4's byte-identity compare
     /// does <b>not</b> detect a reader that materializes compact sections: the writer re-compacts them on the
     /// way out, so the bytes match anyway. <b>B3 is the sole guard</b> of the compact-section contract, and the
     /// cost it guards is real — a materialized section is 8 KB of pooled <c>LightData</c> for something the
-    /// format stores in 2 bytes.</para>
+    /// format stores in 2 bytes. (3) The <c>{B6}</c>-only and <c>{B8}</c>-only batches were each run against
+    /// <c>Validate Deserialization Robustness</c> and <c>Validate Save Durability</c> as well: both stayed
+    /// fully green, so this suite is the only guard either contract has anywhere in the engine.</para>
     /// </summary>
     public static partial class SerializationRoundTripValidationSuite
     {
@@ -59,6 +68,9 @@ namespace Editor.Validation.SerializationRoundTrip
                 new Scenario("B3: non-persisted state is re-derived on load, and data-less sections are not materialized", RoundTripReDerivesNonPersistedState),
                 new Scenario("B4: re-serializing a reloaded chunk reproduces the original bytes and flag map", ReSerializationIsByteIdentical),
                 new Scenario("B5: randomized chunks round-trip identically and re-serialize byte-identically", FuzzChunksRoundTripIdentically),
+                new Scenario("B6: golden bytes — the reference payload's hash, length and version byte are frozen", GoldenPayloadBytesAreFrozen),
+                new Scenario("B7: every compression arm round-trips, and both codecs actually compress", EveryCompressionArmRoundTrips),
+                new Scenario("B8: a chunk loads under any active saveCompression setting, not just the one it was written with", ChunksLoadRegardlessOfTheActiveCompressionSetting),
             };
             return ValidationSuiteRunner.Execute("Serialization Round-Trip", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }

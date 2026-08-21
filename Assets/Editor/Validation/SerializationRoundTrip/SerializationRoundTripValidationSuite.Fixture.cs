@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Data;
 using Editor.Validation.Framework;
 using Helpers;
@@ -210,12 +211,21 @@ namespace Editor.Validation.SerializationRoundTrip
         /// </summary>
         /// <param name="data">The chunk to serialize.</param>
         /// <returns>The exact serialized payload.</returns>
-        private static byte[] SerializeUncompressed(ChunkData data)
+        private static byte[] SerializeUncompressed(ChunkData data) => Serialize(data, CompressionAlgorithm.None);
+
+        /// <summary>
+        /// Serializes a chunk with the given algorithm and returns the exact bytes (a defensive copy — the
+        /// pooled buffer is returned immediately).
+        /// </summary>
+        /// <param name="data">The chunk to serialize.</param>
+        /// <param name="algorithm">The compression algorithm to encode with.</param>
+        /// <returns>The exact serialized payload.</returns>
+        private static byte[] Serialize(ChunkData data, CompressionAlgorithm algorithm)
         {
             byte[] buffer = SerializationBufferPool.Get();
             try
             {
-                int length = ChunkSerializer.Serialize(data, buffer, CompressionAlgorithm.None);
+                int length = ChunkSerializer.Serialize(data, buffer, algorithm);
                 byte[] payload = new byte[length];
                 Array.Copy(buffer, payload, length);
                 return payload;
@@ -286,6 +296,22 @@ namespace Editor.Validation.SerializationRoundTrip
                 parts[i] = flags[i] == FLAG_ABSENT ? "--" : $"{flags[i]:X2}";
             return $"[{string.Join(" ", parts)}]";
         }
+
+        /// <summary>Runs <see cref="ChunkStorageManager.SaveChunkAsync"/> to completion. Wrapped in
+        /// <see cref="Task.Run(Func{Task})"/> so its continuations resume on the ThreadPool instead of being
+        /// posted to the (blocked) editor main thread — blocking directly would deadlock.</summary>
+        /// <param name="storage">The storage manager to save through.</param>
+        /// <param name="data">The chunk to save.</param>
+        /// <returns>The save outcome.</returns>
+        private static ChunkSaveResult RunSave(ChunkStorageManager storage, ChunkData data) =>
+            Task.Run(() => storage.SaveChunkAsync(data)).GetAwaiter().GetResult();
+
+        /// <summary>Runs <see cref="ChunkStorageManager.LoadChunkAsync"/> to completion (same wrapping as <see cref="RunSave"/>).</summary>
+        /// <param name="storage">The storage manager to load through.</param>
+        /// <param name="pos">The chunk position to load.</param>
+        /// <returns>The loaded chunk, or null when it is not on disk.</returns>
+        private static ChunkData RunLoad(ChunkStorageManager storage, Vector2Int pos) =>
+            Task.Run(() => storage.LoadChunkAsync(pos)).GetAwaiter().GetResult();
 
         /// <summary>Logs a single assertion as PASS/FAIL and returns its result for AND-chaining.</summary>
         /// <param name="label">The assertion label.</param>
