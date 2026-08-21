@@ -88,10 +88,13 @@ light-only section (`safeSections[i] == null`, sky set), then the sky level flip
 ## 08. `LightingStateManager.AddPending` logs invalid columns but stores them anyway
 
 **Severity:** Minor  
-**Confidence:** High  
-**Files:** `LightingStateManager.cs` — `AddPending` (lines ~38–57)
+**Confidence:** High (mechanism **reproduced**, 2026-08-21)  
+**Files:** `LightingStateManager.cs` — `AddPending` (lines ~94–118)  
+**Repro:** `K08` in `Minecraft Clone/Dev/Validate Serialization Round-Trip` (NS-1 part 5).
 
 The validation loop only `Debug.LogError`s out-of-range local columns; the subsequent add loop inserts **all** columns including invalid ones. On `Save()` they are byte-truncated (`(byte)col.x`), and on `Load()` the truncated values may pass validation and queue sunlight recalcs for the wrong columns. Fix: `continue`/skip invalid columns in the add loop (or validate-and-skip in one pass).
+
+**Sharpened by the repro:** the "may pass validation" is not a maybe — it is decided by the truncated value, and both arms are observable. Queueing columns `(259, 4)` and `(272, 5)` on one chunk yields, after a save → load cycle: `(272, 5)` → `(16, 5)`, correctly rejected by `LoadPendingColumns`' bounds check; but `(259, 4)` → **`(3, 4)`, which is in range and is silently queued** — a sunlight recalculation for a column the caller never named, indistinguishable on load from a legitimate request. So the failure is not "an invalid column is dropped late", it is "an invalid column becomes a *different valid* column". `AddPendingBlocklight` already gets this right (it `return`s on invalid input); only `AddPending` falls through.
 
 ---
 

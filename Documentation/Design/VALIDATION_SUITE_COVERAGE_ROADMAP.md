@@ -1,13 +1,14 @@
 # Validation Suite Coverage Roadmap — Uncovered Systems, Ranked
 
-**Version:** 1.4  
+**Version:** 1.5  
 **Date:** 2026-07-02  
 **Status:** **Living backlog.** `NS-4`, `NS-5`, `NS-7` and `NS-7b` are ✅ complete (NS-4 2026-08-03; NS-5 at the CP-2
 close-out; NS-7 and NS-7b both 2026-08-20 — the migration chain is now covered end to end, and NS-7b's first
 run found `SERIALIZATION_BUGS` §10, fixed 2026-08-21 and archived as `_FIXED_BUGS.md` Serialization 07, its `K10`
-repro promoted to baseline `B25`). `NS-1` **parts 1–3 are ✅ complete (2026-08-21)** as the standalone
-`Validate Serialization Round-Trip` suite, on top of CP-3's robustness slice; its parts 4–5 (`RegionFile`
-mechanics, pending stores) remain open. `NS-2`, `NS-3`, `NS-6` and `NS-8`…`NS-11` remain proposals.
+repro promoted to baseline `B25`). `NS-1` is **✅ COMPLETE (2026-08-21, parts 1–5)** as the standalone
+`Validate Serialization Round-Trip` suite, on top of CP-3's robustness slice — the top-priority item of this
+roadmap is closed, and the two open serialization bugs it found (`§04`, `§08`) are guarded by repros.
+`NS-2`, `NS-3`, `NS-6` and `NS-8`…`NS-11` remain proposals.
 Existing-coverage counts are re-verified against a real `Validate All` run each time they are touched.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
@@ -21,8 +22,8 @@ Existing-coverage counts are re-verified against a real `Validate All` run each 
 > Status: **Living backlog.** NS-1 is partially seeded (CP-3's robustness slice, 2026-07-22); NS-5 ✅
 > (CP-2 close-out, 2026-07-22), NS-4 ✅ (2026-08-03) and NS-7 + NS-7b ✅ (both 2026-08-20) are complete — see the per-item status lines; the rest are proposals.
 
-**Existing coverage (for contrast, counts verified 2026-08-21 against a full 24-suite run — 537 baselines / 24 suites, all green, 1 known-bug repro outstanding (`K04`, `SERIALIZATION_BUGS` §04); 188 s wall clock, of which Lighting is 182 s):** Lighting (106 — the last seven are the fidelity **C14** mixed-channel mirrors B108–B114), Meshing (57 — including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
-**light** maps), Behavior/fluid tick (17, incl. determinism gates), Placement (29 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (26 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19, its promoted repro B20–B23, `PH-1`'s step-0 horizontal-aggregation guard B24 and its gather-envelope guard B25, and `PH-2`'s B26 pinning that `CalculateVelocity` never writes the transform)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (56), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (9), **Serialization Round-Trip (8 — NS-1 parts 1–3, plus the `K04` repro of `SERIALIZATION_BUGS` §04)**, **Migration Chain (25 — NS-7 + NS-7b, incl. `B25`, the promoted `K10` repro of the bug archived as `_FIXED_BUGS.md` Serialization 07)**, Spawn (10), Command Console (56), Voxel Occlusion (6), Sky & Celestial (15), Sky Render (11), World Clock (10), UI Blur Render (5), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` tests (the `ChunkRelativePosition` tests are no longer standalone — they are the Chunk Math suite's `.ChunkRelativePosition.cs` partial).
+**Existing coverage (for contrast. Last figure verified against a full 24-suite run: 537 baselines / 24 suites, all green, 1 repro; 188 s wall clock, of which Lighting is 182 s. ⚠️ **Now 545 baselines / 24 suites / 2 repros — DERIVED, not yet re-verified**: NS-1 parts 4–5 added `B9`–`B16` and the `K08` repro, observed green in a suite-level run (16 baselines, 0 failures, 2 repros), but the aggregate run to confirm the total is outstanding. Re-verify on the next `Validate All`.):** Lighting (106 — the last seven are the fidelity **C14** mixed-channel mirrors B108–B114), Meshing (57 — including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
+**light** maps), Behavior/fluid tick (17, incl. determinism gates), Placement (29 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (26 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19, its promoted repro B20–B23, `PH-1`'s step-0 horizontal-aggregation guard B24 and its gather-envelope guard B25, and `PH-2`'s B26 pinning that `CalculateVelocity` never writes the transform)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (56), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (9), **Serialization Round-Trip (16 — NS-1 parts 1–5, plus the `K04`/`K08` repros of `SERIALIZATION_BUGS` §04 and §08)**, **Migration Chain (25 — NS-7 + NS-7b, incl. `B25`, the promoted `K10` repro of the bug archived as `_FIXED_BUGS.md` Serialization 07)**, Spawn (10), Command Console (56), Voxel Occlusion (6), Sky & Celestial (15), Sky Render (11), World Clock (10), UI Blur Render (5), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` tests (the `ChunkRelativePosition` tests are no longer standalone — they are the Chunk Math suite's `.ChunkRelativePosition.cs` partial).
 
 **Build protocol for every suite below:** the `validation-driven-bugfix` skill (deterministic repro first, prove-red before trusting green, promote repros to baselines). New suites should land on the shared `ValidationSuiteRunner` (`VS-1`, ✅ shipped 2026-07-08): register `Scenario`s and return its `ValidationRunResult` from a headless `Execute()`, with a thin `[MenuItem]` wrapper. All suites stay on the custom validation framework: migrating to the Unity Test Framework was evaluated 2026-07-02 and rejected (see the status header in
 [`../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md`](../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md)); the CI/coverage/XML gaps close via the VS-2 extensions instead.
@@ -78,7 +79,32 @@ what this document ranks.
   `GoldenMaster`, temp-directory region files (the storage manager already supports a volatile path). Phase **CP-3** of
   [CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) seeds the robustness slice (truncated/garbage/wrong-version payloads → `Deserialize` returns null, no throw, no pooled-shell leak).
 - **Effort:** 🟡 core (1–5); part 6 moved to `NS-7`/`NS-7b` — build 1–5 here.
-- **Status (2026-08-21): ✅ parts 1–3 COMPLETE; parts 4–5 open.** Shipped as
+- **Status (2026-08-21): ✅ COMPLETE (parts 1–5).** Parts 4–5 landed the same day as parts 1–3, into the same
+  suite: **`B9`–`B14`** cover the `RegionFile` sector allocator (a record's table entry shape, growth →
+  relocation → the vacated run being reused, shrink → tail release without extending the file, a 6-round
+  mixed-size rewrite storm across 12 slots asserting every payload intact **and every table run disjoint**,
+  close/reopen durability including a post-reopen write, and the typed `ChunkTooLargeException` contract), and
+  **`B15`–`B16`** cover the pending stores (`LightingStateManager`'s pending columns and blocklight mods —
+  channels *and* the removal flag — plus `ModificationManager`'s pending voxel mods, each read back through a
+  **second** manager instance, guarded by a "a fresh store holds nothing before Load" non-vacuity check).
+  Suite total: **16 baselines + 2 known-bug repros, 202 ms**.
+    - **The allocator is never its own oracle:** the structural assertions parse the 1024-entry offset table
+      straight off disk.
+    - **Flush discipline, learned the hard way:** `RegionFile` only flushes on `Dispose`, so a second handle
+      opened mid-session reads **stale zeros**. The first draft of these scenarios inspected the table while
+      the writer was still open — which made two of them fail for the wrong reason and, worse, made the
+      disjointness and "no table entry" checks pass **vacuously** (all-zero reads satisfy both). Every
+      on-disk inspection now happens after disposal, and `NoOverlappingRuns` fails an empty table outright.
+    - **Prove-red:** three further mutations — not freeing a relocated record's old run → `{B10, B11}`;
+      not writing the offset-table entry → `{B9, B10, B11, B12, B13, B14}`; dropping the blocklight file and
+      the pending-mod metadata byte → `{B15, B16}`. The second batch reddened `B14`, which was **not**
+      predicted: `B14` reopens the region file to check its neighbour, so it depends on table persistence too.
+    - **`K08`** reproduces [`../Bugs/SERIALIZATION_BUGS.md`](../Bugs/SERIALIZATION_BUGS.md) **§08** and
+      sharpens it: an out-of-range pending column is not merely stored, it is byte-truncated onto a
+      **different, valid** column — `(259, 4)` becomes `(3, 4)`, passes the load-side bounds check, and queues
+      a recalculation for a column the caller never named (while `(272, 5)` → `(16, 5)` is correctly rejected).
+      Filed, not fixed.
+- **Superseded status (2026-08-21): parts 1–3 COMPLETE.** Shipped as
   `Minecraft Clone/Dev/Validate Serialization Round-Trip` (`Assets/Editor/Validation/SerializationRoundTrip/`,
   8 baselines `B1`–`B8` plus the `K04` repro), registered as the 24th suite (`ExpectedSuiteCount` 23 → 24). No
   production code changed. Coverage: the fixture-integrity guard that the reference chunk exercises all four v7
@@ -373,7 +399,7 @@ No suites proposed for: **UI/menus and input** (event-driven, low blast radius, 
 
 ## Sequencing summary
 
-~~`NS-1` (core, parts 1–5) and `NS-2` first~~ — `NS-1` **parts 1–3 landed 2026-08-21**; its remaining parts 4–5 (`RegionFile` sector mechanics, pending stores) and `NS-2` are now the top of the queue. They guard the two irreversible failure classes (data loss, seed breaks) and unblock the most queued work (`SL-*`, `WG-3`, `ET-2`). `NS-5`/`NS-6` are 🟢-sized and should simply ride along with the work that triggers them (WS-1/VQ-1 and the next new pool, respectively). `NS-3` is the biggest investment — start it as repro fixtures for the three historical deadlocks and grow it scenario-wise, ideally before `P-4`/`OM-2` rework the scheduling invariants it guards. ~~`NS-4` lands whenever `PH-1`/`VQ-1` get scheduled,
+~~`NS-1` (core, parts 1–5) and `NS-2` first~~ — `NS-1` **is complete as of 2026-08-21 (parts 1–5)**, so **`NS-2` is now the top unbuilt item**, with `NS-8`'s continuity half the cheaper way in (it needs none of `NS-2`'s frozen-fixture machinery). Of the two irreversible failure classes, data loss now has a gate; seed breaks still do not. `NS-1` unblocked `SL-1`/`SL-3`/`SL-4`'s named prerequisite; `WG-3` and `ET-2` still wait on `NS-2`. `NS-5`/`NS-6` are 🟢-sized and should simply ride along with the work that triggers them (WS-1/VQ-1 and the next new pool, respectively). `NS-3` is the biggest investment — start it as repro fixtures for the three historical deadlocks and grow it scenario-wise, ideally before `P-4`/`OM-2` rework the scheduling invariants it guards. ~~`NS-4` lands whenever `PH-1`/`VQ-1` get scheduled,
 using the §2 scenario table as its baseline list.
 
 **The 2026-08-19 additions slot in as follows.** ~~`NS-7` ties `NS-1` at the top — it is the same failure class,
@@ -396,6 +422,23 @@ infrastructure hygiene: do (1) and (2) with the next framework change, and treat
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.5** *(2026-08-21)* - **`NS-1` COMPLETE — parts 4–5 landed the same day**, into the same suite:
+  `B9`–`B14` for the `RegionFile` sector allocator and `B15`–`B16` for the pending stores, plus the `K08`
+  repro of `SERIALIZATION_BUGS` §08 (suite: 8 → **16 baselines + 2 repros**, 202 ms). This closes the
+  roadmap's top-priority item; **`NS-2` is now the top unbuilt entry**. Census: **537 → 545 baselines / 24
+  suites / 2 repros — DERIVED, not yet re-verified** against a full aggregate run (the suite itself was
+  observed at 16/0/2, and Deserialization Robustness, Save Durability and Migration Chain were re-run at 0
+  failures, but the aggregate total is outstanding). Prove-red: three mutations — not freeing a relocated
+  record's vacated run → `{B10, B11}`; not writing the offset-table entry → `{B9, B10, B11, B12, B13, B14}`;
+  dropping the blocklight file and the pending-mod metadata byte → `{B15, B16}`. The second batch reddened
+  `B14` against prediction, because `B14` reopens the region file to check its neighbour. **A methodology
+  correction worth keeping:** the first draft of the part-4 scenarios inspected the on-disk offset table while
+  the writing `RegionFile` was still open — but `RegionFile` only flushes on `Dispose`, so those reads
+  returned stale zeros. Two scenarios failed for the wrong reason, and two checks (run disjointness, "no
+  table entry") were passing **vacuously**, since all-zero reads satisfy both. All on-disk inspection now
+  happens post-dispose, and `NoOverlappingRuns` rejects an empty table outright. `K08` also sharpened §08:
+  an invalid pending column is not just stored, it is truncated onto a *different valid* column — `(259, 4)`
+  becomes `(3, 4)` and is silently queued.
 * **v1.4** *(2026-08-21)* - **`NS-1` parts 1–3 COMPLETE**, shipped as the standalone
   `Minecraft Clone/Dev/Validate Serialization Round-Trip` (`Assets/Editor/Validation/SerializationRoundTrip/`,
   8 baselines + the `K04` repro), registered as the **24th** suite (`ExpectedSuiteCount` 23 → 24); no production
@@ -513,6 +556,6 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-21 (**`NS-1` parts 1–3 shipped** as `Validate Serialization Round-Trip` — 8 baselines + the `K04` repro of `SERIALIZATION_BUGS` §04, registered as the 24th suite; census re-verified at **537 baselines / 24 suites, all green, 1 repro outstanding** (188 s). Parts 4–5 — `RegionFile` sector mechanics and the pending stores — remain open and are the next NS-1 work. Previously: 2026-08-21 (`SERIALIZATION_BUGS` §10 fixed — `RunAOTMigrationAsync`'s region-layout and per-chunk passes now run in sequence instead of exclusively; the bug is archived as `_FIXED_BUGS.md` Serialization 07 and its `K10` repro promoted to baseline `B25`, taking Migration Chain to **25 baselines, 0 repros** and the census to **529 baselines / 23 suites, all green, 0 repros** — re-verified the same day against a full `Validate All` (3 min 14 s). A new `SERIALIZATION_BUGS` §11 was filed for the pre-`needsLight` v1 chunk layout the fix does not cover. Previously: 2026-08-20 (NS-7 **and** NS-7b shipped: `Validate Migration Chain`, 24 baselines + the `K10` repro of `SERIALIZATION_BUGS` §10, census re-verified at **528 baselines / 23 suites, all green**. Previously: 2026-08-19 eighth-pass audit: `NS-7`…`NS-11` added, plus the deliberate-exclusion section for entry points kept out of `ValidationSuiteRegistry`; census re-verified against a `Validate All` run at **497 baselines / 22 suites, all green** — matching the 2026-08-17 release notes; superseded later the same day by the C14 mirrors B108–B114, taking Lighting 99 → 106 and the total to **504**)))  
+**Last Updated:** 2026-08-21 (**`NS-1` COMPLETE — all five parts** shipped as `Validate Serialization Round-Trip`: 16 baselines plus the `K04`/`K08` repros of `SERIALIZATION_BUGS` §04 and §08, registered as the 24th suite. ⚠️ Census **545 baselines / 24 suites / 2 repros is DERIVED** — the suite was observed at 16/0/2 and three neighbouring storage suites at 0 failures, but the aggregate re-verification is outstanding; confirm on the next `Validate All`. **`NS-2` is now the top unbuilt item.** Previously: 2026-08-21 (`NS-1` parts 1–3, census verified at 537 / 24 / 1 over 188 s). Previously: 2026-08-21 (`SERIALIZATION_BUGS` §10 fixed — `RunAOTMigrationAsync`'s region-layout and per-chunk passes now run in sequence instead of exclusively; the bug is archived as `_FIXED_BUGS.md` Serialization 07 and its `K10` repro promoted to baseline `B25`, taking Migration Chain to **25 baselines, 0 repros** and the census to **529 baselines / 23 suites, all green, 0 repros** — re-verified the same day against a full `Validate All` (3 min 14 s). A new `SERIALIZATION_BUGS` §11 was filed for the pre-`needsLight` v1 chunk layout the fix does not cover. Previously: 2026-08-20 (NS-7 **and** NS-7b shipped: `Validate Migration Chain`, 24 baselines + the `K10` repro of `SERIALIZATION_BUGS` §10, census re-verified at **528 baselines / 23 suites, all green**. Previously: 2026-08-19 eighth-pass audit: `NS-7`…`NS-11` added, plus the deliberate-exclusion section for entry points kept out of `ValidationSuiteRegistry`; census re-verified against a `Validate All` run at **497 baselines / 22 suites, all green** — matching the 2026-08-17 release notes; superseded later the same day by the C14 mirrors B108–B114, taking Lighting 99 → 106 and the total to **504**)))  
 **Next Review:** whenever a suite is added or a `Validate All` count changes — the existing-coverage
 paragraph is the one part of this document that goes stale silently.
