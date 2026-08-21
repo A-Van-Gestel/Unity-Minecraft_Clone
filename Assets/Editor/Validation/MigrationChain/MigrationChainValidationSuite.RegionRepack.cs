@@ -59,21 +59,27 @@ namespace Editor.Validation.MigrationChain
         /// </summary>
         /// <param name="regionPath">Folder to create the region files in.</param>
         /// <param name="chunkFormatVersion">Chunk format the payloads are authored in.</param>
-        /// <returns>The payload bytes written (identical for both chunks).</returns>
+        /// <returns>The payload bytes written for <see cref="REPACK_CHUNK_A"/>.</returns>
         private static byte[] SeedV1AddressedRegion(string regionPath, byte chunkFormatVersion)
         {
             Directory.CreateDirectory(regionPath);
-            byte[] payload = BuildHistoricalChunkPayload(chunkFormatVersion);
+            byte[] firstPayload = null;
 
             foreach (int chunkX in new[] { REPACK_CHUNK_A, REPACK_CHUNK_B })
             {
+                // Each chunk is stamped with its OWN coordinate, as a real world is. Sharing one payload
+                // would have both chunks claim a single position, so a chunk landing at the wrong address
+                // would still read back as "a chunk" and the fault would surface only as a coord warning.
+                byte[] payload = BuildHistoricalChunkPayload(chunkFormatVersion, chunkX, REPACK_CHUNK_Z);
+                firstPayload ??= payload;
+
                 (Vector2Int region, int localX, int localZ) = BrokenV1Address(chunkX, REPACK_CHUNK_Z);
                 using RegionFile file = new RegionFile(
                     Path.Combine(regionPath, $"r.{region.x.ToString()}.{region.y.ToString()}.bin"));
                 file.SaveChunkData(localX, localZ, payload, payload.Length, CompressionAlgorithm.None);
             }
 
-            return payload;
+            return firstPayload;
         }
 
         // --- Scenarios -----------------------------------------------------------------------------
@@ -136,15 +142,16 @@ namespace Editor.Validation.MigrationChain
             return ok;
         }
 
-        /// <summary>K10. Reproduces <c>SERIALIZATION_BUGS.md</c> §10 and is <b>expected red</b> until that is
-        /// fixed. Asserts the correct post-migration contract — a migrated world's chunks are readable — for a
-        /// complete v1 world.
+        /// <summary>B25. Red when: a v1 world stops getting BOTH region passes — the layout repack and the
+        /// per-chunk format chain. v1 is the only world version whose path contains a layout step, so it is the
+        /// only version where running one pass instead of both is possible; the payloads would stay
+        /// chunk-format v1 inside a world stamped current, fail the version check in
+        /// <c>ChunkSerializer.Deserialize</c>, and regenerate from seed silently — recoverable only from the
+        /// pre-migration backup, which the player has to know to reach for.
         /// <para>
-        /// <c>RunAOTMigrationAsync</c> picks the region-layout branch <i>instead of</i> the per-chunk format
-        /// branch, and v1 is the only world version whose path contains a layout step. So a v1 world is
-        /// repacked to correct addresses while its payloads stay chunk-format v1 — inside a world now stamped
-        /// current. Every chunk then fails the version check in <c>ChunkSerializer.Deserialize</c> and
-        /// regenerates from seed, silently, with the backup already rotated.
+        /// Authored as the <c>K10</c> repro of <c>_FIXED_BUGS.md</c> Serialization 07 and promoted after the fix was
+        /// confirmed on a real v1 save: 1282 broken-addressed region files collapsed to 9 correct ones and all
+        /// 4855 chunks came back at the current format.
         /// </para></summary>
         private static bool V1WorldChunksSurviveMigration()
         {

@@ -49,9 +49,13 @@ namespace Editor.Validation.MigrationChain
         /// <summary>Byte offset of section 0's non-air count: past the bitmask(4) and the section version byte(1).</summary>
         private const int FIXTURE_SECTION0_NON_AIR_OFFSET = FIXTURE_BITMASK_OFFSET + 4 + 1;
 
-        /// <summary>Golden SHA-256 of the era-v2 fixture payload. Empty string = capture mode.</summary>
+        /// <summary>
+        /// Golden SHA-256 of the era-v2 fixture payload. Empty string = capture mode.
+        /// Re-pinned when the fixture began stamping the voxel-space origin (index × ChunkWidth) rather than
+        /// the raw chunk index, matching what on-disk era saves actually store.
+        /// </summary>
         private const string GOLDEN_V2_FIXTURE_HASH =
-            "9f5e82893fa965eadc8179e62fac2115651a15eee39362540292eee6c206c141";
+            "2e76a440dad6332ef3f8921852a49d8c51b8aad6e1f9c5e2b52ceb122b6203ae";
 
         // --- Chain driver ---------------------------------------------------------------------------
 
@@ -422,9 +426,9 @@ namespace Editor.Validation.MigrationChain
         /// <summary>B21. Red when: the manager's production per-chunk format loop stops applying the chain — the
         /// thing B15/B16 exercise through a mirrored loop. Drives a real <b>v2</b> world (chunk payloads stored
         /// in the era-v2 layout) through <c>RunAOTMigrationAsync</c> and reads the result back through the full
-        /// storage stack. A v2 world is used deliberately: it has no region-layout step in its path, so it takes
-        /// the format branch — which is exactly the branch a v1 world does NOT take (see
-        /// <c>SERIALIZATION_BUGS.md</c> §10, reproduced by <c>K10</c>).</summary>
+        /// storage stack. A v2 world is used deliberately: it has no region-layout step in its path, so it needs
+        /// only the per-chunk pass, where a v1 world needs that pass <i>and</i> the layout repack — the pairing
+        /// <c>B25</c> guards (see <c>_FIXED_BUGS.md</c> Serialization 07).</summary>
         private static bool RealManagerAppliesChunkFormatChain()
         {
             using MigrationFixture fx = new MigrationFixture();

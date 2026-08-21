@@ -102,8 +102,8 @@ namespace Editor.Validation.MigrationChain
         /// <summary>B8. Red when: the manager writes a silently un-migrated chunk through as if it had been
         /// migrated. This is the failure the version-byte guard exists for and the one the shipped dev seam
         /// cannot reach (it throws rather than no-opping): a step that runs, returns its input unchanged and
-        /// is trusted would leave old-format payloads inside a world stamped current — unreadable, with the
-        /// backup already rotated.</summary>
+        /// is trusted would leave old-format payloads inside a world stamped current — unreadable, and
+        /// recoverable only from the pre-migration backup.</summary>
         private static bool SilentNoOpStepIsCaught() =>
             MisbehavingStepIsCaught(MisbehavingStep.Mode.NoOp, "a step that returns its input unchanged");
 

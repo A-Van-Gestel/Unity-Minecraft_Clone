@@ -53,7 +53,11 @@ namespace Editor.Validation.MigrationChain
         /// <summary>Sections the fixture populates — ChunkHeight 128 / 16 = 8, so bitmask bits 0–7.</summary>
         private const int FIXTURE_SECTION_COUNT = 8;
 
-        /// <summary>Chunk coordinate the fixture payload is stamped with (chunk-index space, matching the era).</summary>
+        /// <summary>
+        /// Default chunk index the fixture payload is stamped with. The payload itself stores the
+        /// <i>voxel-space origin</i> (index × <see cref="ERA_CHUNK_WIDTH"/>), which is what a real era save
+        /// carries: <c>ChunkData.position</c> was the voxel origin, confirmed against on-disk v1 worlds.
+        /// </summary>
         private const int FIXTURE_CHUNK_X = 3, FIXTURE_CHUNK_Z = -5;
 
         /// <summary>
@@ -168,9 +172,14 @@ namespace Editor.Validation.MigrationChain
         /// </summary>
         /// <param name="chunkFormatVersion">1 or 2 — the only eras this builder authors. v1 differs from v2
         /// only in its 256-byte (byte-per-column) heightmap; both carry the needs-lighting flag.</param>
+        /// <param name="chunkIndexX">Chunk index X the payload is stamped with, written as a voxel-space origin.</param>
+        /// <param name="chunkIndexZ">Chunk index Z the payload is stamped with, written as a voxel-space origin.</param>
         /// <returns>The uncompressed payload, ready to hand to a migration step's <c>MigrateChunk</c>.</returns>
         /// <exception cref="ArgumentOutOfRangeException">Thrown for any era this builder does not author.</exception>
-        private static byte[] BuildHistoricalChunkPayload(byte chunkFormatVersion)
+        private static byte[] BuildHistoricalChunkPayload(
+            byte chunkFormatVersion,
+            int chunkIndexX = FIXTURE_CHUNK_X,
+            int chunkIndexZ = FIXTURE_CHUNK_Z)
         {
             if (chunkFormatVersion is not (1 or 2))
                 throw new ArgumentOutOfRangeException(nameof(chunkFormatVersion),
@@ -181,8 +190,8 @@ namespace Editor.Validation.MigrationChain
 
             // --- Header (v2→v3's READ DEFINITION, in order) ---
             w.Write(chunkFormatVersion);
-            w.Write(FIXTURE_CHUNK_X);
-            w.Write(FIXTURE_CHUNK_Z);
+            w.Write(chunkIndexX * ERA_CHUNK_WIDTH);
+            w.Write(chunkIndexZ * ERA_CHUNK_WIDTH);
             w.Write(false); // needsLight — the v2→v3 step forces this true, which B15 does not assert on.
 
             // --- Heightmap ---

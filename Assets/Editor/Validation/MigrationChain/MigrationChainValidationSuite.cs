@@ -25,9 +25,9 @@ namespace Editor.Validation.MigrationChain
     /// (v2→v3, v5→v6, v7→v8, v8→v9, v9→v10), the two <c>pending_mods</c> steps and the v1→v2 region-layout
     /// restructure need a historical chunk-format fixture writer per era and are tracked as roadmap NS-7b.
     /// </para>
-    /// <para>All scenarios are <b>baselines</b> (must stay green) except <c>K10</c>, which reproduces
-    /// <c>SERIALIZATION_BUGS.md</c> §10 and is expected <b>red</b> until that is fixed. No production code is
-    /// under test through a new seam — the manager needed none.</para>
+    /// <para>All scenarios are <b>baselines</b> (must stay green). <c>B25</c> was authored as the <c>K10</c>
+    /// repro of <c>_FIXED_BUGS.md</c> Serialization 07 and promoted once the fix was confirmed in-game on a real v1
+    /// world. No production code is under test through a new seam — the manager needed none.</para>
     /// <para>
     /// <b>Prove-red is recorded, not assumed.</b> These baselines were authored against shipped code, so four
     /// engine mutations were applied (in two pairs with disjoint predicted red-sets) to observe them fail:
@@ -43,7 +43,7 @@ namespace Editor.Validation.MigrationChain
     /// <b>B11</b>.</item>
     /// </list>
     /// <para>
-    /// <b>NS-7b's chunk-payload scenarios (B14–B24, K10) added five more mutations</b>, applied in two batches
+    /// <b>NS-7b's chunk-payload scenarios (B14–B25) added five more mutations</b>, applied in two batches
     /// with disjoint predicted red-sets; every batch reddened exactly its prediction:
     /// </para>
     /// <list type="bullet">
@@ -72,9 +72,11 @@ namespace Editor.Validation.MigrationChain
 
         /// <summary>
         /// Builds and runs the migration-chain scenarios, returning the categorized result (the headless/CI
-        /// entry point). Uses <see cref="KnownBugChannel.Bug"/> because <c>K10</c> reproduces a documented
-        /// bug: when it starts passing the runner must route the reader to in-game confirmation and the
-        /// archive-fixed-bug workflow, not to "promote an implemented feature to a baseline".
+        /// entry point). Stays on <see cref="KnownBugChannel.Bug"/>: this suite's known-bug slot has hosted a
+        /// documented serialization bug before (archived as <c>_FIXED_BUGS.md</c> Serialization 07, promoted to
+        /// <c>B25</c>), so a future repro
+        /// added here must route the reader to in-game confirmation and the archive-fixed-bug workflow, not to
+        /// "promote an implemented feature to a baseline".
         /// </summary>
         /// <param name="logToConsole">When false, runs silently and only returns the result (for headless/CI use).</param>
         /// <param name="showProgress">When false, suppresses this suite's own progress bar (the aggregate runner drives one).</param>
@@ -107,7 +109,7 @@ namespace Editor.Validation.MigrationChain
                 new Scenario("B22: pending_mods v4→v5 collapses orientation+fluid into one meta byte, keyed off the frozen v4 fluid ids", PendingModsV4ToV5),
                 new Scenario("B23: pending_mods v5→v6 re-encodes meta per schema and agrees with the per-voxel converter", PendingModsV5ToV6),
                 new Scenario("B24: the v1→v2 repack recovers each chunk index from its broken address and rewrites it at the correct one", RegionRepackMovesChunksToCorrectAddresses),
-                new Scenario("K10: a migrated v1 world's chunks are readable rather than regenerated from seed", V1WorldChunksSurviveMigration, "SERIALIZATION_BUGS §10"),
+                new Scenario("B25: a migrated v1 world's chunks are readable rather than regenerated from seed", V1WorldChunksSurviveMigration),
             };
             return ValidationSuiteRunner.Execute("Migration Chain", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
