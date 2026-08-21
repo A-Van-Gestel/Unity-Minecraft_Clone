@@ -69,6 +69,22 @@ smaller set. Output order is registry order regardless of request order.
   warning; some suites log a `B7 INCONCLUSIVE` zero-alloc note). That is **not** a suite failure —
   read the real verdict from `executionLogs` / the returned counts, not from the tool's success flag.
 
+**⚠️ Runtime budget — never drive `Validate All` through MCP.** A full pass is **~190 s**, and
+**Lighting alone is ~182 s of it**; the other 23 suites together take ~6 s. Anything sent through
+`Unity_RunCommand` that outlives the MCP response window is **re-issued**, and the retries stack on
+the Editor's main thread, survive a client-side task stop, and are cleared only by restarting the
+Editor — so a single `Validate All` over MCP becomes an endless re-run loop that blocks every later
+call. Route it accordingly:
+
+| Want | Do |
+|---|---|
+| The full aggregate | Run `Minecraft Clone/Dev/Validate All` **from the Editor menu**, read the summary from `Logs/Editor.log` |
+| A fast agent-side sweep | `Unity_RunCommand` over the registry **skipping `"Lighting Engine"`** (~6 s, safely inside the window) |
+| Lighting specifically | Its own menu run, or accept the ~182 s cost outside MCP |
+
+The same budget applies to any long `Unity_RunCommand` (fuzz sweeps, multi-suite loops): keep each
+call well under the window, or drive it from a menu item instead.
+
 **Batch / headless / CI.** `ValidationSuiteCI.RunHeadless` is the `-executeMethod` target:
 
 ```
