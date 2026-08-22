@@ -1188,16 +1188,24 @@ public class World : MonoBehaviour, IMeshDrainHost
                         Debug.Log($"[LoadOrGenerateChunk] Restoring {localCols.Count} lighting columns for chunk {chunkCoord}");
 #endif
 
-                    HashSet<Vector2Int> globalCols = new HashSet<Vector2Int>();
+                    HashSet<Vector2Int> globalCols = HashSetPool<Vector2Int>.Get();
                     foreach (Vector2Int lCol in localCols)
                     {
                         globalCols.Add(new Vector2Int(lCol.x + chunkVoxelPos.x, lCol.y + chunkVoxelPos.y));
                     }
 
-                    if (worldData.SunlightRecalculationQueue.ContainsKey(chunkVoxelPos))
-                        worldData.SunlightRecalculationQueue[chunkVoxelPos].UnionWith(globalCols);
+                    // TryGetAndRemove hands over the store's pooled set, so it is ours to release.
+                    HashSetPool<Vector2Int>.Release(localCols);
+
+                    if (worldData.SunlightRecalculationQueue.TryGetValue(chunkVoxelPos, out HashSet<Vector2Int> existingCols))
+                    {
+                        existingCols.UnionWith(globalCols);
+                        HashSetPool<Vector2Int>.Release(globalCols);
+                    }
                     else
+                    {
                         worldData.SunlightRecalculationQueue[chunkVoxelPos] = globalCols;
+                    }
 
                     data.HasLightChangesToProcess = true;
                 }
