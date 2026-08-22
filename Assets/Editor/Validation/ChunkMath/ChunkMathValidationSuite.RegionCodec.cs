@@ -11,7 +11,10 @@ namespace Editor.Validation
     /// Pins <see cref="RegionAddressCodec"/> V2's address math to hand-derived expected values (not just
     /// round-trip identity — a matched encoder/decoder bug pair keeps round-trips green while corrupting
     /// every on-disk address), over positive, negative, and ±2³¹-adjacent domains, plus the decode-only
-    /// V1 legacy contract (expected values, V1≠V2 divergence, encoder guard). Read-only: no format
+    /// V1 legacy contract (expected values, V1≠V2 divergence, encoder guard) and the gated V1 legacy
+    /// <b>encoder</b> itself (G4) — still reachable via <c>allowLegacyEncoder: true</c> for migration and
+    /// future editor tooling, so its formula, its per-call error announcement, and the positive-only domain
+    /// of its round-trip are pinned. Read-only: no format
     /// change is made or implied — the recorded no-V3-bump verdict stands (WORLD_SCALING_ANALYSIS §3.2).
     /// </summary>
     public static partial class ChunkMathValidationSuite
@@ -24,6 +27,71 @@ namespace Editor.Validation
             scenarios.Add(new Scenario("V2 Encoder Slot Range + Truncation Teeth", RunV2EncoderSlotRangeTeeth));
             scenarios.Add(new Scenario("V1 Decoder Legacy Pin + V1≠V2 Divergence", RunV1DecoderLegacyPin));
             scenarios.Add(new Scenario("V1 Encoder Guard + ForVersion Dispatch", RunV1EncoderGuardAndDispatch));
+            scenarios.Add(new Scenario("V1 Legacy Encoder Expected Address (gated, log-captured)", RunV1LegacyEncoderExpectedAddress));
+            scenarios.Add(new Scenario("V1 Legacy Encoder Round-Trip + Negative-Domain Limit", RunV1LegacyEncoderRoundTrip));
+        }
+
+        /// <summary>
+        /// Swallows <see cref="LogType.Error"/> while forwarding everything else, so a scenario can exercise a
+        /// production path whose contract is to log an error without that error being read as a suite failure.
+        /// </summary>
+        private sealed class CapturingLogHandler : ILogHandler
+        {
+            private readonly ILogHandler _inner;
+
+            /// <summary>Number of error-level messages intercepted.</summary>
+            public int ErrorCount;
+
+            /// <summary>The most recent intercepted error message, or null.</summary>
+            public string LastError;
+
+            public CapturingLogHandler(ILogHandler inner) => _inner = inner;
+
+            /// <inheritdoc/>
+            public void LogFormat(LogType logType, UnityEngine.Object context, string format, params object[] args)
+            {
+                if (logType == LogType.Error)
+                {
+                    ErrorCount++;
+                    LastError = string.Format(format, args);
+                    return;
+                }
+
+                _inner.LogFormat(logType, context, format, args);
+            }
+
+            /// <inheritdoc/>
+            public void LogException(System.Exception exception, UnityEngine.Object context) =>
+                _inner.LogException(exception, context);
+        }
+
+        /// <summary>
+        /// Runs <paramref name="action"/> with error logging intercepted, returning the intercepted error count
+        /// and last message. The handler is restored in a <c>finally</c> and the restoration is verified before
+        /// returning: leaking the capturing handler would swallow the runner's own <c>[FAIL]</c> output and turn
+        /// every later suite falsely green, so this is the one thing here that must never fail silently.
+        /// </summary>
+        private static (int count, string last) CaptureExpectedErrors(Action action)
+        {
+            ILogHandler original = Debug.unityLogger.logHandler;
+            CapturingLogHandler capture = new CapturingLogHandler(original);
+
+            try
+            {
+                Debug.unityLogger.logHandler = capture;
+                action();
+            }
+            finally
+            {
+                Debug.unityLogger.logHandler = original;
+            }
+
+            if (!ReferenceEquals(Debug.unityLogger.logHandler, original))
+                throw new InvalidOperationException(
+                    "[ChunkMathValidationSuite] The captured log handler was not restored; aborting before it can " +
+                    "swallow later suite output.");
+
+            return (capture.ErrorCount, capture.LastError);
         }
 
         /// <summary>Independent per-axis oracle for the V2 encoder: double-precision floor, no shift/mask.</summary>
@@ -272,8 +340,9 @@ namespace Editor.Validation
         /// Pins the factory contract: the V1 encoder throws without <c>allowLegacyEncoder</c> (decode-only
         /// legacy — normal code can never write V1 layout), versions below 1 are rejected, and every
         /// version ≥ 2 (including the current save version) dispatches to the same V2 addressing. The
-        /// <c>allowLegacyEncoder: true</c> arm is deliberately not exercised — it emits a
-        /// <c>Debug.LogError</c> by design, which would pollute a green run.
+        /// <c>allowLegacyEncoder: true</c> arm is covered separately by
+        /// <see cref="RunV1LegacyEncoderExpectedAddress"/>, which captures the deliberate <c>Debug.LogError</c>
+        /// rather than letting it read as a suite failure.
         /// </summary>
         private static bool RunV1EncoderGuardAndDispatch()
         {
@@ -323,6 +392,162 @@ namespace Editor.Validation
             }
 
             Debug.Log("[PASS] V1 Encoder Guard + ForVersion Dispatch");
+            return true;
+        }
+
+        /// <summary>
+        /// Pins the V1 <b>encoder</b> formula itself — the historical bug, preserved verbatim and still
+        /// reachable through <c>ForVersion(1, allowLegacyEncoder: true)</c> for migration tooling and future
+        /// editor tools. Two contracts: the emitted <c>(region, slot)</c> values, and the guarantee that
+        /// <b>every</b> encoding call announces itself with an error-level log so the usage can never be silent.
+        /// The announcement is captured rather than suppressed, so it is asserted instead of merely tolerated.
+        /// Positive domain only — see <see cref="RunV1LegacyEncoderRoundTrip"/> for why negatives are a
+        /// recorded limitation rather than a supported input.
+        /// </summary>
+        private static bool RunV1LegacyEncoderExpectedAddress()
+        {
+            IRegionAddressCodec legacy = RegionAddressCodec.ForVersion(1, allowLegacyEncoder: true);
+
+            // (chunk voxel origin, expected V1 region, expected V1 slot) per axis.
+            // V1: region = floor(voxel / 32) via float; slot = voxel % 32 (truncating).
+            (int voxel, int region, int slot)[] cases =
+            {
+                (0, 0, 0),
+                (16, 0, 16),   // the documented "slot is only ever 0 or 16" shape
+                (32, 1, 0),
+                (48, 1, 16),
+                (112, 3, 16),  // pairs with the V1 decoder pin's (3,·,16,·) -> chunk 7 case
+                (160, 5, 0),
+                (320, 10, 0),  // the migration's worked example: broken r.10.0 -> voxelX 320 -> chunk 20
+                (1600, 50, 0),
+            };
+
+            foreach ((int voxel, int region, int slot) in cases)
+            {
+                Vector2Int address = default;
+                int lx = 0;
+                int lz = 0;
+
+                (int count, string last) = CaptureExpectedErrors(() =>
+                    (address, lx, lz) = legacy.ChunkVoxelPosToRegionAddress(new Vector2Int(voxel, voxel)));
+
+                if (address.x != region || address.y != region || lx != slot || lz != slot)
+                {
+                    Debug.LogError($"[FAIL] V1 Legacy Encoder Expected Address — v={voxel.ToString()} expected region " +
+                                   $"({region.ToString()},{region.ToString()}) slot ({slot.ToString()},{slot.ToString()}), " +
+                                   $"got {address} ({lx.ToString()},{lz.ToString()}).");
+                    return false;
+                }
+
+                // The visibility contract: exactly one error-level announcement per encoding call.
+                if (count != 1)
+                {
+                    Debug.LogError($"[FAIL] V1 Legacy Encoder Expected Address — v={voxel.ToString()} produced " +
+                                   $"{count.ToString()} error-level log(s), expected exactly 1. The legacy encoder must " +
+                                   "announce EVERY call, or its use can go unnoticed in a log.");
+                    return false;
+                }
+
+                if (last == null || !last.Contains("Legacy V1 encoder used"))
+                {
+                    Debug.LogError($"[FAIL] V1 Legacy Encoder Expected Address — v={voxel.ToString()}'s announcement was " +
+                                   $"'{last}', which is not the legacy-encoder warning. An unrelated error must not " +
+                                   "satisfy this pin.");
+                    return false;
+                }
+            }
+
+            // Slot stays in the documented {0, 16} set across the positive domain, and never leaves [0,32).
+            for (int chunk = 0; chunk <= 256; chunk++)
+            {
+                int voxel = chunk * ChunkMath.CHUNK_WIDTH;
+                Vector2Int address = default;
+                int lx = 0;
+
+                CaptureExpectedErrors(() => (address, lx, _) =
+                    legacy.ChunkVoxelPosToRegionAddress(new Vector2Int(voxel, voxel)));
+
+                if (lx == 0 || lx == ChunkMath.CHUNK_WIDTH)
+                    continue;
+
+                Debug.LogError($"[FAIL] V1 Legacy Encoder Expected Address — chunk {chunk.ToString()} (voxel " +
+                               $"{voxel.ToString()}) encoded to slot {lx.ToString()}; V1 slots on aligned positive " +
+                               $"origins are only ever 0 or {ChunkMath.CHUNK_WIDTH.ToString()} (region {address.x.ToString()}).");
+                return false;
+            }
+
+            Debug.Log("[PASS] V1 Legacy Encoder Expected Address (gated, log-captured)");
+            return true;
+        }
+
+        /// <summary>
+        /// The property that made the v1→v2 repack correct: over the positive domain, V1 encode followed by V1
+        /// decode recovers the true chunk index, so the migration can read a broken layout back losslessly.
+        /// Also records the boundary of that guarantee — on a NEGATIVE origin the encoder pairs a floored region
+        /// with a truncating modulo, yielding a slot outside <c>[0, 32)</c> that does not round-trip. V1 worlds
+        /// predate negative coordinates, so this is a documented limit on the legacy encoder's usable domain,
+        /// not a bug to fix: any future tool that encodes V1 must stay non-negative.
+        /// </summary>
+        private static bool RunV1LegacyEncoderRoundTrip()
+        {
+            IRegionAddressCodec legacy = RegionAddressCodec.ForVersion(1, allowLegacyEncoder: true);
+
+            // Positive domain: encode -> decode is the identity on chunk indices.
+            for (int chunk = 0; chunk <= 512; chunk++)
+            {
+                int voxel = chunk * ChunkMath.CHUNK_WIDTH;
+                Vector2Int address = default;
+                int lx = 0;
+                int lz = 0;
+
+                CaptureExpectedErrors(() =>
+                    (address, lx, lz) = legacy.ChunkVoxelPosToRegionAddress(new Vector2Int(voxel, voxel)));
+
+                if (lx < 0 || lx >= ChunkMath.CHUNKS_PER_REGION_SIDE)
+                {
+                    Debug.LogError($"[FAIL] V1 Legacy Encoder Round-Trip — chunk {chunk.ToString()} produced the " +
+                                   $"out-of-range slot {lx.ToString()}.");
+                    return false;
+                }
+
+                Vector2Int decoded = legacy.RegionSlotToChunkIndex(address.x, address.y, lx, lz);
+                if (decoded.x != chunk || decoded.y != chunk)
+                {
+                    Debug.LogError($"[FAIL] V1 Legacy Encoder Round-Trip — chunk {chunk.ToString()} encoded to region " +
+                                   $"{address} slot ({lx.ToString()},{lz.ToString()}) but decoded back to {decoded}.");
+                    return false;
+                }
+            }
+
+            // Negative domain: the recorded limit. floor(-16/32) = -1 paired with -16 % 32 = -16.
+            {
+                Vector2Int address = default;
+                int lx = 0;
+                int lz = 0;
+
+                CaptureExpectedErrors(() =>
+                    (address, lx, lz) = legacy.ChunkVoxelPosToRegionAddress(new Vector2Int(-16, -16)));
+
+                if (address.x != -1 || lx != -16)
+                {
+                    Debug.LogError($"[FAIL] V1 Legacy Encoder Round-Trip — voxel -16 was expected to expose V1's " +
+                                   $"floor-region/truncating-slot mismatch as region -1 slot -16, got region " +
+                                   $"{address.x.ToString()} slot {lx.ToString()}. The recorded negative-domain limit " +
+                                   "has changed; re-check the legacy encoder before relying on this note.");
+                    return false;
+                }
+
+                Vector2Int decoded = legacy.RegionSlotToChunkIndex(address.x, address.y, lx, lz);
+                if (decoded.x == -1)
+                {
+                    Debug.LogError("[FAIL] V1 Legacy Encoder Round-Trip — voxel -16 round-tripped to chunk -1, but V1 " +
+                                   "encoding is documented as unusable on negative origins. If this now works, the " +
+                                   "limitation note on this scenario is stale.");
+                    return false;
+                }
+            }
+
+            Debug.Log("[PASS] V1 Legacy Encoder Round-Trip + Negative-Domain Limit");
             return true;
         }
     }
