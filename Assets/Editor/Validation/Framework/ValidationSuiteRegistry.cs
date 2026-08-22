@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Editor.Validation.Behavior;
 using Editor.Validation.Celestial;
+using Editor.Validation.ChunkPipeline;
 using Editor.Validation.ChunkUnload;
 using Editor.Validation.Commands;
 using Editor.Validation.DeserializationRobustness;
@@ -59,7 +60,7 @@ namespace Editor.Validation.Framework
     public static class ValidationSuiteRegistry
     {
         /// <summary>The number of standard suites expected on the list — a floor the aggregate runner asserts against.</summary>
-        public const int ExpectedSuiteCount = 24;
+        public const int ExpectedSuiteCount = 25;
 
         /// <summary>The registered suites, in run/report order.</summary>
         public static readonly IReadOnlyList<RegisteredSuite> Suites = new[]
@@ -76,6 +77,7 @@ namespace Editor.Validation.Framework
             new RegisteredSuite("Chunk Unload Decision", ChunkUnloadDecisionValidationSuite.Execute),
             new RegisteredSuite("Pool Prune Decision", PoolPruneDecisionValidationSuite.Execute),
             new RegisteredSuite("Pipeline Backpressure", PipelineBackpressureValidationSuite.Execute),
+            new RegisteredSuite("Chunk Pipeline", ChunkPipelineValidationSuite.Execute),
             new RegisteredSuite("Save Durability", SaveDurabilityValidationSuite.Execute),
             new RegisteredSuite("Deserialization Robustness", DeserializationRobustnessValidationSuite.Execute),
             new RegisteredSuite("Serialization Round-Trip", SerializationRoundTripValidationSuite.Execute),
