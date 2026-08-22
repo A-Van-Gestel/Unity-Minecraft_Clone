@@ -264,7 +264,7 @@ what this document ranks.
   **G1** `.PaddedVolume.cs` (6) — the padded lighting/fluid index helpers and all three neighborhood gathers had
   **zero** direct assertions; now pinned against an independent per-cell scatter oracle with position-encoding fills
   (full height, partial Y-band, missing-neighbor sentinel on each of the 8 sides, `ExtractCenterLight` round-trip, and
-  the fluid wrapper's `bandCount`-vs-`bandHeight` parameter-semantics difference).
+  the fluid wrapper's `bandCount`-vs-`bandHeight` parameter-semantics difference).  
   **Measured caveat on G1's value (2026-08-22):** the west-halo off-by-one prove-red was *also* run against the
   Lighting suite, which caught it decisively — **33 of 106 baselines red** (`B3` fails to converge, `B10` reports a
   hard border cut-off over 1431 voxels, fuzz baselines `B40`/`B68`/`B70` flag seeds); restoring returned 106/106.
