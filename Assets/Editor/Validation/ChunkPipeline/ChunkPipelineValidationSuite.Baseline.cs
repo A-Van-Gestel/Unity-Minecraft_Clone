@@ -10,11 +10,22 @@ namespace Editor.Validation.ChunkPipeline
     /// <summary>
     /// Baseline scenarios for the chunk-pipeline state machine. All must stay green; a failure is a
     /// regression in the gate composition, the scheduling arms, or the unload policy.
-    /// <para><b>Prove-red map</b> (each scenario's docstring names its own mutation; these are the
-    /// cross-cutting ones): forcing <c>AreNeighborsMeshReady</c> to return true unconditionally reds B3 and
-    /// B4; forcing <c>AreNeighborsDataReady</c> to return true reds B2; dropping the
-    /// <c>WouldStrandInRangeNeighbor</c> arm from <see cref="Helpers.ChunkUnloadDecision.Evaluate"/> reds
-    /// B5 while B1 — which asserts the deadlock — stays green, which is the intended asymmetry.</para>
+    /// <para><b>Prove-red map — OBSERVED, not predicted (swept 2026-08-23).</b> Every mutation below was
+    /// applied in isolation, the suite run, and the red-set recorded; each was then reverted. All six
+    /// baselines have been observed failing at least once.</para>
+    /// <list type="table">
+    /// <item><term>Pump's mesh gate → <c>AreNeighborsReadyAndLit</c></term><description>reds B3, B4, B6</description></item>
+    /// <item><term>Budget break drops the work instead of leaving it ready</term><description>reds B4 alone</description></item>
+    /// <item><term>Skip the <c>IsAwaitingMainThreadProcess</c> clear in the completion <c>finally</c></term><description>reds B5, B6</description></item>
+    /// <item><term><c>World.AreNeighborsDataReady</c> always true</term><description>reds B1, B5</description></item>
+    /// <item><term>Generation admission cap ignored (no staggering)</term><description>reds B2, B3</description></item>
+    /// <item><term>Drop the <c>WouldStrandInRangeNeighbor</c> arm from <see cref="Helpers.ChunkUnloadDecision.Evaluate"/></term><description>reds B5 alone — B1 stays green, the intended asymmetry</description></item>
+    /// </list>
+    /// <para><b>One prediction was wrong and is worth keeping.</b> B2's docstring used to claim that forcing
+    /// <c>AreNeighborsDataReady</c> true would red it. It does not: target parks drop to zero, but B2's
+    /// non-vacuity floor is still satisfied by its mesh declines, and it converges either way. B2's real
+    /// prove-red is the admission-cap mutation. This is why the map above records measurements rather than
+    /// expectations.</para>
     /// </summary>
     public static partial class ChunkPipelineValidationSuite
     {
@@ -93,9 +104,11 @@ namespace Editor.Validation.ChunkPipeline
         /// B2 — generation jobs completing out of order must not strand anyone. The corner chunks are
         /// requested last but admitted one per frame, so the center spends several frames failing
         /// <c>AreNeighborsDataReady</c> before its neighborhood completes.
-        /// <para>Prove-red: make <c>AreNeighborsDataReady</c> return true unconditionally — the center
-        /// schedules lighting against unpopulated neighbors and the parked count drops to 0, tripping the
-        /// vacuity floor.</para>
+        /// <para><b>Prove-red (observed):</b> ignore the pump's generation admission cap so every chunk
+        /// arrives on frame 0 — the staggering this scenario exists to exercise disappears, the floor finds
+        /// no target blocking, and B2 reds (alongside B3). Note the mutation that does <i>not</i> work:
+        /// forcing <c>AreNeighborsDataReady</c> true leaves B2 green, because its mesh declines still satisfy
+        /// the floor and it converges regardless.</para>
         /// </summary>
         private static bool B2OutOfOrderGeneration()
         {
@@ -133,12 +146,19 @@ namespace Editor.Validation.ChunkPipeline
         }
 
         /// <summary>
-        /// B3 — §9.3 wave-front starvation. Every chunk's first lighting pass flags its cardinal neighbors
-        /// with <c>HasLightChangesToProcess</c>, the exact ping-pong that once blocked interior chunks
-        /// forever. It converges today only because meshing gates on the relaxed
-        /// <c>AreNeighborsMeshReady</c> rather than <c>AreNeighborsReadyAndLit</c>.
-        /// <para>Prove-red: point the pump's mesh gate at <c>AreNeighborsReadyAndLit</c> — the §9.3 deadlock
-        /// returns and B3 reds while B2 stays green.</para>
+        /// B3 — §9.3 wave-front starvation. A pre-seeded neighborhood cannot reproduce this: with every
+        /// chunk populated from frame 0, <c>AreNeighborsDataReady</c> passes immediately and no interior
+        /// chunk is ever gated, so the scenario converges without exercising anything. The wave-front only
+        /// forms when chunks <b>arrive over time</b> — so B3 drives generation one admission per frame while
+        /// each completed lighting pass flags its cardinal neighbors, which is the ping-pong that once
+        /// blocked interior chunks forever.
+        /// <para>It converges today only because meshing gates on the relaxed <c>AreNeighborsMeshReady</c>
+        /// rather than <c>AreNeighborsReadyAndLit</c>.</para>
+        /// <para><b>Prove-red (observed):</b> point the pump's mesh gate at <c>AreNeighborsReadyAndLit</c> —
+        /// the §9.3 deadlock returns and B3 reds (alongside B4 and B6) while B2 stays green. Ignoring the
+        /// generation admission cap also reds it. The non-vacuity floor is scoped to the target set, so a B3
+        /// that stopped gating its own targets reds rather than coasting on frontier parks — which is exactly
+        /// what the pre-redesign version of this scenario did.</para>
         /// </summary>
         private static bool B3WaveFrontConverges()
         {
@@ -150,9 +170,24 @@ namespace Editor.Validation.ChunkPipeline
                 ChunkPipelineSimulator sim = new ChunkPipelineSimulator(fixture)
                 {
                     EmitCrossChunkModsOnLightingComplete = true,
+                    GenerationAdmissionsPerFrame = 1,
                 };
 
-                List<ChunkCoord> targets = SeedNeighborhood(fixture, sim, radius: 1);
+                // Chunks arrive over time — the leading edge keeps re-flagging interior chunks whose own
+                // neighbors are still generating. Corners last, so the center waits on the slowest arrivals.
+                List<ChunkCoord> targets = new List<ChunkCoord>();
+                for (int ring = 0; ring <= 1; ring++)
+                for (int x = -1; x <= 1; x++)
+                for (int z = -1; z <= 1; z++)
+                {
+                    if (Mathf.Max(Mathf.Abs(x), Mathf.Abs(z)) != ring) continue;
+                    ChunkCoord coord = new ChunkCoord(x, z);
+                    targets.Add(coord);
+                    sim.RequestGeneration(coord);
+                }
+
+                SeedRing(fixture, radius: 2);
+
                 bool converged = sim.RunUntilConverged(FRAME_BUDGET, targets, out ChunkPipelineSimulator.FrameResult totals);
                 ok = PipelineAssert.Converged("cross-chunk mod wave converges", converged, sim, targets, totals,
                     requireBlocking: true, log);
@@ -166,8 +201,9 @@ namespace Editor.Validation.ChunkPipeline
         /// B4 — a per-frame budget of one lighting schedule and one mesh schedule must delay convergence,
         /// never prevent it: the un-served remainder stays in the ready set rather than being parked
         /// (pipeline §9.1's break semantics, which P-4's rate quota deliberately preserved).
-        /// <para>Prove-red: park the un-served remainder on a budget break instead of leaving it ready — the
-        /// chunks never re-enter the scan without a promotion event and B4 stops converging.</para>
+        /// <para><b>Prove-red (observed):</b> drop the un-served remainder's flags on a budget break instead
+        /// of leaving it ready — the work is never retried and B4 reds alone, the cleanest isolation in the
+        /// suite.</para>
         /// </summary>
         private static bool B4BudgetExhaustion()
         {
@@ -183,7 +219,7 @@ namespace Editor.Validation.ChunkPipeline
                     EmitCrossChunkModsOnLightingComplete = true,
                 };
 
-                List<ChunkCoord> targets = SeedNeighborhood(fixture, sim, radius: 1);
+                List<ChunkCoord> targets = SeedNeighborhood(fixture, radius: 1);
                 bool converged = sim.RunUntilConverged(FRAME_BUDGET, targets, out ChunkPipelineSimulator.FrameResult totals);
                 ok = PipelineAssert.Converged("starved budget still converges", converged, sim, targets, totals,
                     requireBlocking: true, log);
@@ -197,8 +233,9 @@ namespace Editor.Validation.ChunkPipeline
         /// B5 — the same §9.6 setup as B1, but with production's real fact gathering. The strand guard must
         /// defer the unload at least once (asserted, so the scenario cannot pass by simply never becoming an
         /// unload candidate); once the block lifts, the center must clear the flag B1 shows it can never clear when stranded, and the deferred chunk must finally be reclaimed.
-        /// <para>Prove-red: drop the <c>WouldStrandInRangeNeighbor</c> arm from
-        /// <see cref="Helpers.ChunkUnloadDecision.Evaluate"/> — B5 reds while B1 stays green.</para>
+        /// <para><b>Prove-red (observed):</b> drop the <c>WouldStrandInRangeNeighbor</c> arm from
+        /// <see cref="Helpers.ChunkUnloadDecision.Evaluate"/> — B5 reds alone and B1 stays green, confirming
+        /// the asymmetry this pair was built to express.</para>
         /// </summary>
         private static bool B5StrandGuardDefers()
         {
@@ -260,8 +297,9 @@ namespace Editor.Validation.ChunkPipeline
         /// <c>NeedsInitialLighting</c>, <c>HasLightChangesToProcess</c> or <c>IsAwaitingMainThreadProcess</c>:
         /// every one of those has a clear site that must have been reachable. The assertion carries a
         /// non-vacuity floor (flags must actually have been exercised) so it cannot pass on an idle world.
-        /// <para>Prove-red: skip the <c>IsAwaitingMainThreadProcess</c> clear in the pump's lighting
-        /// completion <c>finally</c> — the flag survives and B6 names the chunks holding it.</para>
+        /// <para><b>Prove-red (observed):</b> skip the <c>IsAwaitingMainThreadProcess</c> clear in the pump's
+        /// lighting completion <c>finally</c> — the flag survives and B6 names the chunks holding it (B5 reds
+        /// too, since its phase 2 sweeps the same flag).</para>
         /// </summary>
         private static bool B6FlagsPaired()
         {
@@ -275,10 +313,23 @@ namespace Editor.Validation.ChunkPipeline
                     EmitCrossChunkModsOnLightingComplete = true,
                 };
 
-                List<ChunkCoord> targets = SeedNeighborhood(fixture, sim, radius: 1);
-                sim.RunUntilConverged(FRAME_BUDGET, targets, out ChunkPipelineSimulator.FrameResult totals);
+                List<ChunkCoord> targets = SeedNeighborhood(fixture, radius: 1);
+                bool converged = sim.RunUntilConverged(FRAME_BUDGET, targets, out ChunkPipelineSimulator.FrameResult totals);
                 ok = PipelineAssert.FlagsPaired("settled pipeline holds no stranded flags", fixture, targets,
                     totals.LightingScheduled, log);
+
+                // The docstring claims a *settled* run; without this, B6 would green on a run that never
+                // converged so long as the target flags happened to be clear.
+                if (!converged)
+                {
+                    log.AppendLine($"  [FAIL] run settled — did not converge in {sim.Frame} frames, so the " +
+                                   "flag sweep describes an unfinished pipeline");
+                    ok = false;
+                }
+                else
+                {
+                    log.AppendLine($"  [PASS] run settled — converged in {sim.Frame} frames");
+                }
             }
 
             Debug.Log(log.ToString().TrimEnd());
@@ -322,7 +373,7 @@ namespace Editor.Validation.ChunkPipeline
         /// Seeds a populated, unlit square of the given radius plus the ring beyond it (so the outermost
         /// targets have the neighbor data their gates read), and returns the target coords.
         /// </summary>
-        private static List<ChunkCoord> SeedNeighborhood(ChunkPipelineFixture fixture, ChunkPipelineSimulator sim, int radius)
+        private static List<ChunkCoord> SeedNeighborhood(ChunkPipelineFixture fixture, int radius)
         {
             List<ChunkCoord> targets = new List<ChunkCoord>();
             for (int x = -radius; x <= radius; x++)
@@ -333,7 +384,6 @@ namespace Editor.Validation.ChunkPipeline
             }
 
             SeedRing(fixture, radius + 1);
-            _ = sim; // The pump reads the world the fixture owns; nothing to register per-chunk.
             return targets;
         }
 

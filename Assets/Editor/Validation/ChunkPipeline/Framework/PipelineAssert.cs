@@ -41,43 +41,35 @@ namespace Editor.Validation.ChunkPipeline.Framework
             {
                 StringBuilder stuck = new StringBuilder();
                 int reported = 0;
-                for (int i = 0; i < targets.Count && reported < MAX_REPORTED_CHUNKS; i++)
+                int unmeshed = 0;
+                foreach (ChunkCoord target in targets)
                 {
-                    if (simulator.AllMeshed(new[] { targets[i] })) continue;
-                    stuck.Append(reported++ == 0 ? "" : ", ").Append(Describe(targets[i]));
+                    if (simulator.AllMeshed(new[] { target })) continue;
+                    unmeshed++;
+                    if (reported >= MAX_REPORTED_CHUNKS) continue;
+                    stuck.Append(reported++ == 0 ? "" : ", ").Append(Describe(target));
                 }
 
-                if (targets.Count > reported) stuck.Append(", …");
+                if (unmeshed > reported) stuck.Append(", …");
                 return Fail(label,
                     $"did not converge in {simulator.Frame} frames — unmeshed: {stuck}. " +
                     $"parked={totals.LightingParked}, meshDeclined={totals.MeshDeclined}, " +
                     $"deferredStrand={totals.UnloadDeferredStrand}", log);
             }
 
-            if (requireBlocking && totals.LightingParked == 0 && totals.MeshDeclined == 0)
+            // Scoped to the observed set on purpose: frontier chunks park unconditionally (their own
+            // neighbors were never seeded), so a floor reading the global counters can never fail.
+            if (requireBlocking && totals.ObservedParked == 0 && totals.ObservedMeshDeclined == 0)
                 return Fail(label,
-                    "converged VACUOUSLY — no chunk was ever parked or mesh-declined, so the scenario's " +
-                    "adversarial ordering never exercised a gate. Fix the scenario, not the engine.", log);
+                    "converged VACUOUSLY — no chunk under test was ever parked or mesh-declined, so the " +
+                    "scenario's adversarial ordering never exercised a gate on it. Fix the scenario, not the " +
+                    $"engine. (Frontier parks this run: {totals.LightingParked}, which prove nothing.)", log);
 
             return Pass(label,
-                $"converged in {simulator.Frame} frames (parked={totals.LightingParked}, meshDeclined={totals.MeshDeclined})",
+                $"converged in {simulator.Frame} frames (observed parked={totals.ObservedParked}, " +
+                $"observed meshDeclined={totals.ObservedMeshDeclined})",
                 log);
         }
-
-        /// <summary>
-        /// Asserts the pump did NOT converge — the shape a historical deadlock must still produce when its
-        /// guard is neutered. This is the harness's own prove-red: a pump that converges here is not modeling
-        /// production, and every convergence assertion built on it would be worthless.
-        /// </summary>
-        /// <param name="label">Assertion label for the console line.</param>
-        /// <param name="converged">Whether the pump reported convergence.</param>
-        /// <param name="log">The console sink.</param>
-        /// <returns>True when the run correctly failed to converge.</returns>
-        public static bool Deadlocked(string label, bool converged, StringBuilder log) =>
-            converged
-                ? Fail(label, "the run CONVERGED where the neutered guard must deadlock — the pump is not " +
-                              "modeling production's stranding, so this suite's convergence assertions are vacuous", log)
-                : Pass(label, "deadlocked as the un-guarded pipeline must", log);
 
         /// <summary>
         /// Asserts a chunk is still stuck holding <c>HasLightChangesToProcess</c> — the §9.6 end state, in

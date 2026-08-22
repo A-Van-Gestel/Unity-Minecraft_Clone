@@ -16,8 +16,9 @@ namespace Editor.Validation.ChunkPipeline.Framework
     /// had a guard is the state machine that decides <i>when</i> those jobs may run, which is where all three
     /// historical deadlocks lived. The consequence is that this suite cannot see a bug <i>inside</i> a job.</para>
     /// <para><b>Fidelity gate.</b> A pump that models production badly would let every scenario converge and
-    /// prove nothing. The suite's first scenario therefore neuters the §9.6 strand guard and requires the pump
-    /// to <i>deadlock</i>; if it converges anyway, this class is wrong, not the engine.</para>
+    /// prove nothing. The suite'''s first scenario therefore neuters the §9.6 strand guard and requires the
+    /// center chunk to end up permanently stranded — unable to clear <c>HasLightChangesToProcess</c>; if it
+    /// recovers anyway, this class is wrong, not the engine.</para>
     /// </summary>
     public sealed class ChunkPipelineSimulator
     {
@@ -47,8 +48,19 @@ namespace Editor.Validation.ChunkPipeline.Framework
             /// <summary>Mesh jobs scheduled this frame.</summary>
             public int MeshScheduled;
 
+            /// <summary>
+            /// Parks among the <b>observed</b> chunks only (see <see cref="Observe"/>). This is the honest
+            /// non-vacuity signal: <see cref="LightingParked"/> also counts frontier chunks that park
+            /// unconditionally because their own neighbors were never seeded, so a floor built on it can
+            /// never fail.
+            /// </summary>
+            public int ObservedParked;
+
             /// <summary>Mesh scheduling attempts declined by a gate — the chunk stays queued.</summary>
             public int MeshDeclined;
+
+            /// <summary>Gate declines among the <b>observed</b> chunks only (see <see cref="Observe"/>).</summary>
+            public int ObservedMeshDeclined;
 
             /// <summary>Chunks actually unloaded this frame.</summary>
             public int Unloaded;
@@ -72,6 +84,7 @@ namespace Editor.Validation.ChunkPipeline.Framework
         private readonly HashSet<ChunkCoord> _meshed = new HashSet<ChunkCoord>();
         private readonly HashSet<ChunkCoord> _outOfRange = new HashSet<ChunkCoord>();
         private readonly HashSet<ChunkCoord> _initialLightingDone = new HashSet<ChunkCoord>();
+        private readonly HashSet<ChunkCoord> _observed = new HashSet<ChunkCoord>();
         private readonly List<ChunkCoord> _scanScratch = new List<ChunkCoord>();
         private readonly List<Flight> _completedScratch = new List<Flight>();
 
@@ -109,9 +122,32 @@ namespace Editor.Validation.ChunkPipeline.Framework
         /// <summary>Chunks that have had a mesh applied — the convergence target.</summary>
         public IReadOnlyCollection<ChunkCoord> Meshed => _meshed;
 
-        /// <summary>Requests terrain generation for a coordinate (production: <c>CheckViewDistance</c> enqueue).</summary>
+        /// <summary>
+        /// Restricts the <c>Observed*</c> counters to these chunks — the set a scenario's non-vacuity floor
+        /// is entitled to reason about. <see cref="RunUntilConverged"/> calls this with its targets, so a
+        /// scenario gets the scoping for free; call it directly when driving frames via
+        /// <see cref="RunFrames"/>.
+        /// </summary>
+        /// <param name="coords">The chunks to observe. Replaces any previous observation set.</param>
+        public void Observe(IReadOnlyList<ChunkCoord> coords)
+        {
+            _observed.Clear();
+            foreach (ChunkCoord coord in coords)
+                _observed.Add(coord);
+        }
+
+        /// <summary>
+        /// Requests terrain generation for a coordinate (production: <c>CheckViewDistance</c> enqueue).
+        /// Duplicate requests for a coord already queued or in flight are dropped, mirroring
+        /// <c>DrainGenerationRequests</c>'s admission guard — without it a second completion would re-arm
+        /// <c>NeedsInitialLighting</c> on an already-lit chunk.
+        /// </summary>
         /// <param name="coord">The chunk to generate.</param>
-        public void RequestGeneration(ChunkCoord coord) => _generationRequests.Enqueue(coord);
+        public void RequestGeneration(ChunkCoord coord)
+        {
+            if (_generationRequests.Contains(coord) || _fixture.Jobs.GenerationJobs.ContainsKey(coord)) return;
+            _generationRequests.Enqueue(coord);
+        }
 
         /// <summary>Requests a mesh rebuild (production: <c>RequestChunkMeshRebuild</c>).</summary>
         /// <param name="coord">The chunk to re-mesh.</param>
@@ -206,8 +242,10 @@ namespace Editor.Validation.ChunkPipeline.Framework
                 if (action == LightingScanDecision.ScanAction.Park)
                 {
                     result.LightingParked++;
+                    if (_observed.Contains(coord)) result.ObservedParked++;
                     continue;
                 }
+
                 if (action == LightingScanDecision.ScanAction.Remove) continue;
                 if (lightingScheduled >= LightingSchedulesPerFrame) continue; // Budget break: stays ready.
 
@@ -219,6 +257,7 @@ namespace Editor.Validation.ChunkPipeline.Framework
                 _lightingFlights.Add(new Flight { Coord = coord, CompletesOnFrame = _frame + JobLatencyFrames });
                 lightingScheduled++;
             }
+
             result.LightingScheduled = lightingScheduled;
 
             // Step 6 — ProcessMeshJobs.
@@ -251,6 +290,7 @@ namespace Editor.Validation.ChunkPipeline.Framework
                 if (!MeshingScheduleDecision.DequeuesChunk(decision))
                 {
                     result.MeshDeclined++;
+                    if (_observed.Contains(coord)) result.ObservedMeshDeclined++;
                     continue; // MP-3: left queued.
                 }
 
@@ -259,6 +299,7 @@ namespace Editor.Validation.ChunkPipeline.Framework
                 _meshFlights.Add(new Flight { Coord = coord, CompletesOnFrame = _frame + JobLatencyFrames });
                 meshScheduled++;
             }
+
             result.MeshScheduled = meshScheduled;
 
             RunUnloadPass(ref result);
@@ -275,19 +316,23 @@ namespace Editor.Validation.ChunkPipeline.Framework
         public bool RunUntilConverged(int maxFrames, IReadOnlyList<ChunkCoord> targets, out FrameResult totals)
         {
             totals = default;
+            Observe(targets);
             for (int i = 0; i < maxFrames; i++)
             {
                 FrameResult frame = RunFrame();
                 totals.GenerationCompleted += frame.GenerationCompleted;
                 totals.LightingScheduled += frame.LightingScheduled;
                 totals.LightingParked += frame.LightingParked;
+                totals.ObservedParked += frame.ObservedParked;
                 totals.MeshScheduled += frame.MeshScheduled;
                 totals.MeshDeclined += frame.MeshDeclined;
+                totals.ObservedMeshDeclined += frame.ObservedMeshDeclined;
                 totals.Unloaded += frame.Unloaded;
                 totals.UnloadDeferredStrand += frame.UnloadDeferredStrand;
 
                 if (AllMeshed(targets)) return true;
             }
+
             return AllMeshed(targets);
         }
 
@@ -303,11 +348,14 @@ namespace Editor.Validation.ChunkPipeline.Framework
                 totals.GenerationCompleted += frame.GenerationCompleted;
                 totals.LightingScheduled += frame.LightingScheduled;
                 totals.LightingParked += frame.LightingParked;
+                totals.ObservedParked += frame.ObservedParked;
                 totals.MeshScheduled += frame.MeshScheduled;
                 totals.MeshDeclined += frame.MeshDeclined;
+                totals.ObservedMeshDeclined += frame.ObservedMeshDeclined;
                 totals.Unloaded += frame.Unloaded;
                 totals.UnloadDeferredStrand += frame.UnloadDeferredStrand;
             }
+
             return totals;
         }
 
@@ -317,7 +365,8 @@ namespace Editor.Validation.ChunkPipeline.Framework
         public bool AllMeshed(IReadOnlyList<ChunkCoord> targets)
         {
             foreach (ChunkCoord target in targets)
-                if (!_meshed.Contains(target)) return false;
+                if (!_meshed.Contains(target))
+                    return false;
 
             return true;
         }
@@ -377,6 +426,7 @@ namespace Editor.Validation.ChunkPipeline.Framework
                 if (neighbor is not { IsPopulated: true }) continue;
                 if (neighbor.HasLightChangesToProcess || neighbor.NeedsInitialLighting) return true;
             }
+
             return false;
         }
 
@@ -390,6 +440,11 @@ namespace Editor.Validation.ChunkPipeline.Framework
             }
         }
 
+        /// <summary>
+        /// Moves every flight due this frame into <c>_completedScratch</c>. Walks backwards so removal is
+        /// O(1), which means completions are drained in reverse scheduling order — deterministic, and worth
+        /// knowing because event ordering is the whole point of this pump.
+        /// </summary>
         private void CollectCompleted(List<Flight> flights)
         {
             _completedScratch.Clear();
