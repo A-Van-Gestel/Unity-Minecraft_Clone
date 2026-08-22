@@ -31,18 +31,29 @@ namespace Editor.Validation
             scenarios.Add(new Scenario("V1 Legacy Encoder Round-Trip + Negative-Domain Limit", RunV1LegacyEncoderRoundTrip));
         }
 
+        /// <summary>Stable substring identifying the legacy-encoder announcement this suite expects and suppresses.</summary>
+        private const string LEGACY_ENCODER_MARKER = "Legacy V1 encoder used";
+
         /// <summary>
-        /// Swallows <see cref="LogType.Error"/> while forwarding everything else, so a scenario can exercise a
-        /// production path whose contract is to log an error without that error being read as a suite failure.
+        /// Swallows <b>only</b> the expected legacy-encoder announcement (<see cref="LEGACY_ENCODER_MARKER"/>) and
+        /// forwards every other message untouched, so a scenario can exercise a production path whose contract is
+        /// to log an error without that error being read as a suite failure.
+        /// <para>
+        /// Forwarding the rest is load-bearing, not tidiness: this handler sits <i>upstream</i> of
+        /// <see cref="Application.logMessageReceived"/>, which is the channel
+        /// <see cref="ValidationSuiteRunner.FailSafeErrorScope"/> listens on to force-fail a scenario when an
+        /// engine fail-safe fires. A handler that swallowed every error would silently disarm that scope for the
+        /// duration of the window, and drop unrelated editor errors from the console entirely.
+        /// </para>
         /// </summary>
         private sealed class CapturingLogHandler : ILogHandler
         {
             private readonly ILogHandler _inner;
 
-            /// <summary>Number of error-level messages intercepted.</summary>
+            /// <summary>Number of expected legacy-encoder announcements intercepted.</summary>
             public int ErrorCount;
 
-            /// <summary>The most recent intercepted error message, or null.</summary>
+            /// <summary>The most recent intercepted announcement, or null.</summary>
             public string LastError;
 
             public CapturingLogHandler(ILogHandler inner) => _inner = inner;
@@ -52,8 +63,17 @@ namespace Editor.Validation
             {
                 if (logType == LogType.Error)
                 {
-                    ErrorCount++;
-                    LastError = string.Format(format, args);
+                    string message = string.Format(format, args);
+                    if (message.Contains(LEGACY_ENCODER_MARKER))
+                    {
+                        ErrorCount++;
+                        LastError = message;
+                        return;
+                    }
+
+                    // Not ours — pass it through so the console, the runner's error gate, and
+                    // FailSafeErrorScope all still see it.
+                    _inner.LogFormat(logType, context, "{0}", message);
                     return;
                 }
 
@@ -439,20 +459,16 @@ namespace Editor.Validation
                     return false;
                 }
 
-                // The visibility contract: exactly one error-level announcement per encoding call.
+                // The visibility contract: exactly one announcement per encoding call. The capture only counts
+                // messages carrying LEGACY_ENCODER_MARKER (everything else is forwarded, not counted), so this
+                // single check is already message-bound — an unrelated error cannot satisfy it, and a removed
+                // announcement reads as 0 rather than being masked by incidental console noise.
                 if (count != 1)
                 {
                     Debug.LogError($"[FAIL] V1 Legacy Encoder Expected Address — v={voxel.ToString()} produced " +
-                                   $"{count.ToString()} error-level log(s), expected exactly 1. The legacy encoder must " +
-                                   "announce EVERY call, or its use can go unnoticed in a log.");
-                    return false;
-                }
-
-                if (last == null || !last.Contains("Legacy V1 encoder used"))
-                {
-                    Debug.LogError($"[FAIL] V1 Legacy Encoder Expected Address — v={voxel.ToString()}'s announcement was " +
-                                   $"'{last}', which is not the legacy-encoder warning. An unrelated error must not " +
-                                   "satisfy this pin.");
+                                   $"{count.ToString()} announcement(s) matching '{LEGACY_ENCODER_MARKER}', expected " +
+                                   $"exactly 1 (last: '{last}'). The legacy encoder must announce EVERY call, or its " +
+                                   "use can go unnoticed in a log.");
                     return false;
                 }
             }

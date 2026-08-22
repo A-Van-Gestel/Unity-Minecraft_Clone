@@ -199,22 +199,32 @@ namespace Editor.Validation
         /// </summary>
         private static bool RunPaddedIndexStridePin()
         {
-            // Lighting geometry: width 20, area 400.
-            if (ChunkMath.PADDED_CHUNK_WIDTH != ChunkMath.CHUNK_WIDTH + 2 * ChunkMath.LIGHTING_HALO ||
-                ChunkMath.PADDED_HORIZONTAL_AREA != ChunkMath.PADDED_CHUNK_WIDTH * ChunkMath.PADDED_CHUNK_WIDTH ||
-                ChunkMath.PADDED_LIGHTING_VOLUME != ChunkMath.PADDED_HORIZONTAL_AREA * ChunkMath.CHUNK_HEIGHT)
+            // Geometry pinned to literals, NOT to the formulas that define these constants: restating a
+            // constant's own definition folds to a compile-time `false` and asserts nothing. Literals make the
+            // halo widths a deliberate, reviewable choice — a change here is a change to
+            // ChunkMath.MAX_LIGHTING_BFS_REACH ("the load-bearing invariant of the whole optimization": too
+            // small a halo drops seam light with no error raised) or to FluidTierClassifier.MaxFlowSearchDepth.
+            (string name, int actual, int expected)[] geometry =
             {
-                Debug.LogError("[FAIL] Padded Index Stride Pin — lighting padded geometry constants are not " +
-                               "consistent with CHUNK_WIDTH / LIGHTING_HALO / CHUNK_HEIGHT.");
-                return false;
-            }
+                ("LIGHTING_HALO", ChunkMath.LIGHTING_HALO, 2),
+                ("PADDED_CHUNK_WIDTH", ChunkMath.PADDED_CHUNK_WIDTH, 20),
+                ("PADDED_HORIZONTAL_AREA", ChunkMath.PADDED_HORIZONTAL_AREA, 400),
+                ("PADDED_LIGHTING_VOLUME", ChunkMath.PADDED_LIGHTING_VOLUME, 51_200),
+                ("FLUID_HALO", ChunkMath.FLUID_HALO, 4),
+                ("PADDED_FLUID_WIDTH", ChunkMath.PADDED_FLUID_WIDTH, 24),
+                ("PADDED_FLUID_HORIZONTAL_AREA", ChunkMath.PADDED_FLUID_HORIZONTAL_AREA, 576),
+                ("PADDED_FLUID_VOLUME", ChunkMath.PADDED_FLUID_VOLUME, 73_728),
+            };
 
-            if (ChunkMath.PADDED_FLUID_WIDTH != ChunkMath.CHUNK_WIDTH + 2 * ChunkMath.FLUID_HALO ||
-                ChunkMath.PADDED_FLUID_HORIZONTAL_AREA != ChunkMath.PADDED_FLUID_WIDTH * ChunkMath.PADDED_FLUID_WIDTH ||
-                ChunkMath.PADDED_FLUID_VOLUME != ChunkMath.PADDED_FLUID_HORIZONTAL_AREA * ChunkMath.CHUNK_HEIGHT)
+            foreach ((string name, int actual, int expected) in geometry)
             {
-                Debug.LogError("[FAIL] Padded Index Stride Pin — fluid padded geometry constants are not " +
-                               "consistent with CHUNK_WIDTH / FLUID_HALO / CHUNK_HEIGHT.");
+                if (actual == expected)
+                    continue;
+
+                Debug.LogError($"[FAIL] Padded Index Stride Pin — {name} is {actual.ToString()}, pinned at " +
+                               $"{expected.ToString()}. If this change is deliberate, re-verify the halo reach " +
+                               "invariant (ChunkMath.MAX_LIGHTING_BFS_REACH / FLUID_HALO) and the cross-seam " +
+                               "lighting baselines before updating this pin.");
                 return false;
             }
 
@@ -311,30 +321,52 @@ namespace Editor.Validation
                     chunks[NB_N], chunks[NB_SW], chunks[NB_NW], chunks[NB_SE], chunks[NB_NE], 0, ChunkMath.CHUNK_HEIGHT);
 
                 int haloCells = 0;
-                for (int pz = 0; pz < width; pz++)
+                int centerCells = 0;
+                for (int by = 0; by < ChunkMath.CHUNK_HEIGHT; by++)
                 {
-                    for (int px = 0; px < width; px++)
+                    for (int pz = 0; pz < width; pz++)
                     {
-                        bool isHalo = px < halo || px >= halo + ChunkMath.CHUNK_WIDTH ||
-                                      pz < halo || pz >= halo + ChunkMath.CHUNK_WIDTH;
-                        if (!isHalo)
-                            continue;
+                        for (int px = 0; px < width; px++)
+                        {
+                            bool isHalo = px < halo || px >= halo + ChunkMath.CHUNK_WIDTH ||
+                                          pz < halo || pz >= halo + ChunkMath.CHUNK_WIDTH;
+                            uint v = padded[by * ChunkMath.PADDED_HORIZONTAL_AREA + pz * width + px];
 
-                        haloCells++;
-                        uint v = padded[5 * ChunkMath.PADDED_HORIZONTAL_AREA + pz * width + px];
-                        if (v == uint.MaxValue)
-                            continue;
+                            if (isHalo)
+                            {
+                                haloCells++;
+                                if (v == uint.MaxValue)
+                                    continue;
 
-                        Debug.LogError($"[FAIL] Padded Voxel Gather (oracle sanity) — center-only gather left halo cell " +
-                                       $"({px.ToString()},{pz.ToString()}) as {v.ToString()}, expected the sentinel.");
-                        return false;
+                                Debug.LogError($"[FAIL] Padded Voxel Gather (oracle sanity) — center-only gather left " +
+                                               $"halo cell ({px.ToString()},{by.ToString()},{pz.ToString()}) as " +
+                                               $"{v.ToString()}, expected the sentinel.");
+                                return false;
+                            }
+
+                            // Center span must carry the center chunk's own values — a sentinel fill that
+                            // over-reached into the center is just as wrong as one that under-filled the halo.
+                            centerCells++;
+                            uint expected = chunks[NB_CENTER][
+                                ChunkMath.GetFlattenedIndexInChunk(px - halo, by, pz - halo)];
+                            if (v == expected)
+                                continue;
+
+                            Debug.LogError($"[FAIL] Padded Voxel Gather (oracle sanity) — center-only gather wrote " +
+                                           $"{v.ToString()} at center cell ({px.ToString()},{by.ToString()}," +
+                                           $"{pz.ToString()}), expected the center chunk's {expected.ToString()}.");
+                            return false;
+                        }
                     }
                 }
 
-                if (haloCells != width * width - ChunkMath.CHUNK_WIDTH * ChunkMath.CHUNK_WIDTH)
+                int expectedHalo = (width * width - ChunkMath.CHUNK_WIDTH * ChunkMath.CHUNK_WIDTH) * ChunkMath.CHUNK_HEIGHT;
+                int expectedCenter = ChunkMath.CHUNK_WIDTH * ChunkMath.CHUNK_WIDTH * ChunkMath.CHUNK_HEIGHT;
+                if (haloCells != expectedHalo || centerCells != expectedCenter)
                 {
-                    Debug.LogError($"[FAIL] Padded Voxel Gather (oracle sanity) — counted {haloCells.ToString()} halo " +
-                                   "cells; the scenario's own halo geometry is wrong.");
+                    Debug.LogError($"[FAIL] Padded Voxel Gather (oracle sanity) — counted {haloCells.ToString()} halo / " +
+                                   $"{centerCells.ToString()} center cells, expected {expectedHalo.ToString()} / " +
+                                   $"{expectedCenter.ToString()}; the scenario's own geometry is wrong.");
                     return false;
                 }
 
@@ -456,17 +488,30 @@ namespace Editor.Validation
                     return false;
                 }
 
-                // Rows past the band must still hold the poison value.
+                // Rows past the band must still hold the poison value. Two probes per row: the (0,0) halo corner
+                // AND the start of the 16-wide center span, which is the bulk CopyRun that carries most of the
+                // row — an over-write confined to the center span would leave the corner poisoned and slip past
+                // a corner-only probe.
+                int centerSpanOffset = halo + halo * width;
                 for (int by = TEST_BAND_HEIGHT; by < ChunkMath.CHUNK_HEIGHT; by++)
                 {
-                    int probe = by * ChunkMath.PADDED_HORIZONTAL_AREA;
-                    if (padded[probe] == poison)
-                        continue;
+                    int rowBase = by * ChunkMath.PADDED_HORIZONTAL_AREA;
+                    (string where, int index)[] probes =
+                    {
+                        ("halo corner", rowBase),
+                        ("center span", rowBase + centerSpanOffset),
+                    };
 
-                    Debug.LogError($"[FAIL] Padded Gather Y-Band — band-local row {by.ToString()} is outside the " +
-                                   $"{TEST_BAND_HEIGHT.ToString()}-row band but was written ({padded[probe].ToString()}); " +
-                                   "the gather is not writing band-local rows.");
-                    return false;
+                    foreach ((string where, int index) in probes)
+                    {
+                        if (padded[index] == poison)
+                            continue;
+
+                        Debug.LogError($"[FAIL] Padded Gather Y-Band — band-local row {by.ToString()} is outside the " +
+                                       $"{TEST_BAND_HEIGHT.ToString()}-row band but its {where} was written " +
+                                       $"({padded[index].ToString()}); the gather is not writing band-local rows.");
+                        return false;
+                    }
                 }
             }
             finally

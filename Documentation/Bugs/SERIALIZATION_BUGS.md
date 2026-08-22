@@ -247,3 +247,53 @@ as the current format - which is the §10 failure mode in reverse. Do not "fix" 
 Option 2 looks strongest; it wants its own decision and its own prove-red before anything ships.
 
 **Found by:** a code review of the §10 fix (August 2026).
+
+---
+
+## 14. Region filename parsing is culture-sensitive, so a non-ASCII negative sign would silently hide negative-coordinate regions
+
+**Severity:** Latent robustness (would present as silent world data loss — chunks read as never-generated)  
+**Confidence:** Mechanism certain; **not reachable on the current runtime** — see the measurement below  
+**Files:** `WorldInfoUtility.cs` - `GetWorldInfo`; `Migration_v1_to_v2_RegionRepack.cs` - `ProcessOldRegionFile`; `ChunkStorageManager.cs` - `GetRegion` (writer)
+
+Region files are named `r.{x}.{z}.bin`. The writer interpolates `int` directly and both readers recover the
+coordinates with the **culture-sensitive** `int.TryParse(string, out int)` overload:
+
+```csharp
+string path = Path.Combine(_saveFolderPath, $"r.{coord.x}.{coord.y}.bin");   // writer
+string[] parts = Path.GetFileName(file).Split('.');                          // reader A
+if (parts.Length >= 3 && int.TryParse(parts[1], out int rX) && ...)          // culture-sensitive
+```
+
+`NumberStyles.Integer` includes `AllowLeadingSign`, and the sign it accepts comes from
+`CultureInfo.CurrentCulture.NumberFormat.NegativeSign`. `WS-3` made negative region coordinates reachable, so
+`r.-1.-2.bin` is a filename the engine now produces.
+
+**The failure shape, if a runtime ever supplies a non-ASCII negative sign:** a world written on an
+ASCII-hyphen machine and opened where `NegativeSign` is U+2212 still *glob-matches* `r.*.*.bin`, but
+`int.TryParse("-1")` returns false. `WorldInfoUtility` skips the file as an unrecognized filename and the
+migration step logs "Skipping unrecognized filename" — so every chunk in the negative quadrant reads as
+never-generated and is silently regenerated from seed, discarding the player's edits there. Round-tripping
+within a single culture never exposes it, which is why no existing test sees it.
+
+**Why this is filed rather than fixed (measured 2026-08-22).** All **342** cultures available on the Editor's
+Mono runtime were enumerated: **every one** reports `NegativeSign == "-"` (U+002D) and parses `"-1"`
+correctly — including `sv-SE`, `fi-FI`, `nb-NO` and `lt-LT`, the locales for which .NET 5+ CoreCLR/ICU is
+documented to return U+2212. Unity's Mono BCL does not use that ICU data, so **the bug is not currently
+reachable by changing the machine's locale**. A validation scenario for it was deliberately declined: it could
+not fail under any reachable input.
+
+**What would make it live — the reason this entry exists:**
+
+- Unity moving the scripting runtime to CoreCLR (announced direction), which brings ICU culture data with it.
+- A culture source not covered by `CultureInfo.GetCultures(CultureTypes.AllCultures)` on this runtime.
+- **IL2CPP player builds — unverified.** The sweep ran in the Editor. IL2CPP uses the same Mono class
+  libraries so the result is expected to carry over, but this has not been measured.
+
+**Fix when it becomes live (or pre-emptively, it is nearly free):** pass `CultureInfo.InvariantCulture` at both
+parse sites and format with it at the writer. The on-disk format does not change — today's filenames are
+already invariant-identical — so this needs no save-version bump and no migration step.
+
+**Found by:** a code review of the NS-5 `G3` region-filename pins (August 2026); the ICU premise was checked
+against the runtime and did not reproduce, and the entry was kept on the user's call that the latent risk is
+worth recording.
