@@ -11,10 +11,10 @@ Material:
   m_Shader: {fileID: 4800000, guid: f316339b7c3b46468201dd11c443f2c4, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
-  m_ValidKeywords: []
+  m_ValidKeywords:
+  - _ALPHATEST_ON
   m_InvalidKeywords:
   - USE_SHORE_EFFECTS
-  - _ALPHATEST_ON
   - _EDITORPREVIEWTYPE_WATER
   - _LIQUIDTYPE_WATER
   - _USESHOREEFFECTS_ON
