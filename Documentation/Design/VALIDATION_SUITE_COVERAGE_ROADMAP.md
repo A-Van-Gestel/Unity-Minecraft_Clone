@@ -8,7 +8,8 @@ run found `SERIALIZATION_BUGS` §10, fixed 2026-08-21 and archived as `_FIXED_BU
 repro promoted to baseline `B25`). `NS-1` is **✅ COMPLETE (2026-08-21, parts 1–5)** as the standalone
 `Validate Serialization Round-Trip` suite, on top of CP-3's robustness slice — the top-priority item of this
 roadmap is closed, and the two open serialization bugs it found (`§04`, `§08`) are guarded by repros.
-`NS-2`, `NS-3`, `NS-6` and `NS-8`…`NS-11` remain proposals.
+`NS-3` is 🟡 **slice 1 shipped (2026-08-22)** — 6 baselines, grown scenario-wise from here.
+`NS-2`, `NS-6` and `NS-8`…`NS-11` remain proposals.
 Existing-coverage counts are re-verified against a real `Validate All` run each time they are touched.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
@@ -22,8 +23,8 @@ Existing-coverage counts are re-verified against a real `Validate All` run each 
 > Status: **Living backlog.** NS-1 is partially seeded (CP-3's robustness slice, 2026-07-22); NS-5 ✅
 > (CP-2 close-out, 2026-07-22), NS-4 ✅ (2026-08-03) and NS-7 + NS-7b ✅ (both 2026-08-20) are complete — see the per-item status lines; the rest are proposals.
 
-**Existing coverage (for contrast, counts verified 2026-08-22 against a full `Validate All` run — 561 baselines / 24 suites, 0 failures, 0 isolation violations, 2 known-bug repros outstanding (`K04`/`K08`, `SERIALIZATION_BUGS` §04 and §08); 3 min 19 s wall clock, of which Lighting is the dominant share):** Lighting (106 — the last seven are the fidelity **C14** mixed-channel mirrors B108–B114), Meshing (57 — including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
-**light** maps), Behavior/fluid tick (17, incl. determinism gates), Placement (29 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (26 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19, its promoted repro B20–B23, `PH-1`'s step-0 horizontal-aggregation guard B24 and its gather-envelope guard B25, and `PH-2`'s B26 pinning that `CalculateVelocity` never writes the transform)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (72 — the NS-5 G1–G4 coverage extension added 16: 6 padded-volume, 4 flattened-index, 4 region-filename, 2 legacy-V1-encoder), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (9), **Serialization Round-Trip (16 — NS-1 parts 1–5, plus the `K04`/`K08` repros of `SERIALIZATION_BUGS` §04 and §08)**, **Migration Chain (25 — NS-7 + NS-7b, incl. `B25`, the promoted `K10` repro of the bug archived as `_FIXED_BUGS.md` Serialization 07)**, Spawn (10), Command Console (56), Voxel Occlusion (6), Sky & Celestial (15), Sky Render (11), World Clock (10), UI Blur Render (5), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` tests (the `ChunkRelativePosition` tests are no longer standalone — they are the Chunk Math suite's `.ChunkRelativePosition.cs` partial).
+**Existing coverage (for contrast, counts re-verified 2026-08-22 against a full `Validate All` run — **567 baselines / 25 suites**, 0 failures, 0 isolation violations, 2 known-bug repros outstanding (`K04`/`K08`, `SERIALIZATION_BUGS` §04 and §08); 3 min 9 s wall clock, of which Lighting is the dominant share):** Lighting (106 — the last seven are the fidelity **C14** mixed-channel mirrors B108–B114), Meshing (57 — including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
+**light** maps), Behavior/fluid tick (17, incl. determinism gates), Placement (29 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (26 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19, its promoted repro B20–B23, `PH-1`'s step-0 horizontal-aggregation guard B24 and its gather-envelope guard B25, and `PH-2`'s B26 pinning that `CalculateVelocity` never writes the transform)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (72 — the NS-5 G1–G4 coverage extension added 16: 6 padded-volume, 4 flattened-index, 4 region-filename, 2 legacy-V1-encoder), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), **Chunk Pipeline (6 — NS-3 slice 1, the pipeline state machine: `B1` is the harness's own deadlock prove-red)**, Save Durability (13), Deserialization Robustness (9), **Serialization Round-Trip (16 — NS-1 parts 1–5, plus the `K04`/`K08` repros of `SERIALIZATION_BUGS` §04 and §08)**, **Migration Chain (25 — NS-7 + NS-7b, incl. `B25`, the promoted `K10` repro of the bug archived as `_FIXED_BUGS.md` Serialization 07)**, Spawn (10), Command Console (56), Voxel Occlusion (6), Sky & Celestial (15), Sky Render (11), World Clock (10), UI Blur Render (5), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` tests (the `ChunkRelativePosition` tests are no longer standalone — they are the Chunk Math suite's `.ChunkRelativePosition.cs` partial).
 
 **Build protocol for every suite below:** the `validation-driven-bugfix` skill (deterministic repro first, prove-red before trusting green, promote repros to baselines). New suites should land on the shared `ValidationSuiteRunner` (`VS-1`, ✅ shipped 2026-07-08): register `Scenario`s and return its `ValidationRunResult` from a headless `Execute()`, with a thin `[MenuItem]` wrapper. All suites stay on the custom validation framework: migrating to the Unity Test Framework was evaluated 2026-07-02 and rejected (see the status header in
 [`../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md`](../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md)); the CI/coverage/XML gaps close via the VS-2 extensions instead.
@@ -166,6 +167,31 @@ what this document ranks.
 - **Building blocks:** `LightingFrameSimulator` (already simulates frame-by-frame lighting progression) is the embryo of this harness; `BehaviorTestWorld`'s multi-chunk world shows the world-stubbing pattern scales. The LP-* plan ([LIGHTING_PIPELINE_STATE_REFACTOR.md](LIGHTING_PIPELINE_STATE_REFACTOR.md)) is deliberate groundwork: LP-1's invariant probes and LP-4's `ChunkData` flag-transition API are the first two concrete members of this suite's flag-pairing assertion family. The MP-* plan
   ([MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md](MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md)) is the meshing-side counterpart: MP-1's request/drop probes and MP-2's scheduling baselines are the first members of the *convergence* ("every chunk eventually reaches lit + meshed") family.
 - **Effort:** 🔴 — the hardest harness on this list (World-level orchestration must be stubbed). Build scenario-by-scenario; even the first two scenarios (out-of-order completion, recycle replay) would have caught past incidents.
+
+- **Status (2026-08-22): 🟡 SLICE 1 SHIPPED** — `Minecraft Clone/Dev/Validate Chunk Pipeline`
+  (`Assets/Editor/Validation/ChunkPipeline/`, 6 baselines `B1`–`B6`), the 25th registered suite. The harness
+  drives the **real** `AreNeighborsDataReady` / `AreNeighborsReadyAndLit` / `AreNeighborsMeshReady` plus the real
+  `LightingScanDecision`, `MeshingScheduleDecision` and `ChunkUnloadDecision` over a stub `World` holding real
+  `ChunkData`; only stage *execution* is modeled. Fidelity doc:
+  [../Architecture/Testing Framework/CHUNK_PIPELINE_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/CHUNK_PIPELINE_VALIDATION_HARNESS_FIDELITY.md).
+    - **Three corrections to the entry above, found while building it.** (1) The three historical deadlocks are
+      **not in `_FIXED_BUGS.md`** — they are §9.1 / §9.3 / §9.6 of `CHUNK_LIFECYCLE_PIPELINE.md`, and §9.6's
+      *decision* was already guarded by the Chunk Unload Decision suite (`B4`/`B5`/`B7`). (2) `LightingFrameSimulator`
+      is not an "embryo": it is a 774-line simulator with scheduler mode, budget throttling, completion ordering
+      and merge-fault injection. (3) The 🔴 rested on "World-level orchestration must be stubbed", but
+      `StorageValidationFixture` already had the stub-world recipe and every decision helper was already extracted
+      by CP-*/MP-*, so slice 1 needed **no** extraction refactor and no production change.
+    - **`B1` is the harness's own prove-red, and it is the scenario to read first.** It neuters the §9.6 strand
+      guard and asserts the pipeline **deadlocks**; a green-by-converging `B1` means the pump stopped modeling
+      production and every other baseline is vacuous. Two false greens were caught and fixed during the build —
+      the second is worth carrying: a chunk adjacent to an unloaded neighbour fails the mesh gate on the
+      **missing neighbour alone**, so asserting "the stranded chunk never meshes" would have been red whether or
+      not stranding was fixed. `B1`/`B5` assert the *flag* (`HasLightChangesToProcess`), which is the only signal
+      that separates a guarded pipeline from an unguarded one.
+    - **Deliberately not built yet:** pool recycle + replay, real `MeshDrainPolicy` composition, seeded-shuffle
+      scan order, completion-pass fault injection, the edge-check round budget, and the load-from-disk arm —
+      tracked as `CP-H1`…`CP-H6` in the fidelity doc. LP-* remains 0/7; slice 1 asserts flag pairing against
+      today's raw bools, so it is the regression guard that makes LP-1/LP-4 safe to execute.
 
 ---
 
