@@ -23,7 +23,7 @@ Existing-coverage counts are re-verified against a real `Validate All` run each 
 > (CP-2 close-out, 2026-07-22), NS-4 ✅ (2026-08-03) and NS-7 + NS-7b ✅ (both 2026-08-20) are complete — see the per-item status lines; the rest are proposals.
 
 **Existing coverage (for contrast, counts verified 2026-08-21 against a full `Validate All` run — 545 baselines / 24 suites, 0 failures, 2 known-bug repros outstanding (`K04`/`K08`, `SERIALIZATION_BUGS` §04 and §08); 204 s wall clock, of which Lighting is the dominant share):** Lighting (106 — the last seven are the fidelity **C14** mixed-channel mirrors B108–B114), Meshing (57 — including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
-**light** maps), Behavior/fluid tick (17, incl. determinism gates), Placement (29 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (26 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19, its promoted repro B20–B23, `PH-1`'s step-0 horizontal-aggregation guard B24 and its gather-envelope guard B25, and `PH-2`'s B26 pinning that `CalculateVelocity` never writes the transform)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (70 — the NS-5 G1/G2/G3 coverage extension added 14: 6 padded-volume, 4 flattened-index, 4 region-filename), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (9), **Serialization Round-Trip (16 — NS-1 parts 1–5, plus the `K04`/`K08` repros of `SERIALIZATION_BUGS` §04 and §08)**, **Migration Chain (25 — NS-7 + NS-7b, incl. `B25`, the promoted `K10` repro of the bug archived as `_FIXED_BUGS.md` Serialization 07)**, Spawn (10), Command Console (56), Voxel Occlusion (6), Sky & Celestial (15), Sky Render (11), World Clock (10), UI Blur Render (5), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` tests (the `ChunkRelativePosition` tests are no longer standalone — they are the Chunk Math suite's `.ChunkRelativePosition.cs` partial).
+**light** maps), Behavior/fluid tick (17, incl. determinism gates), Placement (29 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (26 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19, its promoted repro B20–B23, `PH-1`'s step-0 horizontal-aggregation guard B24 and its gather-envelope guard B25, and `PH-2`'s B26 pinning that `CalculateVelocity` never writes the transform)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (72 — the NS-5 G1–G4 coverage extension added 16: 6 padded-volume, 4 flattened-index, 4 region-filename, 2 legacy-V1-encoder), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), Save Durability (13), Deserialization Robustness (9), **Serialization Round-Trip (16 — NS-1 parts 1–5, plus the `K04`/`K08` repros of `SERIALIZATION_BUGS` §04 and §08)**, **Migration Chain (25 — NS-7 + NS-7b, incl. `B25`, the promoted `K10` repro of the bug archived as `_FIXED_BUGS.md` Serialization 07)**, Spawn (10), Command Console (56), Voxel Occlusion (6), Sky & Celestial (15), Sky Render (11), World Clock (10), UI Blur Render (5), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` tests (the `ChunkRelativePosition` tests are no longer standalone — they are the Chunk Math suite's `.ChunkRelativePosition.cs` partial).
 
 **Build protocol for every suite below:** the `validation-driven-bugfix` skill (deterministic repro first, prove-red before trusting green, promote repros to baselines). New suites should land on the shared `ValidationSuiteRunner` (`VS-1`, ✅ shipped 2026-07-08): register `Scenario`s and return its `ValidationRunResult` from a headless `Execute()`, with a thin `[MenuItem]` wrapper. All suites stay on the custom validation framework: migrating to the Unity Test Framework was evaluated 2026-07-02 and rejected (see the status header in
 [`../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md`](../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md)); the CI/coverage/XML gaps close via the VS-2 extensions instead.
@@ -216,8 +216,8 @@ what this document ranks.
 - **Status (2026-07-22): ✅ COMPLETE** — the region-codec pins shipped with the CP-2 close-out as the `.RegionCodec.cs` partial of the "Chunk Math" suite (the standalone-suite framing was dropped: that suite is NS-5's de-facto home). Coverage: V2 encoder *expected-value* pins on both signs (round-trip identity alone is blind to a matched encoder/decoder bug pair — proven in the close-out's prove-red), ±2³¹-adjacent aligned-origin pins, a two-way inverse property (decoder∘encoder was previously unexercised), truncation teeth, the V1 decoder legacy pin with
   V1≠V2 divergence teeth, and the V1 encoder guard + `ForVersion` dispatch pins. "V3 correctness assertions" are moot: the recorded no-V3-bump verdict stands (V2 addressing is already negative-correct; no V3 codec exists). See
   [CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) §7 CP-2 Amended block.
-- **Coverage extension (2026-08-22): ✅ G1/G2/G3 shipped.** A blind-spot audit of the shipped NS-5 surface found three
-  gaps, all closed as `Chunk Math` partials (56 → 70 scenarios, **no production change**):
+- **Coverage extension (2026-08-22): ✅ G1–G4 shipped.** A blind-spot audit of the shipped NS-5 surface found three
+  gaps — a fourth (`G4`) was added on review — all closed as `Chunk Math` partials (56 → 72 scenarios, **no production change**):
   **G1** `.PaddedVolume.cs` (6) — the padded lighting/fluid index helpers and all three neighborhood gathers had
   **zero** direct assertions; now pinned against an independent per-cell scatter oracle with position-encoding fills
   (full height, partial Y-band, missing-neighbor sentinel on each of the 8 sides, `ExtractCenterLight` round-trip, and
@@ -228,11 +228,17 @@ what this document ranks.
   reachable; the two production parsers' `>= 3` / `== 3` guards are pinned **as a divergence**, since they genuinely
   disagree on an over-segmented name.
   Each was prove-red verified by mutating the production code it guards (stride transposition, sign stripping,
-  west-halo off-by-one). Notably the stride-transposition mutation left all 56 pre-existing Chunk Math scenarios
+  west-halo off-by-one, V1 modulo, removed V1 announcement). Notably the stride-transposition mutation left all 56 pre-existing Chunk Math scenarios
   green — direct evidence the G2 gap was real.
-  Remaining known gap (**G4**, deliberately not built): the V1 *legacy encoder* formula is unasserted, because
-  exercising it requires `allowLegacyEncoder: true`, which emits a `Debug.LogError` by design and would pollute a
-  green run. Bounded risk — no production path writes V1 layout.
+  **G4** `.RegionCodec.cs` (+2) — the V1 *legacy encoder*. Initially deferred because exercising it requires
+  `allowLegacyEncoder: true`, whose deliberate `Debug.LogError` is exactly what the runner reads as red; built
+  anyway because the path stays reachable for migration and future editor tooling. The announcement is
+  **captured and asserted** (exactly one error-level log per encoding call, message-bound) rather than
+  suppressed — turning the obstacle into the pin, since silent legacy encoding is the actual hazard. Also pins
+  the formula, the `{0, 16}` slot set on aligned positive origins, and the encode∘decode identity that made the
+  v1→v2 repack correct — plus its boundary: on a **negative** origin V1 pairs a floored region with a
+  truncating modulo, producing an out-of-range slot that does not round-trip. Any future tool encoding V1 must
+  stay non-negative.
 
 ---
 
