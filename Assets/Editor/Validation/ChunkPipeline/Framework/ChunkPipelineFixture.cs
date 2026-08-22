@@ -22,11 +22,20 @@ namespace Editor.Validation.ChunkPipeline.Framework
     /// the job manager is stood up <b>without</b> its real constructor (which would build a terrain generator
     /// and native pools). Any gate that later reaches for generator state will throw here rather than pass
     /// vacuously, which is the intended failure mode.</para>
-    /// <para><b>Shared statics.</b> <c>World.Instance</c>, <c>WorldOrigin</c> and
-    /// <c>PipelineTelemetry.Enabled</c> are captured on construction and restored on <see cref="Dispose"/>, so
-    /// a suite running under "Validate All" can neither inherit nor leak them. The <c>WorldOrigin</c> reset is
-    /// the NS-4 trap: <c>WorldOrigin</c> survives play sessions, and a non-identity origin silently moves every
-    /// lookup away from the seeded chunks.</para>
+    /// <para><b>Shared statics.</b> <c>World.Instance</c>, <c>PipelineTelemetry.Enabled</c> and
+    /// <c>ChunkData.OnLightWorkFlagged</c> are captured on construction and restored on
+    /// <see cref="Dispose"/>, so a suite running under "Validate All" can neither inherit nor leak them.
+    /// <c>WorldOrigin</c> is <b>reset to identity</b> at both ends rather than captured — it is the NS-4
+    /// trap (it survives play sessions, and a non-identity origin silently moves every lookup away from the
+    /// seeded chunks), and no suite has a legitimate non-identity origin to preserve.</para>
+    /// <para>Capturing <c>OnLightWorkFlagged</c> matters because it is a <c>static Action</c> that every
+    /// lighting-flag setter invokes: with a live world registered, this fixture's flag writes would push its
+    /// synthetic coords into the real scheduler's ready set.</para>
+    /// <para><b>Edit-mode assumption.</b> <c>World</c> carries no <c>[ExecuteAlways]</c>, so Unity does not
+    /// deliver <c>OnDestroy</c> here and the teardown below never runs the real world's global cleanup
+    /// (<c>FastNoiseLite.ShutdownLookupTables</c>, <c>StorageManager.Dispose</c>, and its own
+    /// <c>OnLightWorkFlagged = null</c>). <see cref="TearDown"/> severs the stub's references anyway, so the
+    /// day that assumption changes this fixture degrades safely instead of corrupting engine globals.</para>
     /// </summary>
     public sealed class ChunkPipelineFixture : IDisposable
     {
@@ -38,6 +47,7 @@ namespace Editor.Validation.ChunkPipeline.Framework
 
         private readonly World _previousInstance;
         private readonly bool _previousTelemetryEnabled;
+        private readonly Action<Vector2Int> _previousLightWorkFlagged;
         private readonly GameObject _worldGo;
 
         /// <summary>Creates the stub world, job manager and chunk pool, and neutralizes the shared statics.</summary>
@@ -45,7 +55,9 @@ namespace Editor.Validation.ChunkPipeline.Framework
         {
             _previousInstance = World.Instance;
             _previousTelemetryEnabled = PipelineTelemetry.Enabled;
+            _previousLightWorkFlagged = ChunkData.OnLightWorkFlagged;
             PipelineTelemetry.Enabled = false;
+            ChunkData.OnLightWorkFlagged = null;
             WorldOrigin.ResetToIdentity();
 
             try
@@ -123,8 +135,22 @@ namespace Editor.Validation.ChunkPipeline.Framework
         {
             ValidationReflection.SetStaticProperty(typeof(World), nameof(World.Instance), _previousInstance);
             PipelineTelemetry.Enabled = _previousTelemetryEnabled;
+            ChunkData.OnLightWorkFlagged = _previousLightWorkFlagged;
             WorldOrigin.ResetToIdentity();
-            if (_worldGo != null) Object.DestroyImmediate(_worldGo);
+
+            if (_worldGo != null)
+            {
+                // Sever the stub's references first. Unity does not deliver OnDestroy in edit mode, but if it
+                // ever did, World.OnDestroy would Dispose() a job manager built by GetUninitializedObject and
+                // then tear down engine-wide globals it does not own here.
+                if (World != null)
+                {
+                    World.JobManager = null;
+                    World.worldData = null;
+                }
+
+                Object.DestroyImmediate(_worldGo);
+            }
         }
     }
 }
