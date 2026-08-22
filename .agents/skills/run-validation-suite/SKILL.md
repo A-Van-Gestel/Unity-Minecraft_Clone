@@ -41,14 +41,28 @@ it. Before trusting any suite run after an edit:
 ## Step 2 — Run
 
 The authoritative list of suites the aggregate runs is `ValidationSuiteRegistry.Suites`; the
-`Validate All` menu runs exactly those. Current standard inventory (menu path prefix
-`Minecraft Clone/Dev/`): **Validate Lighting Engine, Validate Meshing, Validate Behavior, Validate
-Placement, Validate Mesh Build Queue, Validate Light Work Scheduler, Validate Chunk Math, Validate
-Spawn, Validate Validation Framework**, and the aggregate **Validate All**. Not in the aggregate (run
-individually): the nightly fuzz deep-runs (`Validate Lighting Engine (Border Height Fuzz)`,
-`(Bug 09 Geometry Fuzz)`, `(Bug 05 Canopy Fuzz)`, `(Interrupted Reconciliation Fuzz)`), the fluid determinism variants
-(`Validate Fluid Parallel Determinism [ (Cross-Chunk Halo) | (Cross-Chunk Halo, Y-band) ]`), and the
-standalone `Validate Voxel Metadata Utility` / `Validate FastNoiseLite`.
+`Validate All` menu runs exactly those, and `ExpectedSuiteCount` is the floor the runner asserts
+against. **Read the registry rather than trusting any list, here or elsewhere** — it is one line per
+suite and it is the only place that cannot go stale.
+
+Standard inventory — **24 suites**, in registry run/report order, which is also the display-name
+spelling `RunSelected` expects:
+
+**Lighting Engine · Meshing · Behavior · Placement · Physics Solver · Voxel Occlusion · Mesh Build
+Queue · Light Work Scheduler · Chunk Math · Chunk Unload Decision · Pool Prune Decision · Pipeline
+Backpressure · Save Durability · Deserialization Robustness · Serialization Round-Trip · Migration
+Chain · Spawn · Command Console · World Clock · Sky & Celestial · Sky Render · UI Blur Render · Worm
+Carver · Validation Framework**
+
+Each has a `Minecraft Clone/Dev/Validate <name>` menu item, plus the aggregate **Validate All** —
+**with two where the menu path is NOT the display name**: `Voxel Occlusion` → *Validate Occlusion*,
+and `Sky & Celestial` → *Validate Sky*. Use the display name for `RunSelected`, the menu path for
+`Unity_ManageMenuItem`; crossing them fails (an unknown subset name rejects the whole request).
+
+Not in the aggregate (run individually): the nightly fuzz deep-runs (`Validate Lighting Engine
+(Border Height Fuzz)`, `(Bug 09 Geometry Fuzz)`, `(Bug 05 Canopy Fuzz)`,
+`(Interrupted Reconciliation Fuzz)`), `Validate Fluid Parallel Determinism (Cross-Chunk Halo,
+Y-band)`, and the standalone `Validate Voxel Metadata Utility` / `Validate FastNoiseLite`.
 
 | Goal | Menu (human) | Programmatic, in-editor (agent, no exit) |
 |------|--------------|------------------------------------------|
