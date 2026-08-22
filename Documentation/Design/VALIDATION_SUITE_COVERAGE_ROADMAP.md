@@ -222,6 +222,15 @@ what this document ranks.
   **zero** direct assertions; now pinned against an independent per-cell scatter oracle with position-encoding fills
   (full height, partial Y-band, missing-neighbor sentinel on each of the 8 sides, `ExtractCenterLight` round-trip, and
   the fluid wrapper's `bandCount`-vs-`bandHeight` parameter-semantics difference).
+  **Measured caveat on G1's value (2026-08-22):** the west-halo off-by-one prove-red was *also* run against the
+  Lighting suite, which caught it decisively — **33 of 106 baselines red** (`B3` fails to converge, `B10` reports a
+  hard border cut-off over 1431 voxels, fuzz baselines `B40`/`B68`/`B70` flag seeds); restoring returned 106/106.
+  So the gather is **well covered indirectly** and the "an end-to-end oracle would miss this" hypothesis is
+  **refuted** for this mutation class. G1's remaining value is therefore localization (it names the padded cell and
+  the source slot, versus a downstream field diff), cost (34 ms versus 106 s), and the surface the Lighting suite
+  genuinely never touches: `GatherPaddedFluidVoxelsBand`, the per-side missing-neighbor sentinel paths, and the
+  band-semantics split. Weigh future "zero direct assertions" arguments against this result rather than assuming
+  indirect coverage is thin.
   **G2** `.FlattenedIndex.cs` (4) — `GetFlattenedIndexInChunk` ↔ `GetLocalPositionFromFlattenedIndex` had no inverse
   pin: the same matched-pair blindness the region-codec pins above were written to defeat.
   **G3** `.RegionFileName.cs` (4) — the `r.{x}.{z}.bin` seam, unpinned for the negative region coordinates `WS-3` made
