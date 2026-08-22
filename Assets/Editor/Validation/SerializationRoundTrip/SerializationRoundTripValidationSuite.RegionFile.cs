@@ -74,19 +74,19 @@ namespace Editor.Validation.SerializationRoundTrip
         }
 
         /// <summary>
-        /// B10. Growth and relocation. A record that outgrows its run must move, and its old sectors must be
-        /// released — not stranded. Red when: the rewrite is not relocated (it would overwrite whatever sits
-        /// after it), the table still points at the old run, or the vacated sectors are never reused.
+        /// B10. Growth and relocation. A record that outgrows its run must be re-sized and its old sectors
+        /// released — not stranded. Red when: the table still points at a run of the old size, the vacated
+        /// sectors are never reused, or the resize leaves two records sharing a sector.
         /// </summary>
-        /// <returns>True when growth relocates, updates the table, and frees the old run for reuse.</returns>
+        /// <returns>True when growth resizes the run, updates the table, and frees the old run for reuse.</returns>
         private static bool GrowingARecordRelocatesAndFreesItsOldRun()
         {
             using Fixture fx = new Fixture();
             string path = RegionPath(fx, "b10");
 
-            byte[] small = MakePayload(2000, seed: 2);   // 1 sector
-            byte[] large = MakePayload(20000, seed: 3);  // 5 sectors
-            byte[] filler = MakePayload(2000, seed: 4);  // 1 sector — should land in the freed slot
+            byte[] small = MakePayload(2000, seed: 2); // 1 sector
+            byte[] large = MakePayload(20000, seed: 3); // 5 sectors
+            byte[] filler = MakePayload(2000, seed: 4); // 1 sector — should land in the freed slot
 
             using (RegionFile region = new RegionFile(path))
             {
@@ -113,8 +113,11 @@ namespace Editor.Validation.SerializationRoundTrip
             (int newStart, int newCount) = ReadTableEntry(path, 0, 0);
             (int fillerStart, _) = ReadTableEntry(path, 7, 7);
 
-            ok &= Check($"a grown record is relocated (was sector {oldStart.ToString()}×{oldCount.ToString()}, now {newStart.ToString()}×{newCount.ToString()})",
-                newStart != oldStart && newCount == SectorsFor(large.Length));
+            // Deliberately NOT asserting newStart != oldStart: SaveChunkData frees the old run before
+            // calling FindFreeSectors, so first-fit regrowing in place is legal. The contract is the run
+            // size plus the reuse assertion below.
+            ok &= Check($"a grown record's run is resized (was sector {oldStart.ToString()}×{oldCount.ToString()}, now {newStart.ToString()}×{newCount.ToString()})",
+                newCount == SectorsFor(large.Length));
             ok &= Check($"the vacated sector is reused by the next write (freed {oldStart.ToString()}, filler landed at {fillerStart.ToString()})",
                 fillerStart == oldStart);
             ok &= Check("no two records share a sector after the relocation", NoOverlappingRuns(path));
@@ -133,7 +136,7 @@ namespace Editor.Validation.SerializationRoundTrip
             string path = RegionPath(fx, "b11");
 
             byte[] large = MakePayload(20000, seed: 5); // 5 sectors
-            byte[] small = MakePayload(2000, seed: 6);  // 1 sector
+            byte[] small = MakePayload(2000, seed: 6); // 1 sector
             byte[] refill = MakePayload(9000, seed: 7); // 3 sectors — must fit in the freed tail
 
             using (RegionFile region = new RegionFile(path))
@@ -416,8 +419,11 @@ namespace Editor.Validation.SerializationRoundTrip
         /// <returns>True when at least one run exists and all runs are disjoint.</returns>
         private static bool NoOverlappingRuns(string path)
         {
-            int totalEntries = REGION_CHUNKS_PER_SIDE * REGION_CHUNKS_PER_SIDE;
-            int sectors = (int)(new FileInfo(path).Length / REGION_SECTOR_SIZE) + 1;
+            const int totalEntries = REGION_CHUNKS_PER_SIDE * REGION_CHUNKS_PER_SIDE;
+            long fileLength = new FileInfo(path).Length;
+            // Round up: a torn write could leave a partial trailing sector, and a run that ends exactly
+            // at EOF must stay in range rather than being reported as overrunning the file.
+            int sectors = (int)((fileLength + REGION_SECTOR_SIZE - 1) / REGION_SECTOR_SIZE);
             int[] owner = new int[sectors];
             for (int i = 0; i < sectors; i++) owner[i] = -1;
 
@@ -429,7 +435,16 @@ namespace Editor.Validation.SerializationRoundTrip
                 if (start == 0) continue;
 
                 runs++;
-                for (int s = start; s < start + count && s < sectors; s++)
+
+                // A run reaching past EOF is the exact shape a bogus allocation takes; clamping it into
+                // range would hide the corruption this check exists to find.
+                if (start + count > sectors)
+                {
+                    Debug.LogError($"    entry {index.ToString()} claims sectors {start.ToString()}..{(start + count - 1).ToString()}, past the file's {sectors.ToString()} sectors");
+                    return false;
+                }
+
+                for (int s = start; s < start + count; s++)
                 {
                     if (owner[s] != -1)
                     {

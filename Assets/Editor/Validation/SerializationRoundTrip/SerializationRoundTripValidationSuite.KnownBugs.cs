@@ -85,7 +85,7 @@ namespace Editor.Validation.SerializationRoundTrip
 
             ChunkData reloaded = RunLoad(fx.Storage, pos);
             if (reloaded == null)
-                return Check($"{label}: the saved chunk is on disk and reloads", false) && ok;
+                return Check($"{label}: the saved chunk is on disk and reloads", false);
 
             try
             {
@@ -115,7 +115,7 @@ namespace Editor.Validation.SerializationRoundTrip
             ChunkData data = World.Instance.ChunkPool.GetChunkData(pos);
 
             for (int i = 0; i < data.heightMap.Length; i++)
-                data.heightMap[i] = (ushort)(VoxelData.ChunkHeight - 1);
+                data.heightMap[i] = VoxelData.ChunkHeight - 1;
 
             for (int s = 0; s < data.sections.Length; s++)
             {

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Data;
 using Serialization;
 using UnityEngine;
+using UnityEngine.Pool;
 
 namespace Editor.Validation.SerializationRoundTrip
 {
@@ -159,10 +160,20 @@ namespace Editor.Validation.SerializationRoundTrip
 
             if (restored == null) return false;
 
-            ok &= Check($"no phantom column is queued from the truncated (259, 4) — expected (3, 4) absent, restored set is {DescribeColumns(restored)}",
-                !restored.Contains(new Vector2Int(3, 4)));
-            ok &= Check($"only the caller's valid column is queued (expected 1 column, got {restored.Count.ToString()})",
-                restored.Count == 1);
+            // TryGetAndRemove transfers ownership of the pooled set out of the store, so Clear() will not
+            // release it — the caller must.
+            try
+            {
+                ok &= Check($"no phantom column is queued from the truncated (259, 4) — expected (3, 4) absent, restored set is {DescribeColumns(restored)}",
+                    !restored.Contains(new Vector2Int(3, 4)));
+                ok &= Check($"only the caller's valid column is queued (expected 1 column, got {restored.Count.ToString()})",
+                    restored.Count == 1);
+            }
+            finally
+            {
+                HashSetPool<Vector2Int>.Release(restored);
+            }
+
             return ok;
         }
 
@@ -180,8 +191,17 @@ namespace Editor.Validation.SerializationRoundTrip
             if (!store.TryGetAndRemove(chunk, out HashSet<Vector2Int> restored) || restored == null)
                 return Check($"{label}: pending columns are restored", false);
 
-            return Check($"{label}: pending columns match (expected {DescribeColumns(expected)}, got {DescribeColumns(restored)})",
-                restored.SetEquals(expected));
+            // The store hands over its pooled set on a successful get; releasing it here keeps the suite
+            // from draining HashSetPool<Vector2Int> across a run.
+            try
+            {
+                return Check($"{label}: pending columns match (expected {DescribeColumns(expected)}, got {DescribeColumns(restored)})",
+                    restored.SetEquals(expected));
+            }
+            finally
+            {
+                HashSetPool<Vector2Int>.Release(restored);
+            }
         }
 
         /// <summary>Asserts one restored blocklight mod's channels and removal flag.</summary>

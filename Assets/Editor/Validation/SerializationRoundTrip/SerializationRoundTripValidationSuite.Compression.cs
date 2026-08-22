@@ -38,13 +38,15 @@ namespace Editor.Validation.SerializationRoundTrip
 
             ChunkData source = BuildReferenceChunk(pos);
             bool ok = true;
-            int uncompressedLength = 0;
+
+            // Establish the uncompressed baseline up front so the "actually compresses" check below does not
+            // depend on None happening to come first in s_compressionArms.
+            int uncompressedLength = Serialize(source, CompressionAlgorithm.None).Length;
             try
             {
                 foreach (CompressionAlgorithm algorithm in s_compressionArms)
                 {
                     byte[] payload = Serialize(source, algorithm);
-                    if (algorithm == CompressionAlgorithm.None) uncompressedLength = payload.Length;
 
                     ChunkData loaded = ChunkSerializer.Deserialize(payload, algorithm, pos);
                     if (loaded == null)
