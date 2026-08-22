@@ -13,7 +13,8 @@ namespace Editor.Validation
     /// (CP-2 close-out). Every scenario is a baseline
     /// (must stay green). Scenario implementations live in the partial files (<c>.ChunkRelativePosition.cs</c>,
     /// <c>.ShiftMask.cs</c>, <c>.VoxelQuery.cs</c>, <c>.WorldOrigin.cs</c>, <c>.RegionCodec.cs</c>,
-    /// <c>.FlattenedIndex.cs</c>, <c>.RegionFileName.cs</c>).
+    /// <c>.FlattenedIndex.cs</c>, <c>.RegionFileName.cs</c>,
+    /// <c>.PaddedVolume.cs</c>).
     /// </summary>
     /// <remarks>Deliberately kept in <c>namespace Editor.Validation</c> (not <c>Editor.Validation.ChunkMath</c>)
     /// despite living in the <c>ChunkMath/</c> folder: a <c>.ChunkMath</c> namespace would shadow the
@@ -40,6 +41,7 @@ namespace Editor.Validation
             AddRegionCodecScenarios(scenarios);
             AddFlattenedIndexScenarios(scenarios);
             AddRegionFileNameScenarios(scenarios);
+            AddPaddedVolumeScenarios(scenarios);
             AddFoliagePhaseScenarios(scenarios);
             AddLiquidNoiseScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Chunk Math", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
@@ -65,6 +67,9 @@ namespace Editor.Validation
 
         /// <summary>Registers the NS-5 G3 region-filename round-trip, glob and parser-divergence baselines (partial file .RegionFileName.cs).</summary>
         static partial void AddRegionFileNameScenarios(List<Scenario> scenarios);
+
+        /// <summary>Registers the NS-5 G1 padded-volume index and neighborhood-gather baselines (partial file .PaddedVolume.cs).</summary>
+        static partial void AddPaddedVolumeScenarios(List<Scenario> scenarios);
 
         /// <summary>Registers the FL-1 foliage wave-phase far-origin precision baselines (partial file .FoliagePhase.cs).</summary>
         static partial void AddFoliagePhaseScenarios(List<Scenario> scenarios);
