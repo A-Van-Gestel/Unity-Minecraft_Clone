@@ -69,8 +69,9 @@ smaller set. Output order is registry order regardless of request order.
   warning; some suites log a `B7 INCONCLUSIVE` zero-alloc note). That is **not** a suite failure —
   read the real verdict from `executionLogs` / the returned counts, not from the tool's success flag.
 
-**⚠️ Runtime budget — never drive `Validate All` through MCP.** A full pass is **~190 s**, and
-**Lighting alone is ~182 s of it**; the other 23 suites together take ~6 s. Anything sent through
+**⚠️ Runtime budget — never drive `Validate All` through MCP.** A full pass is **~190–205 s**
+(last verified run: 204 s), and **Lighting alone is the dominant share — ~182 s when measured**;
+the other 23 suites together take ~6 s. Anything sent through
 `Unity_RunCommand` that outlives the MCP response window is **re-issued**, and the retries stack on
 the Editor's main thread, survive a client-side task stop, and are cleared only by restarting the
 Editor — so a single `Validate All` over MCP becomes an endless re-run loop that blocks every later
