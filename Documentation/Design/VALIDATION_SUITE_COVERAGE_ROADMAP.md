@@ -23,7 +23,7 @@ Existing-coverage counts are re-verified against a real `Validate All` run each 
 > Status: **Living backlog.** NS-1 is partially seeded (CP-3's robustness slice, 2026-07-22); NS-5 ✅
 > (CP-2 close-out, 2026-07-22), NS-4 ✅ (2026-08-03) and NS-7 + NS-7b ✅ (both 2026-08-20) are complete — see the per-item status lines; the rest are proposals.
 
-**Existing coverage (for contrast, counts re-verified 2026-08-22 against a full `Validate All` run — **567 baselines / 25 suites**, 0 failures, 0 isolation violations, 2 known-bug repros outstanding (`K04`/`K08`, `SERIALIZATION_BUGS` §04 and §08); 3 min 9 s wall clock, of which Lighting is the dominant share):** Lighting (106 — the last seven are the fidelity **C14** mixed-channel mirrors B108–B114), Meshing (57 — including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
+**Existing coverage (for contrast, counts re-verified 2026-08-22 against a full `Validate All` run — 567 baselines / 25 suites, 0 failures, 0 isolation violations, 2 known-bug repros outstanding (`K04`/`K08`, `SERIALIZATION_BUGS` §04 and §08); 3 min 9 s wall clock, of which Lighting is the dominant share):** Lighting (106 — the last seven are the fidelity **C14** mixed-channel mirrors B108–B114), Meshing (57 — including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
 **light** maps), Behavior/fluid tick (17, incl. determinism gates), Placement (29 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (26 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19, its promoted repro B20–B23, `PH-1`'s step-0 horizontal-aggregation guard B24 and its gather-envelope guard B25, and `PH-2`'s B26 pinning that `CalculateVelocity` never writes the transform)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (72 — the NS-5 G1–G4 coverage extension added 16: 6 padded-volume, 4 flattened-index, 4 region-filename, 2 legacy-V1-encoder), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), **Chunk Pipeline (6 — NS-3 slice 1, the pipeline state machine: `B1` is the harness's own deadlock prove-red)**, Save Durability (13), Deserialization Robustness (9), **Serialization Round-Trip (16 — NS-1 parts 1–5, plus the `K04`/`K08` repros of `SERIALIZATION_BUGS` §04 and §08)**, **Migration Chain (25 — NS-7 + NS-7b, incl. `B25`, the promoted `K10` repro of the bug archived as `_FIXED_BUGS.md` Serialization 07)**, Spawn (10), Command Console (56), Voxel Occlusion (6), Sky & Celestial (15), Sky Render (11), World Clock (10), UI Blur Render (5), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` tests (the `ChunkRelativePosition` tests are no longer standalone — they are the Chunk Math suite's `.ChunkRelativePosition.cs` partial).
 
 **Build protocol for every suite below:** the `validation-driven-bugfix` skill (deterministic repro first, prove-red before trusting green, promote repros to baselines). New suites should land on the shared `ValidationSuiteRunner` (`VS-1`, ✅ shipped 2026-07-08): register `Scenario`s and return its `ValidationRunResult` from a headless `Execute()`, with a thin `[MenuItem]` wrapper. All suites stay on the custom validation framework: migrating to the Unity Test Framework was evaluated 2026-07-02 and rejected (see the status header in
@@ -192,6 +192,23 @@ what this document ranks.
       scan order, completion-pass fault injection, the edge-check round budget, and the load-from-disk arm —
       tracked as `CP-H1`…`CP-H6` in the fidelity doc. LP-* remains 0/7; slice 1 asserts flag pairing against
       today's raw bools, so it is the regression guard that makes LP-1/LP-4 safe to execute.
+    - **Hardening pass (2026-08-23), from a code review of the slice-1 commits.** Two of the six baselines were
+      making non-vacuity claims they could not support. `PipelineAssert`'s "was this scenario adversarial at
+      all" floor read the **global** park counter, which frontier chunks satisfy unconditionally (their own
+      neighbors were never seeded), so it could never fail; the counters are now scoped to an observed set
+      (`ChunkPipelineSimulator.Observe`, auto-called by `RunUntilConverged`). Scoping then exposed the real
+      defect underneath: **`B3` had zero target blocking** — a pre-seeded neighborhood passes
+      `AreNeighborsDataReady` from frame 0, so no interior chunk is ever gated and the §9.3 wave-front it is
+      named for never formed. `B3` now drives generation one admission per frame, and reports 24 observed
+      parks where it previously reported none. Also fixed: `B6` never asserted that its run converged, and a
+      dead `PipelineAssert.Deadlocked` had left two docs describing `B1` as a non-convergence assertion when
+      it asserts the stranding flag (§4 of the fidelity doc had it right all along).
+    - **Prove-red is now measured, not predicted.** Six mutations were applied in isolation and their red-sets
+      recorded in the `.Baseline.cs` docstring; **all six baselines have been observed failing.** One recorded
+      prediction was simply wrong and is kept as a warning: forcing `AreNeighborsDataReady` true does **not**
+      red `B2` (its mesh declines still satisfy the floor and it converges either way) — `B2`'s real
+      prove-red is the admission-cap mutation. Dropping the `WouldStrandInRangeNeighbor` arm reds `B5` alone
+      with `B1` green, so the pair's intended asymmetry is now witnessed rather than asserted.
 
 ---
 

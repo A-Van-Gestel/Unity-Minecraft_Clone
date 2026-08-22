@@ -1,7 +1,9 @@
 # Chunk Pipeline Validation Harness — Fidelity Boundary & Extension Backlog
 
 **Status:** ✅ **Active backlog** — slice 1 shipped 2026-08-22 (`NS-3`): fixture + frame pump + 6 baselines `B1`–`B6`, menu item **`Minecraft Clone/Dev/Validate Chunk Pipeline`**. The suite guards the pipeline **state machine** (readiness gates, scheduling arms, unload policy), not job output.  
-**Created:** 2026-08-22 · **Last updated:** 2026-08-22 **Scope:**  
+**Created:** 2026-08-22  
+**Last updated:** 2026-08-23  
+**Scope:**
 `Assets/Editor/Validation/ChunkPipeline/` — `ChunkPipelineFixture` + `ChunkPipelineSimulator` + `PipelineAssert`. **Siblings:** [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](LIGHTING_VALIDATION_HARNESS_FIDELITY.md), [MESHING_VALIDATION_HARNESS_FIDELITY.md](MESHING_VALIDATION_HARNESS_FIDELITY.md) — same document shape.
 
 ---
@@ -12,8 +14,8 @@ Every other suite in this project asserts an **output**: a light field, a mesh, 
 
 Two structural defenses follow from that, and both are load-bearing:
 
-1. **`B1` is a deadlock assertion, not a convergence one.** It neuters the §9.6 strand guard and requires the pump to fail. If `B1` ever goes green-by-converging, the pump has stopped modeling production and
-   `B2`–`B6` are worthless — fix `ChunkPipelineSimulator`, not the engine.
+1. **`B1` asserts the stranding itself, not merely non-convergence.** It neuters the §9.6 strand guard and requires the center chunk to end up permanently unable to clear `HasLightChangesToProcess`. If `B1` ever passes trivially, the pump has stopped modeling production and `B2`–`B6` are worthless — fix
+   `ChunkPipelineSimulator`, not the engine. (§4 explains why the flag, and not the mesh, is the signal.)
 2. **Every convergence assertion carries a non-vacuity floor.** `PipelineAssert.Converged` fails a run in which no chunk was ever parked or mesh-declined, and `FlagsPaired` fails a run in which no lighting flag was ever set. A scenario whose adversarial ordering never bit is a scenario that tested nothing.
 
 ## 2. What is real, and what is modeled
