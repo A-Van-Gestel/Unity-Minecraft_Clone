@@ -480,10 +480,36 @@ clean. Four corrections to this packet's own text, all found while executing it:
    (the packet listed no new baseline for this phase), a gate-term regression would have had no tripwire at
    all. Weigh that before trimming validation from a "pure re-housing" phase.
 
-*Known limits of this evidence:* the suites are edit-mode Mono, so IL2CPP is unobserved as usual; the
-in-game smoke below is one flight, not a soak; and B7 asserts the predicate against a hand-written oracle,
-so a defect present in *both* would pass — the oracle was transcribed from the three original `World` loops
-rather than from the extracted code, which is the only mitigation.
+*In-game smoke — PASSED (2026-08-23).* One straight-line flight (editor Mono, `enableLighting` and
+`EnablePersistence` on, volatile saves, view distance 10), inspected live at the end while still in play
+mode. **The console carries exactly one `--- Startup complete ---`, so a single `World` instance served the
+whole flight and the instance-field counters cover all of it** — the segment split that hobbled LP-1's soak
+did not recur here.
+
+- **Nothing stuck in the rendered set.** 441 populated chunks hold a `Chunk` object — exactly (2·10+1)² —
+  and of those, **0** were unmeshed and **0** still held `NeedsInitialLighting` / `HasLightChangesToProcess`
+  / `NeedsEdgeCheck`. No stuck swathe, and the wave-front gate (`AreNeighborsMeshReady`) stayed relaxed.
+- **The 89 parked chunks are all outside the render radius**, in the 346-chunk data-only ring. That is the
+  legitimate frontier park the fidelity doc describes (`AreNeighborsDataReady` can never pass at the edge of
+  the loaded region), not a stall — the pipeline was fully quiesced (gen/light/mesh jobs all 0, ready 0).
+- **Both LP-1 probes silent:** cardinal 0 / diagonal 0 / unload 0, and probe 2's violation, orphaned and
+  unpopulated counters all 0 — and **no `[LP-1]` warning was emitted at any point**, which is the signal
+  that spans the whole flight rather than a final sample. Zero console errors. The gate rewire therefore
+  kept probe 1 wired through the *merged* loop, cardinal/diagonal split intact.
+- **Fail-safe promotions: 6 during streaming, none at steady state.** Note the criterion as originally
+  written ("zero recurring fail-safe promotions") is looser than it sounds and the reason matters: the
+  ~1 s scan's flag-walk calls `AddReady`, which does `_waiting.Remove(pos)`, so the parked frontier is
+  drained out of `_waiting` *before* `PromoteAll()` reads its count. The log therefore never reports the
+  frontier ring at all — it fires only for a chunk parked with **no** pending flag, i.e. a genuinely missing
+  promotion hook. Silence here is meaningful, but it is a narrower statement than "nothing was promoted".
+
+*Known limits of this evidence:* the suites are edit-mode Mono, so IL2CPP is unobserved as usual; the smoke
+is **one flight, not a soak**, and covers no block edits, border edits, or save/reload (LP-1's soak covered
+those, against the pre-LP-2 gates); probe 1's zero remains *partly structural* for the reason LP-1 recorded
+(the gate short-circuits on `LightingJobs.ContainsKey` before reaching the flag); and B7 asserts the
+predicate against a hand-written oracle, so a defect present in *both* would pass — the oracle was
+transcribed from the three original `World` loops rather than from the extracted code, which is the only
+mitigation.
 
 *Also corrected while executing:* the packet says to **delete** the orphaned docstring at `W:2800–2806`
 (re-anchored: `2964–2970`). Deleting it would have left `AreNeighborsReadyAndLit` — a public method — with
