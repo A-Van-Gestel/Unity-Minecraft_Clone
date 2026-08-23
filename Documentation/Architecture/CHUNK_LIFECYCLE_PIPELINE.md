@@ -1,7 +1,7 @@
 # Chunk Lifecycle Pipeline: Generation → Lighting → Meshing
 
 **Status:** Living Document  
-**Last Updated:** July 2026  
+**Last Updated:** 2026-08-23 (§6 gains the `SunlightRecalculationQueue` work-store reference)  
 **Purpose:** Comprehensive reference for how a chunk transitions from empty placeholder to rendered mesh, with all state flags, readiness gates, and inter-system dependencies fully mapped.
 
 ---
@@ -513,6 +513,44 @@ sequenceDiagram
    See baselines B48/B49 and `LIGHTING_SYSTEM_OVERVIEW.md` §3.7.
 
 3. **Genuine darkness (level=0, unsupported):** Applied. These are critical for block removal/placement to propagate shadow correctly across borders.
+
+### `SunlightRecalculationQueue` — the fourth work store
+
+Besides the three per-chunk flags (§2), pending lighting work also lives in
+`WorldData.SunlightRecalculationQueue`: a `Dictionary<Vector2Int, HashSet<Vector2Int>>` keyed by **chunk voxel
+origin**, whose values are **global** column positions awaiting a sunlight recalculation. Unlike the flags, it is
+a side table, and **nothing structurally enforces that a queued column's owner is flagged** — the pairing is held
+by convention at each writer.
+
+**Producers (3):**
+
+| Site | Behavior |
+|---|---|
+| `WorldData.QueueSunlightRecalculation` (`WorldData.cs:460`) | Writes the key **unconditionally**, then sets `HasLightChangesToProcess` **only if the owner chunk is resident**. |
+| Disk-load restore (`World.cs:1312`) | Writes the dictionary directly (union into an existing set, or hand over a pooled one) and sets the flag by hand adjacent (`:1322`). |
+| Generation-completion restore (`WorldJobManager.cs:1218`) | Same shape, additionally gated on `enableLighting`. |
+
+**Consumers (2):** `ScheduleLightingUpdate` (`WorldJobManager.cs:831`) drains the columns into the lighting job,
+removes the key and releases the pooled set — the normal exit. `UnloadChunks` (`World.cs:3665`) persists any
+remainder via `PersistOrphanedSunlightColumns`, then removes the key and releases the set **strictly before** the
+only `worldData.RemoveChunk` (`:3731`), so unload never leaves a key behind.
+
+**Why the pairing matters.** The ~1 s fail-safe scan re-flags work using `IsPopulated AND (any lighting flag)`.
+An owner that fails that predicate is skipped, so its queued columns sleep until something else moves them —
+in the worst case not until unload persists them. Two states fail it **legitimately** and are not defects:
+
+- **No resident owner.** Because `QueueSunlightRecalculation` writes the key unconditionally, a BFS spilling
+  across a border into unloaded territory mints an ownerless key by design; it is collected when that chunk
+  loads, or on shutdown (`World.cs:5106`).
+- **Resident but not yet populated.** A placeholder can carry the flag while still loading; `PopulateFromSave`
+  only ORs flags in and never clears, so the flag survives population and the state self-heals.
+
+> **Observability (LP-1, dev/editor only).** `World.ScanSunlightQueuePairing` walks this store once per fail-safe
+> scan and classifies every key against exactly the predicate above, counting genuine violations separately from
+> the two legitimate states, and surfacing all of it on the debug HUD's Chunk Lifecycle block. It is
+> `[Conditional]`-compiled, carries its own `WorldFrameProfiler.Phase.LightQueueProbe` slot, and changes no
+> behavior. A soak on 2026-08-23 observed zero violations; see `LIGHTING_PIPELINE_STATE_REFACTOR.md` §7 (LP-1)
+> for that evidence and its limits. **LP-4 is the phase that replaces the convention with structure.**
 
 ---
 
