@@ -1,8 +1,8 @@
 # Lighting Pipeline State & Gate Refactor (LP-*)
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** 2026-07-06  
-**Status:** Partially implemented — **LP-1 shipped 2026-08-23** (probes live, soak silent; see §7). LP-2…LP-7 remain proposed. §2 re-audited against HEAD on 2026-08-23.  
+**Status:** Partially implemented — **LP-1 and LP-2 shipped 2026-08-23** (probes live and soak silent; the shared gate predicate is in with NS-3 baseline B7 — see §7). LP-3…LP-7 remain proposed. §2 re-audited against HEAD on 2026-08-23.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > Clean-up / refactor plan for the async lighting engine's orchestration layer — the `ChunkData`
@@ -335,7 +335,7 @@ newly created `.cs` files need a Unity import before `dotnet build` sees them; t
 | Phase                                               | Scope (files)                                                                                                                                     | Effort | Depends on                         |
 |-----------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|:------:|------------------------------------|
 | **LP-1 — Invariant probes** ✅ **SHIPPED 2026-08-23** | `World.cs`, `DebugScreen.cs`, `WorldFrameProfiler.cs` (dev/editor-only diagnostics)                                                               |   🟢   | —                                  |
-| **LP-2 — Shared neighbor-gate predicate**           | new `Helpers/NeighborReadinessDecision.cs`; `World.cs` gates; `LightingTestWorld.cs`                                                              |   🟡   | —                                  |
+| **LP-2 — Shared neighbor-gate predicate** ✅ **SHIPPED 2026-08-23** | `Helpers/NeighborReadinessDecision.cs` (new); `World.cs` gates + `VoxelData.cs`; `LightingTestWorld.cs`; NS-3 baseline **B7**                |   🟡   | —                                  |
 | **LP-3 — Retire `IsAwaitingMainThreadProcess`**     | `ChunkData.cs`, `WorldJobManager.cs`, `World.cs`, harness, rules/docs                                                                             |   🟡   | LP-1 (evidence), LP-2              |
 | **LP-4 — `LightingWork` byte + transition API**     | `ChunkData.cs`; call sites in `World.cs`, `WorldJobManager.cs`, `ChunkSerializer.cs`, `ChunkStorageManager.cs`; harness; new transition baselines |   🔴   | LP-2 (fewer sites); LP-3 preferred |
 | **LP-5 — Explicit scheduling contract + coroutine** | `WorldJobManager.ScheduleLightingUpdate`; `World.cs` coroutine; new fallback baseline                                                             |   🟡   | LP-4                               |
@@ -437,7 +437,7 @@ strictly before the only `worldData.RemoveChunk` (`:3731`). The real source is
 owner is resident, so a BFS spilling across a border into unloaded territory mints one by design. **The decision
 stands; only its reason was wrong.**
 
-### LP-2 — Shared neighbor-gate predicate (🟡)
+### LP-2 — Shared neighbor-gate predicate (🟡) ✅ **SHIPPED 2026-08-23**
 
 **Delivers:** §4.2. One predicate, three thin gates, harness drives the same code.
 
@@ -450,6 +450,47 @@ stands; only its reason was wrong.**
 - **Acceptance / regression:** universal gate **+ the meshing suite** (`Validate Meshing`, **57 baselines** as of 2026-08-23 — `AreNeighborsMeshReady` feeds `ScheduleMeshing` via `World.cs:2969`) **+ in-game smoke**: fly a sustained straight line (the wave-front pattern) and confirm no stuck-unmeshed swathes and zero recurring fail-safe promotions (`enableDiagnosticLogs`).
 - **Testability gain:** fidelity **B2 remainder closes** — the readiness computation itself becomes shared, unit-testable code; a future gate bug is a suite red, not an in-game mystery.
 - **Doc-sync (same commit):** `CHUNK_LIFECYCLE_PIPELINE.md` §3 (add the shared-predicate pointer per gate table), `LIGHTING_SYSTEM_OVERVIEW.md` §3.5 (one line), fidelity doc B2 entry (flip the remainder note). **Serialization:** none.
+
+**Amended:** 2026-08-23 — **LP-2 shipped.** `Helpers/NeighborReadinessDecision.cs` now backs all three
+`World` gates and the harness's `AreNeighborsReadyAndLit`; NS-3 gained baseline **B7** (census). Gate: Chunk
+Pipeline 7/7, Lighting 106/106 (both modes), LightScheduler 9/9, Meshing 57/57, both `dotnet build` targets
+clean. Four corrections to this packet's own text, all found while executing it:
+
+1. **The predicate returns a reason, not a bool.** §4.2 sketches `bool NeighborBlocks(...)`. That cannot
+   coexist with LP-1's probe, which counts `IsAwaitingMainThreadProcess` observations *from inside the gate
+   loop* — a bool forces the term to be re-tested caller-side, re-duplicating the exact term LP-2 unifies.
+   Shipped as `BlockReason Evaluate(Gate, in NeighborFacts)`. **This is groundwork for LP-3:** deleting the
+   flag becomes one enum member plus one probe call site, not a hunt across three gates.
+2. **The harness has only ONE routable gate analog.** The scope line says to route both
+   `LightingTestWorld.AreNeighborsDataReady` (`:426`) and `AreNeighborsReadyAndLit` (`:461`). The former is
+   not a loop — it is `GetChunk(coord).NeighborsReady`, a coarse per-chunk bool — so there is nothing to
+   route. Only `:461` was rewired. Deriving that toggle from real neighbor state stays a fidelity-backlog
+   item, not LP-2 scope.
+3. **The meshing suite is NOT a gate for this phase — the acceptance line was wrong.** It claimed the suite
+   covers `AreNeighborsMeshReady` because that gate "feeds `ScheduleMeshing`". It does not: the suite passes
+   `neighborsMeshReady` as an *input bool* and never calls the gate. **NS-3 is the only suite that reaches
+   the production computation** (`ChunkPipelineFixture` stands up a stub `World` and calls the real gates).
+   Run the meshing 57 as a non-regression check, never as this phase's gate. *(The decision to run it
+   stands; only its stated reason was wrong.)*
+4. **The predicted prove-red does not happen — the measured one is narrower, and it matters.** The packet
+   predicted that inverting `lightingInFlight` would red scheduler-mode baselines B66/B67/B70. **Measured:
+   it reds B7 alone.** All 106 lighting baselines stayed green, and so did NS-3's own B1–B6 — the pump
+   converges either way, and the lighting harness exercises the *handling* of a readiness result, never its
+   computation. **Consequence: B7 is the sole guard on the gate-term matrix.** Had LP-2 shipped without it
+   (the packet listed no new baseline for this phase), a gate-term regression would have had no tripwire at
+   all. Weigh that before trimming validation from a "pure re-housing" phase.
+
+*Known limits of this evidence:* the suites are edit-mode Mono, so IL2CPP is unobserved as usual; the
+in-game smoke below is one flight, not a soak; and B7 asserts the predicate against a hand-written oracle,
+so a defect present in *both* would pass — the oracle was transcribed from the three original `World` loops
+rather than from the extracted code, which is the only mitigation.
+
+*Also corrected while executing:* the packet says to **delete** the orphaned docstring at `W:2800–2806`
+(re-anchored: `2964–2970`). Deleting it would have left `AreNeighborsReadyAndLit` — a public method — with
+no XML doc at all, since the orphan *was* its docstring, detached. It was moved onto the method and
+corrected: it described "cardinal neighbors" (the gate checks 8) and called itself a prerequisite for "a
+mesh generation job" (that is `AreNeighborsMeshReady`; this gate serves the edge-check arm). Gate anchors
+also moved `2850–3010` → `3014–3175`.
 
 ### LP-3 — Retire `IsAwaitingMainThreadProcess` (🟡, evidence-gated)
 
@@ -557,7 +598,19 @@ stands; only its reason was wrong.**
   LP-1's scope row named `WorldJobManager.cs`, which it never touched (actual: `World.cs`, `DebugScreen.cs`,
   `WorldFrameProfiler.cs`). Probe 2 gained a third classification — resident-but-unpopulated — after a review
   found it silently counted such owners as clean. **LP-3's hard precondition is now satisfied.**
+* **v1.3** - **LP-2 executed and shipped.** §7's LP-2 packet gains an Amended line. Four corrections to the
+  packet's own text, all found while executing it: the predicate ships returning a `BlockReason` rather than
+  §4.2's sketched `bool`, because a bool cannot coexist with LP-1's in-gate probe (and the enum makes LP-3's
+  deletion a one-member change); the harness has only ONE routable gate analog, not two —
+  `LightingTestWorld.AreNeighborsDataReady` is a coarse per-chunk bool with no loop to route; the acceptance
+  line named the meshing suite as a gate for `AreNeighborsMeshReady`, which it cannot be (that suite takes
+  `neighborsMeshReady` as an input bool — NS-3 is the only suite reaching the production computation); and the
+  predicted prove-red was wrong — inverting `lightingInFlight` reds **B7 alone**, with all 106 lighting
+  baselines and NS-3's own B1–B6 staying green, which makes the new B7 census the sole guard on the gate-term
+  matrix. The orphaned docstring was **moved and corrected** rather than deleted (it was
+  `AreNeighborsReadyAndLit`'s own detached docstring, and stale in two ways). Gate anchors re-derived
+  `2850–3010` → `3014–3175`.
 
 ---
 
-**Last Updated:** 2026-08-23 (**v1.2 — LP-1 shipped**; soak silent and both probes proven live by post-soak injection, LP-3's precondition met; the ownerless-key rationale corrected and LP-1's scope row fixed — see Document History) **Next Review:** when LP-2 or LP-3 starts (LP-3 may proceed on LP-1's evidence, but read the Amended line's six limits first — the zeros are calibrated, not absolute)
+**Last Updated:** 2026-08-23 (**v1.3 — LP-2 shipped**; the shared gate predicate backs all three `World` gates and the harness analog, NS-3 baseline B7 pins the gate-term matrix, and four corrections to the LP-2 packet are recorded in its Amended line — see Document History) **Next Review:** when LP-3 starts (LP-3's precondition is met and LP-2, its second dependency, has landed — but read LP-1's Amended-line limits first; the zeros are calibrated, not absolute, and LP-2's measured prove-red shows how little the lighting suite observes about gate terms)

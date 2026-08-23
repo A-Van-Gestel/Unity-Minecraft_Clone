@@ -198,6 +198,8 @@ It deliberately does **not** require neighbors to have no running lighting jobs,
 
 This prevents meshes from being built before their own and their neighbors' first lighting pass completes.
 
+All three gates share one pure predicate — `Helpers/NeighborReadinessDecision` (LP-2). Each walks the same 8 neighbor offsets, assembles per-neighbor facts, and asks the predicate which gate's rules block; the editor lighting harness calls the identical predicate, so the readiness *computation* cannot drift between production and the harness. The gate differences described above are encoded there and pinned by the Chunk Pipeline suite's B7 census.
+
 For the complete pipeline flow including all gates, flags, and interactions, see [CHUNK_LIFECYCLE_PIPELINE.md](CHUNK_LIFECYCLE_PIPELINE.md).
 
 ### 3.6 Edge Consistency Checking (Starlight-Inspired)

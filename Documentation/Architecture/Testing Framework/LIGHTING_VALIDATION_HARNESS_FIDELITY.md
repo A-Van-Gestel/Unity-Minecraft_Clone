@@ -156,9 +156,20 @@ conversion on the production mod path would not be caught in-harness (guarded in
   `RunFrame` now passes the **real** per-chunk readiness into `Evaluate` and handles the
   `NeighborsNotReady` arm by deferring (retaining the chunk's light work, scheduling nothing), counted in the new `FrameResult.ChunksNeighborsNotReady` (kept distinct from `ChunksStarved` so budget-pressure baselines stay meaningful). Baseline **B41** places a lamp on a chunk's border while its neighbors are marked not-ready, asserts the chunk is deferred every frame (no job scheduled, none in flight, work retained, no blocklight propagates), then marks neighbors ready and asserts the retained work runs and the field converges to the all-ready oracle —
   proving the deferral neither loses nor double-applies the work. The flag is per-chunk-being-scheduled and distinct from B1's `IsLoaded` (absent-for-mod-delivery vs. own-re-lighting-blocked-on-neighbor-terrain).
-- **Still NOT covered (minor):** readiness is a hand-set toggle, not *derived* from neighbor
-  `IsPopulated`/generation-in-flight state (the harness does not model terrain generation), so a bug in the readiness *computation* (`World.AreNeighborsDataReady` itself) is out of scope — only the *handling*
-  of its result is pinned. The fuzz layer (C1) still passes `neighborsDataReady: true`.
+- **Remainder closed by LP-2 (2026-08-23) — but read where the guard actually lives.** The readiness
+  *computation* is no longer harness-local: `World`'s three gates and
+  `LightingTestWorld.AreNeighborsReadyAndLit` both call the shared pure predicate
+  `Helpers/NeighborReadinessDecision`, so the two can no longer disagree about the rules. The gate term
+  matrix is pinned by the **Chunk Pipeline suite's B7** census (3 gates × 2⁷ fact combinations vs an
+  independently written oracle), *not* by this suite.
+- **Measured, not assumed:** inverting the `lightingInFlight` term inside the shared predicate reds **B7
+  alone** — all 106 lighting baselines stay green, and so do NS-3's own B1–B6. This suite exercises the
+  *handling* of a readiness result, never its computation, so it cannot gate a gate-term regression. Do not
+  read a green lighting run as coverage of the predicate.
+- **Still NOT covered (minor):** `AreNeighborsDataReady` remains a hand-set per-chunk toggle here, not
+  *derived* from neighbor `IsPopulated`/generation-in-flight state (the harness models no terrain
+  generation), so only that gate's *result handling* is pinned on this side. The fuzz layer (C1) still
+  passes `neighborsDataReady: true`.
 
 ### B3 — No genuine concurrency (synchronous `.Run()` only)  · **WONTFIX (structural) · scope amended 2026-07-03**
 

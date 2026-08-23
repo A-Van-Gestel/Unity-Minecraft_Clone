@@ -62,7 +62,23 @@ stateDiagram-v2
 
 ## 3. Readiness Gates
 
-Two critical gate functions control when work can proceed. Understanding the difference between them is essential for diagnosing pipeline stalls.
+Three gate functions control when work can proceed. Understanding the differences between them is essential for diagnosing pipeline stalls.
+
+> [!NOTE]
+> ### One shared predicate behind all three (LP-2)
+> `World`'s three gates no longer hand-roll their own neighbor loops. Each walks `VoxelData.AllNeighborOffsets`,
+> assembles a `NeighborReadinessDecision.NeighborFacts` per neighbor, and calls the shared pure predicate
+> `Helpers/NeighborReadinessDecision.Evaluate(gate, facts)` — the gate-side member of the same shared-guard
+> family as `LightingScheduleDecision`, `LightingScanDecision` and `JobCompletionPass`. The editor lighting
+> harness drives the identical predicate, so its gate analog can no longer silently disagree with production.
+>
+> The caller still owns everything world-shaped: the `IsChunkInWorld` skip, the job-dictionary and chunk-map
+> probes, and short-circuiting on the first blocking neighbor. `Evaluate` returns a `BlockReason` rather than
+> a bool, which is what lets the single loop feed LP-1's separate cardinal/diagonal probe counters
+> (`AllNeighborOffsets` is ordered cardinals-first — see `VoxelData.CardinalNeighborCount`).
+>
+> The tables below are the contract; the Chunk Pipeline suite's **B7** asserts every gate × fact combination
+> against an independently written copy of them.
 
 ### 3.1 `AreNeighborsDataReady(ChunkCoord)`
 
@@ -85,15 +101,23 @@ Checks all **8 horizontal neighbors** (cardinal + diagonal):
 
 Checks all **8 horizontal neighbors** (cardinal + diagonal) with stricter requirements:
 
-| Check                          | Condition                             | Rationale                                   |
-|--------------------------------|---------------------------------------|---------------------------------------------|
-| All of `AreNeighborsDataReady` | (see above)                           | Baseline requirement                        |
-| Lighting job                   | `LightingJobs.ContainsKey()` → false  | Neighbor must not be computing light        |
-| Pending light changes          | `HasLightChangesToProcess` → false    | Neighbor must not have unscheduled work     |
-| Initial lighting               | `NeedsInitialLighting` → false        | Neighbor must have completed first lighting |
-| Main-thread processing         | `IsAwaitingMainThreadProcess` → false | Neighbor must not be in transitional state  |
+| Check                  | Condition                             | Rationale                                                                                            |
+|------------------------|---------------------------------------|------------------------------------------------------------------------------------------------------|
+| World bounds           | `IsChunkInWorld()` → skip if false     | As §3.1 — never fires post-WS-3                                                                       |
+| Generation job         | `GenerationJobs.ContainsKey()` → false | Neighbor terrain must be complete                                                                     |
+| Lighting job           | `LightingJobs.ContainsKey()` → false   | Neighbor must not be computing light                                                                  |
+| Data exists + populated | `TryGetChunk()` + `IsPopulated`       | **Skips, does not block** — an unpopulated neighbor holds no light to settle. The four rows below are evaluated only when it is populated |
+| Pending light changes  | `HasLightChangesToProcess` → false     | Neighbor must not have unscheduled work                                                               |
+| Initial lighting       | `NeedsInitialLighting` → false         | Neighbor must have completed first lighting                                                           |
+| Main-thread processing | `IsAwaitingMainThreadProcess` → false  | Neighbor must not be in transitional state                                                            |
 
 **Summary:** "Are all neighbors fully generated AND lighting-stable?"
+
+> [!WARNING]
+> **This gate is NOT a superset of `AreNeighborsDataReady`.** The table above used to open with "all of
+> `AreNeighborsDataReady`", which is wrong in one case that matters: an absent or unpopulated neighbor
+> **blocks** `AreNeighborsDataReady` but is **skipped** by this gate. So a chunk can pass `ReadyAndLit` while
+> failing `DataReady`. B7 pins this asymmetry down explicitly.
 
 ### 3.3 `AreNeighborsMeshReady(ChunkCoord)` *(NEW)*
 

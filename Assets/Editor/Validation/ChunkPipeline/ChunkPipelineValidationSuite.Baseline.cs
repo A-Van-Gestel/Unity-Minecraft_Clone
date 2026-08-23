@@ -432,30 +432,32 @@ namespace Editor.Validation.ChunkPipeline
             };
 
             foreach (NeighborReadinessDecision.Gate gate in gates)
-            for (int mask = 0; mask < 128; mask++)
             {
-                bool generationInFlight = (mask & 1) != 0;
-                bool lightingInFlight = (mask & 2) != 0;
-                bool existsAndPopulated = (mask & 4) != 0;
-                bool needsInitialLighting = (mask & 8) != 0;
-                bool hasLightChanges = (mask & 16) != 0;
-                bool awaitingMainThread = (mask & 32) != 0;
-                bool lightingEnabled = (mask & 64) != 0;
+                for (int mask = 0; mask < 128; mask++)
+                {
+                    bool generationInFlight = (mask & 1) != 0;
+                    bool lightingInFlight = (mask & 2) != 0;
+                    bool existsAndPopulated = (mask & 4) != 0;
+                    bool needsInitialLighting = (mask & 8) != 0;
+                    bool hasLightChanges = (mask & 16) != 0;
+                    bool awaitingMainThread = (mask & 32) != 0;
+                    bool lightingEnabled = (mask & 64) != 0;
 
-                NeighborReadinessDecision.NeighborFacts facts = new NeighborReadinessDecision.NeighborFacts(
-                    generationInFlight, lightingInFlight, existsAndPopulated, needsInitialLighting,
-                    hasLightChanges, awaitingMainThread, lightingEnabled);
+                    NeighborReadinessDecision.NeighborFacts facts = new NeighborReadinessDecision.NeighborFacts(
+                        generationInFlight, lightingInFlight, existsAndPopulated, needsInitialLighting,
+                        hasLightChanges, awaitingMainThread, lightingEnabled);
 
-                NeighborReadinessDecision.BlockReason expected = ExpectedBlockReason(gate, facts);
-                NeighborReadinessDecision.BlockReason actual = NeighborReadinessDecision.Evaluate(gate, facts);
-                checkedCount++;
+                    NeighborReadinessDecision.BlockReason expected = ExpectedBlockReason(gate, facts);
+                    NeighborReadinessDecision.BlockReason actual = NeighborReadinessDecision.Evaluate(gate, facts);
+                    checkedCount++;
 
-                if (actual == expected) continue;
+                    if (actual == expected) continue;
 
-                mismatches.AppendLine(
-                    $"    {gate}: gen={generationInFlight}, light={lightingInFlight}, pop={existsAndPopulated}, " +
-                    $"init={needsInitialLighting}, changes={hasLightChanges}, await={awaitingMainThread}, " +
-                    $"lightingEnabled={lightingEnabled}: expected {expected}, got {actual}");
+                    mismatches.AppendLine(
+                        $"    {gate}: gen={generationInFlight}, light={lightingInFlight}, pop={existsAndPopulated}, " +
+                        $"init={needsInitialLighting}, changes={hasLightChanges}, await={awaitingMainThread}, " +
+                        $"lightingEnabled={lightingEnabled}: expected {expected}, got {actual}");
+                }
             }
 
             bool ok = mismatches.Length == 0;

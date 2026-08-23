@@ -450,11 +450,14 @@ namespace Editor.Validation.Lighting.Framework
         /// reads settled data. Returns false when a neighbor has a lighting job in flight, or carries
         /// <see cref="ChunkData.NeedsInitialLighting"/>, pending light work
         /// (<see cref="ChunkData.HasLightChangesToProcess"/>), or <see cref="ChunkData.IsAwaitingMainThreadProcess"/>.
-        /// <para>Mirror of <c>World.cs</c>'s gate minus the checks the fixed grid cannot have: there are no
-        /// per-neighbor terrain-generation jobs (that coarse readiness is modeled by
-        /// <see cref="AreNeighborsDataReady"/>), and out-of-grid neighbors are the world boundary — skipped,
-        /// exactly like production's <c>!IsChunkInWorld</c> continue. Without this gate the Bug-05 re-granted
-        /// edge round can only be driven at grid quiescence (<see cref="RunReGrantedEdgeCheckRound"/>).</para>
+        /// <para>No longer a hand-written mirror: since LP-2 this calls the very
+        /// <see cref="NeighborReadinessDecision"/> production's gate calls, so the readiness COMPUTATION
+        /// cannot drift between the two (fidelity finding B2's remainder). What stays harness-shaped is the
+        /// fact gathering: the fixed grid has no per-neighbor terrain-generation jobs (that coarse readiness
+        /// is modeled by <see cref="AreNeighborsDataReady"/>), and out-of-grid neighbors are the world
+        /// boundary — skipped, exactly like production's <c>!IsChunkInWorld</c> continue. Without this gate
+        /// the Bug-05 re-granted edge round can only be driven at grid quiescence
+        /// (<see cref="RunReGrantedEdgeCheckRound"/>).</para>
         /// </summary>
         /// <param name="chunkCoord">The grid coordinate whose 8 neighbors are gated for edge-check readiness.</param>
         /// <returns>True when every in-grid neighbor is fully lit and stable.</returns>
@@ -467,15 +470,24 @@ namespace Editor.Validation.Lighting.Framework
                 // Outside the grid = world boundary: nothing to wait on (production's !IsChunkInWorld skip).
                 if (!_chunks.TryGetValue(neighborCoord, out TestChunk neighbor)) continue;
 
-                // A lighting job in flight for the neighbor means its border light is still changing.
-                if (_inFlightCoords.Contains(neighborCoord)) return false;
+                // The readiness rules themselves are NOT restated here — this calls the same
+                // NeighborReadinessDecision production's World.AreNeighborsReadyAndLit calls, which is what
+                // closes fidelity finding B2's remainder. Only the fact GATHERING is harness-shaped: the
+                // fixed grid has no per-neighbor terrain-generation jobs (that coarse readiness is modeled
+                // by AreNeighborsDataReady) and every resident TestChunk carries data, so those two facts
+                // are constants rather than lookups.
+                NeighborReadinessDecision.NeighborFacts facts = new NeighborReadinessDecision.NeighborFacts(
+                    generationInFlight: false,
+                    lightingInFlight: _inFlightCoords.Contains(neighborCoord),
+                    existsAndPopulated: true,
+                    needsInitialLighting: neighbor.Data.NeedsInitialLighting,
+                    hasLightChanges: neighbor.HasLightWork,
+                    awaitingMainThread: neighbor.Data.IsAwaitingMainThreadProcess,
+                    lightingEnabled: true);
 
-                // Light that hasn't been computed / scheduled / merged yet — the edge comparison would read
-                // stale data (mirror of the NeedsInitialLighting / HasLightChangesToProcess /
-                // IsAwaitingMainThreadProcess arms).
-                if (neighbor.Data.NeedsInitialLighting) return false;
-                if (neighbor.HasLightWork) return false;
-                if (neighbor.Data.IsAwaitingMainThreadProcess) return false;
+                if (NeighborReadinessDecision.Evaluate(NeighborReadinessDecision.Gate.ReadyAndLit, facts)
+                    != NeighborReadinessDecision.BlockReason.None)
+                    return false;
             }
 
             return true;
