@@ -2558,9 +2558,14 @@ public class World : MonoBehaviour, IMeshDrainHost
 
                 // LP-1 probe 2 (F6) rides this ~1s cadence because it mirrors the walk above: it re-applies
                 // that scan's own predicate to the queue's keys. Neither the walk nor PromoteAll() below
-                // mutates a work flag, so the probe reads the same state wherever it sits inside this block;
-                // it carries its own profiler bracket rather than borrowing LightFailSafeScan's.
+                // mutates a work flag, so the probe reads the same state wherever it sits inside this block.
+                //
+                // Its cost belongs to LightQueueProbe alone, so this scan's span is closed before the call
+                // and reopened after — the phase slots must stay disjoint for the report's "all timed
+                // regions" total. Add() accumulates, so both segments sum into one LightFailSafeScan figure.
+                WorldFrameProfiler.Add(WorldFrameProfiler.Phase.LightFailSafeScan, lightFailSafeStart);
                 ScanSunlightQueuePairing();
+                lightFailSafeStart = WorldFrameProfiler.Begin();
 
                 int failSafePromoted = _lightWork.PromoteAll();
 
