@@ -70,7 +70,9 @@ Three gate functions control when work can proceed. Understanding the difference
 > assembles a `NeighborReadinessDecision.NeighborFacts` per neighbor, and calls the shared pure predicate
 > `Helpers/NeighborReadinessDecision.Evaluate(gate, facts)` — the gate-side member of the same shared-guard
 > family as `LightingScheduleDecision`, `LightingScanDecision` and `JobCompletionPass`. The editor lighting
-> harness drives the identical predicate, so its gate analog can no longer silently disagree with production.
+> harness drives the identical predicate, so its gate analog can no longer silently disagree with production
+> about the **rules**. It still synthesises one input (`existsAndPopulated: true`), so the shared guarantee
+> does not extend to every fact — see the fidelity doc's B2.
 >
 > The caller still owns everything world-shaped: the `IsChunkInWorld` skip, the job-dictionary and chunk-map
 > probes, and short-circuiting on the first blocking neighbor. `Evaluate` returns a `BlockReason` rather than

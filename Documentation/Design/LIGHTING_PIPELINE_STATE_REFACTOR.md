@@ -511,6 +511,14 @@ predicate against a hand-written oracle, so a defect present in *both* would pas
 transcribed from the three original `World` loops rather than from the extracted code, which is the only
 mitigation.
 
+*Post-review correction (2026-08-23).* A code review of the unpushed series found that the "harness and
+production can no longer disagree" claim above **overstates what LP-2 established**. The shared predicate
+owns the readiness *rules*; the harness still synthesises one *input* — it passes `existsAndPopulated: true`
+unconditionally, so an unloaded neighbour blocks its gate where production would skip it. That matches the
+pre-LP-2 harness (no regression), but it is the residual half of fidelity B2 and is now recorded there
+rather than claimed closed. Closing it means feeding `TestChunk.IsLoaded` into the fact and re-judging the
+five `MarkChunkUnloaded` baselines — out of scope for a re-housing phase.
+
 *Also corrected while executing:* the packet says to **delete** the orphaned docstring at `W:2800–2806`
 (re-anchored: `2964–2970`). Deleting it would have left `AreNeighborsReadyAndLit` — a public method — with
 no XML doc at all, since the orphan *was* its docstring, detached. It was moved onto the method and
