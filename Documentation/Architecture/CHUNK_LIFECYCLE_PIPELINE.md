@@ -551,13 +551,13 @@ by convention at each writer.
 | Site | Behavior |
 |---|---|
 | `WorldData.QueueSunlightRecalculation` (`WorldData.cs:460`) | Writes the key **unconditionally**, then sets `HasLightChangesToProcess` **only if the owner chunk is resident**. |
-| Disk-load restore (`World.cs:1312`) | Writes the dictionary directly (union into an existing set, or hand over a pooled one) and sets the flag by hand adjacent (`:1322`). |
+| Disk-load restore (`World.cs:1358`) | Writes the dictionary directly (union into an existing set, or hand over a pooled one) and sets the flag by hand adjacent (`:1368`). |
 | Generation-completion restore (`WorldJobManager.cs:1218`) | Same shape, additionally gated on `enableLighting`. |
 
 **Consumers (2):** `ScheduleLightingUpdate` (`WorldJobManager.cs:831`) drains the columns into the lighting job,
-removes the key and releases the pooled set — the normal exit. `UnloadChunks` (`World.cs:3665`) persists any
-remainder via `PersistOrphanedSunlightColumns`, then removes the key and releases the set **strictly before** the
-only `worldData.RemoveChunk` (`:3731`), so unload never leaves a key behind.
+removes the key and releases the pooled set — the normal exit. `UnloadChunks` (`World.cs:3688`) persists any
+remainder via `PersistOrphanedSunlightColumns` (`:3692`), then removes the key and releases the set (`:3696`)
+**strictly before** the only `worldData.RemoveChunk` (`:3754`), so unload never leaves a key behind.
 
 **Why the pairing matters.** The ~1 s fail-safe scan re-flags work using `IsPopulated AND (any lighting flag)`.
 An owner that fails that predicate is skipped, so its queued columns sleep until something else moves them —
@@ -565,7 +565,7 @@ in the worst case not until unload persists them. Two states fail it **legitimat
 
 - **No resident owner.** Because `QueueSunlightRecalculation` writes the key unconditionally, a BFS spilling
   across a border into unloaded territory mints an ownerless key by design; it is collected when that chunk
-  loads, or on shutdown (`World.cs:5106`).
+  loads, or on shutdown (`World.cs:5129`–`:5136`).
 - **Resident but not yet populated.** A placeholder can carry the flag while still loading; `PopulateFromSave`
   only ORs flags in and never clears, so the flag survives population and the state self-heals.
 
