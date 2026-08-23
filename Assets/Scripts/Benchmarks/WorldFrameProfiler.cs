@@ -90,10 +90,19 @@ namespace Benchmarks
 
             /// <summary>The budgeted completed-generation-job pass.</summary>
             GenerationProcess = 8,
+
+            /// <summary>
+            /// The <b>dev/editor-only</b> LP-1 sunlight-queue pairing probe: a walk of
+            /// <c>SunlightRecalculationQueue</c> riding the same ~1 Hz cadence as
+            /// <see cref="LightFailSafeScan"/>. Its own slot so the probe's cost never lands in that scan's
+            /// slot, which P9-0 carved out specifically to measure a whole-world walk against view distance.
+            /// Always 0 ms in release builds, where the probe is compiled out.
+            /// </summary>
+            LightQueueProbe = 9,
         }
 
         /// <summary>Number of <see cref="Phase"/> values.</summary>
-        public const int PhaseCount = 9;
+        public const int PhaseCount = 10;
 
         /// <summary>
         /// When <c>false</c> (default) every method is a no-op guarded by a single bool read, so production

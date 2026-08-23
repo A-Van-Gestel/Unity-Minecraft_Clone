@@ -414,6 +414,62 @@ public class World : MonoBehaviour, IMeshDrainHost
     /// <summary>Chunks stuck <c>IsLoading &amp;&amp; !IsPopulated</c> across two consecutive ~1s scans (dev/editor only; F1).</summary>
     public int StuckLoadingChunks => _stuckLoadingChunks;
 
+    // --- LP-1 lighting-invariant probes ---
+    // Two convention-only invariants from LIGHTING_PIPELINE_STATE_REFACTOR.md §2.4, instrumented so LP-3/LP-4
+    // land on observation rather than reasoning. Dev/editor-only (see CountAwaitingObservation /
+    // ScanSunlightQueuePairing); instance fields, so a fresh play session starts them at zero without a
+    // DomainReset line. Neither probe changes behavior.
+
+    // Probe 1 (F1): observations of IsAwaitingMainThreadProcess == true by a gate reader. F1's claim is that
+    // the flag's observable window is ~zero, so every one of these is expected to stay at zero forever.
+    private const string AWAIT_SITE_CARDINAL = "AreNeighborsReadyAndLit/cardinal";
+    private const string AWAIT_SITE_DIAGONAL = "AreNeighborsReadyAndLit/diagonal";
+    private const string AWAIT_SITE_UNLOAD = "UnloadChunks";
+
+    private long _awaitGateCardinal;
+    private long _awaitGateDiagonal;
+    private long _awaitUnload;
+    private bool _awaitProbeLogged;
+
+    /// <summary>Times a cardinal neighbor was seen <c>IsAwaitingMainThreadProcess</c> in the ready-and-lit gate (dev/editor only; LP-1 probe 1, F1).</summary>
+    public long AwaitObservedGateCardinal => _awaitGateCardinal;
+
+    /// <summary>Times a diagonal neighbor was seen <c>IsAwaitingMainThreadProcess</c> in the ready-and-lit gate (dev/editor only; LP-1 probe 1, F1).</summary>
+    public long AwaitObservedGateDiagonal => _awaitGateDiagonal;
+
+    /// <summary>Times an unload candidate was seen <c>IsAwaitingMainThreadProcess</c> (dev/editor only; LP-1 probe 1, F1).</summary>
+    public long AwaitObservedUnload => _awaitUnload;
+
+    // Probe 2 (F6): sunlight-queue keys the fail-safe scan's predicate would skip. Gauge = this scan,
+    // total = cumulative. The two non-violating skip reasons (no resident owner; resident but unpopulated)
+    // get their own counters so neither inflates the violation tally — see ScanSunlightQueuePairing.
+    private int _sunlightQueueUnflagged;
+    private long _sunlightQueueUnflaggedTotal;
+    private int _sunlightQueueOrphaned;
+    private int _sunlightQueueUnpopulated;
+    private long _sunlightQueueUnpopulatedTotal;
+    private bool _sunlightQueueProbeLogged;
+
+    /// <summary>Sunlight-queue keys found unflagged in the most recent ~1s scan (dev/editor only; LP-1 probe 2, F6).</summary>
+    public int SunlightQueueUnflagged => _sunlightQueueUnflagged;
+
+    /// <summary>Cumulative unflagged sunlight-queue observations across all scans (dev/editor only; LP-1 probe 2, F6).</summary>
+    public long SunlightQueueUnflaggedTotal => _sunlightQueueUnflaggedTotal;
+
+    /// <summary>Sunlight-queue keys with no resident owner in the most recent scan — minted by design when a
+    /// BFS spills across a border into unloaded territory, not a violation (dev/editor only; LP-1 probe 2, F6).</summary>
+    public int SunlightQueueOrphaned => _sunlightQueueOrphaned;
+
+    /// <summary>Sunlight-queue keys whose owner is resident but not yet populated in the most recent scan —
+    /// the scan skips them and the state resolves on population, so not a violation (dev/editor only; LP-1
+    /// probe 2, F6).</summary>
+    public int SunlightQueueUnpopulated => _sunlightQueueUnpopulated;
+
+    /// <summary>Cumulative resident-but-unpopulated observations. The gauge above is near-useless on its own —
+    /// the state resolves within a scan or two — so the total is what a soak can actually read
+    /// (dev/editor only; LP-1 probe 2, F6).</summary>
+    public long SunlightQueueUnpopulatedTotal => _sunlightQueueUnpopulatedTotal;
+
     // --- Transient flags ---
     /// <summary>
     /// Indicates whether the world startup process has completed and the world is ready to be used.
@@ -1086,6 +1142,108 @@ public class World : MonoBehaviour, IMeshDrainHost
         foreach (ChunkData cd in worldData.ChunkValues)
             TrackStuckLoadingChunk(cd);
         FinalizeStuckLoadingScan();
+    }
+
+    /// <summary>
+    /// LP-1 probe 1 (F1), dev/editor only: records that a gate reader observed
+    /// <c>IsAwaitingMainThreadProcess</c> set. F1 claims the flag is cleared in the same pass that sets it,
+    /// so no reader can ever see it — every call here contradicts that and blocks LP-3. Warns once, then
+    /// tallies silently so a repeating observation cannot flood the console.
+    /// </summary>
+    /// <param name="chunkData">The chunk observed carrying the flag.</param>
+    /// <param name="site">Reader that made the observation, for the first-hit warning.</param>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private void CountAwaitingObservation(ChunkData chunkData, string site)
+    {
+        switch (site)
+        {
+            case AWAIT_SITE_CARDINAL: _awaitGateCardinal++; break;
+            case AWAIT_SITE_DIAGONAL: _awaitGateDiagonal++; break;
+            case AWAIT_SITE_UNLOAD: _awaitUnload++; break;
+
+            // Every site is named above. Falling here means a caller passed an unregistered site, which would
+            // otherwise be tallied against whichever counter default happened to point at.
+            default:
+                Debug.LogError($"[LP-1] Unregistered probe site '{site}' — the observation was not counted.");
+                return;
+        }
+
+        if (_awaitProbeLogged) return;
+        _awaitProbeLogged = true;
+        Debug.LogWarning($"[LP-1] IsAwaitingMainThreadProcess observed at {site} on chunk {chunkData.Position.ToString()} — " +
+                         "F1's zero-window claim is false; LP-3 is blocked. Further hits are counted, not logged.");
+    }
+
+    /// <summary>
+    /// LP-1 probe 2 (F6), dev/editor only: checks the sunlight-recalculation queue's "queued column ⇒ owner
+    /// chunk flagged" pairing, which today is maintained by convention across three enqueue paths. A populated
+    /// resident owner carrying none of the three work flags is the violation — the fail-safe scan's own
+    /// predicate would skip it, so its columns sleep until unload persists them. Two non-violating states get
+    /// their own counters instead:
+    /// <list type="bullet">
+    /// <item>No resident owner. <see cref="Data.WorldData.QueueSunlightRecalculation"/> writes the queue key
+    /// unconditionally but sets the flag only when the owner is resident, so a BFS spilling across a border
+    /// into unloaded territory mints an ownerless key by design.</item>
+    /// <item>Resident but unpopulated. The scan also requires <c>IsPopulated</c>, so such an owner is skipped
+    /// despite its flag — but <c>PopulateFromSave</c> preserves the flag, so the state self-heals on
+    /// population and would only be noise in the violation count.</item>
+    /// </list>
+    /// </summary>
+    [Conditional("UNITY_EDITOR")]
+    [Conditional("DEVELOPMENT_BUILD")]
+    private void ScanSunlightQueuePairing()
+    {
+        // Bracketed inside this [Conditional] method so release builds pay nothing for a phase that would
+        // always read zero there, and so the probe's cost never lands in LightFailSafeScan's slot.
+        long probeStart = WorldFrameProfiler.Begin();
+
+        int unflagged = 0;
+        int orphaned = 0;
+        int unpopulated = 0;
+
+        // The KeyValuePair enumerator is a struct and allocates nothing; Keys would allocate its collection
+        // wrapper on first touch. The value (the column set) is deliberately not inspected.
+        foreach (KeyValuePair<Vector2Int, HashSet<Vector2Int>> entry in worldData.SunlightRecalculationQueue)
+        {
+            // The key IS the owner's chunk voxel origin — never re-derive it from a column through
+            // SunlightColumnRouting, which would fold a routing bug into the probe itself.
+            if (!worldData.TryGetChunk(entry.Key, out ChunkData owner))
+            {
+                orphaned++;
+                continue;
+            }
+
+            bool flagged = owner.NeedsInitialLighting || owner.HasLightChangesToProcess || owner.NeedsEdgeCheck;
+
+            // Exactly the predicate the fail-safe scan above applies, so anything failing it is provably a
+            // key the scan will not pick up this pass.
+            if (owner.IsPopulated && flagged) continue;
+
+            // An unpopulated owner is skipped for the other half of that predicate, and the state is not yet
+            // decidable: a flag survives population (PopulateFromSave only ORs flags in), while an unflagged
+            // placeholder becomes a genuine violation the moment it populates — which a later scan catches.
+            if (!owner.IsPopulated)
+            {
+                unpopulated++;
+                continue;
+            }
+
+            unflagged++;
+
+            if (_sunlightQueueProbeLogged) continue;
+            _sunlightQueueProbeLogged = true;
+            Debug.LogWarning($"[LP-1] Sunlight queue key {entry.Key.ToString()} has a resident owner with no work flag set — " +
+                             "F6's convention-only pairing is broken; these columns will sleep. Further hits are counted, not logged.");
+        }
+
+        _sunlightQueueUnflagged = unflagged;
+        _sunlightQueueUnflaggedTotal += unflagged;
+        _sunlightQueueOrphaned = orphaned;
+        _sunlightQueueUnpopulated = unpopulated;
+        _sunlightQueueUnpopulatedTotal += unpopulated;
+
+        WorldFrameProfiler.Add(WorldFrameProfiler.Phase.LightQueueProbe, probeStart);
     }
 
     /// <summary>
@@ -2397,6 +2555,13 @@ public class World : MonoBehaviour, IMeshDrainHost
 
                 FinalizeStuckLoadingScan();
 
+
+                // LP-1 probe 2 (F6) rides this ~1s cadence because it mirrors the walk above: it re-applies
+                // that scan's own predicate to the queue's keys. Neither the walk nor PromoteAll() below
+                // mutates a work flag, so the probe reads the same state wherever it sits inside this block;
+                // it carries its own profiler bracket rather than borrowing LightFailSafeScan's.
+                ScanSunlightQueuePairing();
+
                 int failSafePromoted = _lightWork.PromoteAll();
 
                 // A recurring non-zero count means an unblock event lacks a promotion hook — work only
@@ -2886,6 +3051,7 @@ public class World : MonoBehaviour, IMeshDrainHost
                 // Is the neighbor waiting for its completed lighting job to be processed on the main thread?
                 if (neighborData.IsAwaitingMainThreadProcess)
                 {
+                    CountAwaitingObservation(neighborData, AWAIT_SITE_CARDINAL); // LP-1 probe 1 (F1).
                     return false; // Neighbor is in a transitional state, we must wait.
                 }
             }
@@ -2907,7 +3073,12 @@ public class World : MonoBehaviour, IMeshDrainHost
             if (worldData.TryGetChunk(neighborV2Pos, out ChunkData diagData) && diagData.IsPopulated)
             {
                 if (diagData.HasLightChangesToProcess || diagData.NeedsInitialLighting) return false;
-                if (diagData.IsAwaitingMainThreadProcess) return false;
+
+                if (diagData.IsAwaitingMainThreadProcess)
+                {
+                    CountAwaitingObservation(diagData, AWAIT_SITE_DIAGONAL); // LP-1 probe 1 (F1).
+                    return false;
+                }
             }
         }
 
@@ -3460,6 +3631,10 @@ public class World : MonoBehaviour, IMeshDrainHost
             bool isJobRunning = JobManager.GenerationJobs.ContainsKey(chunkCoord)
                                 || JobManager.MeshJobs.ContainsKey(chunkCoord)
                                 || JobManager.LightingJobs.ContainsKey(chunkCoord);
+
+            // LP-1 probe 1 (F1): observed on its own, ahead of the disjunction below, whose short-circuit
+            // would otherwise decide whether the flag is even read.
+            if (data.IsAwaitingMainThreadProcess) CountAwaitingObservation(data, AWAIT_SITE_UNLOAD);
 
             // Pending main-thread lighting work with no active job.
             bool isProcessingLight = data.IsAwaitingMainThreadProcess ||

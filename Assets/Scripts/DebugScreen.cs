@@ -504,6 +504,14 @@ public class DebugScreen : MonoBehaviour
         _middleLeftBuilder.Append("Deserialize failures: ").Append(ChunkSerializer.DeserializeFailures).AppendLine();
         _middleLeftBuilder.Append("Load-arm faults (dev): ").Append(World.LoadArmFaults).AppendLine();
         _middleLeftBuilder.Append("Stuck loading (dev): ").Append(_world.StuckLoadingChunks).AppendLine();
+        _middleLeftBuilder.Append("Awaiting-flag seen (dev) — cardinal: ").Append(_world.AwaitObservedGateCardinal)
+            .Append(" | diagonal: ").Append(_world.AwaitObservedGateDiagonal)
+            .Append(" | unload: ").Append(_world.AwaitObservedUnload).AppendLine();
+        _middleLeftBuilder.Append("Sunlight queue unflagged (dev) — now: ").Append(_world.SunlightQueueUnflagged)
+            .Append(" | total: ").Append(_world.SunlightQueueUnflaggedTotal).AppendLine();
+        _middleLeftBuilder.Append(" └ Non-violating — orphaned: ").Append(_world.SunlightQueueOrphaned)
+            .Append(" | unpopulated: ").Append(_world.SunlightQueueUnpopulated)
+            .Append(" (total: ").Append(_world.SunlightQueueUnpopulatedTotal).Append(')').AppendLine();
         _middleLeftBuilder.Append("Pool destroys — chunk: ").Append(_world.ChunkPool.DestroyedChunks)
             .Append(" | data: ").Append(_world.ChunkPool.DestroyedData)
             .Append(" | sect: ").Append(_world.ChunkPool.DestroyedSections).AppendLine();
