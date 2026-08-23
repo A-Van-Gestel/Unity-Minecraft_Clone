@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Text;
 using Data;
 using Editor.Validation.ChunkPipeline.Framework;
+using Helpers;
 using UnityEngine;
 using Scenario = Editor.Validation.Framework.Scenario;
 
@@ -47,6 +48,8 @@ namespace Editor.Validation.ChunkPipeline
                 "B5 §9.6 unload stranding: the strand guard defers, then releases once the chunk is no longer needed", B5StrandGuardDefers));
             scenarios.Add(new Scenario(
                 "B6 Flag pairing: a converged neighbourhood leaves no chunk holding an unclearable lighting flag", B6FlagsPaired));
+            scenarios.Add(new Scenario(
+                "B7 NeighborReadinessDecision census — all 3 gates × 2⁷ fact combinations match the gate contract (LP-2)", B7NeighborReadinessCensus));
         }
 
         /// <summary>
@@ -401,6 +404,109 @@ namespace Editor.Validation.ChunkPipeline
                 if (Mathf.Max(Mathf.Abs(x), Mathf.Abs(z)) != radius) continue;
                 fixture.AddChunk(x, z, populated: true, needsInitialLighting: false);
             }
+        }
+
+        /// <summary>
+        /// B7 — sweeps all three <see cref="NeighborReadinessDecision.Gate"/> values against all 2⁷
+        /// <see cref="NeighborReadinessDecision.NeighborFacts"/> combinations and asserts each result equals
+        /// <see cref="ExpectedBlockReason"/>, an independent restatement of the gate contract.
+        /// <para>B1–B6 exercise the gates through the pump, where a term swap can still converge and go
+        /// unnoticed. This asserts the term matrix directly — specifically the three places the gates
+        /// deliberately disagree: an unpopulated neighbor blocks <c>DataReady</c> and <c>MeshReady</c> but is
+        /// skipped by <c>ReadyAndLit</c>; lighting in flight blocks only <c>ReadyAndLit</c>; and
+        /// <c>MeshReady</c>'s initial-lighting term is bypassed when lighting is disabled.</para>
+        /// <para><b>Prove-red:</b> drop the <c>lightingEnabled &amp;&amp;</c> guard from the
+        /// <c>MeshReady</c> arm of <c>Evaluate</c> → the lighting-disabled rows diverge and B7 reds.</para>
+        /// </summary>
+        private static bool B7NeighborReadinessCensus()
+        {
+            StringBuilder log = new StringBuilder();
+            StringBuilder mismatches = new StringBuilder();
+            int checkedCount = 0;
+
+            NeighborReadinessDecision.Gate[] gates =
+            {
+                NeighborReadinessDecision.Gate.DataReady,
+                NeighborReadinessDecision.Gate.ReadyAndLit,
+                NeighborReadinessDecision.Gate.MeshReady,
+            };
+
+            foreach (NeighborReadinessDecision.Gate gate in gates)
+            for (int mask = 0; mask < 128; mask++)
+            {
+                bool generationInFlight = (mask & 1) != 0;
+                bool lightingInFlight = (mask & 2) != 0;
+                bool existsAndPopulated = (mask & 4) != 0;
+                bool needsInitialLighting = (mask & 8) != 0;
+                bool hasLightChanges = (mask & 16) != 0;
+                bool awaitingMainThread = (mask & 32) != 0;
+                bool lightingEnabled = (mask & 64) != 0;
+
+                NeighborReadinessDecision.NeighborFacts facts = new NeighborReadinessDecision.NeighborFacts(
+                    generationInFlight, lightingInFlight, existsAndPopulated, needsInitialLighting,
+                    hasLightChanges, awaitingMainThread, lightingEnabled);
+
+                NeighborReadinessDecision.BlockReason expected = ExpectedBlockReason(gate, facts);
+                NeighborReadinessDecision.BlockReason actual = NeighborReadinessDecision.Evaluate(gate, facts);
+                checkedCount++;
+
+                if (actual == expected) continue;
+
+                mismatches.AppendLine(
+                    $"    {gate}: gen={generationInFlight}, light={lightingInFlight}, pop={existsAndPopulated}, " +
+                    $"init={needsInitialLighting}, changes={hasLightChanges}, await={awaitingMainThread}, " +
+                    $"lightingEnabled={lightingEnabled}: expected {expected}, got {actual}");
+            }
+
+            bool ok = mismatches.Length == 0;
+            log.AppendLine(ok
+                ? $"  [PASS] NeighborReadinessDecision census — all {checkedCount} gate × fact combinations " +
+                  "match the contract oracle (per-gate unpopulated / lighting-in-flight / lighting-disabled asymmetries intact)"
+                : $"  [FAIL] NeighborReadinessDecision census — {checkedCount} combinations checked; " +
+                  $"divergences from the contract:\n{mismatches.ToString().TrimEnd()}");
+
+            Debug.Log(log.ToString().TrimEnd());
+            return ok;
+        }
+
+        /// <summary>
+        /// Independent restatement of the three gates' CONTRACT — B7's oracle. A separate copy of the spec,
+        /// NOT a call into <see cref="NeighborReadinessDecision.Evaluate"/>, so a mutation to the production
+        /// predicate diverges from it (the prove-red mechanism). Transcribed from the three original
+        /// <c>World</c> loops, not from the extracted code.
+        /// </summary>
+        /// <param name="gate">The gate whose rules to apply.</param>
+        /// <param name="facts">The neighbor facts to judge.</param>
+        /// <returns>The reason the neighbor blocks, or <c>None</c>.</returns>
+        private static NeighborReadinessDecision.BlockReason ExpectedBlockReason(
+            NeighborReadinessDecision.Gate gate, in NeighborReadinessDecision.NeighborFacts facts)
+        {
+            if (facts.GenerationInFlight) return NeighborReadinessDecision.BlockReason.GenerationInFlight;
+
+            if (gate == NeighborReadinessDecision.Gate.DataReady)
+                return facts.ExistsAndPopulated
+                    ? NeighborReadinessDecision.BlockReason.None
+                    : NeighborReadinessDecision.BlockReason.NotPopulated;
+
+            if (gate == NeighborReadinessDecision.Gate.MeshReady)
+            {
+                if (!facts.ExistsAndPopulated) return NeighborReadinessDecision.BlockReason.NotPopulated;
+
+                return facts.LightingEnabled && facts.NeedsInitialLighting
+                    ? NeighborReadinessDecision.BlockReason.NeedsInitialLighting
+                    : NeighborReadinessDecision.BlockReason.None;
+            }
+
+            // ReadyAndLit: the in-flight lighting check precedes the populated guard, so an unpopulated
+            // neighbor with a lighting job still blocks — matching the original loop's ordering.
+            if (facts.LightingInFlight) return NeighborReadinessDecision.BlockReason.LightingInFlight;
+            if (!facts.ExistsAndPopulated) return NeighborReadinessDecision.BlockReason.None;
+
+            if (facts.HasLightChanges) return NeighborReadinessDecision.BlockReason.PendingLightWork;
+            if (facts.NeedsInitialLighting) return NeighborReadinessDecision.BlockReason.NeedsInitialLighting;
+            if (facts.AwaitingMainThread) return NeighborReadinessDecision.BlockReason.AwaitingMainThread;
+
+            return NeighborReadinessDecision.BlockReason.None;
         }
     }
 }
