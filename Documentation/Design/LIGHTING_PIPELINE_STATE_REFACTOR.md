@@ -329,7 +329,7 @@ newly created `.cs` files need a Unity import before `dotnet build` sees them; t
 `RequestScriptCompilation` + `Unity_RunCommand` wave, gating on the DLL timestamp rather than `IsCompiling`.
 
 > **Baseline counts are re-verified as of 2026-08-23** against `VALIDATION_SUITE_COVERAGE_ROADMAP.md`'s census
-> (567 baselines / 25 suites). v1.0's "62 lighting baselines" and its "B71+ / B62–B70 taken" numbering advice are
+> (568 baselines / 25 suites as of 2026-08-23, LP-2's `B7` included). v1.0's "62 lighting baselines" and its "B71+ / B62–B70 taken" numbering advice are
 > both stale — **do not number new baselines from them**; read the suite's own registration files first.
 
 | Phase                                               | Scope (files)                                                                                                                                     | Effort | Depends on                         |

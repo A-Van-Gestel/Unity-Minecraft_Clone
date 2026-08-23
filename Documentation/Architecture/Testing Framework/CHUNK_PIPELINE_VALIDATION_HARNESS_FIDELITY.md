@@ -1,6 +1,6 @@
 # Chunk Pipeline Validation Harness — Fidelity Boundary & Extension Backlog
 
-**Status:** ✅ **Active backlog** — slice 1 shipped 2026-08-22 (`NS-3`): fixture + frame pump + 6 baselines `B1`–`B6`, menu item **`Minecraft Clone/Dev/Validate Chunk Pipeline`**. The suite guards the pipeline **state machine** (readiness gates, scheduling arms, unload policy), not job output.  
+**Status:** ✅ **Active backlog** — slice 1 shipped 2026-08-22 (`NS-3`): fixture + frame pump + 6 baselines `B1`–`B6`, plus LP-2's `B7` predicate census (2026-08-23) — **7 total**, menu item **`Minecraft Clone/Dev/Validate Chunk Pipeline`**. The suite guards the pipeline **state machine** (readiness gates, scheduling arms, unload policy), not job output.  
 **Created:** 2026-08-22  
 **Last updated:** 2026-08-23  
 **Scope:**
@@ -65,3 +65,4 @@ Being permanently unable to clear the flag is what pipeline §9.6 actually descr
 | Date       | Change                                      |
 |------------|---------------------------------------------|
 | 2026-08-22 | Created alongside NS-3 slice 1 (`B1`–`B6`). |
+| 2026-08-23 | `B7` added by LP-2 — a census of the shared `NeighborReadinessDecision` predicate (3 gates × 2⁷ facts vs an independent oracle). Not a pump scenario: it guards the gate-term matrix the pump provably cannot see. |
