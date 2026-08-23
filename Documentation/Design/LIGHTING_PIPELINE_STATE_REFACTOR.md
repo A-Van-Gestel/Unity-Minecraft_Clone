@@ -1,8 +1,8 @@
 # Lighting Pipeline State & Gate Refactor (LP-*)
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-07-06  
-**Status:** Proposed design — not implemented. §2 re-audited against HEAD on 2026-08-23.  
+**Status:** Partially implemented — **LP-1 shipped 2026-08-23** (probes live, soak silent; see §7). LP-2…LP-7 remain proposed. §2 re-audited against HEAD on 2026-08-23.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > Clean-up / refactor plan for the async lighting engine's orchestration layer — the `ChunkData`
@@ -334,7 +334,7 @@ newly created `.cs` files need a Unity import before `dotnet build` sees them; t
 
 | Phase                                               | Scope (files)                                                                                                                                     | Effort | Depends on                         |
 |-----------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|:------:|------------------------------------|
-| **LP-1 — Invariant probes**                         | `World.cs`, `WorldJobManager.cs` (editor-only diagnostics)                                                                                        |   🟢   | —                                  |
+| **LP-1 — Invariant probes** ✅ **SHIPPED 2026-08-23** | `World.cs`, `DebugScreen.cs`, `WorldFrameProfiler.cs` (dev/editor-only diagnostics)                                                               |   🟢   | —                                  |
 | **LP-2 — Shared neighbor-gate predicate**           | new `Helpers/NeighborReadinessDecision.cs`; `World.cs` gates; `LightingTestWorld.cs`                                                              |   🟡   | —                                  |
 | **LP-3 — Retire `IsAwaitingMainThreadProcess`**     | `ChunkData.cs`, `WorldJobManager.cs`, `World.cs`, harness, rules/docs                                                                             |   🟡   | LP-1 (evidence), LP-2              |
 | **LP-4 — `LightingWork` byte + transition API**     | `ChunkData.cs`; call sites in `World.cs`, `WorldJobManager.cs`, `ChunkSerializer.cs`, `ChunkStorageManager.cs`; harness; new transition baselines |   🔴   | LP-2 (fewer sites); LP-3 preferred |
@@ -366,6 +366,76 @@ needs. Extend that block.
 - **Known limits of the evidence** (state these in the Amended line rather than overclaiming): neither probe is reachable from any validation suite — `LightingTestWorld` and NS-3's `ChunkPipelineSimulator` each keep their **own** gate analog and their own `IsAwaitingMainThreadProcess` model, so nothing in either suite flows through the instrumented production code. Probe 2 samples at ~1 Hz, so a violation that self-heals within a second is invisible. Both probes compile out of IL2CPP, so production is unobserved.
 - **Testability gain:** turns two "should hold" conventions into observable invariants; probe 2 is the first concrete member of NS-3's flag-pairing assertion family.
 - **Doc-sync:** none (no behavior change). **Serialization:** none.
+
+**Amended:** 2026-08-23 — **LP-1 shipped and its soak ran silent. Probe 1's precondition for LP-3 is met.**
+
+*What was observed.* One interactive editor session (Mono, `enableLighting` and `EnablePersistence` both on),
+covering sustained streaming, ~20 sky-affecting block edits, ~10 chunk-border edits, three edit-then-flee rounds
+(confirmed to have exercised the persist path — the console carries `[LIGHTING RESCUE] Saved …` for
+`ChunkCoord(-47, 12…14)`), and a save/reload with a return to the edited region.
+
+**The soak spanned two `World` instances, and this splits the evidence — read the two halves separately.** The
+reload was performed by returning to the main-menu scene, which unloads the World scene and destroys its `World`;
+the reloaded world therefore got a **fresh instance with every probe counter back at zero** (the counters are
+instance fields, deliberately, so a play session starts clean). The console confirms exactly two
+`--- Startup complete ---` entries in the session, and was never cleared.
+
+- **Counters cover the post-reload segment only** (steps after the reload). At the end, with **841 chunks
+  resident and 35 live keys in `SunlightRecalculationQueue`**: probe 1 read `cardinal 0 / diagonal 0 / unload 0`;
+  probe 2 read `violations 0` (gauge and total), `orphaned 0`, `unpopulated 0` (gauge and total). All 35 queued
+  keys had a populated resident owner carrying a work flag — F6's pairing held on every key that segment walked.
+  The pre-reload segment's counters were lost with its `World` and were never read.
+- **The first-hit warnings cover the whole soak, and they are what carries the verdict.** `_awaitProbeLogged` and
+  `_sunlightQueueProbeLogged` are per-instance, so each of the two `World` instances had its own unused warning
+  budget, and Unity's console retains entries across a scene reload within one play session. **No `[LP-1]`
+  warning was emitted by either instance at any point**, so neither probe observed a violation across steps 1–5.
+  **Console eviction was ruled out rather than assumed** — the buffer held 7262 entries whose *oldest* predates
+  the first world load (`--- Startup complete ---` at index 37, the second at 7157), so with FIFO eviction
+  nothing from the session was dropped and "no warning" means "no observation", not "the record was lost". The
+  only two `[LP-1]` entries in the buffer sit at indices 7238/7240 and name the two chunks used by the liveness
+  injections below — they are artefacts of that check, not soak findings. Note the segment split is lopsided:
+  ~7120 entries before the reload versus ~105 after, so the counters above cover only a short tail while the
+  warnings cover everything.
+
+*Why the silence is evidence and not a dead probe.* Both probes were proven live **on the post-reload instance,
+immediately after the soak**, by injection: stripping the work flags off one queued owner made probe 2 report a violation within
+two scans, and flagging `IsAwaitingMainThreadProcess` on a chunk whose neighbour was then dirtied drove probe 1's
+cardinal counter to 17. (A first probe-1 attempt read zero because the flag and the dirtied chunk were the same
+chunk — the gate inspects a chunk's *neighbours*, so that arrangement cannot trip it. The mis-arming, not the
+probe, was at fault.) Counter values recorded on the HUD after those injections are injection artefacts, not
+soak results.
+
+*Known limits of this evidence — carry these into LP-3's go/no-go rather than reading the zeros as proof:*
+
+- **No validation suite reaches either probe.** `LightingTestWorld` and NS-3's `ChunkPipelineSimulator` each keep
+  their own gate analog and their own `IsAwaitingMainThreadProcess` model, so no suite run exercises the
+  instrumented production code. The 106/9/6/22 green gate says the probes broke nothing; it says nothing about
+  what they observed.
+- **Probe 1's zero is partly structural.** The set (`WJM:1668`) and the clear (`WJM:1629`) sit inside one
+  `try`/`finally` iteration of `JobCompletionPass`, and `AreNeighborsReadyAndLit` guards the same window with
+  `LightingJobs.ContainsKey` before reaching the flag at all. A silent probe 1 therefore confirms *no re-entrant
+  reader appeared during this soak* — it does not independently re-prove F1's zero-window claim, which remains a
+  structural argument.
+- **~1 Hz sampling.** Probe 2 walks the queue once per fail-safe scan, so a violation that self-heals inside a
+  second is invisible. The `unpopulated` counter exists because that class of state provably does self-heal.
+- **`orphaned` and `unpopulated` were never observed arising naturally** — both stayed at zero across the soak and
+  were only ever exercised by forced controls. Their branches are proven reachable, not proven to occur in play.
+- **Counters do not survive a world reload.** Being instance fields, they reset whenever the World scene is
+  unloaded (returning to the main menu, or loading another world) — which happened once mid-soak here. A future
+  soak that wants whole-session *counter* totals must either avoid reloading or read the counters immediately
+  before each reload; the first-hit warnings are the only signal that spans instances.
+- **IL2CPP is unobserved.** Both probes compile out under `[Conditional]`, so production behaviour is untested.
+- **One config unsampled.** Probe 2 is hosted inside the `enableLighting` block, so a lighting-disabled session
+  observes nothing. This is by construction — enqueue is lighting-gated too — but it means "silent" says nothing
+  about that config.
+
+*Corrections made to this packet's own text while executing it* (see also the Document History entry): the
+justification for treating an ownerless queue key as non-violating was wrong. The unload drain does **not**
+produce that state — it removes the key (`World.cs:3673`, re-anchored from `:3539`) and releases the pooled set
+strictly before the only `worldData.RemoveChunk` (`:3731`). The real source is
+`WorldData.QueueSunlightRecalculation`, which writes the key unconditionally but sets the flag only when the
+owner is resident, so a BFS spilling across a border into unloaded territory mints one by design. **The decision
+stands; only its reason was wrong.**
 
 ### LP-2 — Shared neighbor-gate predicate (🟡)
 
@@ -479,7 +549,15 @@ needs. Extend that block.
   with a mandatory positive control and an explicit statement of what a silent soak does *not* prove. All line
   anchors and baseline counts re-derived (lighting 62 → **106**; NS-3's 6-baseline suite added to the universal
   gate). §3's decision and §4.2/§4.3 re-checked and unchanged.
+* **v1.2** - **LP-1 executed and shipped.** §7's LP-1 packet gains an Amended line recording a silent soak, the
+  post-soak injection that proves both probes were live, and six calibrated limits on that evidence. Two
+  corrections to the packet's own text, both found while executing it: the ownerless-key decision was justified
+  by the unload drain, which provably does not produce that state (the real source is
+  `WorldData.QueueSunlightRecalculation`'s unconditional key write — decision unchanged, reason replaced), and
+  LP-1's scope row named `WorldJobManager.cs`, which it never touched (actual: `World.cs`, `DebugScreen.cs`,
+  `WorldFrameProfiler.cs`). Probe 2 gained a third classification — resident-but-unpopulated — after a review
+  found it silently counted such owners as clean. **LP-3's hard precondition is now satisfied.**
 
 ---
 
-**Last Updated:** 2026-08-23 (**v1.1 full §2 re-audit at `6b899481`** — F9 struck, census row 10 split for P9-2's cascade decision, F11 added, LP-1 re-scoped onto CP-1's probe pattern, all anchors and baseline counts re-derived; see Document History for the full delta) **Next Review:** when LP-1 lands (record its soak result as an Amended line and tick LP-3's precondition), or when LP-4 starts (re-verify §2.3 anchors — they are fresh as of this re-audit, but the pipeline moves fast)
+**Last Updated:** 2026-08-23 (**v1.2 — LP-1 shipped**; soak silent and both probes proven live by post-soak injection, LP-3's precondition met; the ownerless-key rationale corrected and LP-1's scope row fixed — see Document History) **Next Review:** when LP-2 or LP-3 starts (LP-3 may proceed on LP-1's evidence, but read the Amended line's six limits first — the zeros are calibrated, not absolute)
