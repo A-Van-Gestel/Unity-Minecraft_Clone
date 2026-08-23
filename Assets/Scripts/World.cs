@@ -2962,13 +2962,6 @@ public class World : MonoBehaviour, IMeshDrainHost
     }
 
     /// <summary>
-    /// Checks if all of a chunk's cardinal neighbors have finished generating their data and have a stable lighting state.
-    /// A neighbor is considered "ready" if no generation or lighting job is running for it, and it has no pending
-    /// lighting updates on the main thread. This is a prerequisite for scheduling a mesh generation job.
-    /// </summary>
-    /// <param name="chunkCoord">The coordinate of the central chunk whose neighbors are to be checked.</param>
-    /// <returns>True if all neighbors are fully generated and lit; otherwise, false.</returns>
-    /// <summary>
     /// Promotes parked light work in a chunk's 3×3 neighborhood back into the scheduler's ready set.
     /// Called when an event occurs that can flip a lighting readiness gate: the chunk finished terrain
     /// generation, or its lighting job completed (MT-2). Parked chunks are otherwise only retried by
@@ -3012,78 +3005,71 @@ public class World : MonoBehaviour, IMeshDrainHost
         }
     }
 
+    /// <summary>
+    /// Checks whether all 8 horizontal neighbors have finished generating their data and reached a stable
+    /// lighting state. A neighbor is "ready" if no generation or lighting job is running for it and — when
+    /// populated — it has no pending light changes, no outstanding initial lighting pass, and nothing
+    /// awaiting the main-thread merge. This is the strict gate the border edge-check arm schedules against,
+    /// so an edge comparison never reads light that is still moving.
+    /// <para>Diagonals are checked alongside the cardinals because both mesh and lighting jobs copy data
+    /// from all 8 neighbors; stale diagonal lighting shows up as seam artifacts at chunk corners.</para>
+    /// </summary>
+    /// <param name="chunkCoord">The coordinate of the central chunk whose neighbors are to be checked.</param>
+    /// <returns>True if all neighbors are fully generated and lit; otherwise, false.</returns>
     public bool AreNeighborsReadyAndLit(ChunkCoord chunkCoord)
     {
-        // Check all 4 horizontal neighbors
-        foreach (int faceIndex in VoxelData.HorizontalFaceChecksIndices)
+        for (int i = 0; i < VoxelData.AllNeighborOffsets.Length; i++)
         {
-            Vector3Int offset = VoxelData.FaceChecks[faceIndex];
+            Vector3Int offset = VoxelData.AllNeighborOffsets[i];
             ChunkCoord neighborCoord = chunkCoord.Neighbor(offset.x, offset.z);
 
             if (!IsChunkInWorld(neighborCoord)) continue;
 
-            // Is a terrain generation job for this neighbor still running?
-            if (JobManager.GenerationJobs.ContainsKey(neighborCoord))
+            NeighborReadinessDecision.NeighborFacts facts =
+                GatherNeighborFacts(neighborCoord, out ChunkData neighborData);
+            NeighborReadinessDecision.BlockReason reason =
+                NeighborReadinessDecision.Evaluate(NeighborReadinessDecision.Gate.ReadyAndLit, facts);
+
+            // LP-1 probe 1 (F1). The reason is what makes one loop able to serve both probe sites: the
+            // offsets are ordered cardinals-first, so the index names the site.
+            if (reason == NeighborReadinessDecision.BlockReason.AwaitingMainThread)
             {
-                return false; // Neighbor terrain data is not ready.
+                CountAwaitingObservation(neighborData,
+                    i < VoxelData.CardinalNeighborCount ? AWAIT_SITE_CARDINAL : AWAIT_SITE_DIAGONAL);
             }
 
-            // Is a lighting job for this neighbor currently running?
-            if (JobManager.LightingJobs.ContainsKey(neighborCoord))
-            {
-                return false; // Neighbor is still calculating light, we must wait.
-            }
-
-            Vector2Int neighborV2Pos = neighborCoord.ToVoxelOrigin();
-
-            // Only enforce lighting stability checks if the chunk is actually populated with data.
-            // If it's an empty placeholder, it has no light to process anyway.
-            if (worldData.TryGetChunk(neighborV2Pos, out ChunkData neighborData) && neighborData.IsPopulated)
-            {
-                // Does the neighbor have pending light changes that haven't even been scheduled yet,
-                // OR is waiting for first light is NOT ready to provide lighting data for meshing.
-                if (neighborData.HasLightChangesToProcess || neighborData.NeedsInitialLighting)
-                {
-                    return
-                        false; // Neighbor has pending light changes that haven't even been scheduled yet, we must wait.
-                }
-
-                // Is the neighbor waiting for its completed lighting job to be processed on the main thread?
-                if (neighborData.IsAwaitingMainThreadProcess)
-                {
-                    CountAwaitingObservation(neighborData, AWAIT_SITE_CARDINAL); // LP-1 probe 1 (F1).
-                    return false; // Neighbor is in a transitional state, we must wait.
-                }
-            }
-        }
-
-        // Also check the 4 diagonal neighbors. Both mesh and lighting jobs copy data
-        // from all 8 neighbors (including diagonals), so stale diagonal lighting data
-        // can cause seam artifacts at chunk corners.
-        foreach (Vector3Int diagOffset in VoxelData.DiagonalNeighborOffsets)
-        {
-            ChunkCoord neighborCoord = chunkCoord.Neighbor(diagOffset.x, diagOffset.z);
-
-            if (!IsChunkInWorld(neighborCoord)) continue;
-
-            if (JobManager.GenerationJobs.ContainsKey(neighborCoord)) return false;
-            if (JobManager.LightingJobs.ContainsKey(neighborCoord)) return false;
-
-            Vector2Int neighborV2Pos = neighborCoord.ToVoxelOrigin();
-            if (worldData.TryGetChunk(neighborV2Pos, out ChunkData diagData) && diagData.IsPopulated)
-            {
-                if (diagData.HasLightChangesToProcess || diagData.NeedsInitialLighting) return false;
-
-                if (diagData.IsAwaitingMainThreadProcess)
-                {
-                    CountAwaitingObservation(diagData, AWAIT_SITE_DIAGONAL); // LP-1 probe 1 (F1).
-                    return false;
-                }
-            }
+            if (reason != NeighborReadinessDecision.BlockReason.None) return false;
         }
 
         // If we get here, all neighbors are stable.
         return true;
+    }
+
+    /// <summary>
+    /// Assembles one neighbor's readiness facts for <see cref="NeighborReadinessDecision"/> — the caller-side
+    /// half of that predicate's contract, shared by all three gates so they cannot drift in how they read
+    /// the world. Flag facts are forced false for an unpopulated neighbor: the flags are meaningless there,
+    /// and every gate already treats "absent" and "empty placeholder" identically.
+    /// </summary>
+    /// <param name="neighborCoord">The neighbor to gather facts for. Must already have passed
+    /// <see cref="IsChunkInWorld"/> — out-of-world neighbors are skipped by the caller, not judged here.</param>
+    /// <param name="neighborData">The neighbor's chunk data, or null when it does not resolve. Returned for
+    /// the LP-1 probe's diagnostics; readiness itself is decided entirely from the returned facts.</param>
+    /// <returns>The assembled facts.</returns>
+    private NeighborReadinessDecision.NeighborFacts GatherNeighborFacts(
+        ChunkCoord neighborCoord, out ChunkData neighborData)
+    {
+        bool populated = worldData.TryGetChunk(neighborCoord.ToVoxelOrigin(), out neighborData)
+                         && neighborData.IsPopulated;
+
+        return new NeighborReadinessDecision.NeighborFacts(
+            generationInFlight: JobManager.GenerationJobs.ContainsKey(neighborCoord),
+            lightingInFlight: JobManager.LightingJobs.ContainsKey(neighborCoord),
+            existsAndPopulated: populated,
+            needsInitialLighting: populated && neighborData.NeedsInitialLighting,
+            hasLightChanges: populated && neighborData.HasLightChangesToProcess,
+            awaitingMainThread: populated && neighborData.IsAwaitingMainThreadProcess,
+            lightingEnabled: settings.enableLighting);
     }
 
     /// <summary>
@@ -3108,19 +3094,10 @@ public class World : MonoBehaviour, IMeshDrainHost
             ChunkCoord neighborCoord = chunkCoord.Neighbor(offset.x, offset.z);
             if (!IsChunkInWorld(neighborCoord)) continue;
 
-            // Generation must be complete — no valid voxel data to snapshot otherwise.
-            if (JobManager.GenerationJobs.ContainsKey(neighborCoord)) return false;
-
-            Vector2Int neighborV2Pos = neighborCoord.ToVoxelOrigin();
-            if (!worldData.TryGetChunk(neighborV2Pos, out ChunkData neighborData) ||
-                !neighborData.IsPopulated)
+            NeighborReadinessDecision.NeighborFacts facts = GatherNeighborFacts(neighborCoord, out _);
+            if (NeighborReadinessDecision.Evaluate(NeighborReadinessDecision.Gate.MeshReady, facts)
+                != NeighborReadinessDecision.BlockReason.None)
                 return false;
-
-            // Initial lighting must have been completed at least once.
-            // Without initial lighting, the neighbor's light data is all zeros,
-            // which would produce incorrect face culling and ambient occlusion.
-            // When lighting is disabled, the sunlight fill handles brightness, so skip this gate.
-            if (settings.enableLighting && neighborData.NeedsInitialLighting) return false;
         }
 
         return true;
@@ -3166,18 +3143,10 @@ public class World : MonoBehaviour, IMeshDrainHost
             // Neighbors outside the world will never exist — treat as ready.
             if (!IsChunkInWorld(neighborCoord)) continue;
 
-            // Still actively generating terrain data.
-            if (JobManager.GenerationJobs.ContainsKey(neighborCoord))
-            {
+            NeighborReadinessDecision.NeighborFacts facts = GatherNeighborFacts(neighborCoord, out _);
+            if (NeighborReadinessDecision.Evaluate(NeighborReadinessDecision.Gate.DataReady, facts)
+                != NeighborReadinessDecision.BlockReason.None)
                 return false;
-            }
-
-            // Chunk hasn't been created yet, or exists but terrain isn't populated.
-            if (!worldData.TryGetChunk(neighborCoord.ToVoxelOrigin(), out ChunkData neighborData) ||
-                !neighborData.IsPopulated)
-            {
-                return false;
-            }
         }
 
         // All neighbors exist and are populated.
