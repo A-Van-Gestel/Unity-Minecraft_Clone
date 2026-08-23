@@ -652,9 +652,6 @@ If a chunk unloads during states 1-4, critical data is lost, resulting in "black
 public bool NeedsInitialLighting { get => ...; set { ...; if (value) OnLightWorkFlagged?.Invoke(Position); } }
 public bool HasLightChangesToProcess { get => ...; set { ...; if (value) OnLightWorkFlagged?.Invoke(Position); } }
 public bool NeedsEdgeCheck { get => ...; set { ...; if (value) OnLightWorkFlagged?.Invoke(Position); } }
-
-[NonSerialized]
-public bool IsAwaitingMainThreadProcess = false; // Job done, waiting for apply (plain field — no callback)
 ```
 
 **Layer 2: Per-Chunk Queues (Serialized)**
@@ -684,8 +681,7 @@ bool isJobRunning = JobManager.generationJobs.ContainsKey(coord)
                     || JobManager.meshJobs.ContainsKey(coord)
                     || JobManager.lightingJobs.ContainsKey(coord);
 
-bool isProcessingLight = data.IsAwaitingMainThreadProcess || 
-                        data.HasLightChangesToProcess;
+bool isProcessingLight = data.HasLightChangesToProcess;
 
 if (isJobRunning || isProcessingLight)
 {

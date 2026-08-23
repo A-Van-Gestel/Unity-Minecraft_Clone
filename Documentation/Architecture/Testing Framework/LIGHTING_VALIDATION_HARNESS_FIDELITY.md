@@ -160,7 +160,7 @@ conversion on the production mod path would not be caught in-harness (guarded in
   *computation* is no longer harness-local: `World`'s three gates and
   `LightingTestWorld.AreNeighborsReadyAndLit` both call the shared pure predicate
   `Helpers/NeighborReadinessDecision`, so the two can no longer disagree about the **rules**. The gate term
-  matrix is pinned by the **Chunk Pipeline suite's B7** census (3 gates × 2⁷ fact combinations vs an
+  matrix is pinned by the **Chunk Pipeline suite's B7** census (3 gates × 2⁶ fact combinations vs an
   independently written oracle), *not* by this suite.
 - **Measured, not assumed:** inverting the `lightingInFlight` term inside the shared predicate reds **B7
   alone** — all 106 lighting baselines stay green, and so do NS-3's own B1–B6. This suite exercises the
@@ -195,8 +195,7 @@ conversion on the production mod path would not be caught in-harness (guarded in
 
 - **Was:** per `.agents/rules/pool-reset-safety.md` and `chunk-pipeline.md`, `RemainingEdgeCheckRounds`- stale-after-recycle was a real shipped bug. The harness gated the pipeline on its OWN mirror state (`TestChunk.HasLightWork` + a local `const edgeCheckRounds = 2`), never on `ChunkData`'s real flags, and never called `ChunkData.Reset()` or recycled (`new ChunkData` per chunk). So a recycled-chunk-with- stale-flags defect — a documented *recurring* family — was invisible.
 - **Now:** the harness drives pipeline gating off `ChunkData`'s **real** flags — `HasLightChangesToProcess`
-  (backs `TestChunk.HasLightWork`), `RemainingEdgeCheckRounds` (consumed by the edge-check loops via the shared `DecrementEdgeCheckRound`), `NeedsEdgeCheck` (consumed + cleared in `BeginLightingJob`), and
-  `IsAwaitingMainThreadProcess` (set/cleared across `CompleteLightingJob`). The static
+  (backs `TestChunk.HasLightWork`), `RemainingEdgeCheckRounds` (consumed by the edge-check loops via the shared `DecrementEdgeCheckRound`), and `NeedsEdgeCheck` (consumed + cleared in `BeginLightingJob`). The static
   `ChunkData.OnLightWorkFlagged` is neutralized for the harness's lifetime (save/null/restore) so the real setters are safe headless. `LightingTestWorld.RecycleAllChunks()` routes every chunk through the real production `Reset()` (the pool return/acquire path; `World.Instance == null` → its `Array.Clear(sections)`
   fallback). Two baselines guard it: **B33** recycles a slab/sky-well world through `Reset()` and re-lights to the same oracle field (only correct if light/queues/sections/flags cleared AND
   `RemainingEdgeCheckRounds` restored to 2 — a stale 0 skips the edge rounds), and **B34**
@@ -232,8 +231,8 @@ conversion on the production mod path would not be caught in-harness (guarded in
 - **Closed (near-term) by roadmap item HF-2** (see
   [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) §10):
   per-job fault isolation in production *eliminates* the cascade class instead of modeling it. All three passes (`ProcessLightingJobs`, `ProcessGenerationJobs`, `ProcessMeshJobs` — the audit confirmed the gen/mesh passes share the release-inside-loop/remove-after-loop surface) now isolate each job: a failed
-  `Handle.Complete()` leaves the job enrolled un-released for retry; a fault after `Complete()` logs one error, still releases + removes that job, and the pass continues. The lighting pass clears
-  `IsAwaitingMainThreadProcess` in a per-job `finally` (flag-pairing invariant), re-flags the chunk (`HasLightChangesToProcess`), and counts faults in `LastFaultedLightJobs`; the generation pass's budget-retry paths keep their deliberate un-released `continue` semantics. Behavior documented in
+  `Handle.Complete()` leaves the job enrolled un-released for retry; a fault after `Complete()` logs one error, still releases + removes that job, and the pass continues. The lighting pass releases the job's
+  containers in a per-job `finally`, re-flags the chunk (`HasLightChangesToProcess`), and counts faults in `LastFaultedLightJobs`; the generation pass's budget-retry paths keep their deliberate un-released `continue` semantics. Behavior documented in
   `CHUNK_LIFECYCLE_PIPELINE.md` §4. The full-fidelity alternative — extracting the pass skeleton into a shared orchestrator the harness can drive — remains **HF-4**, deliberately folded into AS-2 / NS-3 rather than done standalone.
 - **Closed FULL by HF-4 #2 (2026-07-06):** the pass skeleton is now `Helpers/JobCompletionPass.cs`
   (`RunMergeLoop` + `RunRemoveAndPromote`, driven via `IJobCompletionDriver<TKey>`; renamed from

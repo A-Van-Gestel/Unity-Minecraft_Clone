@@ -97,15 +97,7 @@ public static class VoxelData
     };
 
     /// <summary>
-    /// How many entries at the START of <see cref="AllNeighborOffsets"/> are cardinal. Callers that must
-    /// distinguish the two halves (the LP-1 gate probe tallies cardinal and diagonal separately) index
-    /// against this rather than re-deriving the split from the offsets.
-    /// </summary>
-    public const int CardinalNeighborCount = 4;
-
-    /// <summary>
-    /// All 8 horizontal neighbor offsets, <b>cardinals first</b> (indices 0–3), then diagonals (4–7) —
-    /// an ordering contract callers rely on, see <see cref="CardinalNeighborCount"/>.
+    /// All 8 horizontal neighbor offsets, <b>cardinals first</b> (indices 0–3), then diagonals (4–7).
     /// Used by the three <c>World</c> neighbor-readiness gates to validate that the full neighborhood is
     /// populated, lit, or mesh-ready (see <c>Helpers.NeighborReadinessDecision</c>).
     /// </summary>

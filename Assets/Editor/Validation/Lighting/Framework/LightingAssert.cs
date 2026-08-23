@@ -296,7 +296,6 @@ namespace Editor.Validation.Lighting.Framework
                 subject.NeedsInitialLighting = true;
                 subject.HasLightChangesToProcess = true;
                 subject.NeedsEdgeCheck = true;
-                subject.IsAwaitingMainThreadProcess = true;
                 subject.RemainingEdgeCheckRounds = 0; // the historical bug condition: counter exhausted
                 subject.SunlightBfsQueue.Enqueue(default);
                 subject.BlocklightBfsQueue.Enqueue(default);
@@ -325,7 +324,6 @@ namespace Editor.Validation.Lighting.Framework
                 if (subject.NeedsInitialLighting) stale.Add("NeedsInitialLighting");
                 if (subject.HasLightChangesToProcess) stale.Add("HasLightChangesToProcess");
                 if (subject.NeedsEdgeCheck) stale.Add("NeedsEdgeCheck");
-                if (subject.IsAwaitingMainThreadProcess) stale.Add("IsAwaitingMainThreadProcess");
                 if (subject.RemainingEdgeCheckRounds != 2)
                     stale.Add($"RemainingEdgeCheckRounds={subject.RemainingEdgeCheckRounds} (expected 2)");
                 if (subject.LifecycleEpoch != epochBefore + 1)

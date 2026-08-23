@@ -57,7 +57,7 @@ namespace Helpers
             /// <summary>A generation, mesh, or lighting job is currently keyed on this chunk.</summary>
             public readonly bool JobRunning;
 
-            /// <summary>Pending main-thread lighting work: <c>IsAwaitingMainThreadProcess || HasLightChangesToProcess</c>.</summary>
+            /// <summary>Pending main-thread lighting work: <c>HasLightChangesToProcess</c>.</summary>
             public readonly bool ProcessingLight;
 
             /// <summary>

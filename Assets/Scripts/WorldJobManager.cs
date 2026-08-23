@@ -1623,12 +1623,8 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <inheritdoc />
     void IJobCompletionDriver<ChunkCoord>.ReleaseJob(ChunkCoord key)
     {
-        // Unconditional (merge finally): the flag-pairing invariant (IsAwaitingMainThreadProcess set in
-        // MergeCompletedLightingJob, cleared here even on fault) + the container release that keeps a
-        // faulted job from lingering in LightingJobs with disposed containers.
-        if (_curLightChunk != null) _curLightChunk.IsAwaitingMainThreadProcess = false;
-
-        // POOLING: Return the full-volume buffers for reuse; dispose per-job containers.
+        // POOLING, unconditional (merge finally): return the full-volume buffers for reuse and dispose the
+        // per-job containers, so a faulted job never lingers in LightingJobs with disposed containers.
         ReleaseLightingJobData(_curLightJob);
 
         // Drop the now-recycled handles (symmetric with the mesh driver): the scratch is only valid
@@ -1655,19 +1651,14 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// mods other jobs deferred for it, verifies the job's pull-back claims (Bug 14), routes its
     /// outbound cross-chunk mods, and runs the stability / edge-check bookkeeping. Extracted from
     /// the <see cref="ProcessLightingJobs"/> loop so a fault in any single merge stays isolated to
-    /// that job (HF-2); the caller owns <c>Handle.Complete()</c>, container release, the
-    /// <c>IsAwaitingMainThreadProcess</c> clear, and removal enrollment.
+    /// that job (HF-2); the caller owns <c>Handle.Complete()</c>, container release, and removal
+    /// enrollment.
     /// </summary>
     /// <param name="chunkCoord">The chunk whose lighting job completed.</param>
     /// <param name="jobData">The completed job's data (already <c>Complete()</c>d).</param>
     /// <param name="chunkData">The chunk's live data, or null when it vanished mid-flight.</param>
     private void MergeCompletedLightingJob(ChunkCoord chunkCoord, in LightingJobData jobData, ChunkData chunkData)
     {
-        if (chunkData != null)
-        {
-            chunkData.IsAwaitingMainThreadProcess = true;
-        }
-
         bool isChunkStable = jobData.IsStable[0];
         bool hasRealCrossChunkMods = false;
 

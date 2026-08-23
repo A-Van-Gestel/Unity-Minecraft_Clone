@@ -448,8 +448,8 @@ namespace Editor.Validation.Lighting.Framework
         /// <see cref="AreNeighborsDataReady"/> (which only checks terrain existence): this checks that every
         /// in-grid neighbor (4 cardinal + 4 diagonal) is fully lit and stable, so a border edge comparison
         /// reads settled data. Returns false when a neighbor has a lighting job in flight, or carries
-        /// <see cref="ChunkData.NeedsInitialLighting"/>, pending light work
-        /// (<see cref="ChunkData.HasLightChangesToProcess"/>), or <see cref="ChunkData.IsAwaitingMainThreadProcess"/>.
+        /// <see cref="ChunkData.NeedsInitialLighting"/> or pending light work
+        /// (<see cref="ChunkData.HasLightChangesToProcess"/>).
         /// <para>No longer a hand-written mirror: since LP-2 this calls the very
         /// <see cref="NeighborReadinessDecision"/> production's gate calls, so the readiness COMPUTATION
         /// cannot drift between the two (fidelity finding B2's remainder). What stays harness-shaped is the
@@ -482,7 +482,6 @@ namespace Editor.Validation.Lighting.Framework
                     existsAndPopulated: true,
                     needsInitialLighting: neighbor.Data.NeedsInitialLighting,
                     hasLightChanges: neighbor.HasLightWork,
-                    awaitingMainThread: neighbor.Data.IsAwaitingMainThreadProcess,
                     lightingEnabled: true);
 
                 if (NeighborReadinessDecision.Evaluate(NeighborReadinessDecision.Gate.ReadyAndLit, facts)
@@ -811,11 +810,6 @@ namespace Editor.Validation.Lighting.Framework
             NeighborhoodLightingJob job = flight.Job;
             job.Run();
 
-            // Mirror production's main-thread-processing guard (WorldJobManager.ProcessLightingJobs sets
-            // this true before applying the result and clears it after). Set/clear pairing on the real
-            // flag so its reset-completeness on recycle is verified (B4); cleared before returning below.
-            chunk.Data.IsAwaitingMainThreadProcess = true;
-
             LightingRunResult result = new LightingRunResult
             {
                 JobReportedStable = flight.IsStable[0],
@@ -922,10 +916,6 @@ namespace Editor.Validation.Lighting.Framework
 
             if (!result.IsStable)
                 chunk.HasLightWork = true;
-
-            // Main-thread processing complete (mirror of production clearing IsAwaitingMainThreadProcess
-            // at the end of the per-job pass).
-            chunk.Data.IsAwaitingMainThreadProcess = false;
 
             foreach (IDisposable container in flight.OwnedContainers)
                 container.Dispose();

@@ -56,7 +56,7 @@ Being permanently unable to clear the flag is what pipeline §9.6 actually descr
 | **CP-H1** | Seeded-shuffle scan order                           | Mirror `LightingFrameSimulator.CompletionOrder`; re-run every baseline across N seeds                                                       |
 | **CP-H2** | Drive the real `MeshBuildQueue` + `MeshDrainPolicy` | Composes the real drain with the real gates; today they are pinned only in isolation                                                        |
 | **CP-H3** | Pool recycle + replay                               | `ChunkData.Reset()` must clear every transient flag; `LifecycleEpoch` ABA re-check after an await                                           |
-| **CP-H4** | Fault injection in the completion passes            | HF-2 per-job isolation: a merge fault must not strand `IsAwaitingMainThreadProcess` (the lighting suite's `B65` does this for its own pass) |
+| **CP-H4** | Fault injection in the completion passes            | HF-2 per-job isolation: a merge fault must still run the per-job `finally` — container release and the `_curLightJob` scratch reset (the lighting suite's `B65` does this for its own pass) |
 | **CP-H5** | `NeedsEdgeCheck` / `RemainingEdgeCheckRounds`       | The edge-check arm and its round budget are modeled only as a flag the scan can take; §7's lifecycle is unexercised                         |
 | **CP-H6** | Load-from-disk arm                                  | `PopulateFromSave` + the CP-3 load-arm fault path (`IsLoading` clear, re-enqueue on the next crossing)                                      |
 
@@ -65,4 +65,4 @@ Being permanently unable to clear the flag is what pipeline §9.6 actually descr
 | Date       | Change                                      |
 |------------|---------------------------------------------|
 | 2026-08-22 | Created alongside NS-3 slice 1 (`B1`–`B6`). |
-| 2026-08-23 | `B7` added by LP-2 — a census of the shared `NeighborReadinessDecision` predicate (3 gates × 2⁷ facts vs an independent oracle). Not a pump scenario: it guards the gate-term matrix the pump provably cannot see. |
+| 2026-08-23 | `B7` added by LP-2 — a census of the shared `NeighborReadinessDecision` predicate (3 gates × 2⁶ facts vs an independent oracle; 2⁷ until LP-3 retired one fact). Not a pump scenario: it guards the gate-term matrix the pump provably cannot see. |

@@ -871,8 +871,7 @@ private void DiagnosticStuckChunkScan()
         report.AppendLine($"  Center Flags: " +
                           $"HasLightChanges={data.HasLightChangesToProcess}, " +
                           $"NeedsInitialLighting={data.NeedsInitialLighting}, " +
-                          $"NeedsEdgeCheck={data.NeedsEdgeCheck}, " +
-                          $"IsAwaitingMainThread={data.IsAwaitingMainThreadProcess}");
+                          $"NeedsEdgeCheck={data.NeedsEdgeCheck}");
         report.AppendLine($"  Active Jobs: " +
                           $"LightingJob={JobManager.LightingJobs.ContainsKey(coord)}, " +
                           $"GenJob={JobManager.GenerationJobs.ContainsKey(coord)}, " +

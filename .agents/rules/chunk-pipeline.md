@@ -19,7 +19,7 @@ Before editing any pipeline logic in these files, read `@Documentation/Architect
 
 ## Invariants that must not break
 
-- **Flag pairing.** Every flag that is set somewhere (`NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`, `IsAwaitingMainThreadProcess`) must have exactly one corresponding clear site. If you add a new flag, define both the set and the clear in the same commit.
+- **Flag pairing.** Every flag that is set somewhere (`NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`) must have exactly one corresponding clear site. If you add a new flag, define both the set and the clear in the same commit.
 
 - **Gate ordering.** A chunk MUST NOT advance to meshing until it passes `AreNeighborsReadyAndLit`. Do not add a "fast path" that skips this gate — historical meshing deadlocks trace to exactly that shortcut.
 

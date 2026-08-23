@@ -29,7 +29,6 @@ Each `ChunkData` instance carries the following transient flags that control pip
 | `NeedsInitialLighting`        | bool | `ProcessGenerationJobs()` / `PopulateFromSave()`; **`UnloadChunks()` persist-and-unload arm** (P-4 rec 3 — forces a full re-light on reload, captured by the save snapshot) | `Update()` lighting scan after scheduling initial pass                                                                                                                                                                                                                              | Chunk has terrain but no lighting yet                                                                                          |
 | `HasLightChangesToProcess`    | bool | `AddToSunLightQueue()`, `AddToBlockLightQueue()`, cross-chunk mods, edge check scheduling                                                                                   | `ScheduleLightingUpdate()`                                                                                                                                                                                                                                                          | Pending light changes in managed queues                                                                                        |
 | `NeedsEdgeCheck`              | bool | Post-stabilization re-arm (`ProcessLightingJobs`), neighbor propagation, or disk load                                                                                       | `ScheduleLightingUpdate()`                                                                                                                                                                                                                                                          | Border voxels need validation against neighbors                                                                                |
-| `IsAwaitingMainThreadProcess` | bool | Per-job merge start (`MergeCompletedLightingJob`)                                                                                                                           | `ProcessLightingJobs()` per-job `finally` (even on fault)                                                                                                                                                                                                                           | Lighting job completed, cross-chunk mods being applied                                                                         |
 | `RemainingEdgeCheckRounds`    | int  | Initialized to 2 on `ChunkData`; reset to 2 by `Reset()`; re-granted to 1 by `ModifyVoxel` on a border-column opacity edit (Bug 05)                                         | Decremented in `ProcessLightingJobs()` per stable pass — per stable pass **that changed light**, once P9-2's `enableConvergentEdgeCheckCascade` is on                                                                                                                               | Iterative edge-check rounds still to re-arm after a stable lighting pass (cross-seam convergence). `[NonSerialized]`.          |
 | `LifecycleEpoch`              | int  | **Bumped** (never zeroed) by every `Reset()` — its reset IS the increment; monotonic across recycles                                                                        | Never — deliberately monotonic (B34 exempts it from the fresh-instance sweep and asserts the bump instead)                                                                                                                                                                          | Pool-ABA detection: async code captures instance + epoch and re-checks both after an await (CP-3 load arm). `[NonSerialized]`. |
 
@@ -76,8 +75,8 @@ Three gate functions control when work can proceed. Understanding the difference
 >
 > The caller still owns everything world-shaped: the `IsChunkInWorld` skip, the job-dictionary and chunk-map
 > probes, and short-circuiting on the first blocking neighbor. `Evaluate` returns a `BlockReason` rather than
-> a bool, which is what lets the single loop feed LP-1's separate cardinal/diagonal probe counters
-> (`AllNeighborOffsets` is ordered cardinals-first — see `VoxelData.CardinalNeighborCount`).
+> a bool, so a caller can act on *which* term blocked rather than re-testing terms the predicate already
+> evaluated.
 >
 > The tables below are the contract; the Chunk Pipeline suite's **B7** asserts every gate × fact combination
 > against an independently written copy of them.
@@ -108,10 +107,9 @@ Checks all **8 horizontal neighbors** (cardinal + diagonal) with stricter requir
 | World bounds           | `IsChunkInWorld()` → skip if false     | As §3.1 — never fires post-WS-3                                                                       |
 | Generation job         | `GenerationJobs.ContainsKey()` → false | Neighbor terrain must be complete                                                                     |
 | Lighting job           | `LightingJobs.ContainsKey()` → false   | Neighbor must not be computing light                                                                  |
-| Data exists + populated | `TryGetChunk()` + `IsPopulated`       | **Skips, does not block** — an unpopulated neighbor holds no light to settle. The four rows below are evaluated only when it is populated |
+| Data exists + populated | `TryGetChunk()` + `IsPopulated`       | **Skips, does not block** — an unpopulated neighbor holds no light to settle. The two rows below are evaluated only when it is populated |
 | Pending light changes  | `HasLightChangesToProcess` → false     | Neighbor must not have unscheduled work                                                               |
 | Initial lighting       | `NeedsInitialLighting` → false         | Neighbor must have completed first lighting                                                           |
-| Main-thread processing | `IsAwaitingMainThreadProcess` → false  | Neighbor must not be in transitional state                                                            |
 
 **Summary:** "Are all neighbors fully generated AND lighting-stable?"
 
@@ -134,7 +132,7 @@ Checks all **8 horizontal neighbors** (cardinal + diagonal) with relaxed require
 | Data exists + populated | `Chunks.TryGetValue()` + `IsPopulated` | Neighbor must have voxel data                                                                                                               |
 | Initial lighting done   | `NeedsInitialLighting` → false         | Neighbor must have had at least one lighting pass                                                                                           |
 
-**Does NOT check:** `lightingJobs`, `HasLightChangesToProcess`, `IsAwaitingMainThreadProcess`.
+**Does NOT check:** `lightingJobs`, `HasLightChangesToProcess`.
 
 **Summary:** "Do all neighbors have populated data with at least one lighting pass complete?"
 
@@ -226,7 +224,7 @@ release each job's containers *inside* the loop and remove the dictionary entrie
 - **`Handle.Complete()` throws** → the job may still own its buffers, so nothing is released; the entry stays enrolled and is retried (isolated again) next pass.
 - **Post-`Complete()` processing throws** → one `Debug.LogError` (errors are the regression signal), the job's containers are still released and the entry enrolled for removal, and the pass continues. Per pass: lighting re-flags the chunk (`HasLightChangesToProcess = true`, stability unknown → a corrective pass runs) and counts the fault in `WorldJobManager.LastFaultedLightJobs`; generation releases only if the happy path had not (its budget-retry `continue` paths intentionally keep jobs un-released across frames); meshing returns the buffers in a
   `finally` and the chunk keeps its previous mesh.
-- **Flag pairing holds on fault:** the lighting pass clears `IsAwaitingMainThreadProcess` in a per-job `finally`, so a faulted merge cannot park its chunk forever.
+- **Container release holds on fault:** the lighting pass releases the job's buffers in a per-job `finally`, so a faulted merge cannot leave a job enrolled with disposed containers.
 
 Recovery is deliberately *not* promised (a faulted generation job can leave its chunk unpopulated, loudly) — the isolation exists to keep one fault from cascading into the whole pass, not to hide it.
 

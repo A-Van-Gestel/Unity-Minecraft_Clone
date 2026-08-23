@@ -192,7 +192,7 @@ Mesh generation is gated by the **relaxed** `AreNeighborsMeshReady`, which requi
 - Have populated voxel data (`IsPopulated`).
 - Have `NeedsInitialLighting = false` (at least one lighting pass complete).
 
-It deliberately does **not** require neighbors to have no running lighting jobs, `HasLightChangesToProcess = false`, or `IsAwaitingMainThreadProcess = false` (the stricter `AreNeighborsReadyAndLit` contract still used for edge-check scheduling). The relaxed gate was introduced to break the wave-front meshing deadlock — see [CHUNK_LIFECYCLE_PIPELINE.md](CHUNK_LIFECYCLE_PIPELINE.md) §3.3 and §9.3. Any stale border lighting is corrected by the automatic re-mesh that fires when the neighbor's lighting job later stabilizes.
+It deliberately does **not** require neighbors to have no running lighting jobs or `HasLightChangesToProcess = false` (the stricter `AreNeighborsReadyAndLit` contract still used for edge-check scheduling). The relaxed gate was introduced to break the wave-front meshing deadlock — see [CHUNK_LIFECYCLE_PIPELINE.md](CHUNK_LIFECYCLE_PIPELINE.md) §3.3 and §9.3. Any stale border lighting is corrected by the automatic re-mesh that fires when the neighbor's lighting job later stabilizes.
 
 > **Note:** `ScheduleMeshing` still checks `HasLightChangesToProcess` / `NeedsInitialLighting` on the **center** chunk before meshing it. And `NeedsEdgeCheck` is intentionally NOT checked by either gate or by `ScheduleMeshing`. Edge checks are corrections that improve quality but do not block the meshing pipeline — a chunk with `NeedsEdgeCheck = true` can be meshed before the edge check runs.
 

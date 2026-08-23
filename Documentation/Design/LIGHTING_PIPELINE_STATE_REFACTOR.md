@@ -2,7 +2,7 @@
 
 **Version:** 1.3  
 **Date:** 2026-07-06  
-**Status:** Partially implemented — **LP-1 and LP-2 shipped 2026-08-23** (probes live and soak silent; the shared gate predicate is in with NS-3 baseline B7 — see §7). LP-3…LP-7 remain proposed. §2 re-audited against HEAD on 2026-08-23.  
+**Status:** Partially implemented — **LP-1, LP-2 and LP-3 shipped 2026-08-23** (probes, the shared gate predicate, and the retirement of `IsAwaitingMainThreadProcess` — all soak-confirmed). LP-4…LP-7 remain proposed. §2 re-audited against HEAD on 2026-08-23.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > Clean-up / refactor plan for the async lighting engine's orchestration layer — the `ChunkData`
@@ -336,7 +336,7 @@ newly created `.cs` files need a Unity import before `dotnet build` sees them; t
 |-----------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|:------:|------------------------------------|
 | **LP-1 — Invariant probes** ✅ **SHIPPED 2026-08-23** | `World.cs`, `DebugScreen.cs`, `WorldFrameProfiler.cs` (dev/editor-only diagnostics)                                                               |   🟢   | —                                  |
 | **LP-2 — Shared neighbor-gate predicate** ✅ **SHIPPED 2026-08-23** | `Helpers/NeighborReadinessDecision.cs` (new); `World.cs` gates + `VoxelData.cs`; `LightingTestWorld.cs`; NS-3 baseline **B7**                |   🟡   | —                                  |
-| **LP-3 — Retire `IsAwaitingMainThreadProcess`**     | `ChunkData.cs`, `WorldJobManager.cs`, `World.cs`, harness, rules/docs                                                                             |   🟡   | LP-1 (evidence), LP-2              |
+| **LP-3 — Retire `IsAwaitingMainThreadProcess`** ✅ **SHIPPED 2026-08-23** | `ChunkData.cs`, `WorldJobManager.cs`, `World.cs`, `NeighborReadinessDecision.cs`, `VoxelData.cs`, harness, NS-3 `B6`/`B7`, rules/docs             |   🟡   | LP-1 (evidence), LP-2              |
 | **LP-4 — `LightingWork` byte + transition API**     | `ChunkData.cs`; call sites in `World.cs`, `WorldJobManager.cs`, `ChunkSerializer.cs`, `ChunkStorageManager.cs`; harness; new transition baselines |   🔴   | LP-2 (fewer sites); LP-3 preferred |
 | **LP-5 — Explicit scheduling contract + coroutine** | `WorldJobManager.ScheduleLightingUpdate`; `World.cs` coroutine; new fallback baseline                                                             |   🟡   | LP-4                               |
 | **LP-6 — Lazy strict-gate evaluation** *(optional)* | `LightingScanDecision.cs` overload; `World.cs` scan; `LightingFrameSimulator.cs`                                                                  |   🟢   | LP-2                               |
@@ -539,6 +539,133 @@ also moved `2850–3010` → `3014–3175`.
 - **Testability gain:** the state machine loses an axis no test could ever exercise (zero observable window ⇒ untestable by construction); the §2.3 census shrinks.
 - **Doc-sync (same commit):** `CHUNK_LIFECYCLE_PIPELINE.md` §2 (row delete) + §3 gate tables + §9.6 code excerpt, `LIGHTING_SYSTEM_OVERVIEW.md` (§3.4 mentions), fidelity doc (B4/B7 entries mention the flag), `.agents/rules/chunk-pipeline.md` + `pool-reset-safety.md` flag lists, and the `chunk-lifecycle` skill's flag enumeration. **Serialization:** none (`[NonSerialized]`).
 
+**Amended:** 2026-08-23 — **LP-3 SHIPPED.** Code complete, universal gate green, and the in-game soak passed (below).
+
+*What landed.* The flag, its two write sites, all four production readers, and the entire LP-1 probe-1 surface
+are gone (21 code sites across 11 files). `NeighborFacts` drops to six facts, `BlockReason` to six members,
+`ReleaseJob` keeps only the container release and MP-5's `_curLightJob = default;`, and `UnloadChunks`'
+`isProcessingLight` is now `HasLightChangesToProcess` alone. `VoxelData.CardinalNeighborCount` went with it —
+LP-2 added that const **solely** so probe 1 could tally cardinals and diagonals separately, so it died with its
+only consumer (the cardinals-first ordering contract on `AllNeighborOffsets` stays documented).
+
+*Gate.* Both `dotnet build` targets clean; **Validate All: 568/568 baselines across 25 suites** — the same
+census as before the deletion, so no baseline was silently dropped. B7's own PASS line reports **192**
+combinations (3 gates × 2⁶), which is the tripwire for the mask halving: had the sweep bound stayed at 128 the
+census would have silently double-covered instead of failing.
+
+*Open question 5 answered by measurement, and its premise was wrong.* Deleting the flag does **not** cost NS-3
+"two of its six teeth". Both baselines were re-mutated after the deletion and each still reds:
+
+- **B6** — pump's mesh gate → `AreNeighborsReadyAndLit`: reds **B3, B4, B6** (unchanged from the 2026-08-23 sweep).
+- **B5** — `World.AreNeighborsDataReady` always true: reds **B1, B5** (unchanged).
+
+What was actually lost is one *axis* of the flag-pairing assertion (it now sweeps two flags, not three), not
+either baseline's prove-red. No replacement assertion was invented; the map row for the retired mutation was
+deleted and the two rows that now carry B5's and B6's prove-red are marked re-measured.
+
+*Corrections to this packet's own text, found while executing it:*
+
+1. **B65 is NOT a gate for this phase — the prove-red line was wrong.** It claimed `ReleaseJob`'s
+   fault-isolation semantics "change shape". They do not, from the suite's side:
+   `LightingFrameSimulator.ReleaseJob` is already an empty no-op (the sim holds no per-job containers), and the
+   harness's flag set/clear lived inside `CompleteLightingJob`, which B65's injected fault throws *before*
+   reaching. B65 therefore never observed the flag at all. Run it as non-regression, never as the gate. (Same
+   class of error as LP-2's meshing-suite correction — a suite named as a gate that does not reach the code.)
+2. **B7 is co-edited with the predicate it guards.** Retiring the term means B7's oracle drops it too, so the
+   census now restates a contract *without* the term and cannot detect that removing it was wrong. The evidence
+   for the removal stays LP-1's soak plus the structural argument; B7 guards the five surviving terms.
+3. **The doc-sync list was four files short.** `COMMAND_CONSOLE_SYSTEM.md` (§`/chunk info` dump),
+   `INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md` (two code excerpts),
+   `DEBUG_METHODS_EXAMPLES.md` (a snippet that would no longer compile), and
+   `CHUNK_PIPELINE_VALIDATION_HARNESS_FIDELITY.md` (CP-H4) all named the flag. CP-H4 was **re-targeted**
+   rather than deleted — the fault-injection gap it describes is real independent of which flag illustrated
+   it, so it now reads "container release and the `_curLightJob` scratch reset".
+4. **`CHUNK_LIFECYCLE_PIPELINE.md` §9.6's excerpt was deliberately left verbatim.** It is explicitly labelled
+   "original pre-fix logic" — a dated quotation of the historical deadlock, not a current-state claim. Editing
+   it would falsify the record.
+
+*Structural re-verification at HEAD* (the argument the deletion rests on, re-run rather than inherited):
+`codegraph callees MergeCompletedLightingJob` reaches no gate reader, and neither do its two non-leaf callees
+(`RequestNeighborMeshRebuilds` → `QueueNeighborRebuild`; `TriggerNeighborEdgeChecks` → `RequestChunk`). Flag
+setters fire `OnLightWorkFlagged` → `LightWorkScheduler.Flag`, which only enqueues to `_staging` and evaluates
+no gate. `AreNeighborsReadyAndLit`'s five callers and `UnloadChunks`' single caller all run in a different step
+of the frame.
+
+*Known limits.* The suites are edit-mode Mono, so IL2CPP is unobserved; **no suite reaches the production gate
+except NS-3**, and B7 is now co-edited (above); and the evidence that the flag was unobservable remains LP-1's
+one soak plus LP-2's one flight, both editor Mono — with probe 1 deleted, no future session can re-observe it.
+**The in-game streaming soak with unload/reload cycles is still owed** and this change is deliberately
+uncommitted until it runs.
+
+*In-game soak — PASSED (2026-08-23).* Editor Mono, `enableLighting` + `EnablePersistence` on,
+`enableDiagnosticLogs` on, **volatile saves** (temp store), view distance 10. Steps: sustained streaming,
+3–5 abrupt unload/reload cycles, ~20 sky-affecting edits, ~10 chunk-border edits, three edit-then-flee rounds,
+then a menu save/reload with a return to the region.
+
+- **Steps 1–4 ran on ONE `World` instance and the counters cover all of it** — the console held exactly one
+  `--- Startup complete ---` and the buffer had not evicted it, so the segment split that hobbled LP-1's soak
+  did not recur. **Zero console errors.**
+- **Nothing stuck.** Two captures 40 s apart, player unmoved at chunk `(-234,-53)`: 441 chunks hold a visual —
+  exactly (2·10+1)² — **0 unmeshed**, and **0** in-radius chunks held `NeedsInitialLighting` /
+  `HasLightChangesToProcess` / `NeedsEdgeCheck`. The 105 flagged chunks all sat outside the render radius in
+  the data-only ring (`waiting=105`), the legitimate frontier park. Jobs gen/light/mesh all 0, ready 0.
+- **The unload path was genuinely exercised** — 77 unloaded on the final pass, `deferStrand=9` (the §9.6 strand
+  guard fired *and* released), `lightPersisted=1` with matching `[LIGHTING RESCUE]` entries. That is the arm
+  whose `isProcessingLight` this phase narrowed.
+- `faultedLightJobs=0`, `stuckLoading=0`, `loadArmFaults=0`; probe 2 reported **0 violations** across 76 live
+  sunlight-queue keys.
+- **The fail-safe promotions are benign, and the criterion was re-derived rather than inherited.** The ~1 s walk
+  calls `AddReady` for every flagged populated chunk *before* `PromoteAll()` (`World.cs:2492–2518`), and
+  `AddReady` removes from `_waiting` — so the log cannot report the parked frontier; it reports only entries
+  parked with **no** flag, which unload cycling mints as stale coords. Counts of 3–26 appeared during
+  streaming (LP-2's flight saw 6, but it never cycled unloads). **Decisive test: console cleared, world
+  quiesced with 105 chunks parked, 40 s produced no promotions at all** — no missing promotion hook.
+- **Step 5 (save/reload) covered the disk-load arm** (`World.cs:1388` sets `NeedsEdgeCheck` on a disk-loaded
+  stable chunk, which then flows through the very gate this phase edited). Post-reload, on a fresh instance:
+  839 resident/839 populated, 441 visual, **0 unmeshed**, **0** in-radius flags (edge-check included), jobs 0,
+  `deserializeFailures=0`, zero errors. That the chunks came **from disk** rather than regeneration is
+  positively established, not assumed: the player stood in chunk `(-147,98)` → region `(-5,3)`, and
+  `Region/r.-5.3.bin` exists with the pre-reload save's timestamp and no later rewrite.
+
+*Known limits.* Editor Mono only — **IL2CPP unobserved**, as usual. Saves were **volatile** (temp store), so
+the real save directory was not exercised. The specific edited voxels were **not** visually re-verified after
+the reload (the edits were made at high speed and their coordinates were not recorded); what is established is
+that the region reloaded from disk and converged clean, not that a particular block edit survived. Step 5 ran
+on a second `World` instance, so its counters start from zero — the pre-reload numbers above are the ones that
+cover steps 1–4. With probe 1 deleted, no future session can re-observe the retired flag.
+
+*Post-review correction (2026-08-23).* A code review of the unpushed series plus this working tree found
+**six drift items this packet's own execution missed**, all now fixed:
+
+1. **The gate docstring still named the deleted term.** `World.AreNeighborsReadyAndLit`'s summary — written by
+   LP-2 days earlier — still required a neighbor to have "nothing awaiting the main-thread merge". The
+   contract comment on the gate this phase edits was the one place the retired term survived in code.
+2. **Three docs still said B7 sweeps 2⁷ facts**, not 2⁶/192: `VALIDATION_SUITE_COVERAGE_ROADMAP.md`,
+   `CHUNK_PIPELINE_VALIDATION_HARNESS_FIDELITY.md`, and `LIGHTING_VALIDATION_HARNESS_FIDELITY.md`. The review
+   caught the first; a `grep` for the literal found the other two. This is the number the Amended line above
+   calls the mask-halving tripwire, so leaving it stale in the census defeats its own guard.
+3. **`CHUNK_LIFECYCLE_PIPELINE.md` §3 pointed at two things LP-3 deleted** — `VoxelData.CardinalNeighborCount`
+   and "LP-1's separate cardinal/diagonal probe counters" — as the *rationale* for `Evaluate` returning a
+   `BlockReason`. The rationale was rewritten to stand on its own (a caller can act on which term blocked);
+   the §3.2 table's "four rows below" also became two.
+4. **B7's oracle docstring still claimed unqualified independence.** It now records the blind spot the review
+   named: retiring a term edits predicate and oracle together, so B7 witnesses a term that *misbehaves*, never
+   one that *disappears*.
+5. **B6 had no prove-red of its own.** With the flag row gone from the map, its only listed mutation was the
+   one already attributed to B3 and B4 — the review's sharpest finding, and stronger than this packet's "lost
+   one axis" framing. **Fixed by strengthening the baseline, not by rewording it:** B6 gained a second
+   assertion, a *clear/schedule balance* — across a run, the number of chunks the ready-set scan clears flags
+   on must equal the number of lighting jobs it schedules. The clear count is derived from `ChunkData` state
+   either side of the scan (`FrameResult.LightingFlagsCleared`), never from the code path that clears, so it is
+   a witness rather than a restatement. It exists because a scan that clears flags *without* scheduling drops
+   work silently and makes the pipeline converge **better** — invisible to every end-state assertion in the
+   suite. **Measured:** clearing the flags in the scan's `Park` branch reds B1/B2/B5/**B6** while leaving
+   **B3 and B4 green**, and inside B6 only the new balance line fires (30 clears vs 18 schedules) — the
+   end-state sweep stays green on the same run. That is the overlap the review identified, closed by
+   measurement.
+6. **The LP-2 eager-fact-gathering regression is real but out of scope here** — recorded as a starting point in
+   LP-6's packet, which owns lazy gate evaluation, rather than re-planned in a deletion phase.
+
 ### LP-4 — `LightingWork` byte + transition API (🔴, the headline)
 
 **Delivers:** §4.1 in full. Every §2.3 census row becomes a named method; partial transitions become unrepresentable; transitions become directly baselinable.
@@ -595,6 +722,11 @@ also moved `2850–3010` → `3014–3175`.
   `World.cs:2518–2519` and the sim's mirror (`LightingFrameSimulator.cs:439`) in the same commit (both callers move atomically — the shared-code invariant).
 - **Gate:** universal gate + a before/after measurement of the `WorldFrameProfiler` Light phase under a streaming load. **Ship only on a measured win** (perf-benchmark discipline); otherwise record NO-GO here and close the phase — the clarity value alone does not justify signature churn.
 - **Doc-sync:** pipeline §4 pseudocode note. **Serialization:** none.
+- **Start here (noted 2026-08-23, from LP-3's code review):** LP-2 also made the *fact gathering* eager. Every
+  gate now probes `GenerationJobs`, `LightingJobs` and the chunk map for all 8 neighbors, where the old
+  `AreNeighborsDataReady` loop returned on the generation check before touching the chunk map, and where
+  `DataReady`/`MeshReady` never read `LightingInFlight` at all. That regression is **unmeasured** — this phase
+  owns measuring it. Deliberately not addressed in LP-3, which was a deletion, not a perf change.
 
 ### LP-7 — Naming & doc hygiene (🟢)
 
@@ -606,11 +738,11 @@ also moved `2850–3010` → `3014–3175`.
 
 ## 8. Open questions
 
-1. **LP-1 probe results** — does `IsAwaitingMainThreadProcess` ever read true at a gate in a real soak? Resolves LP-3's go/no-go; the answer lands here as an Amended line + a checkbox in LP-3.
+1. ~~**LP-1 probe results** — does `IsAwaitingMainThreadProcess` ever read true at a gate in a real soak?~~ **RESOLVED 2026-08-23:** no. Probe 1 stayed silent across LP-1's soak and LP-2's flight (and was proven live by injection), which cleared LP-3's go/no-go; LP-3 has since deleted both the flag and the probe.
 2. **Keep or remove the three bool adapter properties after LP-4?** Decide by call-site count at execution time: if ≤ a handful of readers remain (gates read via LP-2 facts, scan reads via the decision inputs), remove them and read bits directly; otherwise keep the adapters permanently as the read API. Either way, *writes* go through transition methods only.
 3. **LP-6 worth it?** Only a measurement answers it; the phase carries its own GO/NO-GO gate and a NO-GO is a valid close-out.
 4. *(new 2026-08-23)* **How far does LP-4's transition API absorb `EdgeCheckCascadeDecision`?** The pure decision and the transition method now meet on the same three lines (`WJM:1800–1818`). Options: leave the decision untouched and have `SpendEdgeCheckRound(rearm:)` take its outcome as a parameter (least churn, keeps P9-2's rollback flag intact), or fold the effect application into a method that takes the outcome enum directly. Decide at LP-4 execution; **do not** collapse the three outcomes back into two (F11).
-5. *(new 2026-08-23)* **Does LP-3 owe NS-3 a replacement assertion?** NS-3's `B5`/`B6` currently prove-red on "skip the `IsAwaitingMainThreadProcess` clear". Deleting the flag removes that mutation target, so either those baselines get a new prove-red against the remaining `LightingJobs` in-flight guard, or the suite loses two of its six teeth. Resolve *before* LP-3 lands, not after.
+5. ~~*(new 2026-08-23)* **Does LP-3 owe NS-3 a replacement assertion?**~~ **RESOLVED 2026-08-23 by measurement — no, and the premise was wrong.** B5 and B6 each keep an observed prove-red after the deletion (B6: mesh gate → `AreNeighborsReadyAndLit`, reds B3/B4/B6; B5: `AreNeighborsDataReady` always true, reds B1/B5), both re-run post-deletion. The suite loses one *axis* of the flag-pairing sweep, not two teeth. See LP-3's Amended line.
 
 ---
 
@@ -645,7 +777,21 @@ also moved `2850–3010` → `3014–3175`.
   matrix. The orphaned docstring was **moved and corrected** rather than deleted (it was
   `AreNeighborsReadyAndLit`'s own detached docstring, and stale in two ways). Gate anchors re-derived
   `2850–3010` → `3014–3175`.
+* **v1.4** - **LP-3 executed (code complete; in-game soak pending, change held uncommitted).** §7's LP-3 packet
+  gains an Amended line; §8 open questions 1 and 5 are closed, question 5 **by measurement and against its own
+  premise** — B5 and B6 each keep an observed prove-red after the deletion, so the suite loses one axis of the
+  flag-pairing sweep rather than two teeth. Four corrections to the packet's own text, all found while
+  executing it: **B65 is not a gate for this phase** (the simulator's `ReleaseJob` is already a no-op and the
+  injected fault throws before the harness's flag write, so B65 never observed the flag); **B7 is now co-edited
+  with the predicate it guards**, so it cannot witness the term's removal; the doc-sync list was four files
+  short (`COMMAND_CONSOLE_SYSTEM`, the storage architecture's two excerpts, `DEBUG_METHODS_EXAMPLES`, and
+  CP-H4 — the last **re-targeted** at container release rather than deleted); and §9.6's excerpt was left
+  verbatim as a dated quotation of the pre-fix code. `VoxelData.CardinalNeighborCount`, added by LP-2 solely
+  for probe 1, was removed with it. A same-day code review then found six further drift items (a
+  post-review correction block records them), the sharpest being that **B6 had lost its only distinct
+  prove-red**; it was fixed by giving B6 a second, independently-derived assertion — a clear/schedule balance
+  — whose prove-red was measured, not predicted.
 
 ---
 
-**Last Updated:** 2026-08-23 (**v1.3 — LP-2 shipped**; the shared gate predicate backs all three `World` gates and the harness analog, NS-3 baseline B7 pins the gate-term matrix, and four corrections to the LP-2 packet are recorded in its Amended line — see Document History) **Next Review:** when LP-3 starts (LP-3's precondition is met and LP-2, its second dependency, has landed — but read LP-1's Amended-line limits first; the zeros are calibrated, not absolute, and LP-2's measured prove-red shows how little the lighting suite observes about gate terms)
+**Last Updated:** 2026-08-23 (**v1.4 — LP-3 shipped**; the flag and LP-1's probe-1 surface are gone, NS-3's `B6` gained a clear/schedule balance assertion with a measured prove-red, and both LP-3's own corrections and a post-execution review's findings are recorded in its Amended line — see Document History) **Next Review:** LP-4 (read LP-3's Amended line first: B7 is now co-edited with the predicate it guards, and the deleted probe means the flag's absence can no longer be re-observed — but read LP-1's Amended-line limits first; the zeros are calibrated, not absolute, and LP-2's measured prove-red shows how little the lighting suite observes about gate terms)

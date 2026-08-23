@@ -50,7 +50,7 @@ namespace Commands
                 new ConsoleLine(ConsoleLineSeverity.Info,
                     $"  NeedsInitialLighting={data.NeedsInitialLighting}  HasLightChangesToProcess={data.HasLightChangesToProcess}"),
                 new ConsoleLine(ConsoleLineSeverity.Info,
-                    $"  NeedsEdgeCheck={data.NeedsEdgeCheck}  IsAwaitingMainThreadProcess={data.IsAwaitingMainThreadProcess}"),
+                    $"  NeedsEdgeCheck={data.NeedsEdgeCheck}"),
             });
         }
     }

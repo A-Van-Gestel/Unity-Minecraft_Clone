@@ -380,9 +380,8 @@ Runs after CMD-2; each step ends in a verification gate and its own compilable c
    need no chunks/pool); capability commands verified in-game.
 4. **Wave C — 🟡:** `/give` (name→ID via `BlockType.blockName`, case-insensitive), `/setblock`
    (ForcePlace; see table note), `/chunk info` (dump: `IsPopulated`, `IsLoading`,
-   `NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`,
-   `IsAwaitingMainThreadProcess`, active-voxel count + mesh-side state pinned from `Chunk` at
-   implementation time). *Gate:* parse/lookup-failure baselines headless + a pending-mod-route
+   `NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`, active-voxel count +
+   mesh-side state pinned from `Chunk` at implementation time). *Gate:* parse/lookup-failure baselines headless + a pending-mod-route
    baseline for `/setblock` on an unloaded chunk; effects verified in-game.
 5. **Doc-sync:** flip the §8.1 rows to implemented; final `Validate All`.
 

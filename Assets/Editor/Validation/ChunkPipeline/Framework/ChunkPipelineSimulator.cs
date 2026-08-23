@@ -45,6 +45,16 @@ namespace Editor.Validation.ChunkPipeline.Framework
             /// <summary>Chunks parked by the ready-set scan (a readiness gate failed, or a job is in flight).</summary>
             public int LightingParked;
 
+            /// <summary>
+            /// Chunks that entered the ready-set scan carrying at least one lighting flag and left it
+            /// carrying none. Derived by comparing <see cref="ChunkData"/> state either side of the scan —
+            /// deliberately NOT incremented at the code path that clears the flags, so it is an independent
+            /// witness rather than a restatement of <see cref="LightingScheduled"/>. A scan that clears flags
+            /// without scheduling a job (work silently dropped) makes this exceed
+            /// <see cref="LightingScheduled"/>; one that schedules without clearing makes it fall short.
+            /// </summary>
+            public int LightingFlagsCleared;
+
             /// <summary>Mesh jobs scheduled this frame.</summary>
             public int MeshScheduled;
 
@@ -86,6 +96,7 @@ namespace Editor.Validation.ChunkPipeline.Framework
         private readonly HashSet<ChunkCoord> _initialLightingDone = new HashSet<ChunkCoord>();
         private readonly HashSet<ChunkCoord> _observed = new HashSet<ChunkCoord>();
         private readonly List<ChunkCoord> _scanScratch = new List<ChunkCoord>();
+        private readonly HashSet<ChunkCoord> _flaggedBeforeScan = new HashSet<ChunkCoord>();
         private readonly List<Flight> _completedScratch = new List<Flight>();
 
         private int _frame;
@@ -203,20 +214,11 @@ namespace Editor.Validation.ChunkPipeline.Framework
                 ChunkData chunk = Resolve(flight.Coord);
                 if (chunk == null) continue;
 
-                // The merge window: production sets this at merge start and clears it in a per-job finally.
-                chunk.IsAwaitingMainThreadProcess = true;
-                try
-                {
-                    bool wasInitial = _initialLightingDone.Add(flight.Coord);
-                    if (wasInitial && EmitCrossChunkModsOnLightingComplete) EmitCrossChunkMods(flight.Coord);
+                bool wasInitial = _initialLightingDone.Add(flight.Coord);
+                if (wasInitial && EmitCrossChunkModsOnLightingComplete) EmitCrossChunkMods(flight.Coord);
 
-                    // A settled pass requests the mesh (production: IsStable -> RequestChunkMeshRebuild).
-                    if (!chunk.HasLightChangesToProcess) RequestMesh(flight.Coord);
-                }
-                finally
-                {
-                    chunk.IsAwaitingMainThreadProcess = false;
-                }
+                // A settled pass requests the mesh (production: IsStable -> RequestChunkMeshRebuild).
+                if (!chunk.HasLightChangesToProcess) RequestMesh(flight.Coord);
             }
 
             // Step 5 — the lighting ready-set scan, through the real gates and the real arm decision.
@@ -224,6 +226,16 @@ namespace Editor.Validation.ChunkPipeline.Framework
             _scanScratch.Clear();
             foreach (KeyValuePair<Vector2Int, ChunkData> entry in Chunks()) _scanScratch.Add(ChunkCoord.FromVoxelOrigin(entry.Key));
             _scanScratch.Sort(CompareCoords); // Deterministic visit order; production's is a HashSet's.
+
+            // Snapshot which chunks hold a lighting flag going IN, so the number the scan clears can be
+            // derived from chunk state rather than from the scan's own bookkeeping (B6's independent
+            // witness). Scoped to the scan alone: the unload pass also clears flags, via Reset().
+            _flaggedBeforeScan.Clear();
+            foreach (ChunkCoord coord in _scanScratch)
+            {
+                ChunkData flagged = Resolve(coord);
+                if (flagged != null && HasAnyLightingFlag(flagged)) _flaggedBeforeScan.Add(coord);
+            }
 
             foreach (ChunkCoord coord in _scanScratch)
             {
@@ -259,6 +271,12 @@ namespace Editor.Validation.ChunkPipeline.Framework
             }
 
             result.LightingScheduled = lightingScheduled;
+
+            foreach (ChunkCoord coord in _flaggedBeforeScan)
+            {
+                ChunkData cleared = Resolve(coord);
+                if (cleared != null && !HasAnyLightingFlag(cleared)) result.LightingFlagsCleared++;
+            }
 
             // Step 6 — ProcessMeshJobs.
             CollectCompleted(_meshFlights);
@@ -308,6 +326,12 @@ namespace Editor.Validation.ChunkPipeline.Framework
             return result;
         }
 
+        /// <summary>Whether a chunk carries any of the three lighting flags the ready-set scan consumes.</summary>
+        /// <param name="chunk">The chunk to test.</param>
+        /// <returns>True when at least one lighting flag is set.</returns>
+        private static bool HasAnyLightingFlag(ChunkData chunk) =>
+            chunk.NeedsInitialLighting || chunk.NeedsEdgeCheck || chunk.HasLightChangesToProcess;
+
         /// <summary>Runs frames until every requested chunk is meshed, or the budget is spent.</summary>
         /// <param name="maxFrames">Frame ceiling — exhausting it is the deterministic form of a deadlock.</param>
         /// <param name="targets">The chunks that must all reach the meshed state.</param>
@@ -322,6 +346,7 @@ namespace Editor.Validation.ChunkPipeline.Framework
                 FrameResult frame = RunFrame();
                 totals.GenerationCompleted += frame.GenerationCompleted;
                 totals.LightingScheduled += frame.LightingScheduled;
+                totals.LightingFlagsCleared += frame.LightingFlagsCleared;
                 totals.LightingParked += frame.LightingParked;
                 totals.ObservedParked += frame.ObservedParked;
                 totals.MeshScheduled += frame.MeshScheduled;
@@ -347,6 +372,7 @@ namespace Editor.Validation.ChunkPipeline.Framework
                 FrameResult frame = RunFrame();
                 totals.GenerationCompleted += frame.GenerationCompleted;
                 totals.LightingScheduled += frame.LightingScheduled;
+                totals.LightingFlagsCleared += frame.LightingFlagsCleared;
                 totals.LightingParked += frame.LightingParked;
                 totals.ObservedParked += frame.ObservedParked;
                 totals.MeshScheduled += frame.MeshScheduled;
@@ -391,7 +417,7 @@ namespace Editor.Validation.ChunkPipeline.Framework
                 ChunkUnloadDecision.ChunkUnloadFacts facts = new ChunkUnloadDecision.ChunkUnloadFacts(
                     beyondUnloadDistance: true,
                     jobRunning: jobRunning,
-                    processingLight: chunk.IsAwaitingMainThreadProcess || chunk.HasLightChangesToProcess,
+                    processingLight: chunk.HasLightChangesToProcess,
                     wouldStrandInRangeNeighbor: UnloadFacts == UnloadFactGathering.WithStrandGuard
                                                 && WouldStrandInRangeNeighbor(coord));
 

@@ -41,8 +41,8 @@ namespace Helpers
         /// threw is in an unknown state — a corrective pass must run rather than silently dropping it).</summary>
         void OnMergeFault(TKey key, Exception e);
 
-        /// <summary>Unconditional per-job cleanup (lighting: clear <c>IsAwaitingMainThreadProcess</c> +
-        /// release the job's containers; meshing: the MR-6 output return + the pooled input release). Runs in
+        /// <summary>Unconditional per-job cleanup (lighting: release the job's containers and drop the
+        /// per-job scratch; meshing: the MR-6 output return + the pooled input release). Runs in
         /// the merge <c>finally</c> even on a stage-2 fault, so a faulted job never lingers in the registry with
         /// disposed containers (the fidelity-B7 cascade).</summary>
         void ReleaseJob(TKey key);

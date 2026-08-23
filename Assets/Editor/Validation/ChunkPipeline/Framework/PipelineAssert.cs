@@ -97,7 +97,7 @@ namespace Editor.Validation.ChunkPipeline.Framework
 
         /// <summary>
         /// Asserts no <b>interior</b> chunk ends with a lighting flag set whose clear site is unreachable —
-        /// a settled pipeline has no pending lighting work and nothing parked mid-merge. Enforces a
+        /// a settled pipeline has no pending lighting work. Enforces a
         /// non-vacuity floor: at least one flag-driven schedule must have happened during the run.
         /// <para>The sweep is deliberately scoped to the caller's chunks rather than the whole world. A
         /// frontier chunk legitimately parks with <c>HasLightChangesToProcess</c> set while it waits for
@@ -128,16 +128,14 @@ namespace Editor.Validation.ChunkPipeline.Framework
             {
                 ChunkData chunk = fixture.GetChunk(interior[i].X, interior[i].Z);
                 if (chunk == null || !chunk.IsPopulated) continue;
-                if (!chunk.NeedsInitialLighting && !chunk.HasLightChangesToProcess && !chunk.IsAwaitingMainThreadProcess)
-                    continue;
+                if (!chunk.NeedsInitialLighting && !chunk.HasLightChangesToProcess) continue;
 
                 if (count < MAX_REPORTED_CHUNKS)
                 {
                     offenders.Append(count == 0 ? "" : ", ")
                         .Append($"{Describe(interior[i])}[")
                         .Append(chunk.NeedsInitialLighting ? "NeedsInitialLighting " : "")
-                        .Append(chunk.HasLightChangesToProcess ? "HasLightChangesToProcess " : "")
-                        .Append(chunk.IsAwaitingMainThreadProcess ? "IsAwaitingMainThreadProcess" : "")
+                        .Append(chunk.HasLightChangesToProcess ? "HasLightChangesToProcess" : "")
                         .Append(']');
                 }
 

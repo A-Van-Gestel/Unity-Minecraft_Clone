@@ -41,7 +41,7 @@ This project uses custom object pools (`DynamicPool<T>`, `ConcurrentDynamicPool<
 - Any field marked `[NonSerialized]`
 - Any field that is not part of the on-disk save format
 - Any runtime flag, counter, queue, or cached reference that accumulates state during a chunk's lifecycle
-- Any `bool` that gates pipeline progression (`NeedsInitialLighting`, `IsAwaitingMainThreadProcess`, etc.)
+- Any `bool` that gates pipeline progression (`NeedsInitialLighting`, `HasLightChangesToProcess`, etc.)
 
 ## Reset value guidelines
 

@@ -161,12 +161,6 @@ namespace Data
         }
 
         /// <summary>
-        /// A transient flag indicating that a lighting job for this chunk has completed, but its results (e.g., cross-chunk modifications) are still pending processing on the main thread.
-        /// </summary>
-        [NonSerialized]
-        public bool IsAwaitingMainThreadProcess = false;
-
-        /// <summary>
         /// Tracks the number of post-generation edge check rounds remaining for this chunk.
         /// When initial lighting stabilizes, this is decremented on each stabilization.
         /// Each round triggers a self-edge-check and neighbor edge checks, allowing
@@ -262,7 +256,6 @@ namespace Data
             // Lighting flags
             NeedsInitialLighting = false;
             HasLightChangesToProcess = false;
-            IsAwaitingMainThreadProcess = false;
             NeedsEdgeCheck = false;
             RemainingEdgeCheckRounds = 2;
 

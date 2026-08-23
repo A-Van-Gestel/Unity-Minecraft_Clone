@@ -11,7 +11,7 @@ regression does not happen.
 ## When to use this skill
 
 - Modifying `World.cs`, `WorldJobManager.cs`, `ChunkPoolManager.cs`, or anything under `Assets/Scripts/Jobs/` that touches generation, lighting, or meshing jobs.
-- Changes to `ChunkData.cs` that add, remove, or re-purpose a state flag (`IsPopulated`, `NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`, `IsAwaitingMainThreadProcess`, `IsLoading`).
+- Changes to `ChunkData.cs` that add, remove, or re-purpose a state flag (`IsPopulated`, `NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`, `IsLoading`).
 - Anything involving neighbor-readiness checks (`AreNeighborsDataReady`, `AreNeighborsReadyAndLit`).
 - User reports: "chunks are stuck", "meshing won't run", "lighting never settles", "generation queue backed up", "deadlock".
 

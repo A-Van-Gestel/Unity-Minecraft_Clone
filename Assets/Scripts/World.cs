@@ -414,31 +414,10 @@ public class World : MonoBehaviour, IMeshDrainHost
     /// <summary>Chunks stuck <c>IsLoading &amp;&amp; !IsPopulated</c> across two consecutive ~1s scans (dev/editor only; F1).</summary>
     public int StuckLoadingChunks => _stuckLoadingChunks;
 
-    // --- LP-1 lighting-invariant probes ---
-    // Two convention-only invariants from LIGHTING_PIPELINE_STATE_REFACTOR.md §2.4, instrumented so LP-3/LP-4
-    // land on observation rather than reasoning. Dev/editor-only (see CountAwaitingObservation /
-    // ScanSunlightQueuePairing); instance fields, so a fresh play session starts them at zero without a
-    // DomainReset line. Neither probe changes behavior.
-
-    // Probe 1 (F1): observations of IsAwaitingMainThreadProcess == true by a gate reader. F1's claim is that
-    // the flag's observable window is ~zero, so every one of these is expected to stay at zero forever.
-    private const string AWAIT_SITE_CARDINAL = "AreNeighborsReadyAndLit/cardinal";
-    private const string AWAIT_SITE_DIAGONAL = "AreNeighborsReadyAndLit/diagonal";
-    private const string AWAIT_SITE_UNLOAD = "UnloadChunks";
-
-    private long _awaitGateCardinal;
-    private long _awaitGateDiagonal;
-    private long _awaitUnload;
-    private bool _awaitProbeLogged;
-
-    /// <summary>Times a cardinal neighbor was seen <c>IsAwaitingMainThreadProcess</c> in the ready-and-lit gate (dev/editor only; LP-1 probe 1, F1).</summary>
-    public long AwaitObservedGateCardinal => _awaitGateCardinal;
-
-    /// <summary>Times a diagonal neighbor was seen <c>IsAwaitingMainThreadProcess</c> in the ready-and-lit gate (dev/editor only; LP-1 probe 1, F1).</summary>
-    public long AwaitObservedGateDiagonal => _awaitGateDiagonal;
-
-    /// <summary>Times an unload candidate was seen <c>IsAwaitingMainThreadProcess</c> (dev/editor only; LP-1 probe 1, F1).</summary>
-    public long AwaitObservedUnload => _awaitUnload;
+    // --- LP-1 lighting-invariant probe ---
+    // A convention-only invariant from LIGHTING_PIPELINE_STATE_REFACTOR.md §2.4, instrumented so LP-4 lands
+    // on observation rather than reasoning. Dev/editor-only (see ScanSunlightQueuePairing); instance fields,
+    // so a fresh play session starts them at zero without a DomainReset line. The probe changes no behavior.
 
     // Probe 2 (F6): sunlight-queue keys the fail-safe scan's predicate would skip. Gauge = this scan,
     // total = cumulative. The two non-violating skip reasons (no resident owner; resident but unpopulated)
@@ -1142,37 +1121,6 @@ public class World : MonoBehaviour, IMeshDrainHost
         foreach (ChunkData cd in worldData.ChunkValues)
             TrackStuckLoadingChunk(cd);
         FinalizeStuckLoadingScan();
-    }
-
-    /// <summary>
-    /// LP-1 probe 1 (F1), dev/editor only: records that a gate reader observed
-    /// <c>IsAwaitingMainThreadProcess</c> set. F1 claims the flag is cleared in the same pass that sets it,
-    /// so no reader can ever see it — every call here contradicts that and blocks LP-3. Warns once, then
-    /// tallies silently so a repeating observation cannot flood the console.
-    /// </summary>
-    /// <param name="chunkData">The chunk observed carrying the flag.</param>
-    /// <param name="site">Reader that made the observation, for the first-hit warning.</param>
-    [Conditional("UNITY_EDITOR")]
-    [Conditional("DEVELOPMENT_BUILD")]
-    private void CountAwaitingObservation(ChunkData chunkData, string site)
-    {
-        switch (site)
-        {
-            case AWAIT_SITE_CARDINAL: _awaitGateCardinal++; break;
-            case AWAIT_SITE_DIAGONAL: _awaitGateDiagonal++; break;
-            case AWAIT_SITE_UNLOAD: _awaitUnload++; break;
-
-            // Every site is named above. Falling here means a caller passed an unregistered site, which would
-            // otherwise be tallied against whichever counter default happened to point at.
-            default:
-                Debug.LogError($"[LP-1] Unregistered probe site '{site}' — the observation was not counted.");
-                return;
-        }
-
-        if (_awaitProbeLogged) return;
-        _awaitProbeLogged = true;
-        Debug.LogWarning($"[LP-1] IsAwaitingMainThreadProcess observed at {site} on chunk {chunkData.Position.ToString()} — " +
-                         "F1's zero-window claim is false; LP-3 is blocked. Further hits are counted, not logged.");
     }
 
     /// <summary>
@@ -3013,9 +2961,9 @@ public class World : MonoBehaviour, IMeshDrainHost
     /// <summary>
     /// Checks whether all 8 horizontal neighbors have finished generating their data and reached a stable
     /// lighting state. A neighbor is "ready" if no generation or lighting job is running for it and — when
-    /// populated — it has no pending light changes, no outstanding initial lighting pass, and nothing
-    /// awaiting the main-thread merge. This is the strict gate the border edge-check arm schedules against,
-    /// so an edge comparison never reads light that is still moving.
+    /// populated — it has no pending light changes and no outstanding initial lighting pass. This is the
+    /// strict gate the border edge-check arm schedules against, so an edge comparison never reads light
+    /// that is still moving.
     /// <para>Diagonals are checked alongside the cardinals because both mesh and lighting jobs copy data
     /// from all 8 neighbors; stale diagonal lighting shows up as seam artifacts at chunk corners.</para>
     /// </summary>
@@ -3030,20 +2978,10 @@ public class World : MonoBehaviour, IMeshDrainHost
 
             if (!IsChunkInWorld(neighborCoord)) continue;
 
-            NeighborReadinessDecision.NeighborFacts facts =
-                GatherNeighborFacts(neighborCoord, out ChunkData neighborData);
-            NeighborReadinessDecision.BlockReason reason =
-                NeighborReadinessDecision.Evaluate(NeighborReadinessDecision.Gate.ReadyAndLit, facts);
+            NeighborReadinessDecision.NeighborFacts facts = GatherNeighborFacts(neighborCoord);
 
-            // LP-1 probe 1 (F1). The reason is what makes one loop able to serve both probe sites: the
-            // offsets are ordered cardinals-first, so the index names the site.
-            if (reason == NeighborReadinessDecision.BlockReason.AwaitingMainThread)
-            {
-                CountAwaitingObservation(neighborData,
-                    i < VoxelData.CardinalNeighborCount ? AWAIT_SITE_CARDINAL : AWAIT_SITE_DIAGONAL);
-            }
-
-            if (reason != NeighborReadinessDecision.BlockReason.None) return false;
+            if (NeighborReadinessDecision.Evaluate(NeighborReadinessDecision.Gate.ReadyAndLit, facts)
+                != NeighborReadinessDecision.BlockReason.None) return false;
         }
 
         // If we get here, all neighbors are stable.
@@ -3058,13 +2996,10 @@ public class World : MonoBehaviour, IMeshDrainHost
     /// </summary>
     /// <param name="neighborCoord">The neighbor to gather facts for. Must already have passed
     /// <see cref="IsChunkInWorld"/> — out-of-world neighbors are skipped by the caller, not judged here.</param>
-    /// <param name="neighborData">The neighbor's chunk data, or null when it does not resolve. Returned for
-    /// the LP-1 probe's diagnostics; readiness itself is decided entirely from the returned facts.</param>
     /// <returns>The assembled facts.</returns>
-    private NeighborReadinessDecision.NeighborFacts GatherNeighborFacts(
-        ChunkCoord neighborCoord, out ChunkData neighborData)
+    private NeighborReadinessDecision.NeighborFacts GatherNeighborFacts(ChunkCoord neighborCoord)
     {
-        bool populated = worldData.TryGetChunk(neighborCoord.ToVoxelOrigin(), out neighborData)
+        bool populated = worldData.TryGetChunk(neighborCoord.ToVoxelOrigin(), out ChunkData neighborData)
                          && neighborData.IsPopulated;
 
         return new NeighborReadinessDecision.NeighborFacts(
@@ -3073,7 +3008,6 @@ public class World : MonoBehaviour, IMeshDrainHost
             existsAndPopulated: populated,
             needsInitialLighting: populated && neighborData.NeedsInitialLighting,
             hasLightChanges: populated && neighborData.HasLightChangesToProcess,
-            awaitingMainThread: populated && neighborData.IsAwaitingMainThreadProcess,
             lightingEnabled: settings.enableLighting);
     }
 
@@ -3099,7 +3033,7 @@ public class World : MonoBehaviour, IMeshDrainHost
             ChunkCoord neighborCoord = chunkCoord.Neighbor(offset.x, offset.z);
             if (!IsChunkInWorld(neighborCoord)) continue;
 
-            NeighborReadinessDecision.NeighborFacts facts = GatherNeighborFacts(neighborCoord, out _);
+            NeighborReadinessDecision.NeighborFacts facts = GatherNeighborFacts(neighborCoord);
             if (NeighborReadinessDecision.Evaluate(NeighborReadinessDecision.Gate.MeshReady, facts)
                 != NeighborReadinessDecision.BlockReason.None)
                 return false;
@@ -3148,7 +3082,7 @@ public class World : MonoBehaviour, IMeshDrainHost
             // Neighbors outside the world will never exist — treat as ready.
             if (!IsChunkInWorld(neighborCoord)) continue;
 
-            NeighborReadinessDecision.NeighborFacts facts = GatherNeighborFacts(neighborCoord, out _);
+            NeighborReadinessDecision.NeighborFacts facts = GatherNeighborFacts(neighborCoord);
             if (NeighborReadinessDecision.Evaluate(NeighborReadinessDecision.Gate.DataReady, facts)
                 != NeighborReadinessDecision.BlockReason.None)
                 return false;
@@ -3606,13 +3540,8 @@ public class World : MonoBehaviour, IMeshDrainHost
                                 || JobManager.MeshJobs.ContainsKey(chunkCoord)
                                 || JobManager.LightingJobs.ContainsKey(chunkCoord);
 
-            // LP-1 probe 1 (F1): observed on its own, ahead of the disjunction below, whose short-circuit
-            // would otherwise decide whether the flag is even read.
-            if (data.IsAwaitingMainThreadProcess) CountAwaitingObservation(data, AWAIT_SITE_UNLOAD);
-
             // Pending main-thread lighting work with no active job.
-            bool isProcessingLight = data.IsAwaitingMainThreadProcess ||
-                                     data.HasLightChangesToProcess;
+            bool isProcessingLight = data.HasLightChangesToProcess;
 
             // Safety: Don't unload if doing so would strand an IN-RANGE neighbor that needs this chunk's
             // data for lighting. Such a neighbor (HasLightChangesToProcess or NeedsInitialLighting) would

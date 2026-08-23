@@ -171,7 +171,8 @@ what this document ranks.
 - **Status (2026-08-22): 🟡 SLICE 1 SHIPPED** — `Minecraft Clone/Dev/Validate Chunk Pipeline`
   (`Assets/Editor/Validation/ChunkPipeline/`, 7 baselines `B1`–`B7`), the 25th registered suite. **`B7` was
   added by LP-2 (2026-08-23)** and is a different shape from `B1`–`B6`: not a pump run but a census of the
-  shared `NeighborReadinessDecision` predicate over all 3 gates × 2⁷ fact combinations, against an
+  shared `NeighborReadinessDecision` predicate over all 3 gates × 2⁶ fact combinations (192 in total, after
+  LP-3 retired one fact), against an
   independently written oracle. It is currently the **only** guard on the gate-term matrix — measured:
   inverting the predicate's `lightingInFlight` term reds `B7` alone, while `B1`–`B6` and all 106 lighting
   baselines stay green. The harness

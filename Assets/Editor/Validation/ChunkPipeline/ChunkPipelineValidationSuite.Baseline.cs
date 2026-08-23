@@ -11,16 +11,18 @@ namespace Editor.Validation.ChunkPipeline
     /// <summary>
     /// Baseline scenarios for the chunk-pipeline state machine. All must stay green; a failure is a
     /// regression in the gate composition, the scheduling arms, or the unload policy.
-    /// <para><b>Prove-red map — OBSERVED, not predicted (swept 2026-08-23).</b> Every mutation below was
-    /// applied in isolation, the suite run, and the red-set recorded; each was then reverted. All six
-    /// baselines have been observed failing at least once.</para>
+    /// <para><b>Prove-red map — OBSERVED, not predicted (swept 2026-08-23; the two rows that carry B5's and
+    /// B6's prove-red re-measured the same day, after LP-3 retired the flag whose row this map lost).</b>
+    /// Every mutation below was applied in isolation, the suite run, and the red-set recorded; each was then
+    /// reverted. B1–B6 have each been observed failing at least once here; B7 carries its own prove-red in
+    /// its docstring.</para>
     /// <list type="table">
-    /// <item><term>Pump's mesh gate → <c>AreNeighborsReadyAndLit</c></term><description>reds B3, B4, B6</description></item>
+    /// <item><term>Pump's mesh gate → <c>AreNeighborsReadyAndLit</c></term><description>reds B3, B4, B6 — B6's prove-red (re-measured post-LP-3)</description></item>
     /// <item><term>Budget break drops the work instead of leaving it ready</term><description>reds B4 alone</description></item>
-    /// <item><term>Skip the <c>IsAwaitingMainThreadProcess</c> clear in the completion <c>finally</c></term><description>reds B5, B6</description></item>
-    /// <item><term><c>World.AreNeighborsDataReady</c> always true</term><description>reds B1, B5</description></item>
+    /// <item><term><c>World.AreNeighborsDataReady</c> always true</term><description>reds B1, B5 — B5's prove-red (re-measured post-LP-3)</description></item>
     /// <item><term>Generation admission cap ignored (no staggering)</term><description>reds B2, B3</description></item>
     /// <item><term>Drop the <c>WouldStrandInRangeNeighbor</c> arm from <see cref="Helpers.ChunkUnloadDecision.Evaluate"/></term><description>reds B5 alone — B1 stays green, the intended asymmetry</description></item>
+    /// <item><term>Scan clears lighting flags in its <c>Park</c> branch (work dropped, not deferred)</term><description>reds B1, B2, B5, B6 — B3/B4 stay green; inside B6 only the clear/schedule balance fires, the end-state sweep does not</description></item>
     /// </list>
     /// <para><b>One prediction was wrong and is worth keeping.</b> B2's docstring used to claim that forcing
     /// <c>AreNeighborsDataReady</c> true would red it. It does not: target parks drop to zero, but B2's
@@ -49,7 +51,7 @@ namespace Editor.Validation.ChunkPipeline
             scenarios.Add(new Scenario(
                 "B6 Flag pairing: a converged neighbourhood leaves no chunk holding an unclearable lighting flag", B6FlagsPaired));
             scenarios.Add(new Scenario(
-                "B7 NeighborReadinessDecision census — all 3 gates × 2⁷ fact combinations match the gate contract (LP-2)", B7NeighborReadinessCensus));
+                "B7 NeighborReadinessDecision census — all 3 gates × 2⁶ fact combinations match the gate contract (LP-2)", B7NeighborReadinessCensus));
         }
 
         /// <summary>
@@ -296,13 +298,28 @@ namespace Editor.Validation.ChunkPipeline
         }
 
         /// <summary>
-        /// B6 — flag pairing. After a wave-front run settles, no populated chunk may still hold
-        /// <c>NeedsInitialLighting</c>, <c>HasLightChangesToProcess</c> or <c>IsAwaitingMainThreadProcess</c>:
-        /// every one of those has a clear site that must have been reachable. The assertion carries a
-        /// non-vacuity floor (flags must actually have been exercised) so it cannot pass on an idle world.
-        /// <para><b>Prove-red (observed):</b> skip the <c>IsAwaitingMainThreadProcess</c> clear in the pump's
-        /// lighting completion <c>finally</c> — the flag survives and B6 names the chunks holding it (B5 reds
-        /// too, since its phase 2 sweeps the same flag).</para>
+        /// B6 — flag pairing, asserted from both ends.
+        /// <list type="number">
+        /// <item><b>End state:</b> after a wave-front run settles, no populated chunk may still hold
+        /// <c>NeedsInitialLighting</c> or <c>HasLightChangesToProcess</c> — both have a clear site that must
+        /// have been reachable. Carries a non-vacuity floor (flags must actually have been exercised) so it
+        /// cannot pass on an idle world.</item>
+        /// <item><b>Clear/schedule balance:</b> across the whole run, the number of chunks the ready-set scan
+        /// clears flags on must equal the number of lighting jobs it schedules. The clear count is derived
+        /// from <c>ChunkData</c> state either side of the scan
+        /// (<see cref="ChunkPipelineSimulator.FrameResult.LightingFlagsCleared"/>), never from the code path
+        /// that clears — so this is a witness, not a restatement.</item>
+        /// </list>
+        /// <para>Half 2 exists because half 1 alone gives B6 no signal that B3/B4 do not already carry: every
+        /// flag-stranding mutation also breaks convergence. A scan that clears flags <i>without</i> scheduling
+        /// silently drops work and makes the pipeline converge <i>better</i>, so only the balance check sees
+        /// it.</para>
+        /// <para><b>Prove-red (observed):</b> half 1 — point the pump's mesh gate at
+        /// <c>AreNeighborsReadyAndLit</c>: the stricter gate starves the wave front, chunks end holding
+        /// <c>HasLightChangesToProcess</c>, and B6 names them (B3 and B4 red too). Half 2 — clear the flags
+        /// in the scan's <c>Park</c> branch: measured 30 clears against 18 schedules, and half 1 stayed
+        /// <b>green</b> on the same run, which is the whole point of adding it. That mutation reds B1/B2/B5/B6 but
+        /// leaves <b>B3 and B4 green</b> — the overlap half 1 could not escape.</para>
         /// </summary>
         private static bool B6FlagsPaired()
         {
@@ -320,6 +337,22 @@ namespace Editor.Validation.ChunkPipeline
                 bool converged = sim.RunUntilConverged(FRAME_BUDGET, targets, out ChunkPipelineSimulator.FrameResult totals);
                 ok = PipelineAssert.FlagsPaired("settled pipeline holds no stranded flags", fixture, targets,
                     totals.LightingScheduled, log);
+
+                // Half 2 — the clear/schedule balance. Derived from chunk state either side of the scan, so
+                // a scan that clears flags without scheduling (work dropped silently, pipeline converges
+                // BETTER) fails here and nowhere else in this suite.
+                if (totals.LightingFlagsCleared != totals.LightingScheduled)
+                {
+                    log.AppendLine($"  [FAIL] clear/schedule balance — the scan cleared lighting flags on " +
+                                   $"{totals.LightingFlagsCleared} chunk(s) but scheduled " +
+                                   $"{totals.LightingScheduled} job(s); every clear must buy a scheduled job");
+                    ok = false;
+                }
+                else
+                {
+                    log.AppendLine($"  [PASS] clear/schedule balance — {totals.LightingFlagsCleared} flag " +
+                                   "clear(s), each paired with a scheduled lighting job");
+                }
 
                 // The docstring claims a *settled* run; without this, B6 would green on a run that never
                 // converged so long as the target flags happened to be clear.
@@ -407,7 +440,7 @@ namespace Editor.Validation.ChunkPipeline
         }
 
         /// <summary>
-        /// B7 — sweeps all three <see cref="NeighborReadinessDecision.Gate"/> values against all 2⁷
+        /// B7 — sweeps all three <see cref="NeighborReadinessDecision.Gate"/> values against all 2⁶
         /// <see cref="NeighborReadinessDecision.NeighborFacts"/> combinations and asserts each result equals
         /// <see cref="ExpectedBlockReason"/>, an independent restatement of the gate contract.
         /// <para>B1–B6 exercise the gates through the pump, where a term swap can still converge and go
@@ -433,19 +466,18 @@ namespace Editor.Validation.ChunkPipeline
 
             foreach (NeighborReadinessDecision.Gate gate in gates)
             {
-                for (int mask = 0; mask < 128; mask++)
+                for (int mask = 0; mask < 64; mask++)
                 {
                     bool generationInFlight = (mask & 1) != 0;
                     bool lightingInFlight = (mask & 2) != 0;
                     bool existsAndPopulated = (mask & 4) != 0;
                     bool needsInitialLighting = (mask & 8) != 0;
                     bool hasLightChanges = (mask & 16) != 0;
-                    bool awaitingMainThread = (mask & 32) != 0;
-                    bool lightingEnabled = (mask & 64) != 0;
+                    bool lightingEnabled = (mask & 32) != 0;
 
                     NeighborReadinessDecision.NeighborFacts facts = new NeighborReadinessDecision.NeighborFacts(
                         generationInFlight, lightingInFlight, existsAndPopulated, needsInitialLighting,
-                        hasLightChanges, awaitingMainThread, lightingEnabled);
+                        hasLightChanges, lightingEnabled);
 
                     NeighborReadinessDecision.BlockReason expected = ExpectedBlockReason(gate, facts);
                     NeighborReadinessDecision.BlockReason actual = NeighborReadinessDecision.Evaluate(gate, facts);
@@ -455,7 +487,7 @@ namespace Editor.Validation.ChunkPipeline
 
                     mismatches.AppendLine(
                         $"    {gate}: gen={generationInFlight}, light={lightingInFlight}, pop={existsAndPopulated}, " +
-                        $"init={needsInitialLighting}, changes={hasLightChanges}, await={awaitingMainThread}, " +
+                        $"init={needsInitialLighting}, changes={hasLightChanges}, " +
                         $"lightingEnabled={lightingEnabled}: expected {expected}, got {actual}");
                 }
             }
@@ -476,6 +508,10 @@ namespace Editor.Validation.ChunkPipeline
         /// NOT a call into <see cref="NeighborReadinessDecision.Evaluate"/>, so a mutation to the production
         /// predicate diverges from it (the prove-red mechanism). Transcribed from the three original
         /// <c>World</c> loops, not from the extracted code.
+        /// <para><b>What this independence does not cover:</b> retiring a term edits the predicate and this
+        /// oracle in the same change, so B7 stays green through the removal by construction. It witnesses a
+        /// term that <i>misbehaves</i>, never a term that <i>disappears</i> — LP-3 removed
+        /// <c>AwaitingMainThread</c> under exactly that blind spot.</para>
         /// </summary>
         /// <param name="gate">The gate whose rules to apply.</param>
         /// <param name="facts">The neighbor facts to judge.</param>
@@ -506,7 +542,6 @@ namespace Editor.Validation.ChunkPipeline
 
             if (facts.HasLightChanges) return NeighborReadinessDecision.BlockReason.PendingLightWork;
             if (facts.NeedsInitialLighting) return NeighborReadinessDecision.BlockReason.NeedsInitialLighting;
-            if (facts.AwaitingMainThread) return NeighborReadinessDecision.BlockReason.AwaitingMainThread;
 
             return NeighborReadinessDecision.BlockReason.None;
         }

@@ -43,12 +43,9 @@ namespace Helpers
         }
 
         /// <summary>
-        /// Why one neighbor blocks its gate, or <see cref="BlockReason.None"/> when it does not. The reason is
-        /// load-bearing, not decoration: <c>World</c> tallies <see cref="BlockReason.AwaitingMainThread"/>
-        /// observations for the LP-1 probe, which is the evidence LP-3 retires
-        /// <c>IsAwaitingMainThreadProcess</c> on. Members are ordered to match each gate's short-circuit
-        /// order, so the reason names the term that actually fired first rather than an arbitrary one of
-        /// several true terms.
+        /// Why one neighbor blocks its gate, or <see cref="BlockReason.None"/> when it does not. Members are
+        /// ordered to match each gate's short-circuit order, so the reason names the term that actually fired
+        /// first rather than an arbitrary one of several true terms.
         /// </summary>
         public enum BlockReason : byte
         {
@@ -76,11 +73,6 @@ namespace Helpers
             /// Blocks <see cref="Gate.ReadyAndLit"/>, and <see cref="Gate.MeshReady"/> when lighting is
             /// enabled (with lighting off the sunlight fill supplies brightness instead).</summary>
             NeedsInitialLighting,
-
-            /// <summary>The neighbor's completed lighting job is waiting to be merged on the main thread.
-            /// Blocks <see cref="Gate.ReadyAndLit"/> only. Expected to be unobservable in practice — the
-            /// claim LP-1's probe 1 exists to test.</summary>
-            AwaitingMainThread,
         }
 
         /// <summary>
@@ -109,10 +101,6 @@ namespace Helpers
             /// <see cref="ExistsAndPopulated"/>.</summary>
             public readonly bool HasLightChanges;
 
-            /// <summary><c>ChunkData.IsAwaitingMainThreadProcess</c>. Only meaningful when
-            /// <see cref="ExistsAndPopulated"/>.</summary>
-            public readonly bool AwaitingMainThread;
-
             /// <summary><c>Settings.enableLighting</c>. A world-level fact, carried per neighbor so the
             /// predicate stays a pure function of its argument.</summary>
             public readonly bool LightingEnabled;
@@ -123,7 +111,6 @@ namespace Helpers
             /// <param name="existsAndPopulated">See <see cref="ExistsAndPopulated"/>.</param>
             /// <param name="needsInitialLighting">See <see cref="NeedsInitialLighting"/>.</param>
             /// <param name="hasLightChanges">See <see cref="HasLightChanges"/>.</param>
-            /// <param name="awaitingMainThread">See <see cref="AwaitingMainThread"/>.</param>
             /// <param name="lightingEnabled">See <see cref="LightingEnabled"/>.</param>
             public NeighborFacts(
                 bool generationInFlight,
@@ -131,7 +118,6 @@ namespace Helpers
                 bool existsAndPopulated,
                 bool needsInitialLighting,
                 bool hasLightChanges,
-                bool awaitingMainThread,
                 bool lightingEnabled)
             {
                 GenerationInFlight = generationInFlight;
@@ -139,7 +125,6 @@ namespace Helpers
                 ExistsAndPopulated = existsAndPopulated;
                 NeedsInitialLighting = needsInitialLighting;
                 HasLightChanges = hasLightChanges;
-                AwaitingMainThread = awaitingMainThread;
                 LightingEnabled = lightingEnabled;
             }
         }
@@ -152,8 +137,8 @@ namespace Helpers
         /// <list type="bullet">
         /// <item><see cref="Gate.DataReady"/> — generation in flight, or not populated.</item>
         /// <item><see cref="Gate.ReadyAndLit"/> — generation in flight, or lighting in flight, or (when
-        /// populated) pending light changes / needs initial lighting / awaiting the main-thread merge. An
-        /// unpopulated neighbor does <b>not</b> block: it has no light to settle.</item>
+        /// populated) pending light changes / needs initial lighting. An unpopulated neighbor does
+        /// <b>not</b> block: it has no light to settle.</item>
         /// <item><see cref="Gate.MeshReady"/> — generation in flight, or not populated, or (only when
         /// lighting is enabled) needs initial lighting. Lighting in flight and pending light changes are
         /// tolerated on purpose.</item>
@@ -183,7 +168,6 @@ namespace Helpers
 
                     if (facts.HasLightChanges) return BlockReason.PendingLightWork;
                     if (facts.NeedsInitialLighting) return BlockReason.NeedsInitialLighting;
-                    if (facts.AwaitingMainThread) return BlockReason.AwaitingMainThread;
 
                     return BlockReason.None;
 

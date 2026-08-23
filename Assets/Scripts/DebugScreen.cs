@@ -504,9 +504,6 @@ public class DebugScreen : MonoBehaviour
         _middleLeftBuilder.Append("Deserialize failures: ").Append(ChunkSerializer.DeserializeFailures).AppendLine();
         _middleLeftBuilder.Append("Load-arm faults (dev): ").Append(World.LoadArmFaults).AppendLine();
         _middleLeftBuilder.Append("Stuck loading (dev): ").Append(_world.StuckLoadingChunks).AppendLine();
-        _middleLeftBuilder.Append("Awaiting-flag seen (dev) — cardinal: ").Append(_world.AwaitObservedGateCardinal)
-            .Append(" | diagonal: ").Append(_world.AwaitObservedGateDiagonal)
-            .Append(" | unload: ").Append(_world.AwaitObservedUnload).AppendLine();
         _middleLeftBuilder.Append("Sunlight queue unflagged (dev) — now: ").Append(_world.SunlightQueueUnflagged)
             .Append(" | total: ").Append(_world.SunlightQueueUnflaggedTotal).AppendLine();
         _middleLeftBuilder.Append(" └ Non-violating — orphaned: ").Append(_world.SunlightQueueOrphaned)
