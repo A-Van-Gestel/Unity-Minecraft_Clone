@@ -195,7 +195,19 @@ namespace Editor.Validation.Lighting
             // unchanged and still run. Lives in Baselines/LightingValidationSuite.Baseline.C14ChannelMirrors.cs
             // and self-registers here. ---
             AddC14ChannelMirrorBaselineScenarios(scenarios);
+
+            // --- LP-4 transition census (B115-B118): the LightingWork mutation layer, asserted directly on
+            // ChunkData rather than through a world. B115 pins each transition method to its census bit
+            // mask, B116 keeps the P9-2 cascade's three outcomes three at the mutation layer, B117 pins the
+            // callback contract (incl. LP-4's one accepted delta: a combined arm fires once, not twice), and
+            // B118 sweeps for the EdgeCheck-without-LightChanges half-arm behind three historical
+            // deadlocks. Lives in Baselines/LightingValidationSuite.Baseline.LightingWorkTransitions.cs. ---
+            AddLightingWorkTransitionBaselineScenarios(scenarios);
         }
+
+        /// <summary>Hook for the LP-4 transition-census baselines B115-B118 (implemented in Baselines/LightingValidationSuite.Baseline.LightingWorkTransitions.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddLightingWorkTransitionBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the C14 mixed-channel mirror baselines B108-B114 (implemented in Baselines/LightingValidationSuite.Baseline.C14ChannelMirrors.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
