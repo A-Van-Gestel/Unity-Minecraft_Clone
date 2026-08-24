@@ -153,54 +153,54 @@ namespace Editor.Validation.Lighting
 
             try
             {
-                int fires = 0;
+                FireCounter fires = new FireCounter();
                 ChunkData subject = MakeChunkWithWork(LightingWork.None);
-                ChunkData.OnLightWorkFlagged = _ => fires++;
+                ChunkData.OnLightWorkFlagged = _ => fires.Count++;
 
-                fires = 0;
+                fires.Reset();
                 subject.FlagLightWork();
-                passed &= LightingAssert.IsTrue(fires == 1,
-                    "B117: a rising bit fires once", $"fires = {fires}");
+                passed &= LightingAssert.IsTrue(fires.Count == 1,
+                    "B117: a rising bit fires once", $"fires = {fires.Count}");
 
-                fires = 0;
+                fires.Reset();
                 subject.FlagLightWork();
-                passed &= LightingAssert.IsTrue(fires == 0,
-                    "B117: re-flagging an already-set bit does not fire", $"fires = {fires}");
+                passed &= LightingAssert.IsTrue(fires.Count == 0,
+                    "B117: re-flagging an already-set bit does not fire", $"fires = {fires.Count}");
 
-                fires = 0;
+                fires.Reset();
                 subject.ClearLightWork();
-                passed &= LightingAssert.IsTrue(fires == 0,
-                    "B117: clearing a bit does not fire", $"fires = {fires}");
+                passed &= LightingAssert.IsTrue(fires.Count == 0,
+                    "B117: clearing a bit does not fire", $"fires = {fires.Count}");
 
-                fires = 0;
+                fires.Reset();
                 subject.ClearAllLightingWork();
-                passed &= LightingAssert.IsTrue(fires == 0,
-                    "B117: a no-op write does not fire", $"fires = {fires}");
+                passed &= LightingAssert.IsTrue(fires.Count == 0,
+                    "B117: a no-op write does not fire", $"fires = {fires.Count}");
 
                 // The accepted delta: both bits rise in one call, one notification.
-                fires = 0;
+                fires.Reset();
                 subject.FlagNeighborEdgeCheck();
-                passed &= LightingAssert.IsTrue(fires == 1,
-                    "B117: a combined two-bit arm fires ONCE, not twice", $"fires = {fires}");
+                passed &= LightingAssert.IsTrue(fires.Count == 1,
+                    "B117: a combined two-bit arm fires ONCE, not twice", $"fires = {fires.Count}");
 
                 ChunkData cascade = MakeChunkWithWork(LightingWork.None);
-                fires = 0;
+                fires.Reset();
                 cascade.SpendEdgeCheckRound(rearm: true);
-                passed &= LightingAssert.IsTrue(fires == 1,
-                    "B117: the cascade re-arm fires ONCE for its two bits", $"fires = {fires}");
+                passed &= LightingAssert.IsTrue(fires.Count == 1,
+                    "B117: the cascade re-arm fires ONCE for its two bits", $"fires = {fires.Count}");
 
                 ChunkData spendOnly = MakeChunkWithWork(LightingWork.None);
-                fires = 0;
+                fires.Reset();
                 spendOnly.SpendEdgeCheckRound(rearm: false);
-                passed &= LightingAssert.IsTrue(fires == 0,
-                    "B117: a spent-but-not-re-armed round never notifies the scheduler", $"fires = {fires}");
+                passed &= LightingAssert.IsTrue(fires.Count == 0,
+                    "B117: a spent-but-not-re-armed round never notifies the scheduler", $"fires = {fires.Count}");
 
                 // A partial rise still notifies: EdgeCheck already set, LightChanges rising.
                 ChunkData partial = MakeChunkWithWork(LightingWork.EdgeCheck);
-                fires = 0;
+                fires.Reset();
                 partial.FlagNeighborEdgeCheck();
-                passed &= LightingAssert.IsTrue(fires == 1,
-                    "B117: a combined arm still fires when only one of its bits is rising", $"fires = {fires}");
+                passed &= LightingAssert.IsTrue(fires.Count == 1,
+                    "B117: a combined arm still fires when only one of its bits is rising", $"fires = {fires.Count}");
 
                 return passed;
             }
@@ -250,6 +250,19 @@ namespace Editor.Validation.Lighting
             return LightingAssert.IsTrue(failures.Count == 0,
                 "B118: no arming transition leaves EdgeCheck set without LightChanges",
                 failures.Count == 0 ? null : string.Join("\n", failures));
+        }
+
+        /// <summary>
+        /// Mutable fire-count holder for B117. The sink lambda captures the holder, never a local int, so
+        /// resetting between assertions does not reassign a captured variable.
+        /// </summary>
+        private sealed class FireCounter
+        {
+            /// <summary>Number of <c>OnLightWorkFlagged</c> invocations since the last reset.</summary>
+            public int Count;
+
+            /// <summary>Zeroes the counter between assertions.</summary>
+            public void Reset() => Count = 0;
         }
 
         /// <summary>
