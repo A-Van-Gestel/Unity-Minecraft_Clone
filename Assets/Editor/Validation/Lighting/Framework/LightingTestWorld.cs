@@ -602,7 +602,9 @@ namespace Editor.Validation.Lighting.Framework
             // set, then the flag is cleared on schedule (mirror of production reading + clearing
             // ChunkData.NeedsEdgeCheck in ScheduleLightingUpdate). Driving off the real flag means a
             // missed reset of it on pool recycle would alter scheduling — observable (B4).
-            bool edgeCheck = performEdgeCheck || chunk.Data.NeedsEdgeCheck;
+            // The derivation itself is the SHARED ScheduledEdgeCheckDecision production calls, so the
+            // harness's extra explicit-request term cannot drift away from production's flag-only read.
+            bool edgeCheck = ScheduledEdgeCheckDecision.Evaluate(chunk.Data.NeedsEdgeCheck, performEdgeCheck);
             chunk.Data.ClearEdgeCheck();
 
             LightingJobFlight flight = new LightingJobFlight { Coord = chunkCoord };

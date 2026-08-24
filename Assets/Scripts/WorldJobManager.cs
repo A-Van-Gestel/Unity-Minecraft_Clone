@@ -825,6 +825,11 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         // linear allocator handles better.
         bool usePooledBuffers = allocator == Allocator.Persistent;
 
+        // Read the edge-check flag ONCE, here, and hand the same value to both consumers below (the band
+        // derivation and the job field) — see the contract on this method. Production never forces an edge
+        // check independently of the flag; only the editor harness passes the second term.
+        bool performEdgeCheck = ScheduledEdgeCheckDecision.Evaluate(chunkData.NeedsEdgeCheck, false);
+
         // If anything below throws, the catch releases every buffer acquired so far
         // (Return/Dispose skip uncreated entries), so the pool never leaks.
         LightingJobData jobData = new LightingJobData { UsesPooledBuffers = usePooledBuffers };
@@ -887,7 +892,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                     in w, in e, in s, in n, in sw, in nw, in se, in ne,
                     math.max(maxSunNodeY, maxBlockNodeY),
                     jobData.SunLightRecalcQueue.Count > 0,
-                    chunkData.NeedsEdgeCheck);
+                    performEdgeCheck);
 
                 bandTopLight = LightingBandDecision.BuildTopLightTable(in centerTop,
                     in w, in e, in s, in n, in sw, in nw, in se, in ne);
@@ -937,7 +942,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 CrossChunkLightMods = jobData.Mods,
                 PullBackClaims = jobData.PullBackClaims,
                 IsStable = jobData.IsStable,
-                PerformEdgeCheck = chunkData.NeedsEdgeCheck,
+                PerformEdgeCheck = performEdgeCheck,
             };
             // P-2 Layer 1: wire the worker-thread gather's sources (center + 8 neighbors) in one place.
             job.SetGatherSources(neighbors, jobData.Map, jobData.LightMap);
