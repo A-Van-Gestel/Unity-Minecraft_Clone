@@ -1,11 +1,14 @@
 namespace Helpers
 {
     /// <summary>
-    /// Decides whether a lighting job being scheduled runs its border edge check. Both schedulers derive
-    /// the value once, here, and hand the same result to its two consumers: the job's
-    /// <c>PerformEdgeCheck</c> field and LI-2's <see cref="LightingBandDecision.DeriveBandHeight"/> (where
-    /// it admits the neighbor→center cross-seam term and can widen the Y-band). One derivation for both
-    /// keeps the two from steering different behavior — the drift surface finding F4 named.
+    /// Decides whether a lighting job being scheduled runs its border edge check.
+    /// <para>
+    /// The result has <b>two</b> consumers and both must receive the same value: the job's
+    /// <c>PerformEdgeCheck</c> field, and LI-2's <see cref="LightingBandDecision.DeriveBandHeight"/>, where
+    /// it admits the neighbor→center cross-seam term and can widen the Y-band. Deriving it once per
+    /// schedule is what keeps the two from steering different behavior — the drift surface finding F4
+    /// named. Re-reading <c>ChunkData.NeedsEdgeCheck</c> at either consumer re-opens it.
+    /// </para>
     /// <para>
     /// Distinct from <see cref="EdgeCheckCascadeDecision"/>, which owns the opposite end of the lifecycle:
     /// whether a <i>completed</i> pass re-arms the flag. This type only reads it.
@@ -23,16 +26,10 @@ namespace Helpers
         /// <summary>
         /// Evaluates whether the job about to be scheduled performs its border edge check.
         /// </summary>
-        /// <remarks>
-        /// <paramref name="explicitRequest"/> is why this is shared code rather than a local: the harness
-        /// forces edge checks on flag-clear chunks for scenario setup, production never does. Both terms
-        /// live in one documented function so that difference stays visible.
-        /// </remarks>
-        /// <param name="needsEdgeCheck">The chunk's <c>ChunkData.NeedsEdgeCheck</c> flag. Set by the disk-load
-        /// arm, the post-stabilization cascade, and neighbor propagation; consumed here and cleared by
+        /// <param name="needsEdgeCheck">The chunk's <c>ChunkData.NeedsEdgeCheck</c> flag, cleared by
         /// <c>ChunkData.OnLightingJobScheduled()</c> once the schedule succeeds.</param>
-        /// <param name="explicitRequest">A caller-forced edge check independent of the flag. Always
-        /// <c>false</c> in production; the editor harness passes <c>true</c> to stage a border scenario.</param>
+        /// <param name="explicitRequest">Forces the edge check independently of the flag, for a caller
+        /// staging a border scenario on a flag-clear chunk. Pass <c>false</c> to ride the flag alone.</param>
         /// <returns>True when the scheduled job runs its edge check.</returns>
         public static bool Evaluate(bool needsEdgeCheck, bool explicitRequest)
         {

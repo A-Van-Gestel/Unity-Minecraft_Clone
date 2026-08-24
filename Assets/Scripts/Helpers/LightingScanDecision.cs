@@ -1,11 +1,13 @@
 /// <summary>
-/// Pure decision function for the per-chunk arm of the lighting scheduler's ready-set scan.
-/// Both <c>World.Update</c>'s scheduling phase and the editor validation <c>LightingFrameSimulator</c>
-/// (AS-2 scheduler mode) call this, so the two can never silently disagree on which arm a flagged,
-/// ready chunk takes — the completion of the shared-guard pattern started by
-/// <see cref="LightingScheduleDecision"/> (which covers only the in-flight / neighbors-data-ready gate).
-/// The caller performs the side effects (schedule / remove / park) and the per-frame budget throttle;
-/// this is a pure map from a chunk's current flag + gate state to the intended arm.
+/// Pure decision function for the per-chunk arm of the lighting scheduler's ready-set scan: a map from a
+/// chunk's current flag + gate state to the arm it should take. Callers own the side effects (schedule /
+/// remove / park) and any per-frame budget throttle.
+/// <para>
+/// This is the sole arm-selection rule for the engine — it exists so that no scheduling path can hold a
+/// private opinion of which arm a flagged, ready chunk takes. Adding a second implementation defeats its
+/// purpose. Completes the shared-guard pattern started by <see cref="LightingScheduleDecision"/>, which
+/// covers only the in-flight / neighbors-data-ready gate.
+/// </para>
 /// See Documentation/Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md §4 (AS-2) / §10 (HF-4).
 /// </summary>
 public static class LightingScanDecision
@@ -38,7 +40,8 @@ public static class LightingScanDecision
     /// flags remain but whose gate failed (or whose job is still in flight) is parked for a promotion event.
     /// </summary>
     /// <remarks>
-    /// <b>Caller contract</b> (both callers must implement it identically):
+    /// <b>Caller contract.</b> A caller that keeps ready/waiting sets must implement all three bullets
+    /// identically — divergence here is the drift this type exists to prevent:
     /// <list type="bullet">
     /// <item><c>Park</c> → <c>MarkWaiting(pos)</c>.</item>
     /// <item><c>Remove</c> → <c>Remove(pos)</c>.</item>
@@ -46,12 +49,18 @@ public static class LightingScanDecision
     /// effects (initial: full sunlight recalc; edge: set <c>HasLightChangesToProcess</c> so a chunk with only
     /// an edge check can schedule), then attempt the schedule. On <b>success</b> the schedule clears every
     /// lighting flag, so the caller <c>Remove(pos)</c>s the chunk — it re-enters the ready set only via its
-    /// completion's flag callback (if it re-flags unstable) or a <c>PromoteNeighborhood</c> event. On the
-    /// (in-scan unreachable — the gates are pre-checked here) event that the schedule is declined, the caller
-    /// <c>MarkWaiting(pos)</c>s instead (production's end-of-loop <c>!scheduledAny</c> → park).</item>
+    /// completion's flag callback (if it re-flags unstable) or a <c>PromoteNeighborhood</c> event. A declined
+    /// schedule (unreachable from a scan — the gates are pre-checked here) parks the chunk instead.</item>
     /// </list>
-    /// This mirrors production's post-schedule bookkeeping (<c>World.Update</c> ready-set loop end): a
-    /// successfully-scheduled chunk has no flags left and is removed, NOT left in the ready set.
+    /// The load-bearing half is that a successfully-scheduled chunk has no flags left and is <b>removed</b>,
+    /// never left in the ready set.
+    /// <para>
+    /// A caller that keeps <i>no</i> sets — a sweep that re-visits every chunk until nothing is actionable —
+    /// treats <c>Park</c> and <c>Remove</c> as no-ops. Such a caller may also split <c>ScheduleInitial</c>,
+    /// running the recalc for its whole set before scheduling any of it; that ordering is required, not
+    /// optional, because the recalc sets <c>HasLightChangesToProcess</c>, which is a term in the edge arm's
+    /// neighbor gate — interleaving the two lets iteration order decide which chunks reach the edge arm.
+    /// </para>
     /// </remarks>
     /// <param name="jobInFlight">A lighting job is already running for this chunk (production: <c>LightingJobs.ContainsKey</c>).</param>
     /// <param name="needsInitialLighting"><c>ChunkData.NeedsInitialLighting</c>.</param>
