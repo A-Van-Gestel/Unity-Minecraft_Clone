@@ -185,8 +185,11 @@ namespace Data
 
         /// <summary>
         /// Arms a neighbor's edge check on this chunk (census row 10b's cardinal triggers). Sets both bits
-        /// together: an edge check with no light-changes bit cannot satisfy the schedule guard, so a
-        /// half-armed chunk would hold the flag with no path to spend it.
+        /// in one call so the chunk can reschedule under <b>either</b> scan arm — the strict edge arm
+        /// (<c>AreNeighborsReadyAndLit</c>) or the relaxed regular arm (<c>AreNeighborsDataReady</c>, the
+        /// weak-gate fallback) — which is what the two separate writes this replaced did.
+        /// A lone <c>EdgeCheck</c> is a legal state (disk-load-stable arms one deliberately); it simply
+        /// waits on the strict arm, which pre-sets the companion itself before scheduling.
         /// </summary>
         public void FlagNeighborEdgeCheck() =>
             SetWork(_lightingWork | LightingWork.EdgeCheck | LightingWork.LightChanges);

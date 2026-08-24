@@ -41,9 +41,13 @@ answers "is this chunk quiet".
 | `ClearEdgeCheck()` / `ClearLightWork()` | single-bit clears — **editor harness only**, see §4 |
 | `ClearAllLightingWork()` | `= None` (lighting disabled, pool recycle) |
 
-**The invariant this buys:** an edge check can never be armed without its `LightChanges` companion. A
-half-armed chunk cannot satisfy the schedule guard, so it would hold the flag with no path to spend it —
-the shape behind three historical pipeline deadlocks. Baselines B115–B119 guard the mapping.
+**What this buys:** the *combined* arming transitions — `FlagNeighborEdgeCheck` and the cascade re-arm —
+set `EdgeCheck` and `LightChanges` in one indivisible call, so a post-merge chunk stays schedulable under
+both the strict edge arm and the relaxed regular one. Splitting them would silently narrow it to the strict
+arm and change reconciliation timing. A **lone** `EdgeCheck` is legal and used in production (the
+disk-load-stable arm at `World.cs`): such a chunk waits on the strict edge gate, which pre-sets the
+companion itself before scheduling — see the `0 0 1` row of the design doc's reachable-combination table.
+Baselines B115–B119 guard the mapping.
 
 | Flag                          | Type | Set By                                                                                                                                                                      | Cleared By                                                                                                                                                                                                                                                                          | Purpose                                                                                                                        |
 |-------------------------------|------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|

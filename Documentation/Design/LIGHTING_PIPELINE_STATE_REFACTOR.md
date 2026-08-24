@@ -1,7 +1,7 @@
 # Lighting Pipeline State & Gate Refactor (LP-*)
 
-**Version:** 1.3  
-**Date:** 2026-07-06  
+**Version:** 1.5  
+**Date:** 2026-08-24  
 **Status:** Partially implemented — **LP-1, LP-2 and LP-3 shipped 2026-08-23; LP-4 shipped 2026-08-24** (code complete + in-game confirmed — see its Amended line). LP-5…LP-7 remain proposed. §2 re-audited against HEAD on 2026-08-23.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
@@ -755,11 +755,18 @@ read back live from the running editor. Zero errors and zero lighting warnings a
 
 | Check | Flight + border edits | After save/reload |
 |---|---|---|
-| **`EdgeCheck` armed without `LightChanges`** | **0 / 848 chunks** | **0 / 838 chunks** |
+| **`EdgeCheck` set without `LightChanges`** (see caveat) | **0 / 848 chunks** | **0 / 838 chunks** |
 | In-range chunks populated / visual / active | 441 / 441 / 441 | 441 / 441 / 441 |
 | Pending lighting work inside render range | 0 | 0 |
 | Parked chunks | 110, all at rings 13–16 (vd=10) | 69, all at rings 13–16 |
 | Lighting / generation / mesh jobs | 0 / 0 / 0 | 0 / 0 / 0 |
+
+> **Caveat on the first row, added after the LP-4 code review.** A lone `EdgeCheck` is a **legal** state,
+> not a defect — §2.3's `0 0 1` row, produced by the disk-load-stable arm and drained by the strict edge
+> gate. Both censuses were taken on a quiesced world where `E = 0` everywhere, so the zeros show that no
+> chunk was mid-edge-check at that instant; they do **not** establish an invariant. What LP-4 actually
+> guarantees is narrower: the *combined* arming transitions cannot set one bit without the other, which is
+> what B118 tests.
 
 Two results carry more than "it works":
 
@@ -906,4 +913,4 @@ Two results carry more than "it works":
 
 ---
 
-**Last Updated:** 2026-08-24 (**v1.5 — LP-4 SHIPPED**; the three lighting bools are one `LightingWork` byte behind a transition API, every write in the repo routes through it, B115–B119 guard the mutation layer, and an in-game session confirmed zero half-armed chunks across 848 and 838 chunks plus a clean serializer round-trip — see LP-4's Amended line) **Next Review:** LP-5 (read LP-4's Amended line first, and treat its two headline findings as inputs: **no validation harness can reach production's merge**, so anything living in `MergeCompletedLightingJob` is unguarded by construction; and **both** of LP-4's predicted prove-reds were wrong — three phases running now, so predict nothing and measure everything. LP-5 also inherits two filed follow-ups: retiring the harness's split schedule-clear, and the one line the cascade guard still cannot witness)
+**Last Updated:** 2026-08-24 (**v1.5 — LP-4 SHIPPED**; the three lighting bools are one `LightingWork` byte behind a transition API, every write in the repo routes through it, B115–B119 guard the mutation layer, and an in-game session confirmed a clean serializer round-trip and a fully converged render set — see LP-4's Amended line) **Next Review:** LP-5 (read LP-4's Amended line first, and treat its two headline findings as inputs: **no validation harness can reach production's merge**, so anything living in `MergeCompletedLightingJob` is unguarded by construction; and **both** of LP-4's predicted prove-reds were wrong — three phases running now, so predict nothing and measure everything. LP-5 also inherits two filed follow-ups: retiring the harness's split schedule-clear, and the one line the cascade guard still cannot witness)
