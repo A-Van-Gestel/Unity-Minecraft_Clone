@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Editor.Validation.Lighting.Framework;
+using Helpers;
 using UnityEngine;
 using Scenario = Editor.Validation.Framework.Scenario;
 
