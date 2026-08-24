@@ -221,7 +221,7 @@ namespace Editor.Validation.Lighting.Framework
         /// Installs a sink for the static <see cref="ChunkData.OnLightWorkFlagged"/> callback for the
         /// lifetime of this world, replacing the neutralizing null the constructor installs. AS-2 scheduler
         /// mode wires this to <c>LightWorkScheduler.Flag</c> so a flag transition to true — including
-        /// <see cref="CompleteLightingJob"/> re-flagging an unstable chunk via <c>HasLightWork = true</c> —
+        /// <see cref="CompleteLightingJob"/> re-flagging an unstable chunk via <c>Data.FlagLightWork()</c> —
         /// stages the chunk's voxel origin (<see cref="ChunkData.Position"/>) for promotion into the ready
         /// set. The saved original callback is still restored on <see cref="Dispose"/> regardless of what is
         /// installed here.
@@ -263,19 +263,11 @@ namespace Editor.Validation.Lighting.Framework
             /// Pending-light-work gate, backed by the REAL production flag
             /// <see cref="ChunkData.HasLightChangesToProcess"/> rather than a separate harness mirror — so
             /// the set/clear-site pairing runs against production state and a missed reset of it on pool
-            /// recycle is observable (see <c>RecycleChunkData</c> and B33/B34, finding B4). The setter
-            /// fires <c>ChunkData.OnLightWorkFlagged</c> (neutralized for the harness's lifetime; only a
-            /// `true` write fires it).
+            /// recycle is observable (see <c>RecycleChunkData</c> and B33/B34, finding B4).
+            /// Read-only by design: arm through <c>Data.FlagLightWork()</c> and clear through
+            /// <c>Data.OnLightingJobScheduled()</c>, so the harness owns no mutation path production lacks.
             /// </summary>
-            public bool HasLightWork
-            {
-                get => Data.HasLightChangesToProcess;
-                set
-                {
-                    if (value) Data.FlagLightWork();
-                    else Data.ClearLightWork();
-                }
-            }
+            public bool HasLightWork => Data.HasLightChangesToProcess;
 
             /// <summary>
             /// Whether this chunk is currently loaded/populated. Mirror of production's
@@ -417,7 +409,7 @@ namespace Editor.Validation.Lighting.Framework
         /// back into the ready set. Used by the completion pass's merge-fault handler (B7 closure test).
         /// </summary>
         /// <param name="chunkCoord">The chunk to re-flag.</param>
-        public void FlagLightWork(Vector2Int chunkCoord) => GetChunk(chunkCoord).HasLightWork = true;
+        public void FlagLightWork(Vector2Int chunkCoord) => GetChunk(chunkCoord).Data.FlagLightWork();
 
         /// <summary>
         /// Arms a chunk's border edge check the way production's cascade does — <c>EdgeCheck</c> and
@@ -614,7 +606,6 @@ namespace Editor.Validation.Lighting.Framework
             // The derivation itself is the SHARED ScheduledEdgeCheckDecision production calls, so the
             // harness's extra explicit-request term cannot drift away from production's flag-only read.
             bool edgeCheck = ScheduledEdgeCheckDecision.Evaluate(chunk.Data.NeedsEdgeCheck, performEdgeCheck);
-            chunk.Data.ClearEdgeCheck();
 
             LightingJobFlight flight = new LightingJobFlight { Coord = chunkCoord };
 
@@ -685,7 +676,9 @@ namespace Editor.Validation.Lighting.Framework
             NativeQueue<Vector2Int> sunColumnQueue = NewOwned(flight, new NativeQueue<Vector2Int>(Allocator.Persistent));
             while (chunk.SunColumnRecalcQueue.Count > 0) sunColumnQueue.Enqueue(chunk.SunColumnRecalcQueue.Dequeue());
 
-            chunk.HasLightWork = false;
+            // Clear both flags in the one transition production calls once its job.Schedule() succeeds,
+            // positioned after the queue drains to mirror that ordering.
+            chunk.Data.OnLightingJobScheduled();
 
             flight.IsStable = NewOwned(flight, new NativeArray<bool>(1, Allocator.Persistent));
             flight.Mods = NewOwned(flight, new NativeList<LightModification>(Allocator.Persistent));
@@ -930,7 +923,7 @@ namespace Editor.Validation.Lighting.Framework
             result.IsStable = LightingJobProcessor.IsEffectivelyStable(result.JobReportedStable, hasRealCrossChunkMods);
 
             if (!result.IsStable)
-                chunk.HasLightWork = true;
+                chunk.Data.FlagLightWork();
 
             foreach (IDisposable container in flight.OwnedContainers)
                 container.Dispose();
@@ -1159,7 +1152,7 @@ namespace Editor.Validation.Lighting.Framework
                 foreach (TestChunk chunk in _chunks.Values)
                 {
                     chunk.Data.FlagEdgeCheck();
-                    chunk.HasLightWork = true;
+                    chunk.Data.FlagLightWork();
                 }
 
                 int rounds = RunWaveToConvergence(maxRounds);
@@ -1443,7 +1436,7 @@ namespace Editor.Validation.Lighting.Framework
                 });
             }
 
-            target.HasLightWork = true;
+            target.Data.FlagLightWork();
             return true;
         }
 
@@ -1532,7 +1525,7 @@ namespace Editor.Validation.Lighting.Framework
                 foreach (Vector2Int col in localCols)
                     chunk.SunColumnRecalcQueue.Enqueue(col);
 
-                chunk.HasLightWork = true;
+                chunk.Data.FlagLightWork();
                 HashSetPool<Vector2Int>.Release(localCols); // TryGetAndRemove transfers ownership to us
             }
 
@@ -1571,7 +1564,7 @@ namespace Editor.Validation.Lighting.Framework
                         Position = localPos, OldLightLevel = decision.OldLevel,
                         OldBlockR = decision.OldR, OldBlockG = decision.OldG, OldBlockB = decision.OldB,
                     });
-                    chunk.HasLightWork = true;
+                    chunk.Data.FlagLightWork();
                 }
 
                 DictionaryPool<Vector3Int, LightingStateManager.PendingBlocklightMod>.Release(pendingBlocklight);

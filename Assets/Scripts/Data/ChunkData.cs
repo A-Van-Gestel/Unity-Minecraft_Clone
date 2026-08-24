@@ -225,18 +225,6 @@ namespace Data
         public void OnLightingJobScheduled() =>
             SetWork(_lightingWork & ~(LightingWork.LightChanges | LightingWork.EdgeCheck));
 
-        /// <summary>
-        /// Clears the edge-check bit alone. Production never needs this — its schedule-clear is atomic
-        /// (<see cref="OnLightingJobScheduled"/>); the editor harness models scheduling in two halves and
-        /// clears the two bits at different points. Safe by construction: the invariant this API protects
-        /// is that an edge check is never <i>armed</i> without its light-changes companion, and clearing
-        /// cannot arm anything.
-        /// </summary>
-        public void ClearEdgeCheck() => SetWork(_lightingWork & ~LightingWork.EdgeCheck);
-
-        /// <summary>Clears the light-changes bit alone. Harness-only, for the reason on <see cref="ClearEdgeCheck"/>.</summary>
-        public void ClearLightWork() => SetWork(_lightingWork & ~LightingWork.LightChanges);
-
         /// <summary>Clears every pending work kind (census rows 13, 14 — lighting disabled, pool recycle).</summary>
         public void ClearAllLightingWork() => SetWork(LightingWork.None);
 

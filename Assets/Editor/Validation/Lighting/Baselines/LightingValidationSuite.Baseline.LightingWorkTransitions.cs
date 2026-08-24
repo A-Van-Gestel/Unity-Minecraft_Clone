@@ -68,8 +68,6 @@ namespace Editor.Validation.Lighting
                 ("FlagEdgeCheck", d => d.FlagEdgeCheck(), w => w | edge),
                 ("FlagNeighborEdgeCheck", d => d.FlagNeighborEdgeCheck(), w => w | edge | changes),
                 ("ClearInitialLighting", d => d.ClearInitialLighting(), w => w & ~initial),
-                ("ClearEdgeCheck", d => d.ClearEdgeCheck(), w => w & ~edge),
-                ("ClearLightWork", d => d.ClearLightWork(), w => w & ~changes),
                 ("OnLightingJobScheduled", d => d.OnLightingJobScheduled(), w => w & ~(changes | edge)),
                 ("ClearAllLightingWork", d => d.ClearAllLightingWork(), _ => LightingWork.None),
             };
@@ -184,9 +182,9 @@ namespace Editor.Validation.Lighting
                     "B117: re-flagging an already-set bit does not fire", $"fires = {fires.Count}");
 
                 fires.Reset();
-                subject.ClearLightWork();
+                subject.OnLightingJobScheduled();
                 passed &= LightingAssert.IsTrue(fires.Count == 0,
-                    "B117: clearing a bit does not fire", $"fires = {fires.Count}");
+                    "B117: clearing bits does not fire", $"fires = {fires.Count}");
 
                 fires.Reset();
                 subject.ClearAllLightingWork();

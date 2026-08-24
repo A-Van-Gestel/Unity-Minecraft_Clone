@@ -210,10 +210,19 @@ conversion on the production mod path would not be caught in-harness (guarded in
   admitted, and a measured prove-red (dropping the clear from `Reset()`) reds **B34 alone**.
 - **Still NOT covered (minor):** the harness's BFS wake-up queues remain `TestChunk`-managed mirrors of
   `ChunkData`'s (production's `AddTo*Queue` is `World`-coupled — see A3), so the production queues' reset is verified by B34's direct check rather than through the live enqueue path.
-- **Still NOT covered (new, LP-4):** the harness clears the two schedule bits in **two halves**
-  (`EdgeCheck` in `BeginLightingJob`, `LightChanges` in `CompleteLightingJob`) where production clears both
-  atomically in `OnLightingJobScheduled()`. `ChunkData.ClearEdgeCheck()` / `ClearLightWork()` exist solely to
-  serve that split and are called by no production code. LP-5 owns retiring them.
+- ~~**Still NOT covered (new, LP-4):** the harness clears the two schedule bits in **two halves**…~~
+  **CLOSED (2026-08-24, LP-5).** `BeginLightingJob` now calls the same atomic
+  `ChunkData.OnLightingJobScheduled()` production calls, and `ClearEdgeCheck()` / `ClearLightWork()` are
+  deleted — the harness no longer has a private mutation path into the work byte.  
+  **Correction to the LP-4 entry:** both clears were in `BeginLightingJob` all along (the `EdgeCheck` clear
+  beside the edge-check derivation, the `LightChanges` clear after the queue drains, ~70 lines apart), not
+  split across `Begin`/`Complete` as recorded. The split was therefore a *code-shape* divergence, not a
+  timing one — which is why closing it produced **zero** baseline churn where the LP-5 packet predicted
+  some. `TestChunk.HasLightWork` became read-only in the same change; the ~10 arming writes now call
+  `Data.FlagLightWork()` directly.
+  A green that is *identical* before and after can mean the suite is blind to the change, so the clear was
+  prove-red'd on its own: dropping the `OnLightingJobScheduled()` call from `BeginLightingJob` reds
+  **74 of 112**. The relocation is observed; the unchanged verdicts are behavior preservation.
 
 ### B5 — Lighting→meshing handoff is out of scope · **OPEN · LOW (by design)**
 

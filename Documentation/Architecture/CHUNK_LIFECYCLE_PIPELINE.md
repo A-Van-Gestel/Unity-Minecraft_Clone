@@ -38,7 +38,6 @@ answers "is this chunk quiet".
 | `RegrantBorderEditEdgeRound()` | `RemainingEdgeCheckRounds = max(current, 1)` (Bug 05) |
 | `ClearInitialLighting()` | `-InitialLighting` |
 | `OnLightingJobScheduled()` | `-LightChanges -EdgeCheck` (the atomic schedule-clear) |
-| `ClearEdgeCheck()` / `ClearLightWork()` | single-bit clears — **editor harness only**, see §4 |
 | `ClearAllLightingWork()` | `= None` (lighting disabled, pool recycle) |
 
 **What this buys:** the *combined* arming transitions — `FlagNeighborEdgeCheck` and the cascade re-arm —

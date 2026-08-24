@@ -189,7 +189,7 @@ namespace Editor.Validation.Lighting.Framework
                         Mathf.Max(chunk.Data.RemainingEdgeCheckRounds, 1);
             }
 
-            chunk.HasLightWork = true;
+            chunk.Data.FlagLightWork();
         }
 
         /// <summary>
@@ -217,7 +217,7 @@ namespace Editor.Validation.Lighting.Framework
         {
             TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
             chunk.SunQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = oldLevel });
-            chunk.HasLightWork = true;
+            chunk.Data.FlagLightWork();
         }
 
         /// <summary>
@@ -232,7 +232,7 @@ namespace Editor.Validation.Lighting.Framework
             for (int z = 0; z < VoxelData.ChunkWidth; z++)
                 chunk.SunColumnRecalcQueue.Enqueue(new Vector2Int(x, z));
 
-            chunk.HasLightWork = true;
+            chunk.Data.FlagLightWork();
         }
 
         /// <summary>
@@ -280,7 +280,7 @@ namespace Editor.Validation.Lighting.Framework
                     outOfRangeLocals++;
 
                 target.SunColumnRecalcQueue.Enqueue(local);
-                target.HasLightWork = true;
+                target.Data.FlagLightWork();
             }
 
             return lost;
