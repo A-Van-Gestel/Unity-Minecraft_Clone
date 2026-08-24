@@ -3,9 +3,10 @@ using Data;
 namespace Helpers
 {
     /// <summary>
-    /// Pure decision for what a completed lighting pass does to the post-generation edge-check cascade —
-    /// the <c>RemainingEdgeCheckRounds</c> budget, the self <c>NeedsEdgeCheck</c> round, and the 4 cardinal
-    /// neighbor triggers that <c>WorldJobManager.MergeCompletedLightingJob</c> fires on stabilization.
+    /// Owns what a completed lighting pass does to the post-generation edge-check cascade: <see cref="Evaluate"/>
+    /// decides the outcome and <see cref="Apply"/> performs the budget spend and the self re-arm.
+    /// <c>WorldJobManager.MergeCompletedLightingJob</c> keeps only the 4 cardinal neighbor triggers and the
+    /// telemetry counter, which need the chunk coord.
     /// <para>
     /// The legacy rule arms on <b>stability</b>, which <see cref="Jobs.NeighborhoodLightingJob"/> reports as
     /// "no work left pending" — a condition a pass that wrote <i>nothing</i> also satisfies. P9-2 measured
@@ -23,8 +24,10 @@ namespace Helpers
     /// </para>
     /// <para>
     /// Same shared-guard pattern as <see cref="LightingScanDecision"/> and
-    /// <see cref="LightingScheduleDecision"/>: the caller performs the side effects (decrement, flag, trigger
-    /// neighbors); this is a pure map from the merge's outcome to what the cascade does next.
+    /// <see cref="LightingScheduleDecision"/>, with one deliberate difference: the decision's <i>effects</i>
+    /// live here too. They previously sat in the merge as loose lines that no validation harness could reach
+    /// (production's merge runs only from <c>World.Update</c>), so a mis-application went unwitnessed —
+    /// baseline B119 now guards the outcome-to-effect mapping in one call.
     /// </para>
     /// </summary>
     public static class EdgeCheckCascadeDecision
