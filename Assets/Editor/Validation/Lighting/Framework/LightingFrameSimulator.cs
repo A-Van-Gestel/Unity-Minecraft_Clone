@@ -55,7 +55,7 @@ namespace Editor.Validation.Lighting.Framework
 
             /// <summary>Chunks that had pending work but were deferred because their neighbor terrain data
             /// was not ready — production's <see cref="LightingScheduleDecision.Result.NeighborsNotReady"/>
-            /// arm (<c>WorldJobManager.ScheduleLightingUpdate</c> sets <c>HasLightChangesToProcess = true</c>
+            /// arm (<c>WorldJobManager.ScheduleLightingUpdate</c> calls <c>ChunkData.FlagLightWork()</c>
             /// and returns without scheduling). The work is retained and retried once
             /// <see cref="LightingTestWorld.MarkNeighborsReady"/> is called. Kept separate from
             /// <see cref="ChunksStarved"/> so budget-pressure baselines stay meaningful.</summary>
@@ -291,7 +291,7 @@ namespace Editor.Validation.Lighting.Framework
                     // Mirror production WorldJobManager.ScheduleLightingUpdate: leave the chunk's light
                     // work flagged and DON'T schedule. The chunk only reached here because it already has
                     // light work (the ChunkHasLightWork gate above), so the flag is already set — the
-                    // production "HasLightChangesToProcess = true" assignment is a no-op here. The work is
+                    // production's FlagLightWork() call is a no-op here. The work is
                     // retried on a later frame once MarkNeighborsReady is called.
                     result.ChunksNeighborsNotReady++;
                     continue;

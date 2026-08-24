@@ -412,7 +412,7 @@ namespace Editor.Validation.Lighting.Framework
 
         /// <summary>
         /// Re-flags a chunk's pending light work — the harness analog of production setting
-        /// <c>ChunkData.HasLightChangesToProcess = true</c> (a merge-fault re-flag, or a dynamic edit).
+        /// <c>ChunkData.FlagLightWork()</c> (a merge-fault re-flag, or a dynamic edit).
         /// Fires the <c>OnLightWorkFlagged</c> sink like production, so in scheduler mode the chunk stages
         /// back into the ready set. Used by the completion pass's merge-fault handler (B7 closure test).
         /// </summary>

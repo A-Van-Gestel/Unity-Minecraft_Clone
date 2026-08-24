@@ -1435,7 +1435,7 @@ namespace Editor.Validation.Lighting
         /// <c>neighborsDataReady: true</c>, leaving the third arm of <see cref="LightingScheduleDecision"/>
         /// unexercised). A lamp is placed on the +X border of chunk (1,1) while (1,1)'s neighbor terrain
         /// data is marked NOT ready. Production's <c>WorldJobManager.ScheduleLightingUpdate</c> would set
-        /// <c>HasLightChangesToProcess = true</c> and decline to schedule; the simulator must do the same:
+        /// <c>FlagLightWork()</c> and decline to schedule; the simulator must do the same:
         /// across several frames the chunk is deferred (no job scheduled, none in flight), its pending
         /// light work is retained, and no blocklight propagates. Once the neighbors are marked ready, the
         /// retained work schedules and the field must converge to the all-ready oracle — proving the
