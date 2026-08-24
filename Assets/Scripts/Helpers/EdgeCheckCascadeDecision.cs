@@ -1,3 +1,5 @@
+using Data;
+
 namespace Helpers
 {
     /// <summary>
@@ -68,6 +70,26 @@ namespace Helpers
             return lightChanged || hasPendingLightWork
                 ? CascadeOutcome.SpendAndRearm
                 : CascadeOutcome.SpendOnly;
+        }
+
+        /// <summary>
+        /// Applies an outcome of <see cref="Evaluate"/> to the chunk. Paired with the decision on purpose:
+        /// the two used to meet in the merge as three loose lines that no validation harness could reach
+        /// (production's <c>MergeCompletedLightingJob</c> is callable only from <c>World.Update</c>), so a
+        /// mis-application flattened the three outcomes back to two with every baseline still green.
+        /// Keeping them together makes the mapping testable in one call.
+        /// </summary>
+        /// <param name="outcome">The outcome returned by <see cref="Evaluate"/>.</param>
+        /// <param name="chunkData">The chunk whose cascade state the outcome applies to.</param>
+        public static void Apply(CascadeOutcome outcome, ChunkData chunkData)
+        {
+            if (outcome == CascadeOutcome.None) return;
+
+            // The round is spent whether or not the pass propagates. Only the re-arm flags buy lighting
+            // schedules; the counter buys none — and letting a converged chunk hoard budget would break the
+            // premise ModifyVoxel's Bug-05 top-up rests on (post-generation the rounds are spent) and arm
+            // cascades on ordinary edits that legacy never armed.
+            chunkData.SpendEdgeCheckRound(outcome == CascadeOutcome.SpendAndRearm);
         }
     }
 }

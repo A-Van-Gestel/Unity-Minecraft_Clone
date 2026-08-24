@@ -1787,17 +1787,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                     chunkData.HasLightChangesToProcess)
                 : EdgeCheckCascadeDecision.CascadeOutcome.None;
 
-            if (cascade != EdgeCheckCascadeDecision.CascadeOutcome.None)
-            {
-                // The round is spent whether or not the pass propagates. Only the re-arm flags buy lighting
-                // schedules; the counter buys none — and letting a converged chunk hoard budget would break
-                // the premise ModifyVoxel's Bug-05 top-up rests on (post-generation the rounds are spent)
-                // and arm cascades on ordinary edits that legacy never armed.
-                // The re-arm sets the self edge check and its light-changes companion together: an edge
-                // check alone cannot satisfy the schedule guard, so a half-armed chunk could never spend it.
-                chunkData.SpendEdgeCheckRound(
-                    cascade == EdgeCheckCascadeDecision.CascadeOutcome.SpendAndRearm);
-            }
+            // Budget + self re-arm live with the decision that produced the outcome (B119 guards the
+            // mapping); the neighbor triggers and the telemetry counter stay here, where the coord is.
+            EdgeCheckCascadeDecision.Apply(cascade, chunkData);
 
             if (cascade == EdgeCheckCascadeDecision.CascadeOutcome.SpendAndRearm)
             {

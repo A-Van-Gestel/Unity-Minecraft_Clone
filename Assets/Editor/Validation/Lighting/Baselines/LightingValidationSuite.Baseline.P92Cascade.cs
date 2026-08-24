@@ -24,6 +24,7 @@ namespace Editor.Validation.Lighting
     /// </summary>
     public static partial class LightingValidationSuite
     {
+
         /// <summary>Registers the P9-2 cascade baselines (called from <c>AddBaselineScenarios</c>).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddP92CascadeBaselineScenarios(List<Scenario> scenarios)
@@ -40,6 +41,9 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario(
                 "B100: the cascade signal is per-MERGE, not per-border-state — a main-thread write between two merges is invisible to it (P9-2 known limitation)",
                 Baseline_CascadeSignalIsPerMergeNotPerBorderState));
+            scenarios.Add(new Scenario(
+                "B119: Evaluate's outcome maps to the right cascade EFFECTS across the whole input matrix — the three outcomes stay three (P9-2 F11 seam, LP-4)",
+                Baseline_CascadeOutcomeAppliesCorrectEffects));
         }
 
         /// <summary>
@@ -246,6 +250,63 @@ namespace Editor.Validation.Lighting
             }
 
             return passed;
+        }
+
+        /// <summary>
+        /// B119: guards the seam between the pure decision and its effects. Before LP-4 those effects were
+        /// three loose lines inside <c>WorldJobManager.MergeCompletedLightingJob</c> — a method reachable
+        /// only from <c>World.Update</c>, so NO validation harness could execute it. A measured prove-red
+        /// confirmed the hole: forcing <c>SpendOnly</c> to re-arm left all 110 lighting, 7 chunk-pipeline
+        /// and 22 backpressure baselines GREEN, because an over-eager cascade converges *better* and every
+        /// end-state oracle still passes. Pairing the effects with the decision (<c>Apply</c>) makes the
+        /// mapping reachable; this sweeps the full input matrix over it.
+        /// <para>
+        /// <b>Still not covered:</b> that the merge passes the outcome it actually computed. That is one
+        /// line in an unreachable method; only an in-game session or a harness that drives production's
+        /// merge can witness it.
+        /// </para>
+        /// </summary>
+        private static bool Baseline_CascadeOutcomeAppliesCorrectEffects()
+        {
+            List<string> failures = new List<string>();
+
+            foreach (bool flagEnabled in new[] { false, true })
+            foreach (int rounds in new[] { 0, 1, 2 })
+            foreach (bool changed in new[] { false, true })
+            foreach (bool pending in new[] { false, true })
+            {
+                EdgeCheckCascadeDecision.CascadeOutcome outcome =
+                    EdgeCheckCascadeDecision.Evaluate(flagEnabled, rounds, changed, pending);
+
+                LightingWork startWork = pending ? LightingWork.LightChanges : LightingWork.None;
+                ChunkData subject = MakeChunkWithWork(startWork);
+
+                // Drive the counter to the case under test (Reset leaves it at the default budget).
+                while (subject.RemainingEdgeCheckRounds > rounds) subject.SpendEdgeCheckRound(rearm: false);
+                subject.ClearAllLightingWork();
+                if (pending) subject.FlagLightWork();
+
+                int roundsBefore = subject.RemainingEdgeCheckRounds;
+                EdgeCheckCascadeDecision.Apply(outcome, subject);
+
+                bool spent = outcome != EdgeCheckCascadeDecision.CascadeOutcome.None;
+                int wantRounds = spent ? roundsBefore - 1 : roundsBefore;
+                if (subject.RemainingEdgeCheckRounds != wantRounds)
+                    failures.Add($"{outcome} (flag={flagEnabled} rounds={rounds} changed={changed} pending={pending}): "
+                                 + $"rounds {roundsBefore} -> {subject.RemainingEdgeCheckRounds} (expected {wantRounds})");
+
+                LightingWork wantWork =
+                    outcome == EdgeCheckCascadeDecision.CascadeOutcome.SpendAndRearm
+                        ? startWork | LightingWork.EdgeCheck | LightingWork.LightChanges
+                        : startWork;
+                if (subject.Work != wantWork)
+                    failures.Add($"{outcome} (flag={flagEnabled} rounds={rounds} changed={changed} pending={pending}): "
+                                 + $"work {startWork} -> {subject.Work} (expected {wantWork})");
+            }
+
+            return LightingAssert.IsTrue(failures.Count == 0,
+                "B119: every cascade outcome applies its census effects",
+                failures.Count == 0 ? null : string.Join("\n", failures));
         }
     }
 }
