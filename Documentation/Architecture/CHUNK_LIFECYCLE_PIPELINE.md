@@ -347,6 +347,16 @@ foreach pos in snapshot:
         _lightWork.MarkWaiting(pos)                            ← promoted by events above
 ```
 
+> [!NOTE]
+> **The gate calls above are lazy, and the short-circuit shape is literal.** Both `AreNeighbors*` calls are
+> reached through `Helpers.INeighborGates`, which `World` implements on itself, so a gate an arm cannot read
+> is never walked — an in-flight or flag-less chunk costs **no** 8-neighbor walk, and `AreNeighborsReadyAndLit`
+> runs only for a chunk that is not awaiting initial lighting and has an edge check pending. Until LP-6 the
+> code evaluated **both** gates for every ready chunk and passed the results in; this pseudocode described the
+> short-circuit form throughout, and the code now matches it. The arm rule itself lives in one place
+> (`LightingScanDecision`), shared with the startup coroutine and the validation simulators.
+> Measured effect: **−34.7 %** scan gate calls over the standing benchmark route.
+
 > [!IMPORTANT]
 > ### Critical Scheduling Detail
 > `ScheduleLightingUpdate` takes no edge-check parameter — it reads `NeedsEdgeCheck` off the chunk itself. So **border edge work rides any successful schedule**, whichever arm produced it: a chunk that took the *regular* arm under the weaker `AreNeighborsDataReady` gate still edge-checks, without ever satisfying `AreNeighborsReadyAndLit`. §7 covers what that costs.

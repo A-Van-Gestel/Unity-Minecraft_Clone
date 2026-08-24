@@ -1,8 +1,8 @@
 # Lighting Pipeline State & Gate Refactor (LP-*)
 
-**Version:** 1.6  
+**Version:** 1.7  
 **Date:** 2026-08-24  
-**Status:** Partially implemented — **LP-1, LP-2 and LP-3 shipped 2026-08-23; LP-4 and LP-5 shipped 2026-08-24** (each code complete + confirmed in a running editor — see their Amended lines). LP-6 and LP-7 remain proposed; **LP-8 was filed by LP-5** and is not started. §2 re-audited against HEAD on 2026-08-23, with two gate-census rows since made stale by LP-5 (see its Amended line).  
+**Status:** Partially implemented — **LP-1, LP-2 and LP-3 shipped 2026-08-23; LP-4, LP-5 and LP-6 shipped 2026-08-24** (each code complete + confirmed in a running editor — see their Amended lines). **LP-6 additionally awaits one confirmatory Master IL2CPP benchmark run as a regression check** — not a win check, since its effect is below the harness's noise floor by design. LP-7 remains proposed; **LP-8 was filed by LP-5** and is not started. §2 re-audited against HEAD on 2026-08-23, with two gate-census rows since made stale by LP-5 (see its Amended line) and F7's call-site anchors superseded by LP-6.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > Clean-up / refactor plan for the async lighting engine's orchestration layer — the `ChunkData`
@@ -186,7 +186,7 @@ Scheduler-membership transitions ride these: any bit 0→1 fires the callback �
 | F4  | **`ScheduleLightingUpdate` silently reads + clears `NeedsEdgeCheck`** (`WJM:916`/`923`). This makes the §7 weak-gate fallback (edge check running under `AreNeighborsDataReady`) an *implicit* side effect of the regular arm — documented in the pipeline doc but invisible in any signature, and covered by **no dedicated baseline** today. **Widened since v1.0:** LI-2 added a *second*, equally silent reader in the same method — `LightingBandDecision.DeriveBandHeight` takes `chunkData.NeedsEdgeCheck` (`WJM:868`) to force a full-height band. The flag now steers two behaviors, and LP-5's contract statement must name both. |              LP-5               |
 | F5  | **`HasLightChangesToProcess` triple duty**: "managed queues have nodes", "reschedule me" (unstable/fault), and "satisfy the schedule guard" (edge-arm pre-set W:1647). The bit is fine; the *intent* is invisible at call sites.                                                                                                                                                                                                                                                                                                                                                                     |              LP-4               |
 | F6  | **`SunlightRecalculationQueue` is a fourth work store guarded by convention only.** Every current enqueuer also sets `C`, but nothing enforces "queued column ⇒ chunk flagged", and the fail-safe scan (`World.cs:2385–2396`) checks only the three flags — an unflagged entry would sleep until unload persists it. **Re-audited: the surface is now three paths, not one.** `WorldData.QueueSunlightRecalculation` (`:455`) sets `C` *itself* at `:471` — and only if the owner chunk is resident. The other two, both bulk restores of persisted columns, **write the dictionary directly and set `C` by hand adjacent**: `World.cs:1201–1210` (disk load) and `WJM:1218–1228` (generation-completion restore, additionally `enableLighting`-gated). Two hand-maintained pairings are exactly the raw material F6 describes. | LP-1 (probe), LP-4 (structural) |
-| F7  | **Eager double-gate evaluation in the scan** (`World:2518–2519`): both `AreNeighborsDataReady` AND `AreNeighborsReadyAndLit` are computed for every ready chunk each visit (each 8 dictionary lookups + job-dict probes), though each arm needs only one. Small (O(ready) per frame, post-MT-2), but free to fix once gates are consolidated.                                                                                                                                                                                                                                                        |         LP-6 (optional)         |
+| F7  | **Eager double-gate evaluation in the scan** (`World:2518–2519`): both `AreNeighborsDataReady` AND `AreNeighborsReadyAndLit` are computed for every ready chunk each visit (each 8 dictionary lookups + job-dict probes), though each arm needs only one. Small (O(ready) per frame, post-MT-2), but free to fix once gates are consolidated.                                                                                                                                                                                                                                                        |    LP-6 ✅ (anchors stale — six call sites at execution, not two)    |
 | F8  | **Naming:** `RecalculateSunLightLight()` (doubled word, `ChunkData.cs:1434`). The wider Sun/Sky split is Phase B's — out of scope here.                                                                                                                                                                                                                                                                                                                                                                                                                                                              |              LP-7               |
 | ~~F9~~ | ~~**`IsLoading` is never cleared** outside `Reset()`.~~ **STRUCK 2026-08-23 — no longer true.** CP-3 gave it two clear sites: the load-arm fault path (`World.cs:1029`, guarded by a `LifecycleEpoch` compare so a late fault cannot clear a *successor* load's flag) and stale-data recovery (`WJM:1088`). CP-1 also shipped a dev-only stuck-`IsLoading` detector (`World.cs:1039–1071`). Nothing remains for LP-4 to document here.                                                                                                                                                              |        — (closed by CP-3)       |
 | F10 | **Initial arm does work before the schedule can decline** (`World:2533–2537`): `RecalculateSunLightLight()` runs before `ScheduleLightingUpdate`; on a decline the queue-fill repeats next visit. Benign (idempotent), noted for the LP-5 executor; not worth its own change. Note the fill is now 256 `QueueSunlightRecalculation` calls, so the repeat also re-touches the F6 store.                                                                                                                                                                                                                |            — (noted)            |
@@ -314,7 +314,7 @@ skill: version bump + frozen-DTO migration step) and a scope change to bring bac
 |-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------|
 | Voxels are packed `uint`s, no per-voxel objects | Untouched — this is chunk-level orchestration state only.                                                                   |
 | Burst jobs 100 % Burst-compatible               | Jobs never read lifecycle flags (main-thread-only rule); no job file is edited.                                             |
-| No GC / LINQ in hot paths                       | Transition methods and `NeighborFacts` are allocation-free; no delegates in per-frame paths (LP-6 uses a cached interface). |
+| No GC / LINQ in hot paths                       | Transition methods and `NeighborFacts` are allocation-free; no delegates in per-frame paths. LP-6 shipped a **coordinate-parameterized** `INeighborGates` implemented on `World` itself — no cached adapter, no boxing, and its pre-evaluated overload stays allocation-free via a struct provider specialized through the generic core. |
 | Pooling conventions                             | `Reset()` keeps clearing every transient through the funnel; B34's reflection backstop still guards new fields generically. |
 | No BinaryFormatter/JSON for terrain             | Serializer edit is a bit↔bool mapping at the existing offset; layout unchanged (§5).                                        |
 | BlockIDs constants, no raw IDs                  | N/A — no block-level code touched.                                                                                          |
@@ -339,7 +339,7 @@ newly created `.cs` files need a Unity import before `dotnet build` sees them; t
 | **LP-3 — Retire `IsAwaitingMainThreadProcess`** ✅ **SHIPPED 2026-08-23** | `ChunkData.cs`, `WorldJobManager.cs`, `World.cs`, `NeighborReadinessDecision.cs`, `VoxelData.cs`, harness, NS-3 `B6`/`B7`, rules/docs             |   🟡   | LP-1 (evidence), LP-2              |
 | **LP-4 — `LightingWork` byte + transition API**     | `ChunkData.cs`; call sites in `World.cs`, `WorldJobManager.cs`, `ChunkSerializer.cs`, `ChunkStorageManager.cs`; harness; new transition baselines |   🔴   | LP-2 (fewer sites); LP-3 preferred |
 | **LP-5 — Explicit scheduling contract + coroutine** ✅ **SHIPPED 2026-08-24** | `WorldJobManager.ScheduleLightingUpdate` contract; `Helpers/ScheduledEdgeCheckDecision.cs` (new); `World.cs` coroutine arms + termination test; harness split-clear retired (`ChunkData.ClearEdgeCheck`/`ClearLightWork` deleted); baseline **B120** |   🟡   | LP-4                               |
-| **LP-6 — Lazy strict-gate evaluation** *(optional)* | `LightingScanDecision.cs` overload; `World.cs` scan; `LightingFrameSimulator.cs`                                                                  |   🟢   | LP-2                               |
+| **LP-6 — Lazy strict-gate evaluation** ✅ **SHIPPED 2026-08-24** | `Helpers/INeighborGates.cs` (new); `LightingScanDecision.cs` lazy overload + generic core; four `World.cs` call sites; `LightingFrameSimulator.cs`, `ChunkPipelineSimulator.cs`, `LightingTestWorld.cs`; baselines **B121**/**B122** |   🟢   | LP-2                               |
 | **LP-7 — Naming & doc hygiene**                     | `RecalculateSunLightLight` rename; residual doc alignment                                                                                         |   🟢   | —                                  |
 | **LP-8 — Production-scheduler harness driver**      | New editor rig driving `WorldJobManager.ScheduleLightingUpdate` / `ProcessLightingJobs` against a live `World` + `WorldData`                      |   🔴   | LP-5 (filed by it)                 |
 
@@ -976,7 +976,7 @@ iteration order decide which chunks reach the edge arm); the three `HasPending*`
 tightened** rather than scoped out; `TestChunk.HasLightWork` became **read-only**; and the reversal —
 *close the witness gap by extraction* — which is what surfaced the rule above.
 
-### LP-6 — Lazy strict-gate evaluation (🟢, optional, SECONDARY perf)
+### LP-6 — Lazy strict-gate evaluation (🟢, optional, SECONDARY perf) — ✅ SHIPPED 2026-08-24
 
 **Delivers:** F7 — the scan computes `AreNeighborsReadyAndLit` only when the edge arm needs it.
 
@@ -1003,6 +1003,141 @@ tightened** rather than scoped out; `TestChunk.HasLightWork` became **read-only*
   change as a real improvement was retracted for exactly this reason. Use the `perf-benchmark` protocol —
   warm-up discards, repeated trials, drift correction — and prefer a view distance large enough that the
   gate walk dominates. The stable signal in that report is the **iteration count**, not the milliseconds.
+
+**Amended:** 2026-08-24 — **LP-6 SHIPPED.** Code complete, universal gate green at **576 baselines across
+25 suites** (574 → 576; lighting 112 → **114**, adding B121/B122), and the laziness confirmed to reach
+production by counter diff on the standing benchmark route.
+
+*What shipped, and how it differs from the packet's sketch above.* The gate provider **takes the chunk
+coordinate as a parameter** (`INeighborGates.DataReady(ChunkCoord)`), rather than the cached adapter the
+scope line proposed. The adapter shape was rejected at plan time on a failure-mode argument, not taste: a
+coordinate set immediately before each call makes "forgot to update it" a silent **fail-open** bug — the
+gates answer truthfully about the *previous* chunk, and a stale `true` from `ReadyAndLit` schedules a border
+edge check against light that is still moving. Passing the coordinate removes that mode structurally, and
+costs nothing: `World` and `LightingTestWorld` are classes implementing the interface on `this`, so no
+allocation and no adapter exist at all. §6's checklist row ("LP-6 uses a cached interface") was corrected to
+match. Both overloads reach **one generic core**, so the pre-evaluated form a baseline needs stays
+allocation-free (a struct provider specialized, never boxed) without duplicating the arm rule.
+
+*The packet's call-site list was stale.* It named two (`World:2518–2519`, `LightingFrameSimulator:439`).
+At execution there were **six**: LP-5 had added three in `World.cs`, and `ChunkPipelineSimulator` a fourth.
+All six moved. The coroutine's step-2a site had been hand-lazy since LP-5 (`neighborsReadyAndLit: false` with
+a comment justifying it); the shared mechanism now owns that, and the literal is gone.
+
+**Measured, not predicted — the go/no-go evidence.** The packet demanded a measured win and the millisecond
+route was already retired, so the phase measured **work removed** instead and priced it separately:
+
+- *Avoidable share, counted on the unmodified eager code* (a probe that counts what laziness **would**
+  skip, so the measurement could not be confounded by the change it was sizing): **325,650 of 906,298**
+  scan gate calls = **35.9 %**. Split: `DataReady` 174,585/529,180 (33.0 %), `ReadyAndLit` 151,065/377,118
+  (40.1 %).
+- *Per-call cost, measured in situ* on a settled 729-chunk world over 437,400 real gate calls:
+  **753.7 ns/call** at 6.81 neighbors examined = **110.7 ns per neighbor**. An editor micro A/B over
+  `ChunkPipelineFixture` (`Editor/Benchmarking/LightingGateWalkBenchmark.cs`) gives the same shape and shows
+  the cost is **flat in chunk-map size** (289 → 2401 resident chunks): it is per-neighbor fixed cost, not
+  dictionary scaling. Only ~12 ns of the ~78 ns/neighbor there is dictionary probing.
+- *Therefore*: ≈ **165 ms saved over a 479-second route** — **0.034 % of wall**, **0.29 % of the
+  `LightSchedule` pass**, ≈ **0.024 ms/frame** in the heaviest streaming phase.
+
+**Confirmed in production by counter diff** (same route, same seed, before vs after):
+
+| gate | before | after | Δ |
+|------|-------:|------:|----:|
+| `AreNeighborsDataReady`   | 529,180 | 348,405 | **−34.2 %** |
+| `AreNeighborsReadyAndLit` | 377,118 | 243,245 | **−35.5 %** |
+| **scan total**            | **906,298** | **591,650** | **−34.7 %** |
+| `AreNeighborsMeshReady` *(control — LP-6 does not touch it)* | 360,194 | 382,605 | +6.2 % |
+
+The measured **−34.7 %** lands within 3.4 % of the **35.9 %** predicted from the eager-code probe, and the
+untouched `MeshReady` control drifted **6.2 %** between the same two runs — so the agreement is comfortably
+inside run-to-run variance. This is the evidence that the laziness reaches **production**, not merely the
+decision function: no baseline can witness that (B121/B122 exercise the decision, not the call sites), and
+it is exactly the wiring-line gap LP-5/LP-8 named.
+
+**What the millisecond column does *not* show, stated so nobody re-reads it later as a win.** The
+ceiling-bound phases are unchanged, as predicted (Gen 100 m/s 8.207 → 8.188; Load 300 m/s 8.202 → 8.176 —
+the pass simply works until its 8 ms budget expires either way). The non-saturated phases **scatter in both
+directions** by up to ~10 % (Load 100 m/s 3.932 → 3.533, but Gen 50 m/s 3.188 → 3.248). That spread is
+*wider* than the ±1–5 % two-run estimate above, which means the noise floor is wider than two samples could
+resolve — **not** that a 10 % win was found. With n = 1 per condition, the millisecond data is consistent
+with the predicted (invisible) 0.29 % effect and supports no stronger claim. An earlier reading in this
+design of a 93 → 54 ms change as real was retracted for precisely this mistake; it is not repeated here.
+
+**This is a small win and was shipped knowingly as one.** The packet's own bar ("ship only on a measured
+win… the clarity value alone does not justify signature churn") was read as satisfied — the win is measured
+and positive — with the decision recorded as the user's, against a NO-GO recommendation. The structural
+argument carried real weight beside the number: the shipped shape removes the per-call-site wiring line that
+LP-5/LP-8 identified as this design's recurring blind spot, where the alternative (a flags-only
+pre-classifier at each call site) would have re-created one.
+
+**Honest limits on that evidence:**
+- **Editor Mono, not IL2CPP.** These gates are managed dictionary walks, which IL2CPP typically executes
+  several times faster — so the absolute saving in a shipping build is likely **smaller** than 0.034 %, not
+  larger. A confirmatory Master IL2CPP run is a **regression check, not a win check**.
+- **No benchmark can resolve this effect, and that is measured too.** Two runs of the same route on
+  effectively identical code differed by **±1–5 %** per phase on `LightSchedule` (e.g. Gen 20 m/s
+  0.403 → 0.425 ms/frame; Load 200 m/s 7.979 → 8.307). The effect is 0.29 % of that pass — **5× to 17×
+  below the harness's own noise floor**. The counter diff is the only instrument that can see it.
+- **The 0.5 %-of-a-gate-call figure for the deferred fact-gathering item** (below) is likewise a modelled
+  ratio, not a frame measurement.
+- The counters are `#if DEVELOPMENT_BUILD || UNITY_EDITOR`, so a **Master** build reports none of this.
+
+**The one step still open: a confirmatory Master IL2CPP run.** It is a **regression check, not a win
+check** — see the noise-floor limit above; nobody should expect it to show an improvement, and a null result
+is the pass. Protocol for the session that runs it:
+
+1. Build **Master IL2CPP**. (The harness is *not* dev-gated — `WorldFrameProfiler`, `BenchmarkController`
+   and `PipelineTelemetry`'s core all compile in, so the full report is produced. Only the LP-6 counters are
+   `#if DEVELOPMENT_BUILD || UNITY_EDITOR`, so a Master run reports **no gate counts** — that is expected and
+   is not the thing being checked. Build **Development** instead only if gate counts are wanted.)
+2. Main menu → **Run Benchmark**. Take every default: benchmark mode pins gameplay settings to
+   `new Settings()` (`SettingsManager.cs:996`), so view distance is 10 / LoadDistance 13 / 729 resident,
+   phases 30 s, seed 0 — the same route these editor captures used. Change nothing, or comparability is lost.
+3. Compare against the editor baselines, all in
+   `%USERPROFILE%/AppData/LocalLow/johanaxel007/Minecraft Clone/Benchmarks/`:
+   `BenchmarkRun_2026-08-24_19-58-04.log` (before LP-6), `..._20-24-12.log` (before + the avoidable-count
+   probe), `..._21-07-10.log` (after LP-6). **These are editor Mono; an IL2CPP run is not comparable to them
+   in absolute terms** — use them only for the *shape* (which phases are `Ceiling`-bound, where the pass
+   sits as a share of wall).
+4. **Pass = no regression.** Specifically: no new errors; `Validate All` still green; the `LightSchedule`
+   row not systematically worse; and the pass still `Ceiling`-bound at 100+ m/s rather than newly
+   `AllDeclined`/`InFlightCap`, which would indicate the scan is now declining work it used to serve.
+5. **Do not read a scattered ±10 % as either a win or a loss** — with n = 1 per condition that is inside the
+   demonstrated noise. If a phase looks meaningfully worse, re-run before believing it.
+
+**A prediction this phase got wrong, recorded because it is the fourth in a row.** The plan asserted that the
+64-combination equivalence baseline (B121) would be the prove-red tooth. It is not. Mutating the arm rule
+(dropping the `DataReady` term from the regular arm) reds **2 of 114** — **B122** and **B67** — and **B121
+stays green**. That is structural: both overloads reach one shared core, so a mutation *inside* the core
+moves the lazy and pre-evaluated answers together and they still agree. **B121 witnesses that the two
+strategies have not been re-implemented apart** — a guard against re-duplicating the arm rule — while
+**B122 is the tooth against the gate-need rule**. Both docstrings say so. The transferable rule: *an
+equivalence baseline over two paths that share an implementation tests the sharing, not the implementation.*
+
+**Deferred clean-up: the probes stay, and are filed rather than forgotten.** The four gate counters on
+`World` (`GateCallsDataReady` / `GateCallsReadyAndLit` / `GateCallsMeshReady` / `NeighborFactsGathered`) are
+**kept deliberately** — user decision on shipping — because they are the only instrument that can re-verify
+the laziness in production, and LP-6's whole go/no-go rested on them. Their question is nonetheless closed,
+so they are filed for deletion as **`CODEBASE_IMPROVEMENTS.md` §2.3** with explicit retirement triggers, and
+the retention is stated at the declaration in `World.cs` so a later reader does not mistake them for
+leftovers. LP-3 deleting LP-1's probes is the precedent for how this ends. Note the editor benchmark
+(`LightingGateWalkBenchmark.cs`) reads them and must be retired or reworked in the same pass.
+
+**Deferred, with a number attached (do not re-open as an open question).** LP-2's eager *fact gathering* —
+`GatherNeighborFacts` probes `LightingJobs` for every gate, though only `ReadyAndLit` reads it — was
+measured rather than fixed here, per this packet's "owns measuring it". The wasted probe is **~4.1 ns of a
+~754 ns gate call, ≈ 0.5 %**. It is **not worth a session**; it was deliberately kept out of scope because
+fixing it widens the blast radius to the meshing scheduler (`AreNeighborsMeshReady` → `ScheduleMeshing`) and
+its 57 baselines for half a percent. Filed as measured-and-declined, not as an open question.
+
+**The successor target this phase actually found.** `LightSchedule` is **17–21 % of wall time at 100+ m/s**
+and is `Ceiling`-bound on **~95 % of working frames** (Gen 100 m/s: 644 Ceiling stops vs 7 OutOfWork). Across
+the route it cost **56,785 ms to schedule 113,760 jobs ≈ 0.5 ms of main thread per scheduled lighting job**.
+Gate walking is **under 1 %** of that; the rest is job setup and the LI-2 band gather. That is a large,
+saturated, *measured* main-thread cost in the same pass LP-6 was aimed at — LP-6 was simply aimed at the
+wrong 1 % of it. **Worth its own phase; nothing in this design doc covers it.** Note the consequence for any
+future measurement there: because the pass is ceiling-saturated at speed, a real improvement shows up as
+**throughput** (served/s, quota utilization, fewer Ceiling stops), *not* as a drop in milliseconds.
 
 ### LP-7 — Naming & doc hygiene (🟢)
 
@@ -1036,7 +1171,7 @@ The general rule this surfaces: **extraction closes a gap only when the unwitnes
 
 1. ~~**LP-1 probe results** — does `IsAwaitingMainThreadProcess` ever read true at a gate in a real soak?~~ **RESOLVED 2026-08-23:** no. Probe 1 stayed silent across LP-1's soak and LP-2's flight (and was proven live by injection), which cleared LP-3's go/no-go; LP-3 has since deleted both the flag and the probe.
 2. **Keep or remove the three bool adapter properties after LP-4?** Decide by call-site count at execution time: if ≤ a handful of readers remain (gates read via LP-2 facts, scan reads via the decision inputs), remove them and read bits directly; otherwise keep the adapters permanently as the read API. Either way, *writes* go through transition methods only.
-3. **LP-6 worth it?** Only a measurement answers it; the phase carries its own GO/NO-GO gate and a NO-GO is a valid close-out.
+3. ~~**LP-6 worth it?** Only a measurement answers it; the phase carries its own GO/NO-GO gate and a NO-GO is a valid close-out.~~ **RESOLVED 2026-08-24 by measurement — the win is real but small, and it shipped as a deliberate call.** 35.9 % of the scan's gate calls are avoidable (counted, not modelled), worth ≈ 0.024 ms/frame at peak streaming / 0.034 % of wall in editor Mono. The recommendation was NO-GO on that number; it shipped anyway on the user's standing rule that small measured wins compound, with the structural benefit (no per-call-site wiring line) as the second argument. See LP-6's Amended line — including the finding that **no benchmark can resolve an effect this size**, the harness's own run-to-run noise being ±1–5 % on the same pass.
 4. *(new 2026-08-23)* **How far does LP-4's transition API absorb `EdgeCheckCascadeDecision`?** The pure decision and the transition method now meet on the same three lines (`WJM:1800–1818`). Options: leave the decision untouched and have `SpendEdgeCheckRound(rearm:)` take its outcome as a parameter (least churn, keeps P9-2's rollback flag intact), or fold the effect application into a method that takes the outcome enum directly. Decide at LP-4 execution; **do not** collapse the three outcomes back into two (F11).
 5. ~~*(new 2026-08-23)* **Does LP-3 owe NS-3 a replacement assertion?**~~ **RESOLVED 2026-08-23 by measurement — no, and the premise was wrong.** B5 and B6 each keep an observed prove-red after the deletion (B6: mesh gate → `AreNeighborsReadyAndLit`, reds B3/B4/B6; B5: `AreNeighborsDataReady` always true, reds B1/B5), both re-run post-deletion. The suite loses one *axis* of the flag-pairing sweep, not two teeth. See LP-3's Amended line.
 
@@ -1110,7 +1245,22 @@ The general rule this surfaces: **extraction closes a gap only when the unwitnes
   folded-in note misplaced the harness's split schedule-clear (both clears were in `BeginLightingJob`), so
   the predicted baseline churn was zero — and that the same wrong claim sat in the harness fidelity doc.
   §2's gate census is now stale in two rows: the three `HasPending*` readers it names are deleted.
+* **v1.7** - **LP-6 executed and shipped**, against a NO-GO recommendation and recorded as such. The scan
+  evaluates only the gate its arm can read, through a coordinate-parameterized `INeighborGates` (the packet's
+  cached-adapter sketch was rejected on a fail-open argument) reaching one generic core, so the pre-evaluated
+  overload stays allocation-free. All **six** call sites moved — the packet named two, LP-5 having added
+  three and `ChunkPipelineSimulator` a fourth — retiring LP-5's hand-passed `neighborsReadyAndLit: false`.
+  Baselines **B121**/**B122** added (lighting 112 → 114; universal gate 574 → **576**). The phase's numbers:
+  35.9 % of scan gate calls avoidable (counted on unmodified eager code), 753.7 ns per gate call measured in
+  situ, ⇒ ≈ 0.024 ms/frame at peak — shipped as a knowingly small win. Confirmed in production by a
+  −34.7 % counter diff. Three findings recorded for later phases: equivalence baselines over a shared
+  implementation test only the sharing (B121 green under the mutation B122 caught — a **fourth** wrong
+  prove-red prediction); the harness's noise floor is ±1–5 % on `LightSchedule`, below which no benchmark
+  can decide anything; and `LightSchedule` itself (≈ 0.5 ms per scheduled job, ceiling-bound at speed) is the
+  real target, with gates under 1 % of it. §8 q3 resolved; §6's "cached interface" row and F7's call-site
+  anchors corrected. The LP-2 eager-fact-gathering question is closed as measured-and-declined (~0.5 % of a
+  gate call), not deferred.
 
 ---
 
-**Last Updated:** 2026-08-24 (**v1.6 — LP-5 SHIPPED**; the edge-check contract is stated on `ScheduleLightingUpdate` and derived once through `ScheduledEdgeCheckDecision`, the startup coroutine's arms and its termination test both run the shared `LightingScanDecision`, the harness's private schedule-clear is gone, and **B120** guards the §7 weak-gate fallback — see LP-5's Amended line) **Next Review:** LP-6 (read LP-5's Amended line first. Its transferable finding is a limit on LP-4's technique: **extraction closes a gap only for a decision, never for a wiring line** — so do not plan coverage work around extraction without first measuring whether a mutation at the call site reds anything. LP-6 also inherits the eager fact-gathering LP-2 introduced and now owns measuring it; note LP-5 deliberately kept the coroutine eager, buying the cost down with cheap flag pre-filters instead. **LP-8** remains the only route to witnessing production's scheduler and merge)
+**Last Updated:** 2026-08-24 (**v1.7 — LP-6 SHIPPED**; the scan evaluates only the neighbor gate a chunk's arm can read, via a coordinate-parameterized `INeighborGates` implemented on `World` itself, with **B121**/**B122** guarding the two halves and a production counter diff confirming **−34.7 %** scan gate calls — see LP-6's Amended line) **Next Review:** LP-7 (a small naming/doc phase — but read LP-6's Amended line first, because it carries three findings that outlive it. **(1)** An equivalence baseline over two paths that share an implementation tests the *sharing*, not the implementation: B121 stayed green under an arm-rule mutation that B122 caught, and the plan predicting otherwise was wrong — the **fourth** consecutive phase whose prove-red prediction missed, so keep measuring rather than predicting. **(2)** The measurement floor is now quantified: two runs of the same route on identical code differ by ±1–5 % on `LightSchedule`, so **no benchmark in this repo can resolve a sub-1 % pass-level effect** — use deterministic counters for changes that size, and never re-read a scattered ±10 % single-sample column as a win. **(3)** The successor target LP-6 found and did **not** address: `LightSchedule` is 17–21 % of wall at speed, `Ceiling`-bound on ~95 % of working frames, at ≈ 0.5 ms of main thread per scheduled lighting job — gates are under 1 % of it. That deserves its own phase, and because the pass is saturated, a win there will appear as **throughput**, not milliseconds. **LP-8** remains the only route to witnessing production's scheduler and merge)

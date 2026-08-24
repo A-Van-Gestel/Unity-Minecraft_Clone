@@ -1,7 +1,7 @@
 # Codebase Improvement Backlog
 
-**Version:** 1.2  
-**Date:** 2026-07-26  
+**Version:** 1.3  
+**Date:** 2026-08-24  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
@@ -125,6 +125,34 @@ carries a commented-out `SaveSystem.LoadChunk` block plus two stacked TODOs ("PH
 > and all three placeholder-creation sites consolidated onto the new method. See
 > `CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md` §7 CP-4 Amended block.
 
+### 2.3 LP-6 gate-walk probes retained past their question  `[Cleanup]`
+
+*(Added 2026-08-24, on shipping LP-6.)* Four instance counters and their public read properties sit on
+`World` — `_gateCallsDataReady` / `_gateCallsReadyAndLit` / `_gateCallsMeshReady` /
+`_neighborFactsGathered`, exposed as `GateCallsDataReady`, `GateCallsReadyAndLit`, `GateCallsMeshReady`,
+`NeighborFactsGathered` (`World.cs`, declared just above the transient-flags block; incremented at the top
+of the three `AreNeighbors*` gates and in `GatherNeighborFacts`). They were added to size LP-6 and then to
+prove it landed, and **that question is closed** — the counter diff is recorded in
+`LIGHTING_PIPELINE_STATE_REFACTOR.md`'s LP-6 Amended line (−34.7 % scan gate calls).
+
+They are **deliberately kept for now** (user decision, 2026-08-24): they are the only instrument that can
+re-verify the laziness in production, and re-deriving them costs a session. The increments are
+`#if DEVELOPMENT_BUILD || UNITY_EDITOR`, so a release build carries none of it, and the fields are
+*instance* fields — no domain-reload reset obligation (the LP-1 probe convention).
+
+**Recommendation:** delete them once one of these is true — (a) the follow-up `LightSchedule` phase lands
+and re-measures the pass anyway, (b) LP-8's production-scheduler rig can witness gate counts directly, or
+(c) a year passes with nobody reading them. LP-3 is the precedent: it deleted LP-1's probes once they had
+answered their question. Note the two properties consumed by
+`Editor/Benchmarking/LightingGateWalkBenchmark.cs` (`NeighborFactsGathered`, `GateCalls*`) — that benchmark
+must be retired or reworked in the same pass, or it will not compile.
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — delete 4 fields, 4 properties, 4 increment sites, and adjust one editor benchmark.
+> - **Risk:** 🟢 Low — dev/editor-only, read by nothing in production.
+> - **Benefit:** 🟢 Low — but it is 8 members off the §2.1 god object, and removes instrumentation whose
+>   presence implies an open question that is in fact answered.
+
 ---
 
 ## Document History
@@ -132,6 +160,11 @@ carries a commented-out `SaveSystem.LoadChunk` block plus two stacked TODOs ("PH
 *Entries before v1.0 are reconstructed from git history — this document predates the project's
 Document History convention, so they record what the commits changed, not contemporaneous notes.*
 
+* **v1.3** - Added §2.3 (2026-08-24): LP-6's four gate-walk counters on `World`, kept by explicit decision
+  as the re-verification instrument for that phase but filed for deletion with named retirement triggers.
+  Filed *on shipping* rather than discovered later, so the retention is deliberate on the record and at the
+  declaration site. Feeds §2.1 — it is 8 more members on the god object. **No existing entry was
+  re-audited**; §§1.2/1.3/2.1 still carry their 2026-07-26 verification date.
 * **v1.2** - §1.4 implemented and **archived** to
   [`../Archived/CODEBASE_IMPROVEMENTS_COMPLETED.md`](../Archived/CODEBASE_IMPROVEMENTS_COMPLETED.md)
   (2026-08-14): all ten project-owned shaders now declare `#pragma target 3.5`. Verified by reimport
