@@ -2,7 +2,7 @@
 
 **Version:** 1.3  
 **Date:** 2026-07-06  
-**Status:** Partially implemented — **LP-1, LP-2 and LP-3 shipped 2026-08-23** (probes, the shared gate predicate, and the retirement of `IsAwaitingMainThreadProcess` — all soak-confirmed). LP-4…LP-7 remain proposed. §2 re-audited against HEAD on 2026-08-23.  
+**Status:** Partially implemented — **LP-1, LP-2 and LP-3 shipped 2026-08-23**; **LP-4 code complete 2026-08-24** (in-game session pending — see its Amended line). LP-5…LP-7 remain proposed. §2 re-audited against HEAD on 2026-08-23.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > Clean-up / refactor plan for the async lighting engine's orchestration layer — the `ChunkData`
@@ -695,6 +695,68 @@ cover steps 1–4. With probe 1 deleted, no future session can re-observe the re
 - **Doc-sync (same commit):** `CHUNK_LIFECYCLE_PIPELINE.md` §2 (rewrite the flag table around bits + transition methods; note F9's `IsLoading` status honestly), §4 pseudocode names the transition methods; `LIGHTING_SYSTEM_OVERVIEW.md` §3.2/§3.4 mentions;
   `pool-reset-safety.md` "property setter subtlety" section (funnel replaces per-property setters); `chunk-lifecycle` skill flag list; fidelity doc B4 note. **Serialization:** mapping-only; layout unchanged (§5 tripwire applies).
 
+**Amended:** 2026-08-24 — **LP-4 code complete (in-game session pending).** Shipped as five commits:
+the `LightingWork` byte + transition API, the production call-site migration, the B34 backstop fix, the
+setter removal + editor/harness migration, and the B115–B118 census family. Universal gate green at
+**111** lighting baselines (up from 106), plus NS-3 (7), LightScheduler (9), Serialization Round-Trip (16),
+Chunk Unload (9), Deserialization Robustness (9) and both 200-seed fuzz suites.
+
+**Both prove-reds contradicted this packet's predictions — the corrections matter more than the greens:**
+
+1. **Prove-red (a) — arm `E` without `C`.** Predicted: B8 initial-wave / B70 border-fuzz red. **Measured:
+   B8 and B70 stayed GREEN.** The actual observers are **B67** (scheduler-mode park/promotion) and the new
+   B116/B118. Without the new family this mutation had exactly one witness, and its name gives no hint that
+   it guards the half-arm.
+2. **Prove-red (b) — force `SpendOnly` to re-arm.** Predicted: the P92Cascade baselines red. **Measured:
+   nothing red — 110 lighting + 7 chunk-pipeline + 22 backpressure all GREEN.** Two independent reasons,
+   both structural:
+   - P92Cascade tests `Evaluate`, the *pure predicate*. The mutation corrupted the **caller's application**
+     of the outcome — precisely the F11 seam.
+   - **No validation harness can reach production's merge at all.** `MergeCompletedLightingJob` is callable
+     only via `MergeJob` ← `JobCompletionPass.RunMergeLoop` ← `ProcessLightingJobs` ← `World.Update`; both
+     `LightingTestWorld` and `ChunkPipelineSimulator` hand-mirror it. The cascade's effect application was
+     three lines in a method no suite executes.
+   - Compounding it: an over-eager cascade converges *better*, so every end-state oracle passes anyway —
+     the "converges vacuously" mode NS-3's doc warns about.
+
+**Closed by extraction, not by an assertion.** `EdgeCheckCascadeDecision.Apply(outcome, chunkData)` now
+owns the budget spend + self re-arm, next to the `Evaluate` that produces the outcome (the house
+shared-guard pattern, and what F11 argued for). New **B119** sweeps the full input matrix over that
+mapping. Re-measured: the identical mutation now reds **1 of 111 — B119**. `LastEdgeRecycleJobCount` and
+`TriggerNeighborEdgeChecks` stay in the merge, where the chunk coord is.
+
+**Still uncovered, deliberately:** that the merge passes the outcome it actually *computed*. That is one
+line in an unreachable method; no unit-level baseline can witness it. Only the in-game session, or an
+LP-5-era harness that drives production's `ProcessLightingJobs`, can. B119's docstring says so rather than
+implying coverage it lacks.
+
+**Four corrections to this packet's own text, found while executing it:**
+- **Baseline numbering:** "B71+" is unusable — B71 belongs to LI-2's band family. The census family took
+  **B115–B118**, and the cascade-effects guard **B119**.
+- **The B34 enum question is answered: enums ARE skipped.** `Type.IsPrimitive` is false for enums, so
+  `_lightingWork` escaped `NonSerializedPrimitiveFields()` entirely — the generic reset backstop was blind
+  to the very field this phase adds. Fixed by admitting `IsEnum`; prove-red (dropping the clear from
+  `Reset()`) reds **B34 alone, 1 of 106**, which also shows B34 is the *only* baseline that observes a
+  stale work byte on recycle.
+- **The scope list undercounts the write surface.** It named `LightingTestWorld`/`TestChunk`; the compiler
+  found writes in `LightingAssert`, `ChunkPipelineSimulator`, `ChunkPipelineFixture`,
+  `ChunkPipelineValidationSuite.Baseline`, both SerializationRoundTrip files, and `EdgeCheckRedundancyProbe`
+  — 20 editor sites, one of which (`...RoundTrip.cs:226`, `= rng.Next(2) == 0`) a regex census missed.
+- **The editor-assertion bullet names `ArmEdgeCheckRoundIfAvailable`**, retired by §4.1's own cascade note.
+  No transition assertion shipped: the only invariant worth asserting (off-main-thread writes to a
+  *published* chunk) needs a `WorldData` lookup that is itself unsafe from a background thread. A
+  reentrancy sentinel was tried and **removed** — B34's reflection backstop dirties every `[NonSerialized]`
+  primitive, so it stamped the sentinel and produced a guaranteed false positive, and it stranded on a
+  throwing callback. The ownership rule is documented on `SetWork` instead, with no runtime check.
+
+**Two follow-ups filed:** the harness's split schedule-clear (LP-5 packet — `ClearEdgeCheck()` /
+`ClearLightWork()` exist only for it), and the unreachable-merge coverage gap above.
+
+**Line anchors in the scope list are stale** (LP-3 shifted `World.cs`/`WorldJobManager.cs`): `World.cs`
+`:1210→1316`, `:1268→1374`, `:1282→1388`, `:1410→1516`, `:1482–84→1588–90`, `:2535→2653`, `:2540→2658`,
+`:3562→3640`; `ChunkData.cs` `:449/450→442/443`, `:581→574`, `:1357/1371→1350/1364`; `WorldJobManager.cs`
+`:1806–1818→1797–1814`, `:2209–10→2200–01`. The universal gate's "NS-3 (6 baselines)" is **7** since LP-3.
+
 ### LP-5 — Explicit scheduling contract + startup-coroutine unification (🟡)
 
 **Delivers:** F2 + F4 closed — the silent `NeedsEdgeCheck` read/clear becomes an explicit, baselined contract, and the startup coroutine stops hand-mirroring the scan arms.
@@ -801,7 +863,19 @@ cover steps 1–4. With probe 1 deleted, no future session can re-observe the re
   post-review correction block records them), the sharpest being that **B6 had lost its only distinct
   prove-red**; it was fixed by giving B6 a second, independently-derived assertion — a clear/schedule balance
   — whose prove-red was measured, not predicted.
+* **v1.5** - **LP-4 executed (code complete; in-game session pending).** §7's LP-4 packet gains an Amended
+  line. §8 question 2 resolved by call-site count (adapters kept, get-only) and question 4 by measurement
+  rather than preference: the `bool rearm` parameter shipped, then a prove-red showed the *caller's*
+  application of the cascade outcome was unguarded and, worse, **unreachable by any harness** — production's
+  merge is callable only from `World.Update`. `EdgeCheckCascadeDecision` therefore gained `Apply`, moving the
+  budget spend and self re-arm next to the decision (F11's own recommendation), guarded by new **B119** whose
+  prove-red was measured. Both of the packet's predicted prove-reds were **wrong** (B8/B70 stayed green; the
+  P92Cascade family did not observe the cascade flattening at all), and its open question about the B34
+  reflection backstop is answered: **enums are skipped**, so the reset guard was blind to `_lightingWork`
+  until `IsEnum` was admitted. Four further corrections to the packet's text are recorded in the Amended
+  line, including unusable baseline numbering (B71 is taken) and a write surface eight editor files wider
+  than scoped.
 
 ---
 
-**Last Updated:** 2026-08-23 (**v1.4 — LP-3 shipped**; the flag and LP-1's probe-1 surface are gone, NS-3's `B6` gained a clear/schedule balance assertion with a measured prove-red, and both LP-3's own corrections and a post-execution review's findings are recorded in its Amended line — see Document History) **Next Review:** LP-4 (read LP-3's Amended line first: B7 is now co-edited with the predicate it guards, and the deleted probe means the flag's absence can no longer be re-observed — but read LP-1's Amended-line limits first; the zeros are calibrated, not absolute, and LP-2's measured prove-red shows how little the lighting suite observes about gate terms)
+**Last Updated:** 2026-08-24 (**v1.5 — LP-4 code complete**; the three lighting bools are one `LightingWork` byte behind a transition API, every write in the repo routes through it, and B115–B119 guard the mutation layer — see LP-4's Amended line) **Next Review:** LP-5 (read LP-4's Amended line first, and treat its two headline findings as inputs: **no validation harness can reach production's merge**, so anything living in `MergeCompletedLightingJob` is unguarded by construction; and **both** of LP-4's predicted prove-reds were wrong — three phases running now, so predict nothing and measure everything. LP-5 also inherits two filed follow-ups: retiring the harness's split schedule-clear, and the one line the cascade guard still cannot witness)
