@@ -13,6 +13,98 @@ This document outlines **open** bugs related to the current lighting implementat
 
 > All previously listed lighting bugs (01–08, 10–21) have been fixed. See [`_FIXED_BUGS.md`](./_FIXED_BUGS.md) for details.
 
+## Bug 22: Light-Work Fail-Safe Keeps Promoting Parked Chunks in a Fully Quiesced World
+
+**Severity:** Low (diagnostic-visible only; no observed lighting defect)  
+**Status:** Open — observed 2026-08-24, not yet root-caused
+
+**Description:**
+The ~1 s light-work fail-safe scan (`World.cs`, `_fullLightScanTimer` block) reports a **recurring non-zero
+promotion count indefinitely** in a world that has fully converged and is no longer streaming. The code's own
+comment states the intended reading of that signal:
+
+> A recurring non-zero count means an unblock event lacks a promotion hook — work only progressed because of
+> this backstop. Investigate before it reads as "slow lighting".
+
+Observed: `[LIGHTING] Fail-safe promoted 4..18 parked chunk(s) to the ready set.` firing every cycle, still
+firing minutes after the world went static.
+
+**Why the reported count should be ~0.** The same block walks `worldData.ChunkValues` immediately before
+`PromoteAll()` and calls `LightWorkScheduler.AddReady` for every populated chunk with
+`HasAnyLightingWork`; `AddReady` removes the position from `_waiting`. `PromoteAll` then returns
+`_waiting.Count`. So anything it reports is a parked entry the walk could **not** re-ready — i.e. a position
+that is not a populated, flagged chunk at that instant.
+
+**Measured state at the time (live editor, two samples 975 frames apart — byte-identical, so the world was
+genuinely static, not mid-settle):**
+
+| Quantity | Value |
+|---|---|
+| Chunks in map / populated / unpopulated | 787 / 787 / **0** |
+| Populated chunks with lighting work | 125 |
+| Scheduler ready / parked | 0 / **125** |
+| Lighting / generation / mesh jobs | 0 / 0 / 0 |
+| Fail-safe promotions per cycle | **4–18** |
+
+Every parked position should therefore have been re-readied by the walk, leaving `PromoteAll` at 0. It was
+not. `WorldData.ChunkValues` was confirmed to be the same collection as `WorldData.Chunks`, so a
+collection mismatch is ruled out.
+
+**Leading hypothesis (unverified): stale parked entries for unloaded positions.** The session that produced
+it involved **high-speed flight followed by a reversal back over already-generated chunks** — heavy chunk
+unload/reload churn. A position parked by the scan whose chunk is then unloaded is invisible to the
+`ChunkValues` walk, so it stays in `_waiting` and is re-promoted every cycle. The scan's stale-entry arm
+(`!worldData.TryGetChunk` → `Remove`) should drain such an entry the next time it is visited, so a
+*persistent* population of them additionally implies the drain is not reaching them — a per-frame quota or
+break in the ready-set loop is the obvious suspect. Both halves are unconfirmed.
+
+**What is actually new here.** The first half of that hypothesis is not a guess — it was characterised
+during LP-3's soak (2026-08-23), which established that unload cycling mints parked entries whose chunk is
+gone or flag-less, and that **non-zero promotion counts *during* streaming or unload churn are therefore
+expected** (3–26 observed then). The same work established the test that separates noise from signal:
+**stand still, let the world quiesce, and confirm zero promotions.** LP-4's in-game session met it, and so
+did the LP-2 flight before it.
+
+This session is the **first time that quiet-window test has failed** — 4–18 promotions per cycle, minutes
+after motion stopped, with two censuses 975 frames apart proving the world static. So the open question is
+not "why do parked entries appear" (answered) but **"why do they not drain once churn stops"**, which is
+what makes it worth a bug entry rather than a known-noise note.
+
+**Reproduction Steps:**
+
+1. Enable `settings.enableDiagnosticLogs` (the message is gated on it).
+2. Load or generate a world and fly at **elevated speed** across un-generated terrain, then **turn back**
+   over the chunks just generated, so chunks unload and reload.
+3. Stop moving and let the world fully converge (0 jobs, 0 pending lighting work in render range).
+4. Watch the console: `[LIGHTING] Fail-safe promoted N parked chunk(s)` keeps firing every ~1 s.
+
+**Not caused by LP-5.** Present in an earlier session in the same editor log whose stack traces carry
+pre-LP-5 line numbers (`World.cs:2436`) and a different load radius — 19 occurrences there, before any LP-5
+play session. LP-5's own startup-only sessions produced none.
+
+**Impact.** No lighting defect was observed alongside it: the render set was fully converged (441/441 chunks,
+zero pending work of any kind, zero jobs in flight) and no exceptions, stalls or `exceeded max iterations`
+occurred. The cost is a wasted full re-promotion each second plus the scan work it causes, and — more
+importantly — a **permanently noisy diagnostic**, which erodes the signal the comment above depends on.
+
+**Next diagnostic step.** The decisive measurement is enumerating `_waiting` and classifying each entry:
+does its position still resolve via `TryGetChunk`, is that chunk populated, does it carry any lighting
+work? The expected split tells the two candidate causes apart — unresolvable positions mean stale entries
+for unloaded chunks, resolvable-and-flagged ones mean the ~1 s walk is somehow not reaching them.
+
+`LightWorkScheduler` exposes only `ReadyCount`/`WaitingCount`, and `Unity_RunCommand` cannot read private
+state (its analyzer blocks `System.Reflection`) — but **no production accessor is required**. Use the
+`McpEval` harness (`Assets/Editor/Dev/McpEvalScratch.cs`), which is an ordinary editor script with full
+namespace access including reflection: write the probe into `Run()`, then invoke
+`Minecraft Clone/Dev/MCP Eval` and read the `[MCP-EVAL]` console output.
+
+**Order matters, because this bug only exists in a dirtied live session.** Editing the scratch file
+triggers a domain reload, which ends play mode — so write and compile the probe *first*, then enter play
+mode, fly the repro above, stop moving, and only then run the menu item. Running it against a freshly
+loaded world will show nothing.
+
+---
+
 ## Bug 09: Cross-Chunk Blocklight Lost on Rapid Place/Break at Chunk Border
 
 **Severity:** Medium-High  
