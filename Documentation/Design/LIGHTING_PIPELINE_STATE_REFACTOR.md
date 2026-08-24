@@ -989,6 +989,20 @@ tightened** rather than scoped out; `TestChunk.HasLightWork` became **read-only*
   `AreNeighborsDataReady` loop returned on the generation check before touching the chunk map, and where
   `DataReady`/`MeshReady` never read `LightingInFlight` at all. That regression is **unmeasured** — this phase
   owns measuring it. Deliberately not addressed in LP-3, which was a deletion, not a perf change.
+- **Second input (noted 2026-08-24, from LP-5's code review): the startup coroutine is now eager too, and the
+  question is open in both directions.** LP-5's step 2b evaluates *both* neighbor gates for every populated,
+  flagged chunk, where the old code evaluated `AreNeighborsReadyAndLit` only when `NeedsEdgeCheck` was set and
+  `AreNeighborsDataReady` only after the edge arm declined. Static analysis says that is up to 2× the
+  gate work per flagged chunk per sweep, and at larger view distances the sweep count multiplies it.
+  LP-5 bought some of it back with cheap flag pre-filters (`NeedsInitialLighting` in 2a,
+  `HasAnyLightingWork` in 2b) that the old code did not have, and removed one provably-discarded gate call
+  from 2a outright. **Which effect dominates is genuinely unknown.**
+- **Do not try to settle it with the startup profile report.** Measured 2026-08-24: three consecutive runs of
+  identical code returned Lighting Scheduling of **89, 33 and 34 ms** (the first a cold load after a domain
+  reload). That ~2.7× spread swamps every difference in question, and an earlier reading of a 93 → 54 ms
+  change as a real improvement was retracted for exactly this reason. Use the `perf-benchmark` protocol —
+  warm-up discards, repeated trials, drift correction — and prefer a view distance large enough that the
+  gate walk dominates. The stable signal in that report is the **iteration count**, not the milliseconds.
 
 ### LP-7 — Naming & doc hygiene (🟢)
 
