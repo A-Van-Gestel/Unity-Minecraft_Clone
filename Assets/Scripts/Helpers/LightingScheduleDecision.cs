@@ -1,10 +1,14 @@
 namespace Helpers
 {
     /// <summary>
-    /// Pure decision function for the lighting job scheduling guard.
-    /// Both <c>WorldJobManager.ScheduleLightingUpdate</c> and the editor validation
-    /// <c>LightingFrameSimulator</c> call this to ensure identical guard logic — the
-    /// two can never silently disagree on when to accept or reject a scheduling attempt.
+    /// Pure decision function for the lighting job scheduling guard: whether a chunk may start a lighting
+    /// job now, and when it may not, which precondition blocked it.
+    /// <para>
+    /// This is the sole admission rule for a lighting schedule — it exists so that no path can accept or
+    /// reject a scheduling attempt on terms of its own. A caller that re-tests these preconditions itself
+    /// re-opens the drift it prevents. <see cref="LightingScanDecision"/> continues the pattern for the
+    /// per-chunk arm; this type covers only the in-flight / neighbors-data-ready gate.
+    /// </para>
     /// </summary>
     public static class LightingScheduleDecision
     {
@@ -23,10 +27,8 @@ namespace Helpers
         /// <summary>
         /// Evaluates whether a lighting job should be scheduled for a chunk.
         /// </summary>
-        /// <param name="hasJobInFlight">True when a lighting job is already running for this chunk
-        /// (production: <c>LightingJobs.ContainsKey</c>).</param>
-        /// <param name="neighborsDataReady">True when all cardinal neighbors have populated terrain data
-        /// (production: <c>World.AreNeighborsDataReady</c>).</param>
+        /// <param name="hasJobInFlight">True when a lighting job is already running for this chunk.</param>
+        /// <param name="neighborsDataReady">True when all cardinal neighbors have populated terrain data.</param>
         /// <returns>The scheduling decision.</returns>
         public static Result Evaluate(bool hasJobInFlight, bool neighborsDataReady)
         {

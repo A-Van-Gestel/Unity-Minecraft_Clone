@@ -1,23 +1,20 @@
 namespace Helpers
 {
     /// <summary>
-    /// Pure per-neighbor readiness predicate shared by <c>World</c>'s three gates
-    /// (<c>AreNeighborsDataReady</c>, <c>AreNeighborsReadyAndLit</c>, <c>AreNeighborsMeshReady</c>) and the
-    /// editor lighting harness — the gate-side completion of the shared-guard pattern started by
-    /// <see cref="LightingScheduleDecision"/>, <see cref="LightingScanDecision"/> and
-    /// <c>JobCompletionPass</c>. Before this existed the same neighbor facts were re-tested by four
-    /// hand-written loops, so a readiness bug was reachable only in-game (harness fidelity finding B2).
+    /// Pure per-neighbor readiness predicate: decides whether ONE neighbor blocks a given gate, and why.
+    /// The gate-side member of the shared-guard family alongside <see cref="LightingScheduleDecision"/>,
+    /// <see cref="LightingScanDecision"/> and <c>JobCompletionPass</c>.
     /// <para>
-    /// This is a <b>re-housing, not a redesign</b>: each gate's term set is preserved exactly, including the
-    /// three ways they disagree about an unpopulated neighbor and about lighting state. See
-    /// <see cref="Evaluate"/>'s remarks for the per-gate matrix.
+    /// This is the sole definition of each gate's terms. Re-testing them in a loop of its own is how a
+    /// readiness bug becomes reachable only in a running game — the three gates are close enough to look
+    /// interchangeable and are not: they disagree deliberately about an unpopulated neighbor and about
+    /// lighting state. <see cref="Evaluate"/>'s remarks carry the per-gate matrix.
     /// </para>
     /// <para>
-    /// <b>Caller contract.</b> The caller owns everything that needs world context: skipping neighbors
-    /// outside the world (<c>World.IsChunkInWorld</c>), probing the job dictionaries and the chunk map to
-    /// build <see cref="NeighborFacts"/>, and short-circuiting its loop on the first blocking neighbor. This
-    /// type never sees a coordinate, a <c>ChunkData</c>, or a dictionary — which is what makes it trivially
-    /// unit-testable and lets the harness drive the identical code from a synthetic grid.
+    /// <b>Caller contract.</b> The caller owns everything needing world context: skipping neighbors outside
+    /// the world, probing the job dictionaries and the chunk map to build <see cref="NeighborFacts"/>, and
+    /// short-circuiting its loop on the first blocking neighbor. This type never sees a coordinate, a
+    /// <c>ChunkData</c>, or a dictionary, so it evaluates without a live world.
     /// </para>
     /// <para>
     /// See Documentation/Design/LIGHTING_PIPELINE_STATE_REFACTOR.md §4.2 (LP-2).
@@ -37,8 +34,9 @@ namespace Helpers
             ReadyAndLit,
 
             /// <summary>The deliberately relaxed meshing gate: neighbors need populated data and one completed
-            /// initial lighting pass, but may have lighting in flight or pending. Relaxed on purpose — see
-            /// <c>World.AreNeighborsMeshReady</c> for the wave-front ping-pong deadlock this avoids.</summary>
+            /// initial lighting pass, but may have lighting in flight or pending. The relaxation is required, not
+            /// an oversight — demanding settled light here deadlocks the generation wave-front, since two
+            /// neighbors each waiting on the other's light never mesh.</summary>
             MeshReady,
         }
 
@@ -77,8 +75,8 @@ namespace Helpers
 
         /// <summary>
         /// Everything the gates know about ONE neighbor, assembled by the caller from the job dictionaries
-        /// and the chunk map. Plain bools only — no references, no allocation, and nothing that needs a
-        /// live <c>World</c>, so the editor harness can synthesize these directly.
+        /// and the chunk map. Plain bools only — no references, no allocation, and nothing that needs a live
+        /// world, so the facts can be synthesized directly.
         /// </summary>
         public readonly struct NeighborFacts
         {
@@ -133,7 +131,7 @@ namespace Helpers
         /// Decides whether one neighbor blocks the given gate, and why.
         /// </summary>
         /// <remarks>
-        /// The per-gate term matrix, preserved verbatim from the three original loops:
+        /// The per-gate term matrix. The gates are NOT refinements of one another — read the differences:
         /// <list type="bullet">
         /// <item><see cref="Gate.DataReady"/> — generation in flight, or not populated.</item>
         /// <item><see cref="Gate.ReadyAndLit"/> — generation in flight, or lighting in flight, or (when

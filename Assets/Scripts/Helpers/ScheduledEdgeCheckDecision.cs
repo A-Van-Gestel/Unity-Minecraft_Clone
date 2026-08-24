@@ -14,12 +14,10 @@ namespace Helpers
     /// whether a <i>completed</i> pass re-arms the flag. This type only reads it.
     /// </para>
     /// <para>
-    /// <b>Coverage limit.</b> This closes the double-read, not the witness gap: production's
-    /// <c>ScheduleLightingUpdate</c> has three callers, all in <c>World.cs</c>, and no validation harness
-    /// reaches it — so the two lines that *consume* this decision in production stay unobserved by every
-    /// baseline. Only a harness that drives the production scheduler can witness them (design doc LP-8).
+    /// <b>Coverage limit.</b> This function is baselined; the two lines that consume its result are not.
+    /// See LP-8 for why and for what would close it.
     /// </para>
-    /// <para>See Documentation/Design/LIGHTING_PIPELINE_STATE_REFACTOR.md §7 (LP-5, finding F4).</para>
+    /// <para>See Documentation/Design/LIGHTING_PIPELINE_STATE_REFACTOR.md §7 (LP-5, finding F4; LP-8).</para>
     /// </summary>
     public static class ScheduledEdgeCheckDecision
     {
