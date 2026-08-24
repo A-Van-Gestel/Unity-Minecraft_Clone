@@ -53,9 +53,13 @@ This project uses custom object pools (`DynamicPool<T>`, `ConcurrentDynamicPool<
 - **Object references** (e.g., `ChunkData.Chunk`): set to `null` to unlink.
 - **Native containers**: `.Dispose()` in `Release()`, not `Reset()` — they are re-allocated on demand.
 
-## Property setter subtlety
+## Lighting work byte subtlety
 
-`ChunkData` lighting flags (`NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`) use property setters that invoke `OnLightWorkFlagged` when set to `true`. In `Reset()`, always set these through the property (not the backing field) so the guard logic runs correctly. Setting to `false` does NOT fire the callback — this is intentional.
+`ChunkData`'s lighting flags (`NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`) are bits of one `[Flags] LightingWork` byte, exposed as **get-only** bool adapters. They have no setters; every write goes through a named transition method, and all of those funnel into one private `SetWork` that fires `OnLightWorkFlagged` when a bit rises `0→1`. Clearing does NOT fire the callback — this is intentional.
+
+In `Reset()`, clear the whole set with `ClearAllLightingWork()` rather than touching the field, so the funnel runs.
+
+**The trap this field sets for B34:** the reset backstop sweeps `[NonSerialized]` fields by reflection, and its filter was `Type.IsPrimitive` — which is **false for enums**. The work byte escaped the sweep entirely until `IsEnum` was admitted. If you add an enum-typed transient to a pooled type, confirm the backstop actually covers it; a green B34 is not evidence on its own.
 
 ## Verification checklist
 

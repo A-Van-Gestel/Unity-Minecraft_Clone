@@ -196,12 +196,24 @@ conversion on the production mod path would not be caught in-harness (guarded in
 - **Was:** per `.agents/rules/pool-reset-safety.md` and `chunk-pipeline.md`, `RemainingEdgeCheckRounds`- stale-after-recycle was a real shipped bug. The harness gated the pipeline on its OWN mirror state (`TestChunk.HasLightWork` + a local `const edgeCheckRounds = 2`), never on `ChunkData`'s real flags, and never called `ChunkData.Reset()` or recycled (`new ChunkData` per chunk). So a recycled-chunk-with- stale-flags defect — a documented *recurring* family — was invisible.
 - **Now:** the harness drives pipeline gating off `ChunkData`'s **real** flags — `HasLightChangesToProcess`
   (backs `TestChunk.HasLightWork`), `RemainingEdgeCheckRounds` (consumed by the edge-check loops via the shared `DecrementEdgeCheckRound`), and `NeedsEdgeCheck` (consumed + cleared in `BeginLightingJob`). The static
-  `ChunkData.OnLightWorkFlagged` is neutralized for the harness's lifetime (save/null/restore) so the real setters are safe headless. `LightingTestWorld.RecycleAllChunks()` routes every chunk through the real production `Reset()` (the pool return/acquire path; `World.Instance == null` → its `Array.Clear(sections)`
+  `ChunkData.OnLightWorkFlagged` is neutralized for the harness's lifetime (save/null/restore) so the real writes are safe headless. `LightingTestWorld.RecycleAllChunks()` routes every chunk through the real production `Reset()` (the pool return/acquire path; `World.Instance == null` → its `Array.Clear(sections)`
   fallback). Two baselines guard it: **B33** recycles a slab/sky-well world through `Reset()` and re-lights to the same oracle field (only correct if light/queues/sections/flags cleared AND
   `RemainingEdgeCheckRounds` restored to 2 — a stale 0 skips the edge rounds), and **B34**
   (`LightingAssert.AssertResetClearsTransientState`) dirties a real `ChunkData` and asserts `Reset()` clears every transient surface, with a **reflection backstop over every `[NonSerialized]` primitive field** so a new transient flag/counter added later without a reset is caught generically — without a test edit.
+- **Strengthened by LP-4 (2026-08-24):** the three flags are now bits of one `LightingWork` byte with **no
+  setters**, so the harness cannot write them at all except through the same named transition methods
+  production uses. `DecrementEdgeCheckRound` / `RunReGrantedEdgeCheckRound` turned out to be exact mirrors of
+  the production cascade re-arm and now call `SpendEdgeCheckRound(rearm: true)`; the harness's neighbor
+  trigger calls `FlagNeighborEdgeCheck()`. Harness and production now share the **mutation** layer, not just
+  the decision layers. B34's reflection backstop was extended to enum-typed fields in the same arc — its
+  `Type.IsPrimitive` filter is false for enums, so the new work byte escaped the sweep until `IsEnum` was
+  admitted, and a measured prove-red (dropping the clear from `Reset()`) reds **B34 alone**.
 - **Still NOT covered (minor):** the harness's BFS wake-up queues remain `TestChunk`-managed mirrors of
   `ChunkData`'s (production's `AddTo*Queue` is `World`-coupled — see A3), so the production queues' reset is verified by B34's direct check rather than through the live enqueue path.
+- **Still NOT covered (new, LP-4):** the harness clears the two schedule bits in **two halves**
+  (`EdgeCheck` in `BeginLightingJob`, `LightChanges` in `CompleteLightingJob`) where production clears both
+  atomically in `OnLightingJobScheduled()`. `ChunkData.ClearEdgeCheck()` / `ClearLightWork()` exist solely to
+  serve that split and are called by no production code. LP-5 owns retiring them.
 
 ### B5 — Lighting→meshing handoff is out of scope · **OPEN · LOW (by design)**
 

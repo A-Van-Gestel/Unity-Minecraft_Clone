@@ -20,16 +20,39 @@ Each stage is gated by **readiness checks** on the chunk and its neighbors. A ch
 
 ## 2. State Flags Reference
 
-Each `ChunkData` instance carries the following transient flags that control pipeline progression:
+Each `ChunkData` instance carries the following transient flags that control pipeline progression.
+
+The three **lighting work** flags are not independent bools: they are bits of one `[Flags] LightingWork`
+byte (`Data/LightingWork.cs`), exposed as get-only `bool` adapters and mutated **only** through named
+transition methods on `ChunkData`. There is no setter — a raw write is a compile error. The set columns
+below name the transition method each site calls; `Work` exposes the whole set and `HasAnyLightingWork`
+answers "is this chunk quiet".
+
+| Transition method | Effect on the work set |
+|---|---|
+| `FlagInitialLighting()` | `+InitialLighting` |
+| `FlagLightWork()` | `+LightChanges` |
+| `FlagEdgeCheck()` | `+EdgeCheck` |
+| `FlagNeighborEdgeCheck()` | `+EdgeCheck +LightChanges` — armed together, never apart |
+| `SpendEdgeCheckRound(rearm)` | `RemainingEdgeCheckRounds--`; when `rearm`, `+EdgeCheck +LightChanges` |
+| `RegrantBorderEditEdgeRound()` | `RemainingEdgeCheckRounds = max(current, 1)` (Bug 05) |
+| `ClearInitialLighting()` | `-InitialLighting` |
+| `OnLightingJobScheduled()` | `-LightChanges -EdgeCheck` (the atomic schedule-clear) |
+| `ClearEdgeCheck()` / `ClearLightWork()` | single-bit clears — **editor harness only**, see §4 |
+| `ClearAllLightingWork()` | `= None` (lighting disabled, pool recycle) |
+
+**The invariant this buys:** an edge check can never be armed without its `LightChanges` companion. A
+half-armed chunk cannot satisfy the schedule guard, so it would hold the flag with no path to spend it —
+the shape behind three historical pipeline deadlocks. Baselines B115–B119 guard the mapping.
 
 | Flag                          | Type | Set By                                                                                                                                                                      | Cleared By                                                                                                                                                                                                                                                                          | Purpose                                                                                                                        |
 |-------------------------------|------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
 | `IsPopulated`                 | bool | `Populate()` / `PopulateFromSave()`                                                                                                                                         | `Reset()` (pool recycle)                                                                                                                                                                                                                                                            | Voxel data exists and is valid                                                                                                 |
 | `IsLoading`                   | bool | `DrainGenerationRequests()` (at admission; `CheckViewDistance()` only *enqueues*, P-4 §3.1)                                                                                 | `ChunkData.Reset()` (pool recycle); **§3.2 out-of-range discard** in `ProcessGenerationJobs`; **CP-3 load-arm fault path** in `LoadOrGenerateChunk`'s catch (identity-guarded) so a faulted placeholder re-enqueues on the next boundary crossing instead of stranding forever (F1) | Prevents duplicate disk load requests                                                                                          |
-| `NeedsInitialLighting`        | bool | `ProcessGenerationJobs()` / `PopulateFromSave()`; **`UnloadChunks()` persist-and-unload arm** (P-4 rec 3 — forces a full re-light on reload, captured by the save snapshot) | `Update()` lighting scan after scheduling initial pass                                                                                                                                                                                                                              | Chunk has terrain but no lighting yet                                                                                          |
-| `HasLightChangesToProcess`    | bool | `AddToSunLightQueue()`, `AddToBlockLightQueue()`, cross-chunk mods, edge check scheduling                                                                                   | `ScheduleLightingUpdate()`                                                                                                                                                                                                                                                          | Pending light changes in managed queues                                                                                        |
-| `NeedsEdgeCheck`              | bool | Post-stabilization re-arm (`ProcessLightingJobs`), neighbor propagation, or disk load                                                                                       | `ScheduleLightingUpdate()`                                                                                                                                                                                                                                                          | Border voxels need validation against neighbors                                                                                |
-| `RemainingEdgeCheckRounds`    | int  | Initialized to 2 on `ChunkData`; reset to 2 by `Reset()`; re-granted to 1 by `ModifyVoxel` on a border-column opacity edit (Bug 05)                                         | Decremented in `ProcessLightingJobs()` per stable pass — per stable pass **that changed light**, once P9-2's `enableConvergentEdgeCheckCascade` is on                                                                                                                               | Iterative edge-check rounds still to re-arm after a stable lighting pass (cross-seam convergence). `[NonSerialized]`.          |
+| `NeedsInitialLighting`        | `LightingWork` bit (get-only) | `FlagInitialLighting()` from `ProcessGenerationJobs()` / `PopulateFromSave()` / the disk read; **`UnloadChunks()` persist-and-unload arm** (P-4 rec 3 — forces a full re-light on reload, captured by the save snapshot) | `ClearInitialLighting()` from the `Update()` lighting scan after scheduling the initial pass, the startup coroutine, and `LoadOrGenerateChunkInner`                                                                                                                                  | Chunk has terrain but no lighting yet                                                                                          |
+| `HasLightChangesToProcess`    | `LightingWork` bit (get-only) | `FlagLightWork()` from `AddToSunLightQueue()` / `AddToBlockLightQueue()` / `QueueSunlightRecalculation()` / cross-chunk mods / a declined schedule / the edge-arm pre-set    | `OnLightingJobScheduled()` — one atomic call, together with `NeedsEdgeCheck`                                                                                                                                                                                                         | Pending light changes in managed queues                                                                                        |
+| `NeedsEdgeCheck`              | `LightingWork` bit (get-only) | `FlagEdgeCheck()` (disk-load-stable), `FlagNeighborEdgeCheck()` (neighbor propagation), or `SpendEdgeCheckRound(rearm: true)` (post-stabilization re-arm)                    | `OnLightingJobScheduled()` — read **twice** first (the job's `PerformEdgeCheck` and LI-2's band derivation), then cleared with `HasLightChangesToProcess`                                                                                                                             | Border voxels need validation against neighbors                                                                                |
+| `RemainingEdgeCheckRounds`    | int  | Initialized to 2 on `ChunkData`; reset to 2 by `Reset()`; re-granted to 1 by `ModifyVoxel` via `RegrantBorderEditEdgeRound()` on a border-column opacity edit (Bug 05)      | Decremented by `SpendEdgeCheckRound()`, applied from `EdgeCheckCascadeDecision.Apply()` — spent on a stable pass, and once P9-2's `enableConvergentEdgeCheckCascade` is on, spent **without** re-arming when the pass changed nothing                                                | Iterative edge-check rounds still to re-arm after a stable lighting pass (cross-seam convergence). `[NonSerialized]`.          |
 | `LifecycleEpoch`              | int  | **Bumped** (never zeroed) by every `Reset()` — its reset IS the increment; monotonic across recycles                                                                        | Never — deliberately monotonic (B34 exempts it from the fresh-instance sweep and asserts the bump instead)                                                                                                                                                                          | Pool-ABA detection: async code captures instance + epoch and re-checks both after an await (CP-3 load arm). `[NonSerialized]`. |
 
 ### Flag Lifecycle Diagram
@@ -248,7 +271,11 @@ This is where most pipeline stalls originate. The dirty set lives in `LightWorkS
 - **Ready** — visited by the per-frame scan.
 - **Waiting** — parked chunks whose readiness gate failed (or whose lighting job is in-flight); invisible to the scan until a promotion event moves them back. This keeps the per-frame cost at O (schedulable) instead of O (dirty) — under a backlog, blocked chunks no longer pay 8-neighbor gate evaluations every frame.
 
-**Registration:** The three lighting flags on `ChunkData` are properties with setters. When any flag transitions to `true`, a static callback (`ChunkData.OnLightWorkFlagged` → `LightWorkScheduler.Flag`) enqueues the chunk's position into a `ConcurrentQueue<Vector2Int>` — this is thread-safe and supports flag-setting from background deserialization threads (`ChunkSerializer.ReadChunkInternal` via `Task.Run`). The main thread drains this queue into the ready set at the start of the scan (promoting parked entries).
+**Registration:** The three lighting flags are bits of one `LightingWork` byte, written only through `ChunkData`'s transition methods (§2). Every write funnels through one private `SetWork`, which fires the static callback (`ChunkData.OnLightWorkFlagged` → `LightWorkScheduler.Flag`) when **any bit rises 0→1** — clears and no-op writes never notify. The callback enqueues the chunk's position into a `ConcurrentQueue<Vector2Int>`, which is thread-safe and supports flagging from background deserialization threads (`ChunkSerializer.ReadChunkInternal` via `Task.Run`). The main thread drains this queue into the ready set at the start of the scan (promoting parked entries).
+
+> A transition that raises **two** bits at once (`FlagNeighborEdgeCheck`, a cascade re-arm) fires the callback **once**, not twice. Staging dedupes into a `HashSet` on drain, so this is observationally identical to the two separate writes it replaced; B117 pins it.
+>
+> **Ownership:** the work byte is main-thread-only, with one sanctioned exception — deserialization fills a pool instance that has not been published to `WorldData` yet, so no other thread can see it. Because the three kinds now share one field, two threads writing the same *published* chunk would lose an update where three independent bools could not. Nothing enforces this but the contract on `SetWork`.
 
 **Demotion (parking):** A visited ready chunk is moved to waiting when it cannot make progress: it is unpopulated, its lighting job is still in-flight, or its flags remain set but no branch could schedule (a readiness gate failed).
 
@@ -301,17 +328,17 @@ foreach pos in snapshot:
 
         // Edge check path (strict gate)
         if chunkData.NeedsEdgeCheck AND AreNeighborsReadyAndLit(coord):
-            chunkData.HasLightChangesToProcess = true  ← SET before schedule
-            scheduled = ScheduleLightingUpdate()       ← clears NeedsEdgeCheck + HasLight...
+            chunkData.FlagLightWork()                  ← pre-set so the schedule guard passes
+            scheduled = ScheduleLightingUpdate()       ← OnLightingJobScheduled(): clears BOTH bits
 
         // Regular lighting path (relaxed gate)
         if !scheduled AND chunkData.HasLightChangesToProcess AND AreNeighborsDataReady(coord):
-            scheduled = ScheduleLightingUpdate()       ← clears HasLight...
+            scheduled = ScheduleLightingUpdate()       ← OnLightingJobScheduled(): clears BOTH bits
 
         if scheduled: lightJobsScheduled++
 
-    // Remove if all flags are clear; otherwise PARK if nothing was scheduled (gate failed)
-    if !NeedsInitialLighting AND !HasLightChangesToProcess AND !NeedsEdgeCheck:
+    // Remove if all work is clear; otherwise PARK if nothing was scheduled (gate failed)
+    if !chunkData.HasAnyLightingWork:
         _lightWork.Remove(pos)
     else if nothing scheduled this visit:
         _lightWork.MarkWaiting(pos)                            ← promoted by events above
@@ -319,7 +346,7 @@ foreach pos in snapshot:
 
 > [!IMPORTANT]
 > ### Critical Scheduling Detail
-> When the edge-check path in the lighting scan sets `HasLightChangesToProcess = true` but `ScheduleLightingUpdate()` returns `false` (e.g., job already exists — shouldn't happen due to the earlier `LightingJobs.ContainsKey` guard), the flag would remain set and fall through to the regular path.
+> When the edge-check path in the lighting scan calls `FlagLightWork()` but `ScheduleLightingUpdate()` returns `false` (e.g., job already exists — shouldn't happen due to the earlier `LightingJobs.ContainsKey` guard), the flag would remain set and fall through to the regular path.
 > However, because `ScheduleLightingUpdate` reads `NeedsEdgeCheck` internally and clears it, the **fallback path effectively performs the edge check anyway**, but under the weaker `AreNeighborsDataReady` gate instead of `AreNeighborsReadyAndLit`.
 
 ---

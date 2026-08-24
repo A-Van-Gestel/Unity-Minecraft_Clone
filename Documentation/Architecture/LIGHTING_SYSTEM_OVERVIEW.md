@@ -118,7 +118,7 @@ When a player places or breaks a block (`ChunkData.ModifyVoxel`):
 1. The old sky light and blocklight RGB values are captured from `section.LightData[]` via `LightBitMapping`.
 2. The heightmap is updated if the block is light-obstructing.
 3. The modified voxel and its 6 neighbors are added to `_sunlightBfsQueue` and `_blocklightBfsQueue`.
-4. The chunk is flagged: `HasLightChangesToProcess = true`.
+4. The chunk is flagged via `ChunkData.FlagLightWork()`.
 
 ### 3.2 Job Scheduling (`WorldJobManager.ScheduleLightingUpdate`)
 
@@ -182,7 +182,7 @@ Back on the main thread:
     - **Blocklight mods** are persisted in full (local position + RGB + removal flag, `pending_blocklight.bin`) and replayed through `CrossChunkLightModApplier` when the chunk loads from disk — a column recalc cannot restore RGB data, so without this, removals (broken lamps) would leave permanent ghost light in the saved neighbor.
 5. **Stability check:**
     - If `IsStable`: request mesh rebuild for this chunk and neighbors, and — while `RemainingEdgeCheckRounds > 0`, and (P9-2, flag-gated) while the merge actually changed light — re-arm the iterative edge-check rounds on this chunk and its cardinal neighbors (§3.6). Stability is first passed through `LightingJobProcessor.IsEffectivelyStable`, which treats a chunk as stable when its only outstanding mods target out-of-world positions.
-    - If not stable: set `HasLightChangesToProcess = true` for another pass next frame.
+    - If not stable: `FlagLightWork()` for another pass next frame.
 
 ### 3.5 Readiness Gates
 
@@ -208,7 +208,7 @@ After a chunk's initial lighting stabilizes, its border voxels may have incorrec
 
 **Lifecycle (iterative):** Edge checks now run as a small fixed number of *rounds* rather than once, because two adjacent chunks that both stabilize against each other's stale snapshot need more than one reconciliation pass.
 
-1. Each `ChunkData` starts with `RemainingEdgeCheckRounds = 2` (a `[NonSerialized]` counter, reset by `ChunkData.Reset()`). When a lighting job reports `IsStable` (`ProcessLightingJobs`) and rounds remain, the chunk decrements the counter and re-arms its own `NeedsEdgeCheck` + `HasLightChangesToProcess`, then propagates `NeedsEdgeCheck` to its 4 cardinal neighbors via `TriggerNeighborEdgeChecks` (only neighbors that are populated and past initial lighting). Round 1 fixes the immediate frontier; round 2 reconciles the remainder after neighbors have run
+1. Each `ChunkData` starts with `RemainingEdgeCheckRounds = 2` (a `[NonSerialized]` counter, reset by `ChunkData.Reset()`). When a lighting job reports `IsStable` (`ProcessLightingJobs`) and rounds remain, `EdgeCheckCascadeDecision.Apply` spends a round via `ChunkData.SpendEdgeCheckRound(rearm:)`, which re-arms the chunk's own `NeedsEdgeCheck` **and** `HasLightChangesToProcess` in one indivisible step (an edge check armed alone could never satisfy the schedule guard). The merge then propagates to the 4 cardinal neighbors via `TriggerNeighborEdgeChecks`, which calls `FlagNeighborEdgeCheck()` on each (only neighbors that are populated and past initial lighting). Round 1 fixes the immediate frontier; round 2 reconciles the remainder after neighbors have run
    their own edge checks. Chunks loaded from disk with stable lighting also start with `NeedsEdgeCheck = true`.  
    **Post-generation re-grant (Bug 05 fix, July 2026):** once generation spends both rounds, a later
    *border-column* opacity edit can leave a cross-seam voxel under-bright with no round left to reconcile
@@ -230,7 +230,7 @@ After a chunk's initial lighting stabilizes, its border voxels may have incorrec
    the fact that a pass which wrote nothing leaves every border byte-identical to what the neighbors
    already read; the measurement behind it is the design doc's §6 Option B1.
 2. In the main update loop, `NeedsEdgeCheck` is checked after initial lighting but before regular updates. It requires `AreNeighborsReadyAndLit` to fire on the primary path, with a fallback under the weaker `AreNeighborsDataReady` gate when `HasLightChangesToProcess` is also set (see [CHUNK_LIFECYCLE_PIPELINE.md](CHUNK_LIFECYCLE_PIPELINE.md) §7).
-3. `WorldJobManager.ScheduleLightingUpdate` reads `chunkData.NeedsEdgeCheck` into the job's `PerformEdgeCheck` flag and clears it.
+3. `WorldJobManager.ScheduleLightingUpdate` reads `chunkData.NeedsEdgeCheck` **twice** — into the job's `PerformEdgeCheck` flag, and into LI-2's band derivation — then, once `job.Schedule()` has succeeded, clears it together with `HasLightChangesToProcess` in one `OnLightingJobScheduled()` call. On a schedule throw the flags stay set, so the work is not lost.
 4. The job's edge check runs as "Pass -1" before the normal BFS seeding.
 
 **Algorithm (`CheckEdges`, per-voxel logic in `CheckEdgeVoxel` / `CheckEdgeVoxelRGB`):**

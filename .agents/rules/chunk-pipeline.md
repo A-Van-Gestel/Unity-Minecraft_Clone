@@ -19,7 +19,7 @@ Before editing any pipeline logic in these files, read `@Documentation/Architect
 
 ## Invariants that must not break
 
-- **Flag pairing.** Every flag that is set somewhere (`NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`) must have exactly one corresponding clear site. If you add a new flag, define both the set and the clear in the same commit.
+- **Flag pairing.** Every flag that is set somewhere must have exactly one corresponding clear site. If you add a new flag, define both the set and the clear in the same commit. The three lighting flags (`NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`) are bits of one `LightingWork` byte and are **get-only** — mutate them through `ChunkData`'s transition methods (`FlagLightWork()`, `OnLightingJobScheduled()`, …); a raw assignment is a compile error, by design. Never arm `EdgeCheck` without `LightChanges`: a half-armed chunk cannot satisfy the schedule guard and will hold the flag forever.
 
 - **Gate ordering.** A chunk MUST NOT advance to meshing until it passes `AreNeighborsReadyAndLit`. Do not add a "fast path" that skips this gate — historical meshing deadlocks trace to exactly that shortcut.
 
