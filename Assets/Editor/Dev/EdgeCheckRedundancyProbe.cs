@@ -181,7 +181,7 @@ namespace Editor.Dev
 
                     foreach (Vector2Int coord in coords)
                     {
-                        world.GetChunkData(coord).NeedsEdgeCheck = true;
+                        world.GetChunkData(coord).FlagEdgeCheck();
                         world.FlagLightWork(coord);
                     }
 

@@ -713,6 +713,16 @@ cover steps 1–4. With probe 1 deleted, no future session can re-observe the re
 - **Testability gain:** the startup path's arm selection is now the same shared, sim-guarded decision as the steady-state scan — a whole hand-mirrored surface deleted.
 - **Doc-sync (same commit):** `CHUNK_LIFECYCLE_PIPELINE.md` §4 "Critical Scheduling Detail" + §7 fallback section (rewrite as explicit contract + baseline pointer);
   `LIGHTING_SYSTEM_OVERVIEW.md` §3.6 step 3. **Serialization:** none.
+- **Folded in from LP-4 execution (2026-08-24) — retire the harness's split schedule-clear.**
+  Production clears `EdgeCheck` + `LightChanges` atomically in `ChunkData.OnLightingJobScheduled()`, but
+  `LightingTestWorld` clears them in two halves: `EdgeCheck` in `BeginLightingJob` and `LightChanges` in
+  `CompleteLightingJob`. LP-4 could not close this without changing harness timing mid-refactor (its
+  constraint is byte-for-byte preservation), so it added `ChunkData.ClearEdgeCheck()` /
+  `ClearLightWork()` — **two transition methods production never calls, existing solely for that split**.
+  LP-5 owns moving the harness onto `OnLightingJobScheduled()` and then deleting both methods. The tell
+  that this is done: `codegraph callers ClearEdgeCheck` returns nothing outside `ChunkData` itself.
+  Expect baseline churn when the `LightChanges` clear moves from Complete to Begin — that churn is the
+  fidelity gap becoming visible, not a regression.
 
 ### LP-6 — Lazy strict-gate evaluation (🟢, optional, SECONDARY perf)
 

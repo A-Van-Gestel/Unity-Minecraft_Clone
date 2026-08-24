@@ -293,9 +293,9 @@ namespace Editor.Validation.Lighting.Framework
                 // --- Dirty every transient surface a real lifecycle would touch ---
                 subject.IsPopulated = true;
                 subject.IsLoading = true;
-                subject.NeedsInitialLighting = true;
-                subject.HasLightChangesToProcess = true;
-                subject.NeedsEdgeCheck = true;
+                subject.FlagInitialLighting();
+                subject.FlagLightWork();
+                subject.FlagEdgeCheck();
                 subject.RemainingEdgeCheckRounds = 0; // the historical bug condition: counter exhausted
                 subject.SunlightBfsQueue.Enqueue(default);
                 subject.BlocklightBfsQueue.Enqueue(default);

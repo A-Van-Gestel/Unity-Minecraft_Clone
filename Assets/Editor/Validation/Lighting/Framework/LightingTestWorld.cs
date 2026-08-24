@@ -270,7 +270,11 @@ namespace Editor.Validation.Lighting.Framework
             public bool HasLightWork
             {
                 get => Data.HasLightChangesToProcess;
-                set => Data.HasLightChangesToProcess = value;
+                set
+                {
+                    if (value) Data.FlagLightWork();
+                    else Data.ClearLightWork();
+                }
             }
 
             /// <summary>
@@ -599,7 +603,7 @@ namespace Editor.Validation.Lighting.Framework
             // ChunkData.NeedsEdgeCheck in ScheduleLightingUpdate). Driving off the real flag means a
             // missed reset of it on pool recycle would alter scheduling — observable (B4).
             bool edgeCheck = performEdgeCheck || chunk.Data.NeedsEdgeCheck;
-            chunk.Data.NeedsEdgeCheck = false;
+            chunk.Data.ClearEdgeCheck();
 
             LightingJobFlight flight = new LightingJobFlight { Coord = chunkCoord };
 
@@ -1143,7 +1147,7 @@ namespace Editor.Validation.Lighting.Framework
             {
                 foreach (TestChunk chunk in _chunks.Values)
                 {
-                    chunk.Data.NeedsEdgeCheck = true;
+                    chunk.Data.FlagEdgeCheck();
                     chunk.HasLightWork = true;
                 }
 
@@ -1172,9 +1176,7 @@ namespace Editor.Validation.Lighting.Framework
             {
                 if (chunk.Data.RemainingEdgeCheckRounds <= 0) continue;
 
-                chunk.Data.RemainingEdgeCheckRounds--;
-                chunk.Data.NeedsEdgeCheck = true;
-                chunk.HasLightWork = true;
+                chunk.Data.SpendEdgeCheckRound(rearm: true);
                 anyRound = true;
             }
 
@@ -1201,9 +1203,7 @@ namespace Editor.Validation.Lighting.Framework
             {
                 if (chunk.Data.RemainingEdgeCheckRounds <= 0) continue;
 
-                chunk.Data.RemainingEdgeCheckRounds--;
-                chunk.Data.NeedsEdgeCheck = true;
-                chunk.HasLightWork = true;
+                chunk.Data.SpendEdgeCheckRound(rearm: true);
                 TriggerNeighborEdgeChecks(chunk.Coord);
                 anyRound = true;
             }
@@ -1233,8 +1233,7 @@ namespace Editor.Validation.Lighting.Framework
                 if (!_chunks.TryGetValue(neighborCoord, out TestChunk neighbor)) continue;
                 if (neighbor.Data.NeedsInitialLighting) continue;
 
-                neighbor.Data.NeedsEdgeCheck = true;
-                neighbor.HasLightWork = true;
+                neighbor.Data.FlagNeighborEdgeCheck();
             }
         }
 

@@ -120,32 +120,18 @@ namespace Data
         /// <summary>
         /// A transient flag indicating that the chunk's data has been populated, but it has not yet undergone its initial, mandatory lighting calculation.
         /// </summary>
-        public bool NeedsInitialLighting
-        {
-            get => (_lightingWork & LightingWork.InitialLighting) != 0;
-            // Settable only while the LP-4 call-site migration is in flight; the setters go away once
-            // every write routes through the transition methods below.
-            set => SetWorkBit(LightingWork.InitialLighting, value);
-        }
+        public bool NeedsInitialLighting => (_lightingWork & LightingWork.InitialLighting) != 0;
 
         /// <summary>
         /// A transient flag indicating that the chunk has pending general light changes that need to be processed on the main thread.
         /// </summary>
-        public bool HasLightChangesToProcess
-        {
-            get => (_lightingWork & LightingWork.LightChanges) != 0;
-            set => SetWorkBit(LightingWork.LightChanges, value);
-        }
+        public bool HasLightChangesToProcess => (_lightingWork & LightingWork.LightChanges) != 0;
 
         /// <summary>
         /// A transient flag indicating that this chunk needs an edge consistency check against its neighbors.
         /// Set after initial lighting stabilizes; requires all neighbors to be lit before scheduling.
         /// </summary>
-        public bool NeedsEdgeCheck
-        {
-            get => (_lightingWork & LightingWork.EdgeCheck) != 0;
-            set => SetWorkBit(LightingWork.EdgeCheck, value);
-        }
+        public bool NeedsEdgeCheck => (_lightingWork & LightingWork.EdgeCheck) != 0;
 
         /// <summary>
         /// Tracks the number of post-generation edge check rounds remaining for this chunk.
@@ -187,12 +173,6 @@ namespace Data
             _lightingWork = next;
             if ((next & ~previous) != LightingWork.None) OnLightWorkFlagged?.Invoke(Position);
         }
-
-        /// <summary>Sets or clears one work bit through the funnel.</summary>
-        /// <param name="bit">The bit to change.</param>
-        /// <param name="value">True to set the bit, false to clear it.</param>
-        private void SetWorkBit(LightingWork bit, bool value) =>
-            SetWork(value ? _lightingWork | bit : _lightingWork & ~bit);
 
         /// <summary>Flags the chunk for its initial, mandatory lighting pass (census rows 1, 2, 16).</summary>
         public void FlagInitialLighting() => SetWork(_lightingWork | LightingWork.InitialLighting);
@@ -241,6 +221,18 @@ namespace Data
         /// </summary>
         public void OnLightingJobScheduled() =>
             SetWork(_lightingWork & ~(LightingWork.LightChanges | LightingWork.EdgeCheck));
+
+        /// <summary>
+        /// Clears the edge-check bit alone. Production never needs this — its schedule-clear is atomic
+        /// (<see cref="OnLightingJobScheduled"/>); the editor harness models scheduling in two halves and
+        /// clears the two bits at different points. Safe by construction: the invariant this API protects
+        /// is that an edge check is never <i>armed</i> without its light-changes companion, and clearing
+        /// cannot arm anything.
+        /// </summary>
+        public void ClearEdgeCheck() => SetWork(_lightingWork & ~LightingWork.EdgeCheck);
+
+        /// <summary>Clears the light-changes bit alone. Harness-only, for the reason on <see cref="ClearEdgeCheck"/>.</summary>
+        public void ClearLightWork() => SetWork(_lightingWork & ~LightingWork.LightChanges);
 
         /// <summary>Clears every pending work kind (census rows 13, 14 — lighting disabled, pool recycle).</summary>
         public void ClearAllLightingWork() => SetWork(LightingWork.None);

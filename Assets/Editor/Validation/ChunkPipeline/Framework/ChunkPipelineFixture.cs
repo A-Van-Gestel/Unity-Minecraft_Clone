@@ -99,7 +99,7 @@ namespace Editor.Validation.ChunkPipeline.Framework
         {
             Vector2Int origin = new ChunkCoord(x, z).ToVoxelOrigin();
             ChunkData chunk = new ChunkData(origin) { IsPopulated = populated };
-            if (needsInitialLighting) chunk.NeedsInitialLighting = true;
+            if (needsInitialLighting) chunk.FlagInitialLighting();
             World.worldData.SetChunk(origin, chunk);
             return chunk;
         }

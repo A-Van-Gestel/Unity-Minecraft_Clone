@@ -392,7 +392,7 @@ namespace Editor.Validation.ChunkPipeline
             // The gate-block: a registered but unpopulated diagonal neighbor of the center.
             fixture.GetChunk(1, 1).IsPopulated = false;
 
-            fixture.GetChunk(0, 0).HasLightChangesToProcess = true;
+            fixture.GetChunk(0, 0).FlagLightWork();
             sim.MarkOutOfRange(new ChunkCoord(1, 0));
         }
 
@@ -402,7 +402,7 @@ namespace Editor.Validation.ChunkPipeline
         {
             ChunkData blocker = fixture.GetChunk(1, 1);
             blocker.IsPopulated = true;
-            blocker.NeedsInitialLighting = true;
+            blocker.FlagInitialLighting();
         }
 
         /// <summary>

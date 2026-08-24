@@ -223,7 +223,7 @@ namespace Editor.Validation.SerializationRoundTrip
             for (int i = 0; i < data.heightMap.Length; i++)
                 data.heightMap[i] = (ushort)rng.Next(0, VoxelData.ChunkHeight);
 
-            data.NeedsInitialLighting = rng.Next(2) == 0;
+            if (rng.Next(2) == 0) data.FlagInitialLighting();
 
             for (int s = 0; s < data.sections.Length; s++)
             {

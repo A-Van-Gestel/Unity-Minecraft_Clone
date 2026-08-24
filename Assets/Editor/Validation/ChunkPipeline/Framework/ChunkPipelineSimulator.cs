@@ -189,7 +189,7 @@ namespace Editor.Validation.ChunkPipeline.Framework
                 ChunkData chunk = Resolve(flight.Coord);
                 if (chunk == null) continue; // Discarded out-of-range mid-flight (pipeline §3.2).
                 chunk.IsPopulated = true;
-                chunk.NeedsInitialLighting = true;
+                chunk.FlagInitialLighting();
                 result.GenerationCompleted++;
             }
 
@@ -262,9 +262,7 @@ namespace Editor.Validation.ChunkPipeline.Framework
                 if (lightingScheduled >= LightingSchedulesPerFrame) continue; // Budget break: stays ready.
 
                 // A successful schedule clears every lighting flag (the caller contract on EvaluateReadyChunk).
-                chunk.NeedsInitialLighting = false;
-                chunk.NeedsEdgeCheck = false;
-                chunk.HasLightChangesToProcess = false;
+                chunk.ClearAllLightingWork();
                 _fixture.Jobs.LightingJobs[coord] = default;
                 _lightingFlights.Add(new Flight { Coord = coord, CompletesOnFrame = _frame + JobLatencyFrames });
                 lightingScheduled++;
@@ -462,7 +460,7 @@ namespace Editor.Validation.ChunkPipeline.Framework
             {
                 Vector3Int offset = VoxelData.FaceChecks[faceIndex];
                 ChunkData neighbor = Resolve(source.Neighbor(offset.x, offset.z));
-                if (neighbor is { IsPopulated: true }) neighbor.HasLightChangesToProcess = true;
+                if (neighbor is { IsPopulated: true }) neighbor.FlagLightWork();
             }
         }
 

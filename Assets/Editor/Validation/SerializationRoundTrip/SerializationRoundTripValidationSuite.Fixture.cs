@@ -111,7 +111,7 @@ namespace Editor.Validation.SerializationRoundTrip
             for (int i = 0; i < data.heightMap.Length; i++)
                 data.heightMap[i] = (ushort)(40 + (i % 61));
 
-            data.NeedsInitialLighting = true;
+            data.FlagInitialLighting();
 
             // 0x00 — voxels + compact uniform sky. Voxels FIRST: SetVoxel promotes a compact section back
             // to full LightData, so stamping the sky byte before the writes would be undone.
