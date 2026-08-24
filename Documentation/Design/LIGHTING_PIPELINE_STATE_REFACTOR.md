@@ -2,7 +2,7 @@
 
 **Version:** 1.3  
 **Date:** 2026-07-06  
-**Status:** Partially implemented — **LP-1, LP-2 and LP-3 shipped 2026-08-23**; **LP-4 code complete 2026-08-24** (in-game session pending — see its Amended line). LP-5…LP-7 remain proposed. §2 re-audited against HEAD on 2026-08-23.  
+**Status:** Partially implemented — **LP-1, LP-2 and LP-3 shipped 2026-08-23; LP-4 shipped 2026-08-24** (code complete + in-game confirmed — see its Amended line). LP-5…LP-7 remain proposed. §2 re-audited against HEAD on 2026-08-23.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > Clean-up / refactor plan for the async lighting engine's orchestration layer — the `ChunkData`
@@ -695,7 +695,7 @@ cover steps 1–4. With probe 1 deleted, no future session can re-observe the re
 - **Doc-sync (same commit):** `CHUNK_LIFECYCLE_PIPELINE.md` §2 (rewrite the flag table around bits + transition methods; note F9's `IsLoading` status honestly), §4 pseudocode names the transition methods; `LIGHTING_SYSTEM_OVERVIEW.md` §3.2/§3.4 mentions;
   `pool-reset-safety.md` "property setter subtlety" section (funnel replaces per-property setters); `chunk-lifecycle` skill flag list; fidelity doc B4 note. **Serialization:** mapping-only; layout unchanged (§5 tripwire applies).
 
-**Amended:** 2026-08-24 — **LP-4 code complete (in-game session pending).** Shipped as five commits:
+**Amended:** 2026-08-24 — **LP-4 SHIPPED — code complete and in-game confirmed.** Nine commits:
 the `LightingWork` byte + transition API, the production call-site migration, the B34 backstop fix, the
 setter removal + editor/harness migration, and the B115–B118 census family. Universal gate green at
 **111** lighting baselines (up from 106), plus NS-3 (7), LightScheduler (9), Serialization Round-Trip (16),
@@ -748,6 +748,34 @@ implying coverage it lacks.
   reentrancy sentinel was tried and **removed** — B34's reflection backstop dirties every `[NonSerialized]`
   primitive, so it stamped the sentinel and produced a guaranteed false positive, and it stranded on a
   throwing callback. The ownership rule is documented on `SetWork` instead, with no runtime check.
+
+**In-game session PASSED (2026-08-24)** — border edits, a sustained flight with edits, and a save/reload,
+read back live from the running editor. Zero errors and zero lighting warnings across all three; no
+`[LIGHTING] Fail-safe promoted` in a quiesced world.
+
+| Check | Flight + border edits | After save/reload |
+|---|---|---|
+| **`EdgeCheck` armed without `LightChanges`** | **0 / 848 chunks** | **0 / 838 chunks** |
+| In-range chunks populated / visual / active | 441 / 441 / 441 | 441 / 441 / 441 |
+| Pending lighting work inside render range | 0 | 0 |
+| Parked chunks | 110, all at rings 13–16 (vd=10) | 69, all at rings 13–16 |
+| Lighting / generation / mesh jobs | 0 / 0 / 0 | 0 / 0 / 0 |
+
+Two results carry more than "it works":
+
+1. **The serializer's conditional flag round-trips both ways.** All 441 in-range chunks returned with
+   `NeedsInitialLighting = 0` and converged. An unconditional `FlagInitialLighting()` would have brought
+   every disk-loaded chunk back flagged (`I≈441`, a full re-light wave); a rewrite that never flagged would
+   have stranded chunks unlit. Neither happened. The 69 chunks still carrying `InitialLighting` are all at
+   rings 13–16 with `RemainingEdgeCheckRounds = 2` — freshly *generated* frontier, never lit, not loaded.
+2. **The unreachable line has live corroboration.** In-range edge rounds settled at `[0]=315 [1]=126`
+   (flight) and `[0]=373 [1]=68` (reload). A chunk resting at **1** is only reachable when a stable,
+   no-effect pass returns `SpendOnly` — decrement without re-arm. Under the prove-red mutation
+   (`SpendAndRearm` forced) every converged chunk re-arms, re-runs and drains to **0**. A resting
+   population at 1 is therefore evidence that the merge passes the outcome it actually *computed* — the
+   one line B119 cannot witness. **Corroboration, not proof:** the Bug-05 border re-grant also produces
+   `rounds = 1`, so a handful of those chunks are ambiguous; 126 is far more than the border edits made,
+   and a flattened cascade would have drained them regardless.
 
 **Two follow-ups filed:** the harness's split schedule-clear (LP-5 packet — `ClearEdgeCheck()` /
 `ClearLightWork()` exist only for it), and the unreachable-merge coverage gap above.
@@ -863,7 +891,7 @@ implying coverage it lacks.
   post-review correction block records them), the sharpest being that **B6 had lost its only distinct
   prove-red**; it was fixed by giving B6 a second, independently-derived assertion — a clear/schedule balance
   — whose prove-red was measured, not predicted.
-* **v1.5** - **LP-4 executed (code complete; in-game session pending).** §7's LP-4 packet gains an Amended
+* **v1.5** - **LP-4 executed and SHIPPED (in-game confirmed).** §7's LP-4 packet gains an Amended
   line. §8 question 2 resolved by call-site count (adapters kept, get-only) and question 4 by measurement
   rather than preference: the `bool rearm` parameter shipped, then a prove-red showed the *caller's*
   application of the cascade outcome was unguarded and, worse, **unreachable by any harness** — production's
@@ -878,4 +906,4 @@ implying coverage it lacks.
 
 ---
 
-**Last Updated:** 2026-08-24 (**v1.5 — LP-4 code complete**; the three lighting bools are one `LightingWork` byte behind a transition API, every write in the repo routes through it, and B115–B119 guard the mutation layer — see LP-4's Amended line) **Next Review:** LP-5 (read LP-4's Amended line first, and treat its two headline findings as inputs: **no validation harness can reach production's merge**, so anything living in `MergeCompletedLightingJob` is unguarded by construction; and **both** of LP-4's predicted prove-reds were wrong — three phases running now, so predict nothing and measure everything. LP-5 also inherits two filed follow-ups: retiring the harness's split schedule-clear, and the one line the cascade guard still cannot witness)
+**Last Updated:** 2026-08-24 (**v1.5 — LP-4 SHIPPED**; the three lighting bools are one `LightingWork` byte behind a transition API, every write in the repo routes through it, B115–B119 guard the mutation layer, and an in-game session confirmed zero half-armed chunks across 848 and 838 chunks plus a clean serializer round-trip — see LP-4's Amended line) **Next Review:** LP-5 (read LP-4's Amended line first, and treat its two headline findings as inputs: **no validation harness can reach production's merge**, so anything living in `MergeCompletedLightingJob` is unguarded by construction; and **both** of LP-4's predicted prove-reds were wrong — three phases running now, so predict nothing and measure everything. LP-5 also inherits two filed follow-ups: retiring the harness's split schedule-clear, and the one line the cascade guard still cannot witness)
