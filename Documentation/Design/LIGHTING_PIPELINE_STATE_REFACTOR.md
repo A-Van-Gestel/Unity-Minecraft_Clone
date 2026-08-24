@@ -912,15 +912,50 @@ shipped anyway for its actual value — production no longer reads the flag twic
 startup coroutine, so the suites cannot speak to this phase's riskiest change; the gate was a before/after
 of the coroutine's own profile report.
 
-| | before (HEAD at LP-4) | after arms | after termination test |
-|---|---|---|---|
-| Main-loop iterations | 5 (lighting 4) | 5 (lighting 4) | **5 (lighting 4)** |
-| Gen / Schedule / Complete | 58 / 93 / 123 ms | 55 / 54 / 120 ms | 55 / 54 / 121 ms |
+| | before (HEAD at LP-4) | after arms | after termination test | after the F1 fix |
+|---|---|---|---|---|
+| Main-loop iterations | 5 (lighting 4) | 5 (lighting 4) | 5 (lighting 4) | **5 (lighting 4)** |
+| Lighting Scheduling | 93 ms | 54 ms | 54 ms | 89 / 33 / 34 ms |
+
+**Read the iteration row, not the millisecond row.** The sweep count is stable across every code state and
+every repeat — that is the gate this phase actually rests on. The timings are **not** usable evidence: three
+consecutive runs of *identical* code (the last column) returned 89, 33 and 34 ms, the first being a cold
+first-load after a domain reload. A ~2.7× spread on unchanged code is wider than any difference between the
+columns, so no claim about the coroutine getting faster or slower survives this instrument. An earlier
+version of this table read the 93 → 54 drop as a real improvement; it was noise. Settling any perf question
+here needs `perf-benchmark` discipline (warm-up discards, repeated trials, drift correction), not the
+startup report — which is LP-6's job, not this phase's.
 
 Sweep count never moved. A **disk reload** of the same world (Generation Processing 0 ms, confirming the
 load path) converged in 4 sweeps with **441 in-range chunks at zero pending lighting work of any kind and
 zero jobs in flight**; the 178 chunks still flagged are the parked frontier outside the render set, the
 same shape LP-4's session recorded. No safety-break timeout, no fail-safe promotion, no exceptions.
+
+**Sustained-flight session PASSED (2026-08-24)** — high-speed flight across ungenerated terrain, then a
+reversal back over the just-generated chunks (deliberate unload/reload churn), read live from the running
+editor. Two censuses 975 frames apart were byte-identical, so the world was genuinely quiesced rather than
+caught mid-settle.
+
+| Check | Result |
+|---|---|
+| Chunks / populated / in render range | 787 / 787 / **441** |
+| Pending lighting work **in render range** | **0** |
+| Lighting / generation / mesh jobs | **0 / 0 / 0** |
+| `exceeded max iterations`, exceptions, stalls | **none** |
+| In-range edge rounds `[0] / [1] / [2]` | 73 / **368** / 0 |
+| `EdgeCheck` set without `LightChanges` | 75 |
+
+Two rows carry more than "it works":
+
+1. **The resting population at `rounds = 1` is 368**, with
+   `Settings.enableConvergentEdgeCheckCascade` confirmed **on** for the session (checked, not assumed).
+   A chunk rests at 1 only when a stable, no-effect pass returned `SpendOnly` — decrement without re-arm —
+   so this is the same corroboration LP-4 recorded for *the merge passing the outcome it actually computed*,
+   the one line B119 cannot witness. At 368 it is far stronger than LP-4's 126.
+2. **75 chunks sat at a lone `EdgeCheck`.** LP-4's census reported 0/848 for this and its post-review
+   correctly called that worthless — it was taken where `E = 0` everywhere, so it proved absence at an
+   instant, not impossibility. This session actually *populates* §2.3's legal `0 0 1` row and shows it
+   draining, which is the evidence the earlier zero only appeared to be.
 
 **Honest limits on that evidence:**
 - The reload has **no pre-change baseline** — worlds were first generated during this phase. It shows the
@@ -928,7 +963,11 @@ same shape LP-4's session recorded. No safety-break timeout, no fail-safe promot
 - The `IsPopulated` tightening in the termination test removes a **latent** stall (a placeholder chunk
   holding a flag with data-ready neighbors kept the loop alive while both arms skipped it). Nothing here
   demonstrates that stall ever occurred; the argument for the filter is structural, not measured.
-- No sustained flight-with-edits session was run, as LP-4 had. Startup is what this phase changed.
+- The flight surfaced an unrelated pre-existing defect, filed as **Bug 22**: the ~1 s light-work fail-safe
+  keeps promoting 4–18 parked chunks per cycle in the fully quiesced world, where the walk that precedes it
+  should have left `_waiting` empty. Confirmed **not** LP-5's — it appears in an earlier session in the same
+  log with pre-LP-5 line numbers. Root-causing it needs `_waiting` enumerated, which needs an editor-only
+  accessor and a re-flight.
 
 **Four decisions taken at plan time**, one reversing the recommendation: the coroutine keeps its **two-pass**
 split (2a recalculates the whole load area before 2b schedules any of it — `AreNeighborsReadyAndLit` blocks
