@@ -1,8 +1,8 @@
 # Lighting Pipeline State & Gate Refactor (LP-*)
 
-**Version:** 1.5  
+**Version:** 1.6  
 **Date:** 2026-08-24  
-**Status:** Partially implemented — **LP-1, LP-2 and LP-3 shipped 2026-08-23; LP-4 shipped 2026-08-24** (code complete + in-game confirmed — see its Amended line). LP-5…LP-7 remain proposed. §2 re-audited against HEAD on 2026-08-23.  
+**Status:** Partially implemented — **LP-1, LP-2 and LP-3 shipped 2026-08-23; LP-4 and LP-5 shipped 2026-08-24** (each code complete + confirmed in a running editor — see their Amended lines). LP-6 and LP-7 remain proposed; **LP-8 was filed by LP-5** and is not started. §2 re-audited against HEAD on 2026-08-23, with two gate-census rows since made stale by LP-5 (see its Amended line).  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > Clean-up / refactor plan for the async lighting engine's orchestration layer — the `ChunkData`
@@ -338,7 +338,7 @@ newly created `.cs` files need a Unity import before `dotnet build` sees them; t
 | **LP-2 — Shared neighbor-gate predicate** ✅ **SHIPPED 2026-08-23** | `Helpers/NeighborReadinessDecision.cs` (new); `World.cs` gates + `VoxelData.cs`; `LightingTestWorld.cs`; NS-3 baseline **B7**                |   🟡   | —                                  |
 | **LP-3 — Retire `IsAwaitingMainThreadProcess`** ✅ **SHIPPED 2026-08-23** | `ChunkData.cs`, `WorldJobManager.cs`, `World.cs`, `NeighborReadinessDecision.cs`, `VoxelData.cs`, harness, NS-3 `B6`/`B7`, rules/docs             |   🟡   | LP-1 (evidence), LP-2              |
 | **LP-4 — `LightingWork` byte + transition API**     | `ChunkData.cs`; call sites in `World.cs`, `WorldJobManager.cs`, `ChunkSerializer.cs`, `ChunkStorageManager.cs`; harness; new transition baselines |   🔴   | LP-2 (fewer sites); LP-3 preferred |
-| **LP-5 — Explicit scheduling contract + coroutine** | `WorldJobManager.ScheduleLightingUpdate`; `World.cs` coroutine; new fallback baseline                                                             |   🟡   | LP-4                               |
+| **LP-5 — Explicit scheduling contract + coroutine** ✅ **SHIPPED 2026-08-24** | `WorldJobManager.ScheduleLightingUpdate` contract; `Helpers/ScheduledEdgeCheckDecision.cs` (new); `World.cs` coroutine arms + termination test; harness split-clear retired (`ChunkData.ClearEdgeCheck`/`ClearLightWork` deleted); baseline **B120** |   🟡   | LP-4                               |
 | **LP-6 — Lazy strict-gate evaluation** *(optional)* | `LightingScanDecision.cs` overload; `World.cs` scan; `LightingFrameSimulator.cs`                                                                  |   🟢   | LP-2                               |
 | **LP-7 — Naming & doc hygiene**                     | `RecalculateSunLightLight` rename; residual doc alignment                                                                                         |   🟢   | —                                  |
 | **LP-8 — Production-scheduler harness driver**      | New editor rig driving `WorldJobManager.ScheduleLightingUpdate` / `ProcessLightingJobs` against a live `World` + `WorldData`                      |   🔴   | LP-5 (filed by it)                 |
@@ -856,6 +856,87 @@ reachable-state table it must not contradict.
   Expect baseline churn when the `LightChanges` clear moves from Complete to Begin — that churn is the
   fidelity gap becoming visible, not a regression.
 
+**Amended:** 2026-08-24 — **LP-5 SHIPPED — code complete, editor-confirmed on both startup paths.** Seven
+commits: the contract docs, `ScheduledEdgeCheckDecision`, the LP-8 filing, B120, the split-clear retirement,
+and the two coroutine changes. Universal gate green at **574 baselines across 25 suites** (lighting 111 → **112**).
+
+**The headline finding is a limit on the technique LP-4 taught us.** The packet assumed F4's coverage gap
+could be closed the way LP-4 closed its cascade gap — by extraction. It cannot, and the difference is
+general enough to state as a rule:
+
+> **Extraction closes a coverage gap only when the unwitnessed thing is a *decision*. A *wiring line* is
+> closed only by reaching its caller.**
+
+LP-4's cascade effects were behavior, so moving them into `EdgeCheckCascadeDecision.Apply` moved the
+mutation with them and B119 could witness it. LP-5's unwitnessed lines are **assignments at a call site** —
+`PerformEdgeCheck = performEdgeCheck` and the matching `DeriveBandHeight` argument inside
+`ScheduleLightingUpdate`, whose only three callers are all in `World.cs`. Extracting the *derivation*
+changes nothing about who executes the assignment. **Measured before acting on it:** with
+`PerformEdgeCheck = false` forced — production's border reconciliation switched off entirely — the
+universal gate returned **573/573 PASSED**, identical to the clean run including its two expected
+known-bug repros. Not one baseline in the repo observes that line. The DLL timestamp was checked against
+the source before the run, so this is a real null result and not the stale-assembly trap.
+**LP-8 was filed** for the harness that would close it (and LP-4's merge gap with it); the extraction
+shipped anyway for its actual value — production no longer reads the flag twice, independently.
+
+**Five corrections to this packet's own text, found while executing it:**
+- **F4's second reader is described too strongly.** `DeriveBandHeight` does not "force a full-height band"
+  from the flag; it passes it to `CardinalPairConsistent`, which admits **one additional term** (the
+  neighbor→center `CheckEdgeVoxel` arm, unreachable without an edge check) that *can* widen the band to
+  full height. The contract on `ScheduleLightingUpdate` states the precise version.
+- **That reader is pooled-path only.** The band is derived under `usePooledBuffers`, so the startup
+  coroutine's `TempJob` schedules never reach it and always run full height. A contract naming both readers
+  unconditionally would have been freshly wrong in a second way.
+- **The folded-in note misplaced the harness's split.** It records `LightChanges` clearing in
+  `CompleteLightingJob`; both clears were in `BeginLightingJob` all along, ~70 lines apart. The split was a
+  *code-shape* divergence, not a timing one — so the predicted baseline churn was **zero**, measured. The
+  same wrong claim sat in `LIGHTING_VALIDATION_HARNESS_FIDELITY.md`; corrected there as part of closing it.
+- **"New baseline (B7x)" is unusable**, exactly as LP-4 found for "B71+". The tip was B119; the fallback
+  baseline took **B120**.
+- **§2's gate census (rows for `AreNeighborsDataReady` / `AreNeighborsReadyAndLit`) is now stale**: it lists
+  `HasPendingInitialLighting`, `HasPendingLightChangesOnMainThread` and `HasPendingEdgeChecks` as readers.
+  All three are deleted. Line anchors moved too (`World.cs` `:1398–1440 → :1502–1547`,
+  `:1651–1700 → :1755–1810`, `:1477–1486 → :1585–1591`; `WorldJobManager.cs` `:916 → :913`, `:868 → :863`).
+
+**Prove-reds, all measured, none predicted:**
+1. **B120's own** — dropping the flag term from the harness's edge-check derivation reds **3 of 112**
+   (B120, plus B32 and B64, which lean on the fallback for convergence without naming it).
+2. **The relocated schedule-clear** — the split-clear retirement left every verdict unchanged, which is
+   also the signature of a suite that cannot see the change. Removing the `OnLightingJobScheduled()` call
+   from `BeginLightingJob` reds **74 of 112**, so the clear is heavily observed and the unchanged verdicts
+   are genuine behavior preservation.
+3. **Production's `PerformEdgeCheck` assignment** — reds **nothing**, as above. Recorded in B120's
+   docstring rather than implied away.
+
+**Startup-path evidence (editor play mode, seed 424242, 729 chunks, vd = 10).** No baseline drives the
+startup coroutine, so the suites cannot speak to this phase's riskiest change; the gate was a before/after
+of the coroutine's own profile report.
+
+| | before (HEAD at LP-4) | after arms | after termination test |
+|---|---|---|---|
+| Main-loop iterations | 5 (lighting 4) | 5 (lighting 4) | **5 (lighting 4)** |
+| Gen / Schedule / Complete | 58 / 93 / 123 ms | 55 / 54 / 120 ms | 55 / 54 / 121 ms |
+
+Sweep count never moved. A **disk reload** of the same world (Generation Processing 0 ms, confirming the
+load path) converged in 4 sweeps with **441 in-range chunks at zero pending lighting work of any kind and
+zero jobs in flight**; the 178 chunks still flagged are the parked frontier outside the render set, the
+same shape LP-4's session recorded. No safety-break timeout, no fail-safe promotion, no exceptions.
+
+**Honest limits on that evidence:**
+- The reload has **no pre-change baseline** — worlds were first generated during this phase. It shows the
+  disk-load path converges cleanly *now*, not that it converges identically to before.
+- The `IsPopulated` tightening in the termination test removes a **latent** stall (a placeholder chunk
+  holding a flag with data-ready neighbors kept the loop alive while both arms skipped it). Nothing here
+  demonstrates that stall ever occurred; the argument for the filter is structural, not measured.
+- No sustained flight-with-edits session was run, as LP-4 had. Startup is what this phase changed.
+
+**Four decisions taken at plan time**, one reversing the recommendation: the coroutine keeps its **two-pass**
+split (2a recalculates the whole load area before 2b schedules any of it — `AreNeighborsReadyAndLit` blocks
+on a neighbor's `HasLightChangesToProcess`, which the recalc sets, so collapsing the passes would let
+iteration order decide which chunks reach the edge arm); the three `HasPending*` loops were **folded and
+tightened** rather than scoped out; `TestChunk.HasLightWork` became **read-only**; and the reversal —
+*close the witness gap by extraction* — which is what surfaced the rule above.
+
 ### LP-6 — Lazy strict-gate evaluation (🟢, optional, SECONDARY perf)
 
 **Delivers:** F7 — the scan computes `AreNeighborsReadyAndLit` only when the edge arm needs it.
@@ -965,7 +1046,18 @@ The general rule this surfaces: **extraction closes a gap only when the unwitnes
   until `IsEnum` was admitted. Four further corrections to the packet's text are recorded in the Amended
   line, including unusable baseline numbering (B71 is taken) and a write surface eight editor files wider
   than scoped.
+* **v1.6** - **LP-5 executed and SHIPPED (editor-confirmed on both startup paths).** §7's LP-5 packet gains
+  an Amended line and the phase table its shipped row. The phase produced a rule that generalises past this
+  design: **extraction closes a coverage gap only when the unwitnessed thing is a decision — a wiring line
+  is closed only by reaching its caller.** LP-4's cascade gap yielded to extraction because its effects were
+  behavior; LP-5's did not, because the unobserved lines are assignments inside `ScheduleLightingUpdate`,
+  which no harness calls. Measured rather than argued: forcing `PerformEdgeCheck = false` left the universal
+  gate at **573/573**. **LP-8** is filed for the production-scheduler harness that would close it together
+  with LP-4's merge gap. Five corrections to the packet's text are recorded, the sharpest being that its
+  folded-in note misplaced the harness's split schedule-clear (both clears were in `BeginLightingJob`), so
+  the predicted baseline churn was zero — and that the same wrong claim sat in the harness fidelity doc.
+  §2's gate census is now stale in two rows: the three `HasPending*` readers it names are deleted.
 
 ---
 
-**Last Updated:** 2026-08-24 (**v1.5 — LP-4 SHIPPED**; the three lighting bools are one `LightingWork` byte behind a transition API, every write in the repo routes through it, B115–B119 guard the mutation layer, and an in-game session confirmed a clean serializer round-trip and a fully converged render set — see LP-4's Amended line) **Next Review:** LP-5 (read LP-4's Amended line first, and treat its two headline findings as inputs: **no validation harness can reach production's merge**, so anything living in `MergeCompletedLightingJob` is unguarded by construction; and **both** of LP-4's predicted prove-reds were wrong — three phases running now, so predict nothing and measure everything. LP-5 also inherits two filed follow-ups: retiring the harness's split schedule-clear, and the one line the cascade guard still cannot witness)
+**Last Updated:** 2026-08-24 (**v1.6 — LP-5 SHIPPED**; the edge-check contract is stated on `ScheduleLightingUpdate` and derived once through `ScheduledEdgeCheckDecision`, the startup coroutine's arms and its termination test both run the shared `LightingScanDecision`, the harness's private schedule-clear is gone, and **B120** guards the §7 weak-gate fallback — see LP-5's Amended line) **Next Review:** LP-6 (read LP-5's Amended line first. Its transferable finding is a limit on LP-4's technique: **extraction closes a gap only for a decision, never for a wiring line** — so do not plan coverage work around extraction without first measuring whether a mutation at the call site reds anything. LP-6 also inherits the eager fact-gathering LP-2 introduced and now owns measuring it; note LP-5 deliberately kept the coroutine eager, buying the cost down with cheap flag pre-filters instead. **LP-8** remains the only route to witnessing production's scheduler and merge)
