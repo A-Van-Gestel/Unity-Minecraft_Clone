@@ -109,26 +109,23 @@ namespace Data
         }
 
         [NonSerialized]
-        private bool _needsInitialLighting;
+        private LightingWork _lightingWork;
 
-        [NonSerialized]
-        private bool _hasLightChangesToProcess;
+        /// <summary>The set of lighting work kinds pending for this chunk.</summary>
+        public LightingWork Work => _lightingWork;
 
-        [NonSerialized]
-        private bool _needsEdgeCheck;
+        /// <summary>Whether any kind of lighting work is pending — the "is this chunk quiet" question.</summary>
+        public bool HasAnyLightingWork => _lightingWork != LightingWork.None;
 
         /// <summary>
         /// A transient flag indicating that the chunk's data has been populated, but it has not yet undergone its initial, mandatory lighting calculation.
         /// </summary>
         public bool NeedsInitialLighting
         {
-            get => _needsInitialLighting;
-            set
-            {
-                if (_needsInitialLighting == value) return;
-                _needsInitialLighting = value;
-                if (value) OnLightWorkFlagged?.Invoke(Position);
-            }
+            get => (_lightingWork & LightingWork.InitialLighting) != 0;
+            // Settable only while the LP-4 call-site migration is in flight; the setters go away once
+            // every write routes through the transition methods below.
+            set => SetWorkBit(LightingWork.InitialLighting, value);
         }
 
         /// <summary>
@@ -136,13 +133,8 @@ namespace Data
         /// </summary>
         public bool HasLightChangesToProcess
         {
-            get => _hasLightChangesToProcess;
-            set
-            {
-                if (_hasLightChangesToProcess == value) return;
-                _hasLightChangesToProcess = value;
-                if (value) OnLightWorkFlagged?.Invoke(Position);
-            }
+            get => (_lightingWork & LightingWork.LightChanges) != 0;
+            set => SetWorkBit(LightingWork.LightChanges, value);
         }
 
         /// <summary>
@@ -151,13 +143,8 @@ namespace Data
         /// </summary>
         public bool NeedsEdgeCheck
         {
-            get => _needsEdgeCheck;
-            set
-            {
-                if (_needsEdgeCheck == value) return;
-                _needsEdgeCheck = value;
-                if (value) OnLightWorkFlagged?.Invoke(Position);
-            }
+            get => (_lightingWork & LightingWork.EdgeCheck) != 0;
+            set => SetWorkBit(LightingWork.EdgeCheck, value);
         }
 
         /// <summary>
@@ -175,6 +162,90 @@ namespace Data
         // cross-seam under-report would have no edge-check round to reconcile it; one round (self +
         // cardinal neighbors, add-only) is enough to heal it — see ModifyVoxel.
         private const int BORDER_EDIT_EDGE_CHECK_ROUNDS = 1;
+
+        #region Lighting work transitions
+
+        /// <summary>
+        /// The single write funnel for <see cref="Work"/>. Fires <see cref="OnLightWorkFlagged"/> when any
+        /// bit transitions 0→1 — clears and no-op writes never notify, matching the per-property setters
+        /// this replaces.
+        /// <para>
+        /// <b>Ownership.</b> Mutation is main-thread-only, with one sanctioned exception: deserialization
+        /// (<c>ChunkSerializer.ReadChunkInternal</c>, on a <c>Task.Run</c> worker) fills a pool instance
+        /// that has not been published to <c>WorldData</c> yet, so no other thread can see it. Because the
+        /// three work kinds now share one field, two threads writing the same <i>published</i> instance
+        /// would lose an update where three independent bools could not — publishing a chunk before its
+        /// background writer is done would break this, and nothing enforces it but this contract.
+        /// </para>
+        /// </summary>
+        /// <param name="next">The complete work set to store.</param>
+        private void SetWork(LightingWork next)
+        {
+            LightingWork previous = _lightingWork;
+            if (previous == next) return;
+
+            _lightingWork = next;
+            if ((next & ~previous) != LightingWork.None) OnLightWorkFlagged?.Invoke(Position);
+        }
+
+        /// <summary>Sets or clears one work bit through the funnel.</summary>
+        /// <param name="bit">The bit to change.</param>
+        /// <param name="value">True to set the bit, false to clear it.</param>
+        private void SetWorkBit(LightingWork bit, bool value) =>
+            SetWork(value ? _lightingWork | bit : _lightingWork & ~bit);
+
+        /// <summary>Flags the chunk for its initial, mandatory lighting pass (census rows 1, 2, 16).</summary>
+        public void FlagInitialLighting() => SetWork(_lightingWork | LightingWork.InitialLighting);
+
+        /// <summary>Flags the chunk as having light changes to process (census rows 3, 4, 4b, 9, 11).</summary>
+        public void FlagLightWork() => SetWork(_lightingWork | LightingWork.LightChanges);
+
+        /// <summary>Flags the chunk for a neighbor edge-consistency check (census row 3).</summary>
+        public void FlagEdgeCheck() => SetWork(_lightingWork | LightingWork.EdgeCheck);
+
+        /// <summary>
+        /// Arms a neighbor's edge check on this chunk (census row 10b's cardinal triggers). Sets both bits
+        /// together: an edge check with no light-changes bit cannot satisfy the schedule guard, so a
+        /// half-armed chunk would hold the flag with no path to spend it.
+        /// </summary>
+        public void FlagNeighborEdgeCheck() =>
+            SetWork(_lightingWork | LightingWork.EdgeCheck | LightingWork.LightChanges);
+
+        /// <summary>
+        /// Spends one post-generation edge-check round, optionally re-arming this chunk's own edge check
+        /// (census rows 10a/10b). The caller supplies the outcome from
+        /// <c>EdgeCheckCascadeDecision.Evaluate</c> rather than this method re-deriving it — a spent-but-not
+        /// re-armed round is a legal, load-bearing P9-2 state.
+        /// </summary>
+        /// <param name="rearm">True to also arm the self edge check and its light-changes companion.</param>
+        public void SpendEdgeCheckRound(bool rearm)
+        {
+            RemainingEdgeCheckRounds--;
+            if (rearm) SetWork(_lightingWork | LightingWork.EdgeCheck | LightingWork.LightChanges);
+        }
+
+        /// <summary>
+        /// Re-grants a bounded edge-check budget after an opacity-changing border-column edit (census row 5,
+        /// Bug 05). Add-only and bounded, so it cannot livelock.
+        /// </summary>
+        public void RegrantBorderEditEdgeRound() =>
+            RemainingEdgeCheckRounds = Math.Max(RemainingEdgeCheckRounds, BORDER_EDIT_EDGE_CHECK_ROUNDS);
+
+        /// <summary>Clears the initial-lighting bit after a successful initial schedule (census row 6).</summary>
+        public void ClearInitialLighting() => SetWork(_lightingWork & ~LightingWork.InitialLighting);
+
+        /// <summary>
+        /// The atomic schedule-clear: drops the light-changes and edge-check bits together once a lighting
+        /// job is on the wire (census rows 6, 7, 8). Both readers of the edge-check bit — the job's
+        /// <c>PerformEdgeCheck</c> and LI-2's band derivation — run before this fires.
+        /// </summary>
+        public void OnLightingJobScheduled() =>
+            SetWork(_lightingWork & ~(LightingWork.LightChanges | LightingWork.EdgeCheck));
+
+        /// <summary>Clears every pending work kind (census rows 13, 14 — lighting disabled, pool recycle).</summary>
+        public void ClearAllLightingWork() => SetWork(LightingWork.None);
+
+        #endregion
 
         [NonSerialized]
         private readonly Queue<LightQueueNode> _sunlightBfsQueue = new Queue<LightQueueNode>();
@@ -254,9 +325,7 @@ namespace Data
             Chunk = null; // Unlink visual
 
             // Lighting flags
-            NeedsInitialLighting = false;
-            HasLightChangesToProcess = false;
-            NeedsEdgeCheck = false;
+            ClearAllLightingWork();
             RemainingEdgeCheckRounds = 2;
 
             // Clear Queues (retains capacity)
@@ -439,8 +508,8 @@ namespace Data
             foreach (LightQueueNode node in loadedData.BlocklightBfsQueue) AddToBlockLightQueue(node.Position, node.OldLightLevel, node.OldBlockR, node.OldBlockG, node.OldBlockB);
 
             // If loaded data had flags, transfer them
-            if (loadedData.HasLightChangesToProcess) HasLightChangesToProcess = true;
-            if (loadedData.NeedsInitialLighting) NeedsInitialLighting = true;
+            if (loadedData.HasLightChangesToProcess) FlagLightWork();
+            if (loadedData.NeedsInitialLighting) FlagInitialLighting();
 
 
             // Recalculate counts
@@ -571,7 +640,7 @@ namespace Data
                 bool isBorderColumn = localPos.x == 0 || localPos.x == VoxelData.ChunkWidth - 1
                                                       || localPos.z == 0 || localPos.z == VoxelData.ChunkWidth - 1;
                 if (isBorderColumn)
-                    RemainingEdgeCheckRounds = Math.Max(RemainingEdgeCheckRounds, BORDER_EDIT_EDGE_CHECK_ROUNDS);
+                    RegrantBorderEditEdgeRound();
             }
 
             // --- Notify World and Handle Active Voxels ---
@@ -1347,7 +1416,7 @@ namespace Data
                     Position = localPos, OldLightLevel = oldLightLevel,
                     OldBlockR = oldR, OldBlockG = oldG, OldBlockB = oldB,
                 });
-                HasLightChangesToProcess = true;
+                FlagLightWork();
             }
         }
 
@@ -1361,7 +1430,7 @@ namespace Data
             if (World.Instance.settings.enableLighting)
             {
                 _sunlightBfsQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = oldLightLevel });
-                HasLightChangesToProcess = true;
+                FlagLightWork();
             }
         }
 
