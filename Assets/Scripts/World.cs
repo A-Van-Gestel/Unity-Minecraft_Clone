@@ -1493,8 +1493,7 @@ public class World : MonoBehaviour, IMeshDrainHost
         if (settings.enableLighting)
         {
             // This logic is a synchronous version of what the Update() loop does asynchronously.
-            while (HasPendingInitialLighting(chunksInLoadArea) || HasPendingLightChangesOnMainThread(chunksInLoadArea) ||
-                   HasPendingEdgeChecks(chunksInLoadArea) || JobManager.LightingJobs.Count > 0)
+            while (HasActionableLightingWork(chunksInLoadArea) || JobManager.LightingJobs.Count > 0)
             {
                 lightingLoopIterations++;
                 int jobsScheduledThisSweep = 0;
@@ -1775,57 +1774,36 @@ public class World : MonoBehaviour, IMeshDrainHost
     }
 
     /// <summary>
-    /// Checks if any chunk in the list needs initial lighting AND can actually proceed (all 8 neighbors are populated).
-    /// Chunks on the outer ring whose diagonal neighbors are outside the load radius are excluded to prevent deadlock.
+    /// Whether any chunk in the startup load area carries lighting work a sweep can act on — the
+    /// coroutine's termination test, decided by the same <see cref="LightingScanDecision"/> its arms use.
     /// </summary>
-    /// <param name="chunkList">The list of chunks to check.</param>
-    /// <returns>True if any actionable chunk still needs initial lighting.</returns>
-    private bool HasPendingInitialLighting(List<ChunkData> chunkList)
+    /// <remarks>
+    /// Applies the arms' own <c>IsPopulated</c> filter: work neither arm will touch must not keep the loop
+    /// alive. An in-flight chunk resolves to <c>Park</c> and is likewise not actionable — the caller's
+    /// <c>LightingJobs.Count</c> term covers it.
+    /// </remarks>
+    /// <param name="chunkList">The chunks in the startup load area.</param>
+    /// <returns>True when at least one chunk would take a scheduling arm this sweep.</returns>
+    private bool HasActionableLightingWork(List<ChunkData> chunkList)
     {
         foreach (ChunkData chunkData in chunkList)
         {
-            if (chunkData != null && chunkData.NeedsInitialLighting &&
-                AreNeighborsDataReady(ChunkCoord.FromVoxelOrigin(chunkData.Position)))
+            if (chunkData == null || !chunkData.IsPopulated || !chunkData.HasAnyLightingWork) continue;
+
+            ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.Position);
+
+            switch (LightingScanDecision.EvaluateReadyChunk(
+                        JobManager.LightingJobs.ContainsKey(chunkCoord),
+                        chunkData.NeedsInitialLighting,
+                        chunkData.NeedsEdgeCheck,
+                        chunkData.HasLightChangesToProcess,
+                        AreNeighborsDataReady(chunkCoord),
+                        AreNeighborsReadyAndLit(chunkCoord)))
             {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Checks if any chunk has pending light changes that can be scheduled now (all 8 neighbors are populated).
-    /// </summary>
-    /// <param name="chunkList">The list of chunks to check.</param>
-    /// <returns>True if any actionable chunk still has light changes to process.</returns>
-    private bool HasPendingLightChangesOnMainThread(List<ChunkData> chunkList)
-    {
-        foreach (ChunkData chunkData in chunkList)
-        {
-            if (chunkData != null && chunkData.HasLightChangesToProcess &&
-                AreNeighborsDataReady(ChunkCoord.FromVoxelOrigin(chunkData.Position)))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Checks if any chunk needs an edge check AND all its neighbors are fully lit.
-    /// </summary>
-    /// <param name="chunkList">The list of chunks to check.</param>
-    /// <returns>True if any actionable chunk still needs an edge consistency check.</returns>
-    private bool HasPendingEdgeChecks(List<ChunkData> chunkList)
-    {
-        foreach (ChunkData chunkData in chunkList)
-        {
-            if (chunkData != null && chunkData.NeedsEdgeCheck &&
-                AreNeighborsReadyAndLit(ChunkCoord.FromVoxelOrigin(chunkData.Position)))
-            {
-                return true;
+                case LightingScanDecision.ScanAction.ScheduleInitial:
+                case LightingScanDecision.ScanAction.ScheduleEdge:
+                case LightingScanDecision.ScanAction.ScheduleRegular:
+                    return true;
             }
         }
 
