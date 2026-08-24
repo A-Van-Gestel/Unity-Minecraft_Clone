@@ -653,6 +653,8 @@ flowchart TD
 > **This is the contract, stated on the method** (`ScheduleLightingUpdate`'s `<remarks>`): *border edge work rides any successful schedule*. Two readers consume the flag — `NeighborhoodLightingJob.PerformEdgeCheck` and `LightingBandDecision.DeriveBandHeight` (which admits the neighbor→center cross-seam term, potentially widening the Y-band to full height; pooled path only). A change to either alters what the job does, so both are named in the contract.
 >
 > The cost is real: edge checks can run against **neighbor lighting that has not settled**. The edge check only ADDS light (never removes), which bounds the damage, but corrections may be incomplete — the affected chunk gets another round while `RemainingEdgeCheckRounds > 0`.
+>
+> **Coverage:** baseline **B120** (lighting suite) stages a chunk armed with `EdgeCheck + LightChanges` whose neighbors are data-ready but not lit, asserts the two gates actually disagree, that the scan routes it to the regular arm, and that the resulting job still carries `PerformEdgeCheck` with both flags consumed. It witnesses the *harness's* consumption of the flag; production's own `ScheduleLightingUpdate` is reached by no suite (design doc LP-8).
 ---
 
 ## 8. `IsStable` — The Convergence Signal

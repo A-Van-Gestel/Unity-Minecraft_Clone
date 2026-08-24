@@ -420,6 +420,15 @@ namespace Editor.Validation.Lighting.Framework
         public void FlagLightWork(Vector2Int chunkCoord) => GetChunk(chunkCoord).HasLightWork = true;
 
         /// <summary>
+        /// Arms a chunk's border edge check the way production's cascade does — <c>EdgeCheck</c> and
+        /// <c>LightChanges</c> set together in one indivisible transition, so the chunk can schedule under
+        /// either scan arm. Exists so scenarios outside this class need not mutate
+        /// <see cref="GetChunkData"/>'s <c>ChunkData</c> directly (that accessor is inspection-only).
+        /// </summary>
+        /// <param name="chunkCoord">The chunk to arm.</param>
+        public void ArmEdgeCheck(Vector2Int chunkCoord) => GetChunk(chunkCoord).Data.FlagNeighborEdgeCheck();
+
+        /// <summary>
         /// Returns true when the given chunk's neighbor terrain data is ready, so a lighting job for it
         /// may be scheduled. Harness analog of production's <c>World.AreNeighborsDataReady</c>, consumed by
         /// <c>LightingFrameSimulator.RunFrame</c> as the second argument to

@@ -203,11 +203,21 @@ namespace Editor.Validation.Lighting
             // B118 sweeps for the EdgeCheck-without-LightChanges half-arm behind three historical
             // deadlocks. Lives in Baselines/LightingValidationSuite.Baseline.LightingWorkTransitions.cs. ---
             AddLightingWorkTransitionBaselineScenarios(scenarios);
+
+            // --- LP-5 weak-gate edge-check fallback (B120): the §7 behavior where an armed edge check rides
+            // the REGULAR arm's schedule because the strict ReadyAndLit gate is shut. Documented since the
+            // pipeline doc was written, baselined only now. Lives in
+            // Baselines/LightingValidationSuite.Baseline.EdgeCheckFallback.cs. ---
+            AddEdgeCheckFallbackBaselineScenarios(scenarios);
         }
 
         /// <summary>Hook for the LP-4 transition-census baselines B115-B118 (implemented in Baselines/LightingValidationSuite.Baseline.LightingWorkTransitions.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddLightingWorkTransitionBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the LP-5 weak-gate fallback baseline B120 (implemented in Baselines/LightingValidationSuite.Baseline.EdgeCheckFallback.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddEdgeCheckFallbackBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the C14 mixed-channel mirror baselines B108-B114 (implemented in Baselines/LightingValidationSuite.Baseline.C14ChannelMirrors.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
