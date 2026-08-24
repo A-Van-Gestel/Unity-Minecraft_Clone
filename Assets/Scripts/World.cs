@@ -1504,41 +1504,69 @@ public class World : MonoBehaviour, IMeshDrainHost
                 // Iterate through a copy to prevent modification-during-iteration issues.
                 foreach (ChunkData chunkData in chunksInLoadArea)
                 {
-                    if (chunkData.IsPopulated && chunkData.NeedsInitialLighting)
-                    {
-                        // We must still ensure neighbors have their terrain data ready before lighting.
-                        if (AreNeighborsDataReady(ChunkCoord.FromVoxelOrigin(chunkData.Position)))
-                        {
-                            // This chunk is ready. Trigger its full sunlight recalculation, which flags the chunk's light work and populates the light queues.
-                            chunkData.RecalculateSunLightLight();
+                    // Cheap pre-filter, NOT an arm decision: only an initial-lighting candidate can take
+                    // this pass's arm, and skipping the rest keeps the two neighbor gates below off the
+                    // path for every other chunk in the load area (LP-6 owns making them lazy).
+                    if (!chunkData.IsPopulated || !chunkData.NeedsInitialLighting) continue;
 
-                            // The request for an *initial* light pass has now been fulfilled.
-                            chunkData.ClearInitialLighting();
-                        }
-                    }
+                    ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.Position);
+
+                    if (LightingScanDecision.EvaluateReadyChunk(
+                            JobManager.LightingJobs.ContainsKey(chunkCoord),
+                            chunkData.NeedsInitialLighting,
+                            chunkData.NeedsEdgeCheck,
+                            chunkData.HasLightChangesToProcess,
+                            AreNeighborsDataReady(chunkCoord),
+                            AreNeighborsReadyAndLit(chunkCoord))
+                        != LightingScanDecision.ScanAction.ScheduleInitial) continue;
+
+                    // Recalc the whole load area before step 2b schedules any of it: AreNeighborsReadyAndLit
+                    // blocks on a neighbor's HasLightChangesToProcess, which this recalc sets — so splitting
+                    // the arm keeps iteration order from deciding which chunks reach 2b's edge arm.
+                    chunkData.RecalculateSunLightLight();
+                    chunkData.ClearInitialLighting();
                 }
 
                 // --- Step 2b: Schedule Lighting Jobs (including edge checks) ---
                 // Now that the initial light requests have been processed, the regular lighting scheduler can pick them up in the same coroutine iteration.
                 foreach (ChunkData chunkData in chunksInLoadArea)
                 {
+                    // Cheap pre-filter: an unflagged chunk resolves to Remove, and this coroutine keeps no
+                    // scheduler sets to remove it from.
+                    if (!chunkData.IsPopulated || !chunkData.HasAnyLightingWork) continue;
+
                     ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.Position);
-                    if (!chunkData.IsPopulated || JobManager.LightingJobs.ContainsKey(chunkCoord)) continue;
+
+                    // The same shared decision World.Update's ready-set scan runs, so the startup and
+                    // steady-state paths cannot disagree on which arm a chunk takes. In-flight chunks
+                    // resolve to Park and fall through the switch unscheduled.
+                    LightingScanDecision.ScanAction action = LightingScanDecision.EvaluateReadyChunk(
+                        JobManager.LightingJobs.ContainsKey(chunkCoord),
+                        chunkData.NeedsInitialLighting,
+                        chunkData.NeedsEdgeCheck,
+                        chunkData.HasLightChangesToProcess,
+                        AreNeighborsDataReady(chunkCoord),
+                        AreNeighborsReadyAndLit(chunkCoord));
 
                     bool scheduled = false;
 
-                    if (chunkData.NeedsEdgeCheck && AreNeighborsReadyAndLit(chunkCoord))
+                    switch (action)
                     {
-                        // Pre-set so the schedule guard passes; the job's PerformEdgeCheck rides the schedule.
-                        chunkData.FlagLightWork();
-                        scheduled = JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
-                    }
+                        case LightingScanDecision.ScanAction.ScheduleEdge:
+                            // Pre-set so the schedule guard passes; the job's PerformEdgeCheck rides the schedule.
+                            chunkData.FlagLightWork();
+                            scheduled = JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
+                            break;
 
-                    if (!scheduled && chunkData.HasLightChangesToProcess && AreNeighborsDataReady(chunkCoord))
-                    {
-                        // OPTIMIZATION: Use TempJob allocator.
-                        // This is safe because we call CompleteAndProcessLightingJobs() immediately below, ensuring these allocations live for less than 1 frame.
-                        scheduled = JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
+                        case LightingScanDecision.ScanAction.ScheduleRegular:
+                            // OPTIMIZATION: Use TempJob allocator.
+                            // This is safe because we call CompleteAndProcessLightingJobs() immediately below, ensuring these allocations live for less than 1 frame.
+                            scheduled = JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
+                            break;
+
+                        // ScheduleInitial is step 2a's arm. Remove/Park are steady-state bookkeeping for
+                        // scheduler sets this coroutine does not keep — it re-visits every chunk each sweep
+                        // and stops when nothing is actionable, so there is nothing to park or forget.
                     }
 
                     if (scheduled) jobsScheduledThisSweep++;
