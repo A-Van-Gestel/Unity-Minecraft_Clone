@@ -787,6 +787,40 @@ Two results carry more than "it works":
 **Two follow-ups filed:** the harness's split schedule-clear (LP-5 packet — `ClearEdgeCheck()` /
 `ClearLightWork()` exist only for it), and the unreachable-merge coverage gap above.
 
+*Post-review correction (2026-08-24).* A `/code-review` of the ten-commit series found the migration
+faithful — every rewritten write site semantically equivalent, no runtime defect in a shipped path — and
+**six** claim/coverage items, all since fixed. The two that mattered:
+
+1. **The half-arm invariant was overstated, in five places at once** (`ChunkData`'s
+   `FlagNeighborEdgeCheck` docstring, B118's title and docstring, this doc's in-game table framing,
+   `CHUNK_LIFECYCLE_PIPELINE.md`, and the `chunk-pipeline` agent rule). "An edge check is never armed
+   without its `LightChanges` companion" contradicts **§2.3's own `0 0 1` row**: `World`'s disk-load-stable
+   arm calls `FlagEdgeCheck()` alone, and `LightingScanDecision`'s `ScheduleEdge` arm takes such a chunk on
+   `needsEdgeCheck && neighborsReadyAndLit` alone, pre-setting the companion itself. Nothing was stranded;
+   the *claim* was simply stronger than the code. What LP-4 guarantees is narrower: the **combined** arming
+   transitions are indivisible. The concrete risk was a future editor "fixing" the disk-load arm to match
+   the docstring, which would have let those chunks also satisfy the *regular* arm under the weaker
+   `AreNeighborsDataReady` gate — reconciling borders against unlit neighbors, the exact stale-snapshot
+   class edge checks exist to prevent.
+2. **B118 was green by omission.** Its sweep excluded `FlagEdgeCheck` — the one arming transition that
+   contradicts the title it carried — with no comment saying why. Retitled to what it tests, with the
+   lone-arm case documented and pointed at the `0 0 1` row. Re-measured: splitting `FlagNeighborEdgeCheck`
+   now reds **B115, B117 and B118** (three witnesses, up from one).
+
+The other four: B115/B116/B118/B119 fired transitions with the live `ChunkData.OnLightWorkFlagged`
+attached, where every other rig in the repo detaches it (now guarded, `try`/`finally`);
+`EdgeCheckCascadeDecision`'s docstrings still attributed the effects to the caller after `Apply` took them
+over; `HasAnyLightingWork` shipped with **zero** callers while `CHUNK_LIFECYCLE_PIPELINE.md` documented it
+as the scan's remove condition (now adopted at `World.cs:1165/1652/2493`); and this doc's header metadata
+had been stale since LP-3. A seventh, found while fixing the others: `P92Cascade.cs`'s class docstring
+referenced `EdgeCheckCascadeDecision.ShouldRearm`, a member that has never existed.
+
+**The transferable lesson is about evidence, not about flags.** The in-game census that reported "0 chunks
+with `EdgeCheck` and no `LightChanges`" was taken on a **quiesced world where `E = 0` everywhere** — it
+showed no chunk was mid-edge-check at that instant, and was read as confirming an invariant. A live census
+proves absence at an instant; it cannot prove impossibility. Pair any "unrepresentable" claim with the
+reachable-state table it must not contradict.
+
 **Line anchors in the scope list are stale** (LP-3 shifted `World.cs`/`WorldJobManager.cs`): `World.cs`
 `:1210→1316`, `:1268→1374`, `:1282→1388`, `:1410→1516`, `:1482–84→1588–90`, `:2535→2653`, `:2540→2658`,
 `:3562→3640`; `ChunkData.cs` `:449/450→442/443`, `:581→574`, `:1357/1371→1350/1364`; `WorldJobManager.cs`
