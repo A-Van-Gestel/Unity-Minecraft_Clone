@@ -38,7 +38,7 @@ namespace Editor.Validation.Lighting
                 "B117: OnLightWorkFlagged fires once per 0-to-1 bit transition — never on a clear, a no-op, or the second bit of a combined arm (LP-4 callback delta)",
                 Baseline_CallbackFiresOncePerRisingTransition));
             scenarios.Add(new Scenario(
-                "B118: an edge check is never armed without its LightChanges companion, across every arming transition (LP-4 core invariant)",
+                "B118: the COMBINED arming transitions set EdgeCheck and LightChanges together, never one alone (LP-4)",
                 Baseline_EdgeCheckNeverArmedAlone));
         }
 
@@ -48,6 +48,14 @@ namespace Editor.Validation.Lighting
         /// wrong bit, and — the historical defect class — one that clears more than its share.
         /// </summary>
         private static bool Baseline_TransitionBitEffects()
+        {
+            using (new SuppressedWorkCallback())
+            {
+                return TransitionBitEffectsBody();
+            }
+        }
+
+        private static bool TransitionBitEffectsBody()
         {
             const LightingWork initial = LightingWork.InitialLighting;
             const LightingWork changes = LightingWork.LightChanges;
@@ -95,6 +103,14 @@ namespace Editor.Validation.Lighting
         /// post-generation), and that only the re-arm form touches the flags.
         /// </summary>
         private static bool Baseline_SpendEdgeCheckRoundOutcomes()
+        {
+            using (new SuppressedWorkCallback())
+            {
+                return SpendEdgeCheckRoundOutcomesBody();
+            }
+        }
+
+        private static bool SpendEdgeCheckRoundOutcomesBody()
         {
             bool passed = true;
 
@@ -211,12 +227,29 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>
-        /// B118: the invariant LP-4 exists to make unrepresentable. An edge check armed without its
-        /// <c>LightChanges</c> companion cannot satisfy the schedule guard, so the chunk holds the flag with
-        /// no path to spend it — the "flag set whose clear site is unreachable" shape behind three
-        /// historical pipeline deadlocks. Sweeps every arming transition from every starting state.
+        /// B118: the transitions that arm an edge check <i>as part of a cascade or neighbor trigger</i> must
+        /// set <c>LightChanges</c> in the same call, so the chunk can reschedule under either scan arm — the
+        /// strict edge arm or the relaxed regular one. Splitting them would narrow the chunk to the strict
+        /// arm alone and change post-merge reconciliation timing, which is what the two separate writes this
+        /// API replaced never did.
+        /// <para>
+        /// <b>Deliberately NOT swept: <c>FlagEdgeCheck</c>.</b> Arming an edge check alone is a legal,
+        /// production-used state — <c>World</c>'s disk-load-stable arm sets one, and the design doc's
+        /// reachable-combination table lists <c>0 0 1</c> ("waits on the strict edge gate"). Such a chunk is
+        /// not stranded: <see cref="Helpers.LightingScanDecision"/>'s <c>ScheduleEdge</c> arm takes it on
+        /// <c>needsEdgeCheck &amp;&amp; neighborsReadyAndLit</c> alone and pre-sets the companion before
+        /// scheduling. B115 covers <c>FlagEdgeCheck</c>'s own bit effect.
+        /// </para>
         /// </summary>
         private static bool Baseline_EdgeCheckNeverArmedAlone()
+        {
+            using (new SuppressedWorkCallback())
+            {
+                return EdgeCheckNeverArmedAloneBody();
+            }
+        }
+
+        private static bool EdgeCheckNeverArmedAloneBody()
         {
             (string Name, Action<ChunkData> Apply)[] armingTransitions =
             {
@@ -243,13 +276,36 @@ namespace Editor.Validation.Lighting
                     bool armedAlone = (subject.Work & LightingWork.EdgeCheck) != 0
                                       && (subject.Work & LightingWork.LightChanges) == 0;
                     if (armedAlone)
-                        failures.Add($"{name}: {start} -> {subject.Work} (EdgeCheck armed without LightChanges)");
+                        failures.Add($"{name}: {start} -> {subject.Work} (set EdgeCheck without its LightChanges companion)");
                 }
             }
 
             return LightingAssert.IsTrue(failures.Count == 0,
-                "B118: no arming transition leaves EdgeCheck set without LightChanges",
+                "B118: the combined arming transitions never set EdgeCheck alone",
                 failures.Count == 0 ? null : string.Join("\n", failures));
+        }
+
+        /// <summary>
+        /// Detaches the static <c>ChunkData.OnLightWorkFlagged</c> for a scenario's lifetime and restores it
+        /// on dispose. These baselines drive bare <c>ChunkData</c> instances outside any test world, so
+        /// without this their transitions would reach a live <c>LightWorkScheduler</c> if the suite is run
+        /// during play mode — injecting a synthetic chunk coord into the running world's staging queue, and
+        /// exposing the scenario to exceptions thrown by a stale subscriber. Same save/null/restore guard
+        /// <c>LightingAssert</c>, <c>LightingTestWorld</c> and <c>ChunkPipelineFixture</c> use.
+        /// </summary>
+        private sealed class SuppressedWorkCallback : IDisposable
+        {
+            private readonly Action<Vector2Int> _saved;
+
+            /// <summary>Detaches the callback, remembering the previous subscriber.</summary>
+            public SuppressedWorkCallback()
+            {
+                _saved = ChunkData.OnLightWorkFlagged;
+                ChunkData.OnLightWorkFlagged = null;
+            }
+
+            /// <summary>Restores the previous subscriber.</summary>
+            public void Dispose() => ChunkData.OnLightWorkFlagged = _saved;
         }
 
         /// <summary>

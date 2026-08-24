@@ -14,7 +14,7 @@ namespace Editor.Validation.Lighting
     /// <c>CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md</c> §6, Option B1). Two layers are guarded, both
     /// below the level the world harness can reach:
     /// <list type="bullet">
-    /// <item><see cref="EdgeCheckCascadeDecision.ShouldRearm"/> — the pure predicate, including its
+    /// <item><see cref="EdgeCheckCascadeDecision.Evaluate"/> — the pure predicate, including its
     /// flag-off reduction to the legacy stability-only rule.</item>
     /// <item><c>ChunkData.ApplyJobLightMap</c>'s change signal — the input that predicate is only as good
     /// as, exercised across the uniform-sky compaction boundary where a naive
@@ -24,7 +24,6 @@ namespace Editor.Validation.Lighting
     /// </summary>
     public static partial class LightingValidationSuite
     {
-
         /// <summary>Registers the P9-2 cascade baselines (called from <c>AddBaselineScenarios</c>).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddP92CascadeBaselineScenarios(List<Scenario> scenarios)
@@ -267,6 +266,14 @@ namespace Editor.Validation.Lighting
         /// </para>
         /// </summary>
         private static bool Baseline_CascadeOutcomeAppliesCorrectEffects()
+        {
+            using (new SuppressedWorkCallback())
+            {
+                return CascadeOutcomeAppliesCorrectEffectsBody();
+            }
+        }
+
+        private static bool CascadeOutcomeAppliesCorrectEffectsBody()
         {
             List<string> failures = new List<string>();
 
