@@ -32,7 +32,7 @@ using UnityEngine.Pool;
 using Debug = UnityEngine.Debug;
 using Random = UnityEngine.Random;
 
-public class World : MonoBehaviour, IMeshDrainHost
+public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 {
     public Settings settings;
 
@@ -448,6 +448,38 @@ public class World : MonoBehaviour, IMeshDrainHost
     /// the state resolves within a scan or two — so the total is what a soak can actually read
     /// (dev/editor only; LP-1 probe 2, F6).</summary>
     public long SunlightQueueUnpopulatedTotal => _sunlightQueueUnpopulatedTotal;
+
+    // --- LP-6 gate-walk probe (retained past its question — scheduled for removal) ---
+    // Sized the ready-set scan's neighbor-gate cost, then proved LP-6's laziness reached production
+    // (-34.7% scan gate calls). Counts calls, not milliseconds, because the millisecond route cannot see an
+    // effect this size: two runs of the same route on identical code differ by ±1-5% on the LightSchedule
+    // pass, where the effect is 0.29% of it. A call count is deterministic, so the same route walked before
+    // and after yields an exact ratio; the per-call cost comes from LightingGateWalkBenchmark instead.
+    // Instance fields, so a fresh play session starts them at zero without a DomainReset line (the LP-1
+    // probe convention above). Increments are dev/editor-only.
+    //
+    // That question is CLOSED. These are kept only as the re-verification instrument, and are filed for
+    // deletion in CODEBASE_IMPROVEMENTS.md §2.3 — which also names the editor benchmark that reads them.
+    private long _gateCallsDataReady;
+    private long _gateCallsReadyAndLit;
+    private long _gateCallsMeshReady;
+    private long _neighborFactsGathered;
+
+    /// <summary>Cumulative <see cref="AreNeighborsDataReady"/> calls this session (dev/editor only; LP-6 probe).</summary>
+    public long GateCallsDataReady => _gateCallsDataReady;
+
+    /// <summary>Cumulative <see cref="AreNeighborsReadyAndLit"/> calls this session (dev/editor only; LP-6 probe).</summary>
+    public long GateCallsReadyAndLit => _gateCallsReadyAndLit;
+
+    /// <summary>Cumulative <see cref="AreNeighborsMeshReady"/> calls this session (dev/editor only; LP-6 probe).</summary>
+    public long GateCallsMeshReady => _gateCallsMeshReady;
+
+    /// <summary>
+    /// Cumulative <c>GatherNeighborFacts</c> calls this session — one per neighbor actually examined, so it
+    /// counts the gates' real work rather than assuming 8 per call (short-circuits and out-of-world
+    /// neighbors both cut it) (dev/editor only; LP-6 probe).
+    /// </summary>
+    public long NeighborFactsGathered => _neighborFactsGathered;
 
     // --- Transient flags ---
     /// <summary>
@@ -1510,17 +1542,16 @@ public class World : MonoBehaviour, IMeshDrainHost
 
                     ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.Position);
 
+                    // The strict gate is never walked here: the pre-filter leaves only the initial arm
+                    // reachable, and that arm is decided before the decision reads ReadyAndLit. This used to
+                    // be a hand-passed `false` justified in a comment; the lazy overload now owns it (LP-6).
                     if (LightingScanDecision.EvaluateReadyChunk(
                             JobManager.LightingJobs.ContainsKey(chunkCoord),
                             chunkData.NeedsInitialLighting,
                             chunkData.NeedsEdgeCheck,
                             chunkData.HasLightChangesToProcess,
-                            AreNeighborsDataReady(chunkCoord),
-                            // The initial arm is decided before the strict gate is read (the decision's
-                            // documented arm precedence), and the pre-filter makes it the only arm
-                            // reachable here — so the real value cannot change the outcome. Passing it
-                            // would cost an 8-neighbor walk per candidate per sweep for nothing.
-                            neighborsReadyAndLit: false)
+                            this,
+                            chunkCoord)
                         != LightingScanDecision.ScanAction.ScheduleInitial) continue;
 
                     // Recalc the whole load area before step 2b schedules any of it: AreNeighborsReadyAndLit
@@ -1548,8 +1579,8 @@ public class World : MonoBehaviour, IMeshDrainHost
                         chunkData.NeedsInitialLighting,
                         chunkData.NeedsEdgeCheck,
                         chunkData.HasLightChangesToProcess,
-                        AreNeighborsDataReady(chunkCoord),
-                        AreNeighborsReadyAndLit(chunkCoord));
+                        this,
+                        chunkCoord);
 
                     bool scheduled = false;
 
@@ -1801,8 +1832,8 @@ public class World : MonoBehaviour, IMeshDrainHost
                         chunkData.NeedsInitialLighting,
                         chunkData.NeedsEdgeCheck,
                         chunkData.HasLightChangesToProcess,
-                        AreNeighborsDataReady(chunkCoord),
-                        AreNeighborsReadyAndLit(chunkCoord)))
+                        this,
+                        chunkCoord))
             {
                 case LightingScanDecision.ScanAction.ScheduleInitial:
                 case LightingScanDecision.ScanAction.ScheduleEdge:
@@ -2641,8 +2672,8 @@ public class World : MonoBehaviour, IMeshDrainHost
                         chunkData.NeedsInitialLighting,
                         chunkData.NeedsEdgeCheck,
                         chunkData.HasLightChangesToProcess,
-                        AreNeighborsDataReady(chunkCoord),
-                        AreNeighborsReadyAndLit(chunkCoord));
+                        this,
+                        chunkCoord);
 
                     switch (action)
                     {
@@ -2979,6 +3010,10 @@ public class World : MonoBehaviour, IMeshDrainHost
     /// <returns>True if all neighbors are fully generated and lit; otherwise, false.</returns>
     public bool AreNeighborsReadyAndLit(ChunkCoord chunkCoord)
     {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        _gateCallsReadyAndLit++; // LP-6 probe.
+#endif
+
         for (int i = 0; i < VoxelData.AllNeighborOffsets.Length; i++)
         {
             Vector3Int offset = VoxelData.AllNeighborOffsets[i];
@@ -3007,6 +3042,10 @@ public class World : MonoBehaviour, IMeshDrainHost
     /// <returns>The assembled facts.</returns>
     private NeighborReadinessDecision.NeighborFacts GatherNeighborFacts(ChunkCoord neighborCoord)
     {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        _neighborFactsGathered++; // LP-6 probe.
+#endif
+
         bool populated = worldData.TryGetChunk(neighborCoord.ToVoxelOrigin(), out ChunkData neighborData)
                          && neighborData.IsPopulated;
 
@@ -3036,6 +3075,10 @@ public class World : MonoBehaviour, IMeshDrainHost
     /// <returns>True if all neighbors have at minimum completed their initial lighting pass and are populated.</returns>
     public bool AreNeighborsMeshReady(ChunkCoord chunkCoord)
     {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        _gateCallsMeshReady++; // LP-6 probe.
+#endif
+
         foreach (Vector3Int offset in VoxelData.AllNeighborOffsets)
         {
             ChunkCoord neighborCoord = chunkCoord.Neighbor(offset.x, offset.z);
@@ -3080,8 +3123,20 @@ public class World : MonoBehaviour, IMeshDrainHost
     /// </summary>
     /// <param name="coord">The coordinate of the central chunk.</param>
     /// <returns>True if all valid neighbors are fully populated with voxel data.</returns>
+    /// <summary><see cref="INeighborGates.DataReady"/>: forwards to <see cref="AreNeighborsDataReady"/>.
+    /// Implemented on <c>this</c> so the scan's decision allocates no adapter (LP-6).</summary>
+    bool INeighborGates.DataReady(ChunkCoord coord) => AreNeighborsDataReady(coord);
+
+    /// <summary><see cref="INeighborGates.ReadyAndLit"/>: forwards to <see cref="AreNeighborsReadyAndLit"/>.
+    /// Implemented on <c>this</c> so the scan's decision allocates no adapter (LP-6).</summary>
+    bool INeighborGates.ReadyAndLit(ChunkCoord coord) => AreNeighborsReadyAndLit(coord);
+
     public bool AreNeighborsDataReady(ChunkCoord coord)
     {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        _gateCallsDataReady++; // LP-6 probe.
+#endif
+
         // Check all 8 horizontal neighbors to prevent light leaks into ungenerated chunks.
         foreach (Vector3Int offset in VoxelData.AllNeighborOffsets)
         {
