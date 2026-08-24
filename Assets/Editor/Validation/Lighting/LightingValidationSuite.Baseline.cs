@@ -210,7 +210,17 @@ namespace Editor.Validation.Lighting
             // pipeline doc was written, baselined only now. Lives in
             // Baselines/LightingValidationSuite.Baseline.EdgeCheckFallback.cs. ---
             AddEdgeCheckFallbackBaselineScenarios(scenarios);
+
+            // --- LP-6 lazy strict-gate evaluation (B121-B122): the scan evaluates only the neighbor gate the
+            // chunk's arm can read. Behavior-preserving by intent, so no other baseline can witness it — B121
+            // compares the lazy and pre-evaluated paths over all 64 inputs, B122 pins the laziness itself.
+            // Lives in Baselines/LightingValidationSuite.Baseline.LazyGateEquivalence.cs. ---
+            AddLazyGateEquivalenceBaselineScenarios(scenarios);
         }
+
+        /// <summary>Hook for the LP-6 lazy-gate baselines B121-B122 (implemented in Baselines/LightingValidationSuite.Baseline.LazyGateEquivalence.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddLazyGateEquivalenceBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the LP-4 transition-census baselines B115-B118 (implemented in Baselines/LightingValidationSuite.Baseline.LightingWorkTransitions.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
