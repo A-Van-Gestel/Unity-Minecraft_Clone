@@ -308,7 +308,9 @@ namespace Editor.Validation.Lighting.Framework
                 foreach (FieldInfo f in transientPrimitives)
                 {
                     if (f.FieldType == typeof(bool)) f.SetValue(subject, true);
-                    else f.SetValue(subject, Convert.ChangeType(0x5A, f.FieldType));
+                    else if (f.FieldType.IsEnum)
+                        f.SetValue(subject, Enum.ToObject(f.FieldType, DIRTY_FILL_VALUE));
+                    else f.SetValue(subject, Convert.ChangeType(DIRTY_FILL_VALUE, f.FieldType));
                 }
 
                 // --- Recycle through the REAL production Reset() ---
@@ -438,16 +440,22 @@ namespace Editor.Validation.Lighting.Framework
         }
 
         /// <summary>
-        /// Returns the <c>[NonSerialized]</c> primitive (bool/integer) instance fields of
+        /// Returns the <c>[NonSerialized]</c> primitive (bool/integer) and enum instance fields of
         /// <see cref="ChunkData"/> — exactly the transient flag/counter family that
         /// <see cref="ChunkData.Reset"/> is responsible for clearing. Filtering to <c>[NonSerialized]</c>
         /// excludes on-disk save fields (whose reset is not Reset()'s job), avoiding false positives.
+        /// Enums are included explicitly: <c>Type.IsPrimitive</c> is false for them, so a flags byte such
+        /// as <c>LightingWork</c> would otherwise escape the sweep it most needs to be in.
         /// </summary>
         /// <summary>Transient fields whose CONTRACT is monotonic across recycles — their "reset" is an
         /// increment, not a return-to-default — so the fresh-instance comparison must exempt them.
         /// Every entry here MUST have an explicit assertion in <see cref="AssertResetClearsTransientState"/>
         /// (silence is never accidental): <c>_lifecycleEpoch</c> is asserted to BUMP on Reset (CP-3 ABA guard).</summary>
         private static readonly HashSet<string> s_monotonicTransientFields = new HashSet<string> { "_lifecycleEpoch" };
+
+        // Non-zero, non-default filler stamped into every swept transient field before Reset() runs, so a
+        // field Reset() forgets stays visibly dirty. Small enough to fit a byte-backed enum or counter.
+        private const int DIRTY_FILL_VALUE = 0x5A;
 
         private static List<FieldInfo> NonSerializedPrimitiveFields()
         {
@@ -457,7 +465,8 @@ namespace Editor.Validation.Lighting.Framework
             {
                 if (!f.IsDefined(typeof(NonSerializedAttribute), false)) continue;
                 if (f.IsInitOnly) continue; // readonly (e.g. the BFS queues) — checked explicitly, not settable
-                if (!f.FieldType.IsPrimitive || f.FieldType == typeof(char)) continue;
+                if (f.FieldType == typeof(char)) continue;
+                if (!f.FieldType.IsPrimitive && !f.FieldType.IsEnum) continue;
                 if (s_monotonicTransientFields.Contains(f.Name)) continue; // asserted explicitly, not by equality
                 result.Add(f);
             }
