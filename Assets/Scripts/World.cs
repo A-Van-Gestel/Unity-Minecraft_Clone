@@ -1504,8 +1504,8 @@ public class World : MonoBehaviour, IMeshDrainHost
                 foreach (ChunkData chunkData in chunksInLoadArea)
                 {
                     // Cheap pre-filter, NOT an arm decision: only an initial-lighting candidate can take
-                    // this pass's arm, and skipping the rest keeps the two neighbor gates below off the
-                    // path for every other chunk in the load area (LP-6 owns making them lazy).
+                    // this pass's arm, and skipping the rest keeps the neighbor gate below off the path
+                    // for every other chunk in the load area.
                     if (!chunkData.IsPopulated || !chunkData.NeedsInitialLighting) continue;
 
                     ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.Position);
@@ -1516,7 +1516,11 @@ public class World : MonoBehaviour, IMeshDrainHost
                             chunkData.NeedsEdgeCheck,
                             chunkData.HasLightChangesToProcess,
                             AreNeighborsDataReady(chunkCoord),
-                            AreNeighborsReadyAndLit(chunkCoord))
+                            // The initial arm is decided before the strict gate is read (the decision's
+                            // documented arm precedence), and the pre-filter makes it the only arm
+                            // reachable here — so the real value cannot change the outcome. Passing it
+                            // would cost an 8-neighbor walk per candidate per sweep for nothing.
+                            neighborsReadyAndLit: false)
                         != LightingScanDecision.ScanAction.ScheduleInitial) continue;
 
                     // Recalc the whole load area before step 2b schedules any of it: AreNeighborsReadyAndLit
