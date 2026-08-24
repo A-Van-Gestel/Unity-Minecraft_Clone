@@ -43,7 +43,7 @@ namespace Editor.Validation.Lighting.Framework
     /// timing-dependent in-flight races of Bug 08 into deterministic scenarios.
     /// </para>
     /// </summary>
-    public sealed partial class LightingTestWorld : IDisposable
+    public sealed partial class LightingTestWorld : IDisposable, INeighborGates
     {
         /// <summary>Number of voxels in one full chunk buffer (16 × 128 × 16).</summary>
         public const int ChunkBufferLength = VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth;
@@ -429,6 +429,22 @@ namespace Editor.Validation.Lighting.Framework
         /// </summary>
         /// <param name="chunkCoord">The grid coordinate of the chunk being considered for scheduling.</param>
         public bool AreNeighborsDataReady(Vector2Int chunkCoord) => GetChunk(chunkCoord).NeighborsReady;
+
+        /// <summary><see cref="INeighborGates.DataReady"/>: forwards to <see cref="AreNeighborsDataReady"/>,
+        /// converting from the decision's chunk-index space to this harness's grid coordinate (WS-4 boundary
+        /// conversion — the two spaces share an origin, so the mapping is the component pair).</summary>
+        /// <param name="coord">The chunk being gated, in chunk-index space.</param>
+        /// <returns>True when the chunk's neighbor terrain data is ready.</returns>
+        bool INeighborGates.DataReady(ChunkCoord coord) =>
+            AreNeighborsDataReady(new Vector2Int(coord.X, coord.Z));
+
+        /// <summary><see cref="INeighborGates.ReadyAndLit"/>: forwards to
+        /// <see cref="AreNeighborsReadyAndLit"/>, converting chunk-index space to this harness's grid
+        /// coordinate.</summary>
+        /// <param name="coord">The chunk being gated, in chunk-index space.</param>
+        /// <returns>True when every in-grid neighbor is fully lit and stable.</returns>
+        bool INeighborGates.ReadyAndLit(ChunkCoord coord) =>
+            AreNeighborsReadyAndLit(new Vector2Int(coord.X, coord.Z));
 
         /// <summary>
         /// Marks a chunk's neighbor terrain data as NOT ready — production's <c>AreNeighborsDataReady</c>

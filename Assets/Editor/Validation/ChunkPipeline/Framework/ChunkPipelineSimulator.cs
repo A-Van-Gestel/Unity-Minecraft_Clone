@@ -243,13 +243,14 @@ namespace Editor.Validation.ChunkPipeline.Framework
                 if (chunk == null || !chunk.IsPopulated) continue;
                 if (!chunk.NeedsInitialLighting && !chunk.NeedsEdgeCheck && !chunk.HasLightChangesToProcess) continue;
 
+                // Lazy gates against the REAL World, exactly as production's scan runs them (LP-6).
                 LightingScanDecision.ScanAction action = LightingScanDecision.EvaluateReadyChunk(
                     jobInFlight: _fixture.Jobs.LightingJobs.ContainsKey(coord),
                     needsInitialLighting: chunk.NeedsInitialLighting,
                     needsEdgeCheck: chunk.NeedsEdgeCheck,
                     hasLightChanges: chunk.HasLightChangesToProcess,
-                    neighborsDataReady: _fixture.World.AreNeighborsDataReady(coord),
-                    neighborsReadyAndLit: _fixture.World.AreNeighborsReadyAndLit(coord));
+                    gates: _fixture.World,
+                    coord: coord);
 
                 if (action == LightingScanDecision.ScanAction.Park)
                 {

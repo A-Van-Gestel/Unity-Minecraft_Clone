@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using Data;
 using Helpers;
 using UnityEngine;
 using Random = System.Random;
@@ -470,13 +471,15 @@ namespace Editor.Validation.Lighting.Framework
                     continue;
                 }
 
+                // Lazy gates, exactly as production's scan runs them (LP-6) — the simulator must not walk a
+                // gate the real scan skips, or its scheduling fidelity would diverge from the code it models.
                 LightingScanDecision.ScanAction action = LightingScanDecision.EvaluateReadyChunk(
                     _world.IsChunkInFlight(coord),
                     _world.ChunkNeedsInitialLighting(coord),
                     _world.ChunkNeedsEdgeCheck(coord),
                     _world.ChunkHasLightWork(coord),
-                    _world.AreNeighborsDataReady(coord),
-                    _world.AreNeighborsReadyAndLit(coord));
+                    _world,
+                    new ChunkCoord(coord.x, coord.y));
 
                 switch (action)
                 {
