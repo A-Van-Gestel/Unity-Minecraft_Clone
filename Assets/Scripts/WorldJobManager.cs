@@ -774,6 +774,30 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <summary>
     /// Schedules a neighborhood lighting job to propagate sunlight and blocklight changes.
     /// </summary>
+    /// <remarks>
+    /// <b>Edge-check contract — border work rides ANY successful schedule.</b> This method reads
+    /// <c>ChunkData.NeedsEdgeCheck</c> itself rather than taking it as a parameter, so a chunk that reached
+    /// here through the scan's <i>regular</i> arm — gated only on <c>AreNeighborsDataReady</c> — still runs
+    /// its edge check, against neighbor light that may not have settled. That weak-gate fallback is
+    /// deliberate (the strict <c>AreNeighborsReadyAndLit</c> arm can stay blocked indefinitely), but it is
+    /// invisible at the call site, which is why it is stated here.
+    /// <para>
+    /// <b>Two readers consume the flag</b>, and a change to either alters what the job does:
+    /// </para>
+    /// <list type="number">
+    /// <item><c>NeighborhoodLightingJob.PerformEdgeCheck</c> — enables the border reconciliation pass.</item>
+    /// <item><see cref="LightingBandDecision.DeriveBandHeight"/> — the flag admits the neighbor→center
+    /// cross-seam term (<c>CheckEdgeVoxel</c>'s writes, unreachable without an edge check), which can widen
+    /// the LI-2 Y-band to full height. <b>Pooled path only:</b> the band is derived under
+    /// <c>usePooledBuffers</c>, so the startup coroutine's <c>TempJob</c> schedules never reach this reader —
+    /// they run full height regardless.</item>
+    /// </list>
+    /// <para>
+    /// The flag is cleared by <c>ChunkData.OnLightingJobScheduled()</c> <i>after</i> <c>job.Schedule()</c>
+    /// returns: a declined schedule never consumes it, and a schedule that throws leaves it set for the next
+    /// visit. See Documentation/Architecture/CHUNK_LIFECYCLE_PIPELINE.md §7.
+    /// </para>
+    /// </remarks>
     /// <param name="chunkData">The central chunk data object.</param>
     /// <param name="allocator">The allocator for the small per-job containers (heightmap, queues,
     /// mods, stability flag). The full-volume voxel/light maps are always pooled Persistent buffers.</param>

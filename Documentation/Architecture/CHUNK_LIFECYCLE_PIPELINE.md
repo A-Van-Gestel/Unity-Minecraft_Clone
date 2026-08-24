@@ -350,8 +350,11 @@ foreach pos in snapshot:
 
 > [!IMPORTANT]
 > ### Critical Scheduling Detail
-> When the edge-check path in the lighting scan calls `FlagLightWork()` but `ScheduleLightingUpdate()` returns `false` (e.g., job already exists — shouldn't happen due to the earlier `LightingJobs.ContainsKey` guard), the flag would remain set and fall through to the regular path.
-> However, because `ScheduleLightingUpdate` reads `NeedsEdgeCheck` internally and clears it, the **fallback path effectively performs the edge check anyway**, but under the weaker `AreNeighborsDataReady` gate instead of `AreNeighborsReadyAndLit`.
+> `ScheduleLightingUpdate` takes no edge-check parameter — it reads `NeedsEdgeCheck` off the chunk itself. So **border edge work rides any successful schedule**, whichever arm produced it: a chunk that took the *regular* arm under the weaker `AreNeighborsDataReady` gate still edge-checks, without ever satisfying `AreNeighborsReadyAndLit`. §7 covers what that costs.
+>
+> The same applies to the `ScheduleEdge` arm's own failure mode: if `FlagLightWork()` is set but the schedule returns `false` (job already in flight — the earlier `LightingJobs.ContainsKey` guard makes this unreachable from the scan), the flag stays set and falls through to the regular path on a later visit, where the fallback picks the edge check up again.
+>
+> The contract is stated in full on `WorldJobManager.ScheduleLightingUpdate`'s `<remarks>`, including its **second** reader: `LightingBandDecision.DeriveBandHeight` consumes the same flag to admit the neighbor→center cross-seam term, which can widen the LI-2 Y-band to full height. That reader sits on the pooled (`Persistent`) path only, so the startup coroutine's `TempJob` schedules never reach it.
 
 ---
 
@@ -643,13 +646,13 @@ flowchart TD
 **The round is spent either way** (`SpendOnly`) — only the flags buy lighting schedules, so declining the round would save nothing while letting a converged chunk hoard budget for its whole residency, which would break the premise the Bug-05 top-up rests on below and arm cascades on ordinary post-generation edits that this system never armed.
 
 > [!IMPORTANT]
-> ### Edge Check Fallback Path
-> When `NeedsEdgeCheck = true` but `AreNeighborsReadyAndLit` returns `false`, the dedicated edge-check path in the lighting scan does NOT fire.
-> However, if the chunk ALSO has `HasLightChangesToProcess = true` (from cross-chunk mods or other sources), the **fallback regular-lighting path** fires with the weaker `AreNeighborsDataReady` gate.
-> Since `ScheduleLightingUpdate` reads `chunkData.NeedsEdgeCheck` directly, the job **will** perform the edge check even though the strict gate wasn't satisfied. The flag is cleared regardless.
+> ### Edge Check Fallback Path — an explicit contract, not an accident
+> When `NeedsEdgeCheck = true` but `AreNeighborsReadyAndLit` returns `false`, the scan's dedicated edge arm does NOT fire.
+> If the chunk ALSO has `HasLightChangesToProcess = true` (cross-chunk mods, an edit, a re-flagged unstable pass), the **regular arm** fires instead, under the weaker `AreNeighborsDataReady` gate — and because `ScheduleLightingUpdate` reads `chunkData.NeedsEdgeCheck` off the chunk rather than taking it as an argument, that job performs the edge check anyway. The flag is consumed either way.
 >
-> This means edge checks can run with **potentially stale neighbor lighting data** — before neighbors have finished their own lighting passes. The edge check only ADDS light (never removes), which limits damage, but corrections may be incomplete.
-
+> **This is the contract, stated on the method** (`ScheduleLightingUpdate`'s `<remarks>`): *border edge work rides any successful schedule*. Two readers consume the flag — `NeighborhoodLightingJob.PerformEdgeCheck` and `LightingBandDecision.DeriveBandHeight` (which admits the neighbor→center cross-seam term, potentially widening the Y-band to full height; pooled path only). A change to either alters what the job does, so both are named in the contract.
+>
+> The cost is real: edge checks can run against **neighbor lighting that has not settled**. The edge check only ADDS light (never removes), which bounds the damage, but corrections may be incomplete — the affected chunk gets another round while `RemainingEdgeCheckRounds > 0`.
 ---
 
 ## 8. `IsStable` — The Convergence Signal
