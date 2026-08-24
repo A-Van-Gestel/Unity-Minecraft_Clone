@@ -1162,7 +1162,7 @@ public class World : MonoBehaviour, IMeshDrainHost
                 continue;
             }
 
-            bool flagged = owner.NeedsInitialLighting || owner.HasLightChangesToProcess || owner.NeedsEdgeCheck;
+            bool flagged = owner.HasAnyLightingWork;
 
             // Exactly the predicate the fail-safe scan above applies, so anything failing it is provably a
             // key the scan will not pick up this pass.
@@ -1649,7 +1649,7 @@ public class World : MonoBehaviour, IMeshDrainHost
         int stillDirty = 0;
         foreach (ChunkData chunkData in chunksInLoadArea)
         {
-            if (!chunkData.HasLightChangesToProcess && !chunkData.NeedsEdgeCheck && !chunkData.NeedsInitialLighting)
+            if (!chunkData.HasAnyLightingWork)
                 continue;
 
             stillDirty++;
@@ -2490,8 +2490,7 @@ public class World : MonoBehaviour, IMeshDrainHost
                 _fullLightScanTimer = 0f;
                 foreach (ChunkData cd in worldData.ChunkValues)
                 {
-                    if (cd.IsPopulated && (cd.NeedsInitialLighting ||
-                                           cd.HasLightChangesToProcess || cd.NeedsEdgeCheck))
+                    if (cd.IsPopulated && cd.HasAnyLightingWork)
                     {
                         _lightWork.AddReady(cd.Position);
                     }
