@@ -791,7 +791,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
         if (decision == LightingScheduleDecision.Result.NeighborsNotReady)
         {
-            chunkData.HasLightChangesToProcess = true;
+            chunkData.FlagLightWork();
             return false;
         }
 
@@ -919,8 +919,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             job.SetGatherSources(neighbors, jobData.Map, jobData.LightMap);
 
             jobData.Handle = job.Schedule();
-            chunkData.HasLightChangesToProcess = false;
-            if (chunkData.NeedsEdgeCheck) chunkData.NeedsEdgeCheck = false;
+            chunkData.OnLightingJobScheduled();
             LightingJobs.Add(chunkCoord, jobData);
             return true;
         }
@@ -1225,7 +1224,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                         _world.worldData.SunlightRecalculationQueue[chunkData.Position] = globalLightCols;
                     }
 
-                    chunkData.HasLightChangesToProcess = true;
+                    chunkData.FlagLightWork();
                 }
 
                 // Freshly generated chunks recompute all light from current neighbor data during
@@ -1237,7 +1236,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 // --- STAGE 3: Lighting ---
                 if (_world.settings.enableLighting)
                 {
-                    chunkData.NeedsInitialLighting = true;
+                    chunkData.FlagInitialLighting();
                 }
                 else
                 {
@@ -1617,7 +1616,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
         // Stability is unknown after a fault: keep the chunk re-schedulable so a corrective pass runs,
         // rather than silently dropping it in a half-merged state.
-        if (_curLightChunk != null) _curLightChunk.HasLightChangesToProcess = true;
+        if (_curLightChunk != null) _curLightChunk.FlagLightWork();
     }
 
     /// <inheritdoc />
@@ -1790,28 +1789,25 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
             if (cascade != EdgeCheckCascadeDecision.CascadeOutcome.None)
             {
-                // The round is spent whether or not the pass propagates. Only the flags below buy lighting
+                // The round is spent whether or not the pass propagates. Only the re-arm flags buy lighting
                 // schedules; the counter buys none — and letting a converged chunk hoard budget would break
                 // the premise ModifyVoxel's Bug-05 top-up rests on (post-generation the rounds are spent)
                 // and arm cascades on ordinary edits that legacy never armed.
-                chunkData.RemainingEdgeCheckRounds--;
+                // The re-arm sets the self edge check and its light-changes companion together: an edge
+                // check alone cannot satisfy the schedule guard, so a half-armed chunk could never spend it.
+                chunkData.SpendEdgeCheckRound(
+                    cascade == EdgeCheckCascadeDecision.CascadeOutcome.SpendAndRearm);
             }
 
             if (cascade == EdgeCheckCascadeDecision.CascadeOutcome.SpendAndRearm)
             {
                 LastEdgeRecycleJobCount++;
-
-                // Self-edge-check: re-examine this chunk's own borders with the
-                // latest neighbor snapshot data.
-                chunkData.NeedsEdgeCheck = true;
-                chunkData.HasLightChangesToProcess = true;
-
                 TriggerNeighborEdgeChecks(chunkCoord);
             }
         }
         else
         {
-            if (chunkData != null) chunkData.HasLightChangesToProcess = true;
+            if (chunkData != null) chunkData.FlagLightWork();
             LastUnstableJobCount++;
         }
     }
@@ -2197,8 +2193,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             if (neighborData != null && neighborData.IsPopulated
                                      && !neighborData.NeedsInitialLighting)
             {
-                neighborData.NeedsEdgeCheck = true;
-                neighborData.HasLightChangesToProcess = true;
+                neighborData.FlagNeighborEdgeCheck();
             }
         }
     }

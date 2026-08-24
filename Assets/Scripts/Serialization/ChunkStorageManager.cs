@@ -810,7 +810,7 @@ namespace Serialization
         private static ChunkData CreateSerializationSnapshot(ChunkData source)
         {
             ChunkData snapshot = World.Instance.ChunkPool.GetChunkData(source.Position);
-            snapshot.NeedsInitialLighting = source.NeedsInitialLighting;
+            if (source.NeedsInitialLighting) snapshot.FlagInitialLighting();
 
             // Copy Heightmap
             if (source.heightMap != null && snapshot.heightMap != null)

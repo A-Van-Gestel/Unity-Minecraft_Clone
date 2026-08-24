@@ -1313,7 +1313,7 @@ public class World : MonoBehaviour, IMeshDrainHost
                         worldData.SunlightRecalculationQueue[chunkVoxelPos] = globalCols;
                     }
 
-                    data.HasLightChangesToProcess = true;
+                    data.FlagLightWork();
                 }
 
                 // Replay pending cross-chunk blocklight modifications recorded while this chunk was
@@ -1371,7 +1371,7 @@ public class World : MonoBehaviour, IMeshDrainHost
                         JobManager.ScheduleLightingUpdate(data);
 
                         // 3. Clear flag so we don't do this again.
-                        data.NeedsInitialLighting = false;
+                        data.ClearInitialLighting();
                     }
                     else
                     {
@@ -1385,7 +1385,7 @@ public class World : MonoBehaviour, IMeshDrainHost
                 {
                     // Chunk loaded from disk with stable lighting — schedule an edge check
                     // to validate border consistency against current neighbor state.
-                    data.NeedsEdgeCheck = true;
+                    data.FlagEdgeCheck();
 
                     // If the chunk is loaded and doesn't need lighting updates (it's stable),
                     // we must explicitly request the mesh rebuild here.
@@ -1453,7 +1453,7 @@ public class World : MonoBehaviour, IMeshDrainHost
         generationProcessingWatch.Start();
         while (JobManager.GenerationJobs.Count > 0)
         {
-            // Complete any finished generation jobs. This may set `NeedsInitialLighting = true` on chunks.
+            // Complete any finished generation jobs. This may flag chunks for initial lighting.
             JobManager.ProcessGenerationJobs();
             ApplyModifications();
 
@@ -1509,11 +1509,11 @@ public class World : MonoBehaviour, IMeshDrainHost
                         // We must still ensure neighbors have their terrain data ready before lighting.
                         if (AreNeighborsDataReady(ChunkCoord.FromVoxelOrigin(chunkData.Position)))
                         {
-                            // This chunk is ready. Trigger its full sunlight recalculation, which sets `HasLightChangesToProcess = true` and populates the light queues.
+                            // This chunk is ready. Trigger its full sunlight recalculation, which flags the chunk's light work and populates the light queues.
                             chunkData.RecalculateSunLightLight();
 
                             // The request for an *initial* light pass has now been fulfilled.
-                            chunkData.NeedsInitialLighting = false;
+                            chunkData.ClearInitialLighting();
                         }
                     }
                 }
@@ -1529,7 +1529,8 @@ public class World : MonoBehaviour, IMeshDrainHost
 
                     if (chunkData.NeedsEdgeCheck && AreNeighborsReadyAndLit(chunkCoord))
                     {
-                        chunkData.HasLightChangesToProcess = true;
+                        // Pre-set so the schedule guard passes; the job's PerformEdgeCheck rides the schedule.
+                        chunkData.FlagLightWork();
                         scheduled = JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
                     }
 
@@ -1585,9 +1586,7 @@ public class World : MonoBehaviour, IMeshDrainHost
             // disk-loaded chunks so they don't block meshing or confuse other readers.
             foreach (ChunkData chunkData in chunksInLoadArea)
             {
-                chunkData.NeedsInitialLighting = false;
-                chunkData.HasLightChangesToProcess = false;
-                chunkData.NeedsEdgeCheck = false;
+                chunkData.ClearAllLightingWork();
             }
         }
 
@@ -2650,12 +2649,12 @@ public class World : MonoBehaviour, IMeshDrainHost
                             if (action == LightingScanDecision.ScanAction.ScheduleInitial)
                                 chunkData.RecalculateSunLightLight();
                             else if (action == LightingScanDecision.ScanAction.ScheduleEdge)
-                                chunkData.HasLightChangesToProcess = true;
+                                chunkData.FlagLightWork(); // pre-set so the schedule guard passes
 
                             if (JobManager.ScheduleLightingUpdate(chunkData))
                             {
                                 if (action == LightingScanDecision.ScanAction.ScheduleInitial)
-                                    chunkData.NeedsInitialLighting = false;
+                                    chunkData.ClearInitialLighting();
                                 lightJobsScheduled++;
 
                                 // P9-0: one quota unit spent. Counted here rather than at completion — the
@@ -3637,7 +3636,7 @@ public class World : MonoBehaviour, IMeshDrainHost
                 // are not saved and regenerate from seed (fresh lighting), so they need no flag — keeping this
                 // off their path avoids flagging a chunk we immediately delete (review finding #1).
                 if (decision == ChunkUnloadDecision.Result.UnloadPersistLightPending)
-                    data.NeedsInitialLighting = true;
+                    data.FlagInitialLighting();
 
                 // Fire and forget (StorageManager handles the Snapshot lifecycle). CP-6: a failed save is
                 // no longer silent — SaveChunkAsync hands the snapshot (the edits' only surviving copy once

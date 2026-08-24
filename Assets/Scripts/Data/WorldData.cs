@@ -468,7 +468,7 @@ namespace Data
             // Mark the target chunk as needing a lighting update.
             if (_chunks.TryGetValue(chunkVoxelPos, out ChunkData chunkData))
             {
-                chunkData.HasLightChangesToProcess = true;
+                chunkData.FlagLightWork();
             }
         }
 

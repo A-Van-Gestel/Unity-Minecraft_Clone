@@ -223,7 +223,9 @@ namespace Serialization
                 chunk = World.Instance.ChunkPool.GetChunkData(new Vector2Int(x, z)); // Get from POOL
 
                 // --- State Flags ---
-                chunk.NeedsInitialLighting = reader.ReadBoolean();
+                // The chunk comes straight from the pool (Reset already ran), so its work set is empty
+                // and flagging on true reproduces the old unconditional assignment.
+                if (reader.ReadBoolean()) chunk.FlagInitialLighting();
 
                 // --- Height Map ---
                 byte[] hmBytes = reader.ReadBytes(VoxelData.ChunkWidth * VoxelData.ChunkWidth * sizeof(ushort));
@@ -263,7 +265,7 @@ namespace Serialization
                 // If we loaded pending lights, flag the chunk for processing
                 if (chunk.SunLightQueueCount > 0 || chunk.BlockLightQueueCount > 0)
                 {
-                    chunk.HasLightChangesToProcess = true;
+                    chunk.FlagLightWork();
                 }
 
                 chunk.IsPopulated = true;
