@@ -341,6 +341,7 @@ newly created `.cs` files need a Unity import before `dotnet build` sees them; t
 | **LP-5 — Explicit scheduling contract + coroutine** | `WorldJobManager.ScheduleLightingUpdate`; `World.cs` coroutine; new fallback baseline                                                             |   🟡   | LP-4                               |
 | **LP-6 — Lazy strict-gate evaluation** *(optional)* | `LightingScanDecision.cs` overload; `World.cs` scan; `LightingFrameSimulator.cs`                                                                  |   🟢   | LP-2                               |
 | **LP-7 — Naming & doc hygiene**                     | `RecalculateSunLightLight` rename; residual doc alignment                                                                                         |   🟢   | —                                  |
+| **LP-8 — Production-scheduler harness driver**      | New editor rig driving `WorldJobManager.ScheduleLightingUpdate` / `ProcessLightingJobs` against a live `World` + `WorldData`                      |   🔴   | LP-5 (filed by it)                 |
 
 **Minimal standalone-value set:** LP-1 + LP-2 (closes the fidelity B2 remainder and de-risks everything after). **Validation is built alongside, not after** — LP-4 and LP-5 each add baselines in the same commit as the code. **Number them from the suite's current tip, read at execution time** (2026-08-23: the lighting suite's registrations run past B114 and are spread across `Lighting/` and `Lighting/Baselines/`; v1.0's "B71+" is long overtaken).
 
@@ -874,6 +875,26 @@ reachable-state table it must not contradict.
 - **Scope:** `RecalculateSunLightLight()` → `RecalculateSunlight()` via the `refactor-safely`
   skill (declaration `ChunkData.cs:1434`; callers `World.cs:1262`, `:1407`, `:2533` — three, all in `World.cs`; plus the harness docstring at `LightingTestWorld.Builder.cs:225`); verify no serialized name is touched (method — safe). Residual doc alignment (anything §2 of the pipeline doc still footnotes that LP-3/LP-4 made false). Explicitly does NOT start the Sun→Sky rename (Phase B).
 - **Gate:** universal gate. **Doc-sync:** pipeline/lighting docs mention the method by name in pseudocode — update in the same commit. **Serialization:** none.
+
+### LP-8 — Production-scheduler harness driver (🔴, filed 2026-08-24 by LP-5)
+
+**Delivers:** the one thing extraction cannot — a validation harness that executes **production's own scheduler and merge**, closing the two coverage gaps this design has now hit twice.
+
+**Why it exists.** LP-4 found that `MergeCompletedLightingJob` is unreachable from every suite, so its cascade-effect application had zero witnesses; it closed that by extracting `EdgeCheckCascadeDecision.Apply`, which worked *because the unwitnessed thing was behavior that could move into a callee*. LP-5 hit the same wall in a shape where that trick does **not** work. `WorldJobManager.ScheduleLightingUpdate` has exactly three callers (`World.cs:1204`, `:1428`, `:2363` — all production), and the unwitnessed lines are **assignments at that call site**:
+`PerformEdgeCheck = performEdgeCheck` and the matching `DeriveBandHeight` argument. Extracting the *derivation* into `ScheduledEdgeCheckDecision` (LP-5) removes the double-read, but a baseline over that function passes unchanged when the call site is sabotaged.
+
+**Measured, not predicted (2026-08-24).** With `PerformEdgeCheck = performEdgeCheck` replaced by `PerformEdgeCheck = false` in `ScheduleLightingUpdate` — production's border reconciliation switched off entirely — the universal gate returned **573/573 baselines across 25 suites PASSED**, byte-identical to the clean run including its two expected known-bug repros. Not one baseline in the repo observes that line. The Unity-side recompile was confirmed by DLL timestamp before the run, so this is a real null result and not the stale-assembly trap.
+
+The general rule this surfaces: **extraction closes a gap only when the unwitnessed thing is a decision, not a wiring line.** Wiring is closed by reaching the caller.
+
+- **Scope (sketch, not a commitment):** an editor rig that stands up a real `World` + `WorldData` + `JobDataManager.BlockTypesJobData` and the lighting buffer pools, then drives `ScheduleLightingUpdate` → `ProcessLightingJobs` for a small chunk grid. The hard parts are the ones the existing harness deliberately avoids: `World.Instance` stubbing/restore (the documented coupling hub — see the `create-implementation-plan` L1 lens), pooled `Persistent` buffer lifetime across a suite run without leaking, and `NativeArray` disposal on a failing assertion.
+- **What it would witness** (today's blind spots, in priority order):
+    1. `ScheduleLightingUpdate`'s job wiring — `PerformEdgeCheck`, the band arguments, `SetGatherSources` (LP-5's gap).
+    2. That the merge passes the cascade outcome it actually *computed* — the one line B119 explicitly cannot reach (LP-4's gap, currently held only by in-game corroboration).
+    3. The pooled-vs-`TempJob` split itself: the LI-2 band derivation runs **only** on the pooled path, so the startup coroutine's schedules take a different code path that no baseline exercises at all.
+- **Explicitly NOT a replacement for `LightingTestWorld`.** That harness's value is speed and determinism over a synthetic grid; this rig is slower, heavier, and exists to cover the seam between production's orchestration and the shared decisions. Expect a handful of baselines, not a suite.
+- **Prerequisite reading before starting:** LP-4's Amended line (why prove-red predictions have been wrong four phases running now) and `LIGHTING_VALIDATION_HARNESS_FIDELITY.md`.
+- **Do not start this to make LP-5 look complete.** LP-5 ships with its gap documented on `ScheduledEdgeCheckDecision` and in B120's docstring; that is an honest close, and this phase is a separate, larger bet.
 
 ---
 
