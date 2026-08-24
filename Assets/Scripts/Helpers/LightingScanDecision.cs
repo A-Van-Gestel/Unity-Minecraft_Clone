@@ -1,3 +1,5 @@
+using Data;
+
 namespace Helpers
 {
     /// <summary>
@@ -71,35 +73,126 @@ namespace Helpers
         /// <param name="neighborsDataReady">All neighbors have populated terrain data (<c>AreNeighborsDataReady</c>) — gates the initial and regular arms.</param>
         /// <param name="neighborsReadyAndLit">All neighbors are fully lit and stable (<c>AreNeighborsReadyAndLit</c>) — gates the edge arm.</param>
         /// <returns>The scan action the caller should perform.</returns>
+        /// <remarks>
+        /// The pre-evaluated form, for callers that need the gate values themselves (a baseline asserting on
+        /// them) or that hold no world to gate against. A caller with live gates should prefer the
+        /// <see cref="EvaluateReadyChunk(bool, bool, bool, bool, INeighborGates, ChunkCoord)"/> overload,
+        /// which skips the gate this chunk's arm cannot read. Allocation-free: the constant provider is a
+        /// struct reaching <see cref="Evaluate{TGates}"/> through its generic constraint, so it is never boxed.
+        /// </remarks>
         public static ScanAction EvaluateReadyChunk(
             bool jobInFlight,
             bool needsInitialLighting,
             bool needsEdgeCheck,
             bool hasLightChanges,
             bool neighborsDataReady,
-            bool neighborsReadyAndLit)
+            bool neighborsReadyAndLit) =>
+            Evaluate(jobInFlight, needsInitialLighting, needsEdgeCheck, hasLightChanges,
+                new ConstantGates(neighborsDataReady, neighborsReadyAndLit), default);
+
+        /// <summary>
+        /// Decides the scan action for a chunk in the ready set, evaluating <b>only the neighbor gate the
+        /// chunk's arm actually reads</b>. Identical in outcome to the pre-evaluated overload — the arm rule
+        /// below is the single implementation both reach.
+        /// </summary>
+        /// <remarks>
+        /// The arm precedence makes at most one gate reachable per chunk: an in-flight or flag-less chunk
+        /// reads neither, an initial-lighting chunk reads only <see cref="INeighborGates.DataReady"/>, and
+        /// <see cref="INeighborGates.ReadyAndLit"/> is reachable only for a chunk that is not awaiting initial
+        /// lighting and has an edge check pending. Each gate is therefore invoked at most once, so an
+        /// implementation needs no memoization. The caller contract is unchanged — see the overload above.
+        /// </remarks>
+        /// <param name="jobInFlight">A lighting job is already running for this chunk (production: <c>LightingJobs.ContainsKey</c>).</param>
+        /// <param name="needsInitialLighting"><c>ChunkData.NeedsInitialLighting</c>.</param>
+        /// <param name="needsEdgeCheck"><c>ChunkData.NeedsEdgeCheck</c>.</param>
+        /// <param name="hasLightChanges"><c>ChunkData.HasLightChangesToProcess</c>.</param>
+        /// <param name="gates">The live neighbor gates, queried on demand.</param>
+        /// <param name="coord">The chunk being decided, passed through to <paramref name="gates"/>.</param>
+        /// <returns>The scan action the caller should perform.</returns>
+        public static ScanAction EvaluateReadyChunk(
+            bool jobInFlight,
+            bool needsInitialLighting,
+            bool needsEdgeCheck,
+            bool hasLightChanges,
+            INeighborGates gates,
+            ChunkCoord coord) =>
+            Evaluate(jobInFlight, needsInitialLighting, needsEdgeCheck, hasLightChanges, gates, coord);
+
+        /// <summary>
+        /// The sole arm-selection implementation. Generic over the gate provider so a value-type provider is
+        /// specialized rather than boxed, which is what keeps the pre-evaluated overload allocation-free.
+        /// </summary>
+        /// <typeparam name="TGates">The gate provider type.</typeparam>
+        /// <param name="jobInFlight">A lighting job is already running for this chunk.</param>
+        /// <param name="needsInitialLighting"><c>ChunkData.NeedsInitialLighting</c>.</param>
+        /// <param name="needsEdgeCheck"><c>ChunkData.NeedsEdgeCheck</c>.</param>
+        /// <param name="hasLightChanges"><c>ChunkData.HasLightChangesToProcess</c>.</param>
+        /// <param name="gates">The gate provider.</param>
+        /// <param name="coord">The chunk being decided.</param>
+        /// <returns>The scan action the caller should perform.</returns>
+        private static ScanAction Evaluate<TGates>(
+            bool jobInFlight,
+            bool needsInitialLighting,
+            bool needsEdgeCheck,
+            bool hasLightChanges,
+            TGates gates,
+            ChunkCoord coord)
+            where TGates : INeighborGates
         {
             // A job is already running — its completion promotes the chunk (production parks it: MarkWaiting).
+            // Neither gate is reachable from here, so neither is evaluated.
             if (jobInFlight) return ScanAction.Park;
 
             // Initial lighting takes priority; it gates on terrain-data readiness only.
             if (needsInitialLighting)
-                return neighborsDataReady ? ScanAction.ScheduleInitial : ScanAction.Park;
+                return gates.DataReady(coord) ? ScanAction.ScheduleInitial : ScanAction.Park;
 
             // Edge consistency check: needs fully-lit neighbors so the border comparison reads settled data.
-            if (needsEdgeCheck && neighborsReadyAndLit)
+            // The strict gate is read here and nowhere else, and only once initial lighting is ruled out.
+            if (needsEdgeCheck && gates.ReadyAndLit(coord))
                 return ScanAction.ScheduleEdge;
 
             // Regular lighting update — also the fall-through when an edge check is pending but neighbors are
             // not lit yet (production's `!scheduled && HasLightChangesToProcess && AreNeighborsDataReady`).
-            if (hasLightChanges && neighborsDataReady)
+            if (hasLightChanges && gates.DataReady(coord))
                 return ScanAction.ScheduleRegular;
 
             // Nothing schedulable. No flags at all → forget the chunk; otherwise a gate failed → park.
+            // needsInitialLighting is provably false here (its arm returned above); it is restated so this
+            // reads as the documented three-flag rule rather than a condition narrowed by control flow.
             if (!needsInitialLighting && !needsEdgeCheck && !hasLightChanges)
                 return ScanAction.Remove;
 
             return ScanAction.Park;
+        }
+
+        /// <summary>
+        /// Gate provider returning values the caller already computed — the adapter behind the pre-evaluated
+        /// overload. A struct, so <see cref="Evaluate{TGates}"/> specializes over it and no allocation occurs.
+        /// </summary>
+        private readonly struct ConstantGates : INeighborGates
+        {
+            private readonly bool _dataReady;
+            private readonly bool _readyAndLit;
+
+            /// <summary>Captures the pre-evaluated gate values.</summary>
+            /// <param name="dataReady">The <c>AreNeighborsDataReady</c> result.</param>
+            /// <param name="readyAndLit">The <c>AreNeighborsReadyAndLit</c> result.</param>
+            public ConstantGates(bool dataReady, bool readyAndLit)
+            {
+                _dataReady = dataReady;
+                _readyAndLit = readyAndLit;
+            }
+
+            /// <summary><see cref="INeighborGates.DataReady"/>: the captured value; the coordinate is unused.</summary>
+            /// <param name="coord">Ignored — the value was computed by the caller.</param>
+            /// <returns>The captured data-ready result.</returns>
+            bool INeighborGates.DataReady(ChunkCoord coord) => _dataReady;
+
+            /// <summary><see cref="INeighborGates.ReadyAndLit"/>: the captured value; the coordinate is unused.</summary>
+            /// <param name="coord">Ignored — the value was computed by the caller.</param>
+            /// <returns>The captured ready-and-lit result.</returns>
+            bool INeighborGates.ReadyAndLit(ChunkCoord coord) => _readyAndLit;
         }
     }
 }
