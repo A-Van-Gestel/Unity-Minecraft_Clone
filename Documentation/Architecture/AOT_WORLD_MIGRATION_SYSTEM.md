@@ -653,9 +653,9 @@ namespace Serialization.Migration.Steps
             //     byte (1) : node.OldLightLevel     (LightQueueNode.OldLightLevel is byte)
             //   Total per node: 4 + 4 + 4 + 1 = 13 bytes
             //
-            // Two queues are written consecutively: SunlightBfsQueue, then BlocklightBfsQueue.
-            int    sunCount      = reader.ReadInt32();
-            byte[] sunQueueData  = reader.ReadBytes(sunCount * 13);
+            // Two queues are written consecutively: SkylightBfsQueue, then BlocklightBfsQueue.
+            int    skyCount      = reader.ReadInt32();
+            byte[] skyQueueData  = reader.ReadBytes(skyCount * 13);
             int    blockCount    = reader.ReadInt32();
             byte[] blockQueueData = reader.ReadBytes(blockCount * 13);
 
@@ -681,8 +681,8 @@ namespace Serialization.Migration.Steps
                     writer.Write(v1Sections[i]);
             }
 
-            writer.Write(sunCount);
-            writer.Write(sunQueueData);
+            writer.Write(skyCount);
+            writer.Write(skyQueueData);
             writer.Write(blockCount);
             writer.Write(blockQueueData);
 

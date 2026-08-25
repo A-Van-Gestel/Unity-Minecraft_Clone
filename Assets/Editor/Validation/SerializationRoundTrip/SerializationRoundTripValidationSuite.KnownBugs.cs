@@ -89,10 +89,10 @@ namespace Editor.Validation.SerializationRoundTrip
 
             try
             {
-                ok &= Check($"{label}: sunlight queue survives (expected {queueNodes.ToString()}, got {reloaded.SunLightQueueCount.ToString()})",
-                    reloaded.SunLightQueueCount == queueNodes);
-                ok &= Check($"{label}: blocklight queue survives (expected {queueNodes.ToString()}, got {reloaded.BlockLightQueueCount.ToString()})",
-                    reloaded.BlockLightQueueCount == queueNodes);
+                ok &= Check($"{label}: skylight queue survives (expected {queueNodes.ToString()}, got {reloaded.SkylightQueueCount.ToString()})",
+                    reloaded.SkylightQueueCount == queueNodes);
+                ok &= Check($"{label}: blocklight queue survives (expected {queueNodes.ToString()}, got {reloaded.BlocklightQueueCount.ToString()})",
+                    reloaded.BlocklightQueueCount == queueNodes);
             }
             finally
             {
@@ -136,7 +136,7 @@ namespace Editor.Validation.SerializationRoundTrip
                     OldBlockG = (byte)(i % 14),
                     OldBlockB = (byte)(i % 13),
                 };
-                data.SunlightBfsQueue.Enqueue(node);
+                data.SkylightBfsQueue.Enqueue(node);
                 data.BlocklightBfsQueue.Enqueue(node);
             }
 

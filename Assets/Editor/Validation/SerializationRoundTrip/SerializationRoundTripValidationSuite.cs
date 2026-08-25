@@ -91,7 +91,7 @@ namespace Editor.Validation.SerializationRoundTrip
                 new Scenario("B12: a mixed-size rewrite storm leaves every record intact and every run disjoint", MixedSizeRewriteStormPreservesEveryRecord),
                 new Scenario("B13: the offset table survives a close/reopen, including a write made afterwards", OffsetTableSurvivesCloseAndReopen),
                 new Scenario("B14: an oversized record throws ChunkTooLargeException and changes nothing", OversizedRecordThrowsTypedAndChangesNothing),
-                new Scenario("B15: pending sunlight columns and blocklight mods survive save → load", PendingLightStoresSurviveSaveAndLoad),
+                new Scenario("B15: pending skylight columns and blocklight mods survive save → load", PendingLightStoresSurviveSaveAndLoad),
                 new Scenario("B16: pending voxel mods survive save → load with position, id and meta intact", PendingModStoreSurvivesSaveAndLoad),
                 new Scenario("K04: a dense chunk with large pending light queues still saves and reloads", DenseChunkWithLargeLightQueuesSaves, "SERIALIZATION_BUGS §04"),
                 new Scenario("K08: an invalid pending column is rejected, not byte-truncated onto another column", InvalidPendingColumnsAreRejectedNotTruncated, "SERIALIZATION_BUGS §08"),

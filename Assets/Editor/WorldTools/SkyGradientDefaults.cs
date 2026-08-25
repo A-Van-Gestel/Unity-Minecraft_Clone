@@ -27,7 +27,7 @@ namespace Editor.WorldTools
         {
             ("_zenithOverDay", TimeOfDaySettings.CreateDefaultZenithGradient),
             ("_horizonOverDay", TimeOfDaySettings.CreateDefaultHorizonGradient),
-            ("_skyLightOverDay", TimeOfDaySettings.CreateDefaultSkyLightGradient),
+            ("_skylightOverDay", TimeOfDaySettings.CreateDefaultSkylightGradient),
             ("_backgroundOverDay", TimeOfDaySettings.CreateDefaultBackgroundGradient),
         };
 

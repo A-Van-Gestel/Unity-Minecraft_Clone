@@ -121,7 +121,7 @@ added to characterize this exact churn (`LastCrossChunkModsApplyRouted/Effective
 **Outcome branches — both are progress:**
 
 - **RED** → first faithful Bug-13 repro; proceed with `validation-driven-bugfix` (fix until green with all baselines green, promote to baseline after in-game confirmation on the fluid-stress opaque-floor config).
-- **GREEN** → a fidelity finding: enumerate the sim-vs-production deltas as the suspect list — mesh-rebuild interleaving, the world-level `SunlightRecalculationQueue` routing (fidelity A3 remainder), fluid re-flow mods, real per-frame budgets, `PromoteAll` cadence (AS-2) — then instrument the in-game `FluidStressController` repro (opaque floor) with the existing
+- **GREEN** → a fidelity finding: enumerate the sim-vs-production deltas as the suspect list — mesh-rebuild interleaving, the world-level `SkylightRecalculationQueue` routing (fidelity A3 remainder), fluid re-flow mods, real per-frame budgets, `PromoteAll` cadence (AS-2) — then instrument the in-game `FluidStressController` repro (opaque floor) with the existing
   `Last*` counters to identify which event the sim lacks. Update fidelity doc accordingly.
 
 **Outcome (2026-07-04): RED — implemented as K13a–K13d in
@@ -135,7 +135,7 @@ added to characterize this exact churn (`LastCrossChunkModsApplyRouted/Effective
 - All 47 baselines stayed green. Next step: `validation-driven-bugfix` on Bug 13 using K13c as the primary red, then promote to B56+ after in-game confirmation.
 
 **Fix (same day, 2026-07-04):** root cause confirmed by instrumentation (period-2 field cycle across the slab's 8 ring chunks; the Bug 12 cross-seam removal initiator vs. the Bug 11 veto's in-chunk-only support model at perimeter-fed interior seams — attribution proven by an emit-neuter test converging the repro in 2 frames). Fixed by extending the veto with **live third-party cross-chunk support**
-(`CrossChunkLightModApplier.CrossChunkSunlightSupport`, emitter excluded; deferred mods now carry their emitter). K13a–K13d green, all 47 baselines green. The sweep also surfaced a **second, independent defect**
+(`CrossChunkLightModApplier.CrossChunkSkylightSupport`, emitter excluded; deferred mods now carry their emitter). K13a–K13d green, all 47 baselines green. The sweep also surfaced a **second, independent defect**
 — terminating stale over-bright ghost light — filed as **Bug 13's sibling Bug 14** with scenario K14a (expected red). Bug 13 was confirmed in-game the same day, promoted to baselines **B56–B59**, and archived (`_FIXED_BUGS.md` Lighting #17). **Bug 14 was then also fixed, confirmed in-game, and archived the same day** (`_FIXED_BUGS.md` Lighting #18 — pull-back-claim verification at merge, `PullBackClaim` /
 `VerifyPullBackClaims`, plus a hotfix for the border shadow-caster halo-node claim contract found by the first in-game test): K14a red→green and promoted to **B61**, the halo-node contract pinned as **B60**, and the **B59** sweep upgraded to assert the borderless oracle across its full 75-seed space. Fidelity finding **C9** (flat worlds never exercise border shadow-casters) filed and closed. Suite tip: **B61, 53 baselines**.
 
@@ -168,7 +168,7 @@ turns that log line into a mechanical gate.
 **Implementation — Phase 0: discovery (confirm before coding).**
 
 - Grep the Bug-09 fleet bodies (`LightingValidationSuite.Bug09Fuzz.cs` / `…Baseline.cs`, scenarios B15/B16/B22/B26–B29/B40/B41) for how each drives `RunFrame` / `RunToConvergence` — this fixes the shape of the both-modes shared helper (Phase 3).
-- Confirm a fresh `TestChunk`'s `NeedsInitialLighting` default vs. how `QueueFullSunlightRecalc`
+- Confirm a fresh `TestChunk`'s `NeedsInitialLighting` default vs. how `QueueFullSkylightRecalc`
   seeds work — decides how the ready set is seeded at scheduler-mode entry (flag-callback vs. an explicit seed scan).
 
 **Implementation — Phase 1: harness prerequisites (`LightingTestWorld`).**

@@ -110,7 +110,7 @@ namespace Editor.WorldTools.Libraries
 
         /// <summary>
         /// Schedules a lighting job for the given chunk using stored map data.
-        /// Builds the initial sunlight column recalculation queue for all 256 columns.
+        /// Builds the initial skylight column recalculation queue for all 256 columns.
         /// </summary>
         /// <param name="chunkCoord">The chunk coordinate to light.</param>
         /// <param name="maps">Dictionary of all generated chunk maps keyed by voxel origin.</param>
@@ -163,13 +163,13 @@ namespace Editor.WorldTools.Libraries
                 },
             };
 
-            // Build initial sunlight column recalculation queue: all 256 columns
-            NativeQueue<Vector2Int> sunlightRecalcQueue = new NativeQueue<Vector2Int>(Allocator.Persistent);
+            // Build initial skylight column recalculation queue: all 256 columns
+            NativeQueue<Vector2Int> skylightRecalcQueue = new NativeQueue<Vector2Int>(Allocator.Persistent);
             for (int x = 0; x < VoxelData.ChunkWidth; x++)
             {
                 for (int z = 0; z < VoxelData.ChunkWidth; z++)
                 {
-                    sunlightRecalcQueue.Enqueue(new Vector2Int(x, z));
+                    skylightRecalcQueue.Enqueue(new Vector2Int(x, z));
                 }
             }
 
@@ -181,9 +181,9 @@ namespace Editor.WorldTools.Libraries
                 Mods = new NativeList<LightModification>(Allocator.Persistent),
                 PullBackClaims = new NativeList<PullBackClaim>(Allocator.Persistent),
                 IsStable = new NativeArray<bool>(1, Allocator.Persistent),
-                SunLightQueue = new NativeQueue<LightQueueNode>(Allocator.Persistent),
-                BlockLightQueue = new NativeQueue<LightQueueNode>(Allocator.Persistent),
-                SunLightRecalcQueue = sunlightRecalcQueue,
+                SkylightQueue = new NativeQueue<LightQueueNode>(Allocator.Persistent),
+                BlocklightQueue = new NativeQueue<LightQueueNode>(Allocator.Persistent),
+                SkylightRecalcQueue = skylightRecalcQueue,
             };
 
             // P-2 Layer 1: rent the padded volumes UNFILLED — the gather runs on the worker thread inside
@@ -206,9 +206,9 @@ namespace Editor.WorldTools.Libraries
                 BandHeight = jobData.BandHeight,
                 BandMinY = jobData.BandMinY,
                 ChunkPosition = voxelOrigin,
-                SunlightBfsQueue = jobData.SunLightQueue,
-                BlocklightBfsQueue = jobData.BlockLightQueue,
-                SunlightColumnRecalcQueue = jobData.SunLightRecalcQueue,
+                SkylightBfsQueue = jobData.SkylightQueue,
+                BlocklightBfsQueue = jobData.BlocklightQueue,
+                SkylightColumnRecalcQueue = jobData.SkylightRecalcQueue,
                 Heightmap = jobData.Input.Heightmap,
                 BlockTypes = _jobDataManager.BlockTypesJobData,
                 CrossChunkLightMods = jobData.Mods,

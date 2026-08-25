@@ -14,7 +14,7 @@ namespace Editor.Validation.Lighting
     /// how many bottom-anchored rows it must gather/scan/extract. These guard the derivation's three
     /// rules (column-recalc, cross-seam consistency, coverage + headroom) and the section-metadata
     /// summary they consume, BEFORE the band is plumbed into <c>NeighborhoodLightingJob</c>: a wrong
-    /// answer here becomes a truncated sunlight column or a C3-class cross-chunk darkening bug once the
+    /// answer here becomes a truncated skylight column or a C3-class cross-chunk darkening bug once the
     /// job trusts it. Self-registered via the <see cref="AddBandDecisionBaselineScenarios"/> hook
     /// (the <c>Baselines/</c> group-partial pattern).
     /// </summary>
@@ -53,7 +53,7 @@ namespace Editor.Validation.Lighting
                 Baseline_BandReconcileFailsClosed));
         }
 
-        /// <summary>The packed light value of a fully-sunlit uniform region (sky 15, no blocklight).</summary>
+        /// <summary>The packed light value of a fully-skylit uniform region (sky 15, no blocklight).</summary>
         private static ushort BandFullSky => LightBitMapping.PackLightData(15, 0, 0, 0);
 
         /// <summary>A lit-chunk uniform-top summary: all air above the floor section, sky 15.</summary>
@@ -71,7 +71,7 @@ namespace Editor.Validation.Lighting
         /// <summary>Derives the band for a neighborhood that is the same summary in all 9 slots.</summary>
         /// <param name="all">The summary used for the center and every neighbor.</param>
         /// <param name="maxQueuedNodeY">Highest queued BFS node Y, or −1.</param>
-        /// <param name="hasColumnRecalcs">Whether sunlight column recalcs are queued.</param>
+        /// <param name="hasColumnRecalcs">Whether skylight column recalcs are queued.</param>
         /// <param name="performEdgeCheck">Whether the job will edge-check.</param>
         /// <returns>The derived band height.</returns>
         private static int DeriveUniformNeighborhood(in LightingBandChunkTop all,
@@ -302,7 +302,7 @@ namespace Editor.Validation.Lighting
         /// <summary>Derives the bottom edge for a neighborhood that is the same summary in all 9 slots.</summary>
         /// <param name="all">The summary used for the center and every neighbor.</param>
         /// <param name="minQueuedNodeY">Lowest queued BFS node Y, or <c>int.MaxValue</c>.</param>
-        /// <param name="hasColumnRecalcs">Whether sunlight column recalcs are queued.</param>
+        /// <param name="hasColumnRecalcs">Whether skylight column recalcs are queued.</param>
         /// <param name="minCenterHeightmapY">The center chunk's lowest heightmap entry.</param>
         /// <returns>The derived band bottom.</returns>
         private static int DeriveUniformBottomNeighborhood(in LightingBandChunkBottom all,
@@ -397,7 +397,7 @@ namespace Editor.Validation.Lighting
 
             int withHeightmap = DeriveUniformBottomNeighborhood(in dark48, minCenterHeightmapY: 40);
             ok &= LightingAssert.IsTrue(withHeightmap == 40 - LightingBandDecision.BandHeadroomVoxels,
-                "B80: the center's lowest heightmap entry bounds the band (descending-sunlight rule)",
+                "B80: the center's lowest heightmap entry bounds the band (descending-skylight rule)",
                 $"expected {40 - LightingBandDecision.BandHeadroomVoxels}, got {withHeightmap}");
 
             // One shallow neighbor (inert only up to y=16) must lower the whole neighborhood's band.

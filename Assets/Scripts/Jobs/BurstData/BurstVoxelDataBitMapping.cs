@@ -13,7 +13,7 @@ namespace Jobs.BurstData
     {
         // --- Constants for Bit Packing ---
         // Layout: [ID: 16][Reserved: 8][Meta: 8] = 32 bits
-        // Bits 16-23 are reserved for future use (formerly sunlight + blocklight).
+        // Bits 16-23 are reserved for future use (formerly skylight + blocklight).
         public const uint ID_MASK = 0x0000FFFF; // Bits 0-15  (16-bits, Values 0-65,535)
         public const uint META_MASK = 0xFF000000; // Bits 24-31 (8-bits, Values 0-255)
 

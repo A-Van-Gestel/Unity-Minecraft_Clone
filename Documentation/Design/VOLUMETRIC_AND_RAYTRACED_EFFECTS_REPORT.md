@@ -321,7 +321,7 @@ in-scattering along the view ray, which no analytic fog can fake.
 1. A `ScriptableRendererFeature` pass after opaques at **half resolution**: per pixel, DDA-free
    fixed-step march (16–32 steps, blue-noise jittered) from camera to the opaque depth.
 2. Per step: `scatter += density(P) × (skyTerm + blockTerm)` where
-    - `skyTerm` = decoded sky nibble × `SkyLightColor` × RF-1's `SkyDarken` parity × a
+    - `skyTerm` = decoded sky nibble × `SkylightColor` × RF-1's `SkyDarken` parity × a
       Henyey–Greenstein-ish phase toward `_SunDirection` (RF-1/RF-2 provide both; until RF-1
       ships, a fixed noon sun keeps the item testable) — **this is what makes canopy/cave light
       shafts emerge with zero shadow maps** (verdict 2),
@@ -399,7 +399,7 @@ already does all the hard work — it just lacks a per-block, per-channel attenu
    terminates). Neutral filter compiles to today's `−1` — **bit-identical for all existing
    content by construction**, which is the differential the lighting suite proves.
 3. **Sky light is explicitly out of scope:** sky storage is 4-bit mono by design (RGB sky was
-   rejected in `SMOOTH_AND_RGB_LIGHTING.md`); sunlight through stained glass attenuates mono,
+   rejected in `SMOOTH_AND_RGB_LIGHTING.md`); skylight through stained glass attenuates mono,
    it does not colorize. The visible wish (torch/lamp light tinted by glass) is blocklight, so
    this limitation costs little; state it in the settings-free feature (there is no toggle —
    neutral blocks are free).

@@ -7,8 +7,8 @@ namespace Jobs.BurstData
     /// <summary>
     /// The single definition of the engine's light attenuation rule, shared by every system that must
     /// agree on it: the BFS flood-fill (<c>NeighborhoodLightingJob</c>), the borderless validation oracle
-    /// (<c>LightingOracle</c>), and the cross-chunk sunlight removal veto
-    /// (<c>Helpers.CrossChunkLightModApplier.InChunkSunlightSupport</c>).
+    /// (<c>LightingOracle</c>), and the cross-chunk skylight removal veto
+    /// (<c>Helpers.CrossChunkLightModApplier.InChunkSkylightSupport</c>).
     /// <para>
     /// Burst-compatible (uses only <see cref="Unity.Mathematics"/>), so the job can call it directly.
     /// Keeping the formula in one place prevents the three call sites from silently diverging — a
@@ -147,7 +147,7 @@ namespace Jobs.BurstData
         /// </para>
         /// <para>
         /// <b>Why the heightmap has to care</b> (<c>_FIXED_BUGS.md</c> Lighting #25): the heightmap is what makes
-        /// <c>RecalculateSunlightForColumn</c> authoritative for sky <i>removal</i>. A slab that registers
+        /// <c>RecalculateSkylightForColumn</c> authoritative for sky <i>removal</i>. A slab that registers
         /// when it should not means sealing it never moves the heightmap, so the recalculation never re-runs
         /// and the orphaned column — being flat, with no decrement chain for <c>PropagateDarkness</c> to
         /// follow — stays lit forever.

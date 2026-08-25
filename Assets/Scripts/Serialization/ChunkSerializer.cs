@@ -196,7 +196,7 @@ namespace Serialization
 
             // --- Write Lighting Queues ---
             // Lock queues during serialization to prevent concurrent modification by the Main Thread
-            lock (data.SunlightBfsQueue) WriteLightQueue(writer, data.SunlightBfsQueue);
+            lock (data.SkylightBfsQueue) WriteLightQueue(writer, data.SkylightBfsQueue);
             lock (data.BlocklightBfsQueue) WriteLightQueue(writer, data.BlocklightBfsQueue);
         }
 
@@ -259,11 +259,11 @@ namespace Serialization
                 }
 
                 // --- Lighting ---
-                ReadLightQueue(reader, chunk.SunlightBfsQueue);
+                ReadLightQueue(reader, chunk.SkylightBfsQueue);
                 ReadLightQueue(reader, chunk.BlocklightBfsQueue);
 
                 // If we loaded pending lights, flag the chunk for processing
-                if (chunk.SunLightQueueCount > 0 || chunk.BlockLightQueueCount > 0)
+                if (chunk.SkylightQueueCount > 0 || chunk.BlocklightQueueCount > 0)
                 {
                     chunk.FlagLightWork();
                 }

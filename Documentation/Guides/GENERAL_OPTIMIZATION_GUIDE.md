@@ -47,7 +47,7 @@ We introduced a state flag `_isWorldLoaded`. The `Update()` loop is strictly blo
 The "Lighting Scheduling" phase took **41,000ms** (41 seconds) during the bad benchmark. Even after fixing the chunk count, it remained a bottleneck.
 
 **The Cause:**
-The system used a flat `HashSet<Vector2Int>` to store columns needing sunlight recalculation (approx. 100,000 items).
+The system used a flat `HashSet<Vector2Int>` to store columns needing skylight recalculation (approx. 100,000 items).
 When scheduling lighting for a chunk, the code did this:
 
 ```csharp

@@ -138,13 +138,13 @@ namespace Editor.Validation.MigrationChain
         /// <summary>Yaw the HorizontalOnly converter must produce for storage index 2 (West, identity).</summary>
         private const byte EXPECTED_HORIZONTAL_YAW = 2;
 
-        /// <summary>Legacy sunlight nibble on the light carrier (bits 16–19 pre-v9→v10).</summary>
+        /// <summary>Legacy skylight nibble on the light carrier (bits 16–19 pre-v9→v10).</summary>
         private const byte LEGACY_SUN_LEVEL = 12;
 
         /// <summary>Legacy blocklight nibble on the light carrier (bits 20–23), synthesized to gray RGB.</summary>
         private const byte LEGACY_BLOCK_LEVEL = 7;
 
-        /// <summary>Legacy sunlight bit position in the era voxel word (v8→v9's <c>SUNLIGHT_SHIFT</c>).</summary>
+        /// <summary>Legacy skylight bit position in the era voxel word (v8→v9's <c>SUNLIGHT_SHIFT</c>).</summary>
         private const int ERA_SUNLIGHT_SHIFT = 16;
 
         /// <summary>Legacy blocklight bit position in the era voxel word (v8→v9's <c>BLOCKLIGHT_SHIFT</c>).</summary>
@@ -159,7 +159,7 @@ namespace Editor.Validation.MigrationChain
         /// <summary>Heightmap value seeded at column 1.</summary>
         private const ushort FIXTURE_HEIGHT_COLUMN_1 = 77;
 
-        /// <summary>Sunlight queue entries the fixture seeds, to drive v7→v8's 13→16 byte widening.</summary>
+        /// <summary>Skylight queue entries the fixture seeds, to drive v7→v8's 13→16 byte widening.</summary>
         private const int FIXTURE_SUN_QUEUE_ENTRIES = 2;
 
         /// <summary>Blocklight queue entries the fixture seeds.</summary>
@@ -260,7 +260,7 @@ namespace Editor.Validation.MigrationChain
         /// </summary>
         /// <param name="id">Frozen v5-era block id.</param>
         /// <param name="legacyMeta">The pre-schema meta byte.</param>
-        /// <param name="sun">Legacy sunlight nibble (0–15).</param>
+        /// <param name="sun">Legacy skylight nibble (0–15).</param>
         /// <param name="block">Legacy blocklight nibble (0–15).</param>
         /// <returns>The packed era voxel word.</returns>
         private static uint EraVoxel(ushort id, byte legacyMeta, byte sun = 0, byte block = 0) =>

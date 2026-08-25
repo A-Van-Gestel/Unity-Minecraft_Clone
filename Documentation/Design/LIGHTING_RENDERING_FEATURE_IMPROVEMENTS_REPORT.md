@@ -52,7 +52,7 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 - [`../Architecture/SMOOTH_AND_RGB_LIGHTING.md`](../Architecture/SMOOTH_AND_RGB_LIGHTING.md) — the
   shipped RGB light engine (Phases 1/2/B/3): per-section `ushort` light storage (sky 4b +
   blocklight RGB 3×4b), per-channel BFS, shader-only sky tinting. RF-1 builds directly on its
-  `SkyLightColor` design; RF-5's feasibility analysis derives from its storage decisions.
+  `SkylightColor` design; RF-5's feasibility analysis derives from its storage decisions.
 - [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) — cross-linked items:
   `GS-2` (opaque texture), `GS-3` ⏸️ (per-fragment lighting math — analyzed and **deferred**
   2026-08-15: the vertex-stage move is irreducibly non-neutral, so it is not the free win it reads
@@ -118,8 +118,8 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 >
 > **Phase 2 — what changed:**
 >
-> - **§9 effective-light query.** `LightBitMapping.GetEffectiveSkyLight/GetEffectiveLight(lightData,
->   skyDarken)` — Burst-safe integer math, `skyDarken` passable as job data — with `World.GetEffectiveSkyLight/
+> - **§9 effective-light query.** `LightBitMapping.GetEffectiveSkylight/GetEffectiveLight(lightData,
+>   skyDarken)` — Burst-safe integer math, `skyDarken` passable as job data — with `World.GetEffectiveSkylight/
 >   GetEffectiveLight(voxelPos)` wrappers over `World.CurrentSkyDarken`. No BFS, remesh, or save impact.
 > - **§10 subtractive shader parity.** `ApplySkyDarken` in `VoxelLighting.hlsl`:
 >   `max(skyExposure − (1 − GlobalLightLevel), 0)`, then the shade curve at full intensity. All five
@@ -154,7 +154,7 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 >
 > Deliberately **not** shipped in Phase 1: §4's `SkyEvent` tint (no gameplay system produces events yet —
 > the lerp seam is left open), §7's day-length *user setting* (it is world/art state and lives on the asset),
-> §8's TF-4 tie-in (`hasSkyLight` does not exist), and the blue-moonlight night keys — the tint gradient
+> §8's TF-4 tie-in (`hasSkylight` does not exist), and the blue-moonlight night keys — the tint gradient
 > ships flat white, exactly as the retired `_skyLightGradient` was, so Phase 1's only visual delta is brightness.
 
 **What existed before Phase 1 (verified — the support was *wired and functional, but static*):**
@@ -165,7 +165,7 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
   `World.cs:55-60`).
 - `World.SetGlobalLightValue()` (`World.cs:1363-1370`) pushes three things: the
   `GlobalLightLevel` shader global, `_playerCamera.backgroundColor = lerp(night, day, level)`,
-  and `SkyLightColor` from the gradient.
+  and `SkylightColor` from the gradient.
 - **It is called exactly twice, ever:** once at world start (`World.cs:587`) and once on save-load
   (`SaveSystem.cs:157`). Nothing advances `globalLightLevel` at runtime — there is no clock, no
   sun position, no time-of-day progression. The `worldState.timeOfDay` save field
@@ -174,7 +174,7 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 - **The shader chain is modern and already does the right thing** (this part of the task premise
   is stale — it is neither old nor non-functional): `ApplyVoxelLightingRGB`
   (`Assets/Shaders/Includes/VoxelLighting.hlsl:86-102`) modulates **only the per-vertex sky-light
-  channel** by `GlobalLightLevel`, tints it by `SkyLightColor`, runs blocklight RGB through the
+  channel** by `GlobalLightLevel`, tints it by `SkylightColor`, runs blocklight RGB through the
   same shade curve at full intensity, and combines with per-channel `max()`. All three block
   shaders + the liquid shader consume it. Editor previews hardcode daylight
   (`ChunkPreview3DWindow.cs:350-352`).
@@ -183,7 +183,7 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 **already the shipped model** — every voxel's stored 0–15 sky light is what gets scaled, so a
 torch-lit room stays bright at midnight while sky-lit terrain darkens (per-channel `max` picks the
 blocklight contribution). No BFS or light-storage change is needed or wanted: the missing feature
-is purely **time**: a driver that animates `globalLightLevel`/`SkyLightColor`, correct save
+is purely **time**: a driver that animates `globalLightLevel`/`SkylightColor`, correct save
 semantics, and sky visuals (RF-2).
 
 **Storage semantics (important):** the stored 0–15 sky-light value is hereby defined as
@@ -194,7 +194,7 @@ plant growth, etc.) must therefore **never read raw skylight** for time-dependen
 they read the §9 effective-light query. Two storage-mutating alternatives were evaluated and
 rejected:
 
-- *Full sunlight re-BFS at source `15 − N`:* dusk crosses ~15 discrete levels; each step is a
+- *Full skylight re-BFS at source `15 − N`:* dusk crosses ~15 discrete levels; each step is a
   full-world removal + re-propagation pass (removal is the expensive direction) that dirties
   every sky-lit section → repeated full-world remesh, twice a day. It is also semantically wrong:
   sky columns propagate downward without attenuation only at level 15, so a re-flood at 14
@@ -232,7 +232,7 @@ rejected:
    desaturated Purkinje-style blue (≈ `RGB(0.65, 0.75, 1.0)`), and this is the architecturally
    *correct* mechanism, not a shortcut:
     - *Global tint is exact, not an approximation:* moonlight color is uniform across all sky
-      sources, so tinting the sky channel via `SkyLightColor` produces the identical result that
+      sources, so tinting the sky channel via `SkylightColor` produces the identical result that
       per-voxel RGB skylight storage would — at zero storage/BFS cost (RGB skylight was already
       rejected in `SMOOTH_AND_RGB_LIGHTING.md`: 4b→12b, 3× sky BFS). Per-voxel data only ever
       needs *intensity* (the stored exposure).
@@ -248,8 +248,8 @@ rejected:
     - *RF-2 coordination:* author the night background/fog color in the same blue family so the
       horizon doesn't clash with the terrain tint.
 4. **Blood moon / event tinting:** `SetGlobalLightValue()` gains an event **override, not a
-   multiplier**: `SkyLightColor = lerp(gradientColor, _activeSkyEvent.tint, _activeSkyEvent.weight)`
-   (identity when no event is active). A multiply (`SkyLightColor *= tint`) would compose with
+   multiplier**: `SkylightColor = lerp(gradientColor, _activeSkyEvent.tint, _activeSkyEvent.weight)`
+   (identity when no event is active). A multiply (`SkylightColor *= tint`) would compose with
    §3's blue moonlight — red × blue = muddy purple instead of blood red — so the event tint must
    replace/lerp over the gradient output. The `SkyEvent` (blood moon: deep red tint + optionally
    a raised `globalLightLevel` floor) is set by gameplay for the night, and `weight` gives a
@@ -266,15 +266,15 @@ rejected:
    together** (one migration step is better than two).
 7. **Dev affordances:** a `set time` debug command / DebugScreen readout; settings entry for day
    length (`DATA_DRIVEN_SETTINGS_UI` reflection pattern picks it up from `Settings`).
-8. **TF-4 tie-in:** dimensions with `hasSkyLight = false` ignore the time system and use their
+8. **TF-4 tie-in:** dimensions with `hasSkylight = false` ignore the time system and use their
    profile's `fixedGlobalLightLevel` (see the `TF-4` lighting-profile design).
 9. **Effective-light query layer (gameplay reads — required):** `WorldTimeManager` exposes
    `int SkyDarken` in `[0, 11]` (**Minecraft parity**: 0 at day, 11 at deepest night → moonlight
    floor `15 − 11 = 4`), derived from the *same* curve that drives `globalLightLevel` — one
    source of truth, so rendering and gameplay can never disagree about how dark it is. Query
    helpers (next to `LightBitMapping`, or on `World`):
-    - `GetEffectiveSkyLight(pos) = max(0, storedSkyLight − SkyDarken)`
-    - `GetEffectiveLight(pos) = max(effectiveSkyLight, maxRGBBlocklightChannel)` — the value all
+    - `GetEffectiveSkylight(pos) = max(0, storedSkylight − SkyDarken)`
+    - `GetEffectiveLight(pos) = max(effectiveSkylight, maxRGBBlocklightChannel)` — the value all
       time-sensitive gameplay (mob spawning, growth, …) consumes.
 
    Pure integer math on the existing `ushort` — zero relighting, zero remeshing, no save impact,
@@ -353,7 +353,7 @@ above, and the Architecture doc is authoritative.
 4. ✅ **Fog sync** — shipped, as engine-owned fog rather than `RenderSettings.fog`.
 5. **Clouds tint:** ✅ **SHIPPED 2026-07-19** via CL-2 in
    [`CLOUD_RENDERING_IMPROVEMENTS_REPORT.md`](CLOUD_RENDERING_IMPROVEMENTS_REPORT.md) — the
-   cloud shader samples the `SkyLightColor` global directly (no `material.SetColor` needed);
+   cloud shader samples the `SkylightColor` global directly (no `material.SetColor` needed);
    already responsive to `/time`, and upgrades further when RF-1's cycle drives the gradient.
    *Clouds are deliberately **not** fogged: at the default view distance the fog completes well inside
    the cloud plane's extent, so fogging it would erase the clouds. Terrain is what pops in.*
@@ -572,7 +572,7 @@ architectural. Seed/Save ✅.
 
 **Proposed design.**
 
-1. Global uniform `_BlockLightFlicker` set each frame by `World` (piggyback on
+1. Global uniform `_BlocklightFlicker` set each frame by `World` (piggyback on
    `SetGlobalLightValue()`): a smooth pseudo-noise in `[0.92, 1.0]` (sum of two incommensurate
    sines is fine; keep amplitude subtle).
 2. **Per-position phase (the trick that sells it):** in the shader, offset the flicker phase by a
@@ -708,7 +708,7 @@ TF-11 snow line).
 3. **Type by climate:** at the camera position, sample the TF-9 Layer-2 temperature axis (with
    TF-11's altitude lapse) → rain vs. snow. Degrades gracefully pre-TF-3: a single global type
    toggle until the climate axis exists.
-4. **Storm sky:** drive RF-1's event multiplier (`SkyLightColor` darkening) + RF-2 fog density +
+4. **Storm sky:** drive RF-1's event multiplier (`SkylightColor` darkening) + RF-2 fog density +
    cloud plane color/density from the weather state — all existing or planned uniforms; zero
    lighting-engine contact (the BFS/per-voxel light is untouched, same shader-only contract as
    the blood moon).
@@ -970,7 +970,7 @@ contemporaneous notes.*
 * **v1.2** - RF-1 Phase 1 shipped (2026-08-10): world clock + `TimeOfDaySettings` asset + `/time` regrammar +
   save v15. Corrected five stale claims in the RF-1 entry while implementing it — `SetGlobalLightValue` had a
   third call site (`/time`, shipped 2026-07-18), the save version was already v14 (not 11), the `environment`
-  section already existed, `hasSkyLight`/`fixedGlobalLightLevel` were never built, and the line references had
+  section already existed, `hasSkylight`/`fixedGlobalLightLevel` were never built, and the line references had
   drifted. §9/§10 remain open as Phase 2.
 * **v1.1** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Status`/`Target` lifted out of
   the summary blockquote into proper fields, including the RF-vs-LI/GS ownership split that keeps this

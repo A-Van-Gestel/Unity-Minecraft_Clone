@@ -151,7 +151,7 @@ namespace Editor.Dev
                 List<Vector2Int> coords = new List<Vector2Int>(world.AllChunkCoords());
 
                 foreach (Vector2Int coord in coords)
-                    world.QueueFullSunlightRecalc(coord);
+                    world.QueueFullSkylightRecalc(coord);
 
                 // maxRounds:1 performs exactly one wave and then reports -1 because work remains — that
                 // "failure" IS the control's setup, so it is deliberately not treated as one.

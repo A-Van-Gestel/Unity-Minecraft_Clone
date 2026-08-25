@@ -71,7 +71,7 @@ namespace Editor.Validation.Lighting
             // NOTE on Bug 18 (fidelity finding C10; found + FIXED 2026-07-12): the RGB twin of the Bug 12
             // sourceless cross-seam loop. Two equal-color lamps mutually lighting a seam, both broken in the
             // same wave, settled stable-but-wrong over-bright because RGB blocklight had the Bug 17 removal
-            // veto but no cross-seam removal INITIATOR (EmitCrossChunkSunlightRemoval was sky-only). Fixed by
+            // veto but no cross-seam removal INITIATOR (EmitCrossChunkSkylightRemoval was sky-only). Fixed by
             // mirroring the initiator to RGB (EmitCrossChunkBlocklightRemoval in PropagateDarknessRGB),
             // adjudicated by the existing Bug 17 veto. Repro K18a promoted to baseline B90
             // (LightingValidationSuite.C10RgbLoop.cs); C12's RGB pull-back was proven self-healing (B89), so

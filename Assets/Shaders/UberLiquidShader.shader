@@ -79,7 +79,7 @@ Shader "Minecraft/UberLiquidShader"
 
             // Game-only: global light uniforms from World.cs
             float GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel;
-            half3 SkyLightColor;
+            half3 SkylightColor;
 
             LiquidV2F vertFunction(LiquidAppdata v)
             {
@@ -94,8 +94,8 @@ Shader "Minecraft/UberLiquidShader"
                 if (!unity_IsEditorPlaying) finalLiquidType = _EditorPreviewType;
                 #endif
 
-                half3 litWhite = ApplyVoxelLightingRGB(half3(1, 1, 1), i.sunLight, i.blockRGB,
-                                                       SkyLightColor,
+                half3 litWhite = ApplyVoxelLightingRGB(half3(1, 1, 1), i.skylight, i.blockRGB,
+                                                       SkylightColor,
                                                        GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel);
 
                 // --- FLOW MAPPING TIME SETUP ---
@@ -186,7 +186,7 @@ Shader "Minecraft/UberLiquidShader"
                     // Fog the surface BEFORE blending with the refracted background — see the lava branch.
                     final_color = ApplyVoxelFog(final_color, distance(i.worldPos.xz, _WorldSpaceCameraPos.xz));
 
-                    half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.sunLight);
+                    half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.skylight);
                     return lerp(background, half4(final_color, 1.0), water_base_color.a);
                 }
             }

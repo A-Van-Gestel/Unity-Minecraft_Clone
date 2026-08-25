@@ -674,7 +674,7 @@ rewritten — and left as-is rather than widening a four-implementer interface.
   fence-tier sabotage → exactly B29 red); Validate All 254/254 across 10 suites (isolation
   guard proves the fixture's WorldOrigin snapshot/restore is leak-tight). Far-lands
   verification surfaced pre-existing lighting **Bug 19** (negative heightmap index in
-  `RecalculateSunlightForColumn` beyond ±2²⁴ — logged in `LIGHTING_BUGS.md`, out of scope
+  `RecalculateSkylightForColumn` beyond ±2²⁴ — logged in `LIGHTING_BUGS.md`, out of scope
   here). WS-4c tooling row closes in `WORLD_SCALING_FLOATING_ORIGIN.md` alongside.
 * **v1.5** - CMD-2 plan closed (decision menu 2026-07-18): §3.3 gained the hold execution
   decisions — release = data + mesh confirmed (with the physics-only-needs-data nuance: the

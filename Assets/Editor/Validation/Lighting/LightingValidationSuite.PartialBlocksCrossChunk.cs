@@ -56,7 +56,7 @@ namespace Editor.Validation.Lighting
         /// <summary>
         /// B106 — the permanent guard for the VO-4 half of Bug 20, promoted from repro <c>K20b</c> on
         /// 2026-08-08 after the fix was confirmed in game (no flicker at a slab seam). The cross-chunk
-        /// sunlight removal veto's support scan (<c>CrossChunkLightModApplier.InChunkSunlightSupport</c>)
+        /// skylight removal veto's support scan (<c>CrossChunkLightModApplier.InChunkSkylightSupport</c>)
         /// must answer the same question the BFS answers: <i>can this neighbor deliver light to me through
         /// the face between us?</i> Between VO-3 and VO-4 it could not — the scan skipped every
         /// <c>IsOpaque</c> neighbor, and a half slab is authored opaque, so a voxel the BFS legitimately
@@ -113,8 +113,8 @@ namespace Editor.Validation.Lighting
             Vector3Int cubeProbe = new Vector3Int(8, 76, 8);
             Vector3Int cubeNeighbor = cubeProbe + VoxelData.FaceChecks[4];
             world.SetBlock(cubeNeighbor, TestBlockPalette.Stone);
-            world.SetSkyLightAt(cubeNeighbor, 15);
-            byte cubeSupport = world.InChunkSunlightSupportAt(cubeProbe, 0);
+            world.SetSkylightAt(cubeNeighbor, 15);
+            byte cubeSupport = world.InChunkSkylightSupportAt(cubeProbe, 0);
 
             passed &= LightingAssert.IsTrue(cubeSupport == 0,
                 "B106: a fully-opaque neighbor storing sky 15 still contributes no support",
@@ -137,7 +137,7 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>
-        /// Places a lit half slab in one face-neighbor of a probe and returns the in-chunk sunlight
+        /// Places a lit half slab in one face-neighbor of a probe and returns the in-chunk skylight
         /// support the production veto computes for that probe (entering air, so the entry cost is the
         /// flat air step and the only variable is whether the slab is credited).
         /// </summary>
@@ -150,8 +150,8 @@ namespace Editor.Validation.Lighting
         {
             Vector3Int neighbor = probe + VoxelData.FaceChecks[faceIndex];
             world.SetBlock(neighbor, TestBlockPalette.HalfSlab, slabMeta);
-            world.SetSkyLightAt(neighbor, VO4_NEIGHBOR_SKY);
-            return world.InChunkSunlightSupportAt(probe, 0);
+            world.SetSkylightAt(neighbor, VO4_NEIGHBOR_SKY);
+            return world.InChunkSkylightSupportAt(probe, 0);
         }
 
         /// <summary>
@@ -168,8 +168,8 @@ namespace Editor.Validation.Lighting
         {
             world.SetBlock(probe, TestBlockPalette.HalfSlab, VO4_SLAB_VERTICAL);
             Vector3Int neighbor = probe + VoxelData.FaceChecks[faceIndex];
-            world.SetSkyLightAt(neighbor, VO4_NEIGHBOR_SKY);
-            return world.DirectionalInChunkSunlightSupportAt(probe);
+            world.SetSkylightAt(neighbor, VO4_NEIGHBOR_SKY);
+            return world.DirectionalInChunkSkylightSupportAt(probe);
         }
 
         /// <summary>
@@ -222,7 +222,7 @@ namespace Editor.Validation.Lighting
         /// <b>Mechanism</b> (classified, not guessed). The pre-fix heightmap test was
         /// <c>IsLightObstructing</c> = <c>Opacity &gt; 0</c>, so a half slab — authored opacity 15 — put the
         /// heightmap at itself; sealing it left the heightmap unchanged, so
-        /// <c>RecalculateSunlightForColumn</c> (the authority for sky removal) never re-ran.
+        /// <c>RecalculateSkylightForColumn</c> (the authority for sky removal) never re-ran.
         /// <c>PropagateDarkness</c> could not finish the job either: it unwinds light by following exact
         /// <c>neighbor == old − cost</c> chains, which a flat 15 column does not have. The controls prove
         /// the diagnosis and are kept: a <b>Glass</b> shaft (full cube at opacity 0, equally undimmed column,
@@ -272,13 +272,13 @@ namespace Editor.Validation.Lighting
             world.RunInitialLighting();
 
             Vector3Int probe = new Vector3Int(8, VO4_ROOM_CEILING_Y - 3, 8);
-            byte before = world.GetSkyLight(probe);
+            byte before = world.GetSkylight(probe);
 
             LightingFrameSimulator sim = new LightingFrameSimulator(world);
             world.PlaceBlock(shaft, TestBlockPalette.HalfSlab, VO4_SLAB_VERTICAL);
             sim.RunToConvergence(VO4_MAX_FRAMES, int.MaxValue, LightingFrameSimulator.CompletionOrder.Fifo);
 
-            byte after = world.GetSkyLight(probe);
+            byte after = world.GetSkylight(probe);
             return LightingAssert.IsTrue(
                 LightingAssert.MatchesOracleQuiet(world, LightingOracle.Solve(world), out string summary)
                 && after > before,
@@ -320,7 +320,7 @@ namespace Editor.Validation.Lighting
             return LightingAssert.IsTrue(
                 LightingAssert.MatchesOracleQuiet(world, LightingOracle.Solve(world), out string summary),
                 label,
-                $"{summary}. Probe {probe} reads {world.GetSkyLight(probe)}. A column left at 15 after its "
+                $"{summary}. Probe {probe} reads {world.GetSkylight(probe)}. A column left at 15 after its "
                 + "shaft is sealed is Bug 21: the slab is light-obstructing, so the heightmap never moves "
                 + "and the authoritative column recalculation never re-runs, while the darkness wave has "
                 + "no decrement chain to follow through a flat column.");

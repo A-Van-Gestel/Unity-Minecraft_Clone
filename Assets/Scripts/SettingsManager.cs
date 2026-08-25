@@ -363,7 +363,7 @@ public class Settings
     [Header("Lighting")]
     [SettingField(SettingsTab.World, Label = "Lighting", Order = 0)]
     [InitializationField]
-    [Tooltip("Toggles the dynamic voxel lighting engine (Sunlight and Blocklight).\n\n" +
+    [Tooltip("Toggles the dynamic voxel lighting engine (Skylight and Blocklight).\n\n" +
              TooltipTags.Note + "Requires a world reload to fully apply to already generated chunks. The world will render full-bright if turned off.")]
     public bool enableLighting = true;
 

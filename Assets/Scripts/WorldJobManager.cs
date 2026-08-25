@@ -35,7 +35,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     private readonly Func<ushort, BlockTypeJobData> _getBlockData;
 
     // Cached lookup for the veto's live third-party support scan (CrossChunkLightModApplier.
-    // CrossChunkSunlightSupport, the Bug 13 fix): chunk voxel origin -> live populated ChunkData, or
+    // CrossChunkSkylightSupport, the Bug 13 fix): chunk voxel origin -> live populated ChunkData, or
     // null when absent. Allocated once so ApplyCrossChunkLightMod doesn't churn a closure per mod.
     private readonly Func<Vector2Int, ChunkData> _getLoadedChunkByOrigin;
 
@@ -148,16 +148,16 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <summary>Effective cross-chunk applies in the most recent call, broken down by channel and
     /// operation. A steady non-zero in a removal bucket alongside its matching placement bucket is the
     /// signature of a stale-snapshot darkness/re-placement oscillation across a chunk seam.</summary>
-    public int LastEffSunPlacement { get; private set; }
+    public int LastEffSkyPlacement { get; private set; }
 
-    public int LastEffSunRemoval { get; private set; }
+    public int LastEffSkyRemoval { get; private set; }
     public int LastEffBlockPlacement { get; private set; }
     public int LastEffBlockRemoval { get; private set; }
 
     // First effective cross-chunk apply captured in the most recent call — a concrete sample of the
     // oscillating voxel (global position + old→new packed light). LastEffSampleValid gates the rest.
     public bool LastEffSampleValid { get; private set; }
-    public bool LastEffSampleIsSun { get; private set; }
+    public bool LastEffSampleIsSky { get; private set; }
     public bool LastEffSampleIsRemoval { get; private set; }
     public Vector3Int LastEffSampleGlobalPos { get; private set; }
     public ushort LastEffSampleOldLight { get; private set; }
@@ -508,7 +508,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         // rationale (MP-2 preserves them exactly): (1) in-flight — do NOT block on a running LIGHTING
         // job; the mesh job reads an independent voxel snapshot and gets re-requested when lighting
         // completes, which avoids cross-chunk BFS ping-pong deadlocks. (2) center light-readiness,
-        // skipped when lighting is disabled (the sunlight fill maxes brightness, so no lighting job
+        // skipped when lighting is disabled (the skylight fill maxes brightness, so no lighting job
         // ever runs to clear these flags). (3) neighbor mesh-readiness. AreNeighborsMeshReady is a pure
         // read, so evaluating it eagerly here (rather than short-circuited behind the earlier gates) is
         // free of side effects — it costs only a few extra neighbor lookups when an earlier gate would
@@ -772,7 +772,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     }
 
     /// <summary>
-    /// Schedules a neighborhood lighting job to propagate sunlight and blocklight changes.
+    /// Schedules a neighborhood lighting job to propagate skylight and blocklight changes.
     /// </summary>
     /// <remarks>
     /// <b>Edge-check contract — border work rides ANY successful schedule.</b> This method reads
@@ -853,18 +853,18 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             jobData.Mods = new NativeList<LightModification>(allocator);
             jobData.PullBackClaims = new NativeList<PullBackClaim>(allocator);
             jobData.IsStable = new NativeArray<bool>(1, allocator);
-            jobData.SunLightQueue = chunkData.GetSunlightQueueForJob(allocator, out int maxSunNodeY, out int minSunNodeY);
-            jobData.BlockLightQueue = chunkData.GetBlocklightQueueForJob(allocator, out int maxBlockNodeY, out int minBlockNodeY);
-            jobData.SunLightRecalcQueue = new NativeQueue<Vector2Int>(allocator);
+            jobData.SkylightQueue = chunkData.GetSkylightQueueForJob(allocator, out int maxSkyNodeY, out int minSkyNodeY);
+            jobData.BlocklightQueue = chunkData.GetBlocklightQueueForJob(allocator, out int maxBlockNodeY, out int minBlockNodeY);
+            jobData.SkylightRecalcQueue = new NativeQueue<Vector2Int>(allocator);
 
-            if (_world.worldData.SunlightRecalculationQueue.TryGetValue(chunkData.Position, out HashSet<Vector2Int> columns))
+            if (_world.worldData.SkylightRecalculationQueue.TryGetValue(chunkData.Position, out HashSet<Vector2Int> columns))
             {
                 foreach (Vector2Int col in columns)
                 {
-                    jobData.SunLightRecalcQueue.Enqueue(SunlightColumnRouting.ToLocalColumn(col, chunkData.Position));
+                    jobData.SkylightRecalcQueue.Enqueue(SkylightColumnRouting.ToLocalColumn(col, chunkData.Position));
                 }
 
-                _world.worldData.SunlightRecalculationQueue.Remove(chunkData.Position);
+                _world.worldData.SkylightRecalculationQueue.Remove(chunkData.Position);
                 HashSetPool<Vector2Int>.Release(columns);
             }
 
@@ -890,8 +890,8 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
                 jobData.BandHeight = LightingBandDecision.DeriveBandHeight(in centerTop,
                     in w, in e, in s, in n, in sw, in nw, in se, in ne,
-                    math.max(maxSunNodeY, maxBlockNodeY),
-                    jobData.SunLightRecalcQueue.Count > 0,
+                    math.max(maxSkyNodeY, maxBlockNodeY),
+                    jobData.SkylightRecalcQueue.Count > 0,
                     performEdgeCheck);
 
                 bandTopLight = LightingBandDecision.BuildTopLightTable(in centerTop,
@@ -911,8 +911,8 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
                 jobData.BandMinY = LightingBandDecision.DeriveBandMinY(in centerBottom,
                     in wB, in eB, in sB, in nB, in swB, in nwB, in seB, in neB,
-                    math.min(minSunNodeY, minBlockNodeY),
-                    jobData.SunLightRecalcQueue.Count > 0,
+                    math.min(minSkyNodeY, minBlockNodeY),
+                    jobData.SkylightRecalcQueue.Count > 0,
                     chunkData.GetHeightmapMinY());
 
                 // Reconcile the independently-derived top and bottom bounds: on a contradiction (a
@@ -934,9 +934,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 BandTopLight = bandTopLight,
                 BandBottomLight = bandBottomLight,
                 ChunkPosition = chunkData.Position,
-                SunlightBfsQueue = jobData.SunLightQueue,
-                BlocklightBfsQueue = jobData.BlockLightQueue,
-                SunlightColumnRecalcQueue = jobData.SunLightRecalcQueue,
+                SkylightBfsQueue = jobData.SkylightQueue,
+                BlocklightBfsQueue = jobData.BlocklightQueue,
+                SkylightColumnRecalcQueue = jobData.SkylightRecalcQueue,
                 Heightmap = jobData.Input.Heightmap,
                 BlockTypes = _world.JobDataManager.BlockTypesJobData,
                 CrossChunkLightMods = jobData.Mods,
@@ -1243,14 +1243,14 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
                     HashSetPool<Vector2Int>.Release(localLightCols);
 
-                    if (_world.worldData.SunlightRecalculationQueue.TryGetValue(chunkData.Position, out HashSet<Vector2Int> existingQueue))
+                    if (_world.worldData.SkylightRecalculationQueue.TryGetValue(chunkData.Position, out HashSet<Vector2Int> existingQueue))
                     {
                         existingQueue.UnionWith(globalLightCols);
                         HashSetPool<Vector2Int>.Release(globalLightCols);
                     }
                     else
                     {
-                        _world.worldData.SunlightRecalculationQueue[chunkData.Position] = globalLightCols;
+                        _world.worldData.SkylightRecalculationQueue[chunkData.Position] = globalLightCols;
                     }
 
                     chunkData.FlagLightWork();
@@ -1273,7 +1273,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                     foreach (ChunkSection section in chunkData.sections)
                     {
                         if (section == null) continue;
-                        LightingHelper.FillUniformSkyLight(section.LightData, 15);
+                        LightingHelper.FillUniformSkylight(section.LightData, 15);
                     }
                 }
 
@@ -1508,9 +1508,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
         // Per-job containers
         if (jobData.Input.Heightmap.IsCreated) jobData.Input.Heightmap.Dispose();
-        if (jobData.SunLightQueue.IsCreated) jobData.SunLightQueue.Dispose();
-        if (jobData.BlockLightQueue.IsCreated) jobData.BlockLightQueue.Dispose();
-        if (jobData.SunLightRecalcQueue.IsCreated) jobData.SunLightRecalcQueue.Dispose();
+        if (jobData.SkylightQueue.IsCreated) jobData.SkylightQueue.Dispose();
+        if (jobData.BlocklightQueue.IsCreated) jobData.BlocklightQueue.Dispose();
+        if (jobData.SkylightRecalcQueue.IsCreated) jobData.SkylightRecalcQueue.Dispose();
         if (jobData.Mods.IsCreated) jobData.Mods.Dispose();
         if (jobData.PullBackClaims.IsCreated) jobData.PullBackClaims.Dispose();
         if (jobData.IsStable.IsCreated) jobData.IsStable.Dispose();
@@ -1533,8 +1533,8 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         LastCrossChunkModsEffective = 0;
         LastStalePullBacksCleared = 0;
         LastFaultedLightJobs = 0;
-        LastEffSunPlacement = 0;
-        LastEffSunRemoval = 0;
+        LastEffSkyPlacement = 0;
+        LastEffSkyRemoval = 0;
         LastEffBlockPlacement = 0;
         LastEffBlockRemoval = 0;
         LastEffSampleValid = false;
@@ -1841,7 +1841,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// write (the voxel no longer holds the claimed value) is skipped; a claim the live neighbor still
     /// supports (<see cref="CrossChunkLightModApplier.PullBackClaimStillSupported"/>) is kept; an
     /// unverifiable claim (neighbor chunk absent/unloaded) is kept conservatively; a stale claim is
-    /// routed through the standard cross-chunk sunlight-removal veto with the claimed neighbor's chunk
+    /// routed through the standard cross-chunk skylight-removal veto with the claimed neighbor's chunk
     /// as the excluded emitter — so a voxel with OTHER genuine support survives, and a genuinely
     /// sourceless one clears and wakes the chunk for the corrective darkness wave.
     /// </summary>
@@ -1863,7 +1863,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             // Superseded: a later write (same job's wave, a drained inbound mod) replaced the value —
             // the claim no longer describes live state, so there is nothing to verify.
             ushort currentLight = chunkData.GetLightData(claim.CenterPos.x, claim.CenterPos.y, claim.CenterPos.z);
-            if (LightBitMapping.GetSkyLight(currentLight) != claim.WrittenSky) continue;
+            if (LightBitMapping.GetSkylight(currentLight) != claim.WrittenSky) continue;
 
             // Resolve the claimed neighbor voxel in world space (NeighborPos is 3x3-local).
             Vector3Int neighborGlobal = new Vector3Int(
@@ -1877,7 +1877,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
             Vector3Int neighborLocal = new Vector3Int(
                 neighborGlobal.x - neighborOriginXZ.x, neighborGlobal.y, neighborGlobal.z - neighborOriginXZ.y);
-            byte liveNeighborSky = LightBitMapping.GetSkyLight(
+            byte liveNeighborSky = LightBitMapping.GetSkylight(
                 neighborChunk.GetLightData(neighborLocal.x, neighborLocal.y, neighborLocal.z));
 
             // The claim's two voxels are face-adjacent across the seam, so the neighbor delivers through
@@ -1912,7 +1912,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 GlobalPosition = new Vector3Int(
                     ownOriginXZ.x + claim.CenterPos.x, claim.CenterPos.y, ownOriginXZ.y + claim.CenterPos.z),
                 LightLevel = 0,
-                Channel = LightChannel.Sun,
+                Channel = LightChannel.Sky,
             };
 
             if (ApplyCrossChunkLightMod(chunkData, in removal, neighborOriginXZ))
@@ -1939,22 +1939,22 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         Vector3Int localVoxelPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
 
         ushort currentLight = targetChunk.GetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
-        // Only sunlight REMOVAL's (LightLevel == 0) consult independent support — see
-        // CrossChunkLightModApplier.ComputeSunlight. Skip the neighbor scans for placements/uplifts
-        // (the common case during initial-load sunlight propagation), whose decision ignores it.
-        byte independentSunSupport = 0;
-        if (mod.Channel == LightChannel.Sun && mod.LightLevel == 0)
+        // Only skylight REMOVAL's (LightLevel == 0) consult independent support — see
+        // CrossChunkLightModApplier.ComputeSkylight. Skip the neighbor scans for placements/uplifts
+        // (the common case during initial-load skylight propagation), whose decision ignores it.
+        byte independentSkySupport = 0;
+        if (mod.Channel == LightChannel.Sky && mod.LightLevel == 0)
         {
             // Support is attenuated by the target voxel's own opacity (the light enters it), matching
             // NeighborhoodLightingJob.AttenuateLight — a flat air step would over-estimate support into
             // semi-transparent media and wrongly veto a legitimate removal. Independent support is the
             // max of in-chunk neighbors (Bug 11) and live third-party cross-chunk neighbors (Bug 13).
-            CrossChunkLightModApplier.TargetEntryCost sunEntryCost = TargetEntryCostFor(targetChunk, localVoxelPos);
-            byte inChunk = CrossChunkLightModApplier.InChunkSunlightSupport(targetChunk, localVoxelPos, sunEntryCost, _getBlockData);
-            byte crossChunk = CrossChunkLightModApplier.CrossChunkSunlightSupport(
-                _world.worldData.GetChunkCoordFor(mod.GlobalPosition), localVoxelPos, sunEntryCost,
+            CrossChunkLightModApplier.TargetEntryCost skyEntryCost = TargetEntryCostFor(targetChunk, localVoxelPos);
+            byte inChunk = CrossChunkLightModApplier.InChunkSkylightSupport(targetChunk, localVoxelPos, skyEntryCost, _getBlockData);
+            byte crossChunk = CrossChunkLightModApplier.CrossChunkSkylightSupport(
+                _world.worldData.GetChunkCoordFor(mod.GlobalPosition), localVoxelPos, skyEntryCost,
                 emitterOriginXZ, _getLoadedChunkByOrigin, _getBlockData);
-            independentSunSupport = Math.Max(inChunk, crossChunk);
+            independentSkySupport = Math.Max(inChunk, crossChunk);
         }
 
         // Blocklight REMOVAL mods consult per-channel independent support (the Bug 17 RGB veto): a channel
@@ -1976,7 +1976,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         }
 
         CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod,
-            independentSunSupport, independentBlockR, independentBlockG, independentBlockB);
+            independentSkySupport, independentBlockR, independentBlockG, independentBlockB);
 
         if (!decision.ShouldApply)
         {
@@ -1985,13 +1985,13 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
         targetChunk.SetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z, decision.NewLight);
 
-        if (mod.Channel == LightChannel.Sun)
+        if (mod.Channel == LightChannel.Sky)
         {
-            targetChunk.AddToSunLightQueue(localVoxelPos, decision.OldLevel);
+            targetChunk.AddToSkylightQueue(localVoxelPos, decision.OldLevel);
         }
         else
         {
-            targetChunk.AddToBlockLightQueue(localVoxelPos, decision.OldLevel, decision.OldR, decision.OldG, decision.OldB);
+            targetChunk.AddToBlocklightQueue(localVoxelPos, decision.OldLevel, decision.OldR, decision.OldG, decision.OldB);
         }
 
         RecordEffectiveCrossChunkMod(in mod, currentLight, decision.NewLight);
@@ -2001,7 +2001,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <summary>
     /// Records diagnostic accounting for one effective cross-chunk apply (one that changed the
     /// neighbor's light): increments the effective total, the per-channel/per-operation breakdown, and
-    /// captures the first such apply this call as a concrete sample. Sunlight removal is identified by
+    /// captures the first such apply this call as a concrete sample. Skylight removal is identified by
     /// a zero target level; blocklight removal by the mod's <c>IsRemoval</c> flag.
     /// </summary>
     /// <param name="mod">The cross-chunk modification that was applied.</param>
@@ -2012,11 +2012,11 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         LastCrossChunkModsEffective++;
 
         bool isRemoval;
-        if (mod.Channel == LightChannel.Sun)
+        if (mod.Channel == LightChannel.Sky)
         {
             isRemoval = mod.LightLevel == 0;
-            if (isRemoval) LastEffSunRemoval++;
-            else LastEffSunPlacement++;
+            if (isRemoval) LastEffSkyRemoval++;
+            else LastEffSkyPlacement++;
         }
         else
         {
@@ -2028,7 +2028,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         if (LastEffSampleValid) return;
 
         LastEffSampleValid = true;
-        LastEffSampleIsSun = mod.Channel == LightChannel.Sun;
+        LastEffSampleIsSky = mod.Channel == LightChannel.Sky;
         LastEffSampleIsRemoval = isRemoval;
         LastEffSampleGlobalPos = mod.GlobalPosition;
         LastEffSampleOldLight = oldLight;
@@ -2056,7 +2056,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
     /// <summary>
     /// Degrades deferred cross-chunk mods whose target chunk vanished (unloaded or lost its data)
-    /// before its in-flight job result could be merged: sunlight mods fall back to persisted column
+    /// before its in-flight job result could be merged: skylight mods fall back to persisted column
     /// recalculations, blocklight mods to the persisted pending-blocklight store — the same
     /// degradation paths used for mods that target unloaded chunks directly.
     /// </summary>
@@ -2075,7 +2075,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
     /// <summary>
     /// Persists a single cross-chunk light modification that cannot be applied to a live chunk
-    /// (target unloaded or vanished mid-flight). Sun mods are saved as column recalculation
+    /// (target unloaded or vanished mid-flight). Sky mods are saved as column recalculation
     /// entries; blocklight mods are saved as pending RGB modifications for replay on load.
     /// </summary>
     private void PersistUndeliverableLightMod(ChunkCoord targetChunkCoord, in LightModification mod)
@@ -2088,7 +2088,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             return;
         }
 
-        if (mod.Channel == LightChannel.Sun)
+        if (mod.Channel == LightChannel.Sky)
         {
             if (!_droppedLightUpdates.TryGetValue(targetChunkCoord, out HashSet<Vector2Int> cols))
             {
@@ -2100,7 +2100,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         }
         else
         {
-            // A sunlight column recalc cannot restore RGB data — persist the actual blocklight
+            // A skylight column recalc cannot restore RGB data — persist the actual blocklight
             // modification for replay when the chunk is loaded from disk (Bug 08, path 1).
             _world.LightingStateManager.AddPendingBlocklight(targetChunkCoord,
                 new Vector3Int(localX, mod.GlobalPosition.y, localZ),

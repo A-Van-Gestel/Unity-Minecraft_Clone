@@ -148,7 +148,7 @@ namespace Editor.Validation.Lighting
             ChunkData data = world.GetChunkData(new Vector2Int(1, 1));
             byte[] column = new byte[SHAFT_DEPTH];
             for (int i = 0; i < SHAFT_DEPTH; i++)
-                column[i] = LightBitMapping.GetSkyLight(data.GetLightData(8, FLOOR_TOP_Y - 1 - i, 8));
+                column[i] = LightBitMapping.GetSkylight(data.GetLightData(8, FLOOR_TOP_Y - 1 - i, 8));
             return column;
         }
 
@@ -189,8 +189,8 @@ namespace Editor.Validation.Lighting
             BuildShaft(world, capBlock, meta);
 
             ChunkData data = world.GetChunkData(new Vector2Int(1, 1));
-            capCellLight = LightBitMapping.GetSkyLight(data.GetLightData(8, FLOOR_TOP_Y, 8));
-            return LightBitMapping.GetSkyLight(data.GetLightData(8, FLOOR_TOP_Y - 1, 8));
+            capCellLight = LightBitMapping.GetSkylight(data.GetLightData(8, FLOOR_TOP_Y, 8));
+            return LightBitMapping.GetSkylight(data.GetLightData(8, FLOOR_TOP_Y - 1, 8));
         }
     }
 }

@@ -31,7 +31,7 @@ namespace Helpers
         public static Color32 BuildFlatLight(ushort lightData)
         {
             return new Color32(
-                (byte)(LightBitMapping.GetSkyLight(lightData) * 17),
+                (byte)(LightBitMapping.GetSkylight(lightData) * 17),
                 (byte)(LightBitMapping.GetBlocklightR(lightData) * 17),
                 (byte)(LightBitMapping.GetBlocklightG(lightData) * 17),
                 (byte)(LightBitMapping.GetBlocklightB(lightData) * 17)
@@ -914,7 +914,7 @@ namespace Helpers
         /// and the levels of its neighbors. This method uses pre-computed vertex height templates for high performance.
         /// When <paramref name="smoothLighting"/> is enabled, per-vertex corner-averaged light values from
         /// <paramref name="cornerLights"/> are used with direct assignment (top/bottom) or bilinear
-        /// interpolation (sides). Otherwise, flat lighting with separate sun/block channels is applied.
+        /// interpolation (sides). Otherwise, flat lighting with separate sky/block channels is applied.
         /// </summary>
         [SkipLocalsInit] // Optimization: Fluid generation uses many local floats/vectors. Skipping init saves cycles.
         public static void GenerateFluidMeshData(
@@ -993,7 +993,7 @@ namespace Helpers
 
                 // --- Top face lighting ---
                 // Smooth: direct corner assignment (vertices sit at XZ block corners).
-                // Flat: single value from the block above, with separate sun/block channels.
+                // Flat: single value from the block above, with separate sky/block channels.
                 Color32 topLight0, topLight1, topLight2, topLight3;
                 if (smoothLighting)
                 {
@@ -1164,7 +1164,7 @@ namespace Helpers
 
                 // --- Side face lighting ---
                 // Smooth: bilinear interpolation — vertices have sub-block Y from height override.
-                // Flat: single value from the side neighbor, with separate sun/block channels.
+                // Flat: single value from the side neighbor, with separate sky/block channels.
                 Color32 sideLight1, sideLight2, sideLight3, sideLight4;
                 if (smoothLighting)
                 {
@@ -1249,7 +1249,7 @@ namespace Helpers
 
                 // --- Bottom face lighting ---
                 // Smooth: direct corner assignment (vertices sit at XZ block corners at y=0).
-                // Flat: single value from the block below, with separate sun/block channels.
+                // Flat: single value from the block below, with separate sky/block channels.
                 // Bottom face LUT corners are X-mirrored vs the vertex emission order:
                 //   LUT corner 0 = (1,0,0)=BR, 1 = (1,0,1)=TR, 2 = (0,0,0)=BL, 3 = (0,0,1)=TL
                 //   Vertices emitted: BL, TL, BR, TR

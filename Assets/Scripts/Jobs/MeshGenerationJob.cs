@@ -451,12 +451,12 @@ namespace Jobs
                 else
                 {
                     // Off: flat lighting from the flora block's own light level.
-                    ushort blockLightData = GetLightDataFromLocalPos(pos);
+                    ushort blocklightData = GetLightDataFromLocalPos(pos);
                     Color32 flat = new Color32(
-                        (byte)(LightBitMapping.GetSkyLight(blockLightData) * 17),
-                        (byte)(LightBitMapping.GetBlocklightR(blockLightData) * 17),
-                        (byte)(LightBitMapping.GetBlocklightG(blockLightData) * 17),
-                        (byte)(LightBitMapping.GetBlocklightB(blockLightData) * 17));
+                        (byte)(LightBitMapping.GetSkylight(blocklightData) * 17),
+                        (byte)(LightBitMapping.GetBlocklightR(blocklightData) * 17),
+                        (byte)(LightBitMapping.GetBlocklightG(blocklightData) * 17),
+                        (byte)(LightBitMapping.GetBlocklightB(blocklightData) * 17));
                     crossLights.TopL0 = crossLights.TopL1 = crossLights.TopL2 = crossLights.TopL3 = flat;
                     crossLights.BotL0 = crossLights.BotL1 = crossLights.BotL2 = crossLights.BotL3 = flat;
                 }
@@ -1062,23 +1062,23 @@ namespace Jobs
 
         /// <summary>
         /// Builds a flat (uniform) light Color32 from a neighbor voxel state with separate
-        /// sun and block channels. Used by the flat lighting fallback paths.
+        /// sky and block channels. Used by the flat lighting fallback paths.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private Color32 BuildFlatLightData(VoxelState? neighborVoxel, Vector3Int neighborPos)
         {
             if (!neighborVoxel.HasValue)
             {
-                const byte fullSun = 15 * 17; // 255
-                return new Color32(fullSun, 0, 0, 0);
+                const byte fullSky = 15 * 17; // 255
+                return new Color32(fullSky, 0, 0, 0);
             }
 
             ushort lightData = GetLightDataFromLocalPos(neighborPos);
-            byte sun = (byte)(LightBitMapping.GetSkyLight(lightData) * 17);
+            byte sky = (byte)(LightBitMapping.GetSkylight(lightData) * 17);
             byte blockR = (byte)(LightBitMapping.GetBlocklightR(lightData) * 17);
             byte blockG = (byte)(LightBitMapping.GetBlocklightG(lightData) * 17);
             byte blockB = (byte)(LightBitMapping.GetBlocklightB(lightData) * 17);
-            return new Color32(sun, blockR, blockG, blockB);
+            return new Color32(sky, blockR, blockG, blockB);
         }
 
         /// <summary>
@@ -1317,7 +1317,7 @@ namespace Jobs
                     if (!state.HasValue)
                     {
                         // Outside the built neighborhood: treat as open sky, exactly as before.
-                        entry.Sun = 15;
+                        entry.Sky = 15;
                         entry.HoldsLight = 1;
                     }
                     else
@@ -1348,7 +1348,7 @@ namespace Jobs
                         {
                             entry.HoldsLight = 1;
                             ushort lightData = GetLightDataFromLocalPos(cell);
-                            entry.Sun = LightBitMapping.GetSkyLight(lightData);
+                            entry.Sky = LightBitMapping.GetSkylight(lightData);
                             entry.R = LightBitMapping.GetBlocklightR(lightData);
                             entry.G = LightBitMapping.GetBlocklightG(lightData);
                             entry.B = LightBitMapping.GetBlocklightB(lightData);
@@ -1397,7 +1397,7 @@ namespace Jobs
             public byte HoldsLight;
 
             /// <summary>The cell's raw sky light.</summary>
-            public byte Sun;
+            public byte Sky;
 
             /// <summary>The cell's raw red block light.</summary>
             public byte R;
@@ -1539,7 +1539,7 @@ namespace Jobs
                 if (weight <= 0f || occluders[cell].HoldsLight == 0) continue;
 
                 FaceOccluder o = occluders[cell];
-                float4 value = new float4(o.Sun, o.R, o.G, o.B);
+                float4 value = new float4(o.Sky, o.R, o.G, o.B);
 
                 litSum += weight * value;
                 litWeight += weight;

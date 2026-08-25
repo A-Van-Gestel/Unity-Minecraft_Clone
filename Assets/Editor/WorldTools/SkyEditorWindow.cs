@@ -419,7 +419,7 @@ namespace Editor.WorldTools
             EditorUILayoutHelper.BeginGroup();
             DrawProperty("_zenithOverDay", "Zenith", "Sky color straight overhead, over the day.");
             DrawProperty("_horizonOverDay", "Horizon", "Sky color at the horizon. Also drives the distance-fog color.");
-            DrawProperty("_skyLightOverDay", "Sky Light Tint", "Tint multiplied into the terrain's sky-light channel. Flat white is a no-op.");
+            DrawProperty("_skylightOverDay", "Sky Light Tint", "Tint multiplied into the terrain's sky-light channel. Flat white is a no-op.");
             DrawProperty("_backgroundOverDay", "Camera Background", "Camera clear color. Visible only where the skybox is not drawn.");
             EditorUILayoutHelper.EndGroup();
         }

@@ -233,7 +233,7 @@ namespace Editor.Validation.Meshing.Framework
         /// is unreadable. The job resolves a cross-seam
         /// smooth-light sample in two steps: <c>SampleNeighborLight</c> first calls
         /// <c>GetVoxelStateFromLocalPos</c>, and a <b>missing</b> (length-0) voxel map means "no neighbor
-        /// chunk", which short-circuits to full sunlight (15) and <b>never reads the light map at all</b>.
+        /// chunk", which short-circuits to full skylight (15) and <b>never reads the light map at all</b>.
         /// A fixture that brightens a light map without materializing the voxel map therefore reads bright
         /// for the wrong reason — a false green. Materializing the neighbor makes the sample resolve to Air,
         /// which is transparent, so the light map is the only thing left that can brighten the corner.

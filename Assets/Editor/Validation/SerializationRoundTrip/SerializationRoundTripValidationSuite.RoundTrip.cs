@@ -256,7 +256,7 @@ namespace Editor.Validation.SerializationRoundTrip
                 }
             }
 
-            FuzzQueue(data.SunlightBfsQueue, rng);
+            FuzzQueue(data.SkylightBfsQueue, rng);
             FuzzQueue(data.BlocklightBfsQueue, rng);
             return data;
         }
@@ -328,7 +328,7 @@ namespace Editor.Validation.SerializationRoundTrip
 
             ok &= AssertHeightmapsEqual(expected, actual, label);
             ok &= AssertVoxelsAndLightEqual(expected, actual, label);
-            ok &= AssertQueuesEqual(expected.SunlightBfsQueue, actual.SunlightBfsQueue, $"{label}: sunlight queue");
+            ok &= AssertQueuesEqual(expected.SkylightBfsQueue, actual.SkylightBfsQueue, $"{label}: skylight queue");
             ok &= AssertQueuesEqual(expected.BlocklightBfsQueue, actual.BlocklightBfsQueue, $"{label}: blocklight queue");
             return ok;
         }

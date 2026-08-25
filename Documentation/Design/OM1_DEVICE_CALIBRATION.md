@@ -270,7 +270,7 @@ static `World.Instance`. `MeshGenerationBenchmark.ScheduleBenchmarkMeshing` now 
 `World.Instance.*`); the calibrator passes a temporary one (§6) — so the two cannot drift.
 
 The **lighting** leg is deliberately **self-contained**: `StartupCalibrationProbe` stands up its own
-minimal flat-sunlit scenario and `NeighborhoodLightingJob` wiring rather than extracting from
+minimal flat-skylit scenario and `NeighborhoodLightingJob` wiring rather than extracting from
 `LightingJobBenchmark`. The lighting job is far more coupled to that benchmark's scenario machinery
 (`NeighborMapSet`, padded volumes, three `NativeQueue`s, gather sources), so a full extraction would
 invasively refactor a lighting-suite regression guard. The accepted trade is a small, intentional

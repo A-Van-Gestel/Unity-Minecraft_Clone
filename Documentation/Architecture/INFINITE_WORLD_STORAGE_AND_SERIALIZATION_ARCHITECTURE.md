@@ -85,16 +85,16 @@ Three separate managers handle state that exists outside individual chunk blobs:
 
 **Purpose:** Preserves lighting calculation state to prevent "black spots" and ghost-light bugs.
 
-**Files:** `pending_lighting.bin` (sunlight columns), `pending_blocklight.bin` (blocklight modifications)  
+**Files:** `pending_lighting.bin` (skylight columns), `pending_blocklight.bin` (blocklight modifications)  
 **Location:** `Assets/Scripts/Serialization/LightingStateManager.cs`  
 **Saves:**
 
-* Columns from `WorldData.SunlightRecalculationQueue` that belong to unloaded chunks.
-* Cross-chunk **blocklight** modifications (local position + RGB + removal flag) targeting unloaded chunks. A sunlight column recalc cannot restore RGB data — without this store, blocklight removals (broken lamps) and uplifts that crossed into an unloaded chunk were permanently lost, leaving ghost light baked into saved data (Bug 08, path 1).
+* Columns from `WorldData.SkylightRecalculationQueue` that belong to unloaded chunks.
+* Cross-chunk **blocklight** modifications (local position + RGB + removal flag) targeting unloaded chunks. A skylight column recalc cannot restore RGB data — without this store, blocklight removals (broken lamps) and uplifts that crossed into an unloaded chunk were permanently lost, leaving ghost light baked into saved data (Bug 08, path 1).
 
 **Key Methods:**
 
-* `AddPending(ChunkCoord, HashSet<Vector2Int>)` - Save pending sunlight columns for a chunk
+* `AddPending(ChunkCoord, HashSet<Vector2Int>)` - Save pending skylight columns for a chunk
 * `TryGetAndRemove(ChunkCoord, out HashSet<Vector2Int>)` - Restore pending columns on load
 * `AddPendingBlocklight(ChunkCoord, Vector3Int, r, g, b, isRemoval)` - Save one pending blocklight modification (last write per voxel wins)
 * `TryGetAndRemovePendingBlocklight(ChunkCoord, out Dictionary<Vector3Int, PendingBlocklightMod>)` - Restore pending blocklight mods on load
@@ -109,7 +109,7 @@ Three separate managers handle state that exists outside individual chunk blobs:
 
 1. Chunk loads from disk via `LoadChunkAsync()`
 2. `World.LoadOrGenerateChunk()` checks `LightingStateManager`
-3. If pending columns exist, they're converted to global coordinates and re-injected into `WorldData.SunlightRecalculationQueue`
+3. If pending columns exist, they're converted to global coordinates and re-injected into `WorldData.SkylightRecalculationQueue`
 4. If pending blocklight mods exist, each is replayed through `CrossChunkLightModApplier.ComputeBlocklight` against the loaded light data — exactly like the live cross-chunk apply path — writing the new value and enqueueing a BFS wake-up node
 5. Chunk's `HasLightChangesToProcess` flag is set
 6. Lighting job is scheduled in the next Update cycle
@@ -332,7 +332,7 @@ JSON file at save folder root containing world metadata and player state.
 ├──────────────────────────────────────────────┤
 │ Lighting Queues:                             │
 │   ┌────────────────────────────────────────┐ │
-│   │ int: Sunlight Queue Count              │ │
+│   │ int: Skylight Queue Count              │ │
 │   │ FOR EACH NODE (16 bytes):              │ │
 │   │   int: Position.x                      │ │
 │   │   int: Position.y                      │ │
@@ -344,7 +344,7 @@ JSON file at save folder root containing world metadata and player state.
 │   └────────────────────────────────────────┘ │
 │   ┌────────────────────────────────────────┐ │
 │   │ int: Blocklight Queue Count            │ │
-│   │ (same node structure as sunlight)      │ │
+│   │ (same node structure as skylight)      │ │
 │   └────────────────────────────────────────┘ │
 └──────────────────────────────────────────────┘
 ```
@@ -366,7 +366,7 @@ JSON file at save folder root containing world metadata and player state.
    Must be saved and restored. If a chunk is unloaded before initial lighting completes, this flag ensures it will be re-lit on reload. Without this, chunks appear completely dark.
 
 2. **Lighting Queues:**  
-   Represent in-progress BFS propagation. Saving these allow lighting calculations to resume exactly where they left off. Queue nodes contain the voxel position, the *old* sunlight level, and the *old* RGB blocklight channels (needed for removal propagation).
+   Represent in-progress BFS propagation. Saving these allow lighting calculations to resume exactly where they left off. Queue nodes contain the voxel position, the *old* skylight level, and the *old* RGB blocklight channels (needed for removal propagation).
 
 3. **Active Voxels Not Saved:**  
    Fluids, grass, and other "active" blocks are recalculated via `Chunk.OnDataPopulated()` on load. This reduces save file size by ~10% and ensures behavior updates apply retroactively.
@@ -407,7 +407,7 @@ Save version v5 collapsed the previous `(Orientation, FluidLevel)` byte pair int
 
 ### 4.4. Pending Lighting Format (`pending_lighting.bin`)
 
-Binary file storing columns that need sunlight recalculation. (The filename was standardized from the older `lighting_pending.bin` by `Migration_v6_to_v7_SaveFormatExtensibility`.)
+Binary file storing columns that need skylight recalculation. (The filename was standardized from the older `lighting_pending.bin` by `Migration_v6_to_v7_SaveFormatExtensibility`.)
 
 **Structure:**
 
@@ -565,14 +565,14 @@ public void PopulateFromSave(ChunkData loadedData)
     Array.Copy(loadedData.SectionUniformSkyLevel, SectionUniformSkyLevel, SectionUniformSkyLevel.Length);
 
     // Copy lighting queues (RGB-aware)
-    foreach (var node in loadedData.SunlightBfsQueue)
-        AddToSunLightQueue(node.Position, node.OldLightLevel);
+    foreach (var node in loadedData.SkylightBfsQueue)
+        AddToSkylightQueue(node.Position, node.OldLightLevel);
     foreach (var node in loadedData.BlocklightBfsQueue)
-        AddToBlockLightQueue(node.Position, node.OldLightLevel, node.OldBlockR, node.OldBlockG, node.OldBlockB);
+        AddToBlocklightQueue(node.Position, node.OldLightLevel, node.OldBlockR, node.OldBlockG, node.OldBlockB);
 
     // Transfer pending flags
-    if (loadedData.HasLightChangesToProcess) HasLightChangesToProcess = true;
-    if (loadedData.NeedsInitialLighting) NeedsInitialLighting = true;
+    if (loadedData.HasLightChangesToProcess) FlagLightWork();
+    if (loadedData.NeedsInitialLighting) FlagInitialLighting();
 
     // Active blocks (fluids/grass) recalculated via RecalculateCounts, not saved
     foreach (ChunkSection section in sections)
@@ -596,12 +596,12 @@ if (LightingStateManager.TryGetAndRemove(coord, out HashSet<Vector2Int> localCol
     }
     
     // Re-inject into global queue
-    if (worldData.SunlightRecalculationQueue.ContainsKey(pos))
-        worldData.SunlightRecalculationQueue[pos].UnionWith(globalCols);
+    if (worldData.SkylightRecalculationQueue.ContainsKey(pos))
+        worldData.SkylightRecalculationQueue[pos].UnionWith(globalCols);
     else
-        worldData.SunlightRecalculationQueue[pos] = globalCols;
+        worldData.SkylightRecalculationQueue[pos] = globalCols;
     
-    data.HasLightChangesToProcess = true;
+    data.FlagLightWork();
 }
 ```
 
@@ -630,7 +630,7 @@ Robustness` (NS-1 seed, B1–B7) with the dev-only `ChunkStorageManager.InjectLo
 
 Lighting propagation is multi-frame and cross-chunk. A chunk can be in several states:
 
-1. **Newly Generated** - Needs initial sunlight calculation
+1. **Newly Generated** - Needs initial skylight calculation
 2. **Lighting In Progress** - Job running, results not yet applied
 3. **Lighting Awaiting Neighbors** - Waiting for adjacent chunks to load
 4. **Cross-Chunk Propagation** - Light from this chunk affecting neighbors
@@ -658,7 +658,7 @@ public bool NeedsEdgeCheck { get => ...; set { ...; if (value) OnLightWorkFlagge
 
 ```csharp
 // In ChunkData.cs - These ARE saved to disk
-public Queue<LightQueueNode> SunlightBfsQueue;
+public Queue<LightQueueNode> SkylightBfsQueue;
 public Queue<LightQueueNode> BlocklightBfsQueue;
 ```
 
@@ -666,7 +666,7 @@ public Queue<LightQueueNode> BlocklightBfsQueue;
 
 ```csharp
 // In WorldData.cs - NOT automatically saved
-public Dictionary<Vector2Int, HashSet<Vector2Int>> SunlightRecalculationQueue;
+public Dictionary<Vector2Int, HashSet<Vector2Int>> SkylightRecalculationQueue;
 
 // LightingStateManager extracts and persists relevant entries on unload
 ```
@@ -689,7 +689,7 @@ if (isJobRunning || isProcessingLight)
 }
 
 // Step 2: Rescue orphaned global queue data
-if (worldData.SunlightRecalculationQueue.TryGetValue(pos, out var globalCols))
+if (worldData.SkylightRecalculationQueue.TryGetValue(pos, out var globalCols))
 {
     if (globalCols != null && globalCols.Count > 0)
     {
@@ -704,7 +704,7 @@ if (worldData.SunlightRecalculationQueue.TryGetValue(pos, out var globalCols))
         LightingStateManager.AddPending(coord, localCols);
     }
     
-    worldData.SunlightRecalculationQueue.Remove(pos);
+    worldData.SkylightRecalculationQueue.Remove(pos);
 }
 
 // Step 3: Save chunk (includes per-chunk queues and NeedsInitialLighting flag)
@@ -731,7 +731,7 @@ if (loaded != null)
     if (LightingStateManager.TryGetAndRemove(coord, out var localCols))
     {
         // Re-inject into global queue (see code in section 5.2)
-        data.HasLightChangesToProcess = true;
+        data.FlagLightWork();
     }
 
     // 2b. Replay pending cross-chunk blocklight mods. Each mod runs through
@@ -751,8 +751,8 @@ if (loaded != null)
         if (AreNeighborsDataReady(coord))
         {
             // Trigger lighting immediately
-            data.RecalculateSunLightLight();
-            data.NeedsInitialLighting = false;
+            data.RecalculateSkylight();
+            data.ClearInitialLighting();
             
             if (data.Chunk != null)
             {
@@ -786,9 +786,9 @@ foreach (LightModification mod in jobData.Mods)
     if (neighborChunk == null || !neighborChunk.IsPopulated) 
     {
         // Neighbor unloaded — degrade per channel:
-        if (mod.Channel == LightChannel.Sun)
+        if (mod.Channel == LightChannel.Sky)
         {
-            // Sunlight: the affected COLUMN is batched into _droppedLightUpdates and
+            // Skylight: the affected COLUMN is batched into _droppedLightUpdates and
             // saved to LightingStateManager at the end of the pass — a column recalc
             // is authoritative for the sky channel.
         }
@@ -808,7 +808,7 @@ foreach (LightModification mod in jobData.Mods)
     // Otherwise apply to the loaded neighbor via CrossChunkLightModApplier.
 }
 
-// Batch save all vanishing neighbor sunlight columns
+// Batch save all vanishing neighbor skylight columns
 foreach (var kvp in _droppedLightUpdates)
 {
     _world.LightingStateManager.AddPending(kvp.Key, kvp.Value);
@@ -972,7 +972,7 @@ Batching all updates for a single neighbor chunk into one `AddPending()` call re
 **Root Cause:** Three separate issues:
 
 1. `NeedsInitialLighting` flag not preserved during `PopulateFromSave()`
-2. Global `SunlightRecalculationQueue` entries lost when chunks unloaded
+2. Global `SkylightRecalculationQueue` entries lost when chunks unloaded
 3. Cross-chunk light propagation dropped when target neighbor unloaded
 
 **Resolution:**
@@ -1187,7 +1187,7 @@ Saves/
 └── My World/
     ├── level.dat                    (JSON metadata + player state)
     ├── pending_mods.bin             (VoxelMod queue)
-    ├── pending_lighting.bin         (Sunlight column queue)
+    ├── pending_lighting.bin         (Skylight column queue)
     ├── pending_blocklight.bin       (Cross-chunk blocklight mods; absent if nothing pending)
     └── Region/
         ├── r.0.0.bin                (up to 1024 chunks)

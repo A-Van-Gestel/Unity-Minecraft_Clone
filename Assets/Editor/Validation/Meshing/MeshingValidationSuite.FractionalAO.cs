@@ -188,11 +188,11 @@ namespace Editor.Validation.Meshing
         /// <returns>True when the ordering holds for every orientation.</returns>
         private static bool B42_PartialBlockAoOrdering()
         {
-            int air = ProbeTopFaceSun(TestMeshBlockPalette.Air, 0);
-            int cube = ProbeTopFaceSun(TestMeshBlockPalette.SolidOpaque, 0);
-            int slabBottom = ProbeTopFaceSun(TestMeshBlockPalette.HalfSlab, AO_SLAB_BOTTOM);
-            int slabVertical = ProbeTopFaceSun(TestMeshBlockPalette.HalfSlab, AO_SLAB_VERTICAL);
-            int slabTop = ProbeTopFaceSun(TestMeshBlockPalette.HalfSlab, AO_SLAB_TOP);
+            int air = ProbeTopFaceSky(TestMeshBlockPalette.Air, 0);
+            int cube = ProbeTopFaceSky(TestMeshBlockPalette.SolidOpaque, 0);
+            int slabBottom = ProbeTopFaceSky(TestMeshBlockPalette.HalfSlab, AO_SLAB_BOTTOM);
+            int slabVertical = ProbeTopFaceSky(TestMeshBlockPalette.HalfSlab, AO_SLAB_VERTICAL);
+            int slabTop = ProbeTopFaceSky(TestMeshBlockPalette.HalfSlab, AO_SLAB_TOP);
 
             string readings = string.Format(
                 "    air={0} topSlab={1} verticalSlab={2} bottomSlab={3} fullCube={4}",
@@ -261,7 +261,7 @@ namespace Editor.Validation.Meshing
 
         /// <summary>
         /// Meshes a lone opaque cube with <paramref name="ringId"/> placed in the ambient-occlusion ring
-        /// above it, and returns the sum of the four vertex sunlight values on the cube's <c>+Y</c> face.
+        /// above it, and returns the sum of the four vertex skylight values on the cube's <c>+Y</c> face.
         /// Lower means more darkening; 1020 is fully lit.
         /// <para>
         /// The occluder goes in the ring at <c>(+1, +1, 0)</c> rather than directly overhead, because a
@@ -270,23 +270,23 @@ namespace Editor.Validation.Meshing
         /// </summary>
         /// <param name="ringId">The occluder's block ID, or <see cref="TestMeshBlockPalette.Air"/> for none.</param>
         /// <param name="ringMeta">The occluder's metadata byte, selecting its orientation.</param>
-        /// <returns>The summed vertex sunlight, or -1 when the probe face was not emitted.</returns>
-        private static int ProbeTopFaceSun(ushort ringId, byte ringMeta)
+        /// <returns>The summed vertex skylight, or -1 when the probe face was not emitted.</returns>
+        private static int ProbeTopFaceSky(ushort ringId, byte ringMeta)
         {
             using MeshingTestWorld world = new MeshingTestWorld();
             world.SetBlock(AO_PROBE_X, AO_PROBE_Y, AO_PROBE_Z, TestMeshBlockPalette.SolidOpaque, 0);
             if (ringId != TestMeshBlockPalette.Air)
                 world.SetBlock(AO_PROBE_X + 1, AO_PROBE_Y + 1, AO_PROBE_Z, ringId, ringMeta);
 
-            // Uniform full sunlight everywhere isolates the AO term: any variation the probe sees is
+            // Uniform full skylight everywhere isolates the AO term: any variation the probe sees is
             // occlusion weighting, never a light gradient.
             world.FillLight(LightBitMapping.PackLightData(15, 0, 0, 0));
 
             MeshDataJobOutput o = world.Run(SmoothLightingQuality.High);
 
             // Corner-located, not first-quad-located: VO-9b may split this face into sub-quads, and the
-            // corner values are the reading that survives any tessellation density (see TopFaceCornerSun).
-            byte[] corners = TopFaceCornerSun(o, AO_PROBE_X, AO_PROBE_Y, AO_PROBE_Z);
+            // corner values are the reading that survives any tessellation density (see TopFaceCornerSky).
+            byte[] corners = TopFaceCornerSky(o, AO_PROBE_X, AO_PROBE_Y, AO_PROBE_Z);
             if (corners == null) return -1;
 
             return corners[0] + corners[1] + corners[2] + corners[3];

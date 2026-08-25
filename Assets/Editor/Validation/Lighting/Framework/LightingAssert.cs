@@ -106,7 +106,7 @@ namespace Editor.Validation.Lighting.Framework
                         if (report != null && mismatches <= MAX_REPORTED_MISMATCHES)
                             AppendMismatch(report, pos, exp, actual);
 
-                        int skyDelta = LightBitMapping.GetSkyLight(actual) - LightBitMapping.GetSkyLight(exp);
+                        int skyDelta = LightBitMapping.GetSkylight(actual) - LightBitMapping.GetSkylight(exp);
                         if (skyDelta > worstSkyDelta)
                         {
                             worstSkyDelta = skyDelta;
@@ -244,7 +244,7 @@ namespace Editor.Validation.Lighting.Framework
                         litVoxels++;
                         if (litVoxels <= MAX_REPORTED_MISMATCHES)
                         {
-                            ushort expected = LightBitMapping.PackLightData(LightBitMapping.GetSkyLight(light), 0, 0, 0);
+                            ushort expected = LightBitMapping.PackLightData(LightBitMapping.GetSkylight(light), 0, 0, 0);
                             AppendMismatch(report, pos, expected, light);
                         }
                     }
@@ -297,7 +297,7 @@ namespace Editor.Validation.Lighting.Framework
                 subject.FlagLightWork();
                 subject.FlagEdgeCheck();
                 subject.RemainingEdgeCheckRounds = 0; // the historical bug condition: counter exhausted
-                subject.SunlightBfsQueue.Enqueue(default);
+                subject.SkylightBfsQueue.Enqueue(default);
                 subject.BlocklightBfsQueue.Enqueue(default);
                 subject.SetLightData(2, 5, 3, 0x0ABC); // allocates a section + writes light
                 for (int i = 0; i < subject.heightMap.Length; i++) subject.heightMap[i] = 200;
@@ -330,8 +330,8 @@ namespace Editor.Validation.Lighting.Framework
                     stale.Add($"RemainingEdgeCheckRounds={subject.RemainingEdgeCheckRounds} (expected 2)");
                 if (subject.LifecycleEpoch != epochBefore + 1)
                     stale.Add($"LifecycleEpoch={subject.LifecycleEpoch} (expected {epochBefore + 1} — Reset must bump the recycle counter, CP-3 ABA guard)");
-                if (subject.SunLightQueueCount != 0) stale.Add("SunlightBfsQueue");
-                if (subject.BlockLightQueueCount != 0) stale.Add("BlocklightBfsQueue");
+                if (subject.SkylightQueueCount != 0) stale.Add("SkylightBfsQueue");
+                if (subject.BlocklightQueueCount != 0) stale.Add("BlocklightBfsQueue");
                 if (subject.GetLightData(2, 5, 3) != 0) stale.Add("light @ (2,5,3)");
 
                 foreach (ushort h in subject.heightMap)
@@ -478,7 +478,7 @@ namespace Editor.Validation.Lighting.Framework
         {
             report.AppendLine(
                 $"  {worldPos}: " +
-                $"sky {LightBitMapping.GetSkyLight(expected)}/{LightBitMapping.GetSkyLight(actual)}, " +
+                $"sky {LightBitMapping.GetSkylight(expected)}/{LightBitMapping.GetSkylight(actual)}, " +
                 $"R {LightBitMapping.GetBlocklightR(expected)}/{LightBitMapping.GetBlocklightR(actual)}, " +
                 $"G {LightBitMapping.GetBlocklightG(expected)}/{LightBitMapping.GetBlocklightG(actual)}, " +
                 $"B {LightBitMapping.GetBlocklightB(expected)}/{LightBitMapping.GetBlocklightB(actual)} " +

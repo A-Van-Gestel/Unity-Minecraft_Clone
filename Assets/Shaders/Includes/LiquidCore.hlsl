@@ -59,7 +59,7 @@ struct LiquidAppdata
     // MR-2 UNorm8: r=LiquidType/255 (×255 below), g=PackedShoreMask (8-bit wall flags), b=ShadowMultiplier,
     // a=RF-3 emissive strength (stamped by the mesher for lava; zero for water).
     half4 color : COLOR;
-    half4 lightData : TEXCOORD1; // UNorm8: (skyLight, blocklightR, blocklightG, blocklightB)
+    half4 lightData : TEXCOORD1; // UNorm8: (skylight, blocklightR, blocklightG, blocklightB)
 };
 
 struct LiquidV2F
@@ -69,7 +69,7 @@ struct LiquidV2F
     float4 screenPos : TEXCOORD1;
     float3 worldNormal : TEXCOORD2;
     float liquidType : TEXCOORD3;
-    float sunLight : TEXCOORD4;
+    float skylight : TEXCOORD4;
     float shadowMultiplier : TEXCOORD5;
     float2 localFlowVector : TEXCOORD6; // Physical flow XY vector from mesher
     float2 shorePush : TEXCOORD7; // Normalized push direction from C# mesher
@@ -147,7 +147,7 @@ LiquidV2F LiquidVert(LiquidAppdata v)
     // MR-2: liquidType (FluidShaderID) now rides in a UNorm8 color channel, so the GPU delivers it as
     // id/255. Multiply back to the raw id (water=0, lava=1) — the frag's `> 0.5` branch needs this.
     o.liquidType = v.color.r * 255.0;
-    o.sunLight = v.lightData.r;
+    o.skylight = v.lightData.r;
     o.blockRGB = v.lightData.gba;
     o.shadowMultiplier = v.color.b;
     o.localFlowVector = v.uv.xy; // flow XZ
@@ -456,7 +456,7 @@ void EvaluateWater(LiquidV2F i, float phaseTime, out float3 waterCol, out float 
     float wave_fbm = fbm(wave_p, FLUID_FBM_OCTAVES);
     float ripple_noise = fbm(ripple_p, FLUID_FBM_OCTAVES);
 
-    half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.sunLight);
+    half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.skylight);
 
     float combined_noise = (wave_fbm + ripple_noise) * 0.5;
     combined_noise = (combined_noise + 1.0) * 0.5;

@@ -97,7 +97,7 @@ Shader "Hidden/Editor/FluidPreview"
                 if (!unity_IsEditorPlaying) finalLiquidType = _EditorPreviewType;
                 #endif
 
-                half3 litWhite = ApplyVoxelLightingRGB(half3(1, 1, 1), i.sunLight, i.blockRGB,
+                half3 litWhite = ApplyVoxelLightingRGB(half3(1, 1, 1), i.skylight, i.blockRGB,
                                                        half3(1, 1, 1),
                                                        1.0, 0.15, 1.0);
 
@@ -161,7 +161,7 @@ Shader "Hidden/Editor/FluidPreview"
                     // Preview: solid background instead of SampleSceneColor
                     // By conditionally forcing the alpha to 1.0, the generated icon can be rendered fully opaque for the UI
                     // while retaining its transparent nature for in-editor 3D previews.
-                    half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.sunLight);
+                    half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.skylight);
                     half3 background = half3(0.05, 0.1, 0.15); // Dark cool background for water
 
                     float finalAlpha = lerp(water_base_color.a, 1.0, _ForceOpaque);

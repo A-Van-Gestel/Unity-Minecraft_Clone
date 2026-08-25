@@ -537,7 +537,7 @@ what would have to be true to revisit that.*
   layout. (P-2 **Layer 1** — the worker-thread gather — shipped 2026-06-22 and is **not** this substrate; it
   kept the snapshot model.)
 - **LI-1** (single halo-padded lighting volume, **20×128×20, halo = 2** — the originally-proposed
-  1-voxel/18×128×18 halo was a *correctness bug*: the sunlight-darkening path reads ±2, edges **and** diagonal
+  1-voxel/18×128×18 halo was a *correctness bug*: the skylight-darkening path reads ±2, edges **and** diagonal
   corners) was the cheap, bounded prototype of exactly that layout, and an independent lighting win. **DONE
   (2026-06-22)** — layout validated over 47 seam baselines and shipped net-positive via P-2 Layer 1's
   worker-thread gather. LI-1 is therefore **not throwaway**: its layout, gather/extract transcoders and
@@ -548,7 +548,7 @@ what would have to be true to revisit that.*
   lighting and meshing jobs must read correct cross-chunk neighbor data. Both consumer paths were guarded
   before the substrate was trusted —
   [`Testing Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md`](Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md)
-  **C3 (B54/B55, CLOSED 2026-06-21)** (cross-border sunlight darkening) and
+  **C3 (B54/B55, CLOSED 2026-06-21)** (cross-border skylight darkening) and
   [`Testing Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md`](Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md)
   **MH-10/MH-11 (B18–B21, CLOSED 2026-06-21)** (border-face culling consumption + production-fill faithful).
   These guard the *substrate*; **BH-D1** separately guards the *tick path*.

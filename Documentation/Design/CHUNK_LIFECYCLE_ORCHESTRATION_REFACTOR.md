@@ -79,14 +79,14 @@ L657–870), `ChunkPoolManager.cs` (full), `Data/WorldData.cs` (`RequestChunk`/`
 | 4 | **Generation completion** | `ProcessGenerationJobs` (WJM:657): HF-2 two-stage fault isolation; `Populate`; structure expansion under `maxStructureModsPerFrame` budget (un-released budget-retry `continue`s); pending-mod + pending-lighting recovery; `NeedsInitialLighting = true`                                                              | ❌ orchestration none                                    |
 | 5 | **Mod application**       | `ApplyModifications` (W:2065): drains `_modifications`; unpopulated target → `ModManager.AddPendingMod` (persisted); placement rules; `ModifyVoxel`                                                                                                                                                                    | placement *rules* ✅ (placement suite); routing ❌       |
 | 6 | **Activation / visual**   | `CheckViewDistance` view-set diff: pool `Chunk` get/return, `_chunkMap`, borders, re-request mesh when populated                                                                                                                                                                                                       | ❌ none                                                  |
-| 7 | **Unload**                | `UnloadChunks` (W:2330): distance test → job-pin → light-flag-pin → 8-neighbor strand-pin → persist orphaned sunlight columns → fire-and-forget save if modified → mesh-queue remove → pool visual + data, remove from `Chunks`                                                                                        | ❌ none                                                  |
+| 7 | **Unload**                | `UnloadChunks` (W:2330): distance test → job-pin → light-flag-pin → 8-neighbor strand-pin → persist orphaned skylight columns → fire-and-forget save if modified → mesh-queue remove → pool visual + data, remove from `Chunks`                                                                                        | ❌ none                                                  |
 | 8 | **Pool recycle**          | `ChunkPoolManager` (5 pools; data/section pools concurrent for background deserialization); `ChunkData.Reset` / `Chunk.Reset`/`Release`                                                                                                                                                                                | `Reset` transient-state ✅ (lighting B33/B34); sizing ❌ |
 
 ### 2.2 Identity & coordinate math (the WS-1 surface)
 
 Three key spaces coexist: `ChunkCoord` (chunk grid — `_chunkMap`, all three job dictionaries,
 `ModManager`), `Vector2Int` voxel-origin (`worldData.Chunks`, `LightWorkScheduler`,
-`SunlightRecalculationQueue`, serialization), and float world positions (transforms, player). Conversions are scattered and idiom-mixed: `Mathf.FloorToInt(worldPos.x / 16f) * 16`
+`SkylightRecalculationQueue`, serialization), and float world positions (transforms, player). Conversions are scattered and idiom-mixed: `Mathf.FloorToInt(worldPos.x / 16f) * 16`
 (`WorldData.GetChunkCoordFor` W:145–150 — float roundtrip, breaks beyond ±2²⁴),
 `ChunkCoord.FromVoxelOrigin`/`ToVoxelOrigin`, and the **already-wrong-for-negatives** truncating division in `RegionAddressCodec.V2Codec` step 1 (scaling doc §3.2). All-positive coordinates make every variant agree today — which is exactly why no test can currently red a drift.
 
@@ -168,7 +168,7 @@ public static class ChunkUnloadDecision
         Unload,            // out of range, unpinned — proceed to persist/save/pool teardown
         KeepInRange,       // within unload distance
         DeferJobRunning,   // a generation/mesh/lighting job still owns buffers for this chunk
-        DeferLightPending, // IsAwaitingMainThreadProcess / HasLightChangesToProcess (LP-3 may shrink this)
+        DeferLightPending, // HasLightChangesToProcess (LP-3 removed the IsAwaitingMainThreadProcess term)
         DeferWouldStrand,  // a populated neighbor still needs this chunk's data (pipeline §9.6)
     }
 
@@ -519,7 +519,7 @@ is touched (CP-4 does not touch its rule logic, but run it anyway: cheap);
 > only exercised the generate arm at startup).
 
 - **Scope:** §4.1 — pure decision + `UnloadChunks` routes through it (behavior-identical arms, including the exact pin set and the 8-neighbor strand rule); truth-table baselines (new lifecycle-suite partial or NS-5's file — executor picks the home and states it) covering every arm incl. the §9.6 stranding cases; CP-1's counters keyed by the enum.
-- **Coordination:** LP-3 (lighting doc) removes `IsAwaitingMainThreadProcess` — its gate term here shrinks `DeferLightPending`; land in either order, the truth table updates with it. P-4 rec 3 later adds its persist-and-unload arm *here*, baselined.
+- **Coordination:** LP-3 (lighting doc) removed `IsAwaitingMainThreadProcess` — shipped 2026-08-23, so `DeferLightPending` now rests on `HasLightChangesToProcess` alone. P-4 rec 3 later adds its persist-and-unload arm *here*, baselined.
 - **Prove-red:** invert the strand-check term → truth-table baselines red (and only those).
 - **Acceptance:** universal gate + an unload-heavy in-game soak (sprint + return; no stranded chunks, deferral counters sane, memory flat-ish).
 - **Doc-sync:** pipeline doc §9.6 (points at the decision + its baselines as the now-testable guard). **Serialization:** none.

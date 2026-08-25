@@ -16,7 +16,7 @@ namespace Editor.Validation.Lighting.Framework
     /// <list type="bullet">
     /// <item>Attenuation: <c>max(0, source - max(1, opacity))</c> (Starlight formula).</item>
     /// <item>Sky columns: full 15 above the highest light-obstructing block, then downward attenuation.</item>
-    /// <item>Vertical sunlight: level-15 propagates downward without loss through fully transparent blocks.</item>
+    /// <item>Vertical skylight: level-15 propagates downward without loss through fully transparent blocks.</item>
     /// <item>Opaque blocks receive surface light (source - 1) but never propagate; opaque sky sources do not spread.</item>
     /// <item>Blocklight: per-channel RGB, seeded from block emission (emissive blocks propagate even when opaque).</item>
     /// </list>
@@ -152,10 +152,10 @@ namespace Editor.Validation.Lighting.Framework
 
                         // VO-3: per-face, so a vertical slab's open half carries the undimmed column
                         // while a horizontal slab's solid underside still stops it (mirror of the engine).
-                        bool isVerticalSunlight = sourceLight == 15 && VoxelData.FaceChecks[i].y == -1 &&
+                        bool isVerticalSkylight = sourceLight == 15 && VoxelData.FaceChecks[i].y == -1 &&
                                                   LightAttenuation.IsTransparentThroughFace(sourceProps, metas[srcIndex], i) &&
                                                   LightAttenuation.IsTransparentThroughFace(neighborProps, metas[nIndex], entryFace);
-                        if (isVerticalSunlight)
+                        if (isVerticalSkylight)
                             propagated = 15;
 
                         if (propagated > field.Sky[nIndex])

@@ -86,22 +86,22 @@ These pass green in the suite but the corresponding production code is **not** e
   `World`-independent duplicate; it now lives in `ChunkData.UpdateColumnHeightAfterEdit<TObstruction>`
   (allocation-free struct obstruction test, `IBlockObstruction`), called by **both** production
   `ModifyVoxel` and the harness `PlaceBlock`. A divergence in the height rule now breaks the build.
-- **Still divergent (by necessity, LOW):** the BFS **enqueue path** — self removal-node seeding + the 6-neighbor wake — is structurally `World`-coupled: `AddToSunLightQueue`/`AddToBlockLightQueue` guard on
-  `World.Instance.settings.enableLighting` and flag `HasLightChangesToProcess` (→ `OnLightWorkFlagged`), so the editor harness (no live `World`) cannot reuse them and seeds its own `TestChunk` queues. Sharing this would require decoupling those methods from `World` **and** touching the hot `ModifyVoxel` edit path — not worth it for a LOW finding. Likewise, the opacity-change column recalc routes through the **world-level** `WorldData.SunlightRecalculationQueue` in production vs a per-chunk queue in the harness (the structural divergence near Bug 09's
+- **Still divergent (by necessity, LOW):** the BFS **enqueue path** — self removal-node seeding + the 6-neighbor wake — is structurally `World`-coupled: `AddToSkylightQueue`/`AddToBlocklightQueue` guard on
+  `World.Instance.settings.enableLighting` and flag `HasLightChangesToProcess` (→ `OnLightWorkFlagged`), so the editor harness (no live `World`) cannot reuse them and seeds its own `TestChunk` queues. Sharing this would require decoupling those methods from `World` **and** touching the hot `ModifyVoxel` edit path — not worth it for a LOW finding. Likewise, the opacity-change column recalc routes through the **world-level** `WorldData.SkylightRecalculationQueue` in production vs a per-chunk queue in the harness (the structural divergence near Bug 09's
   suspected "fluid re-flow floods the queue" path).
 - **Mitigation for the remainder:** periodically re-diff the harness `PlaceBlock` enqueue/wake against
   `ModifyVoxel`. If the enqueue path is ever shared, decouple `AddTo*Queue` from `World` first.
 
 ### A4 — Oracle shares assumptions with the engine · **MOSTLY CLOSED (2026-06-14) · remainder LOW (optional 2nd oracle)**
 
-- `LightingOracle` is a hand-written spec. Where it encodes the **same** rule as the engine — notably the vertical-sunlight rule (`isVerticalSunlight` requires `IsFullyTransparentToLight` on both source and target), the opaque-source rule, and `Attenuate = max(0, src − max(1, opacity))` — a shared-wrong assumption passes `MatchesOracle`.
-- **Confirmed shared (2026-06-14 audit):** the suspicion was correct — these are not just *similar* rules, they are the **same mechanism** on both sides. `LightingOracle.SolveSky`'s column pass (15 above the heightmap, attenuate downward) mirrors production `NeighborhoodLightingJob.RecalculateSunlightForColumn`
-  (PASS 1 / PASS 2) line-for-line; the `isVerticalSunlight` condition is byte-identical (`LightingOracle.cs` vs `NeighborhoodLightingJob.cs:477`); and both call the identical
+- `LightingOracle` is a hand-written spec. Where it encodes the **same** rule as the engine — notably the vertical-skylight rule (`isVerticalSkylight` requires `IsFullyTransparentToLight` on both source and target), the opaque-source rule, and `Attenuate = max(0, src − max(1, opacity))` — a shared-wrong assumption passes `MatchesOracle`.
+- **Confirmed shared (2026-06-14 audit):** the suspicion was correct — these are not just *similar* rules, they are the **same mechanism** on both sides. `LightingOracle.SolveSky`'s column pass (15 above the heightmap, attenuate downward) mirrors production `NeighborhoodLightingJob.RecalculateSkylightForColumn`
+  (PASS 1 / PASS 2) line-for-line; the `isVerticalSkylight` condition is byte-identical (`LightingOracle.cs` vs `NeighborhoodLightingJob.cs:477`); and both call the identical
   `max(0, src − max(1, opacity))` attenuation. So a defect in any of these, replicated on both sides, is invisible to `MatchesOracle`. (Block-obstruction is keyed on opacity — `IsLightObstructing = opacity > 0`,
   `IsFullyTransparentToLight = opacity == 0`, `IsOpaque = opacity ≥ 15` — never on solidity.)
 - **Now:** every shared oracle rule has ≥1 **independent hand-derived probe** that asserts a constant the oracle never produced (no `MatchesOracle` call), so a formula broken in *both* engine and oracle still flips a probe red. Implemented as baselines **B35–B39** in `LightingValidationSuite.OracleProbes.cs`:
-    - **B35** — vertical sunlight through open air reaches the floor at full `15` (column pass "15 above heightmap" + no depth attenuation).
-    - **B36** — vertical sunlight through a *solid* glass column (opacity 0) stays `15`: the named highest-risk vertical-transparency rule — pins that only opacity, not solidity, blocks light.
+    - **B35** — vertical skylight through open air reaches the floor at full `15` (column pass "15 above heightmap" + no depth attenuation).
+    - **B36** — vertical skylight through a *solid* glass column (opacity 0) stays `15`: the named highest-risk vertical-transparency rule — pins that only opacity, not solidity, blocks light.
     - **B37** — sealed shaft under a leaves cap (opacity 1) decays `14 → 10 → 6` (`−1`/voxel): PASS-2 downward attenuation + the opacity-1 step.
     - **B38** — torch horizontal blocklight falloff `14, 13, … 10` (`−1`/air voxel on all RGB channels): the `max(1, opacity)` air step.
     - **B39** — opaque face receives exactly `source−1` (=13) surface light but never propagates inward (enclosed center stays `0`): tighter than B9's containment-only check.
@@ -120,11 +120,11 @@ These pass green in the suite but the corresponding production code is **not** e
   `ChunkData.AssertLocalPositionInChunk` — a `[Conditional("UNITY_EDITOR")]`/`("DEVELOPMENT_BUILD")` guard called first in all four accessors (before `GetLightData`'s uniform-sky early-return, so compacted sections no longer read silently), throwing with the offending coordinates and chunk position; compiled out of IL2CPP master (the reads are the hottest in the engine). The prerequisite caller audit (all 69 accessor call sites) found **no caller relying on the leniency**: every site is loop-bounded, derived-from-lookup, explicitly guarded, or
   job-volume-bounded (the Burst job's `GetPackedData` sentinel bounds every emitted mod/claim). Verified by re-running B60's both-guards-off sabotage: it now goes **RED** (`ArgumentOutOfRangeException` at the halo claim `(-1, 49, 8)`) where it previously stayed green — retroactively giving B60 its prove-red — with all 53 baselines green under the live assertions once the guards were restored. Pairs with **HF-3** (border heightmap fuzz, the C9 lesson — shipped 2026-07-05, see C9's follow-through note), which widens how many positions scenarios sample.
 
-### A6 — Global sunlight-column routing seam was bypassed (local-column seeding) · **CLOSED (2026-07-19, Bug 19)**
+### A6 — Global skylight-column routing seam was bypassed (local-column seeding) · **CLOSED (2026-07-19, Bug 19)**
 
-The harness seeded column recalcs directly in chunk-local space (`QueueFullSunlightRecalc`), on the stated assumption that production's local→global→local round-trip through the world-level
-`SunlightRecalculationQueue` was "semantically identical". **Bug 19 disproved that assumption**: the production round-trip went through `GetChunkCoordFor(Vector3)`'s int→float conversion, which mis-chunks border columns past ±2²⁴ — a whole defect class the harness structurally could not see, because every harness world sat at the origin AND the seam was never crossed. Closed on both axes:
-the seam is now the shared `Helpers.SunlightColumnRouting` unit (production `QueueSunlightRecalculation`, the `WorldJobManager` job-build drain, and orphan-column persistence all route through it), the harness crosses it via `QueueFullSunlightRecalcViaGlobalRouting`, and `LightingTestWorld` accepts a far
+The harness seeded column recalcs directly in chunk-local space (`QueueFullSkylightRecalc`), on the stated assumption that production's local→global→local round-trip through the world-level
+`SkylightRecalculationQueue` was "semantically identical". **Bug 19 disproved that assumption**: the production round-trip went through `GetChunkCoordFor(Vector3)`'s int→float conversion, which mis-chunks border columns past ±2²⁴ — a whole defect class the harness structurally could not see, because every harness world sat at the origin AND the seam was never crossed. Closed on both axes:
+the seam is now the shared `Helpers.SkylightColumnRouting` unit (production `QueueSkylightRecalculation`, the `WorldJobManager` job-build drain, and orphan-column persistence all route through it), the harness crosses it via `QueueFullSkylightRecalcViaGlobalRouting`, and `LightingTestWorld` accepts a far
 `anchorChunk` (integer-exact plumbing; the frame simulator remains identity-anchor-only by guard). Baselines **B95** (routing integrity at identity/±2²⁴-boundary/±2×10⁷ anchors; prove-red 95 lost + 184 out-of-range columns per far anchor) and **B96** (far-anchor differential twin) pin it. **Remaining sliver (LOW):** the production cross-chunk *mod* delivery path (`ApplyCrossChunkLightMod`) converts via the `WorldData` float/int overloads, while the harness mirror has always used its own exact int subtraction — a future re-introduction of a float
 conversion on the production mod path would not be caught in-harness (guarded instead by the `Vector3Int` overloads capturing integer callers at compile time + the latched dev-build ±2²⁴ tripwire on the float paths).
 
@@ -139,17 +139,17 @@ conversion on the production mod path would not be caught in-harness (guarded in
   `LightingStateManager.AddPending`/`AddPendingBlocklight`, `DegradeDeferredCrossChunkMods`, and replay-on-load — had no harness analog. `RouteCrossChunkMod`'s `PersistUndeliverable` arm was structurally unreachable (the harness hardcoded `targetLoaded: targetInWorld`). The whole persist/degrade/replay path — including Bug 08 path 1 and the "chunk lost data mid-flight" half of Bug 09 — was untested.
 - **Now:** `TestChunk.IsLoaded` + `LightingTestWorld.MarkChunkUnloaded`/`MarkChunkLoaded` model an in-world-but-unloaded chunk. `CompleteLightingJob` passes the **real** `targetLoaded`, so the
   `PersistUndeliverable` route fires into a real, disk-free `LightingStateManager` (`CreateInMemory()`, held as `IPendingLightStore` so `Save`/`Load` are unreachable — disk I/O is impossible by construction, no cross-run `pending_*.bin` contamination). The emitting-chunk-unloaded-mid-flight `else` branch +
-  `DegradeDeferredCrossChunkMods` are mirrored; `MarkChunkLoaded` replays the persisted work (sun columns
+  `DegradeDeferredCrossChunkMods` are mirrored; `MarkChunkLoaded` replays the persisted work (sky columns
     + blocklight through the shared `CrossChunkLightModApplier.ComputeBlocklight`) or discards it (`ChunkLoadMode.FreshlyGenerated` → `DiscardPendingBlocklight`). The per-mod local-column math is shared with production via `LightingModPersister.TryComputeLocalColumn` (a build-time seam — divergence breaks the build). Baselines **B30** (persist→replay), **B31** (deferred-mod degrade → replay), and **B32**
       (freshly-generated discard, spill re-derived from the loaded neighbor) all converge to the oracle.
 - **Still NOT covered (minor):** the on-disk `Save()`/`Load()` binary round-trip is out of scope by design (a serialization concern, not lighting correctness — the in-memory store exercises the identical
-  `Add*`/`TryGetAndRemove*` logic). The `AddPendingBlocklight` placement-after-removal guard (`LightingStateManager.cs:145`) and sunlight-column persist→replay are run by the store but not yet pinned by a dedicated baseline assertion.
+  `Add*`/`TryGetAndRemove*` logic). The `AddPendingBlocklight` placement-after-removal guard (`LightingStateManager.cs:145`) and skylight-column persist→replay are run by the store but not yet pinned by a dedicated baseline assertion.
 
 ### B2 — `neighborsDataReady` is hardcoded `true` in the frame simulator · **CLOSED (2026-06-14)**
 
 - **Was:** `LightingFrameSimulator.RunFrame` called
   `LightingScheduleDecision.Evaluate(IsChunkInFlight(coord), neighborsDataReady: true)`. Production's
-  `NeighborsNotReady` decision (set `HasLightChangesToProcess = true`, return false, **don't** schedule)
+  `NeighborsNotReady` decision (call `FlagLightWork()`, return false, **don't** schedule)
   was never exercised — the third arm of the shared `LightingScheduleDecision.Evaluate` seam was dark, and with it the scheduling-deferral path adjacent to Bug 09.
 - **Now:** a per-chunk neighbor-readiness toggle on the harness — `TestChunk.NeighborsReady` (default true) plus `LightingTestWorld.MarkNeighborsNotReady`/`MarkNeighborsReady` and the
   `AreNeighborsDataReady(coord)` accessor (harness analog of production's `World.AreNeighborsDataReady`).
@@ -312,28 +312,28 @@ conversion on the production mod path would not be caught in-harness (guarded in
   "won't-reproduce → baseline" rule, the canopy fuzz now guards dense-canopy generation convergence as **B42** (broad regression coverage) rather than reproducing Bug 05.
 - **Still NOT covered (minor):** no failure shrinker; grid fixed at 5×5; and, like C1, the search is synchronous (it cannot catch an async/Burst race). A faithful Bug-05 repro, if the bug is real, likely needs in-build instrumentation (see B3), not another synchronous geometry layer.
 
-### C3 — Cross-chunk *sunlight removal / darkening* race quadrant · **CLOSED (2026-06-21) · was a PREREQUISITE for LI-1 → P-2**
+### C3 — Cross-chunk *skylight removal / darkening* race quadrant · **CLOSED (2026-06-21) · was a PREREQUISITE for LI-1 → P-2**
 
-- The dynamic cross-chunk matrix was lopsided. **B7** covers blocklight *removal* across a border with the neighbor in flight; **B13** covers sunlight *uplift* (addition) across a border in flight; **B12** covers blocklight cross-border *re-spread* after a removal. The *steady-state* sunlight-darkening-across-a-border half was subsequently covered by the Bug-12 family (**B51** asymmetric two-shaft, **B53** mutually-lit seam loop, **B52** multi-hop ring), but the **race** quadrant — a sunlight *removal* deferred into an **in-flight**
-  neighbor (the sunlight twin of B7) — still had no scenario. This is also the exact neighborhood
-  [Bug 11](../../Bugs/LIGHTING_BUGS.md) lived in (`CrossChunkLightModApplier.ComputeSunlight` removal path), so it doubles as a Bug-11 regression guard.
+- The dynamic cross-chunk matrix was lopsided. **B7** covers blocklight *removal* across a border with the neighbor in flight; **B13** covers skylight *uplift* (addition) across a border in flight; **B12** covers blocklight cross-border *re-spread* after a removal. The *steady-state* skylight-darkening-across-a-border half was subsequently covered by the Bug-12 family (**B51** asymmetric two-shaft, **B53** mutually-lit seam loop, **B52** multi-hop ring), but the **race** quadrant — a skylight *removal* deferred into an **in-flight**
+  neighbor (the skylight twin of B7) — still had no scenario. This is also the exact neighborhood
+  [Bug 11](../../Bugs/LIGHTING_BUGS.md) lived in (`CrossChunkLightModApplier.ComputeSkylight` removal path), so it doubles as a Bug-11 regression guard.
 - **Why it was a prerequisite.** **LI-1** (single halo-padded lighting volume —
   [PERFORMANCE_IMPROVEMENTS_REPORT.md](../../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) Lighting §) and the **P-2** substrate it seeds change *how the BFS reads across chunk borders* (halo array reads replacing the 9-map/hashmap dispatch). LI-1's acceptance criterion is **bit-identical light output**, and **TG-4** Phase 4 rides the same halo substrate (option (a) = P-2). A halo that under-reads or mis-indexes the seam on the *darkening* path would produce wrong light there. C1/C2 (B40–B44) assert cross-chunk *brightening* fuzz; C3 closes the *darkening*
   half. **C3 is now green and must stay green before LI-1 freezes any halo-vs-9-map diff.**
 - **No new harness capability was needed:** reuses `PlaceBlock`, `BeginLightingJob`/`CompleteLightingJob`,
-  `GetSkyLight`, the borderless oracle, and `RunToConvergence`/`RunWaveToConvergence` exactly as B7/B13/B53.
-- **Closed by** (`Baselines/LightingValidationSuite.Baseline.C3Darkening.cs`, suite was at B53; prove-red confirmed 2026-06-21 — neutering the cross-chunk sunlight-removal apply reds B54/B55 with the (2,1) side stuck at the stale spill, restored → all green):
-    - **B54 — in-flight race (the genuinely-missing quadrant).** A single sky shaft at x28 in `(1,1)` spills across the `(1,1)/(2,1)` seam into `(2,1)`. `BeginLightingJob((2,1))` (snapshots the bright pre-seal state) → seal the shaft in `(1,1)` → run `(1,1)`'s job: it emits a cross-chunk sunlight **removal** mod toward in-flight `(2,1)`, which **must be deferred** (asserted `ModsDeferred > 0`) and drained after
-      `(2,1)`'s merge. `RunWaveToConvergence` → the previously-lit `(2,1)` voxel re-darkens to 0 and the field matches the borderless oracle. Without the defer/drain the removal is lost and `(2,1)` stays brighter than the oracle (the Bug-08-class failure, on the previously-untested sunlight-removal route).
+  `GetSkylight`, the borderless oracle, and `RunToConvergence`/`RunWaveToConvergence` exactly as B7/B13/B53.
+- **Closed by** (`Baselines/LightingValidationSuite.Baseline.C3Darkening.cs`, suite was at B53; prove-red confirmed 2026-06-21 — neutering the cross-chunk skylight-removal apply reds B54/B55 with the (2,1) side stuck at the stale spill, restored → all green):
+    - **B54 — in-flight race (the genuinely-missing quadrant).** A single sky shaft at x28 in `(1,1)` spills across the `(1,1)/(2,1)` seam into `(2,1)`. `BeginLightingJob((2,1))` (snapshots the bright pre-seal state) → seal the shaft in `(1,1)` → run `(1,1)`'s job: it emits a cross-chunk skylight **removal** mod toward in-flight `(2,1)`, which **must be deferred** (asserted `ModsDeferred > 0`) and drained after
+      `(2,1)`'s merge. `RunWaveToConvergence` → the previously-lit `(2,1)` voxel re-darkens to 0 and the field matches the borderless oracle. Without the defer/drain the removal is lost and `(2,1)` stays brighter than the oracle (the Bug-08-class failure, on the previously-untested skylight-removal route).
     - **B55 — steady-state canonical representative.** Same geometry; seal under sequential
       `RunToConvergence`; the darkness crosses the seam and the corridor (incl. the `(2,1)` side) matches the oracle. A simpler explicit representative than the Bug-12 loop geometries (B51/B53).
 
-### C4 — Sunlight-column persist→replay and the `AddPendingBlocklight` placement-after-removal guard are unpinned · **CLOSED (2026-06-14)**
+### C4 — Skylight-column persist→replay and the `AddPendingBlocklight` placement-after-removal guard are unpinned · **CLOSED (2026-06-14)**
 
 - **Was:** elevated from the B1 "still NOT covered" note. **B30/B31/B32 all persist→replay *blocklight***
-  (torch). The persist store's **sunlight-column** path (`PersistMod` `Channel == Sun` →
-  `LightingStateManager.AddPending` → `SunColumnRecalcQueue` replay on load — `LightingTestWorld.cs:859`) and the `AddPendingBlocklight` placement-after-removal guard (`LightingStateManager.cs:145`) both *ran* but no baseline asserted their result.
-- **Now (a — sunlight persist→replay, DONE):** baseline **B46** (`Baseline_PersistReplayCrossChunkSunlight`, the Sun-channel twin of B30). A roof break on the (1,1) border opens a shaft whose spill targets (2,1) while it is `MarkChunkUnloaded`; the suite asserts the emitting job's `ModsPersisted > 0` (the Sun-channel persist route fired), that the under-roof sky stays at its pre-break shadowed value while unloaded, then that
+  (torch). The persist store's **skylight-column** path (`PersistMod` `Channel == Sky` →
+  `LightingStateManager.AddPending` → `SkyColumnRecalcQueue` replay on load — `LightingTestWorld.cs:859`) and the `AddPendingBlocklight` placement-after-removal guard (`LightingStateManager.cs:145`) both *ran* but no baseline asserted their result.
+- **Now (a — skylight persist→replay, DONE):** baseline **B46** (`Baseline_PersistReplayCrossChunkSkylight`, the Sky-channel twin of B30). A roof break on the (1,1) border opens a shaft whose spill targets (2,1) while it is `MarkChunkUnloaded`; the suite asserts the emitting job's `ModsPersisted > 0` (the Sky-channel persist route fired), that the under-roof sky stays at its pre-break shadowed value while unloaded, then that
   `MarkChunkLoaded(LoadFromDisk)` replays the column, re-derives the spill from (1,1)'s lit border, brightens the region, and matches the all-loaded oracle. No new harness capability was needed.
 - **Now (b — the `AddPendingBlocklight` guard, DONE):** baseline **B47**
   (`LightingAssert.AssertPendingBlocklightPlacementAfterRemovalGuard`) pins the order-sensitive guard (`LightingStateManager.cs:165`) directly against the real in-memory store (oracle-free, like B34 pins
@@ -362,8 +362,8 @@ conversion on the production mod path would not be caught in-harness (guarded in
 ### C10 — No RGB analog of the Bug 12 sourceless-loop initiator · **CLOSED (2026-07-12) — the predicted latent bug was real (Bug 18), fixed + guarded by baseline B90**
 
 - The sky↔RGB removal-machinery parity matrix after Bug 17: sky had the **initiator** (Bug 12,
-  `EmitCrossChunkSunlightRemoval`), the **veto** (Bugs 11/13, `In/CrossChunkSunlightSupport`) and **claim verification** (Bug 14, `PullBackClaim`). RGB had the **veto only** (Bug 17,
-  `In/CrossChunkBlocklightSupport`), and `EmitCrossChunkSunlightRemoval` had no blocklight counterpart.
+  `EmitCrossChunkSkylightRemoval`), the **veto** (Bugs 11/13, `In/CrossChunkSkylightSupport`) and **claim verification** (Bug 14, `PullBackClaim`). RGB had the **veto only** (Bug 17,
+  `In/CrossChunkBlocklightSupport`), and `EmitCrossChunkSkylightRemoval` had no blocklight counterpart.
 - **The predicted bug was confirmed real.** The B53-twin scenario — a sealed blocklight corridor straddling the x15|16 seam, two equal-color lamps as the only sources, both broken in the same wave — reproduced RED:
   the seam settled stable-but-wrong at a ~38-voxel over-bright red residue (worst R13 at the seam) with no collapse path, the Bug 17 veto actively protecting the stale mutual support. Filed **Bug 18** (`_FIXED_BUGS.md`
   Lighting #23).
@@ -438,7 +438,7 @@ conversion on the production mod path would not be caught in-harness (guarded in
   | 1 Cross-chunk persist → replay | **B109** | B30 | `ComputeBlocklight` mod-payload `modG`/`modB` transposed → replay read `(12,1,6)` instead of `(12,6,1)` |
   | 3 Removal → cross-border re-light | **B110** | B12 | same mod-payload transposition (`ApplyRemovalChannel` triple) |
   | 7 Race quadrant (in-flight neighbor) | **B111** | B7 | `ComputeBlocklight` **support** args `independentG`/`independentB` transposed → surviving blue ghost `B 0/1` |
-  | 6 Pool recycle / `Reset()` | **B112** | B33 | mod-payload transposition (B33 is sunlight-only, so the mirror adds mixed lamps to the same geometry) |
+  | 6 Pool recycle / `Reset()` | **B112** | B33 | mod-payload transposition (B33 is skylight-only, so the mirror adds mixed lamps to the same geometry) |
   | 4 Surface-stamp family | **B113** | B62, B63 | mod-payload transposition (B63 asserted only R; B113 asserts all three against the oracle) |
   | 2 LI-2 band differential | **B114** | B75, B76 | G/B transposed in `SetBlocklightRGB`'s band-gated store **only when the band is engaged** — banded and full-height legs diverge |
 
@@ -467,7 +467,7 @@ conversion on the production mod path would not be caught in-harness (guarded in
 
 ### C9 — Flat scenario worlds never exercise border shadow-casters · **CLOSED (2026-07-04, found by the Bug 14 hotfix)**
 
-- Every scenario terrain is a superflat floor plus hand-placed features, so the column-recalc **shadow-caster** branch (`RecalculateSunlightForColumn` waking the highest block's horizontal neighbors, **including cross-border ones** — the one production path that seeds darkness nodes in the halo) essentially never fired at a seam. Real terrain hits it constantly. Consequence: the Bug 14 fix's pull-back claims could carry out-of-center positions in-game, crash `ProcessLightingJobs`, and leave every suite scenario green — the crash class was structurally
+- Every scenario terrain is a superflat floor plus hand-placed features, so the column-recalc **shadow-caster** branch (`RecalculateSkylightForColumn` waking the highest block's horizontal neighbors, **including cross-border ones** — the one production path that seeds darkness nodes in the halo) essentially never fired at a seam. Real terrain hits it constantly. Consequence: the Bug 14 fix's pull-back claims could carry out-of-center positions in-game, crash `ProcessLightingJobs`, and leave every suite scenario green — the crash class was structurally
   invisible to the corpus.
 - **Closed** by baseline **B60** (seam overhang → partially-lit neighbor → border-column edit; asserts the cross-border wave fires via `ModsEmitted > 0` + oracle convergence), plus the center-only claim contract in the job and defensive bounds-skips in both verifiers.
 - **Residual — resolved by HF-1 (2026-07-05):** originally the crash itself was not scenario-provable — at B60's position the harness `ChunkData` tolerated the out-of-bounds read as a benign wrong-voxel read that the verifier's superseded check skipped (a deliberate both-guards-off sabotage run stayed green), so B60 only pinned path liveness/convergence. With HF-1's fail-fast accessor assertions (see A5) the same sabotage now reds B60 loudly, so the scenario guards the crash class too. Standing lesson for scenario authoring: prefer at least one
@@ -481,7 +481,7 @@ conversion on the production mod path would not be caught in-harness (guarded in
 
 > **None of C3–C12 require a new harness capability** — each reuses existing primitives
 > (`MarkChunkUnloaded`/`MarkChunkLoaded`, `BeginLightingJob`/`CompleteLightingJob`, the pure-channel lamp
-> palette, `GetSkyLight`/`GetBlocklightRGB`, `RunBug16InterruptedCyclingRecipe`; C11's fuzz needs only a
+> palette, `GetSkylight`/`GetBlocklightRGB`, `RunBug16InterruptedCyclingRecipe`; C11's fuzz needs only a
 > scenario-level seeded driver, the HF-3 shape). The genuinely open *harness/framework* gaps remain those
 > already catalogued: the runner-level work-cap invariant (B8), no failure shrinker (C1/C2), fixed grid
 > sizes (3×3 / 5×5), `neighborsDataReady` is a hand-set toggle not derived from generation state (B2), no
@@ -534,9 +534,9 @@ manual-flight path is not the only guard of that machinery.)
 | C11 | Interrupted-reconciliation axis has ONE recipe instance — **seeded fuzz B91 + band differential B92**; fuzz surfaced a Bug-09-shaped sync under-delivery lead → **RESOLVED harness artifact** (edge-check re-add heals it; Bug 09 stays open) | **CLOSED**                | —                | done           |
 | C12 | RGB darkness-phase pull-backs unverified (Bug 14's RGB mirror) — B60/B61-twin; **verdict GREEN, self-heals → baseline B89**, scopes fix to initiator-only                                                                                     | **CLOSED**                | —                | done           |
 | B8  | Work-cap fail-safe asserted by only B87/B88 — **promoted to a runner-level `FailSafeErrorScope` invariant** (all 8 suites) + 2 framework self-tests                                                                                           | **CLOSED**                | —                | done           |
-| C4  | Sunlight persist→replay (B46) + `AddPendingBlocklight` guard (B47)                                                                                                                                                                            | **CLOSED**                | —                | done           |
+| C4  | Skylight persist→replay (B46) + `AddPendingBlocklight` guard (B47)                                                                                                                                                                            | **CLOSED**                | —                | done           |
 | C5  | Cumulative multi-layer attenuation probe (B45)                                                                                                                                                                                                | **CLOSED**                | —                | done           |
-| C3  | Cross-chunk sunlight darkening race quadrant (B54/B55) — prereq for LI-1 → P-2 / TG-4 Ph.4                                                                                                                                                    | **CLOSED**                | —                | done           |
+| C3  | Cross-chunk skylight darkening race quadrant (B54/B55) — prereq for LI-1 → P-2 / TG-4 Ph.4                                                                                                                                                    | **CLOSED**                | —                | done           |
 | A5  | Fail-soft `ChunkData` accessors — out-of-bounds is a position lottery (closed by HF-1)                                                                                                                                                        | **CLOSED**                | —                | done           |
 | B6  | MT-2 `LightWorkScheduler` park/promote layer unmodeled (closed by AS-2 scheduler mode + B66–B70)                                                                                                                                              | **CLOSED**                | —                | done           |
 | B7  | `ProcessLightingJobs` pass bookkeeping production-only (HF-2 near-term; full replay via `JobCompletionPass` + B65, HF-4 #2; skeleton shared with meshing + release-on-fault order pinned by meshing B27, MP-4)                                | **CLOSED (full)**         | —                | done           |

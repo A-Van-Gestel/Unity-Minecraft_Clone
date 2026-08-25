@@ -35,7 +35,7 @@ Shader "Minecraft/Blocks"
             float GlobalLightLevel;
             float minGlobalLightLevel;
             float maxGlobalLightLevel;
-            half3 SkyLightColor;
+            half3 SkylightColor;
 
             VoxelV2F vertFunction(VoxelAppdata v)
             {
@@ -45,7 +45,7 @@ Shader "Minecraft/Blocks"
             half4 fragFunction(VoxelV2F i) : SV_Target
             {
                 #ifdef DEBUG_LIGHTDATA
-                // False-color visualization: R = sunlight (lightData.r), G = block BLUE
+                // False-color visualization: R = skylight (lightData.r), G = block BLUE
                 // (lightData.a — the vector packs (sky, blockR, blockG, blockB)), B = 0.
                 // Smooth lighting produces per-vertex gradients; flat lighting is uniform per face.
                 return half4(i.lightData.r, i.lightData.a, 0.0, 1.0);
@@ -53,9 +53,9 @@ Shader "Minecraft/Blocks"
 
                 half4 col = SampleBlockTexture(i.uv);
 
-                // Apply voxel lighting: sun (scalar, tinted by sky color) + block (RGB)
+                // Apply voxel lighting: sky (scalar, tinted by sky color) + block (RGB)
                 col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.r, i.lightData.gba,
-                                                SkyLightColor,
+                                                SkylightColor,
                                                 GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel);
 
                 // Multiply by vertex RGB to support BlockIconGenerator shadows and tinting

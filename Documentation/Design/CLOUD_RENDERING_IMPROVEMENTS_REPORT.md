@@ -22,7 +22,7 @@ the render-distance-scaling session that produced `c7eabd6`, not assumed.
 **Relationship to other documents:**
 
 - [`LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md)
-  — RF-2 §5 (clouds tint by `SkyLightColor`) is **absorbed by CL-2** here; RF-7 §4 names cloud
+  — RF-2 §5 (clouds tint by `SkylightColor`) is **absorbed by CL-2** here; RF-7 §4 names cloud
   color/density as storm knobs — CL-4's density parameter is the receiving end.
 - [`../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md`](../Architecture/WORLD_SCALING_FLOATING_ORIGIN.md) — §5.1 owns the cloud
   coordinate rules every item must respect: tiles re-derive through `VoxelToUnity`, pattern
@@ -64,9 +64,9 @@ CL-1/CL-2 drift + shader work (`d52b089`, `12e6cf6`, both in-game verified 2026-
 | Coverage      | `max(viewDistance × 2, 8)` chunks radius; 64-block tiles keyed by **cloud-space tile index** (drift-corrected), pooled GameObjects, one shared `Mesh` per unique pattern tile (`Clouds.GetTileMesh`)                                                                                                                                                                                     |
 | Pattern       | **Procedural seeded (was CL-3 Option A):** `CloudPatternJob` (Burst) — periodic FBM value noise, lowbias32 lattice hash, thresholded at the coverage percentile (0.23 = classic density); knobs 32 cells / 4 octaves / 0.6 persistence calibrated vs `clouds.png` blob stats. Classic texture behind `_useClassicPattern`; still repeats every 512 via `WrapToPattern`                   |
 | Styles        | `CloudStyle` enum: `Off` / `Fast` (down-facing quads only) / `Fancy` (1-block-tall extruded hull, corners inflated by `_depthOffset` against Z-fighting)                                                                                                                                                                                                                                 |
-| Shader        | `Minecraft/CloudShader` — unlit; MC-style per-face shading (Fancy-only via the **per-material** `_CloudFaceShading`, v1.4), `SkyLightColor` day/night tint, coverage-edge fade (`_CloudFadeParams`). Transparent with **`ZWrite On`**: depth resolves overlapping faces (v1.1)                                                                                                           |
+| Shader        | `Minecraft/CloudShader` — unlit; MC-style per-face shading (Fancy-only via the **per-material** `_CloudFaceShading`, v1.4), `SkylightColor` day/night tint, coverage-edge fade (`_CloudFadeParams`). Transparent with **`ZWrite On`**: depth resolves overlapping faces (v1.1)                                                                                                           |
 | Motion        | **Wind drift (was CL-1):** cloud-space tiles on a drift-carrying root — per-frame cost is one root transform move; re-key sweep only on cloud-tile crossing; accumulator wraps at the pattern period; wind vector **owned by `World` since FL-1** (`World.WindBlocksPerSecond`, default `(−0.6, 0)`, shared with foliage sway; `Clouds.LayerWind` reads it), RF-7 drives the value later |
-| Lighting/time | **Face shading + tint + edge fade (was CL-2, absorbs RF-2 §5):** top 1.0 / bottom 0.7 / X 0.9 / Z 0.8 on Fancy, flat on Fast; hue follows `SkyLightColor`, brightness follows the shared `VoxelLightToShadow` curve at `sunLuminance = 1`, **normalized to noon** (noon look = authored `_Color` exactly; night matches terrain's relative darkening)                                    |
+| Lighting/time | **Face shading + tint + edge fade (was CL-2, absorbs RF-2 §5):** top 1.0 / bottom 0.7 / X 0.9 / Z 0.8 on Fancy, flat on Fast; hue follows `SkylightColor`, brightness follows the shared `VoxelLightToShadow` curve at `skyLuminance = 1`, **normalized to noon** (noon look = authored `_Color` exactly; night matches terrain's relative darkening)                                    |
 | Update driver | Per-frame `Clouds.Update` drift tick (root move only, allocation-free); the re-key sweep runs on cloud-tile crossing and from `CheckViewDistance` / `Reanchor()` / `OnSettingsChanged` → `Reinitialize()` (drift survives reinit)                                                                                                                                                        |
 | Layers        | **Per-layer config array (was CL-6):** `CloudLayerConfig[]` on the `Clouds` component — height, drift multiplier + veer, opacity, style clamp (`min(setting, maxStyle)`), noise knobs, seed salt; per-layer runtime state (drift root, material instance, pattern, pools). Defaults: main 100 + upper 170 (×1.5 drift veered 15°, 60% opacity, always `Fast`, 2× blobs @ 0.12 coverage)  |
 
@@ -79,7 +79,7 @@ CL-1/CL-2 drift + shader work (`d52b089`, `12e6cf6`, both in-game verified 2026-
 | CL-3 | Pattern repeats every 512 blocks — infinite non-repeating pattern  |   🟡   |  🟡  |    ⚪    |  ✅   |  ✅   |
 | CL-4 | Frozen shapes — slow density evolution + weather-driven coverage   |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 | CL-5 | `Volumetric` quality tier — raymarched slab above the voxel styles |   🔴   |  🟡  |   🟡    |  ✅   |  ✅   |
-| CL-7 | Cloud shadows — pattern projected as terrain sunlight attenuation  |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+| CL-7 | Cloud shadows — pattern projected as terrain skylight attenuation  |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 | CL-8 | Flying through clouds does nothing — in-cloud screen fog           |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
 
 ---
@@ -179,7 +179,7 @@ uniform; ships behind `CloudStyle.Volumetric` so regressions are opt-in. ⚠ Qua
 
 **Classification:** Polish, high-impact ambience (ground visibly responds to the sky).
 
-**What exists today:** Nothing — terrain sunlight is the BFS skylight field; clouds and
+**What exists today:** Nothing — terrain skylight is the BFS skylight field; clouds and
 terrain lighting are fully decoupled.
 
 **Proposal:** shader-only projection, **zero BFS/lighting-engine contact** (same contract as
@@ -274,14 +274,14 @@ too); pairs naturally with CL-5 where the slab shader gives the effect for free 
   value noise on every seed; the job uses a sequential lowbias32 avalanche mix instead. Also
   learned: `IJobParallelFor` restricts container writes to the current index — per-row batching
   trips the safety system (job rewritten per-cell).
-* **v1.2** - **Night-brightness fix** (2026-07-19, in-game verified): `SkyLightColor` is hue-only
+* **v1.2** - **Night-brightness fix** (2026-07-19, in-game verified): `SkylightColor` is hue-only
   (brightness lives in the shade curve per the RF-1 split), so clouds rendered full-bright at
-  night — the shader now applies the shared `VoxelLightToShadow` curve at `sunLuminance = 1`,
+  night — the shader now applies the shared `VoxelLightToShadow` curve at `skyLuminance = 1`,
   normalized to noon (daytime look unchanged by construction). Baseline row updated.
 * **v1.1** - **CL-1 + CL-2 SHIPPED & archived** (2026-07-19, `d52b089` + `12e6cf6`, in-game
   verified): wind drift (cloud-space tiles on a drift-carrying root, pattern-period-wrapped
   accumulator, exact `VoxelToUnity(Vector3Int)` anchor, inspector wind vector) + shader
-  (MC-style face shading Fancy-only, `SkyLightColor` tint absorbing RF-2 §5, coverage-edge
+  (MC-style face shading Fancy-only, `SkylightColor` tint absorbing RF-2 §5, coverage-edge
   fade). Baseline table updated to the shipped state. Implementation deviation worth keeping:
   the planned "keep the stencil `IncrSat` guard" was **wrong once faces shade differently** —
   the stencil picks a draw-order-arbitrary winner (visible interior patchwork), and a

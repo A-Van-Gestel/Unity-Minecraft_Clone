@@ -600,7 +600,7 @@ graduate to work items).
   [`World Generation/CAVE_GENERATION.md`](World%20Generation/CAVE_GENERATION.md) §3.1.5 (Implemented).
   The *lighting* crash at those magnitudes
   (Bug 19, archived as `_FIXED_BUGS.md` #24) was fixed independently 2026-07-19 — integer column
-  routing end-to-end (`SunlightColumnRouting` + `Vector3Int` overloads on the `WorldData`/`ChunkCoord`
+  routing end-to-end (`SkylightColumnRouting` + `Vector3Int` overloads on the `WorldData`/`ChunkCoord`
   query APIs), so lighting is exact to the ±2³¹ edge even where terrain is degraded.
 - **The absolute ±2³¹ voxel edge overflows by construction — documented-only (decided 2026-07-19).**
   At chunk ±2²⁷ the neighbor/halo ±1 arithmetic (`LocalToGlobal`, cross-chunk mod resolution)
@@ -777,10 +777,10 @@ graduate to work items).
   (c); the liquid-noise cosmetic bullet now records the confirmed flat-blue fluid surfaces and striped
   clouds near the edge. One genuinely new far-coordinate bug was split out as `FLUID_BUGS.md` #17
   (naturally-generated fluids don't reactivate on neighbor break; onset unbracketed) — **fixed in v1.19**.
-* **v1.9** - **Bug 19 fixed** (2026-07-19): the far-lands sunlight column-recalc crash §7's far
-  verification surfaced is closed — root cause was `WorldData.QueueSunlightRecalculation`'s
+* **v1.9** - **Bug 19 fixed** (2026-07-19): the far-lands skylight column-recalc crash §7's far
+  verification surfaced is closed — root cause was `WorldData.QueueSkylightRecalculation`'s
   int→float round-trip mis-chunking columns past ±2²⁴ (plus implicit `Vector3Int`→`Vector3`
-  conversions at 11 query call sites). Fixed by the shared integer `SunlightColumnRouting` seam +
+  conversions at 11 query call sites). Fixed by the shared integer `SkylightColumnRouting` seam +
   `Vector3Int` overloads (auto-capturing every integer caller) + a latched dev-build ±2²⁴ tripwire
   on the float paths; guarded by lighting B95/B96 on a far-anchored harness (prove-red, then
   Validate All 279/279). §9 additionally records the **±2³¹ edge overflow class as documented-only**
@@ -792,7 +792,7 @@ graduate to work items).
   `COMMAND_CONSOLE_SYSTEM.md` (v1.6 there records the shipped surface + suite B24–B31). The §7
   WS-4 phase table is now fully ✅. Far-teleport verification (±2×10⁷ voxels) confirmed the
   documented terrain degradation past ±2²⁴ and surfaced lighting **Bug 19** (negative
-  chunk-local heightmap index in `RecalculateSunlightForColumn` — logged in
+  chunk-local heightmap index in `RecalculateSkylightForColumn` — logged in
   `LIGHTING_BUGS.md`; a global→local column-math seam, not an origin-machinery defect).
 * **v1.7** - **WS-4c's persistence half SHIPPED** (2026-07-17), in-game confirmed across multiple migrated saves
   and the fresh-world flow: `PlayerSaveData.position` is a `ChunkRelativePosition` (level.dat **v12→v13**,

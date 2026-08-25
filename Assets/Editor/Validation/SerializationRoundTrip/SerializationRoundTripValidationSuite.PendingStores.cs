@@ -8,7 +8,7 @@ namespace Editor.Validation.SerializationRoundTrip
 {
     /// <summary>
     /// Part 5 of the suite (roadmap <c>NS-1</c>): the pending stores. Work that could not be applied yet —
-    /// sunlight column recalculations, cross-chunk blocklight modifications, and voxel mods aimed at chunks
+    /// skylight column recalculations, cross-chunk blocklight modifications, and voxel mods aimed at chunks
     /// that were not loaded — lives beside the region files and must survive a save → load cycle. This is
     /// where Bug 08's history lives: what these stores drop is not recomputable, because the light that
     /// crossed into an unloaded chunk has no other record.
@@ -18,7 +18,7 @@ namespace Editor.Validation.SerializationRoundTrip
         // --- Scenarios ---------------------------------------------------------------------------
 
         /// <summary>
-        /// B15. Red when: pending sunlight columns or pending blocklight mods fail to survive a save → load
+        /// B15. Red when: pending skylight columns or pending blocklight mods fail to survive a save → load
         /// cycle through a fresh manager — chunk keys, per-chunk column sets, per-voxel RGB channels or the
         /// removal flag. The removal flag matters on its own: a removal replayed as a placement leaves the
         /// broken lamp's propagated light behind forever.
@@ -126,7 +126,7 @@ namespace Editor.Validation.SerializationRoundTrip
         /// its local columns in one loop and then adds <b>all</b> of them in the next — logging the invalid
         /// ones but storing them anyway. <c>Save</c> narrows each coordinate to a byte, so an out-of-range
         /// column does not merely survive: it is <b>truncated onto a different, in-range column</b>, which
-        /// then passes <c>Load</c>'s bounds check and queues a sunlight recalculation for a column the caller
+        /// then passes <c>Load</c>'s bounds check and queues a skylight recalculation for a column the caller
         /// never asked for. Column 259 becomes column 3.
         /// <para>Asserts the correct behavior — an invalid column is rejected at the door and no phantom
         /// column appears after a round trip — so it flips green once the add loop skips what the validation

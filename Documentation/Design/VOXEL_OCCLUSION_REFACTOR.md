@@ -217,7 +217,7 @@ Not part of the phases below — recording it so a cold executor does not redo i
 | F8 | **AO occlusion is boolean, not fractional.** `SampleCorner` skips the diagonal term only when `sideAOpaque && sideBOpaque`, and `SampleNeighborLight` substitutes hard zero. There is no representation for "half occluding", so even a correct shape model has nowhere to put a coverage fraction.                                                                                            | VO-5         |
 | F10 | **`NS-4` does not guard the collision rotation.** Discovered by VO-1's prove-red: with `math.transpose` applied to the shared rotation core, all **26** Physics Solver baselines stayed green. The plan (v1.0) had asserted `NS-4` was the guard that a collision-bounds refactor is behaviour-preserving; it is not — none of its scenarios distinguish a rotated custom-bounds volume from its inverse. This is a pre-existing coverage gap in `NS-4`, not something VO-1 introduced, and it means *any* future change to the rotation path needs the occlusion baselines (or new `NS-4` scenarios) to be safe. | Recorded here; VO-1's guard chain compensates. A dedicated `NS-4` rotated-bounds scenario is filed as a follow-up in §7. |
 | F11 | **The oracle's sky column seeding was over-migrated by VO-3, and nothing could see it.** `LightingOracle`'s downward column walk charged only each cell's *entry* cost through its top face — and a horizontal slab's top face is the open mid-plane, so the column walked straight through the solid half beneath it, leaving the oracle 1 level brighter than the engine under any slab ceiling. The engine was right (its column recalc uses whole-block opacity there). It went unnoticed because B101–B104 are probe-based by design (F7), so **VO-4's B105 is the suite's first oracle comparison containing a partial block at all**. Full-cube controls matched throughout, which is how the fixture was cleared before the spec was touched. | VO-4 (fixed: `ExitBlocked` on the bottom face) |
-| F12 | **Sealing a partial-block light shaft never darkens the column beneath it.** Found while authoring B105; reproduces with **no chunk seam anywhere**, so it is not VO-4's subject. `IsLightObstructing` is `Opacity > 0`, so a slab already sits in the heightmap and sealing it never re-runs `RecalculateSunlightForColumn`; `PropagateDarkness` cannot help either, because a flat 15 column has no decrement chain. Controls pin it to partial blocks: a Glass shaft (full cube, opacity 0, equally undimmed column, *not* light-obstructing) and a Water shaft both darken correctly. This makes VO-3's recorded "the field is correct; the heightmap merely stays conservative" true for placement and **false for removal**. | Filed as `LIGHTING_BUGS.md` **Bug 21**; **root fix landed 2026-08-08** (user chose it over the narrower trigger-only option): `LightAttenuation.ObstructsSkyColumn` replaces `IsLightObstructing` at every heightmap site, **plus** a second part the harness caught — `ModifyVoxel`'s recalculation trigger fired only on an opacity change, which sealing a slab by rotation does not produce |
+| F12 | **Sealing a partial-block light shaft never darkens the column beneath it.** Found while authoring B105; reproduces with **no chunk seam anywhere**, so it is not VO-4's subject. `IsLightObstructing` is `Opacity > 0`, so a slab already sits in the heightmap and sealing it never re-runs `RecalculateSkylightForColumn`; `PropagateDarkness` cannot help either, because a flat 15 column has no decrement chain. Controls pin it to partial blocks: a Glass shaft (full cube, opacity 0, equally undimmed column, *not* light-obstructing) and a Water shaft both darken correctly. This makes VO-3's recorded "the field is correct; the heightmap merely stays conservative" true for placement and **false for removal**. | Filed as `LIGHTING_BUGS.md` **Bug 21**; **root fix landed 2026-08-08** (user chose it over the narrower trigger-only option): `LightAttenuation.ObstructsSkyColumn` replaces `IsLightObstructing` at every heightmap site, **plus** a second part the harness caught — `ModifyVoxel`'s recalculation trigger fired only on an opacity change, which sealing a slab by rotation does not produce |
 | F13 | **The meshing harness's half slab had no authored volume.** `TestMeshBlockPalette.MakeHalfSlab` never set `collisionBounds`, so both slab fixtures reported `HasCustomBounds = false` and coverage 1 on all six faces — a slab in geometry, a full cube in shape. The lighting palette has always authored it (`TestBlockPalette.cs:88`); the meshing palette diverged silently because, until VO-5, no meshing code asked a shape question. Found by VO-5's first probe returning identical numbers for every orientation. Inert before VO-5 (no existing baseline read bounds), so no prior result was wrong. | VO-5 (fixed: `collisionBounds = BlockCollisionBounds.BottomHalfSlab`). Generalizes the warning already recorded against `TestCustomMeshLibrary` in the VO-6 packet: **harness fixtures mirror production authoring, and an unmirrored field stays invisible until some phase reads it.** |
 | F14 | **VO-5 cannot be visually judged on slab surfaces until VO-6 lands.** VO-5 only ever *removes* darkening (a partial block occludes less), and a block's volume never occludes its own face — so slab faces gain no shading from it, while losing the blanket darkening that previously masked F1. In game this reads as "the slabs have no AO". Confirmed numerically on the four-slab pit: the pit floor moved 64 → 132 (the reported artifact, fixed), while every slab face only brightened. The surfaces a viewer judges the AO blend on are exactly the ones VO-6 re-samples. | Recorded. Owner accepted VO-5 as-is on this basis (2026-08-08) rather than reordering or tuning the blend to compensate — tuning a shading knob to hide a sampling bug would have to be undone by VO-6. **Re-check the D5 blend once VO-6 is in game.** |
 | F9 | ⚠️ **CLOSED-AS-WONTFIX 2026-08-08 (see VO-7).** **Light values are serialized; the model is not versioned.** Nothing on disk records which occlusion model produced a chunk's `LightData`, so without an explicit version bump an upgraded client silently mixes old and new lighting per chunk. (Executor verifies the exact world-version constant — the grep for it returned nothing under `Serialization/`/`Data/`.)                       | ~~VO-7~~ — descoped |
@@ -516,7 +516,7 @@ Plus `BlockTypeJobData.IsFullyOpaqueCell` (`IsOpaque && !HasCustomBounds`) for t
 guards, which ask "does this cell hold only surface light" — a partial block does not, and must
 re-propagate.
 
-**Sites migrated (sunlight + RGB propagation).** `PropagateLight` and `PropagateLightRGB`: source guard,
+**Sites migrated (skylight + RGB propagation).** `PropagateLight` and `PropagateLightRGB`: source guard,
 per-direction exit test, and the neighbour opaque/attenuate branch. `LightingOracle` received the identical
 change plus a metadata channel (`LightingTestWorld.GetBlockMeta`) — the oracle previously cached only block
 ids and so could not evaluate an orientation-dependent spec.
@@ -535,11 +535,11 @@ as K20a red / B101–B103 green.
 the horizontal slab correct (straight to 0 — B101 holding in game) but the column under a *vertical* slab
 decaying `15/14/13/…/0` instead of staying 15. Two whole-block tests had been left unconverted:
 
-- `isVerticalSunlight` (the unattenuated downward sky-column rule) gated on
+- `isVerticalSkylight` (the unattenuated downward sky-column rule) gated on
   `BlockTypeJobData.IsFullyTransparentToLight` — a whole-block `Opacity == 0` test that a slab fails, so
   the column resumed attenuating below it. **Fixed** with `LightAttenuation.IsTransparentThroughFace`.
 - `IsLightObstructing` (`Opacity > 0`) still puts the **heightmap** at a vertical slab, so
-  `RecalculateSunlightForColumn` PASS 1 stops force-lighting there. **Deliberately NOT changed** — with
+  `RecalculateSkylightForColumn` PASS 1 stops force-lighting there. **Deliberately NOT changed** — with
   the rule above fixed, the BFS carries the undimmed column down anyway, so the field is correct; the
   heightmap merely stays conservative (fast path off, slow path right). Changing `IsLightObstructing`
   would touch `ChunkData` heightmap maintenance, generation, and the LI-2 band derivation, for no
@@ -574,7 +574,7 @@ Two alternatives were considered and rejected:
   shape already answers the question. If it is ever wanted, note the distinction needs **no new field** —
   `columnContinues = EntryOpacity == 0 && coverage >= 1` derives it from the shape alone, a one-`&&` change.
 - **A one-time "light cut"** (lose N levels at the slab, then propagate undimmed). Rejected as genuinely
-  requiring new per-column state: sky-light *removal* is authoritative through `RecalculateSunlightForColumn`,
+  requiring new per-column state: sky-light *removal* is authoritative through `RecalculateSkylightForColumn`,
   whose PASS 1 writes a literal 15 above the heightmap, and `PropagateDarkness` unwinds light by following
   exact `neighbor == old − cost` decrement chains. A column sitting flat below 15 has neither, and sky light
   has no spare bits for the extra state.
@@ -650,7 +650,7 @@ future edit from silently reintroducing a whole-block answer.
 including B48/B49 and B56–B59. Values verified inline against live assemblies (open-side slab source 11,
 solid-side 0, opaque cube 0, open-face entry 11, covered-face entry 0, B49's flat differential 7/11).
 
-- **Scope:** `CrossChunkLightModApplier`'s `InChunkSunlightSupport` / `CrossChunkSunlightSupport` /
+- **Scope:** `CrossChunkLightModApplier`'s `InChunkSkylightSupport` / `CrossChunkSkylightSupport` /
   `PullBackClaimStillSupported` currently exclude "fully-opaque neighbours" as non-propagating; that
   test becomes directional. This machinery has a documented live-lock history (Bugs 11/13/14) — read
   `LIGHTING_SYSTEM_OVERVIEW.md` §3.4/§3.7 in full before editing.
@@ -1103,7 +1103,7 @@ substrate it needs.
   `SUB_CELL_TESSELLATION` is a named constant; 2×2 is roughly 1.9×.
 - **Probe fidelity:** B42's and B46's probes located a face as "the first quad matching its region", which
   held only while a face was one quad. Both now read the face's **corner** vertices by position
-  (`TopFaceCornerSun`), the reading VO-9a proved cannot move. They were probe-resolution failures, not
+  (`TopFaceCornerSky`), the reading VO-9a proved cannot move. They were probe-resolution failures, not
   engine regressions — both green again with their assertions unchanged.
 - **`EmitQuadTriangles`' anisotropy-aware split** now runs per sub-quad; `MESHING_BUGS.md` **M04** stays
   filed and untouched.

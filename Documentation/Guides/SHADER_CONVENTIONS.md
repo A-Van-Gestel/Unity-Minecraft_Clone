@@ -106,7 +106,7 @@ does not.
 |---|---|---|
 | A texture-**atlas** UV | `centroid` | The canonical failure. Extrapolation walks the UV off the quad's tile and, with the project atlas point-filtered and mip-free (`packed_texture_atlas.png`), snaps to the neighboring tile's texels — a one-pixel seam of the **wrong block** along every silhouette edge, widening with render scale (at 30 % it is one render-target pixel upscaled ~3×) |
 | A packed bit field, an ID, a discriminator — anything constant per primitive | `nointerpolation` | A bit field has no meaningful in-between. Flat-passing states the contract instead of interpolating and rounding back. `packedShoreMask` (`LiquidCore.hlsl`) is the worked example |
-| A smooth ramp — distance, per-vertex light, a normal, a flow vector | *(none)* | A sub-pixel overshoot is invisible. `fogDistance` in `VoxelV2F` and the liquid shader's `sunLight`/`blockRGB`/`emissive`/`shadowMultiplier` are deliberately plain |
+| A smooth ramp — distance, per-vertex light, a normal, a flow vector | *(none)* | A sub-pixel overshoot is invisible. `fogDistance` in `VoxelV2F` and the liquid shader's `skylight`/`blockRGB`/`emissive`/`shadowMultiplier` are deliberately plain |
 
 - `centroid` moves the sample to the centroid of the covered samples, always inside the primitive.
 - Both are **modifiers, not varyings** — they cost **zero** interpolators, so §1.3's budget is unaffected.

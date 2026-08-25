@@ -110,10 +110,10 @@ Comments and doc comments document the code **as it stands now** — never how i
 // Bad: war story — describes history, not current behavior.
 // NOTE: used to read from the wrong neighbor and leak light across the seam;
 // fixed 2026-06-21 by clamping to the local section.
-skyLight = SampleLocalSection(pos);
+skylight = SampleLocalSection(pos);
 
 // Good: describes what the code does now, and why.
-skyLight = SampleLocalSection(pos); // Clamp to the local section so light never crosses the chunk seam.
+skylight = SampleLocalSection(pos); // Clamp to the local section so light never crosses the chunk seam.
 ```
 
 ## 4. Attributes

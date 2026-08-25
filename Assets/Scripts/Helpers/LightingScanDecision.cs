@@ -50,7 +50,7 @@ namespace Helpers
         /// <item><c>Park</c> → <c>MarkWaiting(pos)</c>.</item>
         /// <item><c>Remove</c> → <c>Remove(pos)</c>.</item>
         /// <item><c>ScheduleInitial</c> / <c>ScheduleEdge</c> / <c>ScheduleRegular</c> → perform the arm's side
-        /// effects (initial: full sunlight recalc; edge: set <c>HasLightChangesToProcess</c> so a chunk with only
+        /// effects (initial: full skylight recalc; edge: set <c>HasLightChangesToProcess</c> so a chunk with only
         /// an edge check can schedule), then attempt the schedule. On <b>success</b> the schedule clears every
         /// lighting flag, so the caller <c>Remove(pos)</c>s the chunk — it re-enters the ready set only via its
         /// completion's flag callback (if it re-flags unstable) or a <c>PromoteNeighborhood</c> event. A declined

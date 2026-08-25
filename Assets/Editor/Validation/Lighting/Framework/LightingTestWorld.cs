@@ -255,9 +255,9 @@ namespace Editor.Validation.Lighting.Framework
             /// </summary>
             public readonly ChunkData Data;
 
-            public readonly Queue<LightQueueNode> SunQueue = new Queue<LightQueueNode>();
+            public readonly Queue<LightQueueNode> SkyQueue = new Queue<LightQueueNode>();
             public readonly Queue<LightQueueNode> BlockQueue = new Queue<LightQueueNode>();
-            public readonly Queue<Vector2Int> SunColumnRecalcQueue = new Queue<Vector2Int>();
+            public readonly Queue<Vector2Int> SkyColumnRecalcQueue = new Queue<Vector2Int>();
 
             /// <summary>
             /// Pending-light-work gate, backed by the REAL production flag
@@ -529,12 +529,12 @@ namespace Editor.Validation.Lighting.Framework
         /// </summary>
         public enum ChunkLoadMode
         {
-            /// <summary>Loaded from disk (the chunk kept its saved light): persisted sunlight column
+            /// <summary>Loaded from disk (the chunk kept its saved light): persisted skylight column
             /// recalcs AND pending cross-chunk blocklight mods are replayed into the live chunk
             /// (mirror of <c>World.LoadOrGenerateChunk</c>'s restore + replay).</summary>
             LoadFromDisk,
 
-            /// <summary>Freshly generated (light recomputed from scratch): persisted sunlight column
+            /// <summary>Freshly generated (light recomputed from scratch): persisted skylight column
             /// recalcs are replayed, but pending blocklight mods are DISCARDED — initial lighting
             /// recomputes all blocklight, so mods recorded while the chunk was absent are obsolete
             /// (mirror of <c>WorldJobManager</c>'s generated-chunk <c>DiscardPendingBlocklight</c>).</summary>
@@ -555,7 +555,7 @@ namespace Editor.Validation.Lighting.Framework
         /// Marks a previously-unloaded chunk as loaded again (clear site for the unload flag set by
         /// <see cref="MarkChunkUnloaded"/>) and replays the pending light work the store accumulated while
         /// it was unloaded, mirroring production's replay-on-load. The seeded BFS wake-up nodes and
-        /// sunlight column recalcs take effect on the next lighting pass the test runs for this chunk.
+        /// skylight column recalcs take effect on the next lighting pass the test runs for this chunk.
         /// </summary>
         /// <param name="chunkCoord">The grid coordinate of the chunk to mark loaded.</param>
         /// <param name="mode">Whether the chunk is loaded from disk (replay blocklight) or freshly
@@ -591,9 +591,9 @@ namespace Editor.Validation.Lighting.Framework
                 // The harness's managed BFS wake-up queues mirror ChunkData's; clear them too so a
                 // recycled TestChunk carries no stale wake-ups (they are normally drained on schedule,
                 // so this only matters if a test recycles mid-lifecycle).
-                chunk.SunQueue.Clear();
+                chunk.SkyQueue.Clear();
                 chunk.BlockQueue.Clear();
-                chunk.SunColumnRecalcQueue.Clear();
+                chunk.SkyColumnRecalcQueue.Clear();
             }
         }
 
@@ -671,13 +671,13 @@ namespace Editor.Validation.Lighting.Framework
             // LI-2: the drains also capture the highest AND lowest queued node Y — band-derivation inputs.
             int maxQueuedNodeY = -1;
             int minQueuedNodeY = int.MaxValue;
-            NativeQueue<LightQueueNode> sunQueue = NewOwned(flight, new NativeQueue<LightQueueNode>(Allocator.Persistent));
-            while (chunk.SunQueue.Count > 0)
+            NativeQueue<LightQueueNode> skyQueue = NewOwned(flight, new NativeQueue<LightQueueNode>(Allocator.Persistent));
+            while (chunk.SkyQueue.Count > 0)
             {
-                LightQueueNode node = chunk.SunQueue.Dequeue();
+                LightQueueNode node = chunk.SkyQueue.Dequeue();
                 if (node.Position.y > maxQueuedNodeY) maxQueuedNodeY = node.Position.y;
                 if (node.Position.y < minQueuedNodeY) minQueuedNodeY = node.Position.y;
-                sunQueue.Enqueue(node);
+                skyQueue.Enqueue(node);
             }
 
             NativeQueue<LightQueueNode> blockQueue = NewOwned(flight, new NativeQueue<LightQueueNode>(Allocator.Persistent));
@@ -689,8 +689,8 @@ namespace Editor.Validation.Lighting.Framework
                 blockQueue.Enqueue(node);
             }
 
-            NativeQueue<Vector2Int> sunColumnQueue = NewOwned(flight, new NativeQueue<Vector2Int>(Allocator.Persistent));
-            while (chunk.SunColumnRecalcQueue.Count > 0) sunColumnQueue.Enqueue(chunk.SunColumnRecalcQueue.Dequeue());
+            NativeQueue<Vector2Int> skyColumnQueue = NewOwned(flight, new NativeQueue<Vector2Int>(Allocator.Persistent));
+            while (chunk.SkyColumnRecalcQueue.Count > 0) skyColumnQueue.Enqueue(chunk.SkyColumnRecalcQueue.Dequeue());
 
             // Clear both flags in the one transition production calls once its job.Schedule() succeeds,
             // positioned after the queue drains to mirror that ordering.
@@ -735,7 +735,7 @@ namespace Editor.Validation.Lighting.Framework
 
                 flight.BandHeight = LightingBandDecision.DeriveBandHeight(in centerTop,
                     in w, in e, in s, in n, in sw, in nw, in se, in ne,
-                    maxQueuedNodeY, sunColumnQueue.Count > 0, edgeCheck);
+                    maxQueuedNodeY, skyColumnQueue.Count > 0, edgeCheck);
 
                 if (BandHeightSabotageHook != null)
                     flight.BandHeight = Mathf.Clamp(BandHeightSabotageHook(flight.BandHeight), 1, ChunkMath.CHUNK_HEIGHT);
@@ -757,7 +757,7 @@ namespace Editor.Validation.Lighting.Framework
 
                 flight.BandMinY = LightingBandDecision.DeriveBandMinY(in centerBottom,
                     in wB, in eB, in sB, in nB, in swB, in nwB, in seB, in neB,
-                    minQueuedNodeY, sunColumnQueue.Count > 0, chunk.Data.GetHeightmapMinY());
+                    minQueuedNodeY, skyColumnQueue.Count > 0, chunk.Data.GetHeightmapMinY());
 
                 if (BandMinYSabotageHook != null)
                     flight.BandMinY = Mathf.Max(0, BandMinYSabotageHook(flight.BandMinY));
@@ -795,9 +795,9 @@ namespace Editor.Validation.Lighting.Framework
                 BandTopLight = bandTopLight,
                 BandBottomLight = bandBottomLight,
                 ChunkPosition = chunk.VoxelOrigin,
-                SunlightBfsQueue = sunQueue,
+                SkylightBfsQueue = skyQueue,
                 BlocklightBfsQueue = blockQueue,
-                SunlightColumnRecalcQueue = sunColumnQueue,
+                SkylightColumnRecalcQueue = skyColumnQueue,
                 Heightmap = heightmap,
                 BlockTypes = _blockTypesNative,
                 CrossChunkLightMods = flight.Mods,
@@ -1024,7 +1024,7 @@ namespace Editor.Validation.Lighting.Framework
 
         /// <summary>
         /// Runs the full initial-lighting sequence the production pipeline performs for freshly
-        /// generated chunks: every chunk gets a full 256-column sunlight recalculation, the grid is
+        /// generated chunks: every chunk gets a full 256-column skylight recalculation, the grid is
         /// converged, and then the edge-check rounds (driven by each chunk's real
         /// <c>ChunkData.RemainingEdgeCheckRounds</c>) reconcile borders, each followed by convergence.
         /// </summary>
@@ -1033,7 +1033,7 @@ namespace Editor.Validation.Lighting.Framework
         public int RunInitialLighting(int maxRounds = DefaultMaxRounds)
         {
             foreach (TestChunk chunk in _chunks.Values)
-                QueueFullSunlightRecalc(chunk.Coord);
+                QueueFullSkylightRecalc(chunk.Coord);
 
             int totalRounds = RunToConvergence(maxRounds);
             if (totalRounds < 0) return -1;
@@ -1122,7 +1122,7 @@ namespace Editor.Validation.Lighting.Framework
         public int RunInitialLightingParallel(int maxRounds = DefaultMaxRounds)
         {
             foreach (TestChunk chunk in _chunks.Values)
-                QueueFullSunlightRecalc(chunk.Coord);
+                QueueFullSkylightRecalc(chunk.Coord);
 
             int totalRounds = RunWaveToConvergence(maxRounds);
             if (totalRounds < 0) return -1;
@@ -1155,7 +1155,7 @@ namespace Editor.Validation.Lighting.Framework
         public int RunInitialLightingParallelForcedEdgeRounds(int forcedEdgeRounds, int maxRounds = DefaultMaxRounds)
         {
             foreach (TestChunk chunk in _chunks.Values)
-                QueueFullSunlightRecalc(chunk.Coord);
+                QueueFullSkylightRecalc(chunk.Coord);
 
             int totalRounds = RunWaveToConvergence(maxRounds);
             if (totalRounds < 0) return -1;
@@ -1285,7 +1285,7 @@ namespace Editor.Validation.Lighting.Framework
 
                 // Superseded: a later write replaced the value — nothing to verify.
                 ushort currentLight = chunk.Data.GetLightData(claim.CenterPos.x, claim.CenterPos.y, claim.CenterPos.z);
-                if (LightBitMapping.GetSkyLight(currentLight) != claim.WrittenSky) continue;
+                if (LightBitMapping.GetSkylight(currentLight) != claim.WrittenSky) continue;
 
                 // Resolve the claimed neighbor voxel (NeighborPos is 3x3-local) to its live chunk.
                 Vector3Int neighborGlobal = new Vector3Int(
@@ -1300,7 +1300,7 @@ namespace Editor.Validation.Lighting.Framework
 
                 int neighborLocalX = neighborGlobal.x - neighborOriginXZ.x;
                 int neighborLocalZ = neighborGlobal.z - neighborOriginXZ.y;
-                byte liveNeighborSky = LightBitMapping.GetSkyLight(
+                byte liveNeighborSky = LightBitMapping.GetSkylight(
                     neighborData.GetLightData(neighborLocalX, neighborGlobal.y, neighborLocalZ));
                 int entryFace = FaceIndexOfDirection(neighborGlobal - new Vector3Int(
                     chunk.VoxelOrigin.x + claim.CenterPos.x, claim.CenterPos.y,
@@ -1333,7 +1333,7 @@ namespace Editor.Validation.Lighting.Framework
                         chunk.VoxelOrigin.x + claim.CenterPos.x, claim.CenterPos.y,
                         chunk.VoxelOrigin.y + claim.CenterPos.z),
                     LightLevel = 0,
-                    Channel = LightChannel.Sun,
+                    Channel = LightChannel.Sky,
                 };
 
                 if (ApplyModToChunk(chunk, in removal, neighborOriginXZ))
@@ -1403,17 +1403,17 @@ namespace Editor.Validation.Lighting.Framework
 
             ushort currentLight = target.Data.GetLightData(localPos.x, localPos.y, localPos.z);
 
-            // Mirror WorldJobManager: only sunlight removals (LightLevel == 0) consult independent
+            // Mirror WorldJobManager: only skylight removals (LightLevel == 0) consult independent
             // support — the max of in-chunk neighbors (Bug 11) and live third-party cross-chunk
             // neighbors (Bug 13) — attenuated by the target voxel's own opacity (the light enters it).
-            byte independentSunSupport = 0;
-            if (mod.Channel == LightChannel.Sun && mod.LightLevel == 0)
+            byte independentSkySupport = 0;
+            if (mod.Channel == LightChannel.Sky && mod.LightLevel == 0)
             {
                 CrossChunkLightModApplier.TargetEntryCost entryCost = TargetEntryCostFor(target.Data, localPos);
-                byte inChunk = CrossChunkLightModApplier.InChunkSunlightSupport(target.Data, localPos, entryCost, _getBlockData);
-                byte crossChunk = CrossChunkLightModApplier.CrossChunkSunlightSupport(
+                byte inChunk = CrossChunkLightModApplier.InChunkSkylightSupport(target.Data, localPos, entryCost, _getBlockData);
+                byte crossChunk = CrossChunkLightModApplier.CrossChunkSkylightSupport(
                     target.VoxelOrigin, localPos, entryCost, emitterOriginXZ, _getLoadedChunkByOrigin, _getBlockData);
-                independentSunSupport = Math.Max(inChunk, crossChunk);
+                independentSkySupport = Math.Max(inChunk, crossChunk);
             }
 
             // Blocklight REMOVAL mods consult per-channel independent support (the Bug 17 RGB veto) —
@@ -1434,14 +1434,14 @@ namespace Editor.Validation.Lighting.Framework
             }
 
             CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod,
-                independentSunSupport, independentBlockR, independentBlockG, independentBlockB);
+                independentSkySupport, independentBlockR, independentBlockG, independentBlockB);
             if (!decision.ShouldApply) return false;
 
             target.Data.SetLightData(localPos.x, localPos.y, localPos.z, decision.NewLight);
 
-            if (mod.Channel == LightChannel.Sun)
+            if (mod.Channel == LightChannel.Sky)
             {
-                target.SunQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = decision.OldLevel });
+                target.SkyQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = decision.OldLevel });
             }
             else
             {
@@ -1459,7 +1459,7 @@ namespace Editor.Validation.Lighting.Framework
         /// <summary>
         /// Persists a single cross-chunk light modification whose target chunk is in-world but unloaded,
         /// into the in-memory pending store for replay on load. Harness mirror of
-        /// <c>WorldJobManager.PersistUndeliverableLightMod</c>: sun mods become pending column recalcs,
+        /// <c>WorldJobManager.PersistUndeliverableLightMod</c>: sky mods become pending column recalcs,
         /// blocklight mods become pending RGB modifications. Shares the local-column math + in-footprint
         /// bounds guard with production via <see cref="LightingModPersister.TryComputeLocalColumn"/>.
         /// </summary>
@@ -1475,7 +1475,7 @@ namespace Editor.Validation.Lighting.Framework
                 return;
             }
 
-            if (mod.Channel == LightChannel.Sun)
+            if (mod.Channel == LightChannel.Sky)
             {
                 // Production batches columns via _droppedLightUpdates before AddPending; the harness adds
                 // the single column directly through a pooled scratch set (AddPending copies its contents
@@ -1487,7 +1487,7 @@ namespace Editor.Validation.Lighting.Framework
             }
             else
             {
-                // A sunlight column recalc cannot restore RGB data — persist the actual blocklight
+                // A skylight column recalc cannot restore RGB data — persist the actual blocklight
                 // modification for replay when the chunk is loaded (Bug 08, path 1).
                 _pendingStore.AddPendingBlocklight(targetChunkCoord,
                     new Vector3Int(localX, mod.GlobalPosition.y, localZ),
@@ -1518,7 +1518,7 @@ namespace Editor.Validation.Lighting.Framework
         /// Replays the pending light work the store accumulated for a chunk while it was unloaded, when
         /// that chunk is marked loaded again. Harness mirror of production's replay-on-load
         /// (<c>World.LoadOrGenerateChunk</c> for disk loads; <c>WorldJobManager</c>'s generated-chunk path
-        /// for fresh generation): drains the persisted sunlight column recalcs into the chunk's recalc
+        /// for fresh generation): drains the persisted skylight column recalcs into the chunk's recalc
         /// queue (both modes), then either replays the pending cross-chunk blocklight mods through the
         /// shared <see cref="CrossChunkLightModApplier.ComputeBlocklight"/> decision (disk load) or
         /// discards them (fresh generation). Pooled store containers are released after draining.
@@ -1530,16 +1530,16 @@ namespace Editor.Validation.Lighting.Framework
         {
             ChunkCoord storeKey = new ChunkCoord(chunkCoord.x, chunkCoord.y);
 
-            // Sunlight column recalcs (BOTH load modes). The store holds LOCAL columns (0-15); the harness
-            // per-chunk recalc queue is also in local space (see QueueFullSunlightRecalc / BeginLightingJob),
+            // Skylight column recalcs (BOTH load modes). The store holds LOCAL columns (0-15); the harness
+            // per-chunk recalc queue is also in local space (see QueueFullSkylightRecalc / BeginLightingJob),
             // so they enqueue directly. Production round-trips local->global->local through the world-level
-            // SunlightRecalculationQueue; that routing seam is covered separately by
-            // QueueFullSunlightRecalcViaGlobalRouting (SunlightColumnRouting), which a far-anchored world
+            // SkylightRecalculationQueue; that routing seam is covered separately by
+            // QueueFullSkylightRecalcViaGlobalRouting (SkylightColumnRouting), which a far-anchored world
             // exercises at production magnitudes — the round-trip is NOT precision-free (Bug 19).
             if (_pendingStore.TryGetAndRemove(storeKey, out HashSet<Vector2Int> localCols))
             {
                 foreach (Vector2Int col in localCols)
-                    chunk.SunColumnRecalcQueue.Enqueue(col);
+                    chunk.SkyColumnRecalcQueue.Enqueue(col);
 
                 chunk.Data.FlagLightWork();
                 HashSetPool<Vector2Int>.Release(localCols); // TryGetAndRemove transfers ownership to us

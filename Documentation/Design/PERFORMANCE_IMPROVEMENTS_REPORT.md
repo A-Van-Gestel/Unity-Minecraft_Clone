@@ -599,7 +599,7 @@ The existing quality-tier keywords (`_FLUID_QUALITY_LOW/MED`, refraction opt-out
 
 **Observed:** `ApplyVoxelLightingRGB` (`VoxelLighting.hlsl`) computes 4 independent shade curves, each ending in `pow(x, 2.2)` — **4 `pow` calls per fragment** in the opaque, transparent, and liquid shaders. Every input (per-vertex light data + global uniforms) is available in the vertex shader; only the final `color * multiplier` needs the fragment stage.
 
-**Recommendation:** Compute the sun multiplier (`sunShadow * skyColor`) and block multiplier (`half3` of the three channel shadows) in the vertex shader and interpolate them; the fragment does `col.rgb *= max(sunContrib, blockContrib)` (or interpolate the combined `max` directly — verify the visual difference across a face is acceptable; interpolating the two contributions separately and taking `max` per-pixel is the closer match). Pixels vastly outnumber vertices in voxel scenes, so this moves the `pow` chain to the cheap stage.
+**Recommendation:** Compute the sun multiplier (`skyShadow * skyColor`) and block multiplier (`half3` of the three channel shadows) in the vertex shader and interpolate them; the fragment does `col.rgb *= max(skyContrib, blockContrib)` (or interpolate the combined `max` directly — verify the visual difference across a face is acceptable; interpolating the two contributions separately and taking `max` per-pixel is the closer match). Pixels vastly outnumber vertices in voxel scenes, so this moves the `pow` chain to the cheap stage.
 
 > **Impact Analysis:**
 > - **Effort:** 🟢 Low — shared include + V2F struct change.
@@ -660,8 +660,8 @@ form (`m^(1/2.2) = 0.1 + 0.9L`), so interpolating anything that reproduces today
 **4. Where to take the `max` — and why the interpolator argument for the cheap option is void.**
 The original recommendation offered two variants. They differ **only** on faces where the sun channel
 dominates at one corner and blocklight at the other (a torch near a cave mouth); with no crossover they
-are identical. At such a face — corner 0 fully sunlit and unlit by torch, corner 1 dark at block level
-8 — mid-face, ignoring `SkyLightColor` tint:
+are identical. At such a face — corner 0 fully skylit and unlit by torch, corner 1 dark at block level
+8 — mid-face, ignoring `SkylightColor` tint:
 
 | Scheme | Multiplier | vs. today |
 |---|---:|---|
@@ -672,14 +672,14 @@ are identical. At such a face — corner 0 fully sunlit and unlit by torch, corn
 A compounds two convexity errors (the curve's *and* `max`'s) and erases the derivative crease where the
 two lighting models cross — it would read as a bright halo band at exactly the sun/torch boundaries
 players look at. A was initially preferred only because B appeared to cost an extra interpolator in both
-`VoxelV2F` and `LiquidV2F`. **It does not.** `SkyLightColor` is a uniform, so the sun contribution can
+`VoxelV2F` and `LiquidV2F`. **It does not.** `SkylightColor` is a uniform, so the sun contribution can
 be carried as the *scalar* `m(litSky)` and tinted in the fragment, packing into the spare channel of the
 block vector:
 
 ```hlsl
 centroid half4 lightShadow; // .rgb = blocklight shadow, .a = sun shadow (pre-tint)
 ...
-col.rgb *= max(i.lightShadow.a * SkyLightColor, i.lightShadow.rgb);
+col.rgb *= max(i.lightShadow.a * SkylightColor, i.lightShadow.rgb);
 ```
 
 `VoxelV2F` stays at **4** interpolators and `LiquidV2F` at **11** — identical to A, and the struct keeps
@@ -771,9 +771,9 @@ if that split is unwanted, fold it back into GS-3 rather than leaving it here un
 
 ```hlsl
 float litSky     = ApplySkyDarken(1.0, GlobalLightLevel);
-float sunShadow  = VoxelLightToShadow(litSky, 1.0, minGlobalLightLevel, maxGlobalLightLevel);
+float skyShadow  = VoxelLightToShadow(litSky, 1.0, minGlobalLightLevel, maxGlobalLightLevel);
 float noonShadow = VoxelLightToShadow(1.0,   1.0, minGlobalLightLevel, maxGlobalLightLevel);
-half  dayNight   = sunShadow / noonShadow;
+half  dayNight   = skyShadow / noonShadow;
 ```
 
 Every input is a **global uniform**, so `dayNight` is constant across the entire frame — yet it costs
@@ -782,7 +782,7 @@ hoist uniform-only expressions out of the fragment stage. The neighbouring `shad
 constant *per face*: it is a ternary chain on `normalWS`, and cloud quads are axis-aligned, so all four
 verts carry the same normal.
 
-**Recommendation:** Move `shade * dayNight * SkyLightColor` into `vert` and interpolate the resulting
+**Recommendation:** Move `shade * dayNight * SkylightColor` into `vert` and interpolate the resulting
 `half3`. Unlike GS-3 this is **mathematically exact** — interpolating a value that is constant across
 the primitive yields that constant — so it carries none of GS-3's gradient-fidelity question and needs
 no visual A/B beyond a smoke check. Compute it in the vertex shader rather than on the CPU: a C#
@@ -917,7 +917,7 @@ a fixed small number of writer workers (1–2; region files are lock-serialized 
 
 **Observed:** After `await StorageManager.LoadChunkAsync(...)`, the continuation of
 `World.LoadOrGenerateChunk` (`World.cs` ~lines 779–941) runs on the main thread and performs, per loaded chunk: `PopulateFromSave` (section ownership transfer + light-queue re-enqueue),
-`OnDataPopulated` (the TG-2 bitmask scan — up to 32k reads on this path by design), pending-mod replay, pending-blocklight replay, a `new HashSet<Vector2Int>` for restored lighting columns (the generation twin in `ProcessGenerationJobs` uses `HashSetPool` — this path doesn't), and — when neighbors are ready — `RecalculateSunLightLight()`, a full 16×16-column sunlight seed walk. **There is no per-frame budget:** every load whose I/O completes gets its continuation the same frame. The generation path drains through `ProcessGenerationJobs` under
+`OnDataPopulated` (the TG-2 bitmask scan — up to 32k reads on this path by design), pending-mod replay, pending-blocklight replay, a `new HashSet<Vector2Int>` for restored lighting columns (the generation twin in `ProcessGenerationJobs` uses `HashSetPool` — this path doesn't), and — when neighbors are ready — `RecalculateSkylight()`, a full 16×16-column skylight seed walk. **There is no per-frame budget:** every load whose I/O completes gets its continuation the same frame. The generation path drains through `ProcessGenerationJobs` under
 `maxStructureModsPerFrame`; the load path has no equivalent, so a fast flight over saved terrain produces uncapped multi-chunk apply bursts in single frames.
 
 **Recommendation:** Instead of applying in the continuation, push loaded `ChunkData` into a completion queue drained by a budgeted per-frame pump (mirror `ProcessGenerationJobs`, which already handles the identical staging steps for generated chunks — potential to share the code). Pool the lighting-columns `HashSet` while there. ⚠ The apply steps fire pipeline events (`PromoteNeighborhood`, staging callbacks) — respect the flag-pairing invariants (`chunk-lifecycle` skill) when moving them.
@@ -1067,7 +1067,7 @@ shapes for free when this lands.
 
 ### DT-1. Debug visualization refresh has no per-frame budget
 
-**Observed:** Switching `visualizationMode` queues **every active chunk** for visualization (`World.HandleVisualization`, `World.cs` ~line 2734), and the processing loop (~line 2767) drains **all ready chunks in a single frame**: per chunk, a full section scan (`Sunlight`/`Blocklight`/
+**Observed:** Switching `visualizationMode` queues **every active chunk** for visualization (`World.HandleVisualization`, `World.cs` ~line 2734), and the processing loop (~line 2767) drains **all ready chunks in a single frame**: per chunk, a full section scan (`Skylight`/`Blocklight`/
 `FluidLevel` visit every voxel of every non-empty section and insert every lit/non-air voxel into a
 `Dictionary<Vector3Int, Color>` — thousands of entries per chunk), then the DT-2 conversion + job schedule; `VoxelVisualizer.LateUpdate` then completes and applies every finished mesh, also unbudgeted. At a few hundred active chunks the toggle is a multi-hundred-ms hitch. Worse, **while a mode is active** every voxel modification re-queues the chunk plus border neighbors (`World.cs` ~line 1853) for a *full rescan* — an ocean flood with the FluidLevel overlay on re-scans the entire flood front every tick batch, precisely when you're trying to watch it.
 
@@ -1346,7 +1346,7 @@ contemporaneous notes.*
   form, so no interpolation scheme reproduces today's result without the fragment `pow` — and the error
   **changes sign**, brightening torch falloff in darkness by ~25 % perceptual while slightly darkening
   near-saturated gradients; (3) the "which variant" question is **settled for packed B**, because
-  `SkyLightColor` is a uniform and the sun term packs as a scalar into the block vector's spare
+  `SkylightColor` is a uniform and the sun term packs as a scalar into the block vector's spare
   channel, so B costs the **same** interpolators as A (`VoxelV2F` 4, `LiquidV2F` 11) and A's ~34 %
   perceptual halo at sun/torch boundaries buys nothing; (4) `DEBUG_LIGHTDATA`, which this document
   itself prescribed as the visual gate, is a **false green** — it renders the raw `lightData` the change

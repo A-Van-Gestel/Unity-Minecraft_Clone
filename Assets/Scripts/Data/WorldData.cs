@@ -49,7 +49,7 @@ namespace Data
         public HashSet<ChunkData> ModifiedChunks = new HashSet<ChunkData>();
 
         [NonSerialized]
-        public Dictionary<Vector2Int, HashSet<Vector2Int>> SunlightRecalculationQueue = new Dictionary<Vector2Int, HashSet<Vector2Int>>();
+        public Dictionary<Vector2Int, HashSet<Vector2Int>> SkylightRecalculationQueue = new Dictionary<Vector2Int, HashSet<Vector2Int>>();
 
         // --- One-entry voxel-query cache (VQ-1) ---
         // Query bursts (an AABB collision scan, a ray march) overwhelmingly hit the same chunk, so caching the
@@ -441,7 +441,7 @@ namespace Data
                 ChunkData.FillEmptyLightMap(jobArray);
 
             if (World.Instance != null && !World.Instance.settings.enableLighting)
-                LightingHelper.StampFullBrightSunlight(jobArray);
+                LightingHelper.StampFullBrightSkylight(jobArray);
         }
 
         #endregion
@@ -449,18 +449,18 @@ namespace Data
         #region Lighting Management
 
         /// <summary>
-        /// Queues a sunlight recalculation for the given column.
+        /// Queues a skylight recalculation for the given column.
         /// </summary>
         /// <param name="columnPos">The column position</param>
-        public void QueueSunlightRecalculation(Vector2Int columnPos)
+        public void QueueSkylightRecalculation(Vector2Int columnPos)
         {
-            Vector2Int chunkVoxelPos = SunlightColumnRouting.RouteToChunkOrigin(columnPos);
+            Vector2Int chunkVoxelPos = SkylightColumnRouting.RouteToChunkOrigin(columnPos);
 
             // OPTIMIZATION: Grab from the global pool
-            if (!SunlightRecalculationQueue.TryGetValue(chunkVoxelPos, out HashSet<Vector2Int> columns))
+            if (!SkylightRecalculationQueue.TryGetValue(chunkVoxelPos, out HashSet<Vector2Int> columns))
             {
                 columns = HashSetPool<Vector2Int>.Get();
-                SunlightRecalculationQueue[chunkVoxelPos] = columns;
+                SkylightRecalculationQueue[chunkVoxelPos] = columns;
             }
 
             columns.Add(columnPos);

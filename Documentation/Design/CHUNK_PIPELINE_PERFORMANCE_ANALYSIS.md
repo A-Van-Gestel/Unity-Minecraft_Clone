@@ -188,7 +188,7 @@ Production is unbounded while consumption is fixed-per-frame:
 1. **Cap in-flight generation** (e.g. `2 × JobsUtility.JobWorkerCount`). The spiral iteration order already feeds nearest-first; just stop scheduling until completions drain.
 2. **Discard at completion for out-of-range chunks.** When a generation job completes for a chunk now beyond `unloadDistance`, dispose the result (optionally save) instead of populating it and feeding it into the lighting pipeline.
 3. **Allow unload of light-pending out-of-range chunks** by persisting their pending columns — the machinery already exists (`LightingStateManager.AddPending`,
-   `World.PersistOrphanedSunlightColumns`); it is simply not used on the unload-blocked path. ⚠ Must respect the flag-pairing and gate-ordering invariants in
+   `World.PersistOrphanedSkylightColumns`); it is simply not used on the unload-blocked path. ⚠ Must respect the flag-pairing and gate-ordering invariants in
    `Architecture/CHUNK_LIFECYCLE_PIPELINE.md`.
 4. **Time-based budgets instead of count-based.** Give `ProcessGenerationJobs` / lighting scheduling / mesh applies a millisecond budget (Stopwatch) so throughput per *second* stays roughly constant regardless of FPS.
 5. **Panic gate.** When `GenerationJobs.Count` (or the light scheduler's
@@ -230,8 +230,8 @@ shipped 2026-07-23 — see the next "Implemented" note.
 - **CP-5 extraction (prerequisite).** The monolithic deferral block in `World.UnloadChunks` became the pure, truth-table-baselined `Helpers/ChunkUnloadDecision.Evaluate(in ChunkUnloadFacts)`; `UnloadChunks` gathers facts and switches on the result. New suite `Minecraft Clone/Dev/Validate Chunk Unload Decision` (9 baselines).
 - **The fix (rec 3).** Two coordinated changes:
     - **Strand guard narrowed to in-range neighbors.** The §9.6 strand scan now ignores a would-be-stranded neighbor that is *itself* beyond the unload distance (it is being reclaimed too, so stranding it is harmless). The guard still defers for in-range neighbors — the deadlock stays closed (`Architecture/CHUNK_LIFECYCLE_PIPELINE.md` §9.6).
-    - **`UnloadPersistLightPending` arm.** An out-of-range chunk pinned only by its own pending/initial lighting (which can never complete — missing-neighbor gate) forces `NeedsInitialLighting = true` (full re-light on reload, captured by the synchronous save snapshot), persists its pending sunlight columns via the existing
-      `LightingStateManager.AddPending` / `World.PersistOrphanedSunlightColumns`, and unloads instead of deferring forever. Precedence `job → in-range-strand → persist-light → unload` keeps strand above persist so a chunk an in-range neighbor needs always defers.
+    - **`UnloadPersistLightPending` arm.** An out-of-range chunk pinned only by its own pending/initial lighting (which can never complete — missing-neighbor gate) forces `NeedsInitialLighting = true` (full re-light on reload, captured by the synchronous save snapshot), persists its pending skylight columns via the existing
+      `LightingStateManager.AddPending` / `World.PersistOrphanedSkylightColumns`, and unloads instead of deferring forever. Precedence `job → in-range-strand → persist-light → unload` keeps strand above persist so a chunk an in-range neighbor needs always defers.
 - **Measured (CP-1 counters, before → after, fly-out soak):** total loaded **1096 → 363**; beyond-unload *unreclaimable* **743 → ~0–2**; `Deferred — light` **308 → 0**; `Deferred — strand` **395 → 0–2** (the residual is a bounded, self-resolving boundary shell around a stuck buffer-band chunk — see the pipeline doc §9.6). No artifacts; durability (edit → unload → reload) confirmed. Full evidence: CP-5 Amended block in
   [`CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md`](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) §7.
 
@@ -295,17 +295,17 @@ flag-off is byte-identical to the fixed ceilings above).
   (`WorldJobManager.TriggerNeighborEdgeChecks`). Each chunk realistically runs ~3+ lighting passes, and neighbors ping-pong each other's `HasLightChangesToProcess`.
 - `ForceCompleteDataJobsCoroutine` (`World.cs:802`) yields one frame per sweep, so convergence takes many sweeps over the whole load area even when everything behaves.
 
-### 4.2 Confirmed stability bug — sunlight, not RGB (Bug 11, fixed June 2026)
+### 4.2 Confirmed stability bug — skylight, not RGB (Bug 11, fixed June 2026)
 
 The reported symptom — churn until `safetyBreak` triggers — fits a chunk (or set of chunks) whose lighting job persistently reports `IsStable = false`. This was **confirmed via the `[LightingDiag]`
 instrumentation** (§4.3) on a stuck reload: every sweep showed `unstable = <clusterSize>`,
-`edgeRecycle = 0`, and a perfectly balanced `eff[sunPl=K, sunRm=K]` — a **sunlight** (not RGB)
+`edgeRecycle = 0`, and a perfectly balanced `eff[skyPl=K, skyRm=K]` — a **skylight** (not RGB)
 removal/re-placement 2-cycle across chunk seams. See [LIGHTING_BUGS.md](../Bugs/LIGHTING_BUGS.md)
 Bug 11 for the full mechanism.
 
-- Root cause: a cross-chunk sunlight **removal** mod (`CrossChunkLightModApplier.ComputeSunlight`, level 0) was applied unconditionally, force-clearing a seam voxel to 0. When two adjacent chunks reloaded mid-darkness-wave remove each other's shared, mutually-supported seam column in the same wave, each clobbers the other's freshly re-lit value against a stale snapshot and the pair never converges (settling one level below the oracle).
-- Fix: `ComputeSunlight` now skips a removal when an in-chunk neighbor independently supports the current value (`InChunkSunlightSupport`). Reproduced + guarded by lighting suite scenario **K11a**.
-- (The earlier suspicion pointed at the per-channel RGB MAX guards / sunlight uplift guard; the instrumentation ruled RGB out — blocklight never participated.)
+- Root cause: a cross-chunk skylight **removal** mod (`CrossChunkLightModApplier.ComputeSkylight`, level 0) was applied unconditionally, force-clearing a seam voxel to 0. When two adjacent chunks reloaded mid-darkness-wave remove each other's shared, mutually-supported seam column in the same wave, each clobbers the other's freshly re-lit value against a stale snapshot and the pair never converges (settling one level below the oracle).
+- Fix: `ComputeSkylight` now skips a removal when an in-chunk neighbor independently supports the current value (`InChunkSkylightSupport`). Reproduced + guarded by lighting suite scenario **K11a**.
+- (The earlier suspicion pointed at the per-channel RGB MAX guards / skylight uplift guard; the instrumentation ruled RGB out — blocklight never participated.)
 
 ### 4.3 How to separate 4.1 from 4.2 (do this first)
 

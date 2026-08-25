@@ -29,7 +29,7 @@ namespace Jobs.BurstData
         /// Extracts the sky light level (0-15) from the packed light data.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static byte GetSkyLight(ushort lightData)
+        public static byte GetSkylight(ushort lightData)
         {
             return (byte)((lightData >> SKY_SHIFT) & CHANNEL_MASK);
         }
@@ -89,7 +89,7 @@ namespace Jobs.BurstData
         /// channel. Burst-safe — pass <paramref name="skyDarken"/> in as job data.
         /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static byte GetEffectiveSkyLight(ushort lightData, int skyDarken)
+        public static byte GetEffectiveSkylight(ushort lightData, int skyDarken)
         {
             int stored = (lightData >> SKY_SHIFT) & CHANNEL_MASK;
             return (byte)math.max(0, stored - skyDarken);
@@ -109,7 +109,7 @@ namespace Jobs.BurstData
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte GetEffectiveLight(ushort lightData, int skyDarken)
         {
-            int effectiveSky = GetEffectiveSkyLight(lightData, skyDarken);
+            int effectiveSky = GetEffectiveSkylight(lightData, skyDarken);
             return (byte)math.max(effectiveSky, GetMaxBlocklight(lightData));
         }
 
@@ -119,7 +119,7 @@ namespace Jobs.BurstData
         /// Updates the sky light level within the packed light data.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ushort SetSkyLight(ushort lightData, byte level)
+        public static ushort SetSkylight(ushort lightData, byte level)
         {
             return (ushort)((lightData & ~(CHANNEL_MASK << SKY_SHIFT)) |
                             ((level & CHANNEL_MASK) << SKY_SHIFT));
@@ -156,7 +156,7 @@ namespace Jobs.BurstData
         }
 
         /// <summary>
-        /// Updates all three blocklight RGB channels at once, preserving the sunlight bits.
+        /// Updates all three blocklight RGB channels at once, preserving the skylight bits.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static ushort SetBlocklightRGB(ushort lightData, byte r, byte g, byte b)

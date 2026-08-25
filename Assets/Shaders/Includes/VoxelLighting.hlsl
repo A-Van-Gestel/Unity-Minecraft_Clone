@@ -92,27 +92,27 @@ float ApplySkyDarken(float skyExposure, float globalLight)
     return max(skyExposure - (1.0 - globalLight), 0.0);
 }
 
-/// Applies the voxel lighting model with separate sunlight and RGB blocklight channels.
-/// Sunlight is a scalar tinted by SkyLightColor (time-of-day gradient).
+/// Applies the voxel lighting model with separate skylight and RGB blocklight channels.
+/// Skylight is a scalar tinted by SkylightColor (time-of-day gradient).
 /// Blocklight is per-channel RGB, each going through the same shade curve independently.
 ///
 /// @param color            Base texture color (RGB).
-/// @param sunLuminance     Per-vertex sunlight scalar (0..1) — stored sky EXPOSURE, not brightness.
+/// @param skyLuminance     Per-vertex skylight scalar (0..1) — stored sky EXPOSURE, not brightness.
 /// @param blockRGB         Per-vertex blocklight RGB (0..1 per channel).
 /// @param skyColor         Sky light tint color (from World.cs gradient, white at noon).
 /// @param globalLight      Day/night cycle (0..1) — subtracted from the sky channel only.
 /// @param minLight         Minimum ambient (0.15).
 /// @param maxLight         Maximum light (1.0).
 half3 ApplyVoxelLightingRGB(half3 color,
-                            float sunLuminance, half3 blockRGB,
+                            float skyLuminance, half3 blockRGB,
                             half3 skyColor,
                             float globalLight, float minLight, float maxLight)
 {
-    // Sunlight: exposure minus the time-of-day darkening, then the shade curve at full intensity
+    // Skylight: exposure minus the time-of-day darkening, then the shade curve at full intensity
     // (the curve's own globalLight term stays 1.0 — the day/night term has already been applied).
-    float litSky = ApplySkyDarken(sunLuminance, globalLight);
-    float sunShadow = VoxelLightToShadow(litSky, 1.0, minLight, maxLight);
-    half3 sunContrib = color * sunShadow * skyColor;
+    float litSky = ApplySkyDarken(skyLuminance, globalLight);
+    float skyShadow = VoxelLightToShadow(litSky, 1.0, minLight, maxLight);
+    half3 skyContrib = color * skyShadow * skyColor;
 
     // Blocklight: RGB channels × same shade curve, always full intensity
     float blockR_shadow = VoxelLightToShadow(blockRGB.r, 1.0, minLight, maxLight);
@@ -120,7 +120,7 @@ half3 ApplyVoxelLightingRGB(half3 color,
     float blockB_shadow = VoxelLightToShadow(blockRGB.b, 1.0, minLight, maxLight);
     half3 blockContrib = color * half3(blockR_shadow, blockG_shadow, blockB_shadow);
 
-    return max(sunContrib, blockContrib);
+    return max(skyContrib, blockContrib);
 }
 
 // --- RF-3: HDR emissive ---

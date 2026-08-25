@@ -621,7 +621,7 @@ namespace Editor.Validation.Meshing
         /// engine's 4-sample corner averaging: when every sampled neighbor holds the same level, the result
         /// is <c>17 × level</c> per channel regardless of <i>which</i> neighbors are sampled — so it is
         /// derived without copying the engine's <c>CornerOffsets</c> sampling LUT (the A4 shared-assumption
-        /// trap). Two configs are checked: full sunlight (→ 255 sun) and an intermediate, multi-channel
+        /// trap). Two configs are checked: full skylight (→ 255 sky) and an intermediate, multi-channel
         /// blocklight (R=7→119, G=3→51) that proves the averaging + UNorm8 rounding + channel order rather
         /// than passing vacuously on an all-zero or saturated read.
         /// </para>
@@ -636,7 +636,7 @@ namespace Editor.Validation.Meshing
         {
             Vector3Int pos = new Vector3Int(8, 8, 8); // interior, so every sampled neighbor is in-chunk
 
-            // Config A — uniform full sunlight. Every corner averages 4× sky=15 → 17×15 = 255.
+            // Config A — uniform full skylight. Every corner averages 4× sky=15 → 17×15 = 255.
             // `engineA` captures the ACTUAL emitted light (vert 0) for the cross-config positive control below.
             Color32 engineA;
             using (MeshingTestWorld world = new MeshingTestWorld())
@@ -648,7 +648,7 @@ namespace Editor.Validation.Meshing
                 bool ok = MeshAssert.VertexCount("B11-A vertex count", o, 24);
                 ok &= MeshAssert.StructuralInvariants("B11-A structural", o);
                 Color32 expectedA = MeshOracle.ExpectedUniformCornerLight(15, 0, 0, 0); // (255,0,0,0)
-                ok &= MeshAssert.LightDataMatches("B11-A full sunlight", o, expectedA);
+                ok &= MeshAssert.LightDataMatches("B11-A full skylight", o, expectedA);
                 if (!ok) return false;
                 engineA = o.LightData[0];
             }

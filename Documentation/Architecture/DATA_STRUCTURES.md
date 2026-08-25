@@ -25,7 +25,7 @@ The `uint` is structured as follows (from least significant bit to most signific
 The masks and shifts are declared once, in `BurstVoxelDataBitMapping`: `ID_MASK = 0x0000FFFF` /
 `ID_SHIFT = 0`, and `META_MASK = 0xFF000000` / `META_SHIFT = 24`.
 
-> **History:** Bits 16-23 previously stored sunlight (16-19) and blocklight (20-23) levels. As of RGB Lighting - Phase B (save v10, chunk format v7), all light data lives in a separate `ushort[] LightData` array per section (see §2.1). The freed bits are reserved for future metadata expansion (biome tint, damage state, block variant, etc.).
+> **History:** Bits 16-23 previously stored skylight (16-19) and blocklight (20-23) levels. As of RGB Lighting - Phase B (save v10, chunk format v7), all light data lives in a separate `ushort[] LightData` array per section (see §2.1). The freed bits are reserved for future metadata expansion (biome tint, damage state, block variant, etc.).
 
 ### Metadata Usage (Context Sensitive)
 
@@ -54,7 +54,7 @@ Direct bitwise operations are error-prone. Instead, all interactions with the pa
   `World.Instance.BlockTypes[ID]` — the managed reference that keeps this type out of jobs. Light data is
   not reachable from here at all; it lives on the section's `LightData[]` (see `LightBitMapping`).
 - **`BurstVoxelDataBitMapping.cs`**: A Burst-compatible static class for block ID and metadata bit-mapping. Used exclusively within **Jobs** and Burst-compiled methods. This separation is crucial because `VoxelState` has references to managed code (`World.Instance`) that cannot be used in a job.
-- **`LightBitMapping.cs`**: A Burst-compatible static class for light data bit-mapping on the `ushort LightData[]` array. The `ushort` packs four 4-bit channels — `[Sky:0-3][BlockR:4-7][BlockG:8-11][BlockB:12-15]` — and the class provides `GetSkyLight`, `SetSkyLight`, `GetBlocklightR/G/B`, `SetBlocklightR/G/B`, and `PackLightData` helpers.
+- **`LightBitMapping.cs`**: A Burst-compatible static class for light data bit-mapping on the `ushort LightData[]` array. The `ushort` packs four 4-bit channels — `[Sky:0-3][BlockR:4-7][BlockG:8-11][BlockB:12-15]` — and the class provides `GetSkylight`, `SetSkylight`, `GetBlocklightR/G/B`, `SetBlocklightR/G/B`, and `PackLightData` helpers.
 
 ## 2. The Chunk Hierarchy
 
@@ -88,7 +88,7 @@ carries needs a matching reset, per `.agents/rules/pool-reset-safety.md`.
 - **`ushort[] heightMap`**: A 1D array (`16x16`) storing the Y-coordinate of the highest opaque block in each column. This is critical for sky light calculation speed.
 - **`byte[] SectionUniformSkyLevel`**: A per-section compact-light shortcut. `0x00–0x0F` means the whole section is uniform at that sky level with zero blocklight; `0xFF` (`UNIFORM_SKY_NONE`) means "no shortcut — read the real `LightData`". It covers both null sections (empty sky above terrain) and non-null ones (pitch-black underground).
 - **Active-voxel buckets**: voxels with active behaviors are held in per-behavior-family `NativeHashSet<int>` sets (`BehaviorFamily.Grass` / `BehaviorFamily.Fluid`), keyed by the flat chunk index. They are `[NonSerialized]`, lazily created, and re-derived on load — never persisted. The `ActiveVoxels` enumerable projects them back to positions for main-thread callers.
-- **Lighting state**: the BFS queues (`SunlightBfsQueue` / `BlocklightBfsQueue`, both `Queue<LightQueueNode>`) plus the pipeline flags `NeedsInitialLighting`, `HasLightChangesToProcess`, and `NeedsEdgeCheck`. Those three are properties, not fields: setting one to `true` fires the static `OnLightWorkFlagged` callback that registers the chunk in `World`'s dirty set. `RemainingEdgeCheckRounds` bounds edge-check convergence.
+- **Lighting state**: the BFS queues (`SkylightBfsQueue` / `BlocklightBfsQueue`, both `Queue<LightQueueNode>`) plus the pipeline flags `NeedsInitialLighting`, `HasLightChangesToProcess`, and `NeedsEdgeCheck`. Those three are properties, not fields: setting one to `true` fires the static `OnLightWorkFlagged` callback that registers the chunk in `World`'s dirty set. `RemainingEdgeCheckRounds` bounds edge-check convergence.
 - **`int LifecycleEpoch`**: a monotonic counter **incremented** (never zeroed) on recycle, so in-flight jobs can detect that the slot they were scheduled against has since been reused.
 
 ### 2.3. `Chunk.cs` (The Visual Manager)
@@ -125,7 +125,7 @@ This class represents the entire save file state.
 
 - **`Dictionary<Vector2Int, ChunkData> _chunks`**: The master collection of all loaded `ChunkData`, indexed by the chunk's voxel-space origin. Exposed read-only as `Chunks` (`IReadOnlyDictionary`), plus the allocation-free `ChunkValues` / `ChunkKeys` views for hot paths. Structural changes go **only** through the dedicated mutators (add / remove / `ClearChunks`), which bump a topology version so the VQ-1 last-chunk query cache can never go stale silently.
 - **`HashSet<ChunkData> ModifiedChunks`**: Tracks chunks that need to be saved to disk.
-- **`Dictionary<Vector2Int, HashSet<Vector2Int>> SunlightRecalculationQueue`**: A bucketed queue (Chunk Coordinate -> List of Local Columns) tracking vertical columns that require a full sky light recalculation (e.g., after a block placement blocks the sky).
+- **`Dictionary<Vector2Int, HashSet<Vector2Int>> SkylightRecalculationQueue`**: A bucketed queue (Chunk Coordinate -> List of Local Columns) tracking vertical columns that require a full sky light recalculation (e.g., after a block placement blocks the sky).
 
 ### `World.cs` (The Orchestrator)
 

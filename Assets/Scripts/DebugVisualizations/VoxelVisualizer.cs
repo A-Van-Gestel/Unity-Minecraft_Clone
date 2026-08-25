@@ -282,16 +282,16 @@ namespace DebugVisualizations
     {
         None,
         ActiveVoxels,
-        Sunlight,
+        Skylight,
         Blocklight,
         FluidLevel,
 
         /// <summary>
-        /// Diagnostic mode: shows sunlight values for ALL voxels (air, water, solids)
+        /// Diagnostic mode: shows skylight values for ALL voxels (air, water, solids)
         /// in a 2-block band around chunk borders. Highlights light-step anomalies
         /// to diagnose the underwater shadow wall bug.
         /// </summary>
-        SunlightChunkBorder,
+        SkylightChunkBorder,
 
         /// <summary>
         /// Shows runtime collision AABBs for solid blocks in visible chunks.
@@ -300,7 +300,7 @@ namespace DebugVisualizations
 
         /// <summary>
         /// Shader-based debug mode: replaces block colors with raw TexCoord1 (smooth lighting)
-        /// data as false-color. Red = sunlight, Green = blocklight. Smooth lighting produces
+        /// data as false-color. Red = skylight, Green = blocklight. Smooth lighting produces
         /// per-vertex gradients; flat lighting renders uniform per face.
         /// </summary>
         SmoothLightingData,

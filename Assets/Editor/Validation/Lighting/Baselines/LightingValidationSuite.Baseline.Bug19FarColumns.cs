@@ -7,17 +7,17 @@ using Scenario = Editor.Validation.Framework.Scenario;
 namespace Editor.Validation.Lighting
 {
     /// <summary>
-    /// Baseline regression scenarios <b>B95–B96</b> — far-coordinate sunlight column routing, guarding
-    /// the <b>Bug 19</b> fix (far-lands sunlight column recalcs crashing on a negative heightmap index,
+    /// Baseline regression scenarios <b>B95–B96</b> — far-coordinate skylight column routing, guarding
+    /// the <b>Bug 19</b> fix (far-lands skylight column recalcs crashing on a negative heightmap index,
     /// see <c>Documentation/Bugs/LIGHTING_BUGS.md</c>). The defective seam was
-    /// <see cref="SunlightColumnRouting.RouteToChunkOrigin"/>'s pre-fix float round-trip: an int→float
+    /// <see cref="SkylightColumnRouting.RouteToChunkOrigin"/>'s pre-fix float round-trip: an int→float
     /// conversion of the global column loses integer precision past ±2²⁴, so border columns route into
     /// an adjacent chunk's queue bucket and drain to chunk-local columns outside [0, ChunkWidth)² —
-    /// exactly the negative heightmap index <c>NeighborhoodLightingJob.RecalculateSunlightForColumn</c>
+    /// exactly the negative heightmap index <c>NeighborhoodLightingJob.RecalculateSkylightForColumn</c>
     /// faulted on in-game at ±2×10⁷.
     /// <para>
     /// <b>B95</b> — routing integrity: every column of a 3×3 grid seeded through the production seam
-    /// (<see cref="LightingTestWorld.QueueFullSunlightRecalcViaGlobalRouting"/>) must land in its own
+    /// (<see cref="LightingTestWorld.QueueFullSkylightRecalcViaGlobalRouting"/>) must land in its own
     /// chunk's bucket with an in-range local, at the identity anchor (control), just past the ±2²⁴
     /// float boundary, and at ±2×10⁷ (the observed in-game magnitude) in both sign quadrants.
     /// <b>B96</b> — far differential twin: an identical fixture built at the identity anchor and at
@@ -51,7 +51,7 @@ namespace Editor.Validation.Lighting
         static partial void AddBug19FarColumnsBaselineScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario(
-                "B95: Global sunlight-column routing delivers every column to its own chunk with an in-range local at the identity, ±2²⁴-boundary, and ±2×10⁷ anchors (Bug 19 fix tripwire)",
+                "B95: Global skylight-column routing delivers every column to its own chunk with an in-range local at the identity, ±2²⁴-boundary, and ±2×10⁷ anchors (Bug 19 fix tripwire)",
                 Baseline_Bug19FarColumnRoutingIntegrity));
             scenarios.Add(new Scenario(
                 "B96: An identical fixture seeded through the column-routing seam converges to a bit-identical light field at the identity and +2×10⁷ anchors (far-anchor differential twin)",
@@ -131,7 +131,7 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>
-        /// Seeds every grid chunk through <see cref="LightingTestWorld.QueueFullSunlightRecalcViaGlobalRouting"/>
+        /// Seeds every grid chunk through <see cref="LightingTestWorld.QueueFullSkylightRecalcViaGlobalRouting"/>
         /// and reports any lost or out-of-range columns as a failure.
         /// </summary>
         /// <param name="world">The world to seed.</param>
@@ -143,7 +143,7 @@ namespace Editor.Validation.Lighting
             int totalOutOfRange = 0;
             foreach (Vector2Int coord in world.AllChunkCoords())
             {
-                totalLost += world.QueueFullSunlightRecalcViaGlobalRouting(coord, out int outOfRange);
+                totalLost += world.QueueFullSkylightRecalcViaGlobalRouting(coord, out int outOfRange);
                 totalOutOfRange += outOfRange;
             }
 
@@ -151,7 +151,7 @@ namespace Editor.Validation.Lighting
 
             Debug.LogError($"[FAIL] {label}: column routing is corrupt — {totalLost} column(s) routed to no grid chunk, " +
                            $"{totalOutOfRange} drained to out-of-range locals (each is a negative/overflowing " +
-                           "heightmap index in NeighborhoodLightingJob.RecalculateSunlightForColumn — the Bug 19 crash)");
+                           "heightmap index in NeighborhoodLightingJob.RecalculateSkylightForColumn — the Bug 19 crash)");
             return false;
         }
 
@@ -159,7 +159,7 @@ namespace Editor.Validation.Lighting
 
         /// <summary>
         /// Builds the Bug-19 fixture at the given anchor: a superflat stone floor plus a shadow-casting
-        /// stone box spanning the center chunk's -X/-Z seams (so cross-chunk sunlight interaction exists
+        /// stone box spanning the center chunk's -X/-Z seams (so cross-chunk skylight interaction exists
         /// at the routing-sensitive borders). Heightmaps recalculated; returned un-lit.
         /// </summary>
         /// <param name="anchorChunk">World chunk coordinate of grid cell (0,0).</param>

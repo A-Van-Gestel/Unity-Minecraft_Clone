@@ -9,7 +9,7 @@ namespace Editor.Validation.Lighting
     /// Baseline regression scenarios <b>B56–B59</b> — multi-chunk suspended-slab convergence, guarding
     /// the <b>Bug 13</b> fix (live-locking cross-chunk skylight under a large opaque slab; fixed July
     /// 2026 by extending the Bug-11 removal veto with live third-party cross-chunk support,
-    /// <see cref="Helpers.CrossChunkLightModApplier.CrossChunkSunlightSupport"/> — see
+    /// <see cref="Helpers.CrossChunkLightModApplier.CrossChunkSkylightSupport"/> — see
     /// <c>Documentation/Bugs/_FIXED_BUGS.md</c>). Promoted from known-bug repros K13a–K13d (roadmap
     /// item AS-1) after in-game confirmation on the fluid-stress opaque-floor config.
     /// <para>

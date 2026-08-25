@@ -12,7 +12,7 @@ namespace Data
 
         /// <summary>
         /// Parallel light array storing per-voxel RGB light data (Phase 2).
-        /// Layout: <c>[Sun:4][BlockR:4][BlockG:4][BlockB:4]</c> = 16 bits.
+        /// Layout: <c>[Sky:4][BlockR:4][BlockG:4][BlockB:4]</c> = 16 bits.
         /// Persisted to disk via flag-based section format (v9+). Bulk-read on load
         /// when present; reconstructed from legacy <c>uint</c> light bits for older saves.
         /// </summary>
@@ -75,7 +75,7 @@ namespace Data
         /// <summary>
         /// Recalculates the NonAirCount using optimized pointer arithmetic and loop unrolling.
         /// Uses a mask-based check (<c>data &amp; ID_MASK</c>) to correctly ignore air voxels
-        /// that only carry light data (sunlight/blocklight bits set, block ID = 0).
+        /// that only carry light data (skylight/blocklight bits set, block ID = 0).
         /// Also recalculates <see cref="emissiveCount"/> — the emissive test goes through the
         /// palette-independent <see cref="EmissiveBlockLookup"/>, so this path (the
         /// <c>RecalculateCounts(null)</c> fallback) keeps it correct where <see cref="opaqueCount"/>
@@ -111,7 +111,7 @@ namespace Data
         /// <summary>
         /// Recalculates NonAir, Opaque, and Emissive counts.
         /// Uses a mask-based check (<c>data &amp; ID_MASK</c>) to correctly ignore air voxels
-        /// that only carry light data (sunlight/blocklight bits set, block ID = 0).
+        /// that only carry light data (skylight/blocklight bits set, block ID = 0).
         /// The emissive test goes through <see cref="EmissiveBlockLookup"/> (not
         /// <paramref name="blockTypes"/>) so it agrees with the incremental
         /// <c>ChunkData.SetVoxel</c> maintenance on every path.

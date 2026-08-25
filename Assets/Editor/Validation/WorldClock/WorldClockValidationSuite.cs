@@ -223,7 +223,7 @@ namespace Editor.Validation.WorldClock
 
                 // The moonlight floor is the reason for the cap: fully-exposed sky never goes below 4.
                 SetDayFraction(clock, 0f);
-                int effectiveAtMidnight = WorldTimeManager.MaxSkyLight - clock.SkyDarken;
+                int effectiveAtMidnight = WorldTimeManager.MaxSkylight - clock.SkyDarken;
                 ok &= Check($"a fully sky-exposed voxel keeps effective light 4 at midnight, got {effectiveAtMidnight}",
                     effectiveAtMidnight == 4);
                 return ok;
@@ -310,8 +310,8 @@ namespace Editor.Validation.WorldClock
 
                 // With the curve pinned at its darkest, the floor is exactly Minecraft's moonlight.
                 SetDayFraction(clock, 0f);
-                ok &= Check($"the darkest reachable state still leaves effective light 4, got {WorldTimeManager.MaxSkyLight - clock.SkyDarken}",
-                    WorldTimeManager.MaxSkyLight - clock.SkyDarken == 4);
+                ok &= Check($"the darkest reachable state still leaves effective light 4, got {WorldTimeManager.MaxSkylight - clock.SkyDarken}",
+                    WorldTimeManager.MaxSkylight - clock.SkyDarken == 4);
 
                 // The rounding the design accepts between the rendered and queried values.
                 bool roundingHolds = true;
@@ -465,19 +465,19 @@ namespace Editor.Validation.WorldClock
 
             // Stored exposure is never mutated by the query — the whole point of the read-time model.
             ok &= Check("the stored channel is untouched by darkening",
-                LightBitMapping.GetSkyLight(openSky) == 15);
+                LightBitMapping.GetSkylight(openSky) == 15);
 
             // A dim sky-lit voxel clamps at zero rather than going negative.
             ushort dimSky = LightBitMapping.PackLightData(3, 0, 0, 0);
-            ok &= Check($"sky light below the darken clamps to 0, got {LightBitMapping.GetEffectiveSkyLight(dimSky, 11)}",
-                LightBitMapping.GetEffectiveSkyLight(dimSky, 11) == 0);
+            ok &= Check($"sky light below the darken clamps to 0, got {LightBitMapping.GetEffectiveSkylight(dimSky, 11)}",
+                LightBitMapping.GetEffectiveSkylight(dimSky, 11) == 0);
 
             // Torches are time-invariant: the max() picks blocklight once sky falls below it.
             ushort torchLit = LightBitMapping.PackLightData(15, 14, 8, 2);
             ok &= Check($"a torch-lit voxel keeps its blocklight at midnight, got {LightBitMapping.GetEffectiveLight(torchLit, 11)}",
                 LightBitMapping.GetEffectiveLight(torchLit, 11) == 14);
             ok &= Check("its sky contribution still darkens underneath",
-                LightBitMapping.GetEffectiveSkyLight(torchLit, 11) == 4);
+                LightBitMapping.GetEffectiveSkylight(torchLit, 11) == 4);
 
             // A cave voxel with no sky exposure is unaffected by time entirely.
             ushort cave = LightBitMapping.PackLightData(0, 9, 0, 0);
@@ -490,7 +490,7 @@ namespace Editor.Validation.WorldClock
             try
             {
                 SetDayFraction(clock, 0f);
-                int fromShaderGlobal = Mathf.RoundToInt((1f - clock.GlobalLightLevel) * WorldTimeManager.MaxSkyLight);
+                int fromShaderGlobal = Mathf.RoundToInt((1f - clock.GlobalLightLevel) * WorldTimeManager.MaxSkylight);
                 ok &= Check($"the darken implied by GlobalLightLevel matches SkyDarken ({fromShaderGlobal} vs {clock.SkyDarken})",
                     fromShaderGlobal == clock.SkyDarken);
                 ok &= Check($"open sky at midnight reads 4 through the clock, got {LightBitMapping.GetEffectiveLight(openSky, clock.SkyDarken)}",

@@ -200,15 +200,15 @@ public void DebugCleanMeshQueue()
 }
 ```
 
-## 4. Sunlight Cross-Section Diagnosis (`DebugLogSunlightCrossSection`)
+## 4. Skylight Cross-Section Diagnosis (`DebugLogSunlightCrossSection`)
 
-**Use Case:** Debugging "shadow wall" artifacts or incorrect light propagation across chunk boundaries. It provides a visual 11x11 cross-section of sunlight values and heightmap data around the targeted block, centered on the nearest chunk boundary.  
+**Use Case:** Debugging "shadow wall" artifacts or incorrect light propagation across chunk boundaries. It provides a visual 11x11 cross-section of skylight values and heightmap data around the targeted block, centered on the nearest chunk boundary.  
 **Usage:** Add to `World.cs`. Call `_world.DebugLogSunlightCrossSection()`, typically tied to a debug key like `F8` in `Player.cs`. Aim your crosshair closely at a block experiencing lighting artifacts.
 
 **Example Output:**
 
 ```text
-<color=cyan>--- SUNLIGHT CROSS-SECTION ---</color>
+<color=cyan>--- SKYLIGHT CROSS-SECTION ---</color>
 Hit: (560, 53, 1438) | Local: (0, 14)
 Scanning along: X axis | Border at X=560
 Chunk border between [559] and [560]
@@ -238,9 +238,9 @@ Water block opacity: 2
 
 ```csharp
 /// <summary>
-/// A diagnostic tool for analyzing the sunlight values spanning across chunk boundaries.
+/// A diagnostic tool for analyzing the skylight values spanning across chunk boundaries.
 /// Raycasts to the nearest targeted block, identifies the cross section perpendicular to
-/// the nearest chunk border, and prints a cross-section of sunlight values spanning
+/// the nearest chunk border, and prints a cross-section of skylight values spanning
 /// 5 voxels on each side of the border across 11 Y levels (5 above, the hit level, 5 below).
 /// </summary>
 public void DebugLogSunlightCrossSection()
@@ -288,7 +288,7 @@ public void DebugLogSunlightCrossSection()
     const int Y_RANGE = 5;
 
     System.Text.StringBuilder sb = new System.Text.StringBuilder();
-    sb.AppendLine($"<color=cyan>--- SUNLIGHT CROSS-SECTION ---</color>");
+    sb.AppendLine($"<color=cyan>--- SKYLIGHT CROSS-SECTION ---</color>");
     sb.AppendLine($"Hit: ({hitPos.x}, {hitPos.y}, {hitPos.z}) | Local: ({localX}, {localZ})");
     sb.AppendLine($"Scanning along: {(scanAlongX ? "X" : "Z")} axis | Border at {(scanAlongX ? "X" : "Z")}={borderWorldCoord}");
     sb.AppendLine($"Chunk border between [{borderWorldCoord - 1}] and [{borderWorldCoord}]");
@@ -336,7 +336,7 @@ public void DebugLogSunlightCrossSection()
                 continue;
             }
 
-            byte sl = state.Value.Sunlight;
+            byte sl = state.Value.Skylight;
             ushort id = state.Value.id;
             string blockChar;
 

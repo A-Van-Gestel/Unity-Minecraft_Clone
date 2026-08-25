@@ -34,7 +34,7 @@ public class WorldTimeManager
     public const int SunriseTickOffset = 6000;
 
     /// <summary>Maximum value of the stored 4-bit sky light channel; the denominator that normalizes sky darken.</summary>
-    public const int MaxSkyLight = 15;
+    public const int MaxSkylight = 15;
 
     private readonly TimeOfDaySettings _settings;
 
@@ -82,7 +82,7 @@ public class WorldTimeManager
     public float GlobalLightLevel => _settings.EvaluateGlobalLightLevel(DayFraction);
 
     /// <summary>Sky darken for the current time as a continuous value, derived from the light curve.</summary>
-    public float ContinuousSkyDarken => (1f - GlobalLightLevel) * MaxSkyLight;
+    public float ContinuousSkyDarken => (1f - GlobalLightLevel) * MaxSkylight;
 
     /// <summary>
     /// How many levels to subtract from stored sky light right now, in <c>[0, 11]</c> — the value all
@@ -110,7 +110,7 @@ public class WorldTimeManager
     public Quaternion SkyRotation => CelestialMath.SkyRotation(DayFraction, _settings.ObserverLatitude);
 
     /// <summary>The sky-light tint for the current time.</summary>
-    public Color SkyLightColor => _settings.EvaluateSkyLightColor(DayFraction);
+    public Color SkylightColor => _settings.EvaluateSkylightColor(DayFraction);
 
     /// <summary>The overhead sky color for the current time.</summary>
     public Color ZenithColor => _settings.EvaluateZenithColor(DayFraction);

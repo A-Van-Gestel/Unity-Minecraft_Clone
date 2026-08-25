@@ -231,15 +231,15 @@ namespace Data
         #endregion
 
         [NonSerialized]
-        private readonly Queue<LightQueueNode> _sunlightBfsQueue = new Queue<LightQueueNode>();
+        private readonly Queue<LightQueueNode> _skylightBfsQueue = new Queue<LightQueueNode>();
 
         [NonSerialized]
         private readonly Queue<LightQueueNode> _blocklightBfsQueue = new Queue<LightQueueNode>();
 
-        public int SunLightQueueCount => _sunlightBfsQueue.Count;
-        public int BlockLightQueueCount => _blocklightBfsQueue.Count;
+        public int SkylightQueueCount => _skylightBfsQueue.Count;
+        public int BlocklightQueueCount => _blocklightBfsQueue.Count;
 
-        public Queue<LightQueueNode> SunlightBfsQueue => _sunlightBfsQueue;
+        public Queue<LightQueueNode> SkylightBfsQueue => _skylightBfsQueue;
         public Queue<LightQueueNode> BlocklightBfsQueue => _blocklightBfsQueue;
 
 
@@ -312,7 +312,7 @@ namespace Data
             RemainingEdgeCheckRounds = 2;
 
             // Clear Queues (retains capacity)
-            _sunlightBfsQueue.Clear();
+            _skylightBfsQueue.Clear();
             _blocklightBfsQueue.Clear();
 
             // Clear active-voxel buckets (retains native capacity; no-op until first registration allocates them).
@@ -371,7 +371,7 @@ namespace Data
 
             sections[sectionIndex] ??= GetNewSection();
 
-            LightingHelper.FillUniformSkyLight(sections[sectionIndex].LightData, sky);
+            LightingHelper.FillUniformSkylight(sections[sectionIndex].LightData, sky);
         }
 
         #endregion
@@ -487,8 +487,8 @@ namespace Data
 
             // Copy Queues
             // We move the queues from the loaded object (temp) to this object (live)
-            foreach (LightQueueNode node in loadedData.SunlightBfsQueue) AddToSunLightQueue(node.Position, node.OldLightLevel);
-            foreach (LightQueueNode node in loadedData.BlocklightBfsQueue) AddToBlockLightQueue(node.Position, node.OldLightLevel, node.OldBlockR, node.OldBlockG, node.OldBlockB);
+            foreach (LightQueueNode node in loadedData.SkylightBfsQueue) AddToSkylightQueue(node.Position, node.OldLightLevel);
+            foreach (LightQueueNode node in loadedData.BlocklightBfsQueue) AddToBlocklightQueue(node.Position, node.OldLightLevel, node.OldBlockR, node.OldBlockG, node.OldBlockB);
 
             // If loaded data had flags, transfer them
             if (loadedData.HasLightChangesToProcess) FlagLightWork();
@@ -549,7 +549,7 @@ namespace Data
             // --- Capture Old State for Lighting ---
             ushort oldId = BurstVoxelDataBitMapping.GetId(oldPackedData);
             ushort oldLightData = GetLightData(localPos.x, localPos.y, localPos.z);
-            byte oldSkyLight = LightBitMapping.GetSkyLight(oldLightData);
+            byte oldSkylight = LightBitMapping.GetSkylight(oldLightData);
             byte oldBlocklight = LightBitMapping.GetMaxBlocklight(oldLightData);
             byte oldBlockR = LightBitMapping.GetBlocklightR(oldLightData);
             byte oldBlockG = LightBitMapping.GetBlocklightG(oldLightData);
@@ -562,7 +562,7 @@ namespace Data
             // When lighting is disabled, stamp sky=15 so the mesh job renders full brightness.
             // Light data lives exclusively in the ushort LightData array (the uint carries no light bits).
             if (!lightingEnabled)
-                SetLightData(localPos.x, localPos.y, localPos.z, LightBitMapping.SetSkyLight(0, 15));
+                SetLightData(localPos.x, localPos.y, localPos.z, LightBitMapping.SetSkylight(0, 15));
 
             // --- MAINTAIN HEIGHTMAP ---
             // Shared Case 1 / Case 2 logic (also run by the editor lighting validation harness).
@@ -577,8 +577,8 @@ namespace Data
             // --- Queue Lighting Updates ---
 
             // 1. Queue the modified block itself for light REMOVAL.
-            AddToSunLightQueue(localPos, oldSkyLight);
-            AddToBlockLightQueue(localPos, oldBlocklight, oldBlockR, oldBlockG, oldBlockB);
+            AddToSkylightQueue(localPos, oldSkylight);
+            AddToBlocklightQueue(localPos, oldBlocklight, oldBlockR, oldBlockG, oldBlockB);
 
             // 2. "WAKE UP" NEIGHBORS to fill any new empty space with their light.
             for (int i = 0; i < 6; i++)
@@ -588,17 +588,17 @@ namespace Data
                 {
                     ushort neighborLight = GetLightData(neighborPos.x, neighborPos.y, neighborPos.z);
 
-                    byte neighborSkyLight = LightBitMapping.GetSkyLight(neighborLight);
-                    if (neighborSkyLight > 0)
-                        AddToSunLightQueue(neighborPos, 0);
+                    byte neighborSkylight = LightBitMapping.GetSkylight(neighborLight);
+                    if (neighborSkylight > 0)
+                        AddToSkylightQueue(neighborPos, 0);
 
                     byte neighborBlocklight = LightBitMapping.GetMaxBlocklight(neighborLight);
                     if (neighborBlocklight > 0)
-                        AddToBlockLightQueue(neighborPos, 0, 0, 0, 0);
+                        AddToBlocklightQueue(neighborPos, 0, 0, 0, 0);
                 }
             }
 
-            // 3. If the column's light transport changed, queue a full vertical sunlight recalculation.
+            // 3. If the column's light transport changed, queue a full vertical skylight recalculation.
             //    Gated by enableLighting: without the lighting engine, no job will ever process
             //    the recalculation queue or clear HasLightChangesToProcess, permanently blocking meshing.
             //
@@ -612,7 +612,7 @@ namespace Data
             if (lightingEnabled && (newProps.opacity != oldProps.opacity
                                     || newObstructsSkyColumn != oldObstructsSkyColumn))
             {
-                World.Instance.worldData.QueueSunlightRecalculation(new Vector2Int(localPos.x + Position.x, localPos.z + Position.y));
+                World.Instance.worldData.QueueSkylightRecalculation(new Vector2Int(localPos.x + Position.x, localPos.z + Position.y));
 
                 // Bug 05: an opacity edit in a border column can under-report cross-seam sky light, and
                 // after generation both edge-check rounds are already spent — leaving no round to
@@ -1086,7 +1086,7 @@ namespace Data
             {
                 byte uniformSky = SectionUniformSkyLevel[i];
                 if (uniformSky != UNIFORM_SKY_NONE)
-                    LightingHelper.FillUniformSkyLight(jobArray, i * sectionSize, sectionSize, uniformSky);
+                    LightingHelper.FillUniformSkylight(jobArray, i * sectionSize, sectionSize, uniformSky);
                 else if (sections[i] != null)
                     NativeArray<ushort>.Copy(sections[i].LightData, 0, jobArray, i * sectionSize, sectionSize);
                 else
@@ -1176,7 +1176,7 @@ namespace Data
         }
 
         /// <summary>
-        /// The chunk's lowest heightmap entry — the input to the bottom-band descending-sunlight rule
+        /// The chunk's lowest heightmap entry — the input to the bottom-band descending-skylight rule
         /// (<see cref="LightingBandDecision.DeriveBandMinY"/>): a vertical sky-15 descent stops at each
         /// column's heightmap block, so no unbounded descent can pass below this Y.
         /// </summary>
@@ -1390,7 +1390,7 @@ namespace Data
         /// <param name="oldR">The old red blocklight channel (0-15).</param>
         /// <param name="oldG">The old green blocklight channel (0-15).</param>
         /// <param name="oldB">The old blue blocklight channel (0-15).</param>
-        public void AddToBlockLightQueue(Vector3Int localPos, byte oldLightLevel, byte oldR, byte oldG, byte oldB)
+        public void AddToBlocklightQueue(Vector3Int localPos, byte oldLightLevel, byte oldR, byte oldG, byte oldB)
         {
             if (World.Instance.settings.enableLighting)
             {
@@ -1404,15 +1404,15 @@ namespace Data
         }
 
         /// <summary>
-        /// Adds a sunlight update request to the internal queue for the next lighting pass.
+        /// Adds a skylight update request to the internal queue for the next lighting pass.
         /// </summary>
         /// <param name="localPos">The local position of the modified voxel.</param>
-        /// <param name="oldLightLevel">The sunlight level the voxel had before modification (needed for darkness propagation).</param>
-        public void AddToSunLightQueue(Vector3Int localPos, byte oldLightLevel)
+        /// <param name="oldLightLevel">The skylight level the voxel had before modification (needed for darkness propagation).</param>
+        public void AddToSkylightQueue(Vector3Int localPos, byte oldLightLevel)
         {
             if (World.Instance.settings.enableLighting)
             {
-                _sunlightBfsQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = oldLightLevel });
+                _skylightBfsQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = oldLightLevel });
                 FlagLightWork();
             }
         }
@@ -1433,7 +1433,7 @@ namespace Data
             minNodeY = int.MaxValue;
 
             // Dequeue each item from the managed queue and enqueue it into the native one.
-            while (BlockLightQueueCount > 0)
+            while (BlocklightQueueCount > 0)
             {
                 LightQueueNode node = _blocklightBfsQueue.Dequeue();
                 if (node.Position.y > maxNodeY) maxNodeY = node.Position.y;
@@ -1446,7 +1446,7 @@ namespace Data
         }
 
         /// <summary>
-        /// Flushes the managed sunlight queue into a NativeQueue for Burst Job processing.
+        /// Flushes the managed skylight queue into a NativeQueue for Burst Job processing.
         /// </summary>
         /// <param name="allocator">The memory allocator to use (e.g., Allocator.TempJob).</param>
         /// <param name="maxNodeY">Highest node Y flushed, or −1 when the queue was empty — an LI-2
@@ -1454,16 +1454,16 @@ namespace Data
         /// <param name="minNodeY">Lowest node Y flushed, or <c>int.MaxValue</c> when the queue was
         /// empty — the LI-2 bottom-band mirror of <paramref name="maxNodeY"/>.</param>
         /// <returns>A populated NativeQueue containing the light nodes.</returns>
-        public NativeQueue<LightQueueNode> GetSunlightQueueForJob(Allocator allocator, out int maxNodeY, out int minNodeY)
+        public NativeQueue<LightQueueNode> GetSkylightQueueForJob(Allocator allocator, out int maxNodeY, out int minNodeY)
         {
             NativeQueue<LightQueueNode> nativeQueue = new NativeQueue<LightQueueNode>(allocator);
             maxNodeY = -1;
             minNodeY = int.MaxValue;
 
             // Dequeue each item from the managed queue and enqueue it into the native one.
-            while (SunLightQueueCount > 0)
+            while (SkylightQueueCount > 0)
             {
-                LightQueueNode node = _sunlightBfsQueue.Dequeue();
+                LightQueueNode node = _skylightBfsQueue.Dequeue();
                 if (node.Position.y > maxNodeY) maxNodeY = node.Position.y;
                 if (node.Position.y < minNodeY) minNodeY = node.Position.y;
                 nativeQueue.Enqueue(node);
@@ -1474,9 +1474,10 @@ namespace Data
         }
 
         /// <summary>
-        /// Recalculates the sunlight for this chunk.
+        /// Enqueues all 256 of this chunk's columns for sky light recalculation. The recalculation
+        /// itself runs later, in the lighting job.
         /// </summary>
-        public void RecalculateSunLightLight()
+        public void RecalculateSkylight()
         {
             WorldData worldData = World.Instance.worldData;
 
@@ -1485,7 +1486,7 @@ namespace Data
                 for (int z = 0; z < VoxelData.ChunkWidth; z++)
                 {
                     // The global position of the column.
-                    worldData.QueueSunlightRecalculation(new Vector2Int(Position.x + x, Position.y + z));
+                    worldData.QueueSkylightRecalculation(new Vector2Int(Position.x + x, Position.y + z));
                 }
             }
         }

@@ -40,7 +40,7 @@ Shader "Minecraft/Transparent Blocks"
             float GlobalLightLevel;
             float minGlobalLightLevel;
             float maxGlobalLightLevel;
-            half3 SkyLightColor;
+            half3 SkylightColor;
 
             VoxelV2F vertFunction(VoxelAppdata v)
             {
@@ -60,9 +60,9 @@ Shader "Minecraft/Transparent Blocks"
                 return half4(i.lightData.r, i.lightData.a, 0.0, 1.0);
                 #endif
 
-                // Apply voxel lighting: sun (scalar, tinted by sky color) + block (RGB)
+                // Apply voxel lighting: sky (scalar, tinted by sky color) + block (RGB)
                 col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.r, i.lightData.gba,
-                                                SkyLightColor,
+                                                SkylightColor,
                                                 GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel);
 
                 // Multiply by vertex RGB to support BlockIconGenerator shadows and tinting

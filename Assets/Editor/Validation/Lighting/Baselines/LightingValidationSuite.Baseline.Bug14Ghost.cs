@@ -7,7 +7,7 @@ namespace Editor.Validation.Lighting
 {
     /// <summary>
     /// Baseline regression scenarios <b>B60/B61</b> guarding the <b>Bug 14</b> fix — stale-snapshot
-    /// cross-chunk sunlight ghost light (fixed July 2026 by recording the darkness-wave seam pull-back
+    /// cross-chunk skylight ghost light (fixed July 2026 by recording the darkness-wave seam pull-back
     /// as <see cref="Jobs.PullBackClaim"/>s and re-verifying them against live neighbor data at merge
     /// time; see <c>Documentation/Bugs/_FIXED_BUGS.md</c>). B61 was promoted from known-bug repro K14a
     /// after in-game confirmation on the fluid-stress opaque-floor run.
@@ -38,7 +38,7 @@ namespace Editor.Validation.Lighting
         static partial void AddBug14GhostBaselineScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario(
-                "B60: A border-column edit whose sunlight recalc seeds a cross-border shadow-caster darkness node settles on the oracle — halo pull-backs are not recorded as claims (Bug 14 fix contract)",
+                "B60: A border-column edit whose skylight recalc seeds a cross-border shadow-caster darkness node settles on the oracle — halo pull-backs are not recorded as claims (Bug 14 fix contract)",
                 Baseline_BorderShadowCasterHaloNode));
             scenarios.Add(new Scenario(
                 "B61: The dynamically-stamped slab's settled field matches the borderless oracle under a shuffled/budgeted schedule (grid-3, seed 1) — no stale ghost light survives (Bug 14 guard)",
@@ -48,7 +48,7 @@ namespace Editor.Validation.Lighting
         /// <summary>
         /// B60: guards the <see cref="Jobs.PullBackClaim"/> center-only contract on the one production
         /// path that seeds darkness nodes OUTSIDE the center chunk — the column-recalc shadow-caster
-        /// check (<c>RecalculateSunlightForColumn</c> wakes the highest block's horizontal neighbors,
+        /// check (<c>RecalculateSkylightForColumn</c> wakes the highest block's horizontal neighbors,
         /// including cross-border ones). A pull-back during such a halo node's wave must NOT be recorded
         /// as a claim: pre-guard, the merge-time verifier indexed the chunk with the out-of-bounds
         /// position and the resulting exception aborted the whole <c>ProcessLightingJobs</c> pass
@@ -74,7 +74,7 @@ namespace Editor.Validation.Lighting
 
             bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B60: initial lighting converges");
 
-            byte underOverhang = world.GetSkyLight(new Vector3Int(15, 49, 24));
+            byte underOverhang = world.GetSkylight(new Vector3Int(15, 49, 24));
             passed &= LightingAssert.IsTrue(underOverhang > 0 && underOverhang < 15,
                 "B60: the voxel under the seam overhang is partially lit (the shadow-caster branch's precondition)",
                 $"Expected 0 < sky < 15 at (15,49,24), got {underOverhang}");

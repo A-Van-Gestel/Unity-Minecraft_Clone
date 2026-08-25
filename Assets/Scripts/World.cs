@@ -280,7 +280,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     private static readonly int s_shaderGlobalLightLevel = Shader.PropertyToID("GlobalLightLevel");
     private static readonly int s_shaderMinGlobalLightLevel = Shader.PropertyToID("minGlobalLightLevel");
     private static readonly int s_shaderMaxGlobalLightLevel = Shader.PropertyToID("maxGlobalLightLevel");
-    private static readonly int s_shaderSkyLightColor = Shader.PropertyToID("SkyLightColor");
+    private static readonly int s_shaderSkylightColor = Shader.PropertyToID("SkylightColor");
     private static readonly int s_shaderLiquidNoiseOrigin = Shader.PropertyToID("_LiquidNoiseOrigin");
 
     // --- Sky Shader Properties (RF-2) ---
@@ -416,38 +416,38 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
     // --- LP-1 lighting-invariant probe ---
     // A convention-only invariant from LIGHTING_PIPELINE_STATE_REFACTOR.md §2.4, instrumented so LP-4 lands
-    // on observation rather than reasoning. Dev/editor-only (see ScanSunlightQueuePairing); instance fields,
+    // on observation rather than reasoning. Dev/editor-only (see ScanSkylightQueuePairing); instance fields,
     // so a fresh play session starts them at zero without a DomainReset line. The probe changes no behavior.
 
-    // Probe 2 (F6): sunlight-queue keys the fail-safe scan's predicate would skip. Gauge = this scan,
+    // Probe 2 (F6): skylight-queue keys the fail-safe scan's predicate would skip. Gauge = this scan,
     // total = cumulative. The two non-violating skip reasons (no resident owner; resident but unpopulated)
-    // get their own counters so neither inflates the violation tally — see ScanSunlightQueuePairing.
-    private int _sunlightQueueUnflagged;
-    private long _sunlightQueueUnflaggedTotal;
-    private int _sunlightQueueOrphaned;
-    private int _sunlightQueueUnpopulated;
-    private long _sunlightQueueUnpopulatedTotal;
-    private bool _sunlightQueueProbeLogged;
+    // get their own counters so neither inflates the violation tally — see ScanSkylightQueuePairing.
+    private int _skylightQueueUnflagged;
+    private long _skylightQueueUnflaggedTotal;
+    private int _skylightQueueOrphaned;
+    private int _skylightQueueUnpopulated;
+    private long _skylightQueueUnpopulatedTotal;
+    private bool _skylightQueueProbeLogged;
 
-    /// <summary>Sunlight-queue keys found unflagged in the most recent ~1s scan (dev/editor only; LP-1 probe 2, F6).</summary>
-    public int SunlightQueueUnflagged => _sunlightQueueUnflagged;
+    /// <summary>Skylight-queue keys found unflagged in the most recent ~1s scan (dev/editor only; LP-1 probe 2, F6).</summary>
+    public int SkylightQueueUnflagged => _skylightQueueUnflagged;
 
-    /// <summary>Cumulative unflagged sunlight-queue observations across all scans (dev/editor only; LP-1 probe 2, F6).</summary>
-    public long SunlightQueueUnflaggedTotal => _sunlightQueueUnflaggedTotal;
+    /// <summary>Cumulative unflagged skylight-queue observations across all scans (dev/editor only; LP-1 probe 2, F6).</summary>
+    public long SkylightQueueUnflaggedTotal => _skylightQueueUnflaggedTotal;
 
-    /// <summary>Sunlight-queue keys with no resident owner in the most recent scan — minted by design when a
+    /// <summary>Skylight-queue keys with no resident owner in the most recent scan — minted by design when a
     /// BFS spills across a border into unloaded territory, not a violation (dev/editor only; LP-1 probe 2, F6).</summary>
-    public int SunlightQueueOrphaned => _sunlightQueueOrphaned;
+    public int SkylightQueueOrphaned => _skylightQueueOrphaned;
 
-    /// <summary>Sunlight-queue keys whose owner is resident but not yet populated in the most recent scan —
+    /// <summary>Skylight-queue keys whose owner is resident but not yet populated in the most recent scan —
     /// the scan skips them and the state resolves on population, so not a violation (dev/editor only; LP-1
     /// probe 2, F6).</summary>
-    public int SunlightQueueUnpopulated => _sunlightQueueUnpopulated;
+    public int SkylightQueueUnpopulated => _skylightQueueUnpopulated;
 
     /// <summary>Cumulative resident-but-unpopulated observations. The gauge above is near-useless on its own —
     /// the state resolves within a scan or two — so the total is what a soak can actually read
     /// (dev/editor only; LP-1 probe 2, F6).</summary>
-    public long SunlightQueueUnpopulatedTotal => _sunlightQueueUnpopulatedTotal;
+    public long SkylightQueueUnpopulatedTotal => _skylightQueueUnpopulatedTotal;
 
     // --- LP-6 gate-walk probe (retained past its question — scheduled for removal) ---
     // Sized the ready-set scan's neighbor-gate cost, then proved LP-6's laziness reached production
@@ -1156,13 +1156,13 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     }
 
     /// <summary>
-    /// LP-1 probe 2 (F6), dev/editor only: checks the sunlight-recalculation queue's "queued column ⇒ owner
+    /// LP-1 probe 2 (F6), dev/editor only: checks the skylight-recalculation queue's "queued column ⇒ owner
     /// chunk flagged" pairing, which today is maintained by convention across three enqueue paths. A populated
     /// resident owner carrying none of the three work flags is the violation — the fail-safe scan's own
     /// predicate would skip it, so its columns sleep until unload persists them. Two non-violating states get
     /// their own counters instead:
     /// <list type="bullet">
-    /// <item>No resident owner. <see cref="Data.WorldData.QueueSunlightRecalculation"/> writes the queue key
+    /// <item>No resident owner. <see cref="Data.WorldData.QueueSkylightRecalculation"/> writes the queue key
     /// unconditionally but sets the flag only when the owner is resident, so a BFS spilling across a border
     /// into unloaded territory mints an ownerless key by design.</item>
     /// <item>Resident but unpopulated. The scan also requires <c>IsPopulated</c>, so such an owner is skipped
@@ -1172,7 +1172,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// </summary>
     [Conditional("UNITY_EDITOR")]
     [Conditional("DEVELOPMENT_BUILD")]
-    private void ScanSunlightQueuePairing()
+    private void ScanSkylightQueuePairing()
     {
         // Bracketed inside this [Conditional] method so release builds pay nothing for a phase that would
         // always read zero there, and so the probe's cost never lands in LightFailSafeScan's slot.
@@ -1184,10 +1184,10 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
         // The KeyValuePair enumerator is a struct and allocates nothing; Keys would allocate its collection
         // wrapper on first touch. The value (the column set) is deliberately not inspected.
-        foreach (KeyValuePair<Vector2Int, HashSet<Vector2Int>> entry in worldData.SunlightRecalculationQueue)
+        foreach (KeyValuePair<Vector2Int, HashSet<Vector2Int>> entry in worldData.SkylightRecalculationQueue)
         {
             // The key IS the owner's chunk voxel origin — never re-derive it from a column through
-            // SunlightColumnRouting, which would fold a routing bug into the probe itself.
+            // SkylightColumnRouting, which would fold a routing bug into the probe itself.
             if (!worldData.TryGetChunk(entry.Key, out ChunkData owner))
             {
                 orphaned++;
@@ -1211,17 +1211,17 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
             unflagged++;
 
-            if (_sunlightQueueProbeLogged) continue;
-            _sunlightQueueProbeLogged = true;
-            Debug.LogWarning($"[LP-1] Sunlight queue key {entry.Key.ToString()} has a resident owner with no work flag set — " +
+            if (_skylightQueueProbeLogged) continue;
+            _skylightQueueProbeLogged = true;
+            Debug.LogWarning($"[LP-1] Skylight queue key {entry.Key.ToString()} has a resident owner with no work flag set — " +
                              "F6's convention-only pairing is broken; these columns will sleep. Further hits are counted, not logged.");
         }
 
-        _sunlightQueueUnflagged = unflagged;
-        _sunlightQueueUnflaggedTotal += unflagged;
-        _sunlightQueueOrphaned = orphaned;
-        _sunlightQueueUnpopulated = unpopulated;
-        _sunlightQueueUnpopulatedTotal += unpopulated;
+        _skylightQueueUnflagged = unflagged;
+        _skylightQueueUnflaggedTotal += unflagged;
+        _skylightQueueOrphaned = orphaned;
+        _skylightQueueUnpopulated = unpopulated;
+        _skylightQueueUnpopulatedTotal += unpopulated;
 
         WorldFrameProfiler.Add(WorldFrameProfiler.Phase.LightQueueProbe, probeStart);
     }
@@ -1335,21 +1335,21 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                     // TryGetAndRemove hands over the store's pooled set, so it is ours to release.
                     HashSetPool<Vector2Int>.Release(localCols);
 
-                    if (worldData.SunlightRecalculationQueue.TryGetValue(chunkVoxelPos, out HashSet<Vector2Int> existingCols))
+                    if (worldData.SkylightRecalculationQueue.TryGetValue(chunkVoxelPos, out HashSet<Vector2Int> existingCols))
                     {
                         existingCols.UnionWith(globalCols);
                         HashSetPool<Vector2Int>.Release(globalCols);
                     }
                     else
                     {
-                        worldData.SunlightRecalculationQueue[chunkVoxelPos] = globalCols;
+                        worldData.SkylightRecalculationQueue[chunkVoxelPos] = globalCols;
                     }
 
                     data.FlagLightWork();
                 }
 
                 // Replay pending cross-chunk blocklight modifications recorded while this chunk was
-                // unloaded. The sunlight column restore above cannot carry RGB data — without this
+                // unloaded. The skylight column restore above cannot carry RGB data — without this
                 // replay, blocklight removals (broken lamps) and uplifts that crossed into this
                 // chunk while it was unloaded would be lost forever, leaving ghost light baked into
                 // the saved data (Bug 08, path 1). When lighting is disabled, the store is left
@@ -1375,7 +1375,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                         if (!decision.ShouldApply) continue;
 
                         data.SetLightData(localPos.x, localPos.y, localPos.z, decision.NewLight);
-                        data.AddToBlockLightQueue(localPos, decision.OldLevel, decision.OldR, decision.OldG, decision.OldB);
+                        data.AddToBlocklightQueue(localPos, decision.OldLevel, decision.OldR, decision.OldG, decision.OldB);
                     }
 
                     DictionaryPool<Vector3Int, LightingStateManager.PendingBlocklightMod>.Release(pendingBlocklight);
@@ -1396,8 +1396,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                             Debug.Log($"[LoadOrGenerateChunk] Neighbors ready - triggering lighting for {chunkCoord}");
 #endif
 
-                        // 1. Fill the queue (RecalculateSunLightLight populates the queues in data)
-                        data.RecalculateSunLightLight();
+                        // 1. Fill the queue (RecalculateSkylight populates the queues in data)
+                        data.RecalculateSkylight();
 
                         // 2. Schedule the job immediately using Data overload
                         JobManager.ScheduleLightingUpdate(data);
@@ -1557,7 +1557,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                     // Recalc the whole load area before step 2b schedules any of it: AreNeighborsReadyAndLit
                     // blocks on a neighbor's HasLightChangesToProcess, which this recalc sets — so splitting
                     // the arm keeps iteration order from deciding which chunks reach 2b's edge arm.
-                    chunkData.RecalculateSunLightLight();
+                    chunkData.RecalculateSkylight();
                     chunkData.ClearInitialLighting();
                 }
 
@@ -1632,7 +1632,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                     // (diagnostics only) names the stuck cluster. See CHUNK_PIPELINE_PERFORMANCE_ANALYSIS §4.
                     StringBuilder tail = new StringBuilder();
                     tail.Append($"Last sweep outcome: processed={JobManager.LastProcessedJobCount}, unstable={JobManager.LastUnstableJobCount}, edgeRecycle={JobManager.LastEdgeRecycleJobCount}, xchunkApplyRouted={JobManager.LastCrossChunkModsApplyRouted}, xchunkEffective={JobManager.LastCrossChunkModsEffective}");
-                    tail.Append($" | eff[sunPl={JobManager.LastEffSunPlacement}, sunRm={JobManager.LastEffSunRemoval}, blkPl={JobManager.LastEffBlockPlacement}, blkRm={JobManager.LastEffBlockRemoval}]");
+                    tail.Append($" | eff[skyPl={JobManager.LastEffSkyPlacement}, skyRm={JobManager.LastEffSkyRemoval}, blkPl={JobManager.LastEffBlockPlacement}, blkRm={JobManager.LastEffBlockRemoval}]");
                     AppendEffectiveSample(tail);
                     tail.Append(logLightingDiagnostics ? " | See [LightingDiag] tail logs above for the recycling cluster." : " | Enable settings.enableDiagnosticLogs to capture the recycling cluster.");
                     Debug.LogError(tail.ToString());
@@ -1734,7 +1734,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
         // Effective-apply breakdown: a steady removal bucket paired with its placement bucket is the
         // stale-snapshot darkness/re-placement oscillation signature.
-        diag.Append($" | eff[sunPl={JobManager.LastEffSunPlacement}, sunRm={JobManager.LastEffSunRemoval}, " +
+        diag.Append($" | eff[skyPl={JobManager.LastEffSkyPlacement}, skyRm={JobManager.LastEffSkyRemoval}, " +
                     $"blkPl={JobManager.LastEffBlockPlacement}, blkRm={JobManager.LastEffBlockRemoval}]");
 
         AppendEffectiveSample(diag);
@@ -1745,7 +1745,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// <summary>
     /// Appends a decoded sample of the first effective cross-chunk apply from the most recent
     /// <see cref="WorldJobManager.ProcessLightingJobs"/> call — a concrete oscillating voxel (global
-    /// position, channel/op, and the relevant light value old→new). Decodes sky level for sunlight
+    /// position, channel/op, and the relevant light value old→new). Decodes sky level for skylight
     /// mods and per-channel RGB for blocklight mods.
     /// </summary>
     /// <param name="builder">The diagnostic line under construction.</param>
@@ -1762,9 +1762,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         ushort newLight = JobManager.LastEffSampleNewLight;
         string op = JobManager.LastEffSampleIsRemoval ? "rm" : "pl";
 
-        if (JobManager.LastEffSampleIsSun)
+        if (JobManager.LastEffSampleIsSky)
         {
-            builder.Append($" | sample: Sun {op} @({p.x},{p.y},{p.z}) sky {LightBitMapping.GetSkyLight(oldLight)}->{LightBitMapping.GetSkyLight(newLight)}");
+            builder.Append($" | sample: Sky {op} @({p.x},{p.y},{p.z}) sky {LightBitMapping.GetSkylight(oldLight)}->{LightBitMapping.GetSkylight(newLight)}");
         }
         else
         {
@@ -2160,8 +2160,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
         Shader.SetGlobalFloat(s_shaderGlobalLightLevel, globalLightLevel);
 
-        Color skyColor = TimeManager != null ? TimeManager.SkyLightColor : Color.white;
-        Shader.SetGlobalColor(s_shaderSkyLightColor, skyColor);
+        Color skyColor = TimeManager != null ? TimeManager.SkylightColor : Color.white;
+        Shader.SetGlobalColor(s_shaderSkylightColor, skyColor);
 
         PublishSkyGlobals();
 
@@ -2551,7 +2551,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 // and reopened after — the phase slots must stay disjoint for the report's "all timed
                 // regions" total. Add() accumulates, so both segments sum into one LightFailSafeScan figure.
                 WorldFrameProfiler.Add(WorldFrameProfiler.Phase.LightFailSafeScan, lightFailSafeStart);
-                ScanSunlightQueuePairing();
+                ScanSkylightQueuePairing();
                 lightFailSafeStart = WorldFrameProfiler.Begin();
 
                 int failSafePromoted = _lightWork.PromoteAll();
@@ -2680,14 +2680,14 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                         case LightingScanDecision.ScanAction.ScheduleInitial:
                         case LightingScanDecision.ScanAction.ScheduleEdge:
                         case LightingScanDecision.ScanAction.ScheduleRegular:
-                            // Initial lighting seeds a full sunlight recalc first; the edge arm sets
+                            // Initial lighting seeds a full skylight recalc first; the edge arm sets
                             // HasLightChangesToProcess so a chunk with only an edge check can schedule (the
                             // job's PerformEdgeCheck is read+cleared from NeedsEdgeCheck inside
                             // ScheduleLightingUpdate). On success the schedule clears every lighting flag, so
                             // the chunk is removed from the work sets — it re-enters via its completion's flag
                             // callback / PromoteNeighborhood; a declined schedule parks it (MT-2).
                             if (action == LightingScanDecision.ScanAction.ScheduleInitial)
-                                chunkData.RecalculateSunLightLight();
+                                chunkData.RecalculateSkylight();
                             else if (action == LightingScanDecision.ScanAction.ScheduleEdge)
                                 chunkData.FlagLightWork(); // pre-set so the schedule guard passes
 
@@ -3681,15 +3681,15 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             PipelineTelemetry.StampUnloaded(chunkCoord);
 
             // 1. Persist Orphaned Lighting Queue
-            if (worldData.SunlightRecalculationQueue.TryGetValue(chunkVoxelPos, out HashSet<Vector2Int> globalCols))
+            if (worldData.SkylightRecalculationQueue.TryGetValue(chunkVoxelPos, out HashSet<Vector2Int> globalCols))
             {
                 if (globalCols != null && globalCols.Count > 0)
                 {
-                    PersistOrphanedSunlightColumns(chunkVoxelPos, globalCols);
-                    Debug.Log($"[LIGHTING RESCUE] Saved {globalCols.Count.ToString()} orphaned sunlight columns for chunk {chunkCoord.ToString()}");
+                    PersistOrphanedSkylightColumns(chunkVoxelPos, globalCols);
+                    Debug.Log($"[LIGHTING RESCUE] Saved {globalCols.Count.ToString()} orphaned skylight columns for chunk {chunkCoord.ToString()}");
                 }
 
-                worldData.SunlightRecalculationQueue.Remove(chunkVoxelPos);
+                worldData.SkylightRecalculationQueue.Remove(chunkVoxelPos);
 
                 // CRITICAL: We are removing this set from the active world entirely, so it must be returned to the pool!
                 if (globalCols != null) HashSetPool<Vector2Int>.Release(globalCols);
@@ -3767,20 +3767,20 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     }
 
     /// <summary>
-    /// Converts global-coordinate sunlight columns to chunk-local coordinates and
+    /// Converts global-coordinate skylight columns to chunk-local coordinates and
     /// persists them to <see cref="LightingStateManager"/> so they can be restored
     /// when the chunk is reloaded. Uses a pooled temporary set for the conversion.
     /// </summary>
     /// <param name="chunkVoxelPos">The chunk's voxel-space world origin.</param>
     /// <param name="globalCols">The global-coordinate columns to persist.</param>
-    private void PersistOrphanedSunlightColumns(Vector2Int chunkVoxelPos, HashSet<Vector2Int> globalCols)
+    private void PersistOrphanedSkylightColumns(Vector2Int chunkVoxelPos, HashSet<Vector2Int> globalCols)
     {
         ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkVoxelPos);
 
         HashSet<Vector2Int> localCols = HashSetPool<Vector2Int>.Get();
         foreach (Vector2Int gCol in globalCols)
         {
-            localCols.Add(SunlightColumnRouting.ToLocalColumn(gCol, chunkVoxelPos));
+            localCols.Add(SkylightColumnRouting.ToLocalColumn(gCol, chunkVoxelPos));
         }
 
         LightingStateManager.AddPending(chunkCoord, localCols);
@@ -4418,7 +4418,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 break;
 
             // For other modes, we iterate sections to efficiently skip empty space.
-            case DebugVisualizationMode.Sunlight:
+            case DebugVisualizationMode.Skylight:
             case DebugVisualizationMode.Blocklight:
             case DebugVisualizationMode.FluidLevel:
 
@@ -4454,16 +4454,16 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                         Color? color = null;
 
                         ushort lightData = section.LightData[i];
-                        byte skyLight = LightBitMapping.GetSkyLight(lightData);
-                        byte blockLight = LightBitMapping.GetMaxBlocklight(lightData);
+                        byte skylight = LightBitMapping.GetSkylight(lightData);
+                        byte blocklight = LightBitMapping.GetMaxBlocklight(lightData);
 
-                        if (visualizationMode == DebugVisualizationMode.Sunlight && skyLight > 0)
+                        if (visualizationMode == DebugVisualizationMode.Skylight && skylight > 0)
                         {
-                            color = new Color(1f, 1f, 0f, skyLight / 15f * 0.8f); // Yellow
+                            color = new Color(1f, 1f, 0f, skylight / 15f * 0.8f); // Yellow
                         }
-                        else if (visualizationMode == DebugVisualizationMode.Blocklight && blockLight > 0)
+                        else if (visualizationMode == DebugVisualizationMode.Blocklight && blocklight > 0)
                         {
-                            color = new Color(1f, 0.5f, 0f, blockLight / 15f * 0.8f); // Orange
+                            color = new Color(1f, 0.5f, 0f, blocklight / 15f * 0.8f); // Orange
                         }
                         else if (visualizationMode == DebugVisualizationMode.FluidLevel &&
                                  state.Properties.fluidType != FluidType.None)
@@ -4492,9 +4492,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 break;
 
             // --- DIAGNOSTIC: Underwater chunk-border shadow wall ---
-            // Shows sunlight values for ALL voxels (including air & water) in a 2-block
+            // Shows skylight values for ALL voxels (including air & water) in a 2-block
             // band around each chunk border. Highlights light-step anomalies.
-            case DebugVisualizationMode.SunlightChunkBorder:
+            case DebugVisualizationMode.SkylightChunkBorder:
 
                 const int borderWidth = 2; // How many blocks from each edge to visualize
                 const int chunkW = VoxelData.ChunkWidth; // 16
@@ -4525,7 +4525,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
                                 VoxelState state = new VoxelState(packedData);
                                 Vector3Int localPos = new Vector3Int(x, localY, z);
-                                byte sunlight = LightBitMapping.GetSkyLight(section.LightData[sectionIndex]);
+                                byte skylight = LightBitMapping.GetSkylight(section.LightData[sectionIndex]);
                                 bool isOpaque = state.Properties.IsOpaque;
 
                                 Color color;
@@ -4542,12 +4542,12 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                                     if (localY + 1 < VoxelData.ChunkHeight)
                                     {
                                         uint abovePacked = chunk.ChunkData.GetVoxel(x, localY + 1, z);
-                                        byte aboveSkyLight = LightBitMapping.GetSkyLight(chunk.ChunkData.GetLightData(x, localY + 1, z));
+                                        byte aboveSkylight = LightBitMapping.GetSkylight(chunk.ChunkData.GetLightData(x, localY + 1, z));
                                         ushort aboveId = BurstVoxelDataBitMapping.GetId(abovePacked);
                                         bool aboveIsOpaque = Instance.BlockTypes[aboveId].IsOpaque;
 
                                         // Flag anomaly: ≥2 level drop from non-opaque voxel above
-                                        if (!aboveIsOpaque && aboveSkyLight >= sunlight + 2)
+                                        if (!aboveIsOpaque && aboveSkylight >= skylight + 2)
                                         {
                                             isAnomaly = true;
                                         }
@@ -4558,15 +4558,15 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                                         // Magenta — light step anomaly (≥2 level unexpected drop)
                                         color = new Color(1f, 0f, 1f, 0.9f);
                                     }
-                                    else if (sunlight == 0)
+                                    else if (skylight == 0)
                                     {
-                                        // Red — zero sunlight on a non-opaque voxel (unexpected darkness)
+                                        // Red — zero skylight on a non-opaque voxel (unexpected darkness)
                                         color = new Color(1f, 0f, 0f, 0.7f);
                                     }
                                     else
                                     {
-                                        // Yellow gradient — normal sunlight (brighter = higher level)
-                                        float intensity = sunlight / 15f;
+                                        // Yellow gradient — normal skylight (brighter = higher level)
+                                        float intensity = skylight / 15f;
                                         color = new Color(1f, 1f, 0f, intensity * 0.8f);
                                     }
                                 }
@@ -4947,10 +4947,10 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// channel, which is permanently 15 under open sky because it records <i>exposure</i>, not
     /// brightness. Pure integer math: no lighting pass, no remesh, no save impact.
     /// </remarks>
-    public byte GetEffectiveSkyLight(Vector3Int voxelPos)
+    public byte GetEffectiveSkylight(Vector3Int voxelPos)
     {
         return TryGetLightData(voxelPos, out ushort lightData)
-            ? LightBitMapping.GetEffectiveSkyLight(lightData, CurrentSkyDarken)
+            ? LightBitMapping.GetEffectiveSkylight(lightData, CurrentSkyDarken)
             : (byte)0;
     }
 
@@ -5102,7 +5102,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// <list type="number">
     /// <item>Waits for all active generation, lighting, and meshing jobs to complete.</item>
     /// <item>Saves all modified chunks synchronously to disk.</item>
-    /// <item>Persists orphaned sunlight recalculation queues to <see cref="LightingStateManager"/>.</item>
+    /// <item>Persists orphaned skylight recalculation queues to <see cref="LightingStateManager"/>.</item>
     /// <item>Returns all visual <see cref="Chunk"/> objects and <see cref="ChunkData"/> instances to their pools.</item>
     /// <item>Clears all tracking collections (mesh queue, borders, lighting dirty-set).</item>
     /// </list>
@@ -5121,15 +5121,15 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         SaveAllModifiedChunks(true);
         SaveSystem.SaveWorld(Instance);
 
-        // 3. Persist orphaned sunlight recalculation queues
-        foreach (KeyValuePair<Vector2Int, HashSet<Vector2Int>> kvp in worldData.SunlightRecalculationQueue)
+        // 3. Persist orphaned skylight recalculation queues
+        foreach (KeyValuePair<Vector2Int, HashSet<Vector2Int>> kvp in worldData.SkylightRecalculationQueue)
         {
             if (kvp.Value == null || kvp.Value.Count == 0) continue;
-            PersistOrphanedSunlightColumns(kvp.Key, kvp.Value);
+            PersistOrphanedSkylightColumns(kvp.Key, kvp.Value);
             HashSetPool<Vector2Int>.Release(kvp.Value);
         }
 
-        worldData.SunlightRecalculationQueue.Clear();
+        worldData.SkylightRecalculationQueue.Clear();
 
         // 4. Return all visual chunks to pool and clear borders
         foreach (KeyValuePair<ChunkCoord, Chunk> kvp in _chunkMap)

@@ -184,7 +184,7 @@ namespace Editor.Validation.SerializationRoundTrip
         {
             for (int i = 0; i < FIXTURE_QUEUE_NODES; i++)
             {
-                data.SunlightBfsQueue.Enqueue(new LightQueueNode
+                data.SkylightBfsQueue.Enqueue(new LightQueueNode
                 {
                     Position = new Vector3Int(i, 20 + i, 15 - i),
                     OldLightLevel = (byte)(i + 1),

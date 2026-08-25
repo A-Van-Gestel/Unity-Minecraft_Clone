@@ -69,7 +69,7 @@ namespace Helpers
 
             /// <summary>The neighbor has never completed a lighting pass, so its light data is all zeros.
             /// Blocks <see cref="Gate.ReadyAndLit"/>, and <see cref="Gate.MeshReady"/> when lighting is
-            /// enabled (with lighting off the sunlight fill supplies brightness instead).</summary>
+            /// enabled (with lighting off the skylight fill supplies brightness instead).</summary>
             NeedsInitialLighting,
         }
 
@@ -172,7 +172,7 @@ namespace Helpers
                 case Gate.MeshReady:
                     if (!facts.ExistsAndPopulated) return BlockReason.NotPopulated;
 
-                    // With lighting disabled the sunlight fill supplies brightness, so a never-lit neighbor
+                    // With lighting disabled the skylight fill supplies brightness, so a never-lit neighbor
                     // still meshes correctly and the term must not fire.
                     return facts.LightingEnabled && facts.NeedsInitialLighting
                         ? BlockReason.NeedsInitialLighting

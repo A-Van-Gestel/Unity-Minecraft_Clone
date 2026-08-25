@@ -119,13 +119,13 @@ namespace Editor.Validation.Meshing
 
         /// <summary>
         /// Meshes a bottom half slab, optionally surrounded by a floor at the same level, and returns the
-        /// four vertex sunlight values of its mid-plane top face.
+        /// four vertex skylight values of its mid-plane top face.
         /// </summary>
         /// <param name="embedded">When true, fills the surrounding cells with full blocks so the slab's
         /// top face is recessed below the surface.</param>
         /// <param name="uniform">Packed light written to every cell.</param>
         /// <param name="ownCellLight">When set, overrides the light in the slab's own cell.</param>
-        /// <returns>The four corner sun values, or null when the face was not emitted (already logged).</returns>
+        /// <returns>The four corner sky values, or null when the face was not emitted (already logged).</returns>
         private static byte[] RecessedSlabTopFace(bool embedded, ushort uniform, ushort? ownCellLight)
         {
             using MeshingTestWorld world = new MeshingTestWorld();
@@ -262,11 +262,11 @@ namespace Editor.Validation.Meshing
 
         /// <summary>
         /// Meshes a floor block with <paramref name="aboveId"/> standing on it and returns the four
-        /// vertex sunlight values of the floor's <c>+Y</c> face.
+        /// vertex skylight values of the floor's <c>+Y</c> face.
         /// </summary>
         /// <param name="aboveId">Block placed in the cell above, or <see cref="TestMeshBlockPalette.Air"/> for none.</param>
         /// <param name="aboveMeta">That block's metadata byte, selecting its orientation.</param>
-        /// <returns>The four corner sun values, or null when the face was not emitted (already logged).</returns>
+        /// <returns>The four corner sky values, or null when the face was not emitted (already logged).</returns>
         private static byte[] FloorTopCorners(ushort aboveId, byte aboveMeta)
         {
             using MeshingTestWorld world = new MeshingTestWorld();
@@ -274,12 +274,12 @@ namespace Editor.Validation.Meshing
             if (aboveId != TestMeshBlockPalette.Air)
                 world.SetBlock(VO8_FLOOR_X, VO8_FLOOR_Y + 1, VO8_FLOOR_Z, aboveId, aboveMeta);
 
-            // Uniform full sunlight isolates the AO term: any per-corner variation is occlusion.
+            // Uniform full skylight isolates the AO term: any per-corner variation is occlusion.
             world.FillLight(LightBitMapping.PackLightData(15, 0, 0, 0));
 
             MeshDataJobOutput o = world.Run(SmoothLightingQuality.High);
 
-            byte[] corners = TopFaceCornerSun(o, VO8_FLOOR_X, VO8_FLOOR_Y, VO8_FLOOR_Z);
+            byte[] corners = TopFaceCornerSky(o, VO8_FLOOR_X, VO8_FLOOR_Y, VO8_FLOOR_Z);
             if (corners != null) return corners;
 
             Debug.LogError($"[FAIL] B46 setup: the floor's +Y face was not emitted with block {aboveId} "
@@ -289,7 +289,7 @@ namespace Editor.Validation.Meshing
         }
 
         /// <summary>
-        /// Returns the sunlight at the four corners of a cell's <c>+Y</c> face, located by vertex
+        /// Returns the skylight at the four corners of a cell's <c>+Y</c> face, located by vertex
         /// <i>position</i> rather than by quad.
         /// <para>
         /// <b>Do not simplify this back to "read the first quad of the face".</b> That held only while a
@@ -303,8 +303,8 @@ namespace Editor.Validation.Meshing
         /// <param name="cellX">Chunk-local X of the cell whose top face is read.</param>
         /// <param name="cellY">Chunk-local Y of that cell (the face lies at <c>cellY + 1</c>).</param>
         /// <param name="cellZ">Chunk-local Z of that cell.</param>
-        /// <returns>The four corner sun values in <c>l0..l3</c> order, or null when a corner is missing.</returns>
-        private static byte[] TopFaceCornerSun(MeshDataJobOutput o, int cellX, int cellY, int cellZ)
+        /// <returns>The four corner sky values in <c>l0..l3</c> order, or null when a corner is missing.</returns>
+        private static byte[] TopFaceCornerSky(MeshDataJobOutput o, int cellX, int cellY, int cellZ)
         {
             float plane = cellY + 1;
 
@@ -385,7 +385,7 @@ namespace Editor.Validation.Meshing
         /// occlusion turns face-uniform, and is independent of the falloff radius.
         /// </para>
         /// </summary>
-        /// <param name="corners">The face's four corner sun values.</param>
+        /// <param name="corners">The face's four corner sky values.</param>
         /// <returns>The number of corners equal to the darkest of them.</returns>
         private static int StrongestShadedCornerCount(byte[] corners)
         {

@@ -145,7 +145,7 @@ namespace Editor.Validation.Meshing
 
             darkest = 255;
             foreach (SubVertexSample s in TopFaceSubVertexField(output, B49_X, B49_Y, B49_Z))
-                darkest = Mathf.Min(darkest, s.Sun);
+                darkest = Mathf.Min(darkest, s.Sky);
 
             return CountTopFaceQuads(output, B49_X, B49_Y, B49_Z);
         }
@@ -217,8 +217,8 @@ namespace Editor.Validation.Meshing
                 foreach (SubVertexSample s in field)
                 {
                     if (Mathf.Abs(s.V - v) >= FACE_POSITION_EPSILON) continue;
-                    darkest = Mathf.Min(darkest, s.Sun);
-                    lightest = Mathf.Max(lightest, s.Sun);
+                    darkest = Mathf.Min(darkest, s.Sky);
+                    lightest = Mathf.Max(lightest, s.Sky);
                     samples++;
                 }
 
@@ -249,8 +249,8 @@ namespace Editor.Validation.Meshing
             int againstWall = 255, oneCellOut = 0;
             foreach (SubVertexSample s in field)
             {
-                if (Mathf.Abs(s.V - 1f) < FACE_POSITION_EPSILON) againstWall = Mathf.Min(againstWall, s.Sun);
-                if (Mathf.Abs(s.V) < FACE_POSITION_EPSILON) oneCellOut = Mathf.Max(oneCellOut, s.Sun);
+                if (Mathf.Abs(s.V - 1f) < FACE_POSITION_EPSILON) againstWall = Mathf.Min(againstWall, s.Sky);
+                if (Mathf.Abs(s.V) < FACE_POSITION_EPSILON) oneCellOut = Mathf.Max(oneCellOut, s.Sky);
             }
 
             ok &= MeshAssert.IsTrue("B59 the wall casts, and its shadow ends within a cell",
@@ -327,7 +327,7 @@ namespace Editor.Validation.Meshing
             // Sweep the eight floor cells around the cube, so perpendicular and diagonal directions are
             // measured together. Each sample is kept with its distance so the ordering leg below can
             // compare within a direction.
-            List<(int dx, int dz, float distance, int sun)> samples = new List<(int, int, float, int)>();
+            List<(int dx, int dz, float distance, int sky)> samples = new List<(int, int, float, int)>();
 
             for (int dx = -1; dx <= 1; dx++)
             for (int dz = -1; dz <= 1; dz++)
@@ -343,9 +343,9 @@ namespace Editor.Validation.Meshing
                     float outsideV = Mathf.Max(Mathf.Max(-v, v - 1f), 0f);
                     float distance = Mathf.Sqrt(outsideU * outsideU + outsideV * outsideV);
 
-                    samples.Add((dx, dz, distance, s.Sun));
+                    samples.Add((dx, dz, distance, s.Sky));
 
-                    bool darkened = s.Sun < 255;
+                    bool darkened = s.Sky < 255;
                     if (distance >= 1f - 0.001f)
                     {
                         if (darkened)
@@ -355,7 +355,7 @@ namespace Editor.Validation.Meshing
                             {
                                 failures.AppendFormat(
                                     "    cell({0},{1}) uv({2:0.00},{3:0.00}) is {4:0.00} cells away and still reads {5}\n",
-                                    dx, dz, s.U, s.V, distance, s.Sun);
+                                    dx, dz, s.U, s.V, distance, s.Sky);
                             }
                         }
                     }
@@ -392,18 +392,18 @@ namespace Editor.Validation.Meshing
             // metric-only, and it is what catches a non-monotonic field like the coverage model's
             // (finding S9), which rose where distance said fall.
             StringBuilder ordering = new StringBuilder();
-            foreach ((int dx, int dz, float distance, int sun) a in samples)
-            foreach ((int dx, int dz, float distance, int sun) b in samples)
+            foreach ((int dx, int dz, float distance, int sky) a in samples)
+            foreach ((int dx, int dz, float distance, int sky) b in samples)
             {
                 if (a.dx != b.dx || a.dz != b.dz) continue;
                 if (a.distance >= b.distance - 0.001f) continue;
-                if (a.sun <= b.sun + SHADOW_ORDERING_TOLERANCE) continue;
+                if (a.sky <= b.sky + SHADOW_ORDERING_TOLERANCE) continue;
 
                 if (ordering.Length < 400)
                 {
                     ordering.AppendFormat(
                         "    cell({0},{1}): {2:0.00} cells away reads {3}, but {4:0.00} away reads {5}\n",
-                        a.dx, a.dz, a.distance, a.sun, b.distance, b.sun);
+                        a.dx, a.dz, a.distance, a.sky, b.distance, b.sky);
                 }
             }
 
@@ -446,10 +446,10 @@ namespace Editor.Validation.Meshing
         /// <returns>True when the sealed corner ignores the hidden cell's light and an open one does not.</returns>
         private static bool B58_SealedCornerIgnoresHiddenLight()
         {
-            int sealedBright = SealedCornerSun(nookSky: 15, sealCorner: true);
-            int sealedDark = SealedCornerSun(nookSky: 0, sealCorner: true);
-            int openBright = SealedCornerSun(nookSky: 15, sealCorner: false);
-            int openDark = SealedCornerSun(nookSky: 0, sealCorner: false);
+            int sealedBright = SealedCornerSky(nookSky: 15, sealCorner: true);
+            int sealedDark = SealedCornerSky(nookSky: 0, sealCorner: true);
+            int openBright = SealedCornerSky(nookSky: 15, sealCorner: false);
+            int openDark = SealedCornerSky(nookSky: 0, sealCorner: false);
 
             if (sealedBright < 0 || sealedDark < 0 || openBright < 0 || openDark < 0)
             {
@@ -486,7 +486,7 @@ namespace Editor.Validation.Meshing
         /// <param name="nookSky">Sky light to write into the diagonal ("nook") cell.</param>
         /// <param name="sealCorner">Whether to raise the two walls that seal the corner.</param>
         /// <returns>The corner vertex's encoded sky light, or -1 when it was not emitted.</returns>
-        private static int SealedCornerSun(byte nookSky, bool sealCorner)
+        private static int SealedCornerSky(byte nookSky, bool sealCorner)
         {
             using MeshingTestWorld world = new MeshingTestWorld();
             BuildFloor(world);
@@ -502,8 +502,8 @@ namespace Editor.Validation.Meshing
 
             // Read inside the using scope: the output's buffers are pooled by the world.
             return TryReadSubVertex(TopFaceSubVertexField(world.Run(SmoothLightingQuality.High),
-                B49_X, B49_Y, B49_Z), 1f, 1f, out int sun)
-                ? sun
+                B49_X, B49_Y, B49_Z), 1f, 1f, out int sky)
+                ? sky
                 : -1;
         }
 
@@ -589,36 +589,36 @@ namespace Editor.Validation.Meshing
         {
             excess = 0;
 
-            if (!TryReadSubVertex(both, u, v, out int sunBoth)
-                || !TryReadSubVertex(onlyA, u, v, out int sunA)
-                || !TryReadSubVertex(onlyB, u, v, out int sunB)
-                || !TryReadSubVertex(neither, u, v, out int sunNeither))
+            if (!TryReadSubVertex(both, u, v, out int skyBoth)
+                || !TryReadSubVertex(onlyA, u, v, out int skyA)
+                || !TryReadSubVertex(onlyB, u, v, out int skyB)
+                || !TryReadSubVertex(neither, u, v, out int skyNeither))
             {
                 return false;
             }
 
-            excess = sunA + sunB - sunBoth - sunNeither;
+            excess = skyA + skyB - skyBoth - skyNeither;
             return true;
         }
 
-        /// <summary>Reads one sub-vertex's sunlight by its position within the face.</summary>
+        /// <summary>Reads one sub-vertex's skylight by its position within the face.</summary>
         /// <param name="field">The face's sub-vertex field.</param>
         /// <param name="u">Face-parameter coordinate to match.</param>
         /// <param name="v">Second face-parameter coordinate to match.</param>
-        /// <param name="sun">The vertex's encoded sky light.</param>
+        /// <param name="sky">The vertex's encoded sky light.</param>
         /// <returns>True when the face emitted a vertex there.</returns>
-        private static bool TryReadSubVertex(List<SubVertexSample> field, float u, float v, out int sun)
+        private static bool TryReadSubVertex(List<SubVertexSample> field, float u, float v, out int sky)
         {
             foreach (SubVertexSample s in field)
             {
                 if (Mathf.Abs(s.U - u) >= FACE_POSITION_EPSILON) continue;
                 if (Mathf.Abs(s.V - v) >= FACE_POSITION_EPSILON) continue;
 
-                sun = s.Sun;
+                sky = s.Sky;
                 return true;
             }
 
-            sun = -1;
+            sky = -1;
             return false;
         }
 
@@ -711,7 +711,7 @@ namespace Editor.Validation.Meshing
                     continue;
                 }
 
-                byte[] corners = TopFaceCornerSun(o, B49_X, B49_Y, B49_Z);
+                byte[] corners = TopFaceCornerSky(o, B49_X, B49_Y, B49_Z);
                 if (corners == null)
                 {
                     failures.AppendFormat("    {0} occluder(s): the face's corners were not all emitted\n", occluders);
@@ -801,7 +801,7 @@ namespace Editor.Validation.Meshing
 
             if (!ok) return false;
 
-            byte[] corners = TopFaceCornerSun(output, B49_X, B49_Y, B49_Z);
+            byte[] corners = TopFaceCornerSky(output, B49_X, B49_Y, B49_Z);
             if (corners == null)
             {
                 Debug.LogError("[FAIL] B49 setup: the floor's top face corners were not all emitted.");
@@ -833,7 +833,7 @@ namespace Editor.Validation.Meshing
         /// it, and never darker than a fully-occluded corner.
         /// </summary>
         /// <param name="o">The meshing job output to read.</param>
-        /// <param name="corners">The face's four corner sun values, in <c>l0..l3</c> order.</param>
+        /// <param name="corners">The face's four corner sky values, in <c>l0..l3</c> order.</param>
         /// <param name="label">Configuration name used in the failure text.</param>
         /// <returns>True when the profile is present and correctly oriented.</returns>
         private static bool AssertContactShadowProfile(MeshDataJobOutput o, byte[] corners, string label)
@@ -849,8 +849,8 @@ namespace Editor.Validation.Meshing
             int lightest = 0;
             foreach (SubVertexSample s in field)
             {
-                if (s.Sun < darkest) darkest = s.Sun;
-                if (s.Sun > lightest) lightest = s.Sun;
+                if (s.Sky < darkest) darkest = s.Sky;
+                if (s.Sky > lightest) lightest = s.Sky;
             }
 
             return MeshAssert.IsTrue($"B49 the face carries a contact shadow ({label})",
@@ -868,7 +868,7 @@ namespace Editor.Validation.Meshing
         /// </summary>
         /// <param name="lit">Packed light value to fill the world with.</param>
         /// <param name="withWalls">Whether to raise the two walls that form the inner corner.</param>
-        /// <returns>The probe face's center sun value, or -1 when that vertex was not emitted.</returns>
+        /// <returns>The probe face's center sky value, or -1 when that vertex was not emitted.</returns>
         private static int InnerCornerFaceCenter(ushort lit, bool withWalls)
         {
             using MeshingTestWorld world = new MeshingTestWorld();
@@ -904,8 +904,8 @@ namespace Editor.Validation.Meshing
         /// there while the seams still matched (an inner corner's center went 144 to 255).
         /// </para>
         /// </summary>
-        /// <param name="walledCenter">Face-center sun with the two walls raised.</param>
-        /// <param name="openCenter">Face-center sun with the same fixture minus the walls.</param>
+        /// <param name="walledCenter">Face-center sky with the two walls raised.</param>
+        /// <param name="openCenter">Face-center sky with the same fixture minus the walls.</param>
         /// <returns>True when the walls measurably darken the face center.</returns>
         private static bool AssertInnerCornerCenterStaysDark(int walledCenter, int openCenter)
         {
@@ -926,16 +926,16 @@ namespace Editor.Validation.Meshing
                 + "could not see because the faces still agreed along their shared edge.");
         }
 
-        /// <summary>Reads the sunlight at the probe face's center sub-vertex.</summary>
+        /// <summary>Reads the skylight at the probe face's center sub-vertex.</summary>
         /// <param name="o">The meshing job output to read.</param>
-        /// <param name="center">The center sub-vertex's sun value.</param>
+        /// <param name="center">The center sub-vertex's sky value.</param>
         /// <returns>True when the face emitted a vertex at its center.</returns>
         private static bool TryReadFaceCenter(MeshDataJobOutput o, out int center)
         {
             center = -1;
             foreach (SubVertexSample s in TopFaceSubVertexField(o, B49_X, B49_Y, B49_Z))
             {
-                if (Mathf.Abs(s.U - 0.5f) < 0.01f && Mathf.Abs(s.V - 0.5f) < 0.01f) center = s.Sun;
+                if (Mathf.Abs(s.U - 0.5f) < 0.01f && Mathf.Abs(s.V - 0.5f) < 0.01f) center = s.Sky;
             }
 
             return center >= 0;
@@ -963,7 +963,7 @@ namespace Editor.Validation.Meshing
             public float V;
 
             /// <summary>The vertex's encoded sky light.</summary>
-            public byte Sun;
+            public byte Sky;
         }
 
         /// <summary>
@@ -973,7 +973,7 @@ namespace Editor.Validation.Meshing
         /// <b>The reading is tessellation-independent by construction</b>, which is the whole point: a
         /// face is one quad or <c>N×N</c> sub-quads depending on what stands near it, so any probe that
         /// indexes by quad order asserts something different at each density. B42 and B46 broke on
-        /// exactly that when VO-9b landed; <see cref="TopFaceCornerSun"/> is the corner-located answer
+        /// exactly that when VO-9b landed; <see cref="TopFaceCornerSky"/> is the corner-located answer
         /// and this is its whole-field counterpart, for scenarios that need the interior too.
         /// </para>
         /// <para>
@@ -1006,7 +1006,7 @@ namespace Editor.Validation.Meshing
                 {
                     U = p.x - cellX,
                     V = p.z - cellZ,
-                    Sun = o.LightData[v].r,
+                    Sky = o.LightData[v].r,
                 });
             }
 

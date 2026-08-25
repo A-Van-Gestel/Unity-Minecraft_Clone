@@ -44,7 +44,7 @@ Read this session, in full or in the relevant regions: `Jobs/MeshGenerationJob.c
 `GetSubQuad`, `EmitFaceQuad`, `BlendCornerLight`/`BilinearLerpLight`, `GetCornerUV`,
 `GenerateStandardCubeFace`, `EmitQuadTriangles`);
 `Assets/Editor/Validation/Meshing/MeshingValidationSuite.SubCellShading.cs` (**B49**) and
-`MeshingValidationSuite.CornerOcclusion.cs` (`TopFaceCornerSun`);
+`MeshingValidationSuite.CornerOcclusion.cs` (`TopFaceCornerSky`);
 `Assets/Editor/Validation/Meshing/Framework/TestCustomMeshLibrary.cs` and
 `TestMeshBlockPalette.cs`; `Data/BlockCollisionBounds.cs`.
 Numbers quoted from `VOXEL_OCCLUSION_REFACTOR.md` are that document's **measured** values and are
@@ -207,7 +207,7 @@ way around instead, which is what "follow the block's rectangular shape" means.
   the direct cell is empty and only the ring could drift, `DIRECT_TERM_DRIFT_ALLOWANCE = 32` where
   the direct cell legitimately varies. **Leg 3b's 1.5 is the precise regression guard** for the
   shipped ring-resampling defect, and §6.3 explains why `SS-2` must *rewrite* it rather than loosen it.
-- **`TopFaceCornerSun`** (`MeshingValidationSuite.CornerOcclusion.cs:306`) is the corner-located
+- **`TopFaceCornerSky`** (`MeshingValidationSuite.CornerOcclusion.cs:306`) is the corner-located
   probe pattern: it locates a face's corners **by vertex position**, never "the first quad matching
   the region". B42/B46 broke on that assumption when `VO-9b` landed. Any new probe follows it.
 - **Fixtures are a fidelity surface (F13).** `TestCustomMeshLibrary.AppendBoxMesh` is parametric on
@@ -819,7 +819,7 @@ whose coverage is linear (§2.2). `SS-0` adds:
 
 ### 6.2 Probes: sub-vertex fields, located by position
 
-`TopFaceCornerSun`'s rule generalizes: **never assume one quad per face**, and never index by quad
+`TopFaceCornerSky`'s rule generalizes: **never assume one quad per face**, and never index by quad
 order. `SS-0` adds `TopFaceSubVertexField(output, cellX, cellY, cellZ)`, which walks every emitted
 vertex, filters by normal and plane, and returns `(u, v) → value` samples keyed by **position** —
 the same reading at any tessellation density, and the reading `B49`'s
@@ -877,7 +877,7 @@ their claims into rewritten `B46`/`B49` plus the new `B56`, and `B54`/`B55` rema
 | **B51** | SS-2   | **The direct answer to F18.** On the floor face under a vertical slab, the sub-vertex nearest the slab's edge is strictly **darker than the linear interpolation of the face's own corner values**, and the far edge is unchanged within rounding. A departure-from-linear assertion, not a predicted constant, so it survives D1/D2 retuning. | Pre-`SS-2` engine fails it by construction (F18 measured the profile as linear). Positive control: replace the slab with air — no departure, and that control is independent of the shadow's shape. |
 | **B52** | SS-2   | The **post** casts a shadow whose darkest sub-vertex lies under the post's footprint and which is zero beyond `R` — the shape-agnostic claim (goal 3) asserted on a shape no production block has. | Force the silhouette to the unit square → the shadow stops tracking the footprint and B52 reds while B51 (a half-cell silhouette) survives. |
 | **B53** | SS-2   | **Position purity (D6).** A corner emitted by a subdivided face and the same corner emitted by its ordinary neighbour carry the same value; and a subdivided face's corner equals the undivided formula at that point. | Apply the model in `ShadeSubVertex` only → corners disagree across the seam. This is the mutation that reproduces the seam `VO-9a` exists to prevent. |
-| **B56** | SS-2   | **The corner reduction — the claim the whole replacement rests on.** With full-cube occluders, a face corner reads `255 / 191 / 128 / 64` for 0 / 1 / 2 / 3 occluding neighbours — **exact values, no tolerance beyond UNorm8 rounding**, because §5.2's collapse is algebraic. Read through `TopFaceCornerSun` on an open floor, one wall, an inner corner, and a 1×1 pit. | Perturb `CELL_OCCLUSION_SHARE` off `0.25`, or swap the sum for a `max` → the 2- and 3-occluder rows red while the 1-occluder row survives, which is the exact signature of D3's rejected global-factor form. |
+| **B56** | SS-2   | **The corner reduction — the claim the whole replacement rests on.** With full-cube occluders, a face corner reads `255 / 191 / 128 / 64` for 0 / 1 / 2 / 3 occluding neighbours — **exact values, no tolerance beyond UNorm8 rounding**, because §5.2's collapse is algebraic. Read through `TopFaceCornerSky` on an open floor, one wall, an inner corner, and a 1×1 pit. | Perturb `CELL_OCCLUSION_SHARE` off `0.25`, or swap the sum for a `max` → the 2- and 3-occluder rows red while the 1-occluder row survives, which is the exact signature of D3's rejected global-factor form. |
 | **B49′**| SS-2   | Rewritten per §6.3 — the inner-corner face centre is bounded away from the unoccluded value and correctly ordered against the face's corners; new roll-away positive control. | Force the ring's occlusion to vanish in the interior (the historical `VO-9b` mutation) → the centre returns `255` and every clause reds. |
 | **B57** | SS-2a  | **The corner seal is local.** A four-configuration differential (both walls / either / neither) isolates what the second wall adds beyond two independent walls, and asserts it is at full strength in the corner *and* materially weaker half a cell out along the diagonal. The first suite scenario to read the field **between** a face's corners and its centre, which is where SS-2a's artifact lived. | Both directions, both executed: the shipped `min` combiner reds the locality leg alone; deleting the seal reds the corner leg *and* B56. Neither leg is satisfiable by the other's failure mode. |
 | **B58** | SS-2a  | **A cell the seal hides does not also feed the light average**, asserted under the suite's **first non-uniform light field**. Two legs: darkening the hidden diagonal must not move a *sealed* corner, and must still move an *open* one. | Weight the light mean by the kernel alone (what SS-2 shipped) → B58 reds alone, `64 → 32`, with all 52 others green. The open-corner leg is the F15 control: a model that simply dropped the diagonal would satisfy the first leg and fail this one. |
@@ -1042,7 +1042,7 @@ Three things this pins down, none of which were certain before:
   the existing half-slab call re-expressed through it. `TestMeshBlockPalette` gains `Post` (id 9,
   `Count` 9 → 10, opacity 15, `Facing6Roll2`), whose mesh bounds and `collisionBounds` come from
   **one shared pair of constants** (§6.1). New probe `TopFaceSubVertexField`, positional, following
-  `TopFaceCornerSun`. **Does NOT touch production code.**
+  `TopFaceCornerSky`. **Does NOT touch production code.**
 - **Ordering:** first. `SS-1` and `SS-2`'s baselines are unwritable without the post.
 - **Prove-red:** two, both suite-local. (a) Author the post's `collisionBounds` deliberately
   disagreeing with its mesh and confirm the new fixture-agreement assertion reds — this is the F13

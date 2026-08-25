@@ -25,7 +25,7 @@ architectural smell in a throwaway prototype — and say why.
 - `BinaryFormatter`, `JSON`, or `XmlSerializer` used for **terrain data** — the
   region system is custom binary with LZ4/GZip
 - **monolithic-column meshing** replacing sub-chunk (16³ section) meshing
-- **bypassing the async BFS flood-fill** queue for sunlight/blocklight
+- **bypassing the async BFS flood-fill** queue for skylight/blocklight
   propagation
 
 **How to check.** These follow from *what the diff adds*, not from a grep of the
@@ -138,7 +138,7 @@ For every hit, ask the two-part question: **what did this line enforce, and wher
 does the new code enforce it instead?** A plain move (the reset is now folded into
 the class's existing `DomainReset`, the `Complete()` is three lines down) is not a
 finding — find it and move on. A deletion with no replacement is the finding, and
-it should be reported in terms of the invariant, not the line: "the sunlight job
+it should be reported in terms of the invariant, not the line: "the skylight job
 handle is no longer completed before the mesh reads it, so the mesh can build on a
 half-lit chunk", not "a `.Complete()` was removed".
 

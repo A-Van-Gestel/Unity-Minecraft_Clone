@@ -42,10 +42,10 @@ Shader "Minecraft/CloudShader"
             CBUFFER_END
 
             // Shader globals (set from C#, outside UnityPerMaterial like the block shaders):
-            // SkyLightColor — time-of-day sky tint (hue only — brightness lives in the shade curve).
+            // SkylightColor — time-of-day sky tint (hue only — brightness lives in the shade curve).
             // GlobalLightLevel / min / max — day/night cycle inputs to the shared shade curve.
             // _CloudFadeParams — x = fade start distance (blocks), y = 1 / fade range (Clouds.UpdateClouds).
-            half3 SkyLightColor;
+            half3 SkylightColor;
             float GlobalLightLevel;
             float minGlobalLightLevel;
             float maxGlobalLightLevel;
@@ -91,19 +91,19 @@ Shader "Minecraft/CloudShader"
                 // Day/night brightness: clouds are fully sky-exposed, so run an exposure of 1 through
                 // the terrain's shared path — subtract the day/night darkening, then the shade curve —
                 // NORMALIZED to its noon value. Noon clouds keep the authored _Color exactly, and night
-                // darkens by the same relative factor as sky-lit terrain. SkyLightColor alone can't do
+                // darkens by the same relative factor as sky-lit terrain. SkylightColor alone can't do
                 // this: it carries the hue, not the brightness.
                 //
                 // The day/night term belongs in the EXPOSURE slot, not the curve's globalLight slot
                 // (RF-1 §10): with the subtractive model those two are no longer the same number, and
                 // passing it as globalLight would leave clouds brighter than the terrain beneath them.
                 float litSky = ApplySkyDarken(1.0, GlobalLightLevel);
-                float sunShadow = VoxelLightToShadow(litSky, 1.0, minGlobalLightLevel, maxGlobalLightLevel);
+                float skyShadow = VoxelLightToShadow(litSky, 1.0, minGlobalLightLevel, maxGlobalLightLevel);
                 float noonShadow = VoxelLightToShadow(1.0, 1.0, minGlobalLightLevel, maxGlobalLightLevel);
-                half dayNight = sunShadow / noonShadow;
+                half dayNight = skyShadow / noonShadow;
 
                 half4 col = _Color;
-                col.rgb *= shade * dayNight * SkyLightColor;
+                col.rgb *= shade * dayNight * SkylightColor;
 
                 // Fade the cloudscape's outer edge instead of ending in a hard line at the coverage radius.
                 float dist = length(i.positionWS.xz - _WorldSpaceCameraPos.xz);

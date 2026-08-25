@@ -29,7 +29,7 @@ namespace Data.WorldTypes
         /// The curve is clamped to this, so a curve authored down to 0 still cannot make a fully
         /// sky-exposed voxel darker than effective level 4.
         /// </summary>
-        public const float MinGlobalLightLevel = 1f - MaxSkyDarken / (float)WorldTimeManager.MaxSkyLight;
+        public const float MinGlobalLightLevel = 1f - MaxSkyDarken / (float)WorldTimeManager.MaxSkylight;
 
         // Key day fractions the default curve is shaped around (0 = midnight, 0.5 = noon). The named
         // /time targets are deliberately placed on SLOPES rather than plateaus, so `day` reads
@@ -95,7 +95,7 @@ namespace Data.WorldTypes
 
         [Tooltip("Tint applied to the sky-light channel over the day. Flat white leaves terrain color exactly as it is today; blue night keys give moonlight its Purkinje shift.")]
         [SerializeField]
-        private Gradient _skyLightOverDay = BuildDefaultSkyLightGradient();
+        private Gradient _skylightOverDay = BuildDefaultSkylightGradient();
 
         [Tooltip("Camera background color over the day. Replaces the old lerp(night, day, lightLevel), which collapsed dawn and dusk onto the same color.")]
         [SerializeField]
@@ -158,7 +158,7 @@ namespace Data.WorldTypes
         /// <summary>Samples the sky-light tint for a point in the day.</summary>
         /// <param name="dayFraction">Position in the day, <c>[0,1)</c>.</param>
         /// <returns>The tint multiplied into the shader's sky-light channel.</returns>
-        public Color EvaluateSkyLightColor(float dayFraction) => _skyLightOverDay.Evaluate(dayFraction);
+        public Color EvaluateSkylightColor(float dayFraction) => _skylightOverDay.Evaluate(dayFraction);
 
         /// <summary>Samples the camera background color for a point in the day.</summary>
         /// <param name="dayFraction">Position in the day, <c>[0,1)</c>.</param>
@@ -251,7 +251,7 @@ namespace Data.WorldTypes
 
         /// <summary>Builds the default sky-light tint: flat white, matching the shipped no-op gradient.</summary>
         /// <returns>A white-to-white gradient.</returns>
-        private static Gradient BuildDefaultSkyLightGradient()
+        private static Gradient BuildDefaultSkylightGradient()
         {
             Gradient gradient = new Gradient();
             gradient.SetKeys(
@@ -304,7 +304,7 @@ namespace Data.WorldTypes
 
         /// <summary>The engine's default sky-light tint gradient, for editor tooling that re-authors an asset.</summary>
         /// <returns>A fresh gradient; the caller owns it.</returns>
-        public static Gradient CreateDefaultSkyLightGradient() => BuildDefaultSkyLightGradient();
+        public static Gradient CreateDefaultSkylightGradient() => BuildDefaultSkylightGradient();
 
         /// <summary>The engine's default camera background gradient, for editor tooling that re-authors an asset.</summary>
         /// <returns>A fresh gradient; the caller owns it.</returns>

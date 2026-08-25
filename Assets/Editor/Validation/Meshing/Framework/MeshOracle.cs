@@ -125,7 +125,7 @@ namespace Editor.Validation.Meshing.Framework
         /// trap). The encoding is re-derived by hand: average of four equal values <c>V</c> is <c>V</c>,
         /// and the engine's UNorm8 map <c>(4V*17 + 2)/4</c> reduces to exactly <c>17V</c> (<c>68V</c> is
         /// always divisible by 4, so the <c>+2</c> rounding never carries). The output channel order
-        /// matches the engine's <c>LightData</c>: <c>(sun, blockR, blockG, blockB)</c>.
+        /// matches the engine's <c>LightData</c>: <c>(sky, blockR, blockG, blockB)</c>.
         /// <para>
         /// <b>Scope:</b> only the uniform (all-corners-equal) case is modelled, which pins the smooth-light
         /// <i>encoding</i> MR-2 must preserve. Distinct-per-corner values and AO darkening (a corner whose

@@ -41,7 +41,7 @@ producing streaks spanning several blocks, whatever the coverage model does.
    cut along; a wrong or inconsistent choice shows as visible diagonal discontinuities where corner
    values differ.
 
-**Decisive diagnostic (run this first):** in play mode, dump `GetSkyLight` for the floor layer and the
+**Decisive diagnostic (run this first):** in play mode, dump `GetSkylight` for the floor layer and the
 air layer above it across the affected area. Uniform 15 ⇒ the cause is in meshing, and candidate 2 is
 next. Any variation ⇒ the cause is the lighting engine and this entry moves to `LIGHTING_BUGS.md`.
 

@@ -18,7 +18,7 @@ struct VoxelAppdata
     float4 vertex : POSITION;
     float4 uv : TEXCOORD0; // xy = atlas UV; zw = foliage sway weight/phase (FL-1; zero on non-flora verts)
     half4 color : COLOR;
-    half4 lightData : TEXCOORD1; // UNorm8: (skyLight, blocklightR, blocklightG, blocklightB)
+    half4 lightData : TEXCOORD1; // UNorm8: (skylight, blocklightR, blocklightG, blocklightB)
 };
 
 // --- Fragment Input ---

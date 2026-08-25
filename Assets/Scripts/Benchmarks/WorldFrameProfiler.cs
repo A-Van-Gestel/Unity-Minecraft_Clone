@@ -92,8 +92,8 @@ namespace Benchmarks
             GenerationProcess = 8,
 
             /// <summary>
-            /// The <b>dev/editor-only</b> LP-1 sunlight-queue pairing probe: a walk of
-            /// <c>SunlightRecalculationQueue</c> riding the same ~1 Hz cadence as
+            /// The <b>dev/editor-only</b> LP-1 skylight-queue pairing probe: a walk of
+            /// <c>SkylightRecalculationQueue</c> riding the same ~1 Hz cadence as
             /// <see cref="LightFailSafeScan"/>. Its own slot so the probe's cost never lands in that scan's
             /// slot, which P9-0 carved out specifically to measure a whole-world walk against view distance.
             /// Always 0 ms in release builds, where the probe is compiled out.

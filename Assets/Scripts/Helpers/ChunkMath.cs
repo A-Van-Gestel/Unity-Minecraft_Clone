@@ -123,7 +123,7 @@ namespace Helpers
         // chunk seam, and is the load-bearing invariant of the whole optimization: LIGHTING_HALO MUST be
         // >= this reach, or a seam read silently falls off the padded volume, gets the MaxValue sentinel
         // (treated as out-of-world), and drops that voxel's light contribution -> non-bit-identical seams
-        // with NO error raised. The reach is bounded at 2 by the BFS itself: the sunlight column-recalc
+        // with NO error raised. The reach is bounded at 2 by the BFS itself: the skylight column-recalc
         // darkness path enqueues neighbor nodes only at the ±1 rim, PropagateDarkness then reads THEIR ±1
         // face neighbors (= ±2), and the IsInCenterChunk re-enqueue gate in NeighborhoodLightingJob blocks
         // anything deeper (symmetric on all four sides, plus the four diagonal corners). If a future change

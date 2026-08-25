@@ -426,8 +426,8 @@ gives TF-5/TF-6 a home as dimension-flavored variants if ever wanted).
 
 1. **Registry:** `DimensionDefinition : ScriptableObject` —
    `{ string dimensionId; WorldTypeDefinition worldType; int seedSalt; DimensionLightingProfile
-   lighting; }` where `DimensionLightingProfile` = `{ bool hasSkyLight; Gradient skyLightGradient;
-   float fixedGlobalLightLevel (used when hasSkyLight = false); }`. Plus a `DimensionRegistry`
+   lighting; }` where `DimensionLightingProfile` = `{ bool hasSkylight; Gradient skylightGradient;
+   float fixedGlobalLightLevel (used when hasSkylight = false); }`. Plus a `DimensionRegistry`
    ScriptableObject (same pattern as `WorldTypeRegistry`); index/id `"overworld"` is the default
    and maps to the world's existing `worldType`.
 2. **Single-active-dimension runtime** (the load-bearing simplification): exactly one dimension is
@@ -458,8 +458,8 @@ gives TF-5/TF-6 a home as dimension-flavored variants if ever wanted).
       are dimension-agnostic already.
     - Older builds opening a v12 world are already refused by the existing
       "version too new" guard (`MigrationManager.cs:64-67`).
-5. **Per-dimension lighting:** `hasSkyLight = false` skips the sunlight column fill at generation
-   and sunlight BFS seeding, using the §6 bypass map; `World.SetGlobalLightValue()` reads the
+5. **Per-dimension lighting:** `hasSkylight = false` skips the skylight column fill at generation
+   and skylight BFS seeding, using the §6 bypass map; `World.SetGlobalLightValue()` reads the
    active profile (ties into `RF-1`'s time system — a no-sky dimension uses
    `fixedGlobalLightLevel` and ignores time).
 6. **Content:** a first non-overworld dimension is then pure data: a new `WorldTypeDefinition`

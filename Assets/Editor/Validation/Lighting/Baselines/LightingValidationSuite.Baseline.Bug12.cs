@@ -6,7 +6,7 @@ using Scenario = Editor.Validation.Framework.Scenario;
 namespace Editor.Validation.Lighting
 {
     /// <summary>
-    /// Baseline regression scenarios for the <b>Bug 12</b> family — the over-bright cross-seam sunlight
+    /// Baseline regression scenarios for the <b>Bug 12</b> family — the over-bright cross-seam skylight
     /// loop that survived source removal (fixed June 2026). Grouped into their own partial file (the first
     /// of the planned <c>Baselines/</c> split; <c>LightingValidationSuite.Baseline.cs</c> had outgrown a
     /// single file) and self-registered via the <see cref="AddBug12BaselineScenarios"/> hook called from
@@ -42,7 +42,7 @@ namespace Editor.Validation.Lighting
         // Investigation (June 2026) confirmed BOTH converge correctly even on the pre-fix engine — the
         // over-bright stuck loop requires the symmetric mutually-equal seam (neither side has a removal
         // initiator); any gradient is broken by the existing PropagateDarkness "neighbor < removed level"
-        // branch (which emits a removal via SetSunlight). So these are NOT fix tripwires (they stay green
+        // branch (which emits a removal via SetSkylight). So these are NOT fix tripwires (they stay green
         // with the fix neutered); they guard against a FUTURE regression in asymmetric / multi-hop cross-seam
         // source removal and pin the scope of Bug 12. ---
         private const int SEAM_LOOP_ASYM_CORRIDOR_MIN_X = 6; // wider corridor so both shafts sit off the seam
@@ -59,7 +59,7 @@ namespace Editor.Validation.Lighting
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddBug12BaselineScenarios(List<Scenario> scenarios)
         {
-            scenarios.Add(new Scenario("B53: Roofing both sky shafts of a mutually-lit cross-seam corridor darkens it to the oracle — no over-bright sourceless loop (Bug 12 guard; promoted from K12a)", Baseline_CrossSeamSunlightLoopClearsOnSourceRemoval));
+            scenarios.Add(new Scenario("B53: Roofing both sky shafts of a mutually-lit cross-seam corridor darkens it to the oracle — no over-bright sourceless loop (Bug 12 guard; promoted from K12a)", Baseline_CrossSeamSkylightLoopClearsOnSourceRemoval));
             scenarios.Add(new Scenario("B50: Roofing one of two sky-exposed seam columns darkens only that column — the still-sky-exposed neighbor keeps lighting both sides (Bug 12 fix over-correction tripwire)", Baseline_GenuineSeamSingleRoofKeepsSkyExposedNeighbor));
             scenarios.Add(new Scenario("B51: Roofing two ASYMMETRICALLY-lit shafts (different seam levels, neither at the seam) darkens the cross-seam corridor to the oracle — no over-bright residue (Bug 12 completeness)", Baseline_AsymmetricCrossSeamSourceRemovalConverges));
             scenarios.Add(new Scenario("B52: Roofing the only shaft of a multi-hop ring corridor that crosses the seam twice darkens the whole ring to the oracle — no stuck multi-hop cross-seam loop (Bug 12 completeness)", Baseline_RingMultiHopCrossSeamSourceRemovalConverges));
@@ -91,11 +91,11 @@ namespace Editor.Validation.Lighting
 
         /// <summary>
         /// B53 (Bug 12 guard, promoted from known-bug scenario K12a after the June 2026 fix): the canonical
-        /// reproduction of the over-bright cross-seam sunlight loop. A 1-wide corridor straddles the x15|16
+        /// reproduction of the over-bright cross-seam skylight loop. A 1-wide corridor straddles the x15|16
         /// seam, lit by a single sky shaft that opens <b>both</b> shared seam columns — after convergence the
         /// two seam voxels are mutually equal at sky 15, each appearing lit "by" the other across the
         /// boundary. Roofing both seam columns (one <see cref="LightingTestWorld.PlaceBlock"/> per chunk, so
-        /// both seam chunks carry a sunlight column recalc into the <b>same</b> wave) removes the genuine
+        /// both seam chunks carry a skylight column recalc into the <b>same</b> wave) removes the genuine
         /// source; run wave-parallel (<see cref="LightingTestWorld.RunWaveToConvergence"/>, production's
         /// concurrent-job / schedule-time-snapshot model), the corridor must darken to the borderless oracle.
         /// <para>
@@ -108,7 +108,7 @@ namespace Editor.Validation.Lighting
         /// NOT reproduce — the simultaneous same-wave perturbation of both seam chunks is required.)
         /// </para>
         /// </summary>
-        private static bool Baseline_CrossSeamSunlightLoopClearsOnSourceRemoval()
+        private static bool Baseline_CrossSeamSkylightLoopClearsOnSourceRemoval()
         {
             using LightingTestWorld world = BuildSeamLoopWorld();
 
@@ -120,12 +120,12 @@ namespace Editor.Validation.Lighting
             // each appears lit "by" the other across the boundary, the basis of the sourceless support loop.
             Vector3Int westSeam = new Vector3Int(SEAM_LOOP_WEST_SEAM_X, SEAM_LOOP_CORRIDOR_Y, SEAM_LOOP_CORRIDOR_Z);
             Vector3Int eastSeam = new Vector3Int(SEAM_LOOP_EAST_SEAM_X, SEAM_LOOP_CORRIDOR_Y, SEAM_LOOP_CORRIDOR_Z);
-            passed &= LightingAssert.IsTrue(world.GetSkyLight(westSeam) == 15 && world.GetSkyLight(eastSeam) == 15,
+            passed &= LightingAssert.IsTrue(world.GetSkylight(westSeam) == 15 && world.GetSkylight(eastSeam) == 15,
                 "B53: both seam voxels are mutually lit to sky 15 before the source is removed",
-                $"Expected 15/15, got {world.GetSkyLight(westSeam)}/{world.GetSkyLight(eastSeam)}");
+                $"Expected 15/15, got {world.GetSkylight(westSeam)}/{world.GetSkylight(eastSeam)}");
 
             // Remove the dominant cross-seam source: roof BOTH seam columns. One edit per chunk, so both
-            // seam chunks carry a sunlight column recalc into the SAME wave.
+            // seam chunks carry a skylight column recalc into the SAME wave.
             world.PlaceBlock(new Vector3Int(SEAM_LOOP_WEST_SEAM_X, SEAM_LOOP_CORRIDOR_Y + 1, SEAM_LOOP_CORRIDOR_Z), TestBlockPalette.Stone);
             world.PlaceBlock(new Vector3Int(SEAM_LOOP_EAST_SEAM_X, SEAM_LOOP_CORRIDOR_Y + 1, SEAM_LOOP_CORRIDOR_Z), TestBlockPalette.Stone);
 
@@ -140,9 +140,9 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>
-        /// B50 (Bug 12 fix tripwire): guards that the cross-seam sunlight removal-mod emission added to fix
+        /// B50 (Bug 12 fix tripwire): guards that the cross-seam skylight removal-mod emission added to fix
         /// Bug 12 (<see cref="NeighborhoodLightingJob"/> <c>PropagateDarkness</c>, adjudicated by the
-        /// vertical-sky-aware veto <c>CrossChunkLightModApplier.InChunkSunlightSupport</c>) does NOT
+        /// vertical-sky-aware veto <c>CrossChunkLightModApplier.InChunkSkylightSupport</c>) does NOT
         /// over-correct: when only ONE of two mutually-lit seam columns loses its source, the other — still
         /// directly sky-exposed — must keep its full sky and continue lighting both sides of the seam.
         /// <para>
@@ -173,9 +173,9 @@ namespace Editor.Validation.Lighting
             // The east seam stays sky-exposed (15); the west seam is re-lit from it across the boundary (14).
             Vector3Int eastSeam = new Vector3Int(SEAM_LOOP_EAST_SEAM_X, SEAM_LOOP_CORRIDOR_Y, SEAM_LOOP_CORRIDOR_Z);
             Vector3Int westSeam = new Vector3Int(SEAM_LOOP_WEST_SEAM_X, SEAM_LOOP_CORRIDOR_Y, SEAM_LOOP_CORRIDOR_Z);
-            passed &= LightingAssert.IsTrue(world.GetSkyLight(eastSeam) == 15 && world.GetSkyLight(westSeam) == 14,
+            passed &= LightingAssert.IsTrue(world.GetSkylight(eastSeam) == 15 && world.GetSkylight(westSeam) == 14,
                 "B50: the still-sky-exposed east seam keeps sky 15 and re-lights the roofed west seam to 14 (no black spot)",
-                $"Expected east 15 / west 14, got east {world.GetSkyLight(eastSeam)} / west {world.GetSkyLight(westSeam)}");
+                $"Expected east 15 / west 14, got east {world.GetSkylight(eastSeam)} / west {world.GetSkylight(westSeam)}");
 
             passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
                 "B50: single-roof field matches the borderless oracle (sky-exposed neighbor not cleared)");
@@ -190,7 +190,7 @@ namespace Editor.Validation.Lighting
         /// symmetric 15/15. Roofing both shafts in the same wave removes every source; the corridor must
         /// darken to the oracle. Confirmed green even with the Bug 12 fix neutered (an asymmetric gradient
         /// always has a strictly-lower side, which the existing <c>PropagateDarkness</c> "&lt; removed level"
-        /// branch removes via <see cref="NeighborhoodLightingJob"/>'s cross-chunk <c>SetSunlight</c>), so this
+        /// branch removes via <see cref="NeighborhoodLightingJob"/>'s cross-chunk <c>SetSkylight</c>), so this
         /// is a general convergence guard, not a fix tripwire: it pins that Bug 12 is specific to the
         /// symmetric mutually-equal seam and catches a future regression in asymmetric cross-seam removal.
         /// </summary>
@@ -217,10 +217,10 @@ namespace Editor.Validation.Lighting
             Vector3Int westSeam = new Vector3Int(SEAM_LOOP_WEST_SEAM_X, SEAM_LOOP_CORRIDOR_Y, SEAM_LOOP_CORRIDOR_Z);
             Vector3Int eastSeam = new Vector3Int(SEAM_LOOP_EAST_SEAM_X, SEAM_LOOP_CORRIDOR_Y, SEAM_LOOP_CORRIDOR_Z);
             passed &= LightingAssert.IsTrue(
-                world.GetSkyLight(westSeam) > 0 && world.GetSkyLight(eastSeam) > 0 &&
-                world.GetSkyLight(westSeam) != world.GetSkyLight(eastSeam),
+                world.GetSkylight(westSeam) > 0 && world.GetSkylight(eastSeam) > 0 &&
+                world.GetSkylight(westSeam) != world.GetSkylight(eastSeam),
                 "B51: the two seam voxels are lit asymmetrically (unequal) before source removal",
-                $"Expected unequal non-zero seam levels, got x15={world.GetSkyLight(westSeam)} x16={world.GetSkyLight(eastSeam)}");
+                $"Expected unequal non-zero seam levels, got x15={world.GetSkylight(westSeam)} x16={world.GetSkylight(eastSeam)}");
 
             // Roof BOTH shafts in the same wave: one edit per chunk, so both seam chunks carry a column recalc
             // into the SAME wave-parallel round (the in-flight stale-snapshot condition).
@@ -275,9 +275,9 @@ namespace Editor.Validation.Lighting
                 "B52: initial ring field matches the oracle");
 
             // Precondition: light actually reaches the far seam crossing (z26 row) — the ring circulates.
-            passed &= LightingAssert.IsTrue(world.GetSkyLight(new Vector3Int(SEAM_LOOP_WEST_SEAM_X, SEAM_LOOP_CORRIDOR_Y, SEAM_LOOP_RING_ZB)) > 0,
+            passed &= LightingAssert.IsTrue(world.GetSkylight(new Vector3Int(SEAM_LOOP_WEST_SEAM_X, SEAM_LOOP_CORRIDOR_Y, SEAM_LOOP_RING_ZB)) > 0,
                 "B52: light circulates around the ring to the far (z26) seam crossing before removal",
-                $"Expected the far seam crossing lit, got {world.GetSkyLight(new Vector3Int(SEAM_LOOP_WEST_SEAM_X, SEAM_LOOP_CORRIDOR_Y, SEAM_LOOP_RING_ZB))}");
+                $"Expected the far seam crossing lit, got {world.GetSkylight(new Vector3Int(SEAM_LOOP_WEST_SEAM_X, SEAM_LOOP_CORRIDOR_Y, SEAM_LOOP_RING_ZB))}");
 
             // Roof the only shaft. The whole ring must go dark.
             world.PlaceBlock(new Vector3Int(SEAM_LOOP_RING_SHAFT_X, SEAM_LOOP_CORRIDOR_Y + 1, SEAM_LOOP_RING_ZA), TestBlockPalette.Stone);

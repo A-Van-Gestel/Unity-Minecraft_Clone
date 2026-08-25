@@ -841,9 +841,9 @@ namespace Serialization
             }
 
             // Queue copying (Locking is correct)
-            lock (source.SunlightBfsQueue)
+            lock (source.SkylightBfsQueue)
             {
-                foreach (LightQueueNode item in source.SunlightBfsQueue) snapshot.SunlightBfsQueue.Enqueue(item);
+                foreach (LightQueueNode item in source.SkylightBfsQueue) snapshot.SkylightBfsQueue.Enqueue(item);
             }
 
             lock (source.BlocklightBfsQueue)

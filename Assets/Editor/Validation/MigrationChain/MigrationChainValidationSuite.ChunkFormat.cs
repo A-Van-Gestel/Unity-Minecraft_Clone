@@ -266,10 +266,10 @@ namespace Editor.Validation.MigrationChain
                     BurstVoxelDataBitMapping.GetMeta(voxels[SLOT_STONE]) == EXPECTED_HORIZONTAL_YAW);
 
                 // Light queues: the fixture's 13-byte entries must survive v7→v8's widening to 16.
-                ok &= Check($"the sunlight queue survives the entry widening, got {chunk.SunLightQueueCount.ToString()}",
-                    chunk.SunLightQueueCount == FIXTURE_SUN_QUEUE_ENTRIES);
-                ok &= Check($"the blocklight queue survives, got {chunk.BlockLightQueueCount.ToString()}",
-                    chunk.BlockLightQueueCount == FIXTURE_BLOCK_QUEUE_ENTRIES);
+                ok &= Check($"the skylight queue survives the entry widening, got {chunk.SkylightQueueCount.ToString()}",
+                    chunk.SkylightQueueCount == FIXTURE_SUN_QUEUE_ENTRIES);
+                ok &= Check($"the blocklight queue survives, got {chunk.BlocklightQueueCount.ToString()}",
+                    chunk.BlocklightQueueCount == FIXTURE_BLOCK_QUEUE_ENTRIES);
             }
             finally
             {
@@ -302,7 +302,7 @@ namespace Editor.Validation.MigrationChain
                 int g = (entry >> LIGHTDATA_G_SHIFT) & 0xF;
                 int b = (entry >> LIGHTDATA_B_SHIFT) & 0xF;
 
-                ok &= Check($"the legacy sunlight nibble becomes sky {LEGACY_SUN_LEVEL.ToString()}, got {sky.ToString()}",
+                ok &= Check($"the legacy skylight nibble becomes sky {LEGACY_SUN_LEVEL.ToString()}, got {sky.ToString()}",
                     sky == LEGACY_SUN_LEVEL);
                 ok &= Check($"the legacy blocklight nibble becomes grey RGB ({LEGACY_BLOCK_LEVEL.ToString()},{LEGACY_BLOCK_LEVEL.ToString()},{LEGACY_BLOCK_LEVEL.ToString()}), got ({r.ToString()},{g.ToString()},{b.ToString()})",
                     r == LEGACY_BLOCK_LEVEL && g == LEGACY_BLOCK_LEVEL && b == LEGACY_BLOCK_LEVEL);

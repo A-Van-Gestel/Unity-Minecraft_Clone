@@ -6,7 +6,7 @@ namespace Serialization
 {
     /// <summary>
     /// The in-memory surface of the pending-lighting store: cross-chunk light work that targets an
-    /// unloaded/unpopulated chunk and must be held until that chunk loads (sunlight column recalcs and
+    /// unloaded/unpopulated chunk and must be held until that chunk loads (skylight column recalcs and
     /// cross-chunk blocklight modifications). Implemented by <see cref="LightingStateManager"/>.
     /// <para>
     /// Binary persistence (<c>Save</c>/<c>Load</c>) is intentionally NOT part of this contract: it is a
@@ -18,14 +18,14 @@ namespace Serialization
     public interface IPendingLightStore
     {
         /// <summary>
-        /// Adds a set of local column coordinates that need sunlight recalculation to the pending store.
+        /// Adds a set of local column coordinates that need skylight recalculation to the pending store.
         /// </summary>
         /// <param name="chunkCoord">The chunk coordinate.</param>
         /// <param name="localColumns">A set of Vector2Ints where x/y are local 0-15 coordinates.</param>
         void AddPending(ChunkCoord chunkCoord, HashSet<Vector2Int> localColumns);
 
         /// <summary>
-        /// Attempts to retrieve and remove the pending local columns for sunlight recalculation in a specific chunk.
+        /// Attempts to retrieve and remove the pending local columns for skylight recalculation in a specific chunk.
         /// </summary>
         /// <param name="chunkCoord">The chunk coordinate to query.</param>
         /// <param name="localColumns">A set of local 0-15 coordinates needing recalculation, if any.</param>

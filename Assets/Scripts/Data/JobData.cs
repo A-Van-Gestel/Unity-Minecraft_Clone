@@ -584,7 +584,7 @@ namespace Data
         // fill the stream exactly, and RF-9 must find capacity elsewhere.
         public NativeList<Color32> Colors;
         public NativeList<Vector3> Normals; // Full-precision working buffer; packed to SNorm8×4 in MeshPostProcessJob
-        public NativeList<Color32> LightData; // TexCoord1 UNorm8: (sunlight, reserved, reserved, blocklight)
+        public NativeList<Color32> LightData; // TexCoord1 UNorm8: (skylight, reserved, reserved, blocklight)
         public NativeList<NormalLightVertex> InterleavedStream3; // Packed Normal + LightData interleaved for GPU upload
 
         // Track stats per section (Index 0 = Section 0, Index 1 = Section 1, etc.)

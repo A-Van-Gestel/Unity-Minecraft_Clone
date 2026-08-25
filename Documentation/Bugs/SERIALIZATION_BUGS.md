@@ -62,7 +62,7 @@ light-only section (`safeSections[i] == null`, sky set), then the sky level flip
 
 **Why it doesn't currently fire:** `SaveChunkAsync` serializes an isolated snapshot created on the main thread (`CreateSerializationSnapshot`), and the synchronous `SaveChunk` path is only called from the main thread. The bug becomes live the moment anyone passes a **live** `ChunkData` to a background `Serialize` call.
 
-**Proposed fix:** Actually copy the array (`skyLevels = (byte[])data.SectionUniformSkyLevel.Clone()` or copy into a pooled buffer), and read `skyLevels[i]` (the local copy) in the write loop — or document loudly that `WriteChunkInternal` must only ever receive snapshots/main-thread data. Note the queue `lock`s in `WriteChunkInternal` have the same asymmetry: the main-thread enqueue sites (`AddToSunLightQueue` etc.) do not lock, so the reader-side locks only protect snapshot objects that nobody else touches anyway.
+**Proposed fix:** Actually copy the array (`skyLevels = (byte[])data.SectionUniformSkyLevel.Clone()` or copy into a pooled buffer), and read `skyLevels[i]` (the local copy) in the write loop — or document loudly that `WriteChunkInternal` must only ever receive snapshots/main-thread data. Note the queue `lock`s in `WriteChunkInternal` have the same asymmetry: the main-thread enqueue sites (`AddToSkylightQueue` etc.) do not lock, so the reader-side locks only protect snapshot objects that nobody else touches anyway.
 
 ---
 
@@ -92,9 +92,9 @@ light-only section (`safeSections[i] == null`, sky set), then the sky level flip
 **Files:** `LightingStateManager.cs` — `AddPending` (lines ~94–118)  
 **Repro:** `K08` in `Minecraft Clone/Dev/Validate Serialization Round-Trip` (NS-1 part 5).
 
-The validation loop only `Debug.LogError`s out-of-range local columns; the subsequent add loop inserts **all** columns including invalid ones. On `Save()` they are byte-truncated (`(byte)col.x`), and on `Load()` the truncated values may pass validation and queue sunlight recalcs for the wrong columns. Fix: `continue`/skip invalid columns in the add loop (or validate-and-skip in one pass).
+The validation loop only `Debug.LogError`s out-of-range local columns; the subsequent add loop inserts **all** columns including invalid ones. On `Save()` they are byte-truncated (`(byte)col.x`), and on `Load()` the truncated values may pass validation and queue skylight recalcs for the wrong columns. Fix: `continue`/skip invalid columns in the add loop (or validate-and-skip in one pass).
 
-**Sharpened by the repro:** the "may pass validation" is not a maybe — it is decided by the truncated value, and both arms are observable. Queueing columns `(259, 4)` and `(272, 5)` on one chunk yields, after a save → load cycle: `(272, 5)` → `(16, 5)`, correctly rejected by `LoadPendingColumns`' bounds check; but `(259, 4)` → **`(3, 4)`, which is in range and is silently queued** — a sunlight recalculation for a column the caller never named, indistinguishable on load from a legitimate request. So the failure is not "an invalid column is dropped late", it is "an invalid column becomes a *different valid* column". `AddPendingBlocklight` already gets this right (it `return`s on invalid input); only `AddPending` falls through.
+**Sharpened by the repro:** the "may pass validation" is not a maybe — it is decided by the truncated value, and both arms are observable. Queueing columns `(259, 4)` and `(272, 5)` on one chunk yields, after a save → load cycle: `(272, 5)` → `(16, 5)`, correctly rejected by `LoadPendingColumns`' bounds check; but `(259, 4)` → **`(3, 4)`, which is in range and is silently queued** — a skylight recalculation for a column the caller never named, indistinguishable on load from a legitimate request. So the failure is not "an invalid column is dropped late", it is "an invalid column becomes a *different valid* column". `AddPendingBlocklight` already gets this right (it `return`s on invalid input); only `AddPending` falls through.
 
 ---
 

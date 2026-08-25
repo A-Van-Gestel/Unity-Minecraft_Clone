@@ -232,7 +232,7 @@ namespace Editor.Validation.Meshing
             StringBuilder sb = new StringBuilder();
             sb.Append("  ").Append(label).Append(": ");
             for (int i = 0; i < light.Length; i++)
-                sb.Append($"v{i}(sun={light[i].r} r={light[i].g} g={light[i].b} b={light[i].a}) ");
+                sb.Append($"v{i}(sky={light[i].r} r={light[i].g} g={light[i].b} b={light[i].a}) ");
             return sb.Append('\n').ToString();
         }
     }

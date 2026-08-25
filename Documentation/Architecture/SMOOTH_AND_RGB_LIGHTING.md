@@ -3,12 +3,12 @@
 - **Status:** Phase 1, Phase 2, Phase B & Phase 3 (Fluid RGB) Implemented
 - **Current Implementation:** Per-vertex smooth lighting with per-channel RGB blocklight BFS + shader-only sky tinting + fluid RGB lighting via the "lit white" multiplier (§5.2). Legacy uint light bits removed; `ushort LightData[]` is sole authority.
 - **Phase 1 Target:** Smooth (ambient-occlusion-style) vertex-averaged lighting with full RGB data layout — **Implemented**
-- **Phase 2 Target:** RGB blocklight propagation (per-channel independent BFS) + shader-only sunlight sky tinting — **Implemented**
+- **Phase 2 Target:** RGB blocklight propagation (per-channel independent BFS) + shader-only skylight sky tinting — **Implemented**
 - **Depends On:** None (can be implemented on the current codebase)
 - **Prerequisites Completed:** BFS attenuation formula fix (`max(1, opacity)`) across all three call sites in `NeighborhoodLightingJob.cs`
 - **Key Decisions (2026-06-06):**
     - Storage: Separate `NativeArray<ushort>` per section (Option A) — not widened `ulong` voxels
-    - Sunlight: Shader-only sky tinting (monochrome BFS, tinted via `SkyLightColor` uniform) — not full BFS RGB
+    - Skylight: Shader-only sky tinting (monochrome BFS, tinted via `SkylightColor` uniform) — not full BFS RGB
     - Blocklight: Per-channel independent propagation (3×4 bits) — not single emission + tint
     - Legacy `uint` light bits: Removed in Phase B (v10). Bits 16-23 zeroed/reserved.
     - Queue serialization: Upgraded to RGB format with AOT migration — not reconstructed at runtime
@@ -36,11 +36,11 @@ Light was packed into each voxel's 32-bit `uint` data alongside block ID and met
 | Field      | Bits  | Range   | Purpose                              |
 |------------|-------|---------|--------------------------------------|
 | Block ID   | 0-15  | 0-65535 | Block type                           |
-| Sunlight   | 16-19 | 0-15    | Light from the sky                   |
+| Skylight   | 16-19 | 0-15    | Light from the sky                   |
 | Blocklight | 20-23 | 0-15    | Light emitted by torches, lava, etc. |
 | Metadata   | 24-31 | 0-255   | Orientation / fluid level / schema   |
 
-The final light value used for rendering was `max(sunlight, blocklight)`, yielding a single scalar 0-15 per voxel. Extraction was done via `BurstVoxelDataBitMapping.GetLight()`.
+The final light value used for rendering was `max(skylight, blocklight)`, yielding a single scalar 0-15 per voxel. Extraction was done via `BurstVoxelDataBitMapping.GetLight()`.
 
 ### 1.2 Mesh Generation (Light → Vertex)
 
@@ -85,7 +85,7 @@ shade = clamp(1.0 - shade, minLight, maxLight);
 return color * pow(lerp(1.0, 0.10, shade), 2.2);  // Gamma-corrected shadow
 ```
 
-Global uniforms (`GlobalLightLevel`, `minGlobalLightLevel`, `maxGlobalLightLevel`) are set by `World.cs` and apply the day/night cycle to sunlight. Blocklight is not affected by these globals — but this distinction is invisible in the current system because sunlight and blocklight are merged into a single scalar via `max()` before reaching the mesh.
+Global uniforms (`GlobalLightLevel`, `minGlobalLightLevel`, `maxGlobalLightLevel`) are set by `World.cs` and apply the day/night cycle to skylight. Blocklight is not affected by these globals — but this distinction is invisible in the current system because skylight and blocklight are merged into a single scalar via `max()` before reaching the mesh.
 
 > **Amended 2026-08-10 (RF-1 §10) — the sky term is now SUBTRACTIVE, not multiplicative.**
 > `GlobalLightLevel` is `1 − skyDarken/15` (range `[0.27, 1]`, from `WorldTimeManager`), and
@@ -105,12 +105,12 @@ Because all 4 vertices of a face share the same light value, the GPU rasterizer 
 This is especially noticeable:
 
 - **Underwater:** Light attenuates by more than 1 level per step (opacity > 0), creating steep staircase patterns.
-- **Cave entrances:** The transition from sunlight 15 to darkness is a series of discrete bands.
+- **Cave entrances:** The transition from skylight 15 to darkness is a series of discrete bands.
 - **Around light sources:** Torches create visible concentric "shells" of brightness.
 
-Additionally, the single-scalar merge `max(sunlight, blocklight)` means the shader cannot distinguish between sunlight and blocklight. This prevents:
+Additionally, the single-scalar merge `max(skylight, blocklight)` means the shader cannot distinguish between skylight and blocklight. This prevents:
 
-- Tinting sunlight based on time of day (blue moonlight at night, red tones during a blood moon event).
+- Tinting skylight based on time of day (blue moonlight at night, red tones during a blood moon event).
 - Colored blocklight from different sources (warm torches, cyan soul lanterns, red redstone).
 - Correct day/night modulation — blocklight should remain at full intensity regardless of the day/night cycle, but currently both channels are merged before the shader sees them.
 
@@ -122,7 +122,7 @@ Additionally, the single-scalar merge `max(sunlight, blocklight)` means the shad
 
 Phase 1 adds **per-vertex light averaging** (the classic Minecraft "Smooth Lighting" technique) while laying the data foundation for Phase 2's full RGB light propagation. The core idea: instead of giving all 4 vertices of a face the same light value, each vertex averages the light of the blocks that share that corner. The GPU then interpolates between 4 different values, producing smooth gradients.
 
-The vertex data layout uses full RGB for **both** sunlight and blocklight from the start, so Phase 2 (RGB propagation) slots in without changing the vertex format, mesh upload code, or shader inputs.
+The vertex data layout uses full RGB for **both** skylight and blocklight from the start, so Phase 2 (RGB propagation) slots in without changing the vertex format, mesh upload code, or shader inputs.
 
 ### 2.2 Corner Averaging Algorithm
 
@@ -242,12 +242,12 @@ Phase 1 introduces a new UV channel (`TexCoord1`) carrying an `RGBA` value with 
 
 | Component | Phase 1 Value                         | Phase 2 Value (future)                    |
 |-----------|---------------------------------------|-------------------------------------------|
-| `R`       | Averaged sunlight luminance (0-255)   | Averaged sunlight Red (0-255)             |
-| `G`       | Averaged sunlight luminance (0-255)   | Averaged sunlight Green (0-255)           |
-| `B`       | Averaged sunlight luminance (0-255)   | Averaged sunlight Blue (0-255)            |
+| `R`       | Averaged skylight luminance (0-255)   | Averaged skylight Red (0-255)             |
+| `G`       | Averaged skylight luminance (0-255)   | Averaged skylight Green (0-255)           |
+| `B`       | Averaged skylight luminance (0-255)   | Averaged skylight Blue (0-255)            |
 | `A`       | Averaged blocklight luminance (0-255) | Averaged max blocklight luminance (0-255) |
 
-In Phase 1, sunlight luminance is replicated across all three RGB channels (`Color32(sun, sun, sun, block)`). This ensures the shader's `sunRGB / sunLuminance` tint extraction always yields `(1, 1, 1)` (pure white) rather than `(1, 0, 0)` (pure red), which would cause incorrect red tinting on all sunlit surfaces. Blocklight is scalar, stored in A. The shader reads `lightData.rgb` as sunlight and `lightData.a` as blocklight intensity.
+In Phase 1, skylight luminance is replicated across all three RGB channels (`Color32(sky, sky, sky, block)`). This ensures the shader's `sunRGB / skyLuminance` tint extraction always yields `(1, 1, 1)` (pure white) rather than `(1, 0, 0)` (pure red), which would cause incorrect red tinting on all skylit surfaces. Blocklight is scalar, stored in A. The shader reads `lightData.rgb` as skylight and `lightData.a` as blocklight intensity.
 
 > **Why `UNorm8 x4` instead of `Float32 x4`?**
 >
@@ -291,13 +291,13 @@ The bilinear approach maps each vertex's rotated block-local position to (u, v) 
 `MeshGenerationJob.ResolveFaceSampleCell` now derives the cell from the face's real position: it steps a short distance off the face's precomputed centroid (`CustomFaceData.Centroid`, rotated exactly as the vertices are) along the face normal, and takes the cell that lands in. A boundary face's centroid is on a cell wall, so this returns `pos + rotatedOffset` unchanged; a mid-plane face's centroid is interior, so it returns the block's own cell.
 The step must be **shorter than half a cell**. A half-cell step puts a mid-plane face exactly on a cell boundary, where rounding resolves toward the own cell for a negative normal and toward the neighbour for a positive one — fixing half the orientations and silently leaving the rest. Scenarios `KM01a` and `KM01b` pin both signs.
 For standard-cube-shaped vertices at exact block corners, the bilinear result degenerates to the pure corner value, matching standard cube smooth lighting exactly. Both the legacy (`Quaternion.Euler`) and schema-aware (`float3x3` matrix) rotation paths are supported, with the world face index used to select the correct perpendicular axes for UV mapping.
-No corner permutation is needed (unlike standard cubes) because the bilinear interpolation uses the vertex's actual rotated world position rather than a fixed index-based assignment. With smooth lighting disabled, the flat lighting fallback path with separate sun/block channels (`BuildFlatLightData`) remains unchanged.
+No corner permutation is needed (unlike standard cubes) because the bilinear interpolation uses the vertex's actual rotated world position rather than a fixed index-based assignment. With smooth lighting disabled, the flat lighting fallback path with separate sky/block channels (`BuildFlatLightData`) remains unchanged.
 
 #### 2.5.3 Fluids
 
 Fluid meshes generate three face types: **top** (the visible water surface), **side** (vertical walls at pool edges and waterfall curtains), and **bottom** (underside visible when swimming beneath). Each face type has unique vertex position characteristics that affect how smooth lighting is applied.
 
-**Phase 1 implementation:** Fluid meshes use **smooth lighting** via a precomputed `FluidCornerLights` struct when the setting is enabled, with per-face strategies matched to each face type's geometry. When smooth lighting is disabled, the flat fallback path with separate sun/block channels (`BuildFlatLight`) is used.
+**Phase 1 implementation:** Fluid meshes use **smooth lighting** via a precomputed `FluidCornerLights` struct when the setting is enabled, with per-face strategies matched to each face type's geometry. When smooth lighting is disabled, the flat fallback path with separate sky/block channels (`BuildFlatLight`) is used.
 
 ##### 2.5.3.1 `FluidCornerLights` Struct (Option A — Precomputed)
 
@@ -419,26 +419,26 @@ For side faces, `GetCornerUV` maps `v = blockLocalPos.y`. A vertex at `y=0.4375`
 
 ##### 2.5.3.5 Flat Fallback (Smooth Lighting Disabled)
 
-When `SmoothLighting` is disabled, `GenerateFluidMeshData` ignores the `FluidCornerLights` struct and uses `BuildFlatLight` with the direct neighbor's separated sun/block channels — identical to the current behavior but with proper channel separation:
+When `SmoothLighting` is disabled, `GenerateFluidMeshData` ignores the `FluidCornerLights` struct and uses `BuildFlatLight` with the direct neighbor's separated sky/block channels — identical to the current behavior but with proper channel separation:
 
 ```csharp
 // Top face: sample from block above
 Color32 fluidLight = above.HasValue
-    ? BuildFlatLight(above.State.Sunlight, above.State.Blocklight)
+    ? BuildFlatLight(above.State.Skylight, above.State.Blocklight)
     : new Color32(255, 255, 255, 0);
 
 // Side faces: sample from side neighbor
 Color32 sideFlatLight = sideNeighbor.HasValue
-    ? BuildFlatLight(sideNeighbor.State.Sunlight, sideNeighbor.State.Blocklight)
+    ? BuildFlatLight(sideNeighbor.State.Skylight, sideNeighbor.State.Blocklight)
     : new Color32(255, 255, 255, 0);
 
 // Bottom face: sample from block below
 Color32 bottomFlatLight = below.HasValue
-    ? BuildFlatLight(below.State.Sunlight, below.State.Blocklight)
+    ? BuildFlatLight(below.State.Skylight, below.State.Blocklight)
     : new Color32(255, 255, 255, 0);
 ```
 
-This replaces the current merged-scalar `LightFloatToUNorm8` path, giving fluids proper sun/block channel separation even without smooth lighting.
+This replaces the current merged-scalar `LightFloatToUNorm8` path, giving fluids proper sky/block channel separation even without smooth lighting.
 
 #### 2.5.4 Legacy Rotated Blocks
 
@@ -449,7 +449,7 @@ Side faces do not need permutation because `GetTranslatedFaceIndex` remaps to a 
 
 #### 2.5.5 Phase 1 Mesh Type Coverage
 
-| Mesh Type       | Smooth Lighting | Separate Sun/Block | Notes                                                                                            |
+| Mesh Type       | Smooth Lighting | Separate Sky/Block | Notes                                                                                            |
 |-----------------|-----------------|--------------------|--------------------------------------------------------------------------------------------------|
 | Standard cubes  | Yes             | Yes                | Full corner averaging + anisotropy fix                                                           |
 | Axis3 / Facing6 | Yes             | Yes                | Via `EmitStandardCubeFaceIfVisible`                                                              |
@@ -465,7 +465,7 @@ Side faces do not need permutation because `GetTranslatedFaceIndex` remaps to a 
 Two new buffers added to `MeshDataJobOutput`:
 
 ```csharp
-public NativeList<Color32> LightData;              // TexCoord1: UNorm8 (sun, sun, sun, block) in Phase 1
+public NativeList<Color32> LightData;              // TexCoord1: UNorm8 (sky, sky, sky, block) in Phase 1
 public NativeList<NormalLightVertex> InterleavedStream3;  // Normals + LightData interleaved for GPU upload
 ```
 
@@ -514,16 +514,16 @@ private void CalculateCornerLights(int faceIndex, Vector3Int blockPos,
 
 /// Samples the 3 LUT neighbors for one corner, applies diagonal occlusion,
 /// averages with the direct neighbor, and encodes to UNorm8.
-/// Phase 2: averages all 4 channels (sun, blockR, blockG, blockB) independently.
+/// Phase 2: averages all 4 channels (sky, blockR, blockG, blockB) independently.
 [MethodImpl(MethodImplOptions.AggressiveInlining)]
 private Color32 SampleCorner(int faceIndex, int cornerIndex, Vector3Int blockPos,
     byte directSun, byte directR, byte directG, byte directB)
 
-/// Reads a neighbor's sun/block light values and opacity.
+/// Reads a neighbor's sky/block light values and opacity.
 /// Phase 2: reads RGB blocklight from ushort light array via GetLightDataFromLocalPos.
 [MethodImpl(MethodImplOptions.AggressiveInlining)]
 private void SampleNeighborLight(Vector3Int pos,
-    out byte sun, out byte blockR, out byte blockG, out byte blockB, out bool isOpaque)
+    out byte sky, out byte blockR, out byte blockG, out byte blockB, out bool isOpaque)
 ```
 
 The encoding uses rounded integer arithmetic for Burst efficiency: `(byte)((sunSum * 17 + 2) / 4)` — the `+ 2` provides correct rounding for the divide-by-4 average.
@@ -533,9 +533,9 @@ The encoding uses rounded integer arithmetic for Burst efficiency: `(byte)((sunS
 `EmitStandardCubeFaceIfVisible` branches on the `SmoothLighting` flag:
 
 - **Enabled:** Calls `CalculateCornerLights` to produce 4 distinct `Color32` values, then passes them to `GenerateStandardCubeFace`'s per-vertex overload (which includes the anisotropy fix).
-- **Disabled:** Calls `BuildFlatLightData(neighborVoxel)` to produce a single `Color32` with separated sun/block channels, duplicated to all 4 vertices.
+- **Disabled:** Calls `BuildFlatLightData(neighborVoxel)` to produce a single `Color32` with separated sky/block channels, duplicated to all 4 vertices.
 
-`BuildFlatLightData` reads the direct neighbor's `Sunlight` and `Blocklight` properties independently (not the merged `LightAsFloat`), encoding as `Color32(sun*17, sun*17, sun*17, block*17)`. This ensures correct day/night modulation even with smooth lighting disabled.
+`BuildFlatLightData` reads the direct neighbor's `Skylight` and `Blocklight` properties independently (not the merged `LightAsFloat`), encoding as `Color32(sky*17, sky*17, sky*17, block*17)`. This ensures correct day/night modulation even with smooth lighting disabled.
 
 `GenerateStandardCubeWithLegacyOrientation` (used by `HorizontalOnly` and `Legacy` schema blocks) follows the same `SmoothLighting` branching pattern, calling `CalculateCornerLights` on the world face `p` for correct neighbor sampling, then `PermuteCornerLightsForYRotation` to align corner lights with the rotated vertex positions on top/bottom faces.
 
@@ -565,11 +565,11 @@ This interleaving was moved from the main thread into a Burst job for performanc
 
 #### 2.7.1 Unified Shade Curve
 
-Both sunlight and blocklight use the **same** gamma-corrected shade function (`CalculateLinearVoxelShadow`). This ensures consistent visual falloff — a torch at light level 14 looks identical in brightness to sunlight at level 14.
+Both skylight and blocklight use the **same** gamma-corrected shade function (`CalculateLinearVoxelShadow`). This ensures consistent visual falloff — a torch at light level 14 looks identical in brightness to skylight at level 14.
 
-The key difference: sunlight intensity is **modulated by the day/night cycle** (the `globalLight` uniform from `World.cs`), while blocklight is **always at full intensity** (effectively `globalLight = 1.0`).
+The key difference: skylight intensity is **modulated by the day/night cycle** (the `globalLight` uniform from `World.cs`), while blocklight is **always at full intensity** (effectively `globalLight = 1.0`).
 
-When a block emits no blocklight (luminance = 0), its blocklight contribution is exactly zero — the shade curve maps 0.0 input to full darkness (shade = 1.0, shadow multiplier = `pow(0.10, 2.2)` ≈ 0.006). This is then `max()`'d with sunlight, so zero blocklight never overrides any sunlight contribution.
+When a block emits no blocklight (luminance = 0), its blocklight contribution is exactly zero — the shade curve maps 0.0 input to full darkness (shade = 1.0, shadow multiplier = `pow(0.10, 2.2)` ≈ 0.006). This is then `max()`'d with skylight, so zero blocklight never overrides any skylight contribution.
 
 ```hlsl
 /// Applies the shared shade curve to a single light channel (scalar, 0..1).
@@ -591,7 +591,7 @@ struct VoxelAppdata
     float4 vertex : POSITION;
     float2 uv : TEXCOORD0;
     half4 color : COLOR;
-    half4 lightData : TEXCOORD1;  // UNorm8: (sunR, sunG, sunB, blockLuminance)
+    half4 lightData : TEXCOORD1;  // UNorm8: (sunR, sunG, skyB, blockLuminance)
 };
 
 struct VoxelV2F
@@ -607,31 +607,31 @@ The `VoxelVert` function passes `lightData` through unchanged.
 
 #### 2.7.3 `VoxelLighting.hlsl`
 
-Replace the scalar `ApplyVoxelLighting()` with an RGB-aware version. In Phase 1, sunlight is monochrome (`lightData.r` only) and blocklight is monochrome (`lightData.a` only). The function is written to handle RGB from the start:
+Replace the scalar `ApplyVoxelLighting()` with an RGB-aware version. In Phase 1, skylight is monochrome (`lightData.r` only) and blocklight is monochrome (`lightData.a` only). The function is written to handle RGB from the start:
 
 ```hlsl
-/// Applies the voxel lighting model with separate sunlight and blocklight channels.
+/// Applies the voxel lighting model with separate skylight and blocklight channels.
 /// Both channels use the same gamma-corrected shade curve.
 ///
 /// @param color         Base texture color (RGB).
-/// @param sunRGB        Per-vertex sunlight as RGB (Phase 1: r=luminance, gb=0).
+/// @param sunRGB        Per-vertex skylight as RGB (Phase 1: r=luminance, gb=0).
 /// @param blockLuminance Per-vertex blocklight luminance (0..1).
-/// @param globalLight   Day/night cycle (0..1) — modulates sunlight only.
+/// @param globalLight   Day/night cycle (0..1) — modulates skylight only.
 /// @param minLight      Minimum ambient (0.15).
 /// @param maxLight      Maximum light (1.0).
 half3 ApplyVoxelLightingRGB(half3 color,
                             half3 sunRGB, float blockLuminance,
                             float globalLight, float minLight, float maxLight)
 {
-    // --- Sunlight ---
+    // --- Skylight ---
     // Phase 1: sunRGB = (luminance, 0, 0) → monochrome white light
     // Phase 2: sunRGB = (R, G, B) → tinted by time of day (blue night, red blood moon)
-    float sunLuminance = max(sunRGB.r, max(sunRGB.g, sunRGB.b));
-    float sunShadow = VoxelLightToShadow(sunLuminance, globalLight, minLight, maxLight);
+    float skyLuminance = max(sunRGB.r, max(sunRGB.g, sunRGB.b));
+    float skyShadow = VoxelLightToShadow(skyLuminance, globalLight, minLight, maxLight);
     // In Phase 1, sunTint is (1,1,1) since only .r has a value.
     // In Phase 2, sunTint carries the color ratio (e.g., bluish for moonlight).
-    half3 sunTint = sunLuminance > 0 ? sunRGB / sunLuminance : half3(1, 1, 1);
-    half3 sunContrib = color * sunShadow * sunTint;
+    half3 sunTint = skyLuminance > 0 ? sunRGB / skyLuminance : half3(1, 1, 1);
+    half3 skyContrib = color * skyShadow * sunTint;
 
     // --- Blocklight ---
     // Blocklight uses the same shade curve but is NOT modulated by day/night
@@ -640,12 +640,12 @@ half3 ApplyVoxelLightingRGB(half3 color,
     half3 blockContrib = color * blockShadow;
 
     // Per-channel max: the brighter source wins per RGB channel
-    return max(sunContrib, blockContrib);
+    return max(skyContrib, blockContrib);
 }
 ```
 
-> **Note on zero blocklight:** When `blockLuminance = 0`, `VoxelLightToShadow(0, 1.0, 0.15, 1.0)` produces `shade = clamp(1.0 - 0, 0.15, 1.0) = 1.0`, then `shadow = pow(lerp(1.0, 0.10, 1.0), 2.2) = pow(0.10, 2.2) ≈ 0.006`. This near-zero value is effectively invisible and always loses the `max()` against any non-trivial sunlight. The `minLight` floor in the shade curve only applies within the curve itself — it prevents sunlight from going fully black (ambient), but does NOT add a baseline to blocklight. A block with `blockLuminance = 0` contributes
-> ≈0.006, which is overridden by even the darkest ambient sunlight (~0.15 equivalent). No light is "invented" where none exists.
+> **Note on zero blocklight:** When `blockLuminance = 0`, `VoxelLightToShadow(0, 1.0, 0.15, 1.0)` produces `shade = clamp(1.0 - 0, 0.15, 1.0) = 1.0`, then `shadow = pow(lerp(1.0, 0.10, 1.0), 2.2) = pow(0.10, 2.2) ≈ 0.006`. This near-zero value is effectively invisible and always loses the `max()` against any non-trivial skylight. The `minLight` floor in the shade curve only applies within the curve itself — it prevents skylight from going fully black (ambient), but does NOT add a baseline to blocklight. A block with `blockLuminance = 0` contributes
+> ≈0.006, which is overridden by even the darkest ambient skylight (~0.15 equivalent). No light is "invented" where none exists.
 
 #### 2.7.4 `StandardBlockShader.shader` / `TransparentBlockShader.shader`
 
@@ -670,9 +670,9 @@ The liquid shader has its own vertex structures (`LiquidAppdata`, `LiquidV2F`) s
 o.lightLevel = max(v.lightData.r, v.lightData.a);
 ```
 
-This takes the per-channel max of sunlight (R) and blocklight (A) to produce a single scalar that feeds into the existing `CalculateVoxelShade` path. The liquid fragment shader is unchanged — it continues to use the scalar `i.lightLevel` for its custom deep/shallow water color blending.
+This takes the per-channel max of skylight (R) and blocklight (A) to produce a single scalar that feeds into the existing `CalculateVoxelShade` path. The liquid fragment shader is unchanged — it continues to use the scalar `i.lightLevel` for its custom deep/shallow water color blending.
 
-**Rationale:** The liquid shader applies shade in a non-standard way (manual blending between deep and shallow water colors based on depth), so it cannot directly use `ApplyVoxelLightingRGB`. A proper RGB-aware liquid lighting path is deferred to Phase 2, where the fragment shader would read separate sun/block channels and apply the shade curve independently.
+**Rationale:** The liquid shader applies shade in a non-standard way (manual blending between deep and shallow water colors based on depth), so it cannot directly use `ApplyVoxelLightingRGB`. A proper RGB-aware liquid lighting path is deferred to Phase 2, where the fragment shader would read separate sky/block channels and apply the shade curve independently.
 
 `Color.a` is set to `0.0` for fluid vertices (previously carried light). `Color.rgba` is now `(liquidType, shoreMask, shadowMultiplier, 0)`.
 
@@ -766,7 +766,7 @@ This is modest. Using `Float32 x4` instead would be +16 bytes/vertex (+28.6%), a
 
 With water opacity = 2, the BFS formula (`sourceLight - max(1, opacity)`) attenuates light by 2 per step: 15 → 13 → 11 → 9 → 7 → 5 → 3 → 1 → 0. Adjacent blocks differ by 2 light levels. After corner averaging with 4 neighbors, the gradient smooths to approximately 1-level differences between adjacent vertices — producing a gentle, natural-looking underwater falloff.
 
-> **Prerequisite completed:** The BFS attenuation formula was aligned with the Starlight/Moonrise `max(1, opacity)` formula (see `LIGHTING_SYSTEM_OVERVIEW.md` Section 4.2). All three attenuation sites (`PropagateLight`, `RecalculateSunlightForColumn`, `CheckEdgeVoxel`) now use the consistent formula, eliminating the previous 1-level shadow line artifact at chunk borders underwater.
+> **Prerequisite completed:** The BFS attenuation formula was aligned with the Starlight/Moonrise `max(1, opacity)` formula (see `LIGHTING_SYSTEM_OVERVIEW.md` Section 4.2). All three attenuation sites (`PropagateLight`, `RecalculateSkylightForColumn`, `CheckEdgeVoxel`) now use the consistent formula, eliminating the previous 1-level shadow line artifact at chunk borders underwater.
 
 ### 2.10 Scope
 
@@ -801,12 +801,12 @@ With water opacity = 2, the BFS formula (`sourceLight - max(1, opacity)`) attenu
 
 ### 3.1 Overview
 
-Phase 2 makes **blocklight** fully RGB-aware in the lighting engine and adds **shader-only sky tinting** for sunlight. This means:
+Phase 2 makes **blocklight** fully RGB-aware in the lighting engine and adds **shader-only sky tinting** for skylight. This means:
 
-- **Sunlight:** Remains a monochrome scalar (0-15) in the BFS, identical to Phase 1. Time-of-day color (blue moonlight, red blood moon, warm dawn) is applied as a shader uniform (`SkyLightColor`) that tints the scalar value at render time. This achieves the same visual result as full BFS RGB sunlight with zero lighting engine cost, because the sky is a uniform color — there is no per-region sky gradient to model.
+- **Skylight:** Remains a monochrome scalar (0-15) in the BFS, identical to Phase 1. Time-of-day color (blue moonlight, red blood moon, warm dawn) is applied as a shader uniform (`SkylightColor`) that tints the scalar value at render time. This achieves the same visual result as full BFS RGB skylight with zero lighting engine cost, because the sky is a uniform color — there is no per-region sky gradient to model.
 - **Blocklight RGB:** Each light-emitting block defines an emission color via a color picker with synced RGB sliders (each channel 0-15). The BFS propagates three independent color channels using per-channel max at each destination voxel.
 
-The smooth-lighting vertex averaging from Phase 1 already produces `Color32` light data per vertex. Phase 2 replaces the duplicated sunlight channels (R=G=B) and scalar blocklight (A) with `(sunLuminance, blockR, blockG, blockB)`. **No vertex format, mesh upload, or stream layout changes are needed** — only the encoding in `SampleCorner`/`BuildFlatLightData` and the shader's `ApplyVoxelLightingRGB` function update.
+The smooth-lighting vertex averaging from Phase 1 already produces `Color32` light data per vertex. Phase 2 replaces the duplicated skylight channels (R=G=B) and scalar blocklight (A) with `(skyLuminance, blockR, blockG, blockB)`. **No vertex format, mesh upload, or stream layout changes are needed** — only the encoding in `SampleCorner`/`BuildFlatLightData` and the shader's `ApplyVoxelLightingRGB` function update.
 
 ### 3.1.1 Design Rationale: Per-Channel Propagation vs Single Emission + Tint
 
@@ -816,21 +816,21 @@ An alternative approach was considered: propagate a single scalar emission throu
 
 **Per-channel propagation solves this naturally:** Each channel propagates and attenuates independently. At overlap zones, per-channel `max()` produces the correct additive color mixing — both sources contribute at full strength. No provenance tracking, no blending ambiguity, no order dependence.
 
-The sky tinting approach works for sunlight specifically because all sunlight comes from one source (the sky), so there is never a color mixing problem — every sun-lit voxel has the same color, just different scalar intensity.
+The sky tinting approach works for skylight specifically because all skylight comes from one source (the sky), so there is never a color mixing problem — every sky-lit voxel has the same color, just different scalar intensity.
 
 ### 3.2 Voxel Data Changes
 
 #### 3.2.1 The Storage Problem
 
-The current 32-bit `uint` allocates 4 bits each for sunlight and blocklight (8 bits total). RGB blocklight needs 12 additional bits:
+The current 32-bit `uint` allocates 4 bits each for skylight and blocklight (8 bits total). RGB blocklight needs 12 additional bits:
 
-- Sunlight: 1 channel × 4 bits = 4 bits (monochrome, tinted in shader)
+- Skylight: 1 channel × 4 bits = 4 bits (monochrome, tinted in shader)
 - Blocklight: 3 channels × 4 bits = 12 bits
 - Total: 16 bits (up from 8), requiring 8 additional bits
 
 ```
-Current:  [ID: 16][Sun: 4][Block: 4][Meta: 8] = 32 bits — fully used
-RGB need: [Sun: 4][BlockR: 4][BlockG: 4][BlockB: 4] = 16 bits — separate array
+Current:  [ID: 16][Sky: 4][Block: 4][Meta: 8] = 32 bits — fully used
+RGB need: [Sky: 4][BlockR: 4][BlockG: 4][BlockB: 4] = 16 bits — separate array
 ```
 
 #### 3.2.2 Chosen Solution: Separate `NativeArray<ushort>` Light Storage
@@ -841,8 +841,8 @@ RGB need: [Sun: 4][BlockR: 4][BlockG: 4][BlockB: 4] = 16 bits — separate array
 Keep the existing `uint` voxel data for ID + metadata. Add a parallel `ushort` per voxel for all light channels:
 
 ```
-Existing uint:  [ID: 16][Sun(legacy): 4][Block(legacy): 4][Meta: 8] = 32 bits
-New ushort:     [Sun: 4][BlockR: 4][BlockG: 4][BlockB: 4] = 16 bits
+Existing uint:  [ID: 16][Sky(legacy): 4][Block(legacy): 4][Meta: 8] = 32 bits
+New ushort:     [Sky: 4][BlockR: 4][BlockG: 4][BlockB: 4] = 16 bits
 ```
 
 **Why `ushort` (16-bit) instead of `uint` (32-bit):** Exactly 16 bits of light data are needed (4 channels × 4 bits). Using `ushort` halves the memory cost compared to `uint` (64 KB vs 128 KB per chunk, or 32,768 × 2 bytes) and improves cache density for the BFS inner loop. The tradeoff — `ushort` bit manipulation in Burst requires casting — is trivial to wrap in helper methods.
@@ -857,7 +857,7 @@ New ushort:     [Sun: 4][BlockR: 4][BlockG: 4][BlockB: 4] = 16 bits
 
 **Serialization (v10, chunk format v7):** The `ushort[] LightData` array is persisted to disk using a flag-based section format. Each section is written with a type flag:
 
-- `0x00` — Voxels + uniform sky: 1B sky level + 2B nonAirCount + voxels. LightData reconstructed via `FillUniformSkyLight` on load.
+- `0x00` — Voxels + uniform sky: 1B sky level + 2B nonAirCount + voxels. LightData reconstructed via `FillUniformSkylight` on load.
 - `0x01` — Voxels + full LightData: section has non-uniform light; both arrays bulk-read on load.
 - `0x02` — Light-only + uniform sky: 1B flag + 1B sky level (2 bytes total). Air section with uniform sky light.
 - `0x03` — Light-only + full LightData: air section with non-uniform light; LightData bulk-read on load.
@@ -868,9 +868,9 @@ The uniform-sky optimization (flags 0x00/0x02) stores a single byte instead of t
 
 ```
 Bit layout (16 bits total):
-  [Sun: 4][BlockR: 4][BlockG: 4][BlockB: 4]
+  [Sky: 4][BlockR: 4][BlockG: 4][BlockB: 4]
 
-  Bits 0-3:   Sunlight scalar    (0-15)
+  Bits 0-3:   Skylight scalar    (0-15)
   Bits 4-7:   Blocklight Red     (0-15)
   Bits 8-11:  Blocklight Green   (0-15)
   Bits 12-15: Blocklight Blue    (0-15)
@@ -886,7 +886,7 @@ private const int BLOCK_B_SHIFT = 12;
 private const int CHANNEL_MASK = 0xF;
 
 [MethodImpl(MethodImplOptions.AggressiveInlining)]
-public static byte GetSunLight(ushort lightData) => (byte)((lightData >> SUN_SHIFT) & CHANNEL_MASK);
+public static byte GetSkylight(ushort lightData) => (byte)((lightData >> SKY_SHIFT) & CHANNEL_MASK);
 
 [MethodImpl(MethodImplOptions.AggressiveInlining)]
 public static byte GetBlocklightR(ushort lightData) => (byte)((lightData >> BLOCK_R_SHIFT) & CHANNEL_MASK);
@@ -898,22 +898,22 @@ public static byte GetBlocklightG(ushort lightData) => (byte)((lightData >> BLOC
 public static byte GetBlocklightB(ushort lightData) => (byte)((lightData >> BLOCK_B_SHIFT) & CHANNEL_MASK);
 
 [MethodImpl(MethodImplOptions.AggressiveInlining)]
-public static ushort PackLightData(byte sun, byte blockR, byte blockG, byte blockB)
-    => (ushort)((sun & CHANNEL_MASK) | ((blockR & CHANNEL_MASK) << BLOCK_R_SHIFT)
+public static ushort PackLightData(byte sky, byte blockR, byte blockG, byte blockB)
+    => (ushort)((sky & CHANNEL_MASK) | ((blockR & CHANNEL_MASK) << BLOCK_R_SHIFT)
         | ((blockG & CHANNEL_MASK) << BLOCK_G_SHIFT) | ((blockB & CHANNEL_MASK) << BLOCK_B_SHIFT));
 ```
 
 #### 3.2.4 Legacy Scalar Light Bits (Removed — Phase B)
 
-The sunlight (bits 16-19) and blocklight (bits 20-23) that previously existed in the `uint` have been removed as of Phase B (§3.8.2). All light readers now use `LightBitMapping` on the `ushort LightData[]` array. The BFS writes exclusively to `LightData` — no dual-write remains. Bits 16-23 in the `uint` are zeroed and reserved for future metadata expansion. Save version 10, chunk format v7.
+The skylight (bits 16-19) and blocklight (bits 20-23) that previously existed in the `uint` have been removed as of Phase B (§3.8.2). All light readers now use `LightBitMapping` on the `ushort LightData[]` array. The BFS writes exclusively to `LightData` — no dual-write remains. Bits 16-23 in the `uint` are zeroed and reserved for future metadata expansion. Save version 10, chunk format v7.
 
-### 3.3 Sunlight: Shader-Only Sky Tinting
+### 3.3 Skylight: Shader-Only Sky Tinting
 
-> **Decision (2026-06-06):** Shader-only tinting confirmed. The sunlight BFS remains monochrome (scalar 0-15, unchanged from Phase 1). The sky color is applied as a per-frame shader uniform. This delivers the visual goal (blue moonlight, red blood moon, warm dawn) with zero lighting engine cost. Full BFS RGB sunlight could be added later if per-region sky coloring becomes a requirement, but is not planned.
+> **Decision (2026-06-06):** Shader-only tinting confirmed. The skylight BFS remains monochrome (scalar 0-15, unchanged from Phase 1). The sky color is applied as a per-frame shader uniform. This delivers the visual goal (blue moonlight, red blood moon, warm dawn) with zero lighting engine cost. Full BFS RGB skylight could be added later if per-region sky coloring becomes a requirement, but is not planned.
 
 #### 3.3.1 Sky Color Uniform
 
-`World.cs` already sets `GlobalLightLevel` (0-1) as a day/night cycle uniform. Phase 2 adds a `SkyLightColor` uniform (RGB) that varies with time of day:
+`World.cs` already sets `GlobalLightLevel` (0-1) as a day/night cycle uniform. Phase 2 adds a `SkylightColor` uniform (RGB) that varies with time of day:
 
 ```csharp
 // World.cs
@@ -928,32 +928,32 @@ private Color _skyLightColor = Color.white;            // Updated per frame from
 // Blood moon:   (1.0, 0.2, 0.15)   — deep red (event-driven override)
 ```
 
-The shader multiplies the monochrome sunlight scalar by this color:
+The shader multiplies the monochrome skylight scalar by this color:
 
 ```hlsl
-half3 sunContrib = baseColor * sunShadow * SkyLightColor;
+half3 skyContrib = baseColor * skyShadow * SkylightColor;
 ```
 
-#### 3.3.2 Sunlight BFS — Unchanged
+#### 3.3.2 Skylight BFS — Unchanged
 
-The sunlight BFS continues to propagate a single scalar value (0-15), identical to Phase 1. The `ushort` light array stores the sunlight scalar in bits 0-3. No changes to `RecalculateSunlightForColumn`, `PropagateLight` (sun channel), or `PropagateDarkness` (sun channel) are needed.
+The skylight BFS continues to propagate a single scalar value (0-15), identical to Phase 1. The `ushort` light array stores the skylight scalar in bits 0-3. No changes to `RecalculateSkylightForColumn`, `PropagateLight` (sky channel), or `PropagateDarkness` (sky channel) are needed.
 
-#### 3.3.3 Sun/Block Interaction at Boundaries
+#### 3.3.3 Sky/Block Interaction at Boundaries
 
-The shader-only approach produces correct sun/block blending because the final compositing uses per-channel `max()` after both contributions are fully computed:
+The shader-only approach produces correct sky/block blending because the final compositing uses per-channel `max()` after both contributions are fully computed:
 
 ```hlsl
-// Sunlight: scalar × shade curve × sky color → RGB contribution
-half3 sunContrib = baseColor * sunShadow * SkyLightColor;
+// Skylight: scalar × shade curve × sky color → RGB contribution
+half3 skyContrib = baseColor * skyShadow * SkylightColor;
 
 // Blocklight: RGB channels × shade curve (always full intensity) → RGB contribution
 half3 blockContrib = baseColor * half3(blockR_shadow, blockG_shadow, blockB_shadow);
 
 // Per-channel max: brighter source wins per RGB channel
-return max(sunContrib, blockContrib);
+return max(skyContrib, blockContrib);
 ```
 
-At a doorway at dusk: outside has high sun luminance tinted warm orange, inside has high blocklight RGB from torches. The smooth lighting vertex averaging produces a gradient of sun luminance (high→low) and blocklight RGB (low→high). The per-channel `max()` picks the dominant source at each point, creating a natural crossfade between warm outdoor sunset light and warm indoor torch light.
+At a doorway at dusk: outside has high sky luminance tinted warm orange, inside has high blocklight RGB from torches. The smooth lighting vertex averaging produces a gradient of sky luminance (high→low) and blocklight RGB (low→high). The per-channel `max()` picks the dominant source at each point, creating a natural crossfade between warm outdoor sunset light and warm indoor torch light.
 
 ### 3.4 Blocklight RGB Changes
 
@@ -1013,14 +1013,14 @@ The current BFS queue entries use `LightQueueNode { Vector3Int Position; byte Ol
 public struct LightQueueNode : IEquatable<LightQueueNode>
 {
     public Vector3Int Position;
-    public byte OldLightLevel;   // Sunlight queue: scalar (unchanged)
+    public byte OldLightLevel;   // Skylight queue: scalar (unchanged)
     public byte OldBlockR;       // Blocklight queue: RGB channels
     public byte OldBlockG;
     public byte OldBlockB;
 }
 ```
 
-The sunlight queue continues to use `OldLightLevel` only. The blocklight queue uses `OldBlockR/G/B`. Adding 3 bytes to the struct is acceptable — queue sizes are bounded (typically <1000 entries per chunk) and the struct is not in a hot loop.
+The skylight queue continues to use `OldLightLevel` only. The blocklight queue uses `OldBlockR/G/B`. Adding 3 bytes to the struct is acceptable — queue sizes are bounded (typically <1000 entries per chunk) and the struct is not in a hot loop.
 
 **Job-side queue (`NeighborhoodLightingJob.cs`):**
 
@@ -1061,7 +1061,7 @@ This follows the same dual-phase pattern as the current scalar BFS (Phase 1: dar
 public struct LightModification
 {
     public Vector3Int GlobalPosition;
-    public byte LightLevel;    // Sunlight: scalar (unchanged)
+    public byte LightLevel;    // Skylight: scalar (unchanged)
     public byte BlockR;        // Blocklight: RGB channels
     public byte BlockG;
     public byte BlockB;
@@ -1069,7 +1069,7 @@ public struct LightModification
 }
 ```
 
-When `Channel == LightChannel.Block`, the RGB fields are used. When `Channel == LightChannel.Sun`, `LightLevel` is used (scalar, unchanged).
+When `Channel == LightChannel.Block`, the RGB fields are used. When `Channel == LightChannel.Sky`, `LightLevel` is used (scalar, unchanged).
 
 **Write-through cache:** The current `NativeHashMap<long, uint>` caches the full packed `uint` voxel data for neighbor positions modified during the job. With the separate `ushort` light array, the cache must also track light modifications. Options:
 
@@ -1080,11 +1080,11 @@ The `ulong` packing approach is preferred for cache coherence — a single hash 
 
 ### 3.5 Mesh Job Changes (Minimal)
 
-The `CalculateCornerLights` function from Phase 1 already returns `Color32`. In Phase 1, it reads scalar sunlight and blocklight and encodes them as `Color32(sun, sun, sun, block)`. In Phase 2, `SampleNeighborLight` reads from both the voxel `uint` (for sunlight scalar and block type opacity) and the `ushort` light array (for RGB blocklight):
+The `CalculateCornerLights` function from Phase 1 already returns `Color32`. In Phase 1, it reads scalar skylight and blocklight and encodes them as `Color32(sky, sky, sky, block)`. In Phase 2, `SampleNeighborLight` reads from both the voxel `uint` (for skylight scalar and block type opacity) and the `ushort` light array (for RGB blocklight):
 
 ```csharp
-// Sunlight is still scalar from the uint (or from ushort bits 0-3)
-byte sun = LightBitMapping.GetSunLight(lightData);
+// Skylight is still scalar from the uint (or from ushort bits 0-3)
+byte sky = LightBitMapping.GetSkylight(lightData);
 
 // Blocklight is now RGB from the ushort light array
 byte blockR = LightBitMapping.GetBlocklightR(lightData);
@@ -1093,7 +1093,7 @@ byte blockB = LightBitMapping.GetBlocklightB(lightData);
 
 // Encode into Color32 for TexCoord1
 Color32 result = new Color32(
-    (byte)(sun * 17),      // R: sun luminance (shader tints via SkyLightColor)
+    (byte)(sky * 17),      // R: sky luminance (shader tints via SkylightColor)
     (byte)(blockR * 17),   // G: block red
     (byte)(blockG * 17),   // B: block green
     (byte)(blockB * 17)    // A: block blue
@@ -1102,15 +1102,15 @@ Color32 result = new Color32(
 
 The `SampleCorner` function averages each of the 4 channels independently across the 4 corner neighbors, using the same rounded integer arithmetic as Phase 1: `(byte)((channelSum * 17 + 2) / 4)`.
 
-`BuildFlatLightData` (smooth lighting disabled) follows the same encoding: `Color32(sun*17, blockR*17, blockG*17, blockB*17)`.
+`BuildFlatLightData` (smooth lighting disabled) follows the same encoding: `Color32(sky*17, blockR*17, blockG*17, blockB*17)`.
 
 #### 3.5.1 TexCoord1 Layout (Phase 2)
 
 | Component | Phase 1 (current)                      | Phase 2                                     |
 |-----------|----------------------------------------|---------------------------------------------|
-| `R`       | Sun luminance × 17 (0-255)             | Sun luminance × 17 (0-255, shader tints it) |
-| `G`       | Sun luminance × 17 (duplicate, wasted) | Blocklight Red × 17 (0-255)                 |
-| `B`       | Sun luminance × 17 (duplicate, wasted) | Blocklight Green × 17 (0-255)               |
+| `R`       | Sky luminance × 17 (0-255)             | Sky luminance × 17 (0-255, shader tints it) |
+| `G`       | Sky luminance × 17 (duplicate, wasted) | Blocklight Red × 17 (0-255)                 |
+| `B`       | Sky luminance × 17 (duplicate, wasted) | Blocklight Green × 17 (0-255)               |
 | `A`       | Block luminance × 17 (scalar)          | Blocklight Blue × 17 (0-255)                |
 
 This fits cleanly into the existing `UNorm8 x4` format with **no vertex layout changes**. The G and B channels, currently wasted as duplicates of R, become blocklight color channels. No changes to `SectionRenderer.cs`, `NormalLightVertex`, or stream layout are needed.
@@ -1120,7 +1120,7 @@ This fits cleanly into the existing `UNorm8 x4` format with **no vertex layout c
 #### 3.6.1 New Uniform
 
 ```hlsl
-half3 SkyLightColor;  // Set by World.cs per frame from the sky light gradient
+half3 SkylightColor;  // Set by World.cs per frame from the sky light gradient
 ```
 
 Added to `StandardBlockShader.shader`, `TransparentBlockShader.shader`, and `UberLiquidShader.shader` properties blocks.
@@ -1131,13 +1131,13 @@ The Phase 1 function signature changes to accept the sky color tint and read blo
 
 ```hlsl
 half3 ApplyVoxelLightingRGB(half3 color,
-                            float sunLuminance, half3 blockRGB,
+                            float skyLuminance, half3 blockRGB,
                             half3 skyColor,
                             float globalLight, float minLight, float maxLight)
 {
-    // Sunlight: scalar luminance × shade curve × sky color tint
-    float sunShadow = VoxelLightToShadow(sunLuminance, globalLight, minLight, maxLight);
-    half3 sunContrib = color * sunShadow * skyColor;
+    // Skylight: scalar luminance × shade curve × sky color tint
+    float skyShadow = VoxelLightToShadow(skyLuminance, globalLight, minLight, maxLight);
+    half3 skyContrib = color * skyShadow * skyColor;
 
     // Blocklight: RGB channels × same shade curve, always full intensity
     float blockR_shadow = VoxelLightToShadow(blockRGB.r, 1.0, minLight, maxLight);
@@ -1145,7 +1145,7 @@ half3 ApplyVoxelLightingRGB(half3 color,
     float blockB_shadow = VoxelLightToShadow(blockRGB.b, 1.0, minLight, maxLight);
     half3 blockContrib = color * half3(blockR_shadow, blockG_shadow, blockB_shadow);
 
-    return max(sunContrib, blockContrib);
+    return max(skyContrib, blockContrib);
 }
 ```
 
@@ -1158,7 +1158,7 @@ col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.rgb, i.lightData.a, ...);
 **To:**
 
 ```hlsl
-col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.r, i.lightData.gba, SkyLightColor, ...);
+col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.r, i.lightData.gba, SkylightColor, ...);
 ```
 
 #### 3.6.3 Liquid Shader RGB Lighting (Phase 3 — Implemented)
@@ -1166,17 +1166,17 @@ col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.r, i.lightData.gba, SkyLigh
 The liquid shader now supports full RGB lighting via the Hybrid "Lit White" approach (see §5.2). `LiquidCore.hlsl` passes sky and block channels separately through `LiquidV2F`:
 
 ```hlsl
-o.sunLight = v.lightData.r;
+o.skylight = v.lightData.r;
 o.blockRGB = v.lightData.gba;
 ```
 
-The fragment shader computes a combined lighting multiplier via `ApplyVoxelLightingRGB(half3(1,1,1), ...)` and applies it as a post-multiply tint. Water's deep/shallow blend is driven by `sunLight` only — a red torch in a cave does not make water appear "shallow". See §5 for the full design and future upgrade path to Full Decomposition.
+The fragment shader computes a combined lighting multiplier via `ApplyVoxelLightingRGB(half3(1,1,1), ...)` and applies it as a post-multiply tint. Water's deep/shallow blend is driven by `skylight` only — a red torch in a cave does not make water appear "shallow". See §5 for the full design and future upgrade path to Full Decomposition.
 
 #### 3.6.4 Notes on Shade Curve at Zero
 
-Each blocklight channel goes through `VoxelLightToShadow` independently. A channel at 0.0 produces shadow ~= 0.006 (near-zero). A channel at 1.0 produces shadow = 1.0 (full brightness). Channels at intermediate values follow the same gamma curve as sunlight — ensuring a red torch `(0.8, 0.1, 0.0)` has the same perceived brightness falloff as sunlight at the same numeric level.
+Each blocklight channel goes through `VoxelLightToShadow` independently. A channel at 0.0 produces shadow ~= 0.006 (near-zero). A channel at 1.0 produces shadow = 1.0 (full brightness). Channels at intermediate values follow the same gamma curve as skylight — ensuring a red torch `(0.8, 0.1, 0.0)` has the same perceived brightness falloff as skylight at the same numeric level.
 
-When all 3 blocklight channels are 0.0, the blocklight contribution is uniformly ~0.006 across all RGB channels — effectively invisible and always losing the `max()` against any non-trivial sunlight contribution. No light is "invented" where none exists.
+When all 3 blocklight channels are 0.0, the blocklight contribution is uniformly ~0.006 across all RGB channels — effectively invisible and always losing the `max()` against any non-trivial skylight contribution. No light is "invented" where none exists.
 
 ### 3.7 Serialization Impact
 
@@ -1184,13 +1184,13 @@ When all 3 blocklight channels are 0.0, the blocklight contribution is uniformly
 
 > **Updated (Phase B):** The `ushort[] LightData` array is now persisted to disk as part of the section format (save version 9+, chunk format v6+). The `uint` voxel no longer carries light bits. `InitLightDataFromPacked` has been removed.
 
-The `ushort[] LightData` array is serialized alongside voxel data using a flag-based section format. In chunk format v7 (save v10), four section flags control how light data is stored — see §3.8.2.5 for the full flag design. Uniform-sky sections (flags 0x00 and 0x02) store only a single byte for the sky level; the full array is reconstructed via `LightingHelper.FillUniformSkyLight` on load.
+The `ushort[] LightData` array is serialized alongside voxel data using a flag-based section format. In chunk format v7 (save v10), four section flags control how light data is stored — see §3.8.2.5 for the full flag design. Uniform-sky sections (flags 0x00 and 0x02) store only a single byte for the sky level; the full array is reconstructed via `LightingHelper.FillUniformSkylight` on load.
 
 #### 3.7.2 Light Queue Serialization — Upgraded to RGB
 
 > **Decision (2026-06-06):** The light queue serialization is upgraded to carry RGB blocklight values (not reconstructed at runtime). This matches the existing architecture where pending light work survives save/load cycles, and avoids edge cases where partially-propagated light values persist in voxel data but the queue that would finish them is lost.
 
-The current `WriteLightQueue`/`ReadLightQueue` in `ChunkSerializer.cs` serializes `LightQueueNode` entries as `(Vector3Int + byte)` = 13 bytes per entry. Phase 2 expands this to `(Vector3Int + byte + byte + byte + byte)` = 16 bytes per entry (sunlight scalar + 3 blocklight RGB channels).
+The current `WriteLightQueue`/`ReadLightQueue` in `ChunkSerializer.cs` serializes `LightQueueNode` entries as `(Vector3Int + byte)` = 13 bytes per entry. Phase 2 expands this to `(Vector3Int + byte + byte + byte + byte)` = 16 bytes per entry (skylight scalar + 3 blocklight RGB channels).
 
 **Migration step required:** This is a chunk format change. A new AOT migration step (`Migration_v{N}_to_v{N+1}_RGBLightQueues.cs`) must:
 
@@ -1210,19 +1210,19 @@ The current `WriteLightQueue`/`ReadLightQueue` in `ChunkSerializer.cs` serialize
 | `Data/JobData.cs` (`BlockTypeJobData`)                           | Add `EmissionR`, `EmissionG`, `EmissionB` bytes; derive from color + intensity                                                                                                                                                     |
 | `Data/JobData.cs` (`LightQueueNode`)                             | Add `OldBlockR`, `OldBlockG`, `OldBlockB` bytes for RGB queue entries                                                                                                                                                              |
 | `Data/ChunkSection.cs`                                           | Add `ushort[]` light array (managed side); pool reset via `Array.Clear`                                                                                                                                                            |
-| `Data/ChunkData.cs`                                              | RGB-aware `ModifyVoxel` light queuing; `AddToBlockLightQueue` carries RGB values                                                                                                                                                   |
+| `Data/ChunkData.cs`                                              | RGB-aware `ModifyVoxel` light queuing; `AddToBlocklightQueue` carries RGB values                                                                                                                                                   |
 | `Jobs/BurstData/BurstVoxelDataBitMapping.cs`                     | Add `LightBitMapping` helper (or extend existing) for `ushort` light pack/unpack                                                                                                                                                   |
-| `Jobs/NeighborhoodLightingJob.cs`                                | Triple-channel blocklight BFS; per-channel darkness removal (`ProcessDarknessChannel` helper); `SetSunlight`/`SetBlocklightRGB`/`GetLightData`; expanded `LightModification` and `LightRemovalNode`; write-through cache expansion |
+| `Jobs/NeighborhoodLightingJob.cs`                                | Triple-channel blocklight BFS; per-channel darkness removal (`ProcessDarknessChannel` helper); `SetSkylight`/`SetBlocklightRGB`/`GetLightData`; expanded `LightModification` and `LightRemovalNode`; write-through cache expansion |
 | `Jobs/Data/LightingJobData.cs`                                   | Pass `NativeArray<ushort>` light arrays (center + 8 neighbors) into job                                                                                                                                                            |
 | `WorldJobManager.cs`                                             | Pass `ushort` light arrays to/from lighting and meshing jobs; handle RGB `LightModification` cross-chunk mods                                                                                                                      |
-| `World.cs`                                                       | Add `SkyLightColor` shader uniform + `Gradient` for time-of-day color                                                                                                                                                              |
-| `Jobs/MeshGenerationJob.cs`                                      | `SampleNeighborLight` reads RGB from `ushort` array; `SampleCorner`/`BuildFlatLightData` encode `(sun, blockR, blockG, blockB)`                                                                                                    |
+| `World.cs`                                                       | Add `SkylightColor` shader uniform + `Gradient` for time-of-day color                                                                                                                                                              |
+| `Jobs/MeshGenerationJob.cs`                                      | `SampleNeighborLight` reads RGB from `ushort` array; `SampleCorner`/`BuildFlatLightData` encode `(sky, blockR, blockG, blockB)`                                                                                                    |
 | `Chunk.cs`                                                       | Thread `ushort` light arrays through `ApplyMeshData` pipeline                                                                                                                                                                      |
-| `Shaders/Includes/VoxelLighting.hlsl`                            | Update `ApplyVoxelLightingRGB` signature: `(sun scalar, block RGB, sky color, ...)`                                                                                                                                                |
-| `Shaders/StandardBlockShader.shader`                             | Add `SkyLightColor` uniform; update frag call to `ApplyVoxelLightingRGB(col, lightData.r, lightData.gba, ...)`                                                                                                                     |
+| `Shaders/Includes/VoxelLighting.hlsl`                            | Update `ApplyVoxelLightingRGB` signature: `(sky scalar, block RGB, sky color, ...)`                                                                                                                                                |
+| `Shaders/StandardBlockShader.shader`                             | Add `SkylightColor` uniform; update frag call to `ApplyVoxelLightingRGB(col, lightData.r, lightData.gba, ...)`                                                                                                                     |
 | `Shaders/TransparentBlockShader.shader`                          | Same as StandardBlockShader                                                                                                                                                                                                        |
-| `Shaders/Includes/LiquidCore.hlsl`                               | RGB-aware: split `lightLevel` into `sunLight` + `blockRGB` in `LiquidV2F`; vertex shader passes channels separately; `EvaluateWater` depth blend uses `sunLight` only (see §5.2)                                                   |
-| `Shaders/UberLiquidShader.shader`                                | Add `SkyLightColor` uniform; replace `CalculateVoxelShade`/`CalculateLinearVoxelShadow` with `ApplyVoxelLightingRGB(half3(1,1,1), ...)` "lit white" multiplier (see §5.2)                                                          |
+| `Shaders/Includes/LiquidCore.hlsl`                               | RGB-aware: split `lightLevel` into `skylight` + `blockRGB` in `LiquidV2F`; vertex shader passes channels separately; `EvaluateWater` depth blend uses `skylight` only (see §5.2)                                                   |
+| `Shaders/UberLiquidShader.shader`                                | Add `SkylightColor` uniform; replace `CalculateVoxelShade`/`CalculateLinearVoxelShadow` with `ApplyVoxelLightingRGB(half3(1,1,1), ...)` "lit white" multiplier (see §5.2)                                                          |
 | `Serialization/ChunkSerializer.cs`                               | Expand `WriteLightQueue`/`ReadLightQueue` for RGB entries; add `InitLightDataFromPacked` to reconstruct ushort light array from uint packed data on every chunk load                                                               |
 | `Serialization/Migration/Steps/MigrationV7ToV8RGBLightQueues.cs` | AOT migration step (world v7→v8, chunk format v4→v5) for light queue format change                                                                                                                                                 |
 | `Benchmarks/LightingJobBenchmark.cs`                             | Add RGB-specific scenarios; fix existing broken scenarios                                                                                                                                                                          |
@@ -1236,7 +1236,7 @@ The current `WriteLightQueue`/`ReadLightQueue` in `ChunkSerializer.cs` serialize
 
 LightData is now persisted to disk using a flag-based section format (save version 9, chunk format v6). See §3.2.2 for the format details. Migration step: `Migration_v8_to_v9_LightDataSerialization.cs`.
 
-### 3.8.2 Phase B: Legacy Light Bit Removal & SkyLight Rename (v9 → v10)
+### 3.8.2 Phase B: Legacy Light Bit Removal & Skylight Rename (v9 → v10)
 
 - **Status:** Implemented (2026-06-07)
 - **Prerequisites:** Phase A (v9) confirmed working, Phase 2 stable
@@ -1245,33 +1245,58 @@ LightData is now persisted to disk using a flag-based section format (save versi
 #### 3.8.2.1 Summary
 
 1. Migrated all scalar light readers (`GetSunLight()`, `GetBlockLight()` on the `uint`) to read from the `ushort LightData[]` array via `LightBitMapping`.
-2. Renamed "SunLight" → "SkyLight" across the codebase. The value represents sky light (tinted by `SkyLightColor` in the shader per time-of-day), not literal sunlight.
+2. Renamed "SunLight" → "Skylight" across the codebase. The value represents sky light (tinted by `SkylightColor` in the shader per time-of-day), not literal sunlight. **Completed in two stages — see §3.8.2.2.**
 3. Removed the dual-write from the BFS (stopped writing to legacy `uint` light bits).
-4. Reclaimed the 8 freed bits (sunlight 4 + blocklight 4) in the `uint` for future metadata expansion (biome tint, damage state, block variant, etc.).
+4. Reclaimed the 8 freed bits (skylight 4 + blocklight 4) in the `uint` for future metadata expansion (biome tint, damage state, block variant, etc.).
 5. Redesigned section flags (v7) with a uniform-sky-level optimization for faster world loading and smaller save files.
 
-#### 3.8.2.2 Terminology Rename: SunLight → SkyLight
+#### 3.8.2.2 Terminology Rename: SunLight → Skylight
 
-The `ushort` light array's first channel has always represented "light from the sky" — a monochrome scalar propagated by the BFS and tinted per-frame by `SkyLightColor` in the shader. The name "SunLight" is a historical artifact from when no tinting existed.
+The `ushort` light array's first channel has always represented "light from the sky" — a monochrome scalar
+propagated by the BFS and tinted per-frame by `SkylightColor` in the shader. The name "SunLight" is a
+historical artifact from when no tinting existed.
 
-**Renamed:**
+The rename landed in **two stages**, three months apart. This section records both, because for that interval
+the doc claimed a completed rename that the code had only partly made.
 
-- `LightBitMapping`: `SUN_SHIFT` → `SKY_SHIFT`, `GetSunLight()` → `GetSkyLight()`, `SetSunLight()` → `SetSkyLight()`, `PackLightData(byte sun, ...)` → `PackLightData(byte sky, ...)`
+**Stage 1 — the bit-accessor layer (2026-06-07, with Phase B):**
+
+- `LightBitMapping`: `SUN_SHIFT` → `SKY_SHIFT`, `GetSunLight()` → `GetSkyLight()`, `SetSunLight()` →
+  `SetSkyLight()`, `PackLightData(byte sun, ...)` → `PackLightData(byte sky, ...)`
+
+Stage 1 stopped there. The BFS, queue, recalculation, diagnostic and shader layers kept their `Sun*` names, so
+`GetSkyLight()` sat beside `SunlightBfsQueue` for three months.
+
+**Stage 2 — everything else (2026-08-25, LP-7):** ~480 identifiers across ~55 files, plus the casing
+normalization to one word (`GetSkyLight` → `GetSkylight`, `BlockLightQueue` → `BlocklightQueue`).
+
 - `LightChannel.Sun` → `LightChannel.Sky`
-- `SunlightBfsQueue` → `SkylightBfsQueue`
-- `RecalculateSunlightForColumn` → `RecalculateSkylightForColumn`
-- `DebugVisualizationMode.Sunlight` → `DebugVisualizationMode.Skylight`
-- All local variables: `sunlight`, `sun`, `currentSunlight`, etc. → `skyLight`, `sky`, `currentSkyLight`, etc.
+- `ChunkData.SunlightBfsQueue` → `SkylightBfsQueue`; `AddToSunLightQueue` → `AddToSkylightQueue`;
+  `RecalculateSunLightLight()` → `RecalculateSkylight()` (the doubled word went with it)
+- `WorldData.SunlightRecalculationQueue` → `SkylightRecalculationQueue`; `QueueSunlightRecalculation` →
+  `QueueSkylightRecalculation`
+- `NeighborhoodLightingJob.RecalculateSunlightForColumn` → `RecalculateSkylightForColumn`; `SetSunlight`,
+  `InChunkSunlightSupport`, `CrossChunkSunlightSupport`, `EmitCrossChunkSunlightRemoval` and siblings
+- `DebugVisualizationMode.Sunlight` → `Skylight` (and `SunlightChunkBorder` → `SkylightChunkBorder`)
+- `LightingScenario.Sunlight*` benchmark scenarios → `Skylight*` (**note:** benchmark reports written before
+  this date print the old scenario names — they do not textually line up with post-rename runs)
+- Shaders: the `sunLight` varying (`LiquidCore.hlsl` → `UberLiquidShader`/`FluidPreviewShader`) → `skyLight`;
+  `sunLuminance` → `skyLuminance`; `SkyLightColor` → `SkylightColor` across the C# `PropertyToID` string and
+  all four declaring shaders
 
-**Not renamed:**
+**Deliberately not renamed:**
 
 - `LightQueueNode.OldLightLevel` — generic name, applies to both sky and block queues
 - `NeedsInitialLighting` — gates all lighting types, not just sky
-- `SkyLightColor` shader uniform — already correctly named
+- **The celestial `Sun*` family** — `SunDirection`, `SunAngularRadius`, `SunElevation`, `SunriseTickOffset`,
+  `SampleSunDisc`, `SkyboxShader`'s `_SunDirection`/`SUN_*`. These name the actual sun, not the light channel;
+  renaming them would make the code wrong and would break `Shader.SetGlobalVector` name binding.
+- **Legacy-format names in migration steps** — `SUNLIGHT_SHIFT`, `ERA_SUNLIGHT_SHIFT`, `isSunlight`,
+  `LEGACY_SUN_LEVEL`. These describe the on-disk layouts those steps migrate *from*.
 
 #### 3.8.2.3 VoxelState Light Property Removal
 
-`VoxelState` currently wraps a single `uint _packedData` and exposes `.Light`, `.Sunlight`, `.Blocklight` properties that read from the uint's light bits. Phase B **removes these properties entirely**.
+`VoxelState` currently wraps a single `uint _packedData` and exposes `.Light`, `.Skylight`, `.Blocklight` properties that read from the uint's light bits. Phase B **removes these properties entirely**.
 
 **Rationale:** Keeping light data separate from voxel identity (ID + meta) enables future optimizations:
 
@@ -1279,16 +1304,16 @@ The `ushort` light array's first channel has always represented "light from the 
 - Nullable `LightData[]` for fully-solid underground sections (no light present)
 - Independent lifecycle management of voxel and light arrays
 
-The 6 callers that previously read `state.Sunlight` / `state.Blocklight` will look up light from the section's `LightData[]` directly, or receive it as a separate parameter (for Burst job call sites).
+The 6 callers that previously read `state.Skylight` / `state.Blocklight` will look up light from the section's `LightData[]` directly, or receive it as a separate parameter (for Burst job call sites).
 
 #### 3.8.2.4 New uint Bit Layout
 
 ```
-Before (v6):  [ID: 16][Sun: 4][Block: 4][Meta: 8] = 32 bits (all used)
+Before (v6):  [ID: 16][Sky: 4][Block: 4][Meta: 8] = 32 bits (all used)
 After  (v7):  [ID: 16][Free: 8][Meta: 8] = 32 bits (8 bits freed)
 ```
 
-`PackVoxelData` will change from `(ushort id, byte sunLight, byte blockLight, byte meta)` to `(ushort id, byte meta)`. The freed bits 16-23 are zeroed and reserved for future use.
+`PackVoxelData` will change from `(ushort id, byte skylight, byte blocklight, byte meta)` to `(ushort id, byte meta)`. The freed bits 16-23 are zeroed and reserved for future use.
 
 #### 3.8.2.5 Section Flag Redesign (Chunk Format v7)
 
@@ -1366,9 +1391,9 @@ HeightMap, state flags, and light queues pass through unchanged.
 
 **Overlapping colored lights:** A cyan soul lantern `(2, 8, 15)` and a warm torch `(15, 10, 4)` both illuminate the same block. Per-channel max in the BFS produces `(15, 10, 15)` at that voxel. The shader applies the gamma curve to each channel independently, producing a bright warm-magenta blend. This is physically plausible for additive light mixing.
 
-**Blue moonlight:** At night, `SkyLightColor = (0.6, 0.7, 1.0)`. The shader multiplies sunlight luminance by this color — outdoor areas get a cool blue tint. Indoor areas lit by warm torches remain warm because blocklight is unaffected by the sky color. The transition at doorways naturally blends between blue outdoor light and warm indoor light through the smooth vertex averaging.
+**Blue moonlight:** At night, `SkylightColor = (0.6, 0.7, 1.0)`. The shader multiplies skylight luminance by this color — outdoor areas get a cool blue tint. Indoor areas lit by warm torches remain warm because blocklight is unaffected by the sky color. The transition at doorways naturally blends between blue outdoor light and warm indoor light through the smooth vertex averaging.
 
-**Blood moon event:** `SkyLightColor = (1.0, 0.2, 0.15)`. Everything outdoors takes on a deep red hue. The lighting engine supports this natively — `World.cs` just changes the `SkyLightColor` uniform, no re-lighting needed.
+**Blood moon event:** `SkylightColor = (1.0, 0.2, 0.15)`. Everything outdoors takes on a deep red hue. The lighting engine supports this natively — `World.cs` just changes the `SkylightColor` uniform, no re-lighting needed.
 
 ### 3.10 Emission Color Tuning Guide
 
@@ -1435,8 +1460,8 @@ The Block Editor includes a **Light Falloff** preview strip below the Emission R
 | **Phase 2c**    | Block emission color (BlockType + BlockTypeJobData + editor UI)          | Low — additive data fields, existing blocks default to white    | Remove color fields, fall back to scalar emission     |
 | **Phase 2d**    | Triple-channel blocklight BFS + per-channel darkness removal             | **High** — core lighting engine change                          | Feature flag to use scalar BFS                        |
 | **Phase 2e**    | Light queue serialization upgrade + AOT migration step                   | Medium — serialization format change                            | Revert migration, fall back to scalar queue format    |
-| **Phase 2f**    | Mesh job: `SampleCorner`/`BuildFlatLightData` encode `(sun, bR, bG, bB)` | Low — just reading new data from the `ushort` array             | Write Phase 1 encoding (sun, sun, sun, block)         |
-| **Phase 2g**    | Shaders: `SkyLightColor` uniform + `ApplyVoxelLightingRGB` update        | Low — shader-only, no BFS change                                | Set `SkyLightColor = white`, revert to Phase 1 call   |
+| **Phase 2f**    | Mesh job: `SampleCorner`/`BuildFlatLightData` encode `(sky, bR, bG, bB)` | Low — just reading new data from the `ushort` array             | Write Phase 1 encoding (sky, sky, sky, block)         |
+| **Phase 2g**    | Shaders: `SkylightColor` uniform + `ApplyVoxelLightingRGB` update        | Low — shader-only, no BFS change                                | Set `SkylightColor = white`, revert to Phase 1 call   |
 | **Post (done)** | Legacy `uint` light bits removed (Phase B, v10)                          | Completed — all readers migrated to `LightBitMapping`           | N/A                                                   |
 
 ### 4.2 Key Risks
@@ -1463,7 +1488,7 @@ The Block Editor includes a **Light Falloff** preview strip below the Emission R
 
 Establish baseline performance metrics using the existing `LightingJobBenchmark.cs` tool (after fixing broken scenarios):
 
-1. Profile `NeighborhoodLightingJob` duration across all existing scenarios (`SunlightVerticalFlat`, `SunlightComplexCaves`, `BlocklightSimple`, `BlocklightStressTest`, `SunlightRemovalCovered`, `BlocklightRemovalSingle`).
+1. Profile `NeighborhoodLightingJob` duration across all existing scenarios (`SkylightVerticalFlat`, `SkylightComplexCaves`, `BlocklightSimple`, `BlocklightStressTest`, `SkylightRemovalCovered`, `BlocklightRemovalSingle`).
 2. Profile `MeshGenerationJob` duration with smooth lighting enabled vs disabled.
 3. Record GPU frame time and vertex buffer memory usage.
 
@@ -1495,7 +1520,7 @@ After implementing the triple-channel blocklight BFS (Step 2d):
 - **3+ source overlap:** Place red, green, and blue sources around a single voxel. Verify the center receives near-white `(~15, ~15, ~15)` light. Remove one source and verify only that channel dims.
 - **Chunk boundary colored light:** Place a colored light source at a chunk boundary. Verify the color propagates correctly across the boundary via `LightModification` RGB fields. No color desync at chunk edges.
 - **Sky tinting:** Set time to night, verify blue moonlight tint outdoors. Enter a torch-lit room, verify warm indoor light is unaffected by sky color. Stand in a doorway, verify smooth gradient between blue outdoor and warm indoor.
-- **Blood moon event:** Override `SkyLightColor = (1.0, 0.2, 0.15)`. Verify all outdoor surfaces take on a deep red hue. Indoor torch-lit areas remain unaffected.
+- **Blood moon event:** Override `SkylightColor = (1.0, 0.2, 0.15)`. Verify all outdoor surfaces take on a deep red hue. Indoor torch-lit areas remain unaffected.
 - **Smooth lighting + RGB:** Verify that corner averaging works correctly with colored light. A smooth lighting gradient from a red torch should produce smooth red falloff, not banded color shifts.
 - **enableLighting = false:** Verify the engine functions correctly with lighting disabled. The `ushort` light array should be zeroed or max-filled as appropriate. No crashes from null/unallocated arrays.
 - **Save/load round-trip:** Place colored light sources, save the world, reload. Verify pending RGB light queue entries are correctly deserialized and the BFS completes propagation after load.
@@ -1516,39 +1541,39 @@ o.lightLevel = max(v.lightData.r, max(v.lightData.g, max(v.lightData.b, v.lightD
 
 This discards all color information. A red blocklight placed near water in a dark cave correctly tints the surrounding solid blocks red via `ApplyVoxelLightingRGB`, but the water surface remains its base deep/shallow blue — producing a stark visual contrast.
 
-The C# mesh pipeline already delivers full RGB light data to fluid vertices via `TEXCOORD1` as `half4(skyLight, blocklightR, blocklightG, blocklightB)`. The gap is entirely shader-side.
+The C# mesh pipeline already delivers full RGB light data to fluid vertices via `TEXCOORD1` as `half4(skylight, blocklightR, blocklightG, blocklightB)`. The gap is entirely shader-side.
 
 ### 5.2 Chosen Approach: Hybrid "Lit White" Multiplier (Phase 3)
 
-- **Status:** Implemented (see §3.6.3). `LiquidCore.hlsl` splits `lightData` into `sunLight` (TEXCOORD4) + `blockRGB` (TEXCOORD9); `UberLiquidShader.shader` and the editor `FluidPreviewShader.shader` apply the `litWhite` multiplier to water (`final_color *= litWhite`) and skip it for self-luminous lava. Water's depth blend and opacity (`water_base_color`) are driven by `sunLight` only.
+- **Status:** Implemented (see §3.6.3). `LiquidCore.hlsl` splits `lightData` into `skylight` (TEXCOORD4) + `blockRGB` (TEXCOORD9); `UberLiquidShader.shader` and the editor `FluidPreviewShader.shader` apply the `litWhite` multiplier to water (`final_color *= litWhite`) and skip it for self-luminous lava. Water's depth blend and opacity (`water_base_color`) are driven by `skylight` only.
 
 #### 5.2.1 Design
 
-Pass `sunLight` (float) and `blockRGB` (half3) separately through `LiquidV2F`, replacing the single `float lightLevel`. In the fragment shader, compute the procedural fluid color (water deep/shallow blend, lava noise, shore effects) as usual, then apply lighting as a single color multiplier derived from `ApplyVoxelLightingRGB`:
+Pass `skylight` (float) and `blockRGB` (half3) separately through `LiquidV2F`, replacing the single `float lightLevel`. In the fragment shader, compute the procedural fluid color (water deep/shallow blend, lava noise, shore effects) as usual, then apply lighting as a single color multiplier derived from `ApplyVoxelLightingRGB`:
 
 ```hlsl
 // Vertex shader (LiquidCore.hlsl)
-o.sunLight = v.lightData.r;
+o.skylight = v.lightData.r;
 o.blockRGB = v.lightData.gba;
 
 // Fragment shader (UberLiquidShader.shader)
-half3 litWhite = ApplyVoxelLightingRGB(half3(1,1,1), i.sunLight, i.blockRGB,
-                                        SkyLightColor, GlobalLightLevel,
+half3 litWhite = ApplyVoxelLightingRGB(half3(1,1,1), i.skylight, i.blockRGB,
+                                        SkylightColor, GlobalLightLevel,
                                         minGlobalLightLevel, maxGlobalLightLevel);
 final_color *= litWhite;
 ```
 
 The "lit white" trick asks: "what color would a white block be under this lighting?" and uses that as a post-multiply tint. This decouples the lighting from the procedural color pipeline entirely — any fluid type just computes its visual appearance, then multiplies by `litWhite` at the end.
 
-Water's deep/shallow blend (`lerp(_DeepColor, _ShallowColor, ...)`) switches from scalar `lightLevel` to `sunLight` only. This is correct: caves should show "deep blue" water based on absence of skylight, not based on a nearby red torch.
+Water's deep/shallow blend (`lerp(_DeepColor, _ShallowColor, ...)`) switches from scalar `lightLevel` to `skylight` only. This is correct: caves should show "deep blue" water based on absence of skylight, not based on a nearby red torch.
 
-**Known side effect — water opacity:** The `water_base_color.a` (used for blending over the refracted background) is also driven by `sunLight` only. Underground water near torches is always at `_DeepColor.a` (0.85, near-opaque) rather than being pushed toward `_ShallowColor.a` (0.75, more transparent) as it was under the old scalar path. The visual difference is ~10% opacity — subtle, but underground water will appear slightly more opaque near torches than before. This is an accepted trade-off: the alternative (using `max(sunLight, max(blockRGB))` for
+**Known side effect — water opacity:** The `water_base_color.a` (used for blending over the refracted background) is also driven by `skylight` only. Underground water near torches is always at `_DeepColor.a` (0.85, near-opaque) rather than being pushed toward `_ShallowColor.a` (0.75, more transparent) as it was under the old scalar path. The visual difference is ~10% opacity — subtle, but underground water will appear slightly more opaque near torches than before. This is an accepted trade-off: the alternative (using `max(skylight, max(blockRGB))` for
 alpha only) would re-introduce the problem where colored blocklight makes water *look* shallow without actually being shallow.
 
 #### 5.2.2 Advantages
 
 - **Correct per-channel shade curves.** Each blocklight channel goes through `VoxelLightToShadow` independently, matching the nonlinear gamma correction used by all other block shaders.
-- **Correct sun/block compositing.** The `max(sunContrib, blockContrib)` per-channel logic means a red torch doesn't tint water pink during the day — sunlight wins on the lit side, blocklight wins in shadow. Identical behavior to standard blocks.
+- **Correct sky/block compositing.** The `max(skyContrib, blockContrib)` per-channel logic means a red torch doesn't tint water pink during the day — skylight wins on the lit side, blocklight wins in shadow. Identical behavior to standard blocks.
 - **Reuses `ApplyVoxelLightingRGB` directly.** No new lighting logic to maintain. Any future changes to the lighting model (new shade curve, HDR, etc.) automatically apply to fluids.
 - **New fluid types get RGB lighting for free.** A future fluid just computes its procedural color and multiplies by `litWhite` — no per-fluid lighting integration work.
 - **Clean upgrade path to Full Decomposition** (§5.3) if needed later.
@@ -1566,7 +1591,7 @@ In practice, lava's pulse is a subtle oscillation (0.9–1.1 range), so the per-
 
 | Interpolator | Before                      | After                       |
 |--------------|-----------------------------|-----------------------------|
-| `TEXCOORD4`  | `float lightLevel` (scalar) | `float sunLight` (sky only) |
+| `TEXCOORD4`  | `float lightLevel` (scalar) | `float skylight` (sky only) |
 | `TEXCOORD9`  | —                           | `half3 blockRGB` (new)      |
 
 Total interpolator count increases from 9 (`TEXCOORD0–8`) to 10 (`TEXCOORD0–9`). Well within hardware limits.
@@ -1577,21 +1602,21 @@ If a future fluid type requires lighting to interact *within* the procedural col
 
 #### 5.3.1 Design
 
-Instead of computing `litWhite` and multiplying at the end, each fluid type manually wires `sunLight` and `blockRGB` into its own procedural color logic at the exact points where lighting should interact.
+Instead of computing `litWhite` and multiplying at the end, each fluid type manually wires `skylight` and `blockRGB` into its own procedural color logic at the exact points where lighting should interact.
 
 For water, this means splitting the lighting into two contributions applied at different stages:
 
 ```hlsl
 // 1. Sky-driven depth blend (unchanged from Hybrid)
-half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.sunLight);
+half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.skylight);
 
 // 2. Compute procedural surface color (waves, foam, shore effects)
 //    ... existing EvaluateWater logic ...
 
 // 3. Apply lighting per-channel THROUGH the procedural color
 half3 final_color = lerp(water_surface_color, _FoamColor.rgb, total_foam);
-final_color = ApplyVoxelLightingRGB(final_color, i.sunLight, i.blockRGB,
-                                     SkyLightColor, GlobalLightLevel,
+final_color = ApplyVoxelLightingRGB(final_color, i.skylight, i.blockRGB,
+                                     SkylightColor, GlobalLightLevel,
                                      minGlobalLightLevel, maxGlobalLightLevel);
 final_color *= i.shadowMultiplier;
 ```
@@ -1605,8 +1630,8 @@ For lava, the pulse modulation would move inside the lighting:
 lava_col *= pulse;
 
 // Apply lighting through the pulsed color
-lava_col = ApplyVoxelLightingRGB(lava_col, i.sunLight, i.blockRGB,
-                                  SkyLightColor, GlobalLightLevel,
+lava_col = ApplyVoxelLightingRGB(lava_col, i.skylight, i.blockRGB,
+                                  SkylightColor, GlobalLightLevel,
                                   minGlobalLightLevel, maxGlobalLightLevel);
 lava_col *= i.shadowMultiplier;
 ```
@@ -1615,7 +1640,7 @@ lava_col *= i.shadowMultiplier;
 
 The upgrade is incremental per fluid type:
 
-1. The V2F struct (`sunLight`, `blockRGB`) and vertex shader unpacking are **identical** — no changes needed.
+1. The V2F struct (`skylight`, `blockRGB`) and vertex shader unpacking are **identical** — no changes needed.
 2. Remove the `litWhite` post-multiply for the target fluid type.
 3. Insert `ApplyVoxelLightingRGB(proceduralColor, ...)` at the appropriate point in that fluid's fragment logic.
 4. Each fluid can be migrated independently — water can use Full Decomposition while lava stays on Hybrid.

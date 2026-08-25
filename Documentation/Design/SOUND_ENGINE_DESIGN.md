@@ -233,7 +233,7 @@ where all the real constraints live.
                         │  mixer · databases · pools    │
                         └──┬─────────┬────────┬─────────┘
      one-shot events ──────┘         │        └────── context snapshot (1/s)
-   (break/place/step)         emitter scan              (biome, skyLight, …)
+   (break/place/step)         emitter scan              (biome, skylight, …)
            │                  (0.5–1 s, Burst)                  │
    L1: pooled 3D            L2: pooled looping          L3: 2D ambience beds
    AudioSources             3D AudioSources                 + music scheduler
@@ -320,7 +320,7 @@ sampled ~1/s at the listener:
 public struct AudioContext
 {
     public byte BiomeIndex;      // §6.2 — dominant biome at the listener
-    public byte SkyLightAtHead;  // 0–15; low ⇒ underground
+    public byte SkylightAtHead;  // 0–15; low ⇒ underground
     public bool Submerged;       // head in fluid ⇒ underwater snapshot (§7)
     // Future inputs — reserved, not implemented:
     // public float TimeOfDay;   // RF-1
@@ -336,7 +336,7 @@ Design the struct now so RF-1/RF-7 *plug in* rather than bolt on; v1 populates b
   `AudioClip[] musicPool`) — ScriptableObjects are the natural home, mirroring how biomes already
   carry generation parameters. Crossfade beds over ~2–4 s on biome change (with a short
   hysteresis so border-strolling doesn't flap).
-- **Cave ambience:** `SkyLightAtHead == 0` (sustained for a few seconds) fades in a cave bed and
+- **Cave ambience:** `SkylightAtHead == 0` (sustained for a few seconds) fades in a cave bed and
   ducks the biome bed — the sky-light value is a free, already-correct "underground" signal.
 - **Music scheduler:** deliberately simple v1 — pick a random clip from the context's pool, play,
   then wait a randomized silence gap (e.g. 3–8 min); re-resolve the pool at each pick so biome

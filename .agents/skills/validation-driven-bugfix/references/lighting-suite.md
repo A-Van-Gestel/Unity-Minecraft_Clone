@@ -42,11 +42,11 @@ Each group file owns **its scenarios, its private constants/builders, AND its ow
   {
       static partial void AddBug12BaselineScenarios(List<Scenario> scenarios)
       {
-          scenarios.Add(new Scenario("B53: …", Baseline_CrossSeamSunlightLoopClearsOnSourceRemoval));
+          scenarios.Add(new Scenario("B53: …", Baseline_CrossSeamSkylightLoopClearsOnSourceRemoval));
           // … B50/B51/B52 …
       }
       private const int SEAM_LOOP_SLAB_MIN_Y = 58; // SCREAMING_CASE per CLAUDE.md
-      private static bool Baseline_CrossSeamSunlightLoopClearsOnSourceRemoval() { … }
+      private static bool Baseline_CrossSeamSkylightLoopClearsOnSourceRemoval() { … }
   }
   ```
 
@@ -92,7 +92,7 @@ world.RunWaveToConvergence(maxRounds);   // Begin-all → Complete-all per round
 var flight = world.BeginLightingJob(coord);   // snapshot inputs, drain queues
 /* ... mutate live state: edits, other jobs ... */
 world.CompleteLightingJob(flight);            // run + stale merge + mod application
-// Queries: GetBlockId, GetLightData, GetSkyLight, GetBlocklightRGB, SnapshotLightField
+// Queries: GetBlockId, GetLightData, GetSkylight, GetBlocklightRGB, SnapshotLightField
 ```
 
 ## Worked examples to copy from
@@ -108,7 +108,7 @@ world.CompleteLightingJob(flight);            // run + stale merge + mod applica
 
 ## Lighting-specific gotchas
 
-- **`0xFFFF` light values are legitimate** (sky 15 + RGB 15,15,15 — white lamp on a sunlit surface). Never reintroduce `ushort.MaxValue` sentinel checks on light reads; bounds-check via `GetPackedData`'s `uint.MaxValue` instead. (Fixed engine-wide June 2026.)
+- **`0xFFFF` light values are legitimate** (sky 15 + RGB 15,15,15 — white lamp on a skylit surface). Never reintroduce `ushort.MaxValue` sentinel checks on light reads; bounds-check via `GetPackedData`'s `uint.MaxValue` instead. (Fixed engine-wide June 2026.)
 - **Opaque sources propagate only their own emission** — never received surface light. Rule exists in BOTH `PropagateLightRGB` and the oracle's `SolveBlocklight`; keep them in sync.
 - **Out-of-grid neighbors must be zero-length arrays, not `default`** — Unity's job scheduler rejects unconstructed containers; the job treats `Length == 0` as void space.
 - **`LightQueueNode` is serialized in chunk save data** (`ChunkData.cs` ~384) — changing it is a save-format change requiring AOT migration. `LightModification` is job-output only and safe to extend (e.g. the `IsRemoval` flag).

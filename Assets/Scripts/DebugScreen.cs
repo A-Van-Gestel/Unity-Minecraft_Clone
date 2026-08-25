@@ -504,11 +504,11 @@ public class DebugScreen : MonoBehaviour
         _middleLeftBuilder.Append("Deserialize failures: ").Append(ChunkSerializer.DeserializeFailures).AppendLine();
         _middleLeftBuilder.Append("Load-arm faults (dev): ").Append(World.LoadArmFaults).AppendLine();
         _middleLeftBuilder.Append("Stuck loading (dev): ").Append(_world.StuckLoadingChunks).AppendLine();
-        _middleLeftBuilder.Append("Sunlight queue unflagged (dev) — now: ").Append(_world.SunlightQueueUnflagged)
-            .Append(" | total: ").Append(_world.SunlightQueueUnflaggedTotal).AppendLine();
-        _middleLeftBuilder.Append(" └ Non-violating — orphaned: ").Append(_world.SunlightQueueOrphaned)
-            .Append(" | unpopulated: ").Append(_world.SunlightQueueUnpopulated)
-            .Append(" (total: ").Append(_world.SunlightQueueUnpopulatedTotal).Append(')').AppendLine();
+        _middleLeftBuilder.Append("Skylight queue unflagged (dev) — now: ").Append(_world.SkylightQueueUnflagged)
+            .Append(" | total: ").Append(_world.SkylightQueueUnflaggedTotal).AppendLine();
+        _middleLeftBuilder.Append(" └ Non-violating — orphaned: ").Append(_world.SkylightQueueOrphaned)
+            .Append(" | unpopulated: ").Append(_world.SkylightQueueUnpopulated)
+            .Append(" (total: ").Append(_world.SkylightQueueUnpopulatedTotal).Append(')').AppendLine();
         _middleLeftBuilder.Append("Pool destroys — chunk: ").Append(_world.ChunkPool.DestroyedChunks)
             .Append(" | data: ").Append(_world.ChunkPool.DestroyedData)
             .Append(" | sect: ").Append(_world.ChunkPool.DestroyedSections).AppendLine();
@@ -676,15 +676,15 @@ public class DebugScreen : MonoBehaviour
             // Determine if the voxel is active and read light data from the section.
             Chunk targetChunk = _world.GetChunkFromVector3(voxelPos);
             bool isVoxelActive = false;
-            byte skyLight = 0;
-            byte blockLight = 0;
+            byte skylight = 0;
+            byte blocklight = 0;
             if (targetChunk != null)
             {
                 Vector3Int localPos = targetChunk.GetVoxelPositionInChunkFromGlobalVector3(voxelPos);
                 isVoxelActive = targetChunk.IsVoxelActive(localPos);
                 ushort lightData = targetChunk.ChunkData.GetLightData(localPos.x, localPos.y, localPos.z);
-                skyLight = LightBitMapping.GetSkyLight(lightData);
-                blockLight = LightBitMapping.GetMaxBlocklight(lightData);
+                skylight = LightBitMapping.GetSkylight(lightData);
+                blocklight = LightBitMapping.GetMaxBlocklight(lightData);
             }
 
             // --- Always-on Information ---
@@ -695,11 +695,11 @@ public class DebugScreen : MonoBehaviour
             // EXPOSURE, so under open sky it reads 15 at midnight too. "Eff" is what the time of day
             // leaves of it — the value gameplay and the shader both work from.
             int skyDarken = _world.CurrentSkyDarken;
-            int effectiveSky = Math.Max(0, skyLight - skyDarken);
-            builder.Append("Light (SkyExp/Block/Max): ").Append(skyLight).Append(" / ").Append(blockLight)
-                .Append(" / ").Append(Math.Max(skyLight, blockLight)).AppendLine();
+            int effectiveSky = Math.Max(0, skylight - skyDarken);
+            builder.Append("Light (SkyExp/Block/Max): ").Append(skylight).Append(" / ").Append(blocklight)
+                .Append(" / ").Append(Math.Max(skylight, blocklight)).AppendLine();
             builder.Append("Light Eff (Sky/Max): ").Append(effectiveSky).Append(" / ")
-                .Append(Math.Max(effectiveSky, blockLight))
+                .Append(Math.Max(effectiveSky, blocklight))
                 .Append("  (darken ").Append(skyDarken).Append(')').AppendLine();
             builder.Append("Meta: 0x").AppendHex2(state.Meta).AppendLine();
 
@@ -774,10 +774,10 @@ public class DebugScreen : MonoBehaviour
         {
             DebugVisualizationMode.None => "None",
             DebugVisualizationMode.ActiveVoxels => "ActiveVoxels",
-            DebugVisualizationMode.Sunlight => "Sunlight",
+            DebugVisualizationMode.Skylight => "Skylight",
             DebugVisualizationMode.Blocklight => "Blocklight",
             DebugVisualizationMode.FluidLevel => "FluidLevel",
-            DebugVisualizationMode.SunlightChunkBorder => "SunlightChunkBorder",
+            DebugVisualizationMode.SkylightChunkBorder => "SkylightChunkBorder",
             DebugVisualizationMode.CollisionBounds => "CollisionBounds",
             DebugVisualizationMode.SmoothLightingData => "SmoothLightingData",
             _ => "Unknown",

@@ -231,7 +231,7 @@ namespace Editor.WorldTools
         /// <summary>
         /// Rebuilds all per-column heightmaps from the current chunk maps.
         /// Must be called after structure expansion to ensure the lighting job
-        /// receives accurate highest-block data (prevents sunlight leaking through canopies).
+        /// receives accurate highest-block data (prevents skylight leaking through canopies).
         /// </summary>
         private void RecomputeHeightMaps()
         {
@@ -394,17 +394,17 @@ namespace Editor.WorldTools
                 bool hasLightMap = _chunkLightMaps.TryGetValue(targetOrigin, out NativeArray<ushort> targetLightMap);
                 if (hasLightMap) light = targetLightMap[flatIndex];
 
-                if (lightMod.Channel == LightChannel.Sun)
+                if (lightMod.Channel == LightChannel.Sky)
                 {
-                    byte currentSkyLight = hasLightMap ? LightBitMapping.GetSkyLight(light) : (byte)0;
+                    byte currentSkylight = hasLightMap ? LightBitMapping.GetSkylight(light) : (byte)0;
 
                     // Stale-snapshot guard: non-zero skylight mods may only INCREASE light.
                     // Zero mods (darkness removal) always apply.
-                    if (lightMod.LightLevel > 0 && lightMod.LightLevel < currentSkyLight)
+                    if (lightMod.LightLevel > 0 && lightMod.LightLevel < currentSkylight)
                         continue;
 
                     if (hasLightMap)
-                        targetLightMap[flatIndex] = LightBitMapping.SetSkyLight(light, lightMod.LightLevel);
+                        targetLightMap[flatIndex] = LightBitMapping.SetSkylight(light, lightMod.LightLevel);
                 }
                 else
                 {
@@ -418,7 +418,7 @@ namespace Editor.WorldTools
         }
 
         /// <summary>
-        /// Stamps sunlight=15 on every voxel in every stored chunk map.
+        /// Stamps skylight=15 on every voxel in every stored chunk map.
         /// Called when lighting is disabled to ensure the mesh job reads full
         /// brightness everywhere — matching the runtime snapshot stamp approach.
         /// </summary>
@@ -434,7 +434,7 @@ namespace Editor.WorldTools
                     _chunkLightMaps[kvp.Key] = lightMap;
                 }
 
-                LightingHelper.StampFullBrightSunlight(lightMap);
+                LightingHelper.StampFullBrightSkylight(lightMap);
             }
         }
 

@@ -2,7 +2,7 @@
 
 **Version:** 1.9  
 **Date:** 2026-08-25  
-**Status:** Partially implemented — **LP-1, LP-2 and LP-3 shipped 2026-08-23; LP-4, LP-5 and LP-6 shipped 2026-08-24** (each code complete + confirmed in a running editor — see their Amended lines). **LP-6's confirmatory Master IL2CPP run was executed 2026-08-25 and PASSED as a regression check** — no regression on any axis, and no win visible, exactly as predicted; LP-6 carries no open items. LP-7 remains proposed; **LP-8 was filed by LP-5** and is not started. §2 re-audited against HEAD on 2026-08-23, with two gate-census rows since made stale by LP-5 (see its Amended line) and F7's call-site anchors superseded by LP-6.  
+**Status:** Partially implemented — **LP-1, LP-2 and LP-3 shipped 2026-08-23; LP-4, LP-5 and LP-6 shipped 2026-08-24** (each code complete + confirmed in a running editor — see their Amended lines). **LP-6's confirmatory Master IL2CPP run was executed 2026-08-25 and PASSED as a regression check** — no regression on any axis, and no win visible, exactly as predicted; LP-6 carries no open items. **LP-7 shipped 2026-08-25** — refiled from 🟢 to 🔴 on execution, because the audit that opened it found the Sun→Sky rename it deferred to had never actually happened (see its Amended line); **LP-8 was filed by LP-5** and is not started. **7 of 8 phases are now done — LP-8 is the only one left.** §2 re-audited against HEAD on 2026-08-23, with two gate-census rows since made stale by LP-5 (see its Amended line) and F7's call-site anchors superseded by LP-6.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > Clean-up / refactor plan for the async lighting engine's orchestration layer — the `ChunkData`
@@ -20,14 +20,14 @@
 **Audited:** 2026-08-23, at commit `6b899481` (branch `feat/world-scaling`) — a **full re-audit** superseding the
 original 2026-07-06 pass at `4cb80e4`, which HEAD had left 631 commits behind. Findings are from static review of
 `Data/ChunkData.cs` (flag cluster L112–177, `Reset` L253–288, `ModifyVoxel` L555–590, loaded-data adoption L440–460,
-BFS enqueues L1348–1373, `RecalculateSunLightLight` L1431–1445), `World.cs` (Update scan arm L2495–2570, startup
+BFS enqueues L1348–1373, `RecalculateSkylight` L1431–1445), `World.cs` (Update scan arm L2495–2570, startup
 coroutine L1388–1486, gates L2850–3010, `UnloadChunks` L3419–3570, `LoadOrGenerateChunkInner` L1185–1290, CP-1 probe
 block L375–415, ~1 s fail-safe scan L2385–2410, load-arm fault path L1015–1032), `WorldJobManager.cs`
 (`ScheduleLightingUpdate` L781–935, completion driver L1592–1650, `MergeCompletedLightingJob` L1655–1830,
 `TriggerNeighborEdgeChecks` L2186–2213, generation completion L1200–1245),
 `Helpers/LightingScanDecision.cs`, `Helpers/LightingScheduleDecision.cs`,
 `Helpers/EdgeCheckCascadeDecision.cs`, `Helpers/JobCompletionPass.cs`, `Helpers/LightWorkScheduler.cs`,
-`Data/WorldData.cs` (`QueueSunlightRecalculation` L455–473), `Serialization/ChunkSerializer.cs` (L134–275),
+`Data/WorldData.cs` (`QueueSkylightRecalculation` L455–473), `Serialization/ChunkSerializer.cs` (L134–275),
 `Serialization/ChunkStorageManager.cs` (L810–815), and the editor harness (`LightingTestWorld.cs` gate analogs
 L420–480, `ChunkPipelineSimulator.cs`, `LightingFrameSimulator.cs` structure). Line numbers are anchors for the
 executor, not contracts — re-verify before editing.
@@ -74,9 +74,11 @@ still stand):
 
 ### Non-goals (v1)
 
-- **Sun→Sky naming unification** (`SunlightBfsQueue`, `AddToSunLightQueue`,
+- ~~**Sun→Sky naming unification** (`SunlightBfsQueue`, `AddToSunLightQueue`,
   `SunlightRecalculationQueue`, …) — owned by the existing **Phase B legacy-light-removal plan**
-  (see `project_phase_b_legacy_light_removal` / DATA_STRUCTURES notes). LP-7 fixes only the doubled-word typo `RecalculateSunLightLight`.
+  (see `project_phase_b_legacy_light_removal` / DATA_STRUCTURES notes).~~ **No longer a non-goal:**
+  LP-7 executed the whole Sun→Sky sweep on 2026-08-25, after finding that Phase B's own doc claimed the
+  rename as done when only its bit-accessor bullet had landed. See LP-7's Amended line.
 - **Re-extracting the scan arm, schedule guard, or completion pass** — done (HF-4 #1/#2, AS-2).
 - **Changing MT-2 scheduling semantics** (ready/waiting split, promotion events, `PromoteAll`
   fail-safe) — the split is intentional, guarded by its own suite, and out of scope. LP-4 only funnels the *callback firing* through one site with identical observable semantics.
@@ -98,13 +100,13 @@ All mutation is main-thread-only (chunk-pipeline rule); jobs read snapshots. "Ca
 | `IsPopulated`                 | plain bool, `[NonSerialized]`              | no (implied true by a chunk record existing)                                                                         |    no    | generation populate (`ChunkData.cs:346`); loaded-data adoption (`ChunkData.cs:460`); disk read (`ChunkSerializer.cs:269`)                                                                                                                                                                                                                                                          | `Reset()` (`ChunkData.cs:258`)                                                                                          |
 | `IsLoading`                   | plain bool, `[NonSerialized]`              | no                                                                                                                   |    no    | generation-request admission (`World.cs:3778`)                                                                                                                                                                                                                                                                                                             | **CP-3 load-arm fault** (`World.cs:1029`, guarded by `LifecycleEpoch` — see F9); stale-data recovery (`WJM:1088`); `Reset()` (`ChunkData.cs:259`) |
 | `NeedsInitialLighting`        | property + backing bool, `[NonSerialized]` | **YES — the only persisted flag** (`ChunkSerializer.cs:142` write, `:226` read; `Migration_v2_to_v3_RestoreLighting.cs:108` forces it true) |   yes    | generation completes (`WJM:1240`); disk read (`ChunkSerializer.cs:226`); loaded-data adoption (`ChunkData.cs:450`); **P-4 rec 3 unload-persist re-light** (`World.cs:3562`)                                                                                                                                                                                 | scan initial arm (`World.cs:2540`); `LoadOrGenerateChunkInner` (`World.cs:1268`); coroutine (`World.cs:1410`, disabled-arm `:1482`); `Reset()` (`ChunkData.cs:263`) |
-| `HasLightChangesToProcess`    | property + backing bool, `[NonSerialized]` | no — **re-derived on load** from non-empty persisted BFS queues (`ChunkSerializer.cs:266`)                           |   yes    | `AddToSunLightQueue`/`AddToBlockLightQueue` (`ChunkData.cs:1357`/`:1371`, **both `enableLighting`-gated**); `QueueSunlightRecalculation` (`WorldData.cs:471`); schedule-declined (`WJM:794`); edge arm pre-set (`World.cs:2535`, coroutine `:1426`); stable re-arm (`WJM:1816`); unstable (`WJM:1823`); merge fault (`WJM:1620`); neighbor edge trigger (`WJM:2210`); pending-column restore (`WJM:1228`, `World.cs:1210`); loaded-data adoption (`ChunkData.cs:449`) | `ScheduleLightingUpdate` success (`WJM:922`); disabled-lighting clears (`World.cs:1483`); `Reset()` (`ChunkData.cs:264`) |
+| `HasLightChangesToProcess`    | property + backing bool, `[NonSerialized]` | no — **re-derived on load** from non-empty persisted BFS queues (`ChunkSerializer.cs:266`)                           |   yes    | `AddToSkylightQueue`/`AddToBlocklightQueue` (`ChunkData.cs:1357`/`:1371`, **both `enableLighting`-gated**); `QueueSkylightRecalculation` (`WorldData.cs:471`); schedule-declined (`WJM:794`); edge arm pre-set (`World.cs:2535`, coroutine `:1426`); stable re-arm (`WJM:1816`); unstable (`WJM:1823`); merge fault (`WJM:1620`); neighbor edge trigger (`WJM:2210`); pending-column restore (`WJM:1228`, `World.cs:1210`); loaded-data adoption (`ChunkData.cs:449`) | `ScheduleLightingUpdate` success (`WJM:922`); disabled-lighting clears (`World.cs:1483`); `Reset()` (`ChunkData.cs:264`) |
 | `NeedsEdgeCheck`              | property + backing bool, `[NonSerialized]` | no — re-derived: disk-loaded stable chunks get it set (`World.cs:1282`)                                              |   yes    | stable re-arm, `SpendAndRearm` only (`WJM:1815`); `TriggerNeighborEdgeChecks` (`WJM:2209`); disk-load-stable (`World.cs:1282`)                                                                                                                                                                                                                              | `ScheduleLightingUpdate` success (`WJM:923`) — **two readers first**: `PerformEdgeCheck` (`WJM:916`) and LI-2's `DeriveBandHeight` (`WJM:868`); disabled clears (`World.cs:1484`); `Reset()` (`ChunkData.cs:266`) |
 | `IsAwaitingMainThreadProcess` | plain public bool, `[NonSerialized]`       | no                                                                                                                   |    no    | merge start (`MergeCompletedLightingJob`, `WJM:1668`)                                                                                                                                                                                                                                                                                                      | completion driver `ReleaseJob` finally (`WJM:1629`) — **same `ProcessLightingJobs` pass** (F1); `Reset()` (`ChunkData.cs:265`) |
 | `RemainingEdgeCheckRounds`    | plain int, `[NonSerialized]`, default 2    | no                                                                                                                   |    no    | re-grant to ≥1 on border-column opacity **or sky-obstruction** edit (`ChunkData.cs:568–581`, Bug 05 + _FIXED_BUGS Lighting #25)                                                                                                                                                                                                                             | decrement on any non-`None` cascade outcome (`WJM:1806`); `Reset()` → 2 (`ChunkData.cs:267`)                            |
 
 **Off-chunk state that co-encodes the machine** (an on-chunk representation can never be authoritative for these): `JobManager.GenerationJobs` / `LightingJobs` / `MeshJobs` membership (in-flight axes), `LightWorkScheduler` ready/waiting/staging membership,
-`worldData.SunlightRecalculationQueue` (per-chunk pending column sets — a fourth work store, F6; **drained inside
+`worldData.SkylightRecalculationQueue` (per-chunk pending column sets — a fourth work store, F6; **drained inside
 `ScheduleLightingUpdate` at `WJM:842–849`, before the flag clears at `:922`**), the managed BFS queues on
 `ChunkData`, `MeshBuildQueue` membership, `Chunk.IsActive`, and `LightingStateManager`'s persisted pending-column /
 pending-blocklight stores (the disk-side mirror the restore paths in row 3 drain from).
@@ -148,10 +150,10 @@ Three semi-independent axes, not one chain:
 |-----|-----------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------|
 | 1   | Generation completes (`WJM:1240`)                                                       | `I:=1`                                                                                                       |
 | 2   | Disk read: persisted flag / non-empty queues (`ChunkSerializer:226/266`)                | `I:=persisted`, queues>0 → `C:=1` *(background thread — the callback's thread-safe staging path)*            |
-| 3   | Disk-load-stable (`World:1282`) / pending columns (`World:1210`) / recovery (`WJM:1228`) | `E:=1` / `C:=1` / `C:=1`  *(the two restore paths write `SunlightRecalculationQueue` **directly**, bypassing `WorldData.QueueSunlightRecalculation` — F6)* |
+| 3   | Disk-load-stable (`World:1282`) / pending columns (`World:1210`) / recovery (`WJM:1228`) | `E:=1` / `C:=1` / `C:=1`  *(the two restore paths write `SkylightRecalculationQueue` **directly**, bypassing `WorldData.QueueSkylightRecalculation` — F6)* |
 | 3b  | **Loaded-data adoption** (`ChunkData:449–450`)                                           | `C \|= loaded.C`, `I \|= loaded.I` — the temp deserialization instance's flags are OR-ed into the live chunk  |
 | 4   | Voxel edit / cross-chunk apply / wake-up (`AddTo*Queue`, `ChunkData:1357/1371`)          | `C:=1` — **both enqueues are `enableLighting`-gated** (no flag when lighting is off)                          |
-| 4b  | Column recalc queued (`WorldData.QueueSunlightRecalculation:471`)                        | `C:=1` on the routed owner chunk, **if resident**; drives `RecalculateSunLightLight`'s 256-column fill        |
+| 4b  | Column recalc queued (`WorldData.QueueSkylightRecalculation:471`)                        | `C:=1` on the routed owner chunk, **if resident**; drives `RecalculateSkylight`'s 256-column fill        |
 | 5   | Border-column opacity **or sky-obstruction** edit (`ChunkData:568–581`, Bug 05)          | `R := max(R, 1)`                                                                                             |
 | 6   | Scan **initial** arm schedules (`World:2533–2541`)                                       | recalc fills queues (`C:=1` via #4b), schedule → `C:=0, E:=0(if set)`, then `I:=0`; `J:=1`                   |
 | 7   | Scan **edge** arm schedules (`World:2535`)                                               | `C:=1` (pre-set so the schedule guard passes), schedule reads `E→PerformEdgeCheck`, → `C:=0, E:=0`; `J:=1`   |
@@ -185,11 +187,11 @@ Scheduler-membership transitions ride these: any bit 0→1 fires the callback �
 | F3  | **Gate duplication ×3.** `AreNeighborsReadyAndLit` runs two identical loops (cardinals W:2853–2892, then diagonals W:2897–2913); the three production gates are three hand-rolled loops over the same neighbor facts; the harness hand-mirrors two of them (`LightingTestWorld.cs:426`/`:461`) — the fidelity-B2 remainder ("a bug in the readiness computation itself is out of scope"). Plus an orphaned stray docstring above `PromoteLightWorkNeighborhood` (W:2800–2806).                                                                                                                       |              LP-2               |
 | F4  | **`ScheduleLightingUpdate` silently reads + clears `NeedsEdgeCheck`** (`WJM:916`/`923`). This makes the §7 weak-gate fallback (edge check running under `AreNeighborsDataReady`) an *implicit* side effect of the regular arm — documented in the pipeline doc but invisible in any signature, and covered by **no dedicated baseline** today. **Widened since v1.0:** LI-2 added a *second*, equally silent reader in the same method — `LightingBandDecision.DeriveBandHeight` takes `chunkData.NeedsEdgeCheck` (`WJM:868`) to force a full-height band. The flag now steers two behaviors, and LP-5's contract statement must name both. |              LP-5               |
 | F5  | **`HasLightChangesToProcess` triple duty**: "managed queues have nodes", "reschedule me" (unstable/fault), and "satisfy the schedule guard" (edge-arm pre-set W:1647). The bit is fine; the *intent* is invisible at call sites.                                                                                                                                                                                                                                                                                                                                                                     |              LP-4               |
-| F6  | **`SunlightRecalculationQueue` is a fourth work store guarded by convention only.** Every current enqueuer also sets `C`, but nothing enforces "queued column ⇒ chunk flagged", and the fail-safe scan (`World.cs:2385–2396`) checks only the three flags — an unflagged entry would sleep until unload persists it. **Re-audited: the surface is now three paths, not one.** `WorldData.QueueSunlightRecalculation` (`:455`) sets `C` *itself* at `:471` — and only if the owner chunk is resident. The other two, both bulk restores of persisted columns, **write the dictionary directly and set `C` by hand adjacent**: `World.cs:1201–1210` (disk load) and `WJM:1218–1228` (generation-completion restore, additionally `enableLighting`-gated). Two hand-maintained pairings are exactly the raw material F6 describes. | LP-1 (probe), LP-4 (structural) |
+| F6  | **`SkylightRecalculationQueue` is a fourth work store guarded by convention only.** Every current enqueuer also sets `C`, but nothing enforces "queued column ⇒ chunk flagged", and the fail-safe scan (`World.cs:2385–2396`) checks only the three flags — an unflagged entry would sleep until unload persists it. **Re-audited: the surface is now three paths, not one.** `WorldData.QueueSkylightRecalculation` (`:455`) sets `C` *itself* at `:471` — and only if the owner chunk is resident. The other two, both bulk restores of persisted columns, **write the dictionary directly and set `C` by hand adjacent**: `World.cs:1201–1210` (disk load) and `WJM:1218–1228` (generation-completion restore, additionally `enableLighting`-gated). Two hand-maintained pairings are exactly the raw material F6 describes. | LP-1 (probe), LP-4 (structural) |
 | F7  | **Eager double-gate evaluation in the scan** (`World:2518–2519`): both `AreNeighborsDataReady` AND `AreNeighborsReadyAndLit` are computed for every ready chunk each visit (each 8 dictionary lookups + job-dict probes), though each arm needs only one. Small (O(ready) per frame, post-MT-2), but free to fix once gates are consolidated.                                                                                                                                                                                                                                                        |    LP-6 ✅ (anchors stale — six call sites at execution, not two)    |
-| F8  | **Naming:** `RecalculateSunLightLight()` (doubled word, `ChunkData.cs:1434`). The wider Sun/Sky split is Phase B's — out of scope here.                                                                                                                                                                                                                                                                                                                                                                                                                                                              |              LP-7               |
+| F8  | **Naming:** `RecalculateSunLightLight()` (doubled word). **Closed by LP-7**, which took the wider Sun→Sky sweep with it rather than leaving it to Phase B.                                                                                                                                                                                                                                                                                                                                                                                                                                                              |              LP-7               |
 | ~~F9~~ | ~~**`IsLoading` is never cleared** outside `Reset()`.~~ **STRUCK 2026-08-23 — no longer true.** CP-3 gave it two clear sites: the load-arm fault path (`World.cs:1029`, guarded by a `LifecycleEpoch` compare so a late fault cannot clear a *successor* load's flag) and stale-data recovery (`WJM:1088`). CP-1 also shipped a dev-only stuck-`IsLoading` detector (`World.cs:1039–1071`). Nothing remains for LP-4 to document here.                                                                                                                                                              |        — (closed by CP-3)       |
-| F10 | **Initial arm does work before the schedule can decline** (`World:2533–2537`): `RecalculateSunLightLight()` runs before `ScheduleLightingUpdate`; on a decline the queue-fill repeats next visit. Benign (idempotent), noted for the LP-5 executor; not worth its own change. Note the fill is now 256 `QueueSunlightRecalculation` calls, so the repeat also re-touches the F6 store.                                                                                                                                                                                                                |            — (noted)            |
+| F10 | **Initial arm does work before the schedule can decline** (`World:2533–2537`): `RecalculateSkylight()` runs before `ScheduleLightingUpdate`; on a decline the queue-fill repeats next visit. Benign (idempotent), noted for the LP-5 executor; not worth its own change. Note the fill is now 256 `QueueSkylightRecalculation` calls, so the repeat also re-touches the F6 store.                                                                                                                                                                                                                |            — (noted)            |
 | F11 | **New (2026-08-23): the P9-2 cascade decision is a fourth shared guard LP-4 must compose with.** `EdgeCheckCascadeDecision` already owns the stable-merge branch that census rows 10a–10c describe, and it is *pure* — the caller applies the effects (`WJM:1800–1818`). LP-4's transition API takes over exactly those effect applications, so the two must be designed together or the decision's three outcomes will be flattened back into two.                                                                                                                                                  |              LP-4               |
 
 ---
@@ -340,7 +342,7 @@ newly created `.cs` files need a Unity import before `dotnet build` sees them; t
 | **LP-4 — `LightingWork` byte + transition API**     | `ChunkData.cs`; call sites in `World.cs`, `WorldJobManager.cs`, `ChunkSerializer.cs`, `ChunkStorageManager.cs`; harness; new transition baselines |   🔴   | LP-2 (fewer sites); LP-3 preferred |
 | **LP-5 — Explicit scheduling contract + coroutine** ✅ **SHIPPED 2026-08-24** | `WorldJobManager.ScheduleLightingUpdate` contract; `Helpers/ScheduledEdgeCheckDecision.cs` (new); `World.cs` coroutine arms + termination test; harness split-clear retired (`ChunkData.ClearEdgeCheck`/`ClearLightWork` deleted); baseline **B120** |   🟡   | LP-4                               |
 | **LP-6 — Lazy strict-gate evaluation** ✅ **SHIPPED 2026-08-24** | `Helpers/INeighborGates.cs` (new); `LightingScanDecision.cs` lazy overload + generic core; four `World.cs` call sites; `LightingFrameSimulator.cs`, `ChunkPipelineSimulator.cs`, `LightingTestWorld.cs`; baselines **B121**/**B122** |   🟢   | LP-2                               |
-| **LP-7 — Naming & doc hygiene**                     | `RecalculateSunLightLight` rename; residual doc alignment                                                                                         |   🟢   | —                                  |
+| **LP-7 — Sun→Sky terminology sweep** ✅ **SHIPPED 2026-08-25** | ~480 identifiers across ~55 files: `NeighborhoodLightingJob.cs`, `World.cs`, `WorldJobManager.cs`, `ChunkData.cs`, `CrossChunkLightModApplier.cs`, the lighting/meshing harness + suites, `LightingJobBenchmark.cs`, 5 shader/HLSL files, and the Architecture/Design doc set |   🔴   | —                                  |
 | **LP-8 — Production-scheduler harness driver**      | New editor rig driving `WorldJobManager.ScheduleLightingUpdate` / `ProcessLightingJobs` against a live `World` + `WorldData`                      |   🔴   | LP-5 (filed by it)                 |
 
 **Minimal standalone-value set:** LP-1 + LP-2 (closes the fidelity B2 remainder and de-risks everything after). **Validation is built alongside, not after** — LP-4 and LP-5 each add baselines in the same commit as the code. **Number them from the suite's current tip, read at execution time** (2026-08-23: the lighting suite's registrations run past B114 and are spread across `Lighting/` and `Lighting/Baselines/`; v1.0's "B71+" is long overtaken).
@@ -361,7 +363,7 @@ needs. Extend that block.
 
 - **Scope:** editor/dev-only (`[Conditional("UNITY_EDITOR")]` + `[Conditional("DEVELOPMENT_BUILD")]`, HF-1/CP-1's dual pattern; zero IL2CPP cost). `World.cs` + `DebugScreen.cs` only — **no editor-assembly file changes**, so the editor `dotnet build` is a no-op confirmation this phase, not a real gate:
     1. Count observations of `IsAwaitingMainThreadProcess == true` **inside `AreNeighborsReadyAndLit`** (both loops, `W:2887`/`:2910`) and in `UnloadChunks` (`W:3465`). Instrumenting inside the gate rather than at its call sites covers all four readers — the `Update` scan, the coroutine's edge arm, and the coroutine's `HasPendingEdgeChecks` — for two call sites. One `Debug.LogWarning` on first hit naming the chunk + site, then counter-only. Prefer **instance** fields: `World` is re-instantiated per play session, so unlike CP-1's static `s_loadArmFaults` they need no `DomainReset` line. Expected: **zero, ever** (F1's claim).
-    2. In the ~1 s fail-safe scan (`World.cs:2385–2410`), assert per **key** of `worldData.SunlightRecalculationQueue` that the owning chunk has a work flag set (F6's claim: never fires). Iterate keys only — the `Dictionary` enumerator is a struct, so the walk stays allocation-free. Use the dictionary key directly as the owner coord; do **not** re-derive it from a column through `SunlightColumnRouting`, which would introduce a routing bug into the probe itself. A key whose chunk is **not resident** gets its own separate counter and no error — the unload drain at `World.cs:3539` legitimately produces that state, so treating it as a violation would be a false positive (decided 2026-08-23).
+    2. In the ~1 s fail-safe scan (`World.cs:2385–2410`), assert per **key** of `worldData.SkylightRecalculationQueue` that the owning chunk has a work flag set (F6's claim: never fires). Iterate keys only — the `Dictionary` enumerator is a struct, so the walk stays allocation-free. Use the dictionary key directly as the owner coord; do **not** re-derive it from a column through `SkylightColumnRouting`, which would introduce a routing bug into the probe itself. A key whose chunk is **not resident** gets its own separate counter and no error — the unload drain at `World.cs:3539` legitimately produces that state, so treating it as a violation would be a false positive (decided 2026-08-23).
 - **Positive control (required — silence alone proves nothing):** before the soak, temporarily force each probe to trip — set `IsAwaitingMainThreadProcess` outside the merge pass, and enqueue a column while suppressing the `C` write — and confirm each logs and increments. Revert **by hand-edit, never `git checkout --`** (the tree is normally dirty). Without this, a probe that is silent because it is dead is indistinguishable from a probe that is silent because the invariant holds.
 - **Acceptance:** universal gate + an in-game soak (streaming, edits, border edits, a save/reload) with both probes silent. Record the result here (Amended line) — LP-3 is **blocked** until probe 1 has a silent soak on record.
 - **Known limits of the evidence** (state these in the Amended line rather than overclaiming): neither probe is reachable from any validation suite — `LightingTestWorld` and NS-3's `ChunkPipelineSimulator` each keep their **own** gate analog and their own `IsAwaitingMainThreadProcess` model, so nothing in either suite flows through the instrumented production code. Probe 2 samples at ~1 Hz, so a violation that self-heals within a second is invisible. Both probes compile out of IL2CPP, so production is unobserved.
@@ -382,12 +384,12 @@ instance fields, deliberately, so a play session starts clean). The console conf
 `--- Startup complete ---` entries in the session, and was never cleared.
 
 - **Counters cover the post-reload segment only** (steps after the reload). At the end, with **841 chunks
-  resident and 35 live keys in `SunlightRecalculationQueue`**: probe 1 read `cardinal 0 / diagonal 0 / unload 0`;
+  resident and 35 live keys in `SkylightRecalculationQueue`**: probe 1 read `cardinal 0 / diagonal 0 / unload 0`;
   probe 2 read `violations 0` (gauge and total), `orphaned 0`, `unpopulated 0` (gauge and total). All 35 queued
   keys had a populated resident owner carrying a work flag — F6's pairing held on every key that segment walked.
   The pre-reload segment's counters were lost with its `World` and were never read.
 - **The first-hit warnings cover the whole soak, and they are what carries the verdict.** `_awaitProbeLogged` and
-  `_sunlightQueueProbeLogged` are per-instance, so each of the two `World` instances had its own unused warning
+  `_skylightQueueProbeLogged` are per-instance, so each of the two `World` instances had its own unused warning
   budget, and Unity's console retains entries across a scene reload within one play session. **No `[LP-1]`
   warning was emitted by either instance at any point**, so neither probe observed a violation across steps 1–5.
   **Console eviction was ruled out rather than assumed** — the buffer held 7262 entries whose *oldest* predates
@@ -434,7 +436,7 @@ soak results.
 justification for treating an ownerless queue key as non-violating was wrong. The unload drain does **not**
 produce that state — it removes the key (`World.cs:3673`, re-anchored from `:3539`) and releases the pooled set
 strictly before the only `worldData.RemoveChunk` (`:3731`). The real source is
-`WorldData.QueueSunlightRecalculation`, which writes the key unconditionally but sets the flag only when the
+`WorldData.QueueSkylightRecalculation`, which writes the key unconditionally but sets the flag only when the
 owner is resident, so a BFS spilling across a border into unloaded territory mints one by design. **The decision
 stands; only its reason was wrong.**
 
@@ -614,7 +616,7 @@ then a menu save/reload with a return to the region.
   guard fired *and* released), `lightPersisted=1` with matching `[LIGHTING RESCUE]` entries. That is the arm
   whose `isProcessingLight` this phase narrowed.
 - `faultedLightJobs=0`, `stuckLoading=0`, `loadArmFaults=0`; probe 2 reported **0 violations** across 76 live
-  sunlight-queue keys.
+  skylight-queue keys.
 - **The fail-safe promotions are benign, and the criterion was re-derived rather than inherited.** The ~1 s walk
   calls `AddReady` for every flagged populated chunk *before* `PromoteAll()` (`World.cs:2492–2518`), and
   `AddReady` removes from `_waiting` — so the log cannot report the parked frontier; it reports only entries
@@ -1224,11 +1226,62 @@ wrong 1 % of it. **Worth its own phase; nothing in this design doc covers it.** 
 future measurement there: because the pass is ceiling-saturated at speed, a real improvement shows up as
 **throughput** (served/s, quota utilization, fewer Ceiling stops), *not* as a drop in milliseconds.
 
-### LP-7 — Naming & doc hygiene (🟢)
+### LP-7 — Sun→Sky terminology sweep (🔴) ✅ SHIPPED 2026-08-25
 
-- **Scope:** `RecalculateSunLightLight()` → `RecalculateSunlight()` via the `refactor-safely`
-  skill (declaration `ChunkData.cs:1434`; callers `World.cs:1262`, `:1407`, `:2533` — three, all in `World.cs`; plus the harness docstring at `LightingTestWorld.Builder.cs:225`); verify no serialized name is touched (method — safe). Residual doc alignment (anything §2 of the pipeline doc still footnotes that LP-3/LP-4 made false). Explicitly does NOT start the Sun→Sky rename (Phase B).
-- **Gate:** universal gate. **Doc-sync:** pipeline/lighting docs mention the method by name in pseudocode — update in the same commit. **Serialization:** none.
+- **Scope as executed:** the whole Phase B §3.8.2.2 rename — ~480 identifiers across ~55 files — plus the
+  casing normalization to one word. The phase was filed as a 🟢 one-method rename; the audit that opened it
+  found the rename it was deferring to had never happened, and the user chose to finish it here.
+- **Gate:** universal gate + both build targets + a shader-compile check. **Serialization:** no chunk-format migration — `ChunkSerializer` writes queues positionally and
+  `DebugVisualizationMode` serializes as an `int`. **But one Unity-YAML field key did move:**
+  `[SerializeField] _skyLightOverDay` → `_skylightOverDay`. Handled by reserialize-and-diff rather than
+  `[FormerlySerializedAs]` — see the Amended line.
+
+**Amended:** 2026-08-25 — **LP-7 SHIPPED, at roughly forty times its filed size.**
+
+**What the phase was filed as, and what it actually was.** LP-7 was a 🟢 entry: rename one doubled-word method
+and tidy the docs. Its own scope line said the wider Sun→Sky split was "Phase B's — out of scope here", and
+`SMOOTH_AND_RGB_LIGHTING.md` §3.8.2 was stamped **"Status: Implemented (2026-06-07)"** with §3.8.2.1 item 2
+claiming the rename had been done *"across the codebase"*. Checking that claim against HEAD before repeating it
+— the doc-vs-code drift check — found it true for exactly **one** of its five bullets. `LightBitMapping` had
+been converted in June; `LightChannel.Sun`, `SunlightBfsQueue`, `RecalculateSunlightForColumn`,
+`DebugVisualizationMode.Sunlight` and every local variable had not. `GetSkyLight()` had been sitting beside
+`SunlightBfsQueue` for three months behind a doc that said otherwise.
+
+**The load-bearing lesson is about the doc, not the code.** A partially-executed rename that *stops* is
+invisible; a partially-executed rename whose doc is marked Implemented is worse than invisible, because the
+next reader (here, the user) correctly believes it is done and plans around that. §3.8.2.2 now records the two
+stages and their dates explicitly.
+
+**What made a ~55-file sweep safe.** Almost all of it is **compile-enforced**: a missed C# identifier is a build
+error, not a silent defect. The exceptions were enumerated up front and gated individually:
+1. **HLSL varyings** — `sunLight` is declared in `LiquidCore.hlsl` and consumed in `UberLiquidShader` and
+   `FluidPreviewShader`; a partial rename compiles in C# and breaks the water material at runtime. All three
+   moved in one edit; all 12 shaders then reported zero messages via `ShaderUtil`.
+2. **The `SkylightColor` global** — `Shader.PropertyToID("SkylightColor")` binds by *string* to `half3
+   SkylightColor` in four shaders. A miss here is not a compile error and not a suite failure; it silently
+   whites out the time-of-day tint. C# string and all four declarations were moved together and re-grepped.
+3. **Prose and celestial collisions** — the engine has two `Sun*` families. The celestial one (`SunDirection`,
+   `SunAngularRadius`, `SunriseTickOffset`, `SampleSunDisc`, `SkyboxShader`'s `SUN_*`) is **correctly** named and
+   was excluded by an explicit token map, as were the legacy-format names in the migration steps
+   (`SUNLIGHT_SHIFT`, `ERA_SUNLIGHT_SHIFT`, `isSunlight`) which describe the on-disk layouts they migrate *from*.
+   Raw counts overstated the job by ~a third for exactly this reason: the two highest-`sun` files in the repo
+   are the two Celestial suites, and neither was touched.
+
+**Result:** `Validate All` **576/576 across 25 suites PASSED**, including Sky & Celestial 15/15 and Sky Render
+11/11 — the suites over the code deliberately *not* swept, which is the useful half of that signal.
+
+**What the gate does and does not prove.** This is a pure rename, so a green suite run proves only that nothing
+else moved; it cannot witness the rename, because renaming is not behavior. What actually proves it is the
+compiler for C#, `ShaderUtil` for HLSL, and a textual re-grep for the one string-bound uniform. **Confirmed in game 2026-08-25:** the user set the skylight gradient to red and the world rendered red,
+exercising the whole value path (gradient → `EvaluateSkylightColor` → `WorldTimeManager.SkylightColor` →
+`SetGlobalColor("SkylightColor")` → four shader declarations). That test was necessary rather than
+belt-and-braces: the shipped gradient is **flat white at every hour**, and white is the identity under the
+shader's multiply, so ordinary play proves nothing about the value path — only about the name binding
+(a mismatch reads as an unset global, i.e. black terrain).
+
+**A note for whoever files the next 🟢 phase.** The estimate was not wrong about the method; it was wrong
+because it trusted a neighbouring doc's status stamp. Re-verify the claim you are deferring to, not just the
+work you are doing.
 
 ### LP-8 — Production-scheduler harness driver (🔴, filed 2026-08-24 by LP-5)
 
@@ -1264,6 +1317,11 @@ The general rule this surfaces: **extraction closes a gap only when the unwitnes
 
 ## Document History
 
+* **v2.0** - **LP-7 shipped**, at ~40× its filed size: the full Sun→Sky terminology sweep (~480 identifiers,
+  ~55 files, incl. 5 shader/HLSL files and the one string-bound shader uniform), plus the casing normalization
+  to one word. Triggered by the finding that `SMOOTH_AND_RGB_LIGHTING.md` §3.8.2 claimed a completed rename
+  that was 1-of-5 done; that section now records both stages. Also swept the residual LP-3/LP-4 write-form
+  drift out of the Architecture docs. `Validate All` 576/576 across 25 suites.
 * **v1.0** - Initial design (analysis + LP-1…LP-7 phased plan; flag/gate census at `4cb80e4`)
 * **v1.1** - Full §2 re-audit at `6b899481`, 631 commits after v1.0's census. F9 struck (CP-3 gave `IsLoading` two
   clear sites); F1 gained a fourth reader; F6's enqueue surface re-derived as three paths, two bypassing the
@@ -1277,7 +1335,7 @@ The general rule this surfaces: **extraction closes a gap only when the unwitnes
   post-soak injection that proves both probes were live, and six calibrated limits on that evidence. Two
   corrections to the packet's own text, both found while executing it: the ownerless-key decision was justified
   by the unload drain, which provably does not produce that state (the real source is
-  `WorldData.QueueSunlightRecalculation`'s unconditional key write — decision unchanged, reason replaced), and
+  `WorldData.QueueSkylightRecalculation`'s unconditional key write — decision unchanged, reason replaced), and
   LP-1's scope row named `WorldJobManager.cs`, which it never touched (actual: `World.cs`, `DebugScreen.cs`,
   `WorldFrameProfiler.cs`). Probe 2 gained a third classification — resident-but-unpopulated — after a review
   found it silently counted such owners as clean. **LP-3's hard precondition is now satisfied.**
@@ -1378,4 +1436,4 @@ The general rule this surfaces: **extraction closes a gap only when the unwitnes
 
 ---
 
-**Last Updated:** 2026-08-25 (**v1.9 — a code review of the LP-6 commits corrected the deferred fact-gathering figure by ~22× (≈ 0.5 % → ≈ 12 % of a gate call, still declined at ≈ 0.1 % of the pass), gave B122's anti-vacuity guard teeth and proved them, and restored a displaced docstring — no production defect. v1.8: LP-6's confirmatory Master IL2CPP run PASSED; LP-6 is fully closed**. A null result on every axis, as designed: no new errors, `Validate All` 576/576 across 25 suites, `LightSchedule` scattered ±1–8 % in both directions with identical FP verdicts in all ten phases, no new `AllDeclined`/`InFlightCap`. LP-6 itself shipped in v1.7 — the scan evaluates only the neighbor gate a chunk's arm can read, via a coordinate-parameterized `INeighborGates` implemented on `World` itself, with **B121**/**B122** guarding the two halves and a production counter diff confirming **−34.7 %** scan gate calls — see LP-6's Amended line) **Next Review:** LP-7 (a small naming/doc phase — but read LP-6's Amended line first, because it carries three findings that outlive it. **(1)** An equivalence baseline over two paths that share an implementation tests the *sharing*, not the implementation: B121 stayed green under an arm-rule mutation that B122 caught, and the plan predicting otherwise was wrong — the **fourth** consecutive phase whose prove-red prediction missed, so keep measuring rather than predicting. **(2)** The measurement floor is now quantified: two runs of the same route on identical code differ by ±1–5 % on `LightSchedule`, so **no benchmark in this repo can resolve a sub-1 % pass-level effect** — use deterministic counters for changes that size, and never re-read a scattered ±10 % single-sample column as a win. **(3)** The successor target LP-6 found and did **not** address: `LightSchedule` is 17–21 % of wall at speed in **editor Mono** — **9,6–15,5 % in Master IL2CPP**, per the 2026-08-25 confirmatory run — at ≈ 0.5 ms of main thread per scheduled lighting job, with gates under 1 % of it. It is saturated in both backends but against **different** limits: the editor hits the 8 ms `Ceiling` on ~95 % of working frames, while a shipping build is bound by the per-frame rate **`Quota`** at 77–96 % utilisation and essentially never reaches the ceiling. That deserves its own phase, aimed at the quota, and because the pass is saturated a win there will appear as **throughput**, not milliseconds. **LP-8** remains the only route to witnessing production's scheduler and merge)
+**Last Updated:** 2026-08-25 (**v2.0 — LP-7 SHIPPED, and it was not the 🟢 phase it was filed as.** The doc-vs-code check that opened it found `SMOOTH_AND_RGB_LIGHTING.md` §3.8.2 stamped *Implemented* over a rename that was **1-of-5 bullets done** — `LightBitMapping` converted in June 2026, while `LightChannel.Sun`, `SunlightBfsQueue`, `RecalculateSunlightForColumn`, `DebugVisualizationMode.Sunlight` and every local variable were not. On the user's call the phase finished the job: **~480 identifiers across ~55 files**, plus the casing normalization to one word (`GetSkyLight`→`GetSkylight`, `BlockLightQueue`→`BlocklightQueue`). `Validate All` **576/576 across 25 suites**, both build targets green, all 12 shaders clean. §3.8.2.2 now records both stages with dates) **Next Review:** LP-8 — the last open phase, and read LP-7's Amended line first for three things that outlive it. **(1)** The failure mode was a *doc*, not code: a rename that stops halfway is invisible, but a rename that stops halfway under a doc marked **Implemented** actively misleads — the user planned on it being done, because the documentation said so. Re-verify the claim you are deferring to, not only the work you are doing. **(2)** A wide rename is safe in proportion to how much of it the compiler checks. Here C# was compile-enforced and the risk concentrated in three places that are not: HLSL varyings (a partial rename breaks the water material at runtime, not at build), the **string-bound** `SkylightColor` uniform (`PropertyToID` ↔ four shader declarations — a miss silently whites out the time-of-day tint, failing no build and no suite), and prose. Gate those three individually or not at all. A fourth almost escaped: **Unity-YAML serialized field keys**. "No migration needed" was reasoned about the *chunk binary format* and missed that `[SerializeField] private Gradient _skyLightOverDay` is a key in an `.asset`; renaming it without `[FormerlySerializedAs]` silently reverts an authored gradient to its default. A sweep of HEAD's 900k lines of YAML found it was the **only** renamed token ever serialized, and its stored value happened to equal the default, so nothing was lost. **Audit serialized keys separately from any binary format** — they are a distinct surface, and "no chunk migration needed" says nothing about them. The project's standing remedy is `Voxel Engine → Force Reserialize All Assets` followed by a git-diff review, restoring any dropped value by copying the old YAML back; `[FormerlySerializedAs]` is deliberately **not** used for this — it was added here and removed on the user's call. **(3)** Raw grep counts overstated this job by about a third, because the engine has **two** `Sun*` families and the two highest-`sun` files in the repo (`SkyRenderValidationSuite`, `SkyValidationSuite`) are celestial and were correctly left alone. Classify tokens before counting them. Note also that a green universal gate here proves only that nothing *else* moved — renaming is not behavior, so no suite can witness it; **in-game visual confirmation of the sky tint and water rendering is still owed**)

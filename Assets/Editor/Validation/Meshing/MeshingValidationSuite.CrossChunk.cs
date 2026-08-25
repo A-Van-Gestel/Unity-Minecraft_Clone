@@ -515,7 +515,7 @@ namespace Editor.Validation.Meshing
         /// Each leg materializes all eight neighbor chunks as loaded-but-empty-and-dark, places one opaque
         /// cube at a position whose corner samples reach the direction under test, and meshes twice: a
         /// <b>control</b> run with every light map dark (asserting the probe is fully dark — this is what
-        /// catches an unmaterialized neighbor, whose missing-neighbor default is full sunlight and would make
+        /// catches an unmaterialized neighbor, whose missing-neighbor default is full skylight and would make
         /// the lit assertion pass for the wrong reason), then a run with <b>only</b> that one direction's map
         /// filled to full sky.
         /// </para>
@@ -597,7 +597,7 @@ namespace Editor.Validation.Meshing
         /// <summary>
         /// The positive control for a B40 leg: with every light map dark the probe must emit no light at all.
         /// A non-zero result means a neighbor chunk was not materialized — the job's missing-neighbor default
-        /// is full sunlight, which would let the lit assertion pass without any light map being read.
+        /// is full skylight, which would let the lit assertion pass without any light map being read.
         /// </summary>
         /// <param name="label">Assertion label for this leg.</param>
         /// <param name="cubeX">Chunk-local X of the probe cube.</param>
@@ -608,10 +608,10 @@ namespace Editor.Validation.Meshing
             using MeshingTestWorld world = BuildLightProbeWorld(cubeX, cubeZ);
             MeshDataJobOutput o = world.Run(SmoothLightingQuality.High);
             bool passed = MeshAssert.StructuralInvariants($"{label} control structural", o);
-            int maxSky = MaxSkyLight(o);
+            int maxSky = MaxSkylight(o);
             return passed & MeshAssert.IsTrue($"{label} control run emits no light", maxSky == 0,
                 $"brightest vertex sky = {maxSky}, expected 0 (non-zero means a neighbor chunk is missing, so " +
-                "the job's full-sunlight default — not a light map — would be brightening the probe)");
+                "the job's full-skylight default — not a light map — would be brightening the probe)");
         }
 
         /// <summary>Asserts the probe receives light once exactly one neighbor light map is brightened.</summary>
@@ -622,7 +622,7 @@ namespace Editor.Validation.Meshing
         {
             MeshDataJobOutput o = world.Run(SmoothLightingQuality.High);
             bool passed = MeshAssert.StructuralInvariants($"{label} lit structural", o);
-            int maxSky = MaxSkyLight(o);
+            int maxSky = MaxSkylight(o);
             return passed & MeshAssert.IsTrue($"{label} the lone bright neighbor lights this seam", maxSky > 0,
                 $"brightest vertex sky = {maxSky}, expected > 0 (0 means the bright map never reached the slot " +
                 "this probe samples — a permuted light slot)");
@@ -631,7 +631,7 @@ namespace Editor.Validation.Meshing
         /// <summary>Returns the brightest sky value across an output's per-vertex smooth-light stream.</summary>
         /// <param name="o">The mesh output to scan.</param>
         /// <returns>The maximum sky channel (the <c>r</c> component of the packed light data).</returns>
-        private static int MaxSkyLight(MeshDataJobOutput o)
+        private static int MaxSkylight(MeshDataJobOutput o)
         {
             int max = 0;
             for (int i = 0; i < o.LightData.Length; i++)

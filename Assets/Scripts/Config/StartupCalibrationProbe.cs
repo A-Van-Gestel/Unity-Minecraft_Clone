@@ -24,7 +24,7 @@ namespace Config
     /// throughput budgets from how fast this device actually drains the pipeline (OM-1).
     /// <para>The mesh leg goes through the shared <see cref="IsolatedJobProbe"/> (same job wiring as the
     /// meshing benchmark). The lighting leg is deliberately self-contained — it stands up a minimal flat
-    /// sunlit scenario itself rather than coupling to the lighting benchmark's scenario machinery (a
+    /// skylit scenario itself rather than coupling to the lighting benchmark's scenario machinery (a
     /// small, intentional duplication that keeps the lighting regression guard untouched).</para>
     /// <para>Each leg runs warmup iterations (absorbing first-run Burst compilation) then takes the
     /// median over several timed iterations on a deterministic pattern, so the result is stable.</para>
@@ -242,7 +242,7 @@ namespace Config
                     // Fresh per-iteration consumables — the job drains the recalc queue and writes the padded volumes.
                     NativeArray<uint> paddedVoxels = new NativeArray<uint>(ChunkMath.PADDED_LIGHTING_VOLUME, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                     NativeArray<ushort> paddedLight = new NativeArray<ushort>(ChunkMath.PADDED_LIGHTING_VOLUME, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                    NativeQueue<LightQueueNode> sunQueue = new NativeQueue<LightQueueNode>(Allocator.Persistent);
+                    NativeQueue<LightQueueNode> skyQueue = new NativeQueue<LightQueueNode>(Allocator.Persistent);
                     NativeQueue<LightQueueNode> blockQueue = new NativeQueue<LightQueueNode>(Allocator.Persistent);
                     NativeQueue<Vector2Int> recalcQueue = new NativeQueue<Vector2Int>(Allocator.Persistent);
                     NativeList<LightModification> mods = new NativeList<LightModification>(Allocator.Persistent);
@@ -260,9 +260,9 @@ namespace Config
                         BandHeight = ChunkMath.CHUNK_HEIGHT, // LI-2: the probe calibrates the full-height path
                         BandMinY = 0,
                         ChunkPosition = new Vector2Int(0, 0),
-                        SunlightBfsQueue = sunQueue,
+                        SkylightBfsQueue = skyQueue,
                         BlocklightBfsQueue = blockQueue,
-                        SunlightColumnRecalcQueue = recalcQueue,
+                        SkylightColumnRecalcQueue = recalcQueue,
                         Heightmap = heightmap,
                         BlockTypes = jobData.BlockTypesJobData,
                         CrossChunkLightMods = mods,
@@ -281,7 +281,7 @@ namespace Config
 
                     paddedVoxels.Dispose();
                     paddedLight.Dispose();
-                    sunQueue.Dispose();
+                    skyQueue.Dispose();
                     blockQueue.Dispose();
                     recalcQueue.Dispose();
                     mods.Dispose();

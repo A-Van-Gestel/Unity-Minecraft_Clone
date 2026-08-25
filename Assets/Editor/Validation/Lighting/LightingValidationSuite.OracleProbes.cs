@@ -7,9 +7,9 @@ namespace Editor.Validation.Lighting
     /// Oracle-independence probes (fidelity finding A4). The borderless <see cref="LightingOracle"/>
     /// is a hand-written spec that, by design, encodes the SAME rules as the engine — the column pass
     /// (15 above the heightmap, attenuate below), the Starlight attenuation
-    /// <c>max(0, src - max(1, opacity))</c>, and the byte-identical <c>isVerticalSunlight</c> condition
+    /// <c>max(0, src - max(1, opacity))</c>, and the byte-identical <c>isVerticalSkylight</c> condition
     /// (compare <c>LightingOracle.SolveSky</c> with <c>NeighborhoodLightingJob.PropagateLight</c> /
-    /// <c>RecalculateSunlightForColumn</c>). Where a rule is shared, a SHARED-WRONG assumption passes
+    /// <c>RecalculateSkylightForColumn</c>). Where a rule is shared, a SHARED-WRONG assumption passes
     /// <see cref="LightingAssert.MatchesOracle"/> silently — engine and oracle agree on the same defect.
     /// <para>
     /// These scenarios therefore assert <b>hardcoded</b> light levels derived from the lighting spec by
@@ -22,12 +22,12 @@ namespace Editor.Validation.Lighting
     public static partial class LightingValidationSuite
     {
         /// <summary>
-        /// B35 (A4 probe — vertical sunlight, air): an open column over a stone floor. Sunlight falls
+        /// B35 (A4 probe — vertical skylight, air): an open column over a stone floor. Skylight falls
         /// straight down through air with NO depth attenuation, so every air voxel from the floor to the
         /// sky cap reads a full 15. Pins the column pass's "15 above the heightmap" rule and the
         /// heightmap-at-the-floor result to a hand value, independent of the oracle.
         /// </summary>
-        private static bool Baseline_ProbeVerticalSunlightThroughAir()
+        private static bool Baseline_ProbeVerticalSkylightThroughAir()
         {
             using LightingTestWorld world = new LightingTestWorld(3);
             world.FillSuperflatFloor(10, TestBlockPalette.Stone);
@@ -35,13 +35,13 @@ namespace Editor.Validation.Lighting
             bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B35: initial lighting converges");
 
             // Hand-derived: floor top is y=10 (Stone, the only obstruction), so the whole air column
-            // above it is full-bright. Depth must not dim sunlight — y=11 and y=120 both read 15.
-            passed &= LightingAssert.IsTrue(world.GetSkyLight(new Vector3Int(24, 11, 24)) == 15,
+            // above it is full-bright. Depth must not dim skylight — y=11 and y=120 both read 15.
+            passed &= LightingAssert.IsTrue(world.GetSkylight(new Vector3Int(24, 11, 24)) == 15,
                 "B35: open-air column is full-bright just above the floor",
-                $"Expected sky=15 at y=11, got {world.GetSkyLight(new Vector3Int(24, 11, 24))} (vertical sunlight attenuating with depth?)");
-            passed &= LightingAssert.IsTrue(world.GetSkyLight(new Vector3Int(24, 120, 24)) == 15,
+                $"Expected sky=15 at y=11, got {world.GetSkylight(new Vector3Int(24, 11, 24))} (vertical skylight attenuating with depth?)");
+            passed &= LightingAssert.IsTrue(world.GetSkylight(new Vector3Int(24, 120, 24)) == 15,
                 "B35: open-air column is full-bright at altitude",
-                $"Expected sky=15 at y=120, got {world.GetSkyLight(new Vector3Int(24, 120, 24))}");
+                $"Expected sky=15 at y=120, got {world.GetSkylight(new Vector3Int(24, 120, 24))}");
             return passed;
         }
 
@@ -52,7 +52,7 @@ namespace Editor.Validation.Lighting
         /// solidity — the glass must neither lower the heightmap nor attenuate skylight: the floor stays
         /// full-bright through the glass. Pins that only opacity, not solidity, blocks light.
         /// </summary>
-        private static bool Baseline_ProbeVerticalSunlightThroughGlass()
+        private static bool Baseline_ProbeVerticalSkylightThroughGlass()
         {
             using LightingTestWorld world = new LightingTestWorld(3);
             world.FillSuperflatFloor(10, TestBlockPalette.Stone);
@@ -63,12 +63,12 @@ namespace Editor.Validation.Lighting
             world.RecalculateHeightmaps();
             bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B36: initial lighting converges");
 
-            passed &= LightingAssert.IsTrue(world.GetSkyLight(new Vector3Int(24, 11, 24)) == 15,
+            passed &= LightingAssert.IsTrue(world.GetSkylight(new Vector3Int(24, 11, 24)) == 15,
                 "B36: skylight reaches the floor through the glass column undimmed",
-                $"Expected sky=15 at the bottom of the glass column, got {world.GetSkyLight(new Vector3Int(24, 11, 24))} (solid glass wrongly attenuating?)");
-            passed &= LightingAssert.IsTrue(world.GetSkyLight(new Vector3Int(24, 30, 24)) == 15,
+                $"Expected sky=15 at the bottom of the glass column, got {world.GetSkylight(new Vector3Int(24, 11, 24))} (solid glass wrongly attenuating?)");
+            passed &= LightingAssert.IsTrue(world.GetSkylight(new Vector3Int(24, 30, 24)) == 15,
                 "B36: skylight is undimmed mid glass column",
-                $"Expected sky=15 mid glass column, got {world.GetSkyLight(new Vector3Int(24, 30, 24))}");
+                $"Expected sky=15 mid glass column, got {world.GetSkylight(new Vector3Int(24, 30, 24))}");
             return passed;
         }
 
@@ -97,15 +97,15 @@ namespace Editor.Validation.Lighting
 
             // Hand-derived chain: heightmap top = leaves at y=20. The cap reads 15, then attenuates by
             // the leaves' opacity (1) into y=19 = 14, and by 1 (air) per voxel below: 14,13,...,6 at y=11.
-            passed &= LightingAssert.IsTrue(world.GetSkyLight(new Vector3Int(24, 19, 24)) == 14,
+            passed &= LightingAssert.IsTrue(world.GetSkylight(new Vector3Int(24, 19, 24)) == 14,
                 "B37: one voxel below the leaves cap = 14",
-                $"Expected sky=14 at y=19, got {world.GetSkyLight(new Vector3Int(24, 19, 24))}");
-            passed &= LightingAssert.IsTrue(world.GetSkyLight(new Vector3Int(24, 15, 24)) == 10,
+                $"Expected sky=14 at y=19, got {world.GetSkylight(new Vector3Int(24, 19, 24))}");
+            passed &= LightingAssert.IsTrue(world.GetSkylight(new Vector3Int(24, 15, 24)) == 10,
                 "B37: five voxels below the leaves cap = 10",
-                $"Expected sky=10 at y=15, got {world.GetSkyLight(new Vector3Int(24, 15, 24))}");
-            passed &= LightingAssert.IsTrue(world.GetSkyLight(new Vector3Int(24, 11, 24)) == 6,
+                $"Expected sky=10 at y=15, got {world.GetSkylight(new Vector3Int(24, 15, 24))}");
+            passed &= LightingAssert.IsTrue(world.GetSkylight(new Vector3Int(24, 11, 24)) == 6,
                 "B37: floor of the sealed shaft = 6 (linear -1/voxel decay)",
-                $"Expected sky=6 at y=11, got {world.GetSkyLight(new Vector3Int(24, 11, 24))} (walls leaking, or wrong attenuation step?)");
+                $"Expected sky=6 at y=11, got {world.GetSkylight(new Vector3Int(24, 11, 24))} (walls leaking, or wrong attenuation step?)");
             return passed;
         }
 
@@ -215,18 +215,18 @@ namespace Editor.Validation.Lighting
                 //   y=19 = 15 − opacity(entering DimGlass = 5) = 10
                 //   y=18 = 10 − opacity(entering DimGlass = 5) =  5   ← two layers charged cumulatively (one layer → 10)
                 //   y=17 =  5 − opacity(entering air = 1)      =  4
-                passed &= LightingAssert.IsTrue(world.GetSkyLight(new Vector3Int(24, 20, 24)) == 15,
+                passed &= LightingAssert.IsTrue(world.GetSkylight(new Vector3Int(24, 20, 24)) == 15,
                     "B45A: DimGlass cap at the heightmap reads full sky",
-                    $"Expected sky=15 at the cap, got {world.GetSkyLight(new Vector3Int(24, 20, 24))}");
-                passed &= LightingAssert.IsTrue(world.GetSkyLight(new Vector3Int(24, 19, 24)) == 10,
+                    $"Expected sky=15 at the cap, got {world.GetSkylight(new Vector3Int(24, 20, 24))}");
+                passed &= LightingAssert.IsTrue(world.GetSkylight(new Vector3Int(24, 19, 24)) == 10,
                     "B45A: entering one DimGlass layer attenuates the column by 5",
-                    $"Expected sky=10 below the first charged layer, got {world.GetSkyLight(new Vector3Int(24, 19, 24))}");
-                passed &= LightingAssert.IsTrue(world.GetSkyLight(new Vector3Int(24, 18, 24)) == 5,
+                    $"Expected sky=10 below the first charged layer, got {world.GetSkylight(new Vector3Int(24, 19, 24))}");
+                passed &= LightingAssert.IsTrue(world.GetSkylight(new Vector3Int(24, 18, 24)) == 5,
                     "B45A: entering two DimGlass layers attenuates the column by 10 cumulatively",
-                    $"Expected sky=5 below the second charged layer, got {world.GetSkyLight(new Vector3Int(24, 18, 24))} (per-layer attenuation not composing?)");
-                passed &= LightingAssert.IsTrue(world.GetSkyLight(new Vector3Int(24, 17, 24)) == 4,
+                    $"Expected sky=5 below the second charged layer, got {world.GetSkylight(new Vector3Int(24, 18, 24))} (per-layer attenuation not composing?)");
+                passed &= LightingAssert.IsTrue(world.GetSkylight(new Vector3Int(24, 17, 24)) == 4,
                     "B45A: air below the cap resumes the -1/voxel step",
-                    $"Expected sky=4 one voxel below the foliage, got {world.GetSkyLight(new Vector3Int(24, 17, 24))}");
+                    $"Expected sky=4 one voxel below the foliage, got {world.GetSkylight(new Vector3Int(24, 17, 24))}");
             }
 
             // --- Part B: horizontal BLOCKLIGHT through two DimGlass panes (BFS attenuation), all channels ---

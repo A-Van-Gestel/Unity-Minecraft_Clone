@@ -281,13 +281,13 @@ namespace Editor.Validation.Lighting
         /// <summary>
         /// B112 (fidelity C14, family 6 — the mirror of B33): pool recycle through the real
         /// <c>ChunkData.Reset()</c> over a field that carries three distinct blocklight channels. B33's
-        /// world is sunlight-only, so it has no channels to leave stale; this mirror adds
+        /// world is skylight-only, so it has no channels to leave stale; this mirror adds
         /// <see cref="TestBlockPalette.LampMixed"/> sources to the same 5x5 slab-and-sky-well geometry,
         /// so a single channel array left dirty by a recycle is observable. Stale-after-recycle is a
         /// documented recurring family (finding B4), which is why it earns a colored twin.
         /// <para>
         /// Prove-red (demonstrated 2026-08-19): transposing the mod payload <c>modG</c>/<c>modB</c> in
-        /// <c>ComputeBlocklight</c> reds this baseline while white B33 stays green — B33 is sunlight-only, so
+        /// <c>ComputeBlocklight</c> reds this baseline while white B33 stays green — B33 is skylight-only, so
         /// it has no blocklight channels to disagree about.
         /// </para>
         /// </summary>
