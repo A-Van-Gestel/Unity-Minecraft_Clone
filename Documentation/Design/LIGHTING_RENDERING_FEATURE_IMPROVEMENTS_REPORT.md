@@ -1,7 +1,7 @@
 # Lighting & Rendering Feature Improvements Report
 
-**Version:** 2.4  
-**Date:** 2026-08-15  
+**Version:** 2.5  
+**Date:** 2026-08-25  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified. Owns lighting
 and rendering *features* (`RF-*`); the *performance* counterparts (`LI-*`, `GS-*`) live in
 [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md), and the combined ranked
@@ -17,6 +17,8 @@ roadmap lives at the end of the sibling worldgen report.
 > Status: **Open backlog.** Items are removed (archived) when implemented and verified.
 
 **Audited:** 2026-07-02, at commit `a458173` (branch `main`).  
+**Amended:** 2026-08-25 — **RF-10 filed**: the skylight tint gradient ships flat white, so RF-1's
+tinting mechanism is built, shipped and confirmed working but never authored. Content only, no code.  
 **Amended:** 2026-07-03 — second gap sweep added RF-7 (weather), alongside TF-10..TF-14 in the
 sibling worldgen report.  
 **Amended:** 2026-07-03 — RF-1 extended with the effective-light query layer + subtractive shader
@@ -103,6 +105,7 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 | RF-7 | Weather: no rain/snow of any kind; precipitation type gated on TF-3's temperature axis    |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 | RF-8 | Animated block textures: every non-fluid tile is static — flipbook via atlas blitting     |   🟡   |  🟢  |   🟡    |  ✅   |  ✅   |
 | RF-9 | Vertex AO crushes to black at night — occlusion is baked in before the sky darkening       |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+| RF-10 | The skylight tint gradient ships flat white — RF-1's tinting mechanism is built but unauthored |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 
 ---
 
@@ -840,6 +843,68 @@ here touches the light engine, storage, or save format.
 **Risks.** 🟡 — vertex-format edits are regression-prone without the meshing suite baselines, and the
 change alters every rendered surface's night appearance. Seed ✅ / Save ✅.
 
+
+### RF-10 — The skylight tint gradient ships flat white (RF-1's mechanism is unauthored)
+
+**Classification:** Content gap, not a code defect — surfaced 2026-08-25 while verifying LP-7's
+Sun→Sky sweep. Every piece of the tinting path is built, shipped, and now *confirmed working*; the
+gradient it reads has simply never been authored.
+
+**What exists today (verified in code and in the asset).**
+
+- `DefaultTimeOfDaySettings.asset` is the only `TimeOfDaySettings` in the project, and its skylight
+  gradient evaluates to **pure white `(1.00, 1.00, 1.00)` at all nine sampled day fractions**
+  (0.00 → 1.00). It carries two colour keys, both `r:1 g:1 b:1`.
+- `BuildDefaultSkylightGradient()` (`TimeOfDaySettings.cs`) is white→white by construction. The asset
+  never overrode it, so the shipped content *is* the placeholder default.
+- The transport around it runs every frame: `World.SetGlobalLightValue()` (`World.cs:2163-2164`) reads
+  `TimeManager.SkylightColor` and pushes it as the `SkylightColor` shader global, which
+  `StandardBlockShader`, `TransparentBlockShader`, `UberLiquidShader` and `CloudShader` all consume.
+- **White is the identity** under the shader's multiply. The feature is therefore fully wired and
+  completely invisible.
+
+**Confirmed working (2026-08-25, in game).** The skylight gradient was set to red and the world
+rendered red, exercising gradient → `EvaluateSkylightColor` → `WorldTimeManager.SkylightColor` →
+`SetGlobalColor("SkylightColor")` → the four shader declarations. **This item costs no code.** It is
+an asset-authoring task in the Sky Editor.
+
+**Why it sat unnoticed for three months.** RF-1 Phase 1 shipped this deliberately — its
+"deliberately not shipped" note records that "the tint gradient ships flat white … so Phase 1's only
+visual delta is brightness". The deferral was written down but never given a backlog ID, so it never
+entered the master summary table and dropped out of view. The generalizable half is worth keeping:
+**an identity value is indistinguishable from a broken path during ordinary play.** Nothing short of a
+deliberate non-identity test tells you whether a multiply-by-white pipeline works or is dead, which is
+exactly why the red-gradient check above was necessary rather than belt-and-braces.
+
+**What to author.** RF-1 §3 already carries the full authoring spec — do not re-derive it. In brief:
+blue-shifted Purkinje-style night keys (≈ `RGB(0.65, 0.75, 1.0)`), warm sunrise near 0.25, white noon
+at 0.5, red-orange dusk near 0.75. The rule that matters most is §3's: **hold B at 1.0 and reduce only
+R/G** on the night keys — scaling all three channels down double-dips with §2's brightness curve and
+pushes the moonlight floor below readable. Torches stay warm and caves stay neutral for free, because
+the tint multiplies only the sky contribution before the per-channel `max()` in `ApplyVoxelLightingRGB`.
+
+**Options.**
+
+| Option | Note |
+|---|---|
+| Author the skylight gradient alone | The minimum that delivers moonlit nights. Self-contained, reversible, no code |
+| Author the background/fog gradient in the same blue family | RF-1 §3's "RF-2 coordination" bullet — without it the horizon clashes with the newly-tinted terrain. Recommended as the same sitting |
+| Leave flat white | Honest only if the intent is a deliberately colourless night. Should then be recorded as a decision, because it currently reads as an oversight |
+
+**Dependencies / ordering.** RF-1 (shipped) supplies the mechanism and the spec; RF-2 (shipped)
+supplies the horizon colours to coordinate against. **Distinct from RF-1 §4's `SkyEvent` blood-moon
+tint**, which is a genuine *code* gap (the lerp seam is left open, no gameplay system produces events)
+— RF-10 is content only and does not unblock or depend on it. Interacts with RF-9 only in that the tint
+applies after §10's subtractive shade, so it recolours without re-darkening.
+
+**Risks.** 🟢 — no code, no pipeline invariants, no seed or save impact (the gradient lives on a
+ScriptableObject asset, not in the save; `worldState.timeOfDay` is unaffected). The visual reach is
+wide — every sky-lit surface at night — so judge it from an in-game capture at several day fractions
+rather than from the gradient swatch. Seed ✅ / Save ✅.
+
+Note the field key moved in LP-7's sweep: `_skyLightOverDay` → `_skylightOverDay`. The asset was
+reserialized and its values verified intact, so authoring proceeds normally.
+
 ---
 
 ## Roadmap
@@ -852,11 +917,21 @@ RF-2 (#5 — **§1–§5 shipped 2026-08-11**; the §6 remainder is unranked pol
 RF-7 (#17), RF-4 (#18), RF-3 (#19), RF-6 (#20), RF-5 (#21),
 RF-8 (#22 — added 2026-07-20), RF-9 (unranked — added 2026-08-10; schedule **with RF-3**, whose
 vertex-channel allocation it shares, rather than on its own merit).
+RF-10 (unranked — added 2026-08-25; pure asset authoring with no code, so it does not compete for
+engineering time and can land whenever someone opens the Sky Editor).
 
 ---
 
 ## Document History
 
+* **v2.5** - **RF-10 filed** (2026-08-25). LP-7's Sun→Sky sweep needed the `SkylightColor` shader
+  binding proven end-to-end, and proving it exposed that the gradient behind it is **flat white at every
+  hour** — `DefaultTimeOfDaySettings.asset` still carries `BuildDefaultSkylightGradient()`'s white→white
+  placeholder. Since white is the identity under the shader's multiply, RF-1's tint has been shipping as a
+  no-op since Phase 1. RF-1's Phase-1 notes *do* record the deferral, but it never got a backlog ID and so
+  never reached the summary table; this entry gives it one. **No scope change to any existing item, and no
+  code work — RF-10 is asset authoring against RF-1 §3's existing spec.** Confirmed the path itself is
+  sound by setting the gradient red in game and observing a red world.
 * **v2.4** - **`RF-*` status sweep + one correction** (2026-08-15, no scope change). RF-1's detail banner
   and summary row still read "Phase 2 awaiting one in-game confirmation", contradicting **this document's
   own** v1.3 entry and RF-9 §, both of which record that confirmation on 2026-08-10 — both now say
