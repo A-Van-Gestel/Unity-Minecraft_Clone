@@ -1,7 +1,7 @@
 # Chunk Lifecycle Pipeline: Generation → Lighting → Meshing
 
 **Status:** Living Document  
-**Last Updated:** 2026-08-23 (§6 gains the `SunlightRecalculationQueue` work-store reference)  
+**Last Updated:** 2026-08-25 (§4's gate note records LP-6's lazy evaluation — the scan reads only the gate a chunk's arm can reach)  
 **Purpose:** Comprehensive reference for how a chunk transitions from empty placeholder to rendered mesh, with all state flags, readiness gates, and inter-system dependencies fully mapped.
 
 ---

@@ -1,6 +1,6 @@
 # Lighting Pipeline State & Gate Refactor (LP-*)
 
-**Version:** 1.8  
+**Version:** 1.9  
 **Date:** 2026-08-25  
 **Status:** Partially implemented — **LP-1, LP-2 and LP-3 shipped 2026-08-23; LP-4, LP-5 and LP-6 shipped 2026-08-24** (each code complete + confirmed in a running editor — see their Amended lines). **LP-6's confirmatory Master IL2CPP run was executed 2026-08-25 and PASSED as a regression check** — no regression on any axis, and no win visible, exactly as predicted; LP-6 carries no open items. LP-7 remains proposed; **LP-8 was filed by LP-5** and is not started. §2 re-audited against HEAD on 2026-08-23, with two gate-census rows since made stale by LP-5 (see its Amended line) and F7's call-site anchors superseded by LP-6.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
@@ -1034,8 +1034,12 @@ route was already retired, so the phase measured **work removed** instead and pr
 - *Per-call cost, measured in situ* on a settled 729-chunk world over 437,400 real gate calls:
   **753.7 ns/call** at 6.81 neighbors examined = **110.7 ns per neighbor**. An editor micro A/B over
   `ChunkPipelineFixture` (`Editor/Benchmarking/LightingGateWalkBenchmark.cs`) gives the same shape and shows
-  the cost is **flat in chunk-map size** (289 → 2401 resident chunks): it is per-neighbor fixed cost, not
-  dictionary scaling. Only ~12 ns of the ~78 ns/neighbor there is dictionary probing.
+  the cost is **flat in chunk-map size** (619 → 629 → 626 ns/call across 289 → 2401 resident chunks,
+  re-confirmed 2026-08-25): it is per-neighbor fixed cost, not dictionary scaling. *(An earlier claim here —
+  "only ~12 ns of the ~78 ns/neighbor is dictionary probing" — was withdrawn 2026-08-25: it came from a probe
+  that timed an **empty** dictionary. The `LightingJobs` probe **alone** costs ~13 ns of that ~78 ns/neighbor
+  once the dictionary holds production's in-flight cap; the other two probes per neighbor were never
+  measured separately, so no split is claimed.)*
 - *Therefore*: ≈ **165 ms saved over a 479-second route** — **0.034 % of wall**, **0.29 % of the
   `LightSchedule` pass**, ≈ **0.024 ms/frame** in the heaviest streaming phase.
 
@@ -1078,8 +1082,9 @@ pre-classifier at each call site) would have re-created one.
   effectively identical code differed by **±1–5 %** per phase on `LightSchedule` (e.g. Gen 20 m/s
   0.403 → 0.425 ms/frame; Load 200 m/s 7.979 → 8.307). The effect is 0.29 % of that pass — **5× to 17×
   below the harness's own noise floor**. The counter diff is the only instrument that can see it.
-- **The 0.5 %-of-a-gate-call figure for the deferred fact-gathering item** (below) is likewise a modelled
-  ratio, not a frame measurement.
+- **The fact-gathering item's figure (below) was wrong by ~22× and is corrected in place** — it is now
+  **~12 % of a gate call**, still a modelled ratio rather than a frame measurement. See that paragraph for
+  the two independent errors, found by code review 2026-08-25.
 - The counters are `#if DEVELOPMENT_BUILD || UNITY_EDITOR`, so a **Master** build reports none of this.
 
 **The last step — a confirmatory Master IL2CPP run — RAN 2026-08-25 and PASSED. LP-6 has no open items.**
@@ -1189,12 +1194,26 @@ the retention is stated at the declaration in `World.cs` so a later reader does 
 leftovers. LP-3 deleting LP-1's probes is the precedent for how this ends. Note the editor benchmark
 (`LightingGateWalkBenchmark.cs`) reads them and must be retired or reworked in the same pass.
 
-**Deferred, with a number attached (do not re-open as an open question).** LP-2's eager *fact gathering* —
-`GatherNeighborFacts` probes `LightingJobs` for every gate, though only `ReadyAndLit` reads it — was
-measured rather than fixed here, per this packet's "owns measuring it". The wasted probe is **~4.1 ns of a
-~754 ns gate call, ≈ 0.5 %**. It is **not worth a session**; it was deliberately kept out of scope because
-fixing it widens the blast radius to the meshing scheduler (`AreNeighborsMeshReady` → `ScheduleMeshing`) and
-its 57 baselines for half a percent. Filed as measured-and-declined, not as an open question.
+**Deferred, with a number attached — the number was wrong and is restated below (still declined).** LP-2's
+eager *fact gathering* — `GatherNeighborFacts` probes `LightingJobs` **once per neighbor** for every gate,
+though only `ReadyAndLit` reads it — was measured rather than fixed here, per this packet's "owns measuring
+it".
+
+*The original figure (~4.1 ns of a ~754 ns gate call, ≈ 0.5 %) was wrong by ~22×*, from **two independent
+errors** found by code review on 2026-08-25: the probe was timed against an **empty** `Dictionary<,>` (no
+buckets ⇒ `ContainsKey` returns on a null check without hashing — 4.1 ns instead of the **13.2 ns** measured
+once it holds production's 64-job in-flight cap), and the ratio divided a **per-probe** numerator by a
+**per-call** denominator, though the probe runs once per examined neighbor.
+
+*Corrected*: **13.2 ns × 6.81 neighbors ≈ 90 ns of a 753.7 ns gate call ≈ 12 %** — of the two gates that
+never read the fact (`DataReady`, and `MeshReady` in the meshing scheduler).
+
+**It is still declined, and the corrected number is what makes that defensible rather than lucky.** Scan
+gate calls are ≈ **0.84 %** of the `LightSchedule` pass (LP-6 removed 34.7 % of them for 0.29 %), so ~12 % of
+them is ≈ **0.1 % of the pass** — below this repo's demonstrated ±1–5 % noise floor, and smaller than LP-6's
+own shipped win. Fixing it still widens the blast radius to the meshing scheduler
+(`AreNeighborsMeshReady` → `ScheduleMeshing`) and its 57 baselines. Filed as measured-and-declined, not as an
+open question — but on a pass-level denominator now, not on the retracted 0.5 %.
 
 **The successor target this phase actually found.** `LightSchedule` is **17–21 % of wall time at 100+ m/s**
 and is `Ceiling`-bound on **~95 % of working frames** (Gen 100 m/s: 644 Ceiling stops vs 7 OutOfWork). Across
@@ -1340,7 +1359,23 @@ The general rule this surfaces: **extraction closes a gap only when the unwitnes
   number; in Master it is **9,6–15,5 % of wall and quota-bound** — same conclusion, different saturation to
   relieve. The reference run is 183 commits back, so it bounds the whole LP-1…LP-6 arc rather than LP-6
   alone; nothing available could isolate a 0,29 %-of-pass effect anyway.
+* **v1.9** - **Code review of the LP-6 commits corrected three claims; no production defect was found.** The
+  review traced all six migrated call sites and confirmed the lazy path behavior-preserving. What it did find
+  was measurement and test-vacuity debt. **(1)** `LightingGateWalkBenchmark`'s isolated probe timed an
+  **empty** `Dictionary<,>`, which returns without hashing — so the deferred fact-gathering item's
+  "~4.1 ns ≈ 0.5 % of a gate call" was wrong by **~22×** (two independent errors: the empty dictionary, and a
+  per-probe numerator over a per-call denominator). Re-measured against production's 64-job in-flight cap:
+  **13.2 ns/probe ⇒ ≈ 12 % of a gate call**. The item **stays declined**, now on the defensible denominator —
+  ≈ **0.1 % of the `LightSchedule` pass**. The "~12 ns of ~78 ns/neighbor is dictionary probing" split was
+  **withdrawn** for the same reason; "flat in chunk-map size" survives and was re-confirmed. **(2)** B122's
+  anti-vacuity guard was computed from the oracle rather than from the recording gates, so it could not fail;
+  it now counts observed queries and **its prove-red was run** — the null refactor (both gates queried
+  unconditionally) reds it, where before only the per-combination checks fired. B121's `compared == 64`
+  tautology was deleted and its class docstring corrected to claim only what it asserts (gate-value agreement
+  is true by construction and is deliberately not asserted). **(3)** `World`'s two `INeighborGates`
+  forwarders had been inserted between `AreNeighborsDataReady`'s doc block and its body, leaving that method
+  undocumented and the forwarder carrying two `<summary>` tags; the members were moved below it.
 
 ---
 
-**Last Updated:** 2026-08-25 (**v1.8 — LP-6's confirmatory Master IL2CPP run PASSED; LP-6 is fully closed**. A null result on every axis, as designed: no new errors, `Validate All` 576/576 across 25 suites, `LightSchedule` scattered ±1–8 % in both directions with identical FP verdicts in all ten phases, no new `AllDeclined`/`InFlightCap`. LP-6 itself shipped in v1.7 — the scan evaluates only the neighbor gate a chunk's arm can read, via a coordinate-parameterized `INeighborGates` implemented on `World` itself, with **B121**/**B122** guarding the two halves and a production counter diff confirming **−34.7 %** scan gate calls — see LP-6's Amended line) **Next Review:** LP-7 (a small naming/doc phase — but read LP-6's Amended line first, because it carries three findings that outlive it. **(1)** An equivalence baseline over two paths that share an implementation tests the *sharing*, not the implementation: B121 stayed green under an arm-rule mutation that B122 caught, and the plan predicting otherwise was wrong — the **fourth** consecutive phase whose prove-red prediction missed, so keep measuring rather than predicting. **(2)** The measurement floor is now quantified: two runs of the same route on identical code differ by ±1–5 % on `LightSchedule`, so **no benchmark in this repo can resolve a sub-1 % pass-level effect** — use deterministic counters for changes that size, and never re-read a scattered ±10 % single-sample column as a win. **(3)** The successor target LP-6 found and did **not** address: `LightSchedule` is 17–21 % of wall at speed in **editor Mono** — **9,6–15,5 % in Master IL2CPP**, per the 2026-08-25 confirmatory run — at ≈ 0.5 ms of main thread per scheduled lighting job, with gates under 1 % of it. It is saturated in both backends but against **different** limits: the editor hits the 8 ms `Ceiling` on ~95 % of working frames, while a shipping build is bound by the per-frame rate **`Quota`** at 77–96 % utilisation and essentially never reaches the ceiling. That deserves its own phase, aimed at the quota, and because the pass is saturated a win there will appear as **throughput**, not milliseconds. **LP-8** remains the only route to witnessing production's scheduler and merge)
+**Last Updated:** 2026-08-25 (**v1.9 — a code review of the LP-6 commits corrected the deferred fact-gathering figure by ~22× (≈ 0.5 % → ≈ 12 % of a gate call, still declined at ≈ 0.1 % of the pass), gave B122's anti-vacuity guard teeth and proved them, and restored a displaced docstring — no production defect. v1.8: LP-6's confirmatory Master IL2CPP run PASSED; LP-6 is fully closed**. A null result on every axis, as designed: no new errors, `Validate All` 576/576 across 25 suites, `LightSchedule` scattered ±1–8 % in both directions with identical FP verdicts in all ten phases, no new `AllDeclined`/`InFlightCap`. LP-6 itself shipped in v1.7 — the scan evaluates only the neighbor gate a chunk's arm can read, via a coordinate-parameterized `INeighborGates` implemented on `World` itself, with **B121**/**B122** guarding the two halves and a production counter diff confirming **−34.7 %** scan gate calls — see LP-6's Amended line) **Next Review:** LP-7 (a small naming/doc phase — but read LP-6's Amended line first, because it carries three findings that outlive it. **(1)** An equivalence baseline over two paths that share an implementation tests the *sharing*, not the implementation: B121 stayed green under an arm-rule mutation that B122 caught, and the plan predicting otherwise was wrong — the **fourth** consecutive phase whose prove-red prediction missed, so keep measuring rather than predicting. **(2)** The measurement floor is now quantified: two runs of the same route on identical code differ by ±1–5 % on `LightSchedule`, so **no benchmark in this repo can resolve a sub-1 % pass-level effect** — use deterministic counters for changes that size, and never re-read a scattered ±10 % single-sample column as a win. **(3)** The successor target LP-6 found and did **not** address: `LightSchedule` is 17–21 % of wall at speed in **editor Mono** — **9,6–15,5 % in Master IL2CPP**, per the 2026-08-25 confirmatory run — at ≈ 0.5 ms of main thread per scheduled lighting job, with gates under 1 % of it. It is saturated in both backends but against **different** limits: the editor hits the 8 ms `Ceiling` on ~95 % of working frames, while a shipping build is bound by the per-frame rate **`Quota`** at 77–96 % utilisation and essentially never reaches the ceiling. That deserves its own phase, aimed at the quota, and because the pass is saturated a win there will appear as **throughput**, not milliseconds. **LP-8** remains the only route to witnessing production's scheduler and merge)
