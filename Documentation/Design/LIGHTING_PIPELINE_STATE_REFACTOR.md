@@ -1,8 +1,8 @@
 # Lighting Pipeline State & Gate Refactor (LP-*)
 
-**Version:** 1.7  
-**Date:** 2026-08-24  
-**Status:** Partially implemented — **LP-1, LP-2 and LP-3 shipped 2026-08-23; LP-4, LP-5 and LP-6 shipped 2026-08-24** (each code complete + confirmed in a running editor — see their Amended lines). **LP-6 additionally awaits one confirmatory Master IL2CPP benchmark run as a regression check** — not a win check, since its effect is below the harness's noise floor by design. LP-7 remains proposed; **LP-8 was filed by LP-5** and is not started. §2 re-audited against HEAD on 2026-08-23, with two gate-census rows since made stale by LP-5 (see its Amended line) and F7's call-site anchors superseded by LP-6.  
+**Version:** 1.8  
+**Date:** 2026-08-25  
+**Status:** Partially implemented — **LP-1, LP-2 and LP-3 shipped 2026-08-23; LP-4, LP-5 and LP-6 shipped 2026-08-24** (each code complete + confirmed in a running editor — see their Amended lines). **LP-6's confirmatory Master IL2CPP run was executed 2026-08-25 and PASSED as a regression check** — no regression on any axis, and no win visible, exactly as predicted; LP-6 carries no open items. LP-7 remains proposed; **LP-8 was filed by LP-5** and is not started. §2 re-audited against HEAD on 2026-08-23, with two gate-census rows since made stale by LP-5 (see its Amended line) and F7's call-site anchors superseded by LP-6.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > Clean-up / refactor plan for the async lighting engine's orchestration layer — the `ChunkData`
@@ -1082,9 +1082,9 @@ pre-classifier at each call site) would have re-created one.
   ratio, not a frame measurement.
 - The counters are `#if DEVELOPMENT_BUILD || UNITY_EDITOR`, so a **Master** build reports none of this.
 
-**The one step still open: a confirmatory Master IL2CPP run.** It is a **regression check, not a win
-check** — see the noise-floor limit above; nobody should expect it to show an improvement, and a null result
-is the pass. Protocol for the session that runs it:
+**The last step — a confirmatory Master IL2CPP run — RAN 2026-08-25 and PASSED. LP-6 has no open items.**
+It was a **regression check, not a win check** — see the noise-floor limit above; nobody should expect it to
+show an improvement, and a null result is the pass. The protocol it followed, and then the outcome:
 
 1. Build **Master IL2CPP**. (The harness is *not* dev-gated — `WorldFrameProfiler`, `BenchmarkController`
    and `PipelineTelemetry`'s core all compile in, so the full report is produced. Only the LP-6 counters are
@@ -1104,6 +1104,72 @@ is the pass. Protocol for the session that runs it:
    `AllDeclined`/`InFlightCap`, which would indicate the scan is now declining work it used to serve.
 5. **Do not read a scattered ±10 % as either a win or a loss** — with n = 1 per condition that is inside the
    demonstrated noise. If a phase looks meaningfully worse, re-run before believing it.
+
+**Outcome (2026-08-25): PASSED — a null result on every axis, which is the pass.** Run
+`BenchmarkRun_2026-08-25_06-46-06.log`: Unity 6000.5.9f1, WindowsPlayer, **IL2CPP / Master / Development:No**,
+Burst AOT on with safety checks off, commit `ede85f79`, every default taken (view distance 10 / load 13 /
+729 resident, 30 s phases, the same route) — 7 m 19 s, 8 436 samples. As step 1 predicted the report is
+complete but carries **no gate counts**; that is the `DEVELOPMENT_BUILD` gate, not a defect.
+
+- **No new errors.** The player log holds **one** `ERROR` for the whole run — URP's
+  `Hidden/…/DBufferClear` shader being unsupported on this GPU, emitted at startup and **present verbatim in
+  the pre-LP player log too**. No exceptions, no pipeline warnings; the panic-gate open/close cycling is the
+  admission gate working as designed and is reported per phase in the log itself.
+- **`Validate All` still green: 576 baselines across 25 suites PASSED** (3 m 7 s), with exactly the two
+  expected known-bug repros (`K04`, `K08` — `SERIALIZATION_BUGS` §04/§08). Byte-identical in shape to the
+  run LP-6 shipped on.
+- **The `LightSchedule` row is not systematically worse.** Compared against
+  `BenchmarkRun_2026-08-15_22-10-06.log` — the only other **IL2CPP Master** run of this route, and therefore
+  the only backend-comparable reference (see the caveat below). Using **ms/s**, the phase-duration-normalised
+  column, rather than totals:
+
+  | phase | pre ms/s | post ms/s | Δ | pre % wall | post % wall | pre served/s | post served/s |
+  |-------|---------:|----------:|---:|-----------:|------------:|-------------:|--------------:|
+  | Gen 10 m/s  | 10,7 | 10,7 | ±0 % | 1,1 % | 1,1 % | 60 | 61 |
+  | Gen 20 m/s  | 17,7 | 17,9 | +1 % | 1,8 % | 1,8 % | 99 | 101 |
+  | Gen 50 m/s  | 54,1 | 52,6 | −3 % | 5,4 % | 5,3 % | 305 | 304 |
+  | Gen 100 m/s | 100,5 | 96,3 | −4 % | 10,1 % | 9,6 % | 547 | 542 |
+  | Gen 200 m/s | 153,1 | 155,2 | +1 % | 15,3 % | 15,5 % | 921 | 917 |
+  | Ensure      | 20,9 | 21,3 | +2 % | 2,1 % | 2,1 % | 123 | 129 |
+  | Load 50 m/s | 22,3 | 24,1 | +8 % | 2,2 % | 2,4 % | 130 | 141 |
+  | Load 100 m/s| 36,8 | 36,5 | −1 % | 3,7 % | 3,6 % | 221 | 220 |
+  | Load 200 m/s| 71,5 | 70,4 | −2 % | 7,1 % | 7,0 % | 418 | 436 |
+
+  Scattered in both directions, every phase inside the demonstrated ±1–5 % noise but one (+8 % on the
+  *cheapest* loading phase, at 2,4 % of wall, where served/s simultaneously **rose** 130 → 141). Per step 5
+  that is read as neither a win nor a loss. The **FP verdict is identical in all ten phases**
+  (4× `Healthy`, `AdmissionBound + ORDERING-BOUND`, 2× `NO REGIME`, 3× `Healthy + ORDERING-BOUND`), and the
+  stage latencies are superimposable — `populated→lit` p50 pre → post: 862,7 → 860,3 / 636,8 → 630,8 /
+  276,6 → 261,3 / 470,6 → 472,4 / 128,0 → 128,9 ms, on identical delivered-chunk counts.
+- **No new `AllDeclined`/`InFlightCap`** — the failure mode step 4 named. `AllDeclined` moves 53 → 69,
+  531 → 510, 1 588 → 1 581, 776 → 784 across the phases (flat, both directions); `InFlightCap` is **0** in
+  every phase but Gen 200 (3 → 8, of ~29 000 quota units).
+
+**The caveat on that reference run, stated so the comparison is not over-read.** `..._08-15_22-10-06` sits
+**183 commits** back (and on Unity 6000.5.8f1 rather than .9f1). It therefore bounds *the whole LP-1…LP-6 arc
+plus ten days of unrelated work* — it is **not** an LP-6 isolate, and a same-backend A/B of LP-6 alone was
+never available, the phase's before/after having been captured in the editor. That is adequate for what step
+4 asks (a regression check needs a floor, not an attribution) and inadequate for anything stronger: nothing
+here could isolate LP-6's 0,29 %-of-pass effect even if the backends matched, which is the noise-floor
+finding above, not a new limitation.
+
+**One criterion could not be checked as written, and the reason matters.** Step 4 asked that the pass stay
+`Ceiling`-bound at 100+ m/s. **In Master IL2CPP it never was.** `LightSchedule`'s `Ceiling` stops are
+0 / 0 / 1 / 2 / 58 across the generation phases and **0** across loading, against 644–741 in the editor
+captures; the binding reason is the per-frame rate `Quota`, at **77–96 %** utilisation versus the editor's
+~10 %. The pre-LP IL2CPP run shows **the same shape** (`Ceiling` 0 / 0 / 1 / 1 / 44, utilisation 71–97 %), so
+this is a **backend property, not something LP-6 changed**. Its mechanism is visible in the two reports:
+the per-frame quota is device-calibrated (OM-1) at launch and the player resolved
+`lightJobs/frame=15` where the editor session resolved 64, on frames roughly an order of magnitude shorter —
+so the 8 ms ceiling is never reached and the rate quota binds first. This is a third, independent reason the
+editor captures are not comparable in absolute terms, beyond the two step 3 already gave.
+
+**A doc correction this run produced.** The successor-target figure recorded below — `LightSchedule` at
+**17–21 % of wall at 100+ m/s**, `Ceiling`-bound on ~95 % of working frames — is an **editor-Mono** number.
+In Master IL2CPP the same pass is **9,6–15,5 % of wall** and is quota-bound, not ceiling-bound. The
+conclusion is unchanged and if anything sharper: the pass is still the largest single main-thread cost in
+the pipeline and still saturated, so a win there still shows up as **throughput, not milliseconds** — but
+the saturation to relieve in a shipping build is the **rate quota**, not the time ceiling.
 
 **A prediction this phase got wrong, recorded because it is the fourth in a row.** The plan asserted that the
 64-combination equivalence baseline (B121) would be the prove-red tooth. It is not. Mutating the arm rule
@@ -1260,7 +1326,21 @@ The general rule this surfaces: **extraction closes a gap only when the unwitnes
   real target, with gates under 1 % of it. §8 q3 resolved; §6's "cached interface" row and F7's call-site
   anchors corrected. The LP-2 eager-fact-gathering question is closed as measured-and-declined (~0.5 % of a
   gate call), not deferred.
+* **v1.8** - **LP-6's confirmatory Master IL2CPP run executed — PASSED, and LP-6 closes with no open items.**
+  A null result on every axis, which was the pass condition: one pre-existing URP shader `ERROR` and nothing
+  else, `Validate All` at **576/576 across 25 suites** with the two expected known-bug repros, `LightSchedule`
+  scattered ±1–8 % in both directions against the only other IL2CPP Master run of this route, identical FP
+  verdicts in all ten phases, superimposable stage latencies, and no new `AllDeclined`/`InFlightCap`. Two
+  things the run taught that the editor captures could not. **(1)** Step 4's "still `Ceiling`-bound at
+  100+ m/s" is **not satisfiable in a shipping build**: in Master IL2CPP `LightSchedule` is bound by the
+  per-frame rate **`Quota`** at 77–96 % utilisation and hits the 8 ms ceiling ~0 times, because the
+  device-calibrated budget resolves to `lightJobs/frame=15` (the editor got 64) on far shorter frames. The
+  pre-LP IL2CPP run shows the same shape, so it is a backend property, not a regression. **(2)** The
+  successor-target figure in LP-6's Amended line (17–21 % of wall, ceiling-bound) is an **editor-Mono**
+  number; in Master it is **9,6–15,5 % of wall and quota-bound** — same conclusion, different saturation to
+  relieve. The reference run is 183 commits back, so it bounds the whole LP-1…LP-6 arc rather than LP-6
+  alone; nothing available could isolate a 0,29 %-of-pass effect anyway.
 
 ---
 
-**Last Updated:** 2026-08-24 (**v1.7 — LP-6 SHIPPED**; the scan evaluates only the neighbor gate a chunk's arm can read, via a coordinate-parameterized `INeighborGates` implemented on `World` itself, with **B121**/**B122** guarding the two halves and a production counter diff confirming **−34.7 %** scan gate calls — see LP-6's Amended line) **Next Review:** LP-7 (a small naming/doc phase — but read LP-6's Amended line first, because it carries three findings that outlive it. **(1)** An equivalence baseline over two paths that share an implementation tests the *sharing*, not the implementation: B121 stayed green under an arm-rule mutation that B122 caught, and the plan predicting otherwise was wrong — the **fourth** consecutive phase whose prove-red prediction missed, so keep measuring rather than predicting. **(2)** The measurement floor is now quantified: two runs of the same route on identical code differ by ±1–5 % on `LightSchedule`, so **no benchmark in this repo can resolve a sub-1 % pass-level effect** — use deterministic counters for changes that size, and never re-read a scattered ±10 % single-sample column as a win. **(3)** The successor target LP-6 found and did **not** address: `LightSchedule` is 17–21 % of wall at speed, `Ceiling`-bound on ~95 % of working frames, at ≈ 0.5 ms of main thread per scheduled lighting job — gates are under 1 % of it. That deserves its own phase, and because the pass is saturated, a win there will appear as **throughput**, not milliseconds. **LP-8** remains the only route to witnessing production's scheduler and merge)
+**Last Updated:** 2026-08-25 (**v1.8 — LP-6's confirmatory Master IL2CPP run PASSED; LP-6 is fully closed**. A null result on every axis, as designed: no new errors, `Validate All` 576/576 across 25 suites, `LightSchedule` scattered ±1–8 % in both directions with identical FP verdicts in all ten phases, no new `AllDeclined`/`InFlightCap`. LP-6 itself shipped in v1.7 — the scan evaluates only the neighbor gate a chunk's arm can read, via a coordinate-parameterized `INeighborGates` implemented on `World` itself, with **B121**/**B122** guarding the two halves and a production counter diff confirming **−34.7 %** scan gate calls — see LP-6's Amended line) **Next Review:** LP-7 (a small naming/doc phase — but read LP-6's Amended line first, because it carries three findings that outlive it. **(1)** An equivalence baseline over two paths that share an implementation tests the *sharing*, not the implementation: B121 stayed green under an arm-rule mutation that B122 caught, and the plan predicting otherwise was wrong — the **fourth** consecutive phase whose prove-red prediction missed, so keep measuring rather than predicting. **(2)** The measurement floor is now quantified: two runs of the same route on identical code differ by ±1–5 % on `LightSchedule`, so **no benchmark in this repo can resolve a sub-1 % pass-level effect** — use deterministic counters for changes that size, and never re-read a scattered ±10 % single-sample column as a win. **(3)** The successor target LP-6 found and did **not** address: `LightSchedule` is 17–21 % of wall at speed in **editor Mono** — **9,6–15,5 % in Master IL2CPP**, per the 2026-08-25 confirmatory run — at ≈ 0.5 ms of main thread per scheduled lighting job, with gates under 1 % of it. It is saturated in both backends but against **different** limits: the editor hits the 8 ms `Ceiling` on ~95 % of working frames, while a shipping build is bound by the per-frame rate **`Quota`** at 77–96 % utilisation and essentially never reaches the ceiling. That deserves its own phase, aimed at the quota, and because the pass is saturated a win there will appear as **throughput**, not milliseconds. **LP-8** remains the only route to witnessing production's scheduler and merge)
