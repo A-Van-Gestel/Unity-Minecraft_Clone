@@ -93,27 +93,25 @@ call. Route it accordingly:
 
 | Want | Do |
 |---|---|
-| The full aggregate, agent-driven | **Schedule it, don't run it in the call** (recipe below) |
+| The full aggregate, agent-driven | `Unity_ManageMenuItem` → `Minecraft Clone/Dev/Validate All` (recipe below) |
 | The full aggregate, by hand | `Minecraft Clone/Dev/Validate All` from the Editor menu |
 | A fast agent-side sweep | `Unity_RunCommand` over the registry **skipping `"Lighting Engine"`** (~6 s, safely inside the window) |
 
-**Schedule-and-poll recipe** — the reliable way to drive anything long from an agent. The
-`Unity_RunCommand` returns immediately; the work runs on the editor's update loop, outside any request
-window:
+**Menu-item recipe** — the reliable way to drive the full aggregate from an agent. `Unity_ManageMenuItem`
+Execute `Minecraft Clone/Dev/Validate All`. The call exceeds 120 s and the harness **moves it to a
+background task cleanly** — no stacking, no re-execution — then delivers a completion notification. Do not
+`TaskStop` it or re-issue it; just wait, then read the combined summary from the editor log.
 
-```csharp
-EditorApplication.delayCall += () =>
-{
-    AggregateRunResult agg = ValidationSuiteAggregateRunner.Run(false);
-    Debug.Log("[CENSUS] suites=" + agg.Suites.Count + " baselines=" + …);   // one marker line
-};
-result.Log("scheduled");
-```
+**Resolve that log by newest write time** — it is usually `<project>/Logs/Editor.log` but some sessions
+write only `%LOCALAPPDATA%\Unity\Editor\Editor.log` (when the project log cannot be opened, the editor
+logs that reason at startup and falls back). A frozen log looks exactly like a job that never started. Use
+`Get-Content -Tail N` (that file reaches GB scale).
 
-Then poll the editor log for `[CENSUS]`. **Resolve the log by newest write time** — it is usually
-`<project>/Logs/Editor.log` but some sessions write only `%LOCALAPPDATA%\Unity\Editor\Editor.log`; a
-frozen log looks exactly like a job that never started. Use `Get-Content -Tail N` (that file reaches GB
-scale). The same budget and recipe apply to any long `Unity_RunCommand` — fuzz sweeps, multi-suite loops.
+**Do not try to schedule long work off a `Unity_RunCommand` via `EditorApplication.delayCall`.** The call
+returns `success: true` and the queued delegate then **never runs** — no output, no marker, no exception,
+an idle editor (the dynamic run-command assembly is torn down once `Execute` returns). It is
+indistinguishable from a slow run until you give up on it. Route long work through a menu item; if some
+task has no menu item, add one rather than scheduling it.
 
 **Batch / headless / CI.** `ValidationSuiteCI.RunHeadless` is the `-executeMethod` target:
 
