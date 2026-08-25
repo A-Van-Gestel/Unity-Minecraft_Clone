@@ -715,7 +715,7 @@ event-driven promotion (see Step 5).
 
 ### 9.2 Cross-Chunk Mod Ping-Pong
 
-**Mechanism:** When chunk A's lighting job produces cross-chunk mods for neighbor B, B is flagged via `FlagLightWork()`. B then runs its lighting job, potentially producing mods back for A. This sets A's `HasLightChangesToProcess = true` again, preventing A from being meshed (because `ScheduleMeshing` checks this flag on the center chunk).
+**Mechanism:** When chunk A's lighting job produces cross-chunk mods for neighbor B, B is flagged via `FlagLightWork()`. B then runs its lighting job, potentially producing mods back for A. That flags A again via `FlagLightWork()`, preventing A from being meshed (because `ScheduleMeshing` checks this flag on the center chunk).
 
 **Convergence:** Light values are bounded 0-15 and the BFS is monotonic within a pass. The cross-chunk skylight guard (only INCREASE allowed for non-zero mods) further constrains oscillation. This should converge in 2-3 rounds.
 
@@ -836,7 +836,7 @@ if (isJobRunning || isProcessingLight) continue; // Skip unload
 
 - **Strand guard (unchanged intent, narrowed trigger).** Unloading is still deferred (`DeferWouldStrand`) when a populated neighbor with `HasLightChangesToProcess`/`NeedsInitialLighting` would be stranded — **but only if that neighbor is itself within the unload distance**
   (`!IsBeyondUnloadDistance`). An in-range neighbor genuinely needs this chunk's data and can still make progress, so the deadlock this section describes stays guarded.
-- **P-4 rec 3 — persist-and-unload the pinned trail.** A neighbor that is *itself* beyond the unload distance no longer defers the unload: it is being reclaimed on this or a later pass, so stranding it is harmless. Consequently an out-of-range chunk pinned *only* by its own pending/initial lighting — whose lighting can never complete because a further-out neighbor was never generated (the missing-neighbor gate) — takes the `UnloadPersistLightPending` arm: it forces a full re-light via `FlagInitialLighting()` (captured on reload, captured by the synchronous save
+- **P-4 rec 3 — persist-and-unload the pinned trail.** A neighbor that is *itself* beyond the unload distance no longer defers the unload: it is being reclaimed on this or a later pass, so stranding it is harmless. Consequently an out-of-range chunk pinned *only* by its own pending/initial lighting — whose lighting can never complete because a further-out neighbor was never generated (the missing-neighbor gate) — takes the `UnloadPersistLightPending` arm: it forces a full re-light on reload via `FlagInitialLighting()` (captured by the synchronous save
   snapshot; fresh regeneration for an unmodified chunk), persists its pending skylight columns via `LightingStateManager.AddPending`/`PersistOrphanedSkylightColumns`, and unloads. This drains the "pinned trail" (perf analysis §3.3) that previously climbed unbounded behind a moving player.
 
 Precedence is `job → in-range-strand → persist-light → unload`: the strand check sits **above** the light-persist arm so a chunk an in-range neighbor needs always defers rather than shedding its lighting. The only residual is a bounded boundary shell — out-of-range chunks whose *buffer-band* (kept, in-range) neighbor is stuck light-pending — which self-resolves the moment the player moves it past the boundary. Verified in-game (soak: beyond-unload-unreclaimable 743 → ~0–2, `Deferred — light` 308 → 0; durability: edit → unload → reload preserves the edit

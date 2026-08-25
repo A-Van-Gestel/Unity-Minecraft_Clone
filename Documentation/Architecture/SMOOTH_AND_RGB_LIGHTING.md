@@ -1280,7 +1280,7 @@ normalization to one word (`GetSkyLight` → `GetSkylight`, `BlockLightQueue` �
 - `DebugVisualizationMode.Sunlight` → `Skylight` (and `SunlightChunkBorder` → `SkylightChunkBorder`)
 - `LightingScenario.Sunlight*` benchmark scenarios → `Skylight*` (**note:** benchmark reports written before
   this date print the old scenario names — they do not textually line up with post-rename runs)
-- Shaders: the `sunLight` varying (`LiquidCore.hlsl` → `UberLiquidShader`/`FluidPreviewShader`) → `skyLight`;
+- Shaders: the `sunLight` varying (`LiquidCore.hlsl` → `UberLiquidShader`/`FluidPreviewShader`) → `skylight`;
   `sunLuminance` → `skyLuminance`; `SkyLightColor` → `SkylightColor` across the C# `PropertyToID` string and
   all four declaring shaders
 
