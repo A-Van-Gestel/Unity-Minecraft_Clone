@@ -3123,14 +3123,6 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// </summary>
     /// <param name="coord">The coordinate of the central chunk.</param>
     /// <returns>True if all valid neighbors are fully populated with voxel data.</returns>
-    /// <summary><see cref="INeighborGates.DataReady"/>: forwards to <see cref="AreNeighborsDataReady"/>.
-    /// Implemented on <c>this</c> so the scan's decision allocates no adapter (LP-6).</summary>
-    bool INeighborGates.DataReady(ChunkCoord coord) => AreNeighborsDataReady(coord);
-
-    /// <summary><see cref="INeighborGates.ReadyAndLit"/>: forwards to <see cref="AreNeighborsReadyAndLit"/>.
-    /// Implemented on <c>this</c> so the scan's decision allocates no adapter (LP-6).</summary>
-    bool INeighborGates.ReadyAndLit(ChunkCoord coord) => AreNeighborsReadyAndLit(coord);
-
     public bool AreNeighborsDataReady(ChunkCoord coord)
     {
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -3154,6 +3146,18 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // All neighbors exist and are populated.
         return true;
     }
+
+    /// <summary><see cref="INeighborGates.DataReady"/>: forwards to <see cref="AreNeighborsDataReady"/>.
+    /// Implemented on <c>this</c> so the scan's decision allocates no adapter (LP-6).</summary>
+    /// <param name="coord">The coordinate of the central chunk.</param>
+    /// <returns>True if all valid neighbors are fully populated with voxel data.</returns>
+    bool INeighborGates.DataReady(ChunkCoord coord) => AreNeighborsDataReady(coord);
+
+    /// <summary><see cref="INeighborGates.ReadyAndLit"/>: forwards to <see cref="AreNeighborsReadyAndLit"/>.
+    /// Implemented on <c>this</c> so the scan's decision allocates no adapter (LP-6).</summary>
+    /// <param name="coord">The coordinate of the central chunk.</param>
+    /// <returns>True if all valid neighbors are fully lit and stable.</returns>
+    bool INeighborGates.ReadyAndLit(ChunkCoord coord) => AreNeighborsReadyAndLit(coord);
 
 
     #region Voxel Modifications
