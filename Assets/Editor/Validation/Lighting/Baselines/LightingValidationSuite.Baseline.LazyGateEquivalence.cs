@@ -20,9 +20,10 @@ namespace Editor.Validation.Lighting
     /// <para>
     /// <b>The check.</b> All 64 combinations of the six decision inputs are enumerated. For each, the
     /// pre-evaluated overload's action is compared against the lazy overload's, driven by a recording gate
-    /// provider. Two properties are asserted per combination: the actions match, and every gate the lazy
-    /// path DID query returned the same value the eager path was handed — so a provider that is asked for
-    /// the wrong gate cannot pass by coincidence.
+    /// provider. Two properties are asserted per combination: the actions match, and neither gate is
+    /// queried more than once. Gate-value <i>agreement</i> is deliberately not asserted — the provider is
+    /// constructed from the same two values the eager call is handed, so agreement holds by construction
+    /// and asserting it would witness nothing.
     /// </para>
     /// <para>
     /// <b>B122</b> pins the laziness itself: the gate-need rule derived from the arm precedence. Without it
@@ -109,7 +110,6 @@ namespace Editor.Validation.Lighting
         {
             bool passed = true;
             StringBuilder mismatches = new StringBuilder();
-            int compared = 0;
 
             for (int bits = 0; bits < 64; bits++)
             {
@@ -127,8 +127,6 @@ namespace Editor.Validation.Lighting
                 LightingScanDecision.ScanAction lazy = LightingScanDecision.EvaluateReadyChunk(
                     jobInFlight, needsInitial, needsEdge, hasChanges, gates, default);
 
-                compared++;
-
                 if (eager != lazy)
                 {
                     passed = false;
@@ -145,10 +143,6 @@ namespace Editor.Validation.Lighting
                 mismatches.Append($"\n  bits={bits}: gate queried more than once " +
                                   $"(dataReady x{gates.DataReadyQueries}, readyAndLit x{gates.ReadyAndLitQueries})");
             }
-
-            passed &= LightingAssert.IsTrue(compared == 64,
-                "B121: all 64 input combinations were compared",
-                $"Expected 64 comparisons, ran {compared}");
 
             return LightingAssert.IsTrue(passed,
                 "B121: lazy evaluation agrees with pre-evaluated on every input combination",
@@ -195,8 +189,11 @@ namespace Editor.Validation.Lighting
                 bool edgeArmTook = readyAndLitReachable && readyAndLit;
                 bool dataReadyReachable = !jobInFlight && (needsInitial || (hasChanges && !edgeArmTook));
 
-                if (!readyAndLitReachable) lazyReadyAndLitSkips++;
-                if (!dataReadyReachable) lazyDataReadySkips++;
+                // Counted from what the provider was ACTUALLY asked, never from the oracle above: a guard
+                // derived from `bits` is a property of this loop's arithmetic and would hold against an
+                // implementation that queried both gates every time — the null refactor B122 exists to catch.
+                if (gates.ReadyAndLitQueries == 0) lazyReadyAndLitSkips++;
+                if (gates.DataReadyQueries == 0) lazyDataReadySkips++;
 
                 if (gates.ReadyAndLitQueries != (readyAndLitReachable ? 1 : 0))
                 {
