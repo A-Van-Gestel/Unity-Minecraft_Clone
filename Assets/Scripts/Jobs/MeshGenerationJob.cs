@@ -451,12 +451,12 @@ namespace Jobs
                 else
                 {
                     // Off: flat lighting from the flora block's own light level.
-                    ushort blocklightData = GetLightDataFromLocalPos(pos);
+                    ushort lightData = GetLightDataFromLocalPos(pos);
                     Color32 flat = new Color32(
-                        (byte)(LightBitMapping.GetSkylight(blocklightData) * 17),
-                        (byte)(LightBitMapping.GetBlocklightR(blocklightData) * 17),
-                        (byte)(LightBitMapping.GetBlocklightG(blocklightData) * 17),
-                        (byte)(LightBitMapping.GetBlocklightB(blocklightData) * 17));
+                        (byte)(LightBitMapping.GetSkylight(lightData) * 17),
+                        (byte)(LightBitMapping.GetBlocklightR(lightData) * 17),
+                        (byte)(LightBitMapping.GetBlocklightG(lightData) * 17),
+                        (byte)(LightBitMapping.GetBlocklightB(lightData) * 17));
                     crossLights.TopL0 = crossLights.TopL1 = crossLights.TopL2 = crossLights.TopL3 = flat;
                     crossLights.BotL0 = crossLights.BotL1 = crossLights.BotL2 = crossLights.BotL3 = flat;
                 }
