@@ -28,12 +28,17 @@ namespace Editor.Benchmarking
     /// shipping code path — dictionary probes, <c>IsChunkInWorld</c>, short-circuits and all.</para>
     /// <para><b>Screening only.</b> Editor Mono is slower than IL2CPP and its ratios are not guaranteed to
     /// carry over. What transfers is the <i>shape</i>: which gate costs more, and how much of it is the
-    /// <c>LightingJobs</c> probe that two of the three gates never read.</para>
+    /// <c>LightingJobs</c> probe that two of the three gates never read — measured against a dictionary
+    /// filled to production's in-flight cap, since an empty one skips hashing entirely.</para>
     /// </remarks>
     internal static class LightingGateWalkBenchmark
     {
         private const int WARMUP = 200;
         private const int RUNS = 20000;
+
+        /// <summary>Live lighting jobs the isolated probe is timed against — production's in-flight cap, so the
+        /// probe hashes into a dictionary the size the real gate walks.</summary>
+        private const int IN_FLIGHT_LIGHTING_JOBS = 64;
 
         /// <summary>Chunk-map radii to sweep — a gate's cost is dominated by dictionary probes, whose cost
         /// tracks map size. 8/16/24 span roughly 289, 1089 and 2401 resident chunks.</summary>
@@ -101,8 +106,11 @@ namespace Editor.Benchmarking
                 fixture.AddSquare(radius);
                 ChunkCoord center = new ChunkCoord(0, 0);
 
-                // AllNeighborOffsets' first entry is the neighbor the loop reaches first; unpopulating it
-                // blocks DataReady immediately and flagging light work blocks ReadyAndLit immediately.
+                // AllNeighborOffsets' first entry is the neighbor the gate loop reaches first, so unpopulating
+                // it blocks DataReady on the first examined neighbor. Only DataReady is measured here; the
+                // matching ReadyAndLit short-circuit is not, so read the figure below as that gate's alone.
+                // AddSquare populates the whole square, so the first offset always resolves — the null check
+                // is defensive. If it ever fired, this would disable a LATER neighbor and the label would lie.
                 foreach (Vector3Int offset in VoxelData.AllNeighborOffsets)
                 {
                     ChunkData first = fixture.GetChunk(offset.x, offset.z);
@@ -184,6 +192,16 @@ namespace Editor.Benchmarking
                 fixture.AddSquare(radius);
 
                 Dictionary<ChunkCoord, LightingJobData> dict = fixture.Jobs.LightingJobs;
+
+                // The fixture seeds this dictionary EMPTY, and an empty Dictionary<,> has no buckets — so
+                // ContainsKey would return on a null check without ever hashing, timing a fast path
+                // production never takes. Fill it to the in-flight cap the real probe walks against.
+                // Scoped to this fixture deliberately: populating LightingJobs on the fixtures used by
+                // Measure would make AreNeighborsReadyAndLit see jobs in flight and change its short-circuit
+                // behavior, corrupting the gate-walk numbers this benchmark exists to produce.
+                for (int i = 0; i < IN_FLIGHT_LIGHTING_JOBS; i++)
+                    dict[new ChunkCoord(-1000 - i, -1000)] = default;
+
                 ChunkCoord probe = new ChunkCoord(1, 0);
                 bool hit = false;
 
