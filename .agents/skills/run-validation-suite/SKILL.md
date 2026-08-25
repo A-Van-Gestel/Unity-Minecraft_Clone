@@ -108,10 +108,13 @@ logs that reason at startup and falls back). A frozen log looks exactly like a j
 `Get-Content -Tail N` (that file reaches GB scale).
 
 **Do not try to schedule long work off a `Unity_RunCommand` via `EditorApplication.delayCall`.** The call
-returns `success: true` and the queued delegate then **never runs** — no output, no marker, no exception,
-an idle editor (the dynamic run-command assembly is torn down once `Execute` returns). It is
-indistinguishable from a slow run until you give up on it. Route long work through a menu item; if some
-task has no menu item, add one rather than scheduling it.
+returns `success: true` and the queued delegate then does not run on any predictable schedule. Observed
+2026-08-25: no output for **70 minutes** on an idle editor — no marker, no exception, nothing to
+distinguish it from a slow run — and it then fired unprompted when an unrelated
+`RequestScriptCompilation` pumped the editor, **executing the pre-edit assembly** and interleaving with a
+menu-item run issued in the meantime. Two hazards, not one: you cannot tell "queued" from "finished", and a
+forgotten delegate can wake up later and run **stale code** whose output looks current. Route long work
+through a menu item; if a task has no menu item, add one rather than scheduling it.
 
 **Batch / headless / CI.** `ValidationSuiteCI.RunHeadless` is the `-executeMethod` target:
 
