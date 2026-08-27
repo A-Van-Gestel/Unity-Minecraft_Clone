@@ -117,8 +117,47 @@ namespace Editor.Validation.Meshing.Framework
         /// <summary>Light emission authored on <see cref="EmissiveOpaque"/>, on the engine's 0-15 scale.</summary>
         public const byte EmissiveLevel = 12;
 
+        /// <summary>
+        /// A second cross-mesh flora type whose FL-4b envelope is deliberately the opposite of
+        /// <see cref="CrossFlora"/>'s: no positional nudge, scale locked to 1, mirroring off — a
+        /// sapling-like plant that must sit exactly on its unit-cell corners. Baseline B63 uses the
+        /// contrast between the two to prove the envelope is read per block rather than globally.
+        /// </summary>
+        public const ushort RigidFlora = 11;
+
+        /// <summary>The authored FL-4b envelope of <see cref="RigidFlora"/> — no variation at all.</summary>
+        public static CrossMeshVariationSettings RigidFloraVariation => new CrossMeshVariationSettings
+        {
+            offset = 0f,
+            scaleMin = 1f,
+            scaleMax = 1f,
+            allowMirror = false,
+        };
+
+        /// <summary>
+        /// A cross-mesh flora type authored past every engine limit (offset and scale at the
+        /// attribute ceilings). Baseline B63 places it in a section's top row to prove
+        /// <c>SanitizeEnvelope</c> reins it back inside the padded section bounds — the vertical
+        /// direction being the one that binds, since scaling is anchored at the plant's base.
+        /// </summary>
+        public const ushort ExtremeFlora = 12;
+
+        /// <summary>
+        /// The deliberately over-authored FL-4b envelope of <see cref="ExtremeFlora"/>. Min and max
+        /// are both pinned to the ceiling on purpose: with a range, the per-cell hash picks somewhere
+        /// inside it and the clamp may never be exercised — a degenerate range makes every cell
+        /// land on the extreme, so the assertion tests the limit rather than a lucky sample.
+        /// </summary>
+        public static CrossMeshVariationSettings ExtremeFloraVariation => new CrossMeshVariationSettings
+        {
+            offset = CrossMeshVariation.MaxCellEscape,
+            scaleMin = CrossMeshVariationSettings.MaxAuthoredScale,
+            scaleMax = CrossMeshVariationSettings.MaxAuthoredScale,
+            allowMirror = true,
+        };
+
         /// <summary>Total number of block types in the palette.</summary>
-        public const int Count = 11;
+        public const int Count = 13;
 
         /// <summary>
         /// Builds the palette as managed <see cref="BlockType"/> instances and converts them to the
@@ -140,6 +179,12 @@ namespace Editor.Validation.Meshing.Framework
             jobData[WaterSource] = new BlockTypeJobData(
                 MakeFluid("TestWaterSource", FluidType.WaterLike, fluidShaderID: 0, fluidLevel: 0, flowLevels: 8));
             jobData[CrossFlora] = new BlockTypeJobData(MakeCrossFlora("TestCrossFlora"));
+            BlockType rigidFlora = MakeCrossFlora("TestRigidFlora");
+            rigidFlora.crossMeshVariation = RigidFloraVariation;
+            jobData[RigidFlora] = new BlockTypeJobData(rigidFlora);
+            BlockType extremeFlora = MakeCrossFlora("TestExtremeFlora");
+            extremeFlora.crossMeshVariation = ExtremeFloraVariation;
+            jobData[ExtremeFlora] = new BlockTypeJobData(extremeFlora);
             BlockType swayingLeaf = MakeCube("TestSwayingLeafCube", isSolid: true, opacity: 1, renderNeighborFaces: true, MetadataSchema.None);
             swayingLeaf.swayStrength = SwayStrength;
             jobData[SwayingLeafCube] = new BlockTypeJobData(swayingLeaf);

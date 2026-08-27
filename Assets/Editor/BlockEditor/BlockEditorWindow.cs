@@ -154,6 +154,7 @@ namespace Editor.BlockEditor
                     isSolid = blockType.isSolid,
                     renderNeighborFaces = blockType.renderNeighborFaces,
                     swayStrength = blockType.swayStrength,
+                    crossMeshVariation = blockType.crossMeshVariation,
                     fluidType = blockType.fluidType,
                     fluidShaderID = blockType.fluidShaderID,
                     fluidMeshData = blockType.fluidMeshData,

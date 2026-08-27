@@ -468,8 +468,9 @@ namespace Jobs
 
                 // FL-4: deterministic per-voxel offset / scale / mirror, hashed over the same
                 // voxel-space cell as the phase so a re-mesh or re-anchor reproduces it exactly.
+                // FL-4b: the envelope it varies within is the block type's authored one.
                 CrossMeshVariation variation = CrossMeshVariation.FromCell(
-                    (int)ChunkPosition.x + pos.x, pos.y, (int)ChunkPosition.z + pos.z);
+                    (int)ChunkPosition.x + pos.x, pos.y, (int)ChunkPosition.z + pos.z, in voxelProps);
 
                 VoxelMeshHelper.GenerateCrossMesh(textureID, in crossLights,
                     pos, swayPhase, in variation, ref _vertexIndex, ref Output.Vertices, ref Output.TransparentTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals,

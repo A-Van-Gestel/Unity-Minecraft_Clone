@@ -201,22 +201,35 @@ namespace Data
     [StructLayout(LayoutKind.Sequential)]
     public struct CrossMeshVariation
     {
-        /// <summary>Half-width of the hashed XZ offset, in blocks.</summary>
-        public const float MaxOffset = 0.15f;
+        /// <summary>Default half-width of the hashed XZ offset, in blocks (FL-4's shipped value).</summary>
+        public const float DefaultMaxOffset = 0.15f;
 
-        /// <summary>Smallest hashed uniform scale.</summary>
-        public const float MinScale = 0.85f;
+        /// <summary>Default smallest hashed uniform scale (FL-4's shipped value).</summary>
+        public const float DefaultMinScale = 0.85f;
 
-        /// <summary>Largest hashed uniform scale.</summary>
-        public const float MaxScale = 1.1f;
+        /// <summary>Default largest hashed uniform scale (FL-4's shipped value).</summary>
+        public const float DefaultMaxScale = 1.1f;
 
         /// <summary>
-        /// How far a varied cross mesh can reach outside its own 1×1×1 cell, in blocks: the XZ
-        /// offset plus the overhang of a scaled-up cross (scaling is centred in XZ). Vertical
-        /// escape is smaller (the base is anchored, so only the top grows), so this covers both.
-        /// <see cref="SectionRenderer"/> pads its constant section bounds by this amount (MR-4).
+        /// The hard ceiling on how far any varied cross mesh may reach outside its own 1×1×1 cell,
+        /// in blocks: an XZ offset plus the overhang of a scaled-up cross (scaling is centred in XZ).
+        /// Vertical escape is smaller (the base is anchored, so only the top grows), so this covers
+        /// both. <see cref="SectionRenderer"/> pads its constant section bounds by exactly this amount
+        /// (MR-4), which is why <see cref="BlockTypeJobData"/> clamps authored FL-4b envelopes against
+        /// it — an authored range may never widen the geometry past the culling volume.
         /// </summary>
-        public const float MaxCellEscape = MaxOffset + (MaxScale - 1f) * 0.5f;
+        public const float MaxCellEscape = DefaultMaxOffset + (DefaultMaxScale - 1f) * 0.5f;
+
+        /// <summary>
+        /// The largest scale any block can end up with after <see cref="SanitizeEnvelope"/>. The
+        /// binding direction is <b>vertical</b>, not horizontal: scaling is centred in XZ (each side
+        /// overhangs only half the growth) but anchored at the base in Y, so the whole of
+        /// <c>scale - 1</c> rises above the cell. The ceiling is therefore
+        /// <c>1 + MaxCellEscape</c>, not <c>1 + 2 * MaxCellEscape</c> — a taller plant would poke out
+        /// of the padded section bounds and pop under frustum culling. Nothing may render larger,
+        /// whatever was authored.
+        /// </summary>
+        public const float MaxSanitizedScale = 1f + MaxCellEscape;
 
         /// <summary>XZ offset in blocks, each component in [-<see cref="MaxOffset"/>, <see cref="MaxOffset"/>].</summary>
         public float OffsetX, OffsetZ;
@@ -235,16 +248,22 @@ namespace Data
         public static CrossMeshVariation Identity => new CrossMeshVariation { Scale = 1f };
 
         /// <summary>
-        /// Derives the variation for one flora voxel from its voxel-space cell. All four values come
-        /// from bit-slices of a single hash, and use a salt distinct from FL-1's sway phase so a
-        /// tuft's size and its wind phase are not correlated.
+        /// Derives the variation for one flora voxel from its voxel-space cell, within the block
+        /// type's authored envelope (FL-4b). All four values come from bit-slices of a single hash,
+        /// and use a salt distinct from FL-1's sway phase so a tuft's size and its wind phase are
+        /// not correlated.
         /// </summary>
         /// <param name="voxelX">Voxel-space cell X.</param>
         /// <param name="voxelY">Voxel-space cell Y.</param>
         /// <param name="voxelZ">Voxel-space cell Z.</param>
+        /// <param name="maxOffset">The block's XZ offset half-width, already clamped by <see cref="BlockTypeJobData"/>.</param>
+        /// <param name="minScale">The block's smallest uniform scale.</param>
+        /// <param name="maxScale">The block's largest uniform scale, already clamped.</param>
+        /// <param name="allowMirror">Whether this block's texture may be mirrored.</param>
         /// <returns>The cell's deterministic offset / scale / mirror.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static CrossMeshVariation FromCell(int voxelX, int voxelY, int voxelZ)
+        public static CrossMeshVariation FromCell(int voxelX, int voxelY, int voxelZ,
+            float maxOffset, float minScale, float maxScale, bool allowMirror)
         {
             uint h = VoxelMeshHelper.VoxelHashU32(voxelX, voxelY, voxelZ, VARIATION_SALT);
 
@@ -256,11 +275,61 @@ namespace Data
 
             return new CrossMeshVariation
             {
-                OffsetX = ox * MaxOffset,
-                OffsetZ = oz * MaxOffset,
-                Scale = math.lerp(MinScale, MaxScale, s),
-                MirrorU = ((h >> 31) & 1u) != 0u,
+                OffsetX = ox * maxOffset,
+                OffsetZ = oz * maxOffset,
+                Scale = math.lerp(minScale, maxScale, s),
+                MirrorU = allowMirror && ((h >> 31) & 1u) != 0u,
             };
+        }
+
+        /// <summary>
+        /// Convenience overload deriving the variation from a block type's mirrored envelope.
+        /// </summary>
+        /// <param name="voxelX">Voxel-space cell X.</param>
+        /// <param name="voxelY">Voxel-space cell Y.</param>
+        /// <param name="voxelZ">Voxel-space cell Z.</param>
+        /// <param name="props">The flora block's job data, carrying its clamped FL-4b envelope.</param>
+        /// <returns>The cell's deterministic offset / scale / mirror.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static CrossMeshVariation FromCell(int voxelX, int voxelY, int voxelZ, in BlockTypeJobData props)
+            => FromCell(voxelX, voxelY, voxelZ,
+                props.VariationOffset, props.VariationScaleMin, props.VariationScaleMax, props.VariationAllowMirror);
+
+        /// <summary>
+        /// Clamps an authored FL-4b envelope into what the engine can actually render: a non-inverted
+        /// scale range, and an offset/scale pair whose combined reach stays within
+        /// <see cref="MaxCellEscape"/> — the exact margin <see cref="SectionRenderer"/> pads its
+        /// constant section bounds by, so exceeding it would put geometry outside the culling volume.
+        /// The scale ceiling is spent first (it is the harder constraint, see
+        /// <see cref="MaxSanitizedScale"/>), then whatever margin is left goes to the offset.
+        /// </summary>
+        /// <param name="settings">The block's authored envelope.</param>
+        /// <param name="offset">The clamped XZ offset half-width.</param>
+        /// <param name="scaleMin">The clamped smallest scale.</param>
+        /// <param name="scaleMax">The clamped largest scale.</param>
+        public static void SanitizeEnvelope(CrossMeshVariationSettings settings,
+            out float offset, out float scaleMin, out float scaleMax)
+        {
+            // A non-positive scale ceiling means the struct was never authored (default(T) rather
+            // than CrossMeshVariationSettings.Default) — fail safe to the engine defaults instead of
+            // rendering that block type as a quarter-size stub.
+            if (settings.scaleMax <= 0f) settings = CrossMeshVariationSettings.Default;
+
+            // An inverted range is an authoring slip, not an intent: order it rather than emitting
+            // a degenerate mesh.
+            scaleMin = math.max(CrossMeshVariationSettings.MinAuthoredScale, math.min(settings.scaleMin, settings.scaleMax));
+            scaleMax = math.max(scaleMin, math.max(settings.scaleMax, settings.scaleMin));
+
+            // Vertical escape (the full scale - 1, since the base is anchored) is what binds; the XZ
+            // overhang is half of it and can never be the limiting direction.
+            if (scaleMax > MaxSanitizedScale)
+            {
+                scaleMax = MaxSanitizedScale;
+                scaleMin = math.min(scaleMin, scaleMax);
+            }
+
+            float scaleOverhang = math.max(0f, (scaleMax - 1f) * 0.5f);
+            offset = math.clamp(settings.offset, 0f, MaxCellEscape - scaleOverhang);
         }
 
         private const uint VARIATION_SALT = 0x1B873593u;
@@ -337,6 +406,22 @@ namespace Data
 
         /// <summary>Foliage wind-sway strength in [0, 1] (FL-2); 0 = rigid. Written to the emitted verts' UV Z by the meshing job's sway post-pass.</summary>
         public readonly float SwayStrength;
+
+        // FL-4b: the block's authored cross-mesh variation envelope, already sanitised (see the
+        // constructor). Only RenderShape.CrossMesh reads these; every other shape ignores them.
+
+        /// <summary>Clamped XZ offset half-width, in blocks.</summary>
+        public readonly float VariationOffset;
+
+        /// <summary>Smallest uniform scale, base-anchored.</summary>
+        public readonly float VariationScaleMin;
+
+        /// <summary>Largest uniform scale, clamped so the block cannot escape its section.</summary>
+        public readonly float VariationScaleMax;
+
+        /// <summary>Whether this block's texture may render mirrored.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public readonly bool VariationAllowMirror;
 
         public readonly RenderShape RenderShape;
         public readonly int CustomMeshIndex; // -1 if not a custom mesh
@@ -423,6 +508,13 @@ namespace Data
             IsSolid = blockType.isSolid;
             RenderNeighborFaces = blockType.renderNeighborFaces;
             SwayStrength = blockType.swayStrength;
+
+            // FL-4b: sanitise the authored envelope once, here, so every consumer (runtime meshing,
+            // the BlockEditor preview, the validation palettes) sees the same clamped values and no
+            // authored range can push geometry outside the padded MR-4 section bounds.
+            CrossMeshVariation.SanitizeEnvelope(blockType.crossMeshVariation,
+                out VariationOffset, out VariationScaleMin, out VariationScaleMax);
+            VariationAllowMirror = blockType.crossMeshVariation.allowMirror;
             RenderShape = blockType.renderShape;
             CustomMeshIndex = customMeshIdx;
 

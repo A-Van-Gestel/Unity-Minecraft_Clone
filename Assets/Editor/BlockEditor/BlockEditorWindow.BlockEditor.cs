@@ -326,6 +326,9 @@ namespace Editor.BlockEditor
 
                 _selectedBlock.renderNeighborFaces = EditorGUILayout.Toggle(new GUIContent("Render Neighbor Faces", "Indicates whether the neighboring faces should still be rendered when this block is placed."), _selectedBlock.renderNeighborFaces);
                 _selectedBlock.swayStrength = EditorGUILayout.Slider(new GUIContent("Sway Strength", "Foliage wind-sway strength in [0, 1] (FL-2). 0 = rigid. Only affects blocks rendered in the transparent cutout pass (Render Neighbor Faces); cross-mesh flora ignores this — FL-1 bakes its own root-anchored weights."), _selectedBlock.swayStrength, 0f, 1f);
+                if (_selectedBlock.renderShape == RenderShape.CrossMesh)
+                    DrawCrossMeshVariationSection();
+
                 _selectedBlock.isActive = EditorGUILayout.Toggle(new GUIContent("Is Active", "Indicates whether the block has any block behavior."), _selectedBlock.isActive);
 
                 EditorUILayoutHelper.DrawSeparator();
@@ -748,6 +751,51 @@ namespace Editor.BlockEditor
 
         #region Block Editor Tab - List Management
 
+        /// <summary>
+        /// Draws the FL-4b per-voxel variation controls for a cross-mesh block: the XZ nudge, the
+        /// scale range, and the mirror toggle. Warns when the authored pair reaches further than the
+        /// engine allows a plant to leave its cell, since the mesher clamps it on the way to Burst.
+        /// </summary>
+        private void DrawCrossMeshVariationSection()
+        {
+            EditorGUILayout.LabelField(new GUIContent("Per-Voxel Variation",
+                "FL-4b: how much this flora type differs from cell to cell. Defaults reproduce the engine-wide FL-4 look."), EditorStyles.boldLabel);
+            EditorGUI.indentLevel++;
+
+            CrossMeshVariationSettings variation = _selectedBlock.crossMeshVariation;
+
+            variation.offset = EditorGUILayout.Slider(new GUIContent("Position Nudge",
+                    "Half-width of the per-voxel XZ offset, in blocks. 0 keeps every plant centred in its cell."),
+                variation.offset, 0f, CrossMeshVariation.MaxCellEscape);
+
+            EditorGUILayout.MinMaxSlider(new GUIContent("Scale Range",
+                    "Smallest and largest per-voxel uniform scale. The plant is anchored at its base, so this varies height too. Equal values disable size variation."),
+                ref variation.scaleMin, ref variation.scaleMax,
+                CrossMeshVariationSettings.MinAuthoredScale, CrossMeshVariationSettings.MaxAuthoredScale);
+            EditorGUILayout.LabelField(" ", $"{variation.scaleMin:0.00} – {variation.scaleMax:0.00}");
+
+            variation.allowMirror = EditorGUILayout.Toggle(new GUIContent("Allow Mirror",
+                    "Let half the plants render with a horizontally flipped texture — a free second variant. Turn off for a texture that reads wrong mirrored."),
+                variation.allowMirror);
+
+            _selectedBlock.crossMeshVariation = variation;
+
+            // Show the block what the mesher will actually use: the sanitizer is the authority, and a
+            // silent clamp would otherwise look like the editor ignoring the authored value.
+            CrossMeshVariation.SanitizeEnvelope(variation, out float clampedOffset, out float clampedMin, out float clampedMax);
+            if (!Mathf.Approximately(clampedOffset, variation.offset) ||
+                !Mathf.Approximately(clampedMin, variation.scaleMin) ||
+                !Mathf.Approximately(clampedMax, variation.scaleMax))
+            {
+                EditorGUILayout.HelpBox(
+                    $"Clamped for rendering to nudge {clampedOffset:0.00}, scale {clampedMin:0.00} – {clampedMax:0.00}. " +
+                    $"A plant may reach at most {CrossMeshVariation.MaxCellEscape:0.00} blocks outside its cell, " +
+                    "which is the margin the section's culling bounds allow.", MessageType.Info);
+            }
+
+            EditorGUI.indentLevel--;
+        }
+
         // --- Helper methods for list management ---
 
         private void AddNewBlock()
@@ -791,6 +839,7 @@ namespace Editor.BlockEditor
                 collisionBounds = _selectedBlock.collisionBounds,
                 renderNeighborFaces = _selectedBlock.renderNeighborFaces,
                 swayStrength = _selectedBlock.swayStrength,
+                crossMeshVariation = _selectedBlock.crossMeshVariation,
                 fluidType = _selectedBlock.fluidType,
                 fluidShaderID = _selectedBlock.fluidShaderID,
                 fluidMeshData = _selectedBlock.fluidMeshData,

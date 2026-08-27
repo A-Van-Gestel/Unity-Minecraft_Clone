@@ -41,6 +41,7 @@ namespace Editor.Validation.Meshing
             scenarios.Add(new Scenario("B22: cross-mesh UV ZW carries sway weight (top/bottom split) + deterministic per-voxel phase; cubes stay ZW=0 (FL-1 guard)", B22_CrossMeshSwayChannels));
             scenarios.Add(new Scenario("B23: sway-flagged cube writes authored swayStrength + phase to UV ZW on every vert; zero-strength blocks stay ZW=0 (FL-2 guard)", B23_CubeSwayChannels));
             scenarios.Add(new Scenario("B62: per-voxel cross-mesh variation matches the offset/scale/mirror oracle, stays base-planted, inside the padded cell, deterministic and cell-distinct (FL-4 guard)", B62_CrossMeshVariation));
+            scenarios.Add(new Scenario("B63: each cross-mesh block varies within its OWN authored envelope — a zero-variation type lands exactly on its unit-cell corners, a default-envelope one does not, and an over-authored one stays inside the padded section bounds (FL-4b guard)", B63_PerBlockVariationEnvelope));
 
             // --- Cross-chunk border-face-culling family (B18–B21, MH-10/MH-11) lives in its own partial
             // file (MeshingValidationSuite.CrossChunk.cs) and self-registers here. ---
@@ -1069,7 +1070,7 @@ namespace Editor.Validation.Meshing
                 // Cross verts sit near the cell's corners, up to MARGIN outside it after FL-4 variation.
                 if (v.x < pos.x - MARGIN || v.x > pos.x + 1 + MARGIN ||
                     v.z < pos.z - MARGIN || v.z > pos.z + 1 + MARGIN ||
-                    v.y < pos.y || v.y > pos.y + CrossMeshVariation.MaxScale)
+                    v.y < pos.y || v.y > pos.y + CrossMeshVariation.MaxSanitizedScale)
                     continue;
 
                 vertsSeen++;
@@ -1209,9 +1210,9 @@ namespace Editor.Validation.Meshing
             if (o.Vertices.Length != 48) return false;
 
             // The test world meshes chunk (0, 0), so the voxel-space cell equals the chunk-local cell.
-            CrossMeshVariation varA = CrossMeshVariation.FromCell(posA.x, posA.y, posA.z);
-            CrossMeshVariation varB = CrossMeshVariation.FromCell(posB.x, posB.y, posB.z);
-            CrossMeshVariation varC = CrossMeshVariation.FromCell(posC.x, posC.y, posC.z);
+            CrossMeshVariation varA = FloraVariationOracle(posA, TestMeshBlockPalette.CrossFlora);
+            CrossMeshVariation varB = FloraVariationOracle(posB, TestMeshBlockPalette.CrossFlora);
+            CrossMeshVariation varC = FloraVariationOracle(posC, TestMeshBlockPalette.CrossFlora);
 
             passed &= CheckCrossVariation("B62 voxel A", o, posA, varA);
             passed &= CheckCrossVariation("B62 voxel B", o, posB, varB);
@@ -1234,15 +1235,15 @@ namespace Editor.Validation.Meshing
 
             // The published limits are load-bearing: SectionRenderer pads its bounds by MaxCellEscape,
             // which is only correct while the hash stays inside the offset/scale ranges it is derived from.
-            passed &= MeshAssert.IsTrue("B62 oracle offsets within ±MaxOffset",
-                Mathf.Abs(varA.OffsetX) <= CrossMeshVariation.MaxOffset &&
-                Mathf.Abs(varA.OffsetZ) <= CrossMeshVariation.MaxOffset &&
-                Mathf.Abs(varB.OffsetX) <= CrossMeshVariation.MaxOffset &&
-                Mathf.Abs(varB.OffsetZ) <= CrossMeshVariation.MaxOffset,
+            passed &= MeshAssert.IsTrue("B62 oracle offsets within ±DefaultMaxOffset",
+                Mathf.Abs(varA.OffsetX) <= CrossMeshVariation.DefaultMaxOffset &&
+                Mathf.Abs(varA.OffsetZ) <= CrossMeshVariation.DefaultMaxOffset &&
+                Mathf.Abs(varB.OffsetX) <= CrossMeshVariation.DefaultMaxOffset &&
+                Mathf.Abs(varB.OffsetZ) <= CrossMeshVariation.DefaultMaxOffset,
                 $"A=({varA.OffsetX:G6},{varA.OffsetZ:G6}) B=({varB.OffsetX:G6},{varB.OffsetZ:G6})");
-            passed &= MeshAssert.IsTrue("B62 oracle scales within [MinScale, MaxScale]",
-                varA.Scale >= CrossMeshVariation.MinScale && varA.Scale <= CrossMeshVariation.MaxScale &&
-                varB.Scale >= CrossMeshVariation.MinScale && varB.Scale <= CrossMeshVariation.MaxScale,
+            passed &= MeshAssert.IsTrue("B62 oracle scales within the default scale range",
+                varA.Scale >= CrossMeshVariation.DefaultMinScale && varA.Scale <= CrossMeshVariation.DefaultMaxScale &&
+                varB.Scale >= CrossMeshVariation.DefaultMinScale && varB.Scale <= CrossMeshVariation.DefaultMaxScale,
                 $"A={varA.Scale:G6} B={varB.Scale:G6}");
 
             // Determinism: the variation must depend on nothing but the voxel cell, so a second run
@@ -1265,6 +1266,100 @@ namespace Editor.Validation.Meshing
 
             passed &= MeshAssert.IsTrue("B62 varied geometry deterministic across runs", identical,
                 $"run1 verts={firstVerts.Length} run2 verts={o2.Vertices.Length}");
+
+            return passed;
+        }
+
+        /// <summary>
+        /// The independent oracle for a flora voxel's variation: re-derives it from the palette block's
+        /// authored FL-4b envelope, sanitised exactly as <see cref="BlockTypeJobData"/> does. The test
+        /// world meshes chunk (0, 0), so the chunk-local cell is already the voxel-space cell.
+        /// </summary>
+        /// <param name="pos">The voxel's chunk-local cell.</param>
+        /// <param name="paletteId">The flora block's palette ID.</param>
+        /// <returns>The variation the mesher is expected to have applied.</returns>
+        private static CrossMeshVariation FloraVariationOracle(Vector3Int pos, ushort paletteId)
+        {
+            BlockTypeJobData props = TestMeshBlockPalette.CreateJobDataArray()[paletteId];
+            return CrossMeshVariation.FromCell(pos.x, pos.y, pos.z, in props);
+        }
+
+        /// <summary>
+        /// B63 — FL-4b per-block envelope guard. Two cross-mesh flora types sit in one chunk: the
+        /// default-envelope <c>CrossFlora</c> and <c>RigidFlora</c>, authored to zero variation. The
+        /// rigid one must land exactly on its unit-cell corners with an unmirrored texture — something
+        /// the engine-wide constants can never produce — while the default one must still be offset or
+        /// resized. A mesher that ignored the per-block envelope would fail one of the two halves.
+        /// </summary>
+        private static bool B63_PerBlockVariationEnvelope()
+        {
+            using MeshingTestWorld world = new MeshingTestWorld();
+            Vector3Int rigidPos = new Vector3Int(8, 8, 8);
+            Vector3Int defaultPos = new Vector3Int(3, 8, 3);
+            // Top row of section 0: the only place a base-anchored upscale can leave the section.
+            Vector3Int extremePos = new Vector3Int(13, ChunkMath.SECTION_SIZE - 1, 13);
+            world.SetBlock(rigidPos.x, rigidPos.y, rigidPos.z, TestMeshBlockPalette.RigidFlora);
+            world.SetBlock(defaultPos.x, defaultPos.y, defaultPos.z, TestMeshBlockPalette.CrossFlora);
+            world.SetBlock(extremePos.x, extremePos.y, extremePos.z, TestMeshBlockPalette.ExtremeFlora);
+            MeshDataJobOutput o = world.Run();
+
+            bool passed = MeshAssert.VertexCount("B63 vertex count (3 cross voxels)", o, 48);
+            passed &= MeshAssert.StructuralInvariants("B63 structural", o);
+            if (o.Vertices.Length != 48) return false;
+
+            CrossMeshVariation rigid = FloraVariationOracle(rigidPos, TestMeshBlockPalette.RigidFlora);
+            CrossMeshVariation varied = FloraVariationOracle(defaultPos, TestMeshBlockPalette.CrossFlora);
+
+            // The authored envelope must survive the trip through BlockTypeJobData untouched.
+            passed &= MeshAssert.IsTrue("B63 rigid block's envelope collapses to no variation",
+                ExactValue.IsZero(rigid.OffsetX) && ExactValue.IsZero(rigid.OffsetZ) &&
+                ExactValue.Equal(rigid.Scale, 1f) && !rigid.MirrorU,
+                $"offset=({rigid.OffsetX:G6},{rigid.OffsetZ:G6}) scale={rigid.Scale:G6} mirror={rigid.MirrorU}");
+
+            // Positive control: the SAME cell hashed under the default envelope is visibly varied, so
+            // "rigid" above cannot be passing because the hash happens to be neutral at this cell.
+            CrossMeshVariation rigidCellUnderDefault =
+                FloraVariationOracle(rigidPos, TestMeshBlockPalette.CrossFlora);
+            passed &= MeshAssert.IsTrue("B63 control: the same cell IS varied under the default envelope",
+                !ExactValue.IsZero(rigidCellUnderDefault.OffsetX) ||
+                !ExactValue.IsZero(rigidCellUnderDefault.OffsetZ) ||
+                !ExactValue.Equal(rigidCellUnderDefault.Scale, 1f),
+                $"offset=({rigidCellUnderDefault.OffsetX:G6},{rigidCellUnderDefault.OffsetZ:G6}) scale={rigidCellUnderDefault.Scale:G6}");
+
+            // The default envelope must survive sanitising unchanged — a clamp that quietly narrowed
+            // it would keep every geometry assertion green (oracle and mesher share the sanitizer)
+            // while grass silently lost most of its variation.
+            passed &= MeshAssert.IsTrue("B63 default envelope reaches the sanitizer intact",
+                Mathf.Abs(varied.OffsetX) <= CrossMeshVariation.DefaultMaxOffset &&
+                Mathf.Abs(varied.OffsetZ) <= CrossMeshVariation.DefaultMaxOffset &&
+                varied.Scale >= CrossMeshVariation.DefaultMinScale &&
+                varied.Scale <= CrossMeshVariation.DefaultMaxScale,
+                $"offset=({varied.OffsetX:G6},{varied.OffsetZ:G6}) scale={varied.Scale:G6}");
+
+            CrossMeshVariation.SanitizeEnvelope(CrossMeshVariationSettings.Default,
+                out float defOffset, out float defMin, out float defMax);
+            passed &= MeshAssert.IsTrue("B63 default envelope sanitizes to the authored FL-4 values",
+                ExactValue.Equal(defOffset, CrossMeshVariation.DefaultMaxOffset) &&
+                ExactValue.Equal(defMin, CrossMeshVariation.DefaultMinScale) &&
+                ExactValue.Equal(defMax, CrossMeshVariation.DefaultMaxScale),
+                $"sanitized to offset={defOffset:G6} scale=[{defMin:G6}, {defMax:G6}]");
+
+            // Geometry: the rigid plant's verts must be the untouched unit-cell corners.
+            passed &= CheckCrossVariation("B63 rigid flora", o, rigidPos, rigid);
+            passed &= CheckCrossVariation("B63 default flora", o, defaultPos, varied);
+
+            // The over-authored plant must be reined back inside the box SectionRenderer pads to.
+            // Vertical is the direction that binds: the base is anchored, so the whole of scale - 1
+            // grows upward, while an XZ upscale is halved by being centred.
+            const float SECTION_TOP = ChunkMath.SECTION_SIZE + CrossMeshVariation.MaxCellEscape;
+            float highestVert = float.MinValue;
+            for (int i = 0; i < o.Vertices.Length; i++)
+                highestVert = Mathf.Max(highestVert, o.Vertices[i].y);
+
+            passed &= MeshAssert.IsTrue(
+                $"B63 an over-authored top-row plant stays under the padded section top ({SECTION_TOP:0.00})",
+                highestVert <= SECTION_TOP + MeshAssert.VertexEpsilon,
+                $"highest vert y={highestVert:G6} — geometry outside the section's culling volume pops under frustum culling");
 
             return passed;
         }
@@ -1310,7 +1405,7 @@ namespace Editor.Validation.Meshing
             for (int i = 0; i < o.Vertices.Length; i++)
             {
                 Vector3 v = o.Vertices[i];
-                if (v.y < pos.y - MARGIN || v.y > pos.y + CrossMeshVariation.MaxScale + MARGIN ||
+                if (v.y < pos.y - MARGIN || v.y > pos.y + CrossMeshVariation.MaxSanitizedScale + MARGIN ||
                     v.x < minX - 1f || v.x > maxX + 1f || v.z < minZ - 1f || v.z > maxZ + 1f)
                     continue; // A vert from another voxel entirely.
 
@@ -1318,7 +1413,7 @@ namespace Editor.Validation.Meshing
                 vertsSeen++;
 
                 if (v.x < minX || v.x > maxX || v.z < minZ || v.z > maxZ ||
-                    v.y < pos.y || v.y > pos.y + CrossMeshVariation.MaxScale)
+                    v.y < pos.y || v.y > pos.y + CrossMeshVariation.MaxSanitizedScale)
                     insideMargin = false;
 
                 if (ExactValue.Equal(v.y, pos.y)) baseVerts++;

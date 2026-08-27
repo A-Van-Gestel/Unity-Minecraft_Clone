@@ -49,6 +49,12 @@ namespace Data
         [Range(0f, 1f)]
         public float swayStrength;
 
+        [Tooltip("FL-4b: how much this flora type varies from cell to cell — position nudge, size " +
+                 "range, and whether its texture may be mirrored. Only cross-mesh blocks use it; the " +
+                 "defaults reproduce the engine-wide look FL-4 shipped with.")]
+        [ConditionalField(nameof(renderShape), false, RenderShape.CrossMesh)]
+        public CrossMeshVariationSettings crossMeshVariation = CrossMeshVariationSettings.Default;
+
         [Header("Fluid Properties")]
         [Tooltip("The type of fluid this block represents. 'None' for solid blocks.")]
         public FluidType fluidType = FluidType.None;
