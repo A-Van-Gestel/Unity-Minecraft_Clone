@@ -99,8 +99,9 @@ optimizations, all documented at their declaration sites:
   (bit0 = opaque, bit1 = transparent, bit2 = fluid), so the bitmask indexes a prebuilt `Material[]` and
   `sharedMaterials` is reassigned only when the combination (or the cache version) actually changed. No
   `Material[]` allocation in the hot apply path.
-* **Constant section bounds** (MR-4) — section geometry is always confined to its own 16³ cell, so a
-  constant `Bounds` replaces the per-update `RecalculateBounds()` vertex scan.
+* **Constant section bounds** (MR-4) — section geometry stays within its own 16³ cell plus a fixed
+  margin (`CrossMeshVariation.MaxCellEscape`, the furthest FL-4's per-voxel flora variation can push a
+  border tuft), so a constant padded `Bounds` replaces the per-update `RecalculateBounds()` vertex scan.
 
 ### 4.2. Mesh Generation Pipeline (Jobs)
 

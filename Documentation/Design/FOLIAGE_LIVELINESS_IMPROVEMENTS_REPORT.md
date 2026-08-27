@@ -1,11 +1,12 @@
 # Foliage & Flora Liveliness Improvements Report
 
-**Version:** 1.2  
-**Date:** 2026-07-19  
+**Version:** 1.3  
+**Date:** 2026-08-27  
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.
-Shipped and archived so far: **FL-1 wind sway** (v1.1) and **FL-2 leaf shimmer + the coherent
-traveling-wave sway model** (v1.2), both 2026-07-19, in-game verified — the "What exists today"
-table below is the substrate every remaining sway item (FL-8) builds on.  
+Shipped and archived so far: **FL-1 wind sway** (v1.1), **FL-2 leaf shimmer + the coherent
+traveling-wave sway model** (v1.2), both 2026-07-19, and **FL-4 per-voxel cross-mesh variation**
+(v1.3, 2026-08-27), all in-game verified — the "What exists today" table below is the substrate
+every remaining flora item (FL-8, FL-3, FL-5) builds on.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The master backlog for making the **grass / foliage layer feel alive** in the VoxelEngine —
@@ -73,23 +74,24 @@ item's "What exists today".
 | ID   | Finding                                                                                    | Effort | Risk | Benefit | Seed | Save |
 |------|--------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
 | FL-3 | Flora variety — new CrossMesh block types + per-biome minor-flora palettes                 |   🟡   |  🟢  |   🟢    |  ⚠️  |  ✅   |
-| FL-4 | Per-voxel cross-mesh variation — deterministic hash offset / mirror / scale at mesh time   |   🟢   |  🟢  |   🟢    |  ✅   |  ✅   |
+| FL-4b | Per-block variation ranges (offset / scale / mirror) authored in the BlockEditor          |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | FL-5 | Two-block-tall plants (tall grass, large fern) — paired-half placement/removal semantics   |   🟡   |  🟡  |   🟡    |  ⚠️  |  ✅   |
 | FL-6 | Ambient particles — falling leaves, drifting motes/pollen, fireflies at night              |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 | FL-7 | Block interaction particles — break/place crumbs sampled from the atlas tile               |   🟡   |  🟢  |   🟡    |  ✅   |  ✅   |
 | FL-8 | Player rustle — flora near the player pushes away (shader global), optional audio hook     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | FL-9 | Flora life-cycle behaviors — grass-blades spread/decay, sapling growth (tick system)       |   🔴   |  🟡  |   🟡    |  ✅   |  ✅   |
 
-**Suggested order:** FL-4 (extends the shipped sway substrate; same meshing-suite arc) → FL-3
-(content) → FL-8 (trivial now that the sway vertex path exists) → FL-6/FL-7 (particles, one
-budgeting pass) → FL-5 → FL-9. TF-11 (tint) is the missing color half of the same goal and ranks
-alongside these in the combined roadmap.
+**Suggested order:** FL-3 (content — every new flora type inherits FL-1/FL-2/FL-4 for free) →
+FL-8 (trivial now that the sway vertex path exists) → FL-4b (once FL-3 gives more than one flora
+type to tune per block) → FL-6/FL-7 (particles, one budgeting pass) → FL-5 → FL-9. TF-11 (tint) is
+the missing color half of the same goal and ranks alongside these in the combined roadmap.
 
 ---
 
-## What exists today (shipped FL-1 + FL-2 substrate)
+## What exists today (shipped FL-1 + FL-2 + FL-4 substrate)
 
-FL-1 and FL-2 shipped 2026-07-19 (in-game verified); every remaining sway item builds on this shape:
+FL-1 and FL-2 shipped 2026-07-19 and FL-4 on 2026-08-27 (all in-game verified); every remaining
+flora item builds on this shape:
 
 | Area            | Shipped state                                                                                                                                                                                                                                            |
 |-----------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -100,7 +102,9 @@ FL-1 and FL-2 shipped 2026-07-19 (in-game verified); every remaining sway item b
 | Wind ownership  | **Promoted `Clouds` → `World`**: `World._windBlocksPerSecond` (+ public `WindBlocksPerSecond`) is the single wind source; `Clouds.LayerWind` and foliage both read it; RF-7 later drives the value                                                        |
 | Driver          | `FoliageSway` component on the `World` prefab — amplitude/frequency/gust/reference-speed + wave-coherence knobs (wavelength 14 blocks, phase jitter 0.2, vertical bob 0.3, gust spatial 0.35), pushes `FoliageWindVector`/`FoliageSwayParams`/`FoliageSwayParams2` per frame |
 | Setting         | `enableFoliageSway` (Graphics → Effects, default on, `SettingsManager.cs`)                                                                                                                                                                                |
-| Suite guard     | Meshing baselines **B22** (cross-mesh, + `CrossFlora` palette entry) and **B23** (cube shimmer, + `SwayingLeafCube` entry): weight semantics, phase uniform/deterministic/cell-distinct, zero-strength blocks keep `zw = 0`; both prove-red witnessed     |
+| Per-voxel variation | `CrossMeshVariation` (`Data/JobData.cs`) — hashed XZ offset (±0.15), uniform scale ([0.85, 1.1], anchored at the base) and texture-U mirror, built in the meshing job from the **voxel-space** cell and applied inside `GenerateCrossMesh`. Its salted hash (`VoxelMeshHelper.VoxelHashU32`) is de-correlated from the FL-1 phase; `CrossMeshVariation.Identity` keeps BlockEditor preview icons centred. Ranges are engine constants — per-block authoring is FL-4b |
+| Section bounds  | `SectionRenderer`'s constant MR-4 bounds are padded by `CrossMeshVariation.MaxCellEscape` on every side, the only distance geometry may leave its section (a border tuft offset + upscaled)                                                     |
+| Suite guard     | Meshing baselines **B22** (cross-mesh, + `CrossFlora` palette entry), **B23** (cube shimmer, + `SwayingLeafCube` entry) and **B62** (FL-4 variation vs. the `FromCell` oracle: base-planted, inside the padded cell, cell-distinct, deterministic); **B16** pins the padded bounds. All prove-red witnessed |
 
 ---
 
@@ -148,32 +152,37 @@ biomes); FL-4/FL-1 apply to all new types automatically.
 
 ---
 
-### FL-4 — Per-voxel cross-mesh variation (offset / mirror / scale)
+### FL-4b — Per-block variation ranges authored in the BlockEditor
 
-**Classification:** Polish with outsized payoff (cheapest item in the report).
+**Classification:** Polish / authoring ergonomics. Follow-up to shipped FL-4.
 
-**What exists today.** Every cross mesh is emitted at the exact voxel corner with identical
-1×1×1 geometry (`GenerateCrossMesh` hardcodes the eight plane corners,
-`VoxelMeshHelper.cs:638-652`) — grids of perfectly aligned, identical X-shapes read as
-artificial at a glance.
+**What exists today.** FL-4's offset half-width, scale range, and mirror are engine constants on
+`CrossMeshVariation` (`Data/JobData.cs`), applied identically to every `RenderShape.CrossMesh`
+block. `BlockType` already carries a comparable per-block visual knob — `swayStrength`
+(`[Range(0,1)]`, BlockEditor slider, mirrored into `BlockTypeJobData`) — so the pattern to copy
+exists end to end.
 
-**Gap / finding:** Minecraft-style flora gets most of its organic feel from deterministic
-per-position jitter, not from animation.
+**Gap / finding:** one shared range cannot suit every flora type at once: a dense grass tuft wants
+generous jitter, while a sapling or a mushroom cap wants to stay near its cell centre. The gap only
+starts to bite once FL-3 lands more than one flora block.
 
-**Proposal.** Inside `GenerateCrossMesh`, derive a per-voxel hash (Burst,
-`Unity.Mathematics` — reuse the lowbias32-style hash pattern from `CloudPatternJob`; hash the
-**voxel-space cell**, never Unity-space, for re-anchor determinism) and apply:
+**Proposal.** Add per-block `variationOffset` / `variationScaleMin` / `variationScaleMax` /
+`allowMirror` fields to `BlockType`, mirror them into `BlockTypeJobData`, expose them in the
+BlockEditor next to the sway slider, and pass them into `CrossMeshVariation.FromCell`. Keep the
+current constants as the defaults so authored data reproduces today's look. **Bounds caveat:** the
+MR-4 padded section bounds are derived from `CrossMeshVariation.MaxCellEscape`; per-block ranges
+must be clamped to that constant (or the constant raised deliberately, with B16/B62 updated), or a
+generous authored range silently pushes geometry outside the section's culling volume.
 
-- XZ offset ∈ ±0.15 blocks (keeps the cross inside the cell with margin at max scale),
-- uniform scale ∈ [0.85, 1.1] (anchored at the base — `y=0` stays on the ground),
-- mirror flip (swap the two planes' diagonal) for a free 2× visual variant.
+**Known limitation carried from FL-4 (documented, not scheduled).** Selection and collision
+volumes come from `BlockCollisionBoundsUtility.GetBounds`, which is cell-anchored and knows nothing
+about the render variation, so the block-highlight box no longer lines up with an offset/scaled
+plant (up to ~0.15 blocks). The cross never filled its cell, so this is a pre-existing mismatch
+FL-4 widens rather than creates; teaching the interaction path about the variation was judged not
+worth it for a non-solid block. Revisit only if FL-4b's authored ranges make the drift larger.
 
-Same hash family as FL-1's `uv.w` phase (`VoxelMeshHelper.VoxelHash01`, already shipped) — one
-hash call per flora voxel. Deterministic across re-mesh, so no popping when a chunk rebuilds.
-Suite guard: fixture asserting exact vertices for a fixed cell (determinism) + bounds assertion
-(never escapes the cell).
-
-**Dependencies / cross-links:** none hard; extends the meshing-suite arc FL-1 established (B22).
+**Dependencies / cross-links:** FL-4 ✅ shipped; FL-3 (the reason to differentiate); the meshing
+suite's B62 oracle must then read the authored ranges rather than the constants.
 
 ---
 
@@ -321,6 +330,19 @@ RF-1 effective-light queries; TG-4 cleanup (pending) touches the same scheduler.
 
 ## Document History
 
+* **v1.3** - **FL-4 SHIPPED & archived** (2026-08-27): `CrossMeshVariation` (`Data/JobData.cs`)
+  bakes a hashed XZ offset (±0.15), uniform base-anchored scale ([0.85, 1.1]) and texture-U mirror
+  into every cross mesh, built in `MeshGenerationJob` from the voxel-space cell and applied by
+  `GenerateCrossMesh`; a new salted `VoxelMeshHelper.VoxelHashU32` keeps the variation de-correlated
+  from the FL-1 sway phase, and `CrossMeshVariation.Identity` keeps BlockEditor preview icons static.
+  Deviations from the sketch: (1) the hash is derived in the **job**, not inside `GenerateCrossMesh`,
+  which never sees the voxel-space cell; (2) "mirror = swap the two planes' diagonal" is a geometric
+  no-op (the cross already contains both diagonals) and shipped as a texture-U flip instead; (3) the
+  sketch's "never escapes the cell" guard is impossible alongside scale 1.1 — instead
+  `SectionRenderer`'s constant MR-4 bounds are padded by `CrossMeshVariation.MaxCellEscape` (user
+  decision), and baseline **B16** now pins the padded box. New meshing baseline **B62** (oracle,
+  base-planted, padded-cell bounds, cell-distinct, deterministic; prove-red witnessed) and B22's
+  helper made variation-aware. Per-block ranges deferred to the new **FL-4b**.
 * **v1.2** - **FL-2 SHIPPED & archived** (2026-07-19, in-game verified, Validate All 281/281):
   `BlockType.swayStrength` (`[Range(0,1)]`, BlockEditor slider, `BlockTypeJobData` mirror) written
   to `uv.zw` by a per-voxel **post-pass** in `GenerateVoxelMeshData` (deviation from the sketch's
@@ -346,5 +368,5 @@ RF-1 effective-light queries; TG-4 cleanup (pending) touches the same scheduler.
 
 ---
 
-**Last Updated:** 2026-07-19  
-**Next Review:** when FL-4 starts (re-verify the shipped-substrate table against `VoxelMeshHelper`/`VoxelCommon.hlsl`) or on the next gap sweep
+**Last Updated:** 2026-08-27  
+**Next Review:** when FL-3 starts (re-verify the shipped-substrate table against `VoxelMeshHelper`/`VoxelCommon.hlsl`) or on the next gap sweep
