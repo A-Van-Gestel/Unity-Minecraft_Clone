@@ -1,12 +1,13 @@
 # Foliage & Flora Liveliness Improvements Report
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Date:** 2026-08-27  
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.
 Shipped and archived so far: **FL-1 wind sway** (v1.1), **FL-2 leaf shimmer + the coherent
-traveling-wave sway model** (v1.2), both 2026-07-19, and **FL-4 per-voxel cross-mesh variation**
-(v1.3, 2026-08-27), all in-game verified — the "What exists today" table below is the substrate
-every remaining flora item (FL-8, FL-3, FL-5) builds on.  
+traveling-wave sway model** (v1.2), both 2026-07-19, **FL-4 per-voxel cross-mesh variation** and its
+**FL-4b** per-block authoring follow-up (v1.3/v1.4, 2026-08-27), all verified in the running editor —
+FL-1/FL-2/FL-4 in-game, FL-4b's authoring path end-to-end through the BlockEditor. The "What exists
+today" table below is the substrate every remaining flora item (FL-8, FL-3, FL-5) builds on.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > The master backlog for making the **grass / foliage layer feel alive** in the VoxelEngine —
@@ -74,17 +75,16 @@ item's "What exists today".
 | ID   | Finding                                                                                    | Effort | Risk | Benefit | Seed | Save |
 |------|--------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
 | FL-3 | Flora variety — new CrossMesh block types + per-biome minor-flora palettes                 |   🟡   |  🟢  |   🟢    |  ⚠️  |  ✅   |
-| FL-4b | Per-block variation ranges (offset / scale / mirror) authored in the BlockEditor          |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | FL-5 | Two-block-tall plants (tall grass, large fern) — paired-half placement/removal semantics   |   🟡   |  🟡  |   🟡    |  ⚠️  |  ✅   |
 | FL-6 | Ambient particles — falling leaves, drifting motes/pollen, fireflies at night              |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 | FL-7 | Block interaction particles — break/place crumbs sampled from the atlas tile               |   🟡   |  🟢  |   🟡    |  ✅   |  ✅   |
 | FL-8 | Player rustle — flora near the player pushes away (shader global), optional audio hook     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | FL-9 | Flora life-cycle behaviors — grass-blades spread/decay, sapling growth (tick system)       |   🔴   |  🟡  |   🟡    |  ✅   |  ✅   |
 
-**Suggested order:** FL-3 (content — every new flora type inherits FL-1/FL-2/FL-4 for free) →
-FL-8 (trivial now that the sway vertex path exists) → FL-4b (once FL-3 gives more than one flora
-type to tune per block) → FL-6/FL-7 (particles, one budgeting pass) → FL-5 → FL-9. TF-11 (tint) is
-the missing color half of the same goal and ranks alongside these in the combined roadmap.
+**Suggested order:** FL-3 (content — every new flora type inherits FL-1/FL-2/FL-4 for free, and
+FL-4b's per-block envelope is already there to tune each one) → FL-8 (trivial now that the sway
+vertex path exists) → FL-6/FL-7 (particles, one budgeting pass) → FL-5 → FL-9. TF-11 (tint) is the
+missing color half of the same goal and ranks alongside these in the combined roadmap.
 
 ---
 
@@ -102,9 +102,10 @@ flora item builds on this shape:
 | Wind ownership  | **Promoted `Clouds` → `World`**: `World._windBlocksPerSecond` (+ public `WindBlocksPerSecond`) is the single wind source; `Clouds.LayerWind` and foliage both read it; RF-7 later drives the value                                                        |
 | Driver          | `FoliageSway` component on the `World` prefab — amplitude/frequency/gust/reference-speed + wave-coherence knobs (wavelength 14 blocks, phase jitter 0.2, vertical bob 0.3, gust spatial 0.35), pushes `FoliageWindVector`/`FoliageSwayParams`/`FoliageSwayParams2` per frame |
 | Setting         | `enableFoliageSway` (Graphics → Effects, default on, `SettingsManager.cs`)                                                                                                                                                                                |
-| Per-voxel variation | `CrossMeshVariation` (`Data/JobData.cs`) — hashed XZ offset (±0.15), uniform scale ([0.85, 1.1], anchored at the base) and texture-U mirror, built in the meshing job from the **voxel-space** cell and applied inside `GenerateCrossMesh`. Its salted hash (`VoxelMeshHelper.VoxelHashU32`) is de-correlated from the FL-1 phase; `CrossMeshVariation.Identity` keeps BlockEditor preview icons centred. Ranges are engine constants — per-block authoring is FL-4b |
+| Per-voxel variation | `CrossMeshVariation` (`Data/JobData.cs`) — hashed XZ offset, base-anchored uniform scale and texture-U mirror, built in the meshing job from the **voxel-space** cell and applied inside `GenerateCrossMesh`. Its salted hash (`VoxelMeshHelper.VoxelHashU32`) is de-correlated from the FL-1 phase; `CrossMeshVariation.Identity` keeps BlockEditor preview icons centred |
+| Variation authoring | `BlockType.crossMeshVariation` (`CrossMeshVariationSettings`: offset / scaleMin / scaleMax / allowMirror, FL-4b) — a CrossMesh-only BlockEditor section, mirrored into `BlockTypeJobData`. `CrossMeshVariationSettings.Default` (0.15 / 0.85 / 1.1 / mirror on) reproduces FL-4's engine-wide look and is authored explicitly on Grass Blades. `CrossMeshVariation.SanitizeEnvelope` is the single choke point: it falls back to `Default` for a never-authored (zeroed) struct, orders an inverted range, floors the scale at `MinAuthoredScale`, and clamps against `MaxCellEscape` so no authored value can leave the section's culling volume. **Vertical is the binding direction** — scaling is centred in XZ but anchored at the base in Y, so the ceiling is `MaxSanitizedScale = 1 + MaxCellEscape`, not `1 + 2 × MaxCellEscape` |
 | Section bounds  | `SectionRenderer`'s constant MR-4 bounds are padded by `CrossMeshVariation.MaxCellEscape` on every side, the only distance geometry may leave its section (a border tuft offset + upscaled)                                                     |
-| Suite guard     | Meshing baselines **B22** (cross-mesh, + `CrossFlora` palette entry), **B23** (cube shimmer, + `SwayingLeafCube` entry) and **B62** (FL-4 variation vs. the `FromCell` oracle: base-planted, inside the padded cell, cell-distinct, deterministic); **B16** pins the padded bounds. All prove-red witnessed |
+| Suite guard     | Meshing baselines **B22** (cross-mesh, + `CrossFlora` palette entry), **B23** (cube shimmer, + `SwayingLeafCube` entry), **B62** (FL-4 variation vs. the `FromCell` oracle: base-planted, inside the padded cell, cell-distinct, deterministic) and **B63** (FL-4b: a zero-envelope `RigidFlora` palette entry lands exactly on its unit-cell corners, a default-envelope block in the same chunk does not, and an over-authored `ExtremeFlora` in a section's **top row** stays under the padded section top); **B16** pins the padded bounds. All prove-red witnessed |
 
 ---
 
@@ -149,40 +150,6 @@ but land the palette change in one commit, not dribbled.
 **Dependencies / cross-links:** TF-3 (climate axes make palette selection principled — don't
 wait for it, but re-key palettes when it ships); TF-11 (tint makes one flower texture serve many
 biomes); FL-4/FL-1 apply to all new types automatically.
-
----
-
-### FL-4b — Per-block variation ranges authored in the BlockEditor
-
-**Classification:** Polish / authoring ergonomics. Follow-up to shipped FL-4.
-
-**What exists today.** FL-4's offset half-width, scale range, and mirror are engine constants on
-`CrossMeshVariation` (`Data/JobData.cs`), applied identically to every `RenderShape.CrossMesh`
-block. `BlockType` already carries a comparable per-block visual knob — `swayStrength`
-(`[Range(0,1)]`, BlockEditor slider, mirrored into `BlockTypeJobData`) — so the pattern to copy
-exists end to end.
-
-**Gap / finding:** one shared range cannot suit every flora type at once: a dense grass tuft wants
-generous jitter, while a sapling or a mushroom cap wants to stay near its cell centre. The gap only
-starts to bite once FL-3 lands more than one flora block.
-
-**Proposal.** Add per-block `variationOffset` / `variationScaleMin` / `variationScaleMax` /
-`allowMirror` fields to `BlockType`, mirror them into `BlockTypeJobData`, expose them in the
-BlockEditor next to the sway slider, and pass them into `CrossMeshVariation.FromCell`. Keep the
-current constants as the defaults so authored data reproduces today's look. **Bounds caveat:** the
-MR-4 padded section bounds are derived from `CrossMeshVariation.MaxCellEscape`; per-block ranges
-must be clamped to that constant (or the constant raised deliberately, with B16/B62 updated), or a
-generous authored range silently pushes geometry outside the section's culling volume.
-
-**Known limitation carried from FL-4 (documented, not scheduled).** Selection and collision
-volumes come from `BlockCollisionBoundsUtility.GetBounds`, which is cell-anchored and knows nothing
-about the render variation, so the block-highlight box no longer lines up with an offset/scaled
-plant (up to ~0.15 blocks). The cross never filled its cell, so this is a pre-existing mismatch
-FL-4 widens rather than creates; teaching the interaction path about the variation was judged not
-worth it for a non-solid block. Revisit only if FL-4b's authored ranges make the drift larger.
-
-**Dependencies / cross-links:** FL-4 ✅ shipped; FL-3 (the reason to differentiate); the meshing
-suite's B62 oracle must then read the authored ranges rather than the constants.
 
 ---
 
@@ -330,6 +297,30 @@ RF-1 effective-light queries; TG-4 cleanup (pending) touches the same scheduler.
 
 ## Document History
 
+* **v1.4** - **FL-4b SHIPPED & archived** (2026-08-27, Validate All 578/578, BlockEditor authoring
+  path confirmed end-to-end): per-block variation moved from engine constants to
+  `BlockType.crossMeshVariation`, a `CrossMeshVariationSettings` struct (offset / scaleMin / scaleMax
+  / allowMirror) mirrored into `BlockTypeJobData` and read by `CrossMeshVariation.FromCell`. Design
+  choices, all user decisions: a **nested settings struct** rather than four flat fields (each of the
+  BlockEditor's two hand-maintained `BlockType` copy initializers gains one line, not four — the
+  omission FL-2 already had to fix once); the envelope is **clamped in the job-data mirror**
+  (`SanitizeEnvelope`) with a BlockEditor `HelpBox` showing the clamped result, so MR-4's padded
+  bounds hold by construction whatever is authored, and no `MaxCellEscape` change was needed; and
+  Grass Blades was **authored explicitly** in `BlockDatabase.asset` (additive re-serialize, 190
+  insertions / 0 deletions) rather than left on initializer defaults. New constants
+  `CrossMeshVariation.Default*` / `MaxSanitizedScale` replace the old `MaxOffset`/`MinScale`/`MaxScale`.
+  New meshing baseline **B63** with a zero-envelope `RigidFlora` palette entry (prove-red witnessed:
+  making `FromCell` ignore its envelope fails B63 alone, B62 stays green). Post-review fixes, all
+  found by `review-changes` after the first green run: the scale ceiling was clamping only the
+  **XZ** overhang, so an authored `scaleMax` above 1.2 would have pushed a top-row plant past the
+  padded section bounds (base-anchored scaling sends the whole of `scale - 1` upward) — corrected to
+  `MaxSanitizedScale = 1 + MaxCellEscape` and guarded by a third B63 leg placing an over-authored
+  `ExtremeFlora` at a section's top row. That fixture pins min = max at the ceiling deliberately: the
+  first attempt left a range, the per-cell hash sampled 1.04, and the prove-red came back **green** —
+  the clamp was never exercised. Also: both scale `[Range]` attributes widened to match the
+  BlockEditor's slider limits, and a zeroed envelope now falls back to `Default` instead of
+  sanitizing to a quarter-size plant. Verified in passing that
+  Unity's initializer defaults survive deserialization of asset entries written before the field existed.
 * **v1.3** - **FL-4 SHIPPED & archived** (2026-08-27): `CrossMeshVariation` (`Data/JobData.cs`)
   bakes a hashed XZ offset (±0.15), uniform base-anchored scale ([0.85, 1.1]) and texture-U mirror
   into every cross mesh, built in `MeshGenerationJob` from the voxel-space cell and applied by
