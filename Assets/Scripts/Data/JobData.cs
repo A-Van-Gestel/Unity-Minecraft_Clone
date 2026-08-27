@@ -193,6 +193,80 @@ namespace Data
     }
 
     /// <summary>
+    /// FL-4: the deterministic per-voxel variation applied to one cross mesh at mesh time —
+    /// an XZ offset, a uniform scale anchored at the plant's base, and a texture mirror flag.
+    /// Derived from the <b>voxel-space</b> cell (never Unity-space) so it survives floating-origin
+    /// re-anchors and chunk re-meshes bit-identically, exactly like FL-1's sway phase (WS-4 rule).
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CrossMeshVariation
+    {
+        /// <summary>Half-width of the hashed XZ offset, in blocks.</summary>
+        public const float MaxOffset = 0.15f;
+
+        /// <summary>Smallest hashed uniform scale.</summary>
+        public const float MinScale = 0.85f;
+
+        /// <summary>Largest hashed uniform scale.</summary>
+        public const float MaxScale = 1.1f;
+
+        /// <summary>
+        /// How far a varied cross mesh can reach outside its own 1×1×1 cell, in blocks: the XZ
+        /// offset plus the overhang of a scaled-up cross (scaling is centred in XZ). Vertical
+        /// escape is smaller (the base is anchored, so only the top grows), so this covers both.
+        /// <see cref="SectionRenderer"/> pads its constant section bounds by this amount (MR-4).
+        /// </summary>
+        public const float MaxCellEscape = MaxOffset + (MaxScale - 1f) * 0.5f;
+
+        /// <summary>XZ offset in blocks, each component in [-<see cref="MaxOffset"/>, <see cref="MaxOffset"/>].</summary>
+        public float OffsetX, OffsetZ;
+
+        /// <summary>Uniform scale in [<see cref="MinScale"/>, <see cref="MaxScale"/>], anchored at y = 0.</summary>
+        public float Scale;
+
+        /// <summary>When true the texture's U coordinate is flipped, giving a free second visual variant.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool MirrorU;
+
+        /// <summary>
+        /// The neutral variation: no offset, unit scale, no mirror. Used by the block-preview icon
+        /// renderer, which must stay centred and static.
+        /// </summary>
+        public static CrossMeshVariation Identity => new CrossMeshVariation { Scale = 1f };
+
+        /// <summary>
+        /// Derives the variation for one flora voxel from its voxel-space cell. All four values come
+        /// from bit-slices of a single hash, and use a salt distinct from FL-1's sway phase so a
+        /// tuft's size and its wind phase are not correlated.
+        /// </summary>
+        /// <param name="voxelX">Voxel-space cell X.</param>
+        /// <param name="voxelY">Voxel-space cell Y.</param>
+        /// <param name="voxelZ">Voxel-space cell Z.</param>
+        /// <returns>The cell's deterministic offset / scale / mirror.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static CrossMeshVariation FromCell(int voxelX, int voxelY, int voxelZ)
+        {
+            uint h = VoxelMeshHelper.VoxelHashU32(voxelX, voxelY, voxelZ, VARIATION_SALT);
+
+            // Three independent 10-bit slices + one spare bit: enough resolution for sub-block
+            // jitter, and cheaper than three separate hash calls.
+            float ox = ((h & 0x3FFu) * (1f / 1023f)) * 2f - 1f;
+            float oz = (((h >> 10) & 0x3FFu) * (1f / 1023f)) * 2f - 1f;
+            float s = ((h >> 20) & 0x3FFu) * (1f / 1023f);
+
+            return new CrossMeshVariation
+            {
+                OffsetX = ox * MaxOffset,
+                OffsetZ = oz * MaxOffset,
+                Scale = math.lerp(MinScale, MaxScale, s),
+                MirrorU = ((h >> 31) & 1u) != 0u,
+            };
+        }
+
+        private const uint VARIATION_SALT = 0x1B873593u;
+    }
+
+    /// <summary>
     /// A job-safe representation of a nullable VoxelState.
     /// </summary>
     public struct OptionalVoxelState

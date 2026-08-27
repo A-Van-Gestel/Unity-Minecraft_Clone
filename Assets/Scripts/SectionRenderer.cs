@@ -55,14 +55,18 @@ public class SectionRenderer
     };
 
     /// <summary>
-    /// MR-4: a section's geometry is always confined to its 16×16×16 cell (fluid surface heights and
-    /// cross meshes stay inside block bounds), so its post-processed section-space vertices lie in
-    /// [0, SECTION_SIZE]³. A constant <see cref="Bounds"/> replaces the per-update
-    /// <see cref="Mesh.RecalculateBounds"/> vertex scan in <see cref="UpdateMeshNative"/>.
+    /// MR-4: a section's geometry stays within its 16×16×16 cell plus a fixed margin — fluid surface
+    /// heights stay inside block bounds, and FL-4's per-voxel cross-mesh variation can push a border
+    /// tuft at most <see cref="CrossMeshVariation.MaxCellEscape"/> blocks past the section face. A
+    /// constant padded <see cref="Bounds"/> replaces the per-update
+    /// <see cref="Mesh.RecalculateBounds"/> vertex scan in <see cref="UpdateMeshNative"/>; the margin
+    /// is derived from the variation limits so the two cannot drift apart.
     /// </summary>
     private static readonly Bounds s_sectionBounds = new Bounds(
         new Vector3(ChunkMath.SECTION_SIZE * 0.5f, ChunkMath.SECTION_SIZE * 0.5f, ChunkMath.SECTION_SIZE * 0.5f),
-        new Vector3(ChunkMath.SECTION_SIZE, ChunkMath.SECTION_SIZE, ChunkMath.SECTION_SIZE));
+        new Vector3(ChunkMath.SECTION_SIZE + 2f * CrossMeshVariation.MaxCellEscape,
+            ChunkMath.SECTION_SIZE + 2f * CrossMeshVariation.MaxCellEscape,
+            ChunkMath.SECTION_SIZE + 2f * CrossMeshVariation.MaxCellEscape));
 
     // --- MR-3: cached material combinations ---
     // There are only 8 possible submesh-presence combinations (bit0=opaque, bit1=transparent,

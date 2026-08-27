@@ -466,8 +466,13 @@ namespace Jobs
                 float swayPhase = VoxelMeshHelper.VoxelHash01(
                     (int)ChunkPosition.x + pos.x, pos.y, (int)ChunkPosition.z + pos.z);
 
+                // FL-4: deterministic per-voxel offset / scale / mirror, hashed over the same
+                // voxel-space cell as the phase so a re-mesh or re-anchor reproduces it exactly.
+                CrossMeshVariation variation = CrossMeshVariation.FromCell(
+                    (int)ChunkPosition.x + pos.x, pos.y, (int)ChunkPosition.z + pos.z);
+
                 VoxelMeshHelper.GenerateCrossMesh(textureID, in crossLights,
-                    pos, swayPhase, ref _vertexIndex, ref Output.Vertices, ref Output.TransparentTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                    pos, swayPhase, in variation, ref _vertexIndex, ref Output.Vertices, ref Output.TransparentTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals,
                     ref Output.LightData);
                 return;
             }

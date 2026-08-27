@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Data;
 using Editor.Validation.Meshing.Framework;
 using Helpers;
 using UnityEngine;
@@ -252,10 +253,12 @@ namespace Editor.Validation.Meshing
 
         /// <summary>
         /// B16 — MR-4 postcondition: after a non-empty update, <see cref="Mesh.bounds"/> must EQUAL the
-        /// constant 16³ section-cell box (center (8,8,8), size (16,16,16)), independent of the actual
-        /// geometry extent. Positive control: the probe verts' tight AABB is strictly smaller than the
-        /// cell, so a <c>RecalculateBounds()</c>-style tight result would fail this equality — proving
-        /// the assertion is not vacuously satisfied by whatever bounds the geometry happens to produce.
+        /// constant section-cell box — the 16³ cell padded on every side by
+        /// <see cref="CrossMeshVariation.MaxCellEscape"/>, the only distance any geometry may reach
+        /// outside its cell (FL-4 flora variation) — independent of the actual geometry extent.
+        /// Positive control: the probe verts' tight AABB is strictly smaller than that box, so a
+        /// <c>RecalculateBounds()</c>-style tight result would fail this equality — proving the
+        /// assertion is not vacuously satisfied by whatever bounds the geometry happens to produce.
         /// </summary>
         private static bool B16_BoundsEqualConstantSectionCell()
         {
@@ -264,8 +267,8 @@ namespace Editor.Validation.Meshing
             using SectionRendererTestFixture fixture = new SectionRendererTestFixture();
             fixture.RunUpdate(s_rendererProbeVerts, opaqueCount: 3, transparentCount: 0, fluidCount: 0);
 
-            const float size = ChunkMath.SECTION_SIZE;
-            const float half = size * 0.5f;
+            const float size = ChunkMath.SECTION_SIZE + 2f * CrossMeshVariation.MaxCellEscape;
+            const float half = ChunkMath.SECTION_SIZE * 0.5f;
             Bounds expected = new Bounds(new Vector3(half, half, half), new Vector3(size, size, size));
 
             allPassed &= RendererAssert.BoundsEqual("B16: mesh bounds equal the constant section cell",

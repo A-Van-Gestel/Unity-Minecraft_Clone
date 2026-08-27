@@ -169,6 +169,30 @@ namespace Helpers
         }
 
         /// <summary>
+        /// Raw (un-normalized) salted variant of <see cref="VoxelHash01"/>: same avalanche over the
+        /// <b>voxel-space</b> cell, mixed with a caller-chosen salt so independent per-voxel decisions
+        /// stay de-correlated, and returning all 32 bits so one call can be bit-sliced into several
+        /// values (FL-4). Deliberately a separate function — <see cref="VoxelHash01"/>'s output is
+        /// pinned by the shipped FL-1/FL-2 sway phases and must stay bit-identical.
+        /// </summary>
+        /// <param name="x">Voxel-space cell X.</param>
+        /// <param name="y">Voxel-space cell Y.</param>
+        /// <param name="z">Voxel-space cell Z.</param>
+        /// <param name="salt">Per-use-site salt; distinct salts give uncorrelated streams for one cell.</param>
+        /// <returns>The full 32-bit avalanche result.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static uint VoxelHashU32(int x, int y, int z, uint salt)
+        {
+            uint h = (uint)x * 0x9E3779B1u ^ (uint)y * 0x85EBCA77u ^ (uint)z * 0xC2B2AE3Du ^ salt;
+            h ^= h >> 16;
+            h *= 0x7FEB352Du;
+            h ^= h >> 15;
+            h *= 0x846CA68Bu;
+            h ^= h >> 16;
+            return h;
+        }
+
+        /// <summary>
         /// Generates a single face of a standard cube voxel with flat (uniform) lighting.
         /// Delegates to the per-vertex-light overload with identical corner values.
         /// </summary>
@@ -802,7 +826,7 @@ namespace Helpers
         private static void AddCrossQuad(
             Vector3 bl, Vector3 tl, Vector3 br, Vector3 tr, Vector3 normal, int textureID, Color32 vertexColor,
             Color32 lightBL, Color32 lightTL, Color32 lightBR, Color32 lightTR, in Vector3Int position,
-            float swayPhase,
+            float swayPhase, bool mirrorU,
             ref int vertexIndex, ref NativeList<Vector3> vertices, ref NativeList<int> transparentTriangles,
             ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
             ref NativeList<Color32> lightData)
@@ -827,16 +851,41 @@ namespace Helpers
             lightData.Add(lightBR);
             lightData.Add(lightTR);
 
-            // FL-1: grass bends from the root — only the two top (y=1) verts carry sway weight,
+            // FL-4: a mirrored voxel swaps the texture's U extremes, so one atlas tile reads as two
+            // different plants. Geometry is untouched — the cross already contains both diagonals.
+            float uLeft = mirrorU ? 1f : 0f;
+            float uRight = mirrorU ? 0f : 1f;
+
+            // FL-1: grass bends from the root — only the two top verts carry sway weight,
             // so the base stays planted and the mesh can never displace into the ground.
-            AddTexture(textureID, new Vector2(0, 0), swayWeight: 0f, swayPhase, ref uvs); // BL
-            AddTexture(textureID, new Vector2(0, 1), swayWeight: 1f, swayPhase, ref uvs); // TL
-            AddTexture(textureID, new Vector2(1, 0), swayWeight: 0f, swayPhase, ref uvs); // BR
-            AddTexture(textureID, new Vector2(1, 1), swayWeight: 1f, swayPhase, ref uvs); // TR
+            AddTexture(textureID, new Vector2(uLeft, 0), swayWeight: 0f, swayPhase, ref uvs); // BL
+            AddTexture(textureID, new Vector2(uLeft, 1), swayWeight: 1f, swayPhase, ref uvs); // TL
+            AddTexture(textureID, new Vector2(uRight, 0), swayWeight: 0f, swayPhase, ref uvs); // BR
+            AddTexture(textureID, new Vector2(uRight, 1), swayWeight: 1f, swayPhase, ref uvs); // TR
 
             EmitQuadTriangles(lightBL, lightTL, lightBR, lightTR, vertexIndex, ref transparentTriangles);
 
             vertexIndex += 4;
+        }
+
+        /// <summary>
+        /// Applies a voxel's FL-4 variation to one unit-cube cross corner: scale is uniform and
+        /// centred in XZ but anchored at y = 0 (the plant grows upward, never into the ground),
+        /// then the hashed XZ offset shifts the whole plant within — and slightly beyond — its cell.
+        /// </summary>
+        /// <param name="x">Unit corner X (0 or 1).</param>
+        /// <param name="y">Unit corner Y (0 or 1).</param>
+        /// <param name="z">Unit corner Z (0 or 1).</param>
+        /// <param name="variation">The voxel's variation.</param>
+        /// <returns>The varied cell-local corner position.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector3 VaryCrossCorner(float x, float y, float z, in CrossMeshVariation variation)
+        {
+            const float CELL_CENTER = 0.5f;
+            return new Vector3(
+                CELL_CENTER + (x - CELL_CENTER) * variation.Scale + variation.OffsetX,
+                y * variation.Scale,
+                CELL_CENTER + (z - CELL_CENTER) * variation.Scale + variation.OffsetZ);
         }
 
         /// <summary>
@@ -846,12 +895,19 @@ namespace Helpers
         /// by the caller with either smooth corner-averaged values or uniform flat values.
         /// Sway data rides the UV ZW channels (FL-1): top verts get weight 1, bottom verts 0, and
         /// every vert carries <paramref name="swayPhase"/> so the shader can de-synchronize tufts.
+        /// <paramref name="variation"/> (FL-4) jitters the plant's position, size, and texture mirror
+        /// per voxel; pass <see cref="CrossMeshVariation.Identity"/> for an unvaried, centred cross.
         /// </summary>
+        /// <param name="textureID">Atlas index of the flora texture.</param>
+        /// <param name="cornerLights">Pre-resolved per-corner light values (top and bottom levels).</param>
+        /// <param name="position">The voxel's chunk-local cell.</param>
+        /// <param name="swayPhase">Per-voxel wind phase in [0, 1), from <see cref="VoxelHash01"/>.</param>
+        /// <param name="variation">Per-voxel offset / scale / mirror (FL-4).</param>
         [BurstCompile]
         [SkipLocalsInit]
         public static void GenerateCrossMesh(
             int textureID, in CrossMeshCornerLights cornerLights,
-            in Vector3Int position, float swayPhase,
+            in Vector3Int position, float swayPhase, in CrossMeshVariation variation,
             ref int vertexIndex,
             ref NativeList<Vector3> vertices, ref NativeList<int> transparentTriangles,
             ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
@@ -871,40 +927,41 @@ namespace Helpers
             Color32 light_1_0_1 = cornerLights.BotL3;
             Color32 light_1_1_1 = cornerLights.TopL3;
 
-            // Plane 1: (0,0,0) to (1,1,1)
-            Vector3 p1_bl = new Vector3(0, 0, 0);
-            Vector3 p1_tl = new Vector3(0, 1, 0);
-            Vector3 p1_br = new Vector3(1, 0, 1);
-            Vector3 p1_tr = new Vector3(1, 1, 1);
+            // Plane 1: (0,0,0) to (1,1,1) — corners are varied per voxel (FL-4); normals are not,
+            // because a uniform scale plus a translation leaves face directions unchanged.
+            Vector3 p1_bl = VaryCrossCorner(0, 0, 0, in variation);
+            Vector3 p1_tl = VaryCrossCorner(0, 1, 0, in variation);
+            Vector3 p1_br = VaryCrossCorner(1, 0, 1, in variation);
+            Vector3 p1_tr = VaryCrossCorner(1, 1, 1, in variation);
             Vector3 normal1_front = new Vector3(-0.7071f, 0f, 0.7071f);
             Vector3 normal1_back = new Vector3(0.7071f, 0f, -0.7071f);
 
             // Plane 2: (1,0,0) to (0,1,1)
-            Vector3 p2_bl = new Vector3(1, 0, 0);
-            Vector3 p2_tl = new Vector3(1, 1, 0);
-            Vector3 p2_br = new Vector3(0, 0, 1);
-            Vector3 p2_tr = new Vector3(0, 1, 1);
+            Vector3 p2_bl = VaryCrossCorner(1, 0, 0, in variation);
+            Vector3 p2_tl = VaryCrossCorner(1, 1, 0, in variation);
+            Vector3 p2_br = VaryCrossCorner(0, 0, 1, in variation);
+            Vector3 p2_tr = VaryCrossCorner(0, 1, 1, in variation);
             Vector3 normal2_front = new Vector3(0.7071f, 0f, 0.7071f);
             Vector3 normal2_back = new Vector3(-0.7071f, 0f, -0.7071f);
 
             // Plane 1 front: bl=(0,0,0), tl=(0,1,0), br=(1,0,1), tr=(1,1,1)
             AddCrossQuad(p1_bl, p1_tl, p1_br, p1_tr, normal1_front, textureID, vertexColor,
-                light_0_0_0, light_0_1_0, light_1_0_1, light_1_1_1, in position, swayPhase,
+                light_0_0_0, light_0_1_0, light_1_0_1, light_1_1_1, in position, swayPhase, variation.MirrorU,
                 ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
 
             // Plane 1 back: bl=(1,0,1), tl=(1,1,1), br=(0,0,0), tr=(0,1,0)
             AddCrossQuad(p1_br, p1_tr, p1_bl, p1_tl, normal1_back, textureID, vertexColor,
-                light_1_0_1, light_1_1_1, light_0_0_0, light_0_1_0, in position, swayPhase,
+                light_1_0_1, light_1_1_1, light_0_0_0, light_0_1_0, in position, swayPhase, variation.MirrorU,
                 ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
 
             // Plane 2 front: bl=(1,0,0), tl=(1,1,0), br=(0,0,1), tr=(0,1,1)
             AddCrossQuad(p2_bl, p2_tl, p2_br, p2_tr, normal2_front, textureID, vertexColor,
-                light_1_0_0, light_1_1_0, light_0_0_1, light_0_1_1, in position, swayPhase,
+                light_1_0_0, light_1_1_0, light_0_0_1, light_0_1_1, in position, swayPhase, variation.MirrorU,
                 ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
 
             // Plane 2 back: bl=(0,0,1), tl=(0,1,1), br=(1,0,0), tr=(1,1,0)
             AddCrossQuad(p2_br, p2_tr, p2_bl, p2_tl, normal2_back, textureID, vertexColor,
-                light_0_0_1, light_0_1_1, light_1_0_0, light_1_1_0, in position, swayPhase,
+                light_0_0_1, light_0_1_1, light_1_0_0, light_1_1_0, in position, swayPhase, variation.MirrorU,
                 ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
         }
 

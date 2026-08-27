@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text;
 using Data;
 using Data.Enums;
 using Editor.Validation.Meshing.Framework;
@@ -39,6 +40,7 @@ namespace Editor.Validation.Meshing
             scenarios.Add(new Scenario("B17: a pooled output reused across scenes equals a fresh buffer (MH-2 / MR-6 stale-reuse guard)", B17_PooledOutputStaleDataGuard));
             scenarios.Add(new Scenario("B22: cross-mesh UV ZW carries sway weight (top/bottom split) + deterministic per-voxel phase; cubes stay ZW=0 (FL-1 guard)", B22_CrossMeshSwayChannels));
             scenarios.Add(new Scenario("B23: sway-flagged cube writes authored swayStrength + phase to UV ZW on every vert; zero-strength blocks stay ZW=0 (FL-2 guard)", B23_CubeSwayChannels));
+            scenarios.Add(new Scenario("B62: per-voxel cross-mesh variation matches the offset/scale/mirror oracle, stays base-planted, inside the padded cell, deterministic and cell-distinct (FL-4 guard)", B62_CrossMeshVariation));
 
             // --- Cross-chunk border-face-culling family (B18–B21, MH-10/MH-11) lives in its own partial
             // file (MeshingValidationSuite.CrossChunk.cs) and self-registers here. ---
@@ -1045,6 +1047,9 @@ namespace Editor.Validation.Meshing
         /// Verifies one cross-flora voxel's 16 verts: weight (UV Z) is exactly 1 on top verts and 0 on
         /// bottom verts, and phase (UV W) is a single value shared by all 16, inside [0, 1] (half
         /// rounding may land a phase just below 1 exactly on 1 — functionally equivalent, sin is 2π-periodic).
+        /// The cell filter carries FL-4's escape margin and classifies top-vs-bottom by height rather
+        /// than by an exact <c>pos.y + 1</c>, since a varied cross is scaled and offset (B62 owns the
+        /// variation itself).
         /// </summary>
         /// <param name="label">Assertion label prefix.</param>
         /// <param name="o">The meshing output containing the voxel's verts.</param>
@@ -1056,17 +1061,20 @@ namespace Editor.Validation.Meshing
             int vertsSeen = 0;
             bool weightsOk = true, phaseUniform = true;
 
+            const float MARGIN = CrossMeshVariation.MaxCellEscape;
+
             for (int i = 0; i < o.Vertices.Length; i++)
             {
                 Vector3 v = o.Vertices[i];
-                // Cross verts sit on the cell's corners/edges: x/z in {pos, pos+1}, y in {pos, pos+1}.
-                if (v.x < pos.x || v.x > pos.x + 1 || v.z < pos.z || v.z > pos.z + 1 ||
-                    v.y < pos.y || v.y > pos.y + 1)
+                // Cross verts sit near the cell's corners, up to MARGIN outside it after FL-4 variation.
+                if (v.x < pos.x - MARGIN || v.x > pos.x + 1 + MARGIN ||
+                    v.z < pos.z - MARGIN || v.z > pos.z + 1 + MARGIN ||
+                    v.y < pos.y || v.y > pos.y + CrossMeshVariation.MaxScale)
                     continue;
 
                 vertsSeen++;
                 float weight = o.Uvs[i].z;
-                bool isTop = Mathf.Approximately(v.y, pos.y + 1);
+                bool isTop = v.y > pos.y + 0.5f;
                 if (!ExactValue.Equal(weight, isTop ? 1f : 0f)) weightsOk = false;
 
                 float w = o.Uvs[i].w;
@@ -1170,6 +1178,191 @@ namespace Editor.Validation.Meshing
             passed &= MeshAssert.IsTrue($"{label}: UV Z == {expectedWeight:G4} on every vert", weightsOk, "UV Z mismatch");
             passed &= MeshAssert.IsTrue($"{label}: phase uniform across the voxel", phaseUniform, $"first phase={phase:G6}");
             passed &= MeshAssert.IsTrue($"{label}: phase within [0, 1]", phase >= 0f && phase <= 1f, $"phase={phase:G6}");
+            return passed;
+        }
+
+        /// <summary>
+        /// B62 — FL-4 per-voxel cross-mesh variation guard. Three cross-flora voxels — two that hash to
+        /// an un-mirrored texture and one that hashes to a mirrored one — must each match the
+        /// <see cref="CrossMeshVariation.FromCell"/> oracle for their voxel-space cell: every vert sits
+        /// on a varied corner, the base stays exactly on the ground plane, the mirror flag flips the
+        /// texture's U direction, and no vert reaches further than
+        /// <see cref="CrossMeshVariation.MaxCellEscape"/> outside the cell — the margin
+        /// <see cref="SectionRenderer"/>'s constant section bounds are padded by (MR-4). The two cells
+        /// must also differ (anti-constant-hash) and reproduce bit-identically across runs.
+        /// </summary>
+        private static bool B62_CrossMeshVariation()
+        {
+            using MeshingTestWorld world = new MeshingTestWorld();
+            Vector3Int posA = new Vector3Int(8, 8, 8);
+            Vector3Int posB = new Vector3Int(4, 8, 4);
+            // Cell C hashes to MirrorU = true; A and B both hash to false, so without it the mirror
+            // assertion would only ever see the un-mirrored branch and pass vacuously.
+            Vector3Int posC = new Vector3Int(1, 8, 1);
+            world.SetBlock(posA.x, posA.y, posA.z, TestMeshBlockPalette.CrossFlora);
+            world.SetBlock(posB.x, posB.y, posB.z, TestMeshBlockPalette.CrossFlora);
+            world.SetBlock(posC.x, posC.y, posC.z, TestMeshBlockPalette.CrossFlora);
+            MeshDataJobOutput o = world.Run();
+
+            bool passed = MeshAssert.VertexCount("B62 vertex count (3 cross voxels)", o, 48);
+            passed &= MeshAssert.StructuralInvariants("B62 structural", o);
+            if (o.Vertices.Length != 48) return false;
+
+            // The test world meshes chunk (0, 0), so the voxel-space cell equals the chunk-local cell.
+            CrossMeshVariation varA = CrossMeshVariation.FromCell(posA.x, posA.y, posA.z);
+            CrossMeshVariation varB = CrossMeshVariation.FromCell(posB.x, posB.y, posB.z);
+            CrossMeshVariation varC = CrossMeshVariation.FromCell(posC.x, posC.y, posC.z);
+
+            passed &= CheckCrossVariation("B62 voxel A", o, posA, varA);
+            passed &= CheckCrossVariation("B62 voxel B", o, posB, varB);
+            passed &= CheckCrossVariation("B62 voxel C", o, posC, varC);
+
+            // Both mirror states must be exercised, or the U-direction assertion proves nothing.
+            passed &= MeshAssert.IsTrue("B62 fixture covers both mirror states",
+                varA.MirrorU != varC.MirrorU || varB.MirrorU != varC.MirrorU,
+                $"A={varA.MirrorU} B={varB.MirrorU} C={varC.MirrorU} — pick cells that hash to both");
+
+            // Anti-constant guard: a hash that collapsed to one value would re-create the perfectly
+            // uniform grid FL-4 exists to break, while every per-voxel assertion above stayed green.
+            bool distinct = !ExactValue.Equal(varA.OffsetX, varB.OffsetX)
+                            || !ExactValue.Equal(varA.OffsetZ, varB.OffsetZ)
+                            || !ExactValue.Equal(varA.Scale, varB.Scale)
+                            || varA.MirrorU != varB.MirrorU;
+            passed &= MeshAssert.IsTrue("B62 variation differs between cells", distinct,
+                $"A=({varA.OffsetX:G6},{varA.OffsetZ:G6},{varA.Scale:G6},{varA.MirrorU}) " +
+                $"B=({varB.OffsetX:G6},{varB.OffsetZ:G6},{varB.Scale:G6},{varB.MirrorU})");
+
+            // The published limits are load-bearing: SectionRenderer pads its bounds by MaxCellEscape,
+            // which is only correct while the hash stays inside the offset/scale ranges it is derived from.
+            passed &= MeshAssert.IsTrue("B62 oracle offsets within ±MaxOffset",
+                Mathf.Abs(varA.OffsetX) <= CrossMeshVariation.MaxOffset &&
+                Mathf.Abs(varA.OffsetZ) <= CrossMeshVariation.MaxOffset &&
+                Mathf.Abs(varB.OffsetX) <= CrossMeshVariation.MaxOffset &&
+                Mathf.Abs(varB.OffsetZ) <= CrossMeshVariation.MaxOffset,
+                $"A=({varA.OffsetX:G6},{varA.OffsetZ:G6}) B=({varB.OffsetX:G6},{varB.OffsetZ:G6})");
+            passed &= MeshAssert.IsTrue("B62 oracle scales within [MinScale, MaxScale]",
+                varA.Scale >= CrossMeshVariation.MinScale && varA.Scale <= CrossMeshVariation.MaxScale &&
+                varB.Scale >= CrossMeshVariation.MinScale && varB.Scale <= CrossMeshVariation.MaxScale,
+                $"A={varA.Scale:G6} B={varB.Scale:G6}");
+
+            // Determinism: the variation must depend on nothing but the voxel cell, so a second run
+            // over the same map reproduces both the positions and the UVs bit-identically.
+            Vector3[] firstVerts = o.Vertices.AsArray().ToArray();
+            half4[] firstUvs = o.Uvs.AsArray().ToArray();
+            MeshDataJobOutput o2 = world.Run();
+            bool identical = o2.Vertices.Length == firstVerts.Length && o2.Uvs.Length == firstUvs.Length;
+            if (identical)
+            {
+                for (int i = 0; i < firstVerts.Length; i++)
+                {
+                    if (firstVerts[i] != o2.Vertices[i] || !firstUvs[i].Equals(o2.Uvs[i]))
+                    {
+                        identical = false;
+                        break;
+                    }
+                }
+            }
+
+            passed &= MeshAssert.IsTrue("B62 varied geometry deterministic across runs", identical,
+                $"run1 verts={firstVerts.Length} run2 verts={o2.Vertices.Length}");
+
+            return passed;
+        }
+
+        /// <summary>
+        /// Verifies one flora voxel's 16 varied verts against the FL-4 oracle: every vert lands on one
+        /// of the eight varied corners, the eight base verts stay exactly on the cell's ground plane,
+        /// no vert escapes the cell by more than <see cref="CrossMeshVariation.MaxCellEscape"/>, and the
+        /// first quad's U direction matches the mirror flag.
+        /// </summary>
+        /// <param name="label">Assertion label prefix.</param>
+        /// <param name="o">The meshing output containing the voxel's verts.</param>
+        /// <param name="pos">The voxel's chunk-local cell.</param>
+        /// <param name="variation">The expected variation for the voxel's cell.</param>
+        private static bool CheckCrossVariation(string label, MeshDataJobOutput o, Vector3Int pos,
+            CrossMeshVariation variation)
+        {
+            const float MARGIN = CrossMeshVariation.MaxCellEscape;
+            float minX = pos.x - MARGIN, maxX = pos.x + 1 + MARGIN;
+            float minZ = pos.z - MARGIN, maxZ = pos.z + 1 + MARGIN;
+
+            // The eight varied cell corners, in the same order the generator derives them.
+            Vector3[] expected = new Vector3[8];
+            for (int c = 0; c < 8; c++)
+            {
+                float cx = (c & 1) != 0 ? 1f : 0f;
+                float cy = (c & 2) != 0 ? 1f : 0f;
+                float cz = (c & 4) != 0 ? 1f : 0f;
+                expected[c] = new Vector3(
+                    pos.x + 0.5f + (cx - 0.5f) * variation.Scale + variation.OffsetX,
+                    pos.y + cy * variation.Scale,
+                    pos.z + 0.5f + (cz - 0.5f) * variation.Scale + variation.OffsetZ);
+            }
+
+            int firstVert = -1;
+            int vertsSeen = 0, baseVerts = 0;
+            bool cornersOk = true, insideMargin = true;
+            // Per-corner hit counts, not a single bool: the four quads emit each corner exactly twice,
+            // so a defect that collapses two corners onto one still leaves every vert matching *some*
+            // oracle corner. Only the counts distinguish "8 corners" from "4 corners, doubled up".
+            int[] cornerHits = new int[8];
+
+            for (int i = 0; i < o.Vertices.Length; i++)
+            {
+                Vector3 v = o.Vertices[i];
+                if (v.y < pos.y - MARGIN || v.y > pos.y + CrossMeshVariation.MaxScale + MARGIN ||
+                    v.x < minX - 1f || v.x > maxX + 1f || v.z < minZ - 1f || v.z > maxZ + 1f)
+                    continue; // A vert from another voxel entirely.
+
+                if (firstVert < 0) firstVert = i;
+                vertsSeen++;
+
+                if (v.x < minX || v.x > maxX || v.z < minZ || v.z > maxZ ||
+                    v.y < pos.y || v.y > pos.y + CrossMeshVariation.MaxScale)
+                    insideMargin = false;
+
+                if (ExactValue.Equal(v.y, pos.y)) baseVerts++;
+
+                bool matched = false;
+                for (int c = 0; c < 8; c++)
+                {
+                    if (Vector3.Distance(v, expected[c]) <= MeshAssert.VertexEpsilon)
+                    {
+                        cornerHits[c]++;
+                        matched = true;
+                        break;
+                    }
+                }
+
+                if (!matched) cornersOk = false;
+            }
+
+            bool passed = MeshAssert.IsTrue($"{label}: 16 verts found near cell", vertsSeen == 16, $"found {vertsSeen}");
+            passed &= MeshAssert.IsTrue($"{label}: every vert matches the variation oracle", cornersOk,
+                $"offset=({variation.OffsetX:G6},{variation.OffsetZ:G6}) scale={variation.Scale:G6}");
+
+            StringBuilder wrongCorners = new StringBuilder();
+            for (int c = 0; c < 8; c++)
+            {
+                if (cornerHits[c] != 2) wrongCorners.Append($" corner{c}={cornerHits[c]}");
+            }
+
+            passed &= MeshAssert.IsTrue($"{label}: all 8 varied corners emitted exactly twice",
+                wrongCorners.Length == 0, $"expected 2 hits each, got:{wrongCorners}");
+            passed &= MeshAssert.IsTrue($"{label}: 8 base verts stay exactly on y = {pos.y}", baseVerts == 8,
+                $"found {baseVerts}");
+            passed &= MeshAssert.IsTrue($"{label}: no vert escapes the cell by more than {MARGIN:G4}", insideMargin,
+                "a vert left the padded section bounds SectionRenderer relies on");
+
+            if (firstVert < 0 || vertsSeen != 16) return false;
+
+            // Vert 0 and vert 2 of the voxel's first quad are its BL and BR corners; mirroring swaps
+            // which of them carries the tile's low U, so their ordering is the mirror flag's signature.
+            bool uDescending = o.Uvs[firstVert].x > o.Uvs[firstVert + 2].x;
+            passed &= MeshAssert.IsTrue($"{label}: texture U direction matches MirrorU={variation.MirrorU}",
+                uDescending == variation.MirrorU,
+                $"u[0]={(float)o.Uvs[firstVert].x:G6} u[2]={(float)o.Uvs[firstVert + 2].x:G6}");
+
             return passed;
         }
     }
