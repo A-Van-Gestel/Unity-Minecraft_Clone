@@ -1,4 +1,6 @@
+using Audio;
 using Data;
+using Data.Enums;
 using Helpers;
 using Jobs.BurstData;
 using Physics;
@@ -119,10 +121,19 @@ public class PlayerInteraction : MonoBehaviour
                 // cannot be broken. (Placement is gated inside the probe via PlacementController.CanPlaceAt.)
                 if (_world.IsVoxelInsideBorder(breakVoxel))
                 {
+                    // Sampled before the modification: the sound belongs to the block being removed, and one
+                    // frame later the cell holds Air.
+                    ushort brokenBlockId = _world.TryGetVoxel(breakVoxel.x, breakVoxel.y, breakVoxel.z,
+                        out VoxelState brokenState)
+                        ? brokenState.ID
+                        : BlockIDs.Air;
+
                     _world.AddModification(new VoxelMod(breakVoxel, blockId: BlockIDs.Air)
                     {
                         ImmediateUpdate = true,
                     });
+
+                    PlayBlockSound(brokenBlockId, BlockSoundEvent.Break, _lastProbe.HitCell);
                 }
             }
 
@@ -144,10 +155,27 @@ public class PlayerInteraction : MonoBehaviour
                     ImmediateUpdate = true,
                 });
                 itemSlot.ItemSlot.Take(1);
+
+                PlayBlockSound(placedBlockId, BlockSoundEvent.Place, _lastProbe.PlaceCell);
             }
         }
     }
 
+
+    /// <summary>
+    /// Plays a block's break or place one-shot at the center of the affected cell.
+    /// </summary>
+    /// <param name="blockId">The block whose sound material should sound.</param>
+    /// <param name="evt">Which one-shot to play.</param>
+    /// <param name="unityCell">The affected cell in Unity/render space — the probe's own space.</param>
+    private void PlayBlockSound(ushort blockId, BlockSoundEvent evt, Vector3Int unityCell)
+    {
+        SoundManager sound = SoundManager.Instance;
+        if (sound == null) return;
+
+        // Unity space, not voxel space: the listener lives in render space, and the probe cell is already there.
+        sound.PlayBlockSound(_world.BlockTypes, blockId, evt, unityCell + new Vector3(0.5f, 0.5f, 0.5f));
+    }
 
     /// <summary>
     /// Converts a Unity-space cell from the placement probe into the absolute voxel cell a
