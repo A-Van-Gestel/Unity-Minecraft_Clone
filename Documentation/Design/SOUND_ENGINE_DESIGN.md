@@ -456,7 +456,13 @@ on top stays verified in-game, as with every other suite.
 Clip content comes from free/CC0 sources; `BlockSoundDatabase` isolates content from
 architecture, so clips can be swapped or upgraded at any time without code changes.
 
-Candidate sources for S0's clip content. **License hygiene rule:** licensing on these sites is
+**Shipped content (2026-08-28):** [Kenney — Impact Sounds](https://kenney.nl/assets/impact-sounds) v1.0,
+**CC0**, 75 of its 130 clips under `Assets/Audio/Blocks/kenney_impact/`, covering 12 of the 14 `SoundMaterial` groups
+(5 variants each for break and step; `Wood`, `Glass` and `Metal` also carry distinct place clips). `None`
+is silent by design and `Liquid` is unfilled — an impact pack has no water content, so fluids stay silent
+until a water/splash source is chosen. Recorded in `REFERENCES_AND_CREDITS.md` and `CreditsDatabase.asset`.
+
+Candidate sources for further clip content. **License hygiene rule:** licensing on these sites is
 per-asset (or per-pack), *not* per-site — verify the license of every individual download, and
 record author + source URL + license per imported clip/pack in the project's **existing credit
 infrastructure**: a new "🔊 Audio" section in

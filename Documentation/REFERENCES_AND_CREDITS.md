@@ -70,7 +70,18 @@ not per-site:** verify and record the licence of every individual download here,
 and licence, before it ships. See `Documentation/Design/SOUND_ENGINE_DESIGN.md` §9 for the sourcing policy,
 including the three-step permission rule for "free to download but no attached licence" packs.*
 
-*No audio content has been imported yet — the engine ships with an empty sound database.*
+* [**Impact Sounds**](https://kenney.nl/assets/impact-sounds) by [Kenney](https://kenney.nl/)
+    * *Version:* 1.0 (2019-12-19)
+    * *License:* CC0 (Public Domain) — per the pack's own `License.txt`. Crediting is explicitly not
+      required; recorded here because the project credits every third-party asset.
+    * *Files used:* 75 of the pack's 130 clips — `footstep_carpet`, `footstep_concrete`,
+      `footstep_grass`, `footstep_snow`, `footstep_wood`, `impactGeneric_light`, `impactGlass_light`,
+      `impactGlass_medium`, `impactMetal_medium`, `impactMining`, `impactPlank_medium`,
+      `impactPlate_medium`, `impactSoft_heavy`, `impactSoft_medium`, `impactWood_medium` (5 variants each).
+    * *Source:* `Assets/Audio/Blocks/kenney_impact/` (one folder per pack)
+    * *Notes:* Block break / place / footstep one-shots, mapped to `SoundMaterial` groups in
+      `BlockSoundDatabase.asset`. The `Liquid` group is deliberately unfilled — an impact pack has no
+      water or splash content.
 
 ## ✒️ Fonts
 

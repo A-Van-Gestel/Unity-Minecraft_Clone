@@ -285,3 +285,32 @@ MonoBehaviour:
     notes: "Book chapter. Technique only \u2014 no code used. Evaluated in Burst
       on the CPU rather than on the GPU, and restricted to the Dynamic Density Band
       instead of the full volume."
+  - name: Impact Sounds
+    author: Kenney
+    category: 6
+    licenseType: 5
+    customLicenseText: 
+    url: https://kenney.nl/assets/impact-sounds
+    usageDescription: Block break, place and footstep one-shots, mapped to SoundMaterial
+      groups.
+    sourceFiles:
+    - footstep_carpet
+    - footstep_concrete
+    - footstep_grass
+    - footstep_snow
+    - footstep_wood
+    - impactGeneric_light
+    - impactGlass_light
+    - impactGlass_medium
+    - impactMetal_medium
+    - impactMining
+    - impactPlank_medium
+    - impactPlate_medium
+    - impactSoft_heavy
+    - impactSoft_medium
+    - impactWood_medium
+    projectFiles:
+    - Assets/Audio/Blocks/kenney_impact/
+    version: 1.0
+    notes: 75 of the pack's 130 clips, 5 variants per family. Crediting is not required
+      by CC0.
