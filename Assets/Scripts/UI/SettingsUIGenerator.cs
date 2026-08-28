@@ -59,6 +59,7 @@ namespace UI
             SettingsTab.General,
             SettingsTab.Controls,
             SettingsTab.Graphics,
+            SettingsTab.Audio,
             SettingsTab.World,
             SettingsTab.Performance,
             SettingsTab.Benchmark,

@@ -351,6 +351,69 @@ public class Settings
 
     #endregion
 
+    #region Audio Tab
+
+    // ═══════════════════════════════════════════════════════════════════
+    // AUDIO TAB
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Master output volume. Scales every category below.
+    /// </summary>
+    [Header("Volume")]
+    [SettingField(SettingsTab.Audio, Label = "Master Volume", Format = "f2", Order = 0)]
+    [Range(0f, 1f)]
+    [Tooltip("Overall output volume. Scales every category below.\n\n" +
+             TooltipTags.DefaultColorStart + "1.00" + TooltipTags.DefaultColorEnd)]
+    public float masterVolume = 1f;
+
+    /// <summary>
+    /// Volume of the background music scheduler.
+    /// </summary>
+    [SettingField(SettingsTab.Audio, Label = "Music Volume", Format = "f2", Order = 1)]
+    [Range(0f, 1f)]
+    [Tooltip("Volume of background music.\n\n" +
+             TooltipTags.DefaultColorStart + "0.70" + TooltipTags.DefaultColorEnd)]
+    public float musicVolume = 0.7f;
+
+    /// <summary>
+    /// Volume of the biome, cave and weather ambience beds.
+    /// </summary>
+    [SettingField(SettingsTab.Audio, Label = "Ambient Volume", Format = "f2", Order = 2)]
+    [Range(0f, 1f)]
+    [Tooltip("Volume of biome and cave ambience beds.\n\n" +
+             TooltipTags.DefaultColorStart + "1.00" + TooltipTags.DefaultColorEnd)]
+    public float ambientVolume = 1f;
+
+    /// <summary>
+    /// Volume of block break, place and footstep one-shots.
+    /// </summary>
+    [SettingField(SettingsTab.Audio, Label = "Block Volume", Format = "f2", Order = 3)]
+    [Range(0f, 1f)]
+    [Tooltip("Volume of block break, place and footstep sounds.\n\n" +
+             TooltipTags.DefaultColorStart + "1.00" + TooltipTags.DefaultColorEnd)]
+    public float blockVolume = 1f;
+
+    /// <summary>
+    /// Volume of the looping fluid emitters (flowing water, waterfalls, lava).
+    /// </summary>
+    [SettingField(SettingsTab.Audio, Label = "Fluid Volume", Format = "f2", Order = 4)]
+    [Range(0f, 1f)]
+    [Tooltip("Volume of flowing water, waterfall and lava loops.\n\n" +
+             TooltipTags.DefaultColorStart + "1.00" + TooltipTags.DefaultColorEnd)]
+    public float fluidVolume = 1f;
+
+    /// <summary>
+    /// Volume of interface sounds.
+    /// </summary>
+    [SettingField(SettingsTab.Audio, Label = "UI Volume", Format = "f2", Order = 5)]
+    [Range(0f, 1f)]
+    [Tooltip("Volume of interface sounds.\n\n" +
+             TooltipTags.DefaultColorStart + "1.00" + TooltipTags.DefaultColorEnd)]
+    public float uiVolume = 1f;
+
+    #endregion
+
     #region World Tab
 
     // ═══════════════════════════════════════════════════════════════════

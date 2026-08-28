@@ -68,6 +68,12 @@ MonoBehaviour:
     vSync: 1
     unlimitedFps: 0
     maxFps: 120
+    masterVolume: 1
+    musicVolume: 0.7
+    ambientVolume: 1
+    blockVolume: 1
+    fluidVolume: 1
+    uiVolume: 1
     enableLighting: 1
     enableCaves: 1
     enableLodes: 1
