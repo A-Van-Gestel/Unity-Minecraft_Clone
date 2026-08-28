@@ -28,6 +28,12 @@ namespace Audio
         [SerializeField]
         private float _landingEmphasis = 1.4f;
 
+        [Tooltip("Volume of the layered step from a non-solid block occupying the player's own cell " +
+                 "(water, flora), relative to the step from the block underneath.")]
+        [Range(0f, 1f)]
+        [SerializeField]
+        private float _occupantLayerVolume = 0.9f;
+
         private VoxelRigidbody _body;
         private World _world;
         private Vector3 _lastStepPosition;
@@ -75,29 +81,50 @@ namespace Audio
         }
 
         /// <summary>
-        /// Resolves the block under the player's feet and plays its step sound.
+        /// Plays a step: the supporting block always, plus a layered one-shot for a non-solid block
+        /// occupying the player's own cell.
         /// </summary>
         /// <param name="emphasis">Volume multiplier — above 1 for the landing step.</param>
         private void PlayStep(float emphasis)
         {
             Vector3 unityPos = transform.position;
+            SoundResolution.StepCells(unityPos.y, out int occupantUnityY, out int supportUnityY);
 
-            // The cell below the feet: floor() rather than round(), and one below the standing surface.
-            Vector3Int unityCell = new Vector3Int(
-                Mathf.FloorToInt(unityPos.x),
-                Mathf.FloorToInt(unityPos.y) - 1,
-                Mathf.FloorToInt(unityPos.z));
+            int unityX = Mathf.FloorToInt(unityPos.x);
+            int unityZ = Mathf.FloorToInt(unityPos.z);
+            Vector3Int origin = WorldOrigin.OriginVoxel;
+            int voxelX = unityX + origin.x;
+            int voxelZ = unityZ + origin.z;
 
-            Vector3Int voxelCell = unityCell + WorldOrigin.OriginVoxel;
-            if (!_world.TryGetVoxel(voxelCell.x, voxelCell.y, voxelCell.z, out VoxelState state)) return;
+            // A cell outside the loaded world resolves to Air rather than aborting the step: an unloaded
+            // occupant must not silence a perfectly known supporting block below it.
+            ushort occupantId = TryGetBlockId(voxelX, occupantUnityY + origin.y, voxelZ);
+            ushort supportId = TryGetBlockId(voxelX, supportUnityY + origin.y, voxelZ);
 
-            SoundMaterial material = SoundResolution.ResolveMaterial(_world.BlockTypes, state.ID);
-            if (material == SoundMaterial.None) return;
+            SoundResolution.ResolveStepMaterials(_world.BlockTypes, occupantId, supportId,
+                out SoundMaterial supportMaterial, out SoundMaterial occupantMaterial);
 
             // Played at the foot position, not the block center: the listener is on the camera, and a step
             // should read as being underneath the player rather than a block away.
-            Vector3 feetPos = new Vector3(unityPos.x, unityCell.y + 1f, unityPos.z);
-            SoundManager.Instance.PlayBlockSound(material, BlockSoundEvent.Step, feetPos, emphasis);
+            Vector3 feetPos = new Vector3(unityPos.x, occupantUnityY, unityPos.z);
+
+            // Both calls are unconditional: a None material is already silent, and each takes its own voice
+            // and event salt, so the two layers get independent clips and pitch rather than flanging.
+            SoundManager.Instance.PlayBlockSound(supportMaterial, BlockSoundEvent.Step, feetPos, emphasis);
+            SoundManager.Instance.PlayBlockSound(occupantMaterial, BlockSoundEvent.Step, feetPos,
+                emphasis * _occupantLayerVolume);
+        }
+
+        /// <summary>
+        /// Reads one voxel's block ID, treating an unloaded or out-of-world cell as air.
+        /// </summary>
+        /// <param name="voxelX">Voxel-world X.</param>
+        /// <param name="voxelY">Voxel-world Y.</param>
+        /// <param name="voxelZ">Voxel-world Z.</param>
+        /// <returns>The block ID, or <see cref="BlockIDs.Air"/> when the cell cannot be read.</returns>
+        private ushort TryGetBlockId(int voxelX, int voxelY, int voxelZ)
+        {
+            return _world.TryGetVoxel(voxelX, voxelY, voxelZ, out VoxelState state) ? state.ID : BlockIDs.Air;
         }
     }
 }

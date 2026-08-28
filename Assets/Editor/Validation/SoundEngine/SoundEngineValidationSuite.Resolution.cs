@@ -30,6 +30,8 @@ namespace Editor.Validation.SoundEngine
             scenarios.Add(new Scenario("Clip Pick Is Deterministic And Always In Range", RunClipPick));
             scenarios.Add(new Scenario("Pitch Stays Inside The Group's Envelope", RunPitchEnvelope));
             scenarios.Add(new Scenario("Event Hash Separates Materials And Events", RunEventHash));
+            scenarios.Add(new Scenario("Step Samples The Occupied Cell And The Supporting Cell", RunStepCells));
+            scenarios.Add(new Scenario("A Non-Solid Occupant Layers Over The Supporting Block", RunStepOccupantLayering));
         }
 
         /// <summary>
@@ -204,6 +206,114 @@ namespace Editor.Validation.SoundEngine
             if (eventCollisions > 0)
                 return FailSound(scenario, $"{eventCollisions} of {RESOLUTION_SWEEP_EVENTS} salts hashed two " +
                                            "events identically.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// The sampling geometry itself: which two cells a step reads for a given feet height. Below y = 0 a
+        /// truncating cast would round toward zero and sample the cell above, which is why floor is pinned here
+        /// rather than left to the caller.
+        /// </summary>
+        private static bool RunStepCells()
+        {
+            const string scenario = "Step Samples The Occupied Cell And The Supporting Cell";
+
+            // feetY, expected occupant, expected support.
+            (float FeetY, int Occupant, int Support)[] cases =
+            {
+                (64f, 64, 63), // Resting exactly on a block top.
+                (64.5f, 64, 63), // Mid-cell, as after a step-up onto a slab.
+                (64.999f, 64, 63), // Just below the next cell boundary.
+                (0f, 0, -1), // The origin plane.
+                (-0.5f, -1, -2), // Below y = 0: truncation would answer (0, -1).
+                (-64f, -64, -65), // Deep negative, well away from the sign boundary.
+            };
+
+            foreach ((float feetY, int expectedOccupant, int expectedSupport) in cases)
+            {
+                SoundResolution.StepCells(feetY, out int occupant, out int support);
+
+                if (occupant != expectedOccupant)
+                    return FailSound(scenario, $"feet at y={feetY} occupied cell {occupant}, expected {expectedOccupant}.");
+                if (support != expectedSupport)
+                    return FailSound(scenario, $"feet at y={feetY} supporting cell {support}, expected {expectedSupport}.");
+                if (support != occupant - 1)
+                    return FailSound(scenario, $"feet at y={feetY} gave non-adjacent cells {occupant} and {support}.");
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// The layering rule that makes wading and flora audible: a non-solid occupant sounds <i>in addition
+        /// to</i> the block supporting the player, a solid one adds nothing, and an occupant matching the
+        /// support is dropped rather than doubled.
+        /// </summary>
+        private static bool RunStepOccupantLayering()
+        {
+            const string scenario = "A Non-Solid Occupant Layers Over The Supporting Block";
+
+            // Mirrors the shipped palette: the only non-solid sounding blocks are the two fluids and cross-mesh flora.
+            const ushort air = 0;
+            const ushort stone = 1;
+            const ushort sand = 2;
+            const ushort water = 3;
+            const ushort grassBlades = 4;
+            const ushort slab = 5;
+            const ushort mutePlant = 6;
+            const ushort stoneDust = 7;
+
+            BlockType[] blocks =
+            {
+                new BlockType { blockName = "Air", isSolid = false, soundMaterial = SoundMaterial.None },
+                new BlockType { blockName = "Stone", isSolid = true, soundMaterial = SoundMaterial.Stone },
+                new BlockType { blockName = "Sand", isSolid = true, soundMaterial = SoundMaterial.Sand },
+                new BlockType { blockName = "Water", isSolid = false, soundMaterial = SoundMaterial.Liquid },
+                new BlockType { blockName = "Grass Blades", isSolid = false, soundMaterial = SoundMaterial.Plant },
+                new BlockType { blockName = "Half Slab", isSolid = true, soundMaterial = SoundMaterial.Stone },
+                new BlockType { blockName = "Mute Plant", isSolid = false, soundMaterial = SoundMaterial.None },
+                new BlockType { blockName = "Stone Dust", isSolid = false, soundMaterial = SoundMaterial.Stone },
+            };
+
+            // occupant, support, expected support layer, expected occupant layer, what the case represents.
+            (ushort Occupant, ushort Support, SoundMaterial Support2, SoundMaterial Occupant2, string Case)[] cases =
+            {
+                (water, sand, SoundMaterial.Sand, SoundMaterial.Liquid, "wading: a splash over the riverbed"),
+                (grassBlades, stone, SoundMaterial.Stone, SoundMaterial.Plant, "flora rustling over the ground"),
+                (air, stone, SoundMaterial.Stone, SoundMaterial.None, "the ordinary case: air adds no layer"),
+                (slab, stone, SoundMaterial.Stone, SoundMaterial.None, "a solid occupant adds no layer"),
+                (mutePlant, sand, SoundMaterial.Sand, SoundMaterial.None, "a silent occupant adds no layer"),
+                (stoneDust, stone, SoundMaterial.Stone, SoundMaterial.None, "an occupant matching the support is not doubled"),
+                (air, air, SoundMaterial.None, SoundMaterial.None, "nothing under the feet at all"),
+            };
+
+            foreach ((ushort occupant, ushort support, SoundMaterial expectedSupport, SoundMaterial expectedOccupant,
+                         string label) in cases)
+            {
+                SoundResolution.ResolveStepMaterials(blocks, occupant, support,
+                    out SoundMaterial actualSupport, out SoundMaterial actualOccupant);
+
+                if (actualSupport != expectedSupport)
+                    return FailSound(scenario, $"{label}: support layer was {actualSupport}, expected {expectedSupport}.");
+                if (actualOccupant != expectedOccupant)
+                    return FailSound(scenario, $"{label}: occupant layer was {actualOccupant}, expected {expectedOccupant}.");
+            }
+
+            // The supporting block must keep sounding even when an occupant layers over it — the whole point
+            // of layering over the earlier winner-takes-all rule.
+            SoundResolution.ResolveStepMaterials(blocks, water, sand, out SoundMaterial wadeSupport, out _);
+            if (wadeSupport == SoundMaterial.None)
+                return FailSound(scenario, "wading silenced the riverbed instead of layering over it.");
+
+            // The out-of-range and null guards ResolveMaterial already carries must survive the occupant path.
+            SoundResolution.ResolveStepMaterials(blocks, 99, stone, out SoundMaterial oorSupport, out SoundMaterial oorOccupant);
+            if (oorSupport != SoundMaterial.Stone || oorOccupant != SoundMaterial.None)
+                return FailSound(scenario, "an out-of-range occupant did not leave the support alone.");
+
+            SoundResolution.ResolveStepMaterials(null, water, stone, out SoundMaterial nullSupport, out SoundMaterial nullOccupant);
+            if (nullSupport != SoundMaterial.None || nullOccupant != SoundMaterial.None)
+                return FailSound(scenario, "a null database did not resolve to None on both layers.");
 
             return true;
         }

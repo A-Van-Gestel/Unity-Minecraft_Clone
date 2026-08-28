@@ -26,6 +26,50 @@ namespace Audio
         }
 
         /// <summary>
+        /// Selects the two cells a footstep samples: the one the player occupies and the one supporting them.
+        /// </summary>
+        /// <param name="feetUnityY">The feet Y in Unity/render space — the body AABB's minimum, not its center.</param>
+        /// <param name="occupantUnityY">The cell the player stands <i>in</i>.</param>
+        /// <param name="supportUnityY">The cell the player stands <i>on</i>, one below the occupant.</param>
+        public static void StepCells(float feetUnityY, out int occupantUnityY, out int supportUnityY)
+        {
+            // Floor, never truncate: below y = 0 a truncating cast rounds toward zero and picks the cell above.
+            occupantUnityY = Mathf.FloorToInt(feetUnityY);
+            supportUnityY = occupantUnityY - 1;
+        }
+
+        /// <summary>
+        /// Resolves the material(s) a footstep sounds: the supporting block always, plus a non-solid
+        /// occupant layered over it, so wading reads as a splash <i>over</i> the riverbed rather than
+        /// replacing it.
+        /// </summary>
+        /// <param name="blockTypes">The block database array, indexed by block ID.</param>
+        /// <param name="occupantId">The block filling the cell the player stands in.</param>
+        /// <param name="supportId">The block in the cell below, supporting the player.</param>
+        /// <param name="supportMaterial">The supporting block's material, or None when it is silent.</param>
+        /// <param name="occupantMaterial">The layer to play on top, or None when there is nothing to add.</param>
+        /// <remarks>
+        /// A <i>solid</i> occupant adds nothing: the only way to occupy a solid cell is to stand on a
+        /// sub-voxel shape such as a half slab, which would layer the same footfall over itself.
+        /// </remarks>
+        public static void ResolveStepMaterials(BlockType[] blockTypes, ushort occupantId, ushort supportId,
+            out SoundMaterial supportMaterial, out SoundMaterial occupantMaterial)
+        {
+            supportMaterial = ResolveMaterial(blockTypes, supportId);
+            occupantMaterial = SoundMaterial.None;
+
+            if (blockTypes == null || occupantId >= blockTypes.Length) return;
+
+            BlockType occupant = blockTypes[occupantId];
+            if (occupant is not { isSolid: false }) return;
+
+            // Two voices of one material flange rather than layer — a single voice says it better.
+            if (occupant.soundMaterial == supportMaterial) return;
+
+            occupantMaterial = occupant.soundMaterial;
+        }
+
+        /// <summary>
         /// Picks which clip of a group plays for one event.
         /// </summary>
         /// <param name="clipCount">How many clips the event's array holds.</param>
