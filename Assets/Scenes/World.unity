@@ -250,6 +250,7 @@ Transform:
   - {fileID: 1313044167}
   - {fileID: 620586937}
   - {fileID: 1810088667}
+  - {fileID: 516268958}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &151001796
@@ -264,6 +265,7 @@ GameObject:
   - component: {fileID: 151001798}
   - component: {fileID: 151001799}
   - component: {fileID: 151001800}
+  - component: {fileID: 151001801}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -348,6 +350,20 @@ MonoBehaviour:
   isFlying: 0
   isNoclipping: 0
   isSprinting: 0
+--- !u!114 &151001801
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 151001796}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cbf6f35e09ae9894381ca6cb635b61e4, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Audio.PlayerFootsteps
+  _strideLength: 1.5
+  _landingEmphasis: 1.4
 --- !u!1 &154747208
 GameObject:
   m_ObjectHideFlags: 0
@@ -1674,6 +1690,55 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 439044754}
   m_Mesh: {fileID: 10208, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!1 &516268957
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 516268958}
+  - component: {fileID: 516268959}
+  m_Layer: 0
+  m_Name: SoundManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &516268958
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 516268957}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 140463849}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &516268959
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 516268957}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e80f9b718be6b3140ac98f525349eda9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Audio.SoundManager
+  _blockSounds: {fileID: 11400000, guid: 7bb2797a3c62f1b48b74b58950734b13, type: 2}
+  _mixer: {fileID: 24100000, guid: 06f869aadb3bc9347b4c686bb85bb7a9, type: 2}
+  _blocksGroup: {fileID: -4932264678354281645, guid: 06f869aadb3bc9347b4c686bb85bb7a9, type: 2}
+  _voiceCount: 24
+  _maxDistance: 20
 --- !u!1 &568008936
 GameObject:
   m_ObjectHideFlags: 0
@@ -6067,8 +6132,9 @@ GameObject:
   m_Component:
   - component: {fileID: 1810088667}
   - component: {fileID: 1810088668}
+  - component: {fileID: 1810088669}
   m_Layer: 0
-  m_Name: GraphicsSettingsController
+  m_Name: SettingsControllers
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -6101,6 +6167,18 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c41e20cecaf0859419dc59ab1a5924c9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::UI.GraphicsSettingsController
+--- !u!114 &1810088669
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1810088666}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 13113a34062cb7c4798eadeb03fcafe8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::UI.AudioSettingsController
 --- !u!1001 &1810338387
 PrefabInstance:
   m_ObjectHideFlags: 0
