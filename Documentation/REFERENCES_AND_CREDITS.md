@@ -62,6 +62,16 @@ This document tracks all third-party assets, libraries, algorithms, and resource
 * **Hotbar, UI Slot's, Buttons & Dirt Main Menu background**
     * *Source:* Ripped from Minecraft.
 
+## 🔊 Audio
+
+*Clips are referenced by `Assets/Resources/Data/BlockSoundDatabase.asset`, which isolates content from
+architecture — packs can be swapped without code changes. **Licensing on the sourcing sites is per-asset,
+not per-site:** verify and record the licence of every individual download here, with author, source URL
+and licence, before it ships. See `Documentation/Design/SOUND_ENGINE_DESIGN.md` §9 for the sourcing policy,
+including the three-step permission rule for "free to download but no attached licence" packs.*
+
+*No audio content has been imported yet — the engine ships with an empty sound database.*
+
 ## ✒️ Fonts
 
 * [**Monocraft**](https://github.com/IdreesInc/Monocraft) by [IdreesInc](https://github.com/IdreesInc)

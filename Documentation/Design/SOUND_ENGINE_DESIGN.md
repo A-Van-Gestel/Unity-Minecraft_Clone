@@ -1,10 +1,12 @@
 # Sound Engine Design
 
-**Version:** 1.0  
-**Date:** 2026-07-03  
-**Status:** **Proposed design — not implemented.** No audio code exists in the project yet: there is no
-`SoundMaterial` channel on `BlockType`, no emitter or mixer plumbing, and no `Validate Sound Engine`
-suite. The design is complete enough to build against as-is.  
+**Version:** 1.1  
+**Date:** 2026-08-28  
+**Status:** **Partially implemented — S0 and S1 shipped.** The `SoundMaterial` channel, the shared
+`BlockSoundDatabase`, the BlockEditor dropdown and prefill, the volume settings, the pooled one-shot
+voices and the break / place / footstep triggers all exist, and the `Validate Sound Engine` suite guards
+them (11 baselines). Not yet done: the `AudioMixer` asset (the runtime is mixer-optional until it is
+authored), any audio content, and phases S2–S4.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > Design for the VoxelEngine's audio system: block sounds (break / place / step), fluid and
@@ -14,7 +16,9 @@ suite. The design is complete enough to build against as-is.
 > on top of existing project patterns (ScriptableObject databases, pooling,
 > Burst-job-produces / main-thread-consumes).
 >
-> Status: **Proposed design — not implemented.** No audio code exists in the project today.
+>
+> Status: **S0 + S1 shipped** (2026-08-28); S2–S4 outstanding. Section 2's "current state" table describes
+> the project *before* that work — it is kept as the historical audit it was written as.
 
 **Audited:** 2026-07-03, at commit `2dde457` (branch `main`).
 Findings are from static review of `BlockType` / `BlockDatabase` / `BlockTagPreset`,
@@ -271,8 +275,11 @@ can hear). v1 ships without this; the API above is already shaped for it.
 
 **Footsteps:** in the player controller — accumulate horizontal distance while grounded; every
 ~1.5 blocks traveled, query the block under the feet (`GetVoxelState` at
-`floor(position) + down`), resolve `soundMaterial`, `PlayBlockSound(mat, Step, feetPos)`. Reuse
-the LIQUID contact state the physics already computes for wading sounds. Jump-land plays an
+`floor(position) + down`), resolve `soundMaterial`, `PlayBlockSound(mat, Step, feetPos)`. Wading
+sounds are deferred to S2: contrary to the original audit the physics layer computes **no**
+liquid contact state (`Assets/Scripts/Physics/` has no fluid awareness at all), so there is nothing to
+reuse — the same gap that leaves `AudioContext.Submerged` (§5.3) and the §7 underwater snapshot without a
+source. Jump-land plays an
 immediate step (slightly louder) and resets the accumulator.
 
 **Directionality** is free: 3D sources + the `AudioListener` on the player camera.
@@ -303,8 +310,8 @@ Minecraft effectively does):
 **Performance requirements — by construction, then profiled.** The scan is not a "tune it later"
 prototype: it is written to the project's hot-path standards from the start — Burst-compiled,
 linear voxel-array iteration (no per-voxel virtual/managed calls), a reused `NativeList` (no
-per-scan allocation), early-out on chunks with no fluid sections (section flags already track
-fluid presence), and the whole scan off the main thread. Cadence (0.5–1 s) and radius (~2 chunks)
+per-scan allocation), early-out on chunks with no fluid sections (**no such flag exists yet** —
+`ChunkSection` tracks only `nonAirCount`/`IsEmpty`, so S3 must add one or pick another predicate), and the whole scan off the main thread. Cadence (0.5–1 s) and radius (~2 chunks)
 are then tuned against the profiler once the layer exists; the scan is a candidate for the
 existing benchmark-harness pattern.
 
@@ -359,10 +366,12 @@ Master
 └── UI
 ```
 
-Exposed volume parameters wired into the data-driven settings UI (one "Audio" section — the
-planned `Group` property on `SettingFieldAttribute` would render this as a single collapsible
-block). Sliders map linearly 0–1 → dB via the standard `20 * log10(x)` conversion with a floor
-at −80 dB.
+Exposed volume parameters wired into the data-driven settings UI. **As shipped:** a dedicated
+`SettingsTab.Audio` holds the six sliders (the `Group` property on `SettingFieldAttribute` remains only a
+proposal), and `AudioVolumes` is the single source of truth for category gain — it drives the mixer when
+one is assigned and is applied per source when one is not, so the mixer asset can be authored at any time
+without a code change. Sliders map linearly 0–1 → dB via the standard `20 * log10(x)` conversion with a
+floor at −80 dB.
 
 **Underwater:** `AudioContext.Submerged` drives an `AudioMixer` snapshot transition applying a
 low-pass on everything except UI — cheap and dramatic.
@@ -415,8 +424,8 @@ job and the managed query) and is seed-safe by construction.
 
 | Phase                     | Scope                                                                                                                                                                                                                                                                                                                                                      | Effort | Depends on        |
 |---------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|-------------------|
-| **S0 — Data foundation**  | `SoundMaterial` enum, `BlockSoundGroup`/`BlockSoundDatabase`, `BlockType.soundMaterial` + `BlockTagPreset` field, BlockEditor dropdown, prefill utility, mixer asset + settings wiring (§5.4). Credits plumbing (§9): append `Audio` to `CreditCategory`, "🔊 Audio" section in `REFERENCES_AND_CREDITS.md` + `CreditsDatabase` entries per imported pack. |   🟢   | —                 |
-| **S1 — One-shots**        | `SoundManager` + pooled 3D sources, break/place hooks in `PlayerInteraction`, footsteps in the player controller.                                                                                                                                                                                                                                          |   🟢   | S0                |
+| **S0 — Data foundation** ✅ | `SoundMaterial` enum, `BlockSoundGroup`/`BlockSoundDatabase`, `BlockType.soundMaterial` + `BlockTagPreset` field, BlockEditor dropdown, prefill utility, mixer asset + settings wiring (§5.4). Credits plumbing (§9): append `Audio` to `CreditCategory`, "🔊 Audio" section in `REFERENCES_AND_CREDITS.md` + `CreditsDatabase` entries per imported pack. |   🟢   | —                 |
+| **S1 — One-shots** ✅       | `SoundManager` + pooled 3D sources, break/place hooks in `PlayerInteraction`, footsteps in the player controller.                                                                                                                                                                                                                                          |   🟢   | S0                |
 | **S2 — Ambience & music** | `AudioContext`, biome audio fields on `BiomeBase`, managed biome query (§6.2 option a), beds + crossfades, cave ambience, music scheduler, underwater snapshot.                                                                                                                                                                                            |   🟡   | S0; §6.2 refactor |
 | **S3 — Fluid emitters**   | Burst emitter scan job, clustering, looping emitter pool with fades.                                                                                                                                                                                                                                                                                       |   🟡   | S1 (pool infra)   |
 | **S4 — Later**            | v2 apply-site break/place hook (`VoxelModSource.Live` filter), hit/mining sounds, weather (RF-7), time-of-day (RF-1), `LEAVES` wind emitters.                                                                                                                                                                                                              |   —    | feature-gated     |
@@ -453,7 +462,8 @@ record author + source URL + license per imported clip/pack in the project's **e
 infrastructure**: a new "🔊 Audio" section in
 [`../REFERENCES_AND_CREDITS.md`](../REFERENCES_AND_CREDITS.md) (following the per-pack format of
 the Graphics & Textures section) plus matching `CreditsDatabase.asset` entries for the in-game
-credits screen — which needs an `Audio` value **appended** to `CreditCategory` (S0 scope). This
+credits screen — `CreditCategory.Audio` already exists (it was appended before this design was scheduled), and the
+"🔊 Audio" section is now in place awaiting its first entry. This
 also satisfies CC-BY attribution wherever a non-CC0 pack is knowingly accepted.
 
 Since this is a free, non-commercial hobby project, attribution-required (CC-BY) and even NC
@@ -495,6 +505,13 @@ attached license" source.
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.1** - S0 + S1 shipped (2026-08-28). Status flipped to *Partially implemented*, and four claims
+  the original audit made were corrected against the code as built: `CreditCategory.Audio` already
+  existed, the physics layer has **no** liquid contact state (§5.1 wading and the §5.3/§7 submerged
+  context lose their source and move to S2), `ChunkSection` has **no** fluid-presence flag for §5.2's
+  early-out, and §5.4 now records the shipped `SettingsTab.Audio` + `AudioVolumes` arrangement in place of
+  the never-built `Group` property. The mixer asset itself is still unauthored — the runtime is
+  deliberately mixer-optional so it can be dropped in later without a code change.
 * **v1.0** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Status`/`Target` added above the
   existing summary, `Audited` line and relationship list retained as written. Status made explicit —
   **Proposed design — not implemented** — which the original only stated in passing inside the summary
@@ -507,8 +524,9 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-07-26 (header completed; still unimplemented)  
-**Next Review:** when the sound engine is scheduled — re-verify the §Audited findings against
-`BlockType`/`BlockDatabase` and the fluid tick path first, since the tick was re-architected by the
-TG-4 arc after this was written (see
-[`../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`](../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md)).
+**Last Updated:** 2026-08-28 (S0 + S1 shipped; audit claims corrected)  
+**Next Review:** when S2 or S3 is scheduled. S2 must first build the §6.2 managed biome query and decide
+where liquid contact state lives, since neither exists. S3 must re-verify the §5.2 scan against the fluid
+tick as re-architected by the TG-4 arc (see
+[`../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`](../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md))
+and settle the missing fluid-presence flag.
