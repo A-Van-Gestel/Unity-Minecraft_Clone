@@ -26,7 +26,7 @@ output, baseline vs known-bug semantics).
 | **Placement**      | `Placement/`                             | `Validate Placement`                   | Player placement decision (`PlacementController`/`PlacementResolver` tag logic)         |
 | **MeshQueue**      | `MeshQueue/`                             | `Validate Mesh Build Queue`            | MT-1 `MeshBuildQueue` contract (dedup, ordering, immediate-promotion)                   |
 | **LightScheduler** | `LightScheduler/`                        | `Validate Light Work Scheduler`        | MT-2 `LightWorkScheduler` ready/waiting split, promotion events, `PromoteAll` fail-safe |
-| **Sound Engine**   | `SoundEngine/`                           | `Validate Sound Engine`                | Block-sound resolution: material lookup, clip pick, pitch envelope, place-to-break fallback, authored-content census |
+| **Sound Engine**   | `SoundEngine/`                           | `Validate Sound Engine`                | Block-sound resolution: material lookup, clip pick, pitch envelope, place-to-break fallback, two-cell footstep sampling, authored-content census |
 
 The three storage-boundary suites split one system by contract, so route a save/load fix by which
 contract it breaks — they share `Framework/StorageValidationFixture` (stub `World.Instance` +

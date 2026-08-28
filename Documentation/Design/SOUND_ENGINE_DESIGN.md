@@ -1,13 +1,14 @@
 # Sound Engine Design
 
-**Version:** 1.1  
-**Date:** 2026-08-28  
+**Version:** 1.3  
+**Date:** 2026-08-29  
 **Status:** **Partially implemented — S0 and S1 shipped and confirmed in game.** The `SoundMaterial`
 channel, the shared `BlockSoundDatabase`, the BlockEditor dropdown and prefill, the volume settings, the
 pooled one-shot voices and the break / place / footstep triggers all exist; the `AudioMixer` is authored
 with its seven exposed volume parameters; two CC0 packs supply content, so all 13 sounding materials have
-break and step clips. The `Validate Sound Engine` suite guards the resolution chain (11 baselines). Not
-yet done: phases S2–S4, and the §5.1 two-cell footstep sampling that water and cross-mesh flora need.  
+break and step clips. Footsteps sample two cells, so wading and cross-mesh flora sound (§5.1). The
+`Validate Sound Engine` suite guards the resolution chain (13 baselines). Not yet done: phases S2, S3, and the
+remainder of S4.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > Design for the VoxelEngine's audio system: block sounds (break / place / step), fluid and
@@ -18,7 +19,8 @@ yet done: phases S2–S4, and the §5.1 two-cell footstep sampling that water an
 > Burst-job-produces / main-thread-consumes).
 >
 >
-> Status: **S0 + S1 shipped** (2026-08-28); S2–S4 outstanding. Section 2's "current state" table describes
+> Status: **S0 + S1 shipped** (2026-08-28), plus S4's two-cell footstep sampling (2026-08-29); S2, S3 and the
+> rest of S4 outstanding. Section 2's "current state" table describes
 > the project *before* that work — it is kept as the historical audit it was written as.
 
 **Audited:** 2026-07-03, at commit `2dde457` (branch `main`).
@@ -275,29 +277,38 @@ a listener-distance cull *at the trigger site* (cheaper than instantiating a sou
 can hear). v1 ships without this; the API above is already shaped for it.
 
 **Footsteps:** in the player controller — accumulate horizontal distance while grounded; every
-~1.5 blocks traveled, query the block under the feet (`GetVoxelState` at
-`floor(position) + down`), resolve `soundMaterial`, `PlayBlockSound(mat, Step, feetPos)`. Jump-land plays
+~1.5 blocks traveled, read the two cells at the feet (`TryGetVoxel` at `floor(position)` and one below),
+resolve their materials and play them layered (see the two-cell note below). Jump-land plays
 an immediate step (slightly louder) and resets the accumulator.
 
-> **Known limitation — the occupied cell is never sampled** (observed in game, 2026-08-28; `S1` as
-> shipped). `PlayerFootsteps.PlayStep` reads exactly one voxel: `floor(y) - 1`, the block *supporting*
-> the player. Anything occupying the cell the player stands **in** is therefore inaudible, which is a
-> real gap rather than a tuning issue:
+> **Two-cell sampling** (`S4`, shipped 2026-08-29). A step reads **two** voxels rather than one:
+> `SoundResolution.StepCells` selects the cell the player occupies (`floor(feetY)`) and the cell supporting
+> them (one below), and `SoundResolution.ResolveStepMaterials` returns **both layers** — the supporting
+> block always, plus a non-solid occupant played *over* it. Wading is a `Liquid` splash on top of the
+> riverbed's `Sand`/`Dirt`, not instead of it; walking through cross-mesh flora layers `Plant` over the
+> ground. The two one-shots each take their own voice and event salt, so they get independent clips and
+> pitch rather than flanging, and `PlayerFootsteps` scales the occupant layer by a serialized
+> `_occupantLayerVolume` (default 0.9).
 >
-> - **Water** fills the player's own cell; the supporting block is the riverbed, so wading through
->   water plays `Sand`/`Dirt` and the `Liquid` step clips effectively never sound.
-> - **Cross-mesh flora** (grass blades) is non-solid and occupies the player's cell too, so walking
->   through it plays the `Grass`/`Dirt` block beneath and never `Plant`.
+> Layering rather than a winner-takes-all priority: sounding only the occupant severs the step from the
+> ground the player is actually walking on, which reads as a disconnect the moment the two materials differ
+> — the same reason Minecraft plays a splash *alongside* the footfall rather than replacing it.
 >
-> Compounding it, `Update` returns early whenever `IsGrounded` is false, so swimming — or wading deep
-> enough to lose ground contact — produces no footsteps at all.
+> Three cases add no second layer: a *solid* occupant (the only way to occupy a solid cell is to stand on a
+> sub-voxel shape such as a half slab, which would layer a footfall over itself), a silent one, and one
+> whose material already matches the support (two voices of one material flange rather than layer). An
+> unloaded or out-of-world cell reads as air, so a missing occupant never silences a known supporting block.
 >
-> **The fix is a two-cell sample with a priority rule** (Minecraft's model): read the occupied cell as
-> well as the supporting one, and let a non-solid occupant — liquid, flora, snow layer — win. That also
-> supplies the wading trigger, and it needs no physics-layer change, which matters because
-> `Assets/Scripts/Physics/` computes **no** liquid contact state at all (contrary to the original audit)
-> — the same gap that leaves `AudioContext.Submerged` (§5.3) and the §7 underwater snapshot without a
-> source. Tracked in `S4`.
+> Both halves live in the pure `SoundResolution` layer, which is why the suite can pin them (the two
+> `Step ...` baselines); the wiring in `PlayerFootsteps.PlayStep` stays an in-game check.
+>
+> **Still open:** `Update` returns early whenever `IsGrounded` is false, so swimming produces no footsteps.
+> Deliberately deferred rather than fixed here — there is no swimming *mechanic* to sound
+> ([`../Bugs/FLUID_BUGS.md`](../Bugs/FLUID_BUGS.md) §02 "No player effect": no buoyancy or swimming
+> simulation, fluids are merely non-solid), and strokes would want their own clips distinct from walking and
+> wading. Independently, `Assets/Scripts/Physics/` computes **no** liquid contact state at all, which is what
+> leaves `AudioContext.Submerged` (§5.3) and the §7 underwater snapshot without a source — an `S2`
+> prerequisite, not a footstep one.
 
 **Directionality** is free: 3D sources + the `AudioListener` on the player camera.
 
@@ -445,7 +456,7 @@ job and the managed query) and is seed-safe by construction.
 | **S1 — One-shots** ✅       | `SoundManager` + pooled 3D sources, break/place hooks in `PlayerInteraction`, footsteps in the player controller.                                                                                                                                                                                                                                          |   🟢   | S0                |
 | **S2 — Ambience & music** | `AudioContext`, biome audio fields on `BiomeBase`, managed biome query (§6.2 option a), beds + crossfades, cave ambience, music scheduler, underwater snapshot.                                                                                                                                                                                            |   🟡   | S0; §6.2 refactor |
 | **S3 — Fluid emitters**   | Burst emitter scan job, clustering, looping emitter pool with fades.                                                                                                                                                                                                                                                                                       |   🟡   | S1 (pool infra)   |
-| **S4 — Later**            | **Two-cell footstep sampling** (occupied cell + supporting cell, non-solid occupant wins — fixes silent water wading and cross-mesh flora, and supplies the wading trigger; see the §5.1 limitation note). v2 apply-site break/place hook (`VoxelModSource.Live` filter), hit/mining sounds, weather (RF-7), time-of-day (RF-1), `LEAVES` wind emitters.                                                                                                                                                                                                              |   —    | feature-gated     |
+| **S4 — Later**            | **Two-cell footstep sampling** ✅ (occupied cell + supporting cell, a non-solid occupant layered over the support — see the §5.1 note; shipped 2026-08-29). Still open: ungrounded/swimming steps (deferred — no swimming mechanic exists, `FLUID_BUGS.md` §02), v2 apply-site break/place hook (`VoxelModSource.Live` filter), hit/mining sounds, weather (RF-7), time-of-day (RF-1), `LEAVES` wind emitters.                                                                                                                                                                                                              |   —    | feature-gated     |
 
 S0+S1 alone deliver the largest perceived-quality jump (block feedback + footsteps) and validate
 the whole data model; S2 and S3 are independent of each other and can land in either order.
@@ -454,7 +465,8 @@ the whole data model; S2 and S3 are independent of each other and can land in ei
 its baselines to a `Validate Sound Engine` editor suite in the established validation-suite style
 as the phase lands — S0 pins the resolution chain (material → group → clip pick, place→break
 fallback, prefill heuristic output), S1 pins trigger-site decisions (which material/event a given
-break/place/step resolves to — assertable without playing audio), S2 pins the `AudioContext`
+break/place/step resolves to — assertable without playing audio, extended by S4's two step baselines: the
+sampled cell pair and the occupant layering rule), S2 pins the `AudioContext`
 derivation and biome-query parity (§6.2: managed helper vs. job path bit-identical), S3 pins the
 scan/cluster output (candidate sets and cluster centroids for fixture worlds). The audible layer
 on top stays verified in-game, as with every other suite.
@@ -531,6 +543,13 @@ attached license" source.
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.3** - Two-cell footstep sampling shipped (2026-08-29), closing the v1.2 limitation: `SoundResolution`
+  gained `StepCells` + `ResolveStepMaterials`, `PlayerFootsteps` samples the occupied and the supporting cell,
+  and the Sound Engine suite grew from 11 to 13 baselines. The occupant **layers over** the support rather
+  than replacing it — winner-takes-all was implemented first and rejected on listening, because dropping the
+  ground the player walks on reads as a disconnect whenever the two materials differ. Ungrounded/swimming steps were deliberately left
+  out — no swimming mechanic exists to sound, and strokes need their own clips. §5.1's limitation blockquote
+  is now the shipped rule, and the header's stale v1.1 stamp (it lagged the v1.2 entry) is corrected here.
 * **v1.2** - Footstep sampling limitation recorded (2026-08-28), after S0+S1 were audited in game: steps
   sample only the supporting block, so water wading and cross-mesh flora never sound, and no step fires
   while ungrounded. Written up in §5.1 with the two-cell fix and tracked in `S4`. Also records the second
@@ -554,7 +573,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-28 (S0 + S1 shipped and audited in game; footstep sampling limitation recorded)  
+**Last Updated:** 2026-08-29 (S4's two-cell footstep sampling shipped; §5.1 limitation closed)  
 **Next Review:** when S2 or S3 is scheduled. S2 must first build the §6.2 managed biome query and decide
 where liquid contact state lives, since neither exists. S3 must re-verify the §5.2 scan against the fluid
 tick as re-architected by the TG-4 arc (see
