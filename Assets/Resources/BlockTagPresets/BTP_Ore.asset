@@ -15,4 +15,4 @@ MonoBehaviour:
   tags: 769
   worldGenCanReplaceTags: 256
   placementCanReplaceTags: 8194
-  soundMaterial: 0
+  soundMaterial: 1
