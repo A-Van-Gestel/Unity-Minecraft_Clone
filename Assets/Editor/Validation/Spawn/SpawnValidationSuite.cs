@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -27,7 +28,7 @@ namespace Editor.Validation
         /// Runs every registered scenario and prints a categorized summary via the shared
         /// <see cref="ValidationSuiteRunner"/>. Baseline failures mark the suite red.
         /// </summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Spawn")]
+        [MenuItem("Minecraft Clone/Dev/Validate Spawn", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>

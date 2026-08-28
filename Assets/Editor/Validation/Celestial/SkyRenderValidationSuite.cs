@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using Editor.WorldTools.Libraries;
 using Sky;
@@ -169,7 +170,7 @@ namespace Editor.Validation.Celestial
         private static readonly Color s_neutralSky = new Color(0.400f, 0.400f, 0.400f, 1f);
 
         /// <summary>Runs every scenario and prints a categorized summary via the shared runner.</summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Sky Render")]
+        [MenuItem("Minecraft Clone/Dev/Validate Sky Render", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>

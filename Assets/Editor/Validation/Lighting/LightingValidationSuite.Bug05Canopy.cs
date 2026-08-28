@@ -1,4 +1,5 @@
 using System.Text;
+using Editor.Dev;
 using Editor.Validation.Lighting.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -172,7 +173,7 @@ namespace Editor.Validation.Lighting
         /// stays fast). Logs the first failing seed's full case plus whether extra edge rounds resolve it
         /// (confirming the round-budget mechanism), or a green all-pass summary.
         /// </summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Lighting Engine (Bug 05 Canopy Fuzz)")]
+        [MenuItem("Minecraft Clone/Dev/Validate Lighting Engine (Bug 05 Canopy Fuzz)", priority = DevMenuPriority.DeepValidation)]
         public static void RunBug05CanopyFuzz()
         {
             Debug.Log($"--- Bug 05 dense-canopy fuzz: {BUG05_CANOPY_NIGHTLY_ITERATIONS} randomized canopy seeds ---");

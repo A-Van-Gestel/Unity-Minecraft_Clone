@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using UnityEditor;
 
@@ -20,7 +21,7 @@ namespace Editor.Validation.SoundEngine
     public static partial class SoundEngineValidationSuite
     {
         /// <summary>Menu entry — runs the suite and logs the categorized summary.</summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Sound Engine")]
+        [MenuItem("Minecraft Clone/Dev/Validate Sound Engine", priority = DevMenuPriority.Validation)]
         public static void RunTests() => Execute();
 
         /// <summary>

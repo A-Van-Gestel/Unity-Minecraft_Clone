@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using Data;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using Jobs.BurstData;
 using Serialization;
@@ -30,7 +31,7 @@ namespace Editor.Validation.DeserializationRobustness
     public static class DeserializationRobustnessValidationSuite
     {
         /// <summary>Runs every scenario and prints a categorized summary via the shared runner.</summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Deserialization Robustness")]
+        [MenuItem("Minecraft Clone/Dev/Validate Deserialization Robustness", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>

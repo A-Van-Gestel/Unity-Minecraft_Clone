@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Data.WorldTypes;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using Jobs.BurstData;
 using UnityEditor;
@@ -50,7 +51,7 @@ namespace Editor.Validation.WorldClock
         private const float MIN_VISIBLE_STEP = 0.02f;
 
         /// <summary>Runs every scenario and prints a categorized summary via the shared runner.</summary>
-        [MenuItem("Minecraft Clone/Dev/Validate World Clock")]
+        [MenuItem("Minecraft Clone/Dev/Validate World Clock", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>

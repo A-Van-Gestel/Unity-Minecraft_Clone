@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using UnityEditor;
 
@@ -22,7 +23,7 @@ namespace Editor.Validation
     public static partial class ChunkMathValidationSuite
     {
         /// <summary>Menu entry — runs the suite and logs the categorized summary.</summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Chunk Math")]
+        [MenuItem("Minecraft Clone/Dev/Validate Chunk Math", priority = DevMenuPriority.Validation)]
         public static void RunTests() => Execute();
 
         /// <summary>

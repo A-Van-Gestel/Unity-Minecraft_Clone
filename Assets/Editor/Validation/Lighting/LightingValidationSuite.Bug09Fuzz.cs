@@ -1,4 +1,5 @@
 using System;
+using Editor.Dev;
 using Editor.Validation.Lighting.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -194,7 +195,7 @@ namespace Editor.Validation.Lighting
         /// Nightly deep run of the Bug-09 geometry fuzz (kept off the interactive suite so it stays fast).
         /// Logs the first failing seed's full case for reproduction, or a green all-pass summary.
         /// </summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Lighting Engine (Bug 09 Geometry Fuzz)")]
+        [MenuItem("Minecraft Clone/Dev/Validate Lighting Engine (Bug 09 Geometry Fuzz)", priority = DevMenuPriority.DeepValidation)]
         public static void RunBug09GeometryFuzz()
         {
             Debug.Log($"--- Bug 09 geometry fuzz: {BUG09_FUZZ_NIGHTLY_ITERATIONS} randomized cross-chunk seeds ---");

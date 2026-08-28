@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Data;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using Jobs.BurstData;
 using Serialization;
@@ -31,7 +32,7 @@ namespace Editor.Validation.SaveDurability
     public static class SaveDurabilityValidationSuite
     {
         /// <summary>Runs every scenario and prints a categorized summary via the shared runner.</summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Save Durability")]
+        [MenuItem("Minecraft Clone/Dev/Validate Save Durability", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>

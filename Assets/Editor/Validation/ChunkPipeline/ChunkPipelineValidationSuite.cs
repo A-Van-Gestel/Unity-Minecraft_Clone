@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using UnityEditor;
 
@@ -20,7 +21,7 @@ namespace Editor.Validation.ChunkPipeline
     public static partial class ChunkPipelineValidationSuite
     {
         /// <summary>Runs every scenario and prints a categorized summary via the shared runner.</summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Chunk Pipeline")]
+        [MenuItem("Minecraft Clone/Dev/Validate Chunk Pipeline", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>

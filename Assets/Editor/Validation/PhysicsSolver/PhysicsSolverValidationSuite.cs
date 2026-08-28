@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Globalization;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -38,7 +39,7 @@ namespace Editor.Validation.PhysicsSolver
         /// <see cref="ValidationSuiteRunner"/>. Baseline failures mark the suite red; known-bug reproductions are
         /// reported as warnings.
         /// </summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Physics Solver")]
+        [MenuItem("Minecraft Clone/Dev/Validate Physics Solver", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>

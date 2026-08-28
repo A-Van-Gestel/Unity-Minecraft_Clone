@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using Serialization;
 using Serialization.Migration;
@@ -67,7 +68,7 @@ namespace Editor.Validation.MigrationChain
     public static partial class MigrationChainValidationSuite
     {
         /// <summary>Runs every scenario and prints a categorized summary via the shared runner.</summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Migration Chain")]
+        [MenuItem("Minecraft Clone/Dev/Validate Migration Chain", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>

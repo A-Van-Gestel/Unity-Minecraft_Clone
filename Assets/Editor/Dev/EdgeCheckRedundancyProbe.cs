@@ -52,7 +52,7 @@ namespace Editor.Dev
         /// <summary>Production's real edge-check round budget, for labeling which rounds are in-budget.</summary>
         private const int PRODUCTION_ROUNDS = 2;
 
-        [MenuItem("Minecraft Clone/Dev/P9-2 Edge-Check Redundancy Probe")]
+        [MenuItem("Minecraft Clone/Dev/P9-2 Edge-Check Redundancy Probe", priority = DevMenuPriority.Diagnostics)]
         public static void Run()
         {
             StringBuilder report = new StringBuilder();

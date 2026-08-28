@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Data.WorldTypes;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using Sky;
 using UnityEditor;
@@ -130,7 +131,7 @@ namespace Editor.Validation.Celestial
         private const float FOG_EPSILON = 1e-4f;
 
         /// <summary>Runs every scenario and prints a categorized summary via the shared runner.</summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Sky")]
+        [MenuItem("Minecraft Clone/Dev/Validate Sky", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>

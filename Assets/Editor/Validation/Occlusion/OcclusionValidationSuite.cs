@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Text;
 using Data;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using Helpers;
 using Jobs.BurstData;
@@ -33,7 +34,7 @@ namespace Editor.Validation.Occlusion
         private const float EPSILON = 1e-4f;
 
         /// <summary>Runs every registered scenario and prints a categorized summary.</summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Occlusion")]
+        [MenuItem("Minecraft Clone/Dev/Validate Occlusion", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>

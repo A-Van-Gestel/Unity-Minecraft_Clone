@@ -41,7 +41,7 @@ namespace Editor.Dev
         };
 
         /// <summary>Renames the groups, drops the redundant one, and exposes one volume parameter per category.</summary>
-        [MenuItem("Minecraft Clone/Dev/Audio/Fix Audio Mixer")]
+        [MenuItem("Minecraft Clone/Dev/Audio/Fix Audio Mixer", priority = DevMenuPriority.AssetTools)]
         public static void Run()
         {
             AudioMixer mixer = AssetDatabase.LoadAssetAtPath<AudioMixer>(MIXER_PATH);

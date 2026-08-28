@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Text;
 using Data.WorldTypes;
+using Editor.Dev;
 using UnityEditor;
 using UnityEngine;
 
@@ -34,7 +35,7 @@ namespace Editor.WorldTools
         /// <summary>
         /// Overwrites the sky gradients on every settings asset with the code defaults, after confirming.
         /// </summary>
-        [MenuItem("Minecraft Clone/Dev/Reset Sky Gradients To Code Defaults")]
+        [MenuItem("Minecraft Clone/Dev/Reset Sky Gradients To Code Defaults", priority = DevMenuPriority.AssetTools)]
         public static void ResetSkyGradients()
         {
             List<TimeOfDaySettings> assets = FindAssets(out List<string> paths);

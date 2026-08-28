@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using Helpers;
 using Libraries;
@@ -44,7 +45,7 @@ namespace Editor.Validation.Generation
         private const ulong CLASSIC_IN_BAND_GOLDEN = 16972300629807613903UL;
 
         /// <summary>Runs the suite and prints a categorized summary. Baseline failures mark it red.</summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Worm Carver")]
+        [MenuItem("Minecraft Clone/Dev/Validate Worm Carver", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>Builds and runs the scenarios (headless/CI entry point).</summary>

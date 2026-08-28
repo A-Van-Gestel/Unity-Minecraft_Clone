@@ -1,4 +1,5 @@
 using Data;
+using Editor.Dev;
 using Helpers;
 using Jobs.BurstData;
 using Serialization.Migration.Steps;
@@ -33,7 +34,7 @@ namespace Editor.Validation
     {
         private const string MENU_PATH = "Minecraft Clone/Dev/Validate Voxel Metadata Utility";
 
-        [MenuItem(MENU_PATH)]
+        [MenuItem(MENU_PATH, priority = DevMenuPriority.Validation)]
         public static void Run()
         {
             var runner = new Runner();

@@ -13,7 +13,7 @@ namespace Editor.Dev
     public static class MeshOrchestrationDiagnosticsMenu
     {
         /// <summary>Logs <see cref="World.BuildMeshOrchestrationDiagnostics"/> for the active world.</summary>
-        [MenuItem("Minecraft Clone/Dev/Dump Mesh Orchestration Diagnostics")]
+        [MenuItem("Minecraft Clone/Dev/Dump Mesh Orchestration Diagnostics", priority = DevMenuPriority.Diagnostics)]
         private static void Dump()
         {
             if (!Application.isPlaying || World.Instance == null)

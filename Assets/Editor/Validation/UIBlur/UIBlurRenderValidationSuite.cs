@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -57,7 +58,7 @@ namespace Editor.Validation.UIBlur
         private static readonly Color s_backdrop = new Color(0.9f, 0.1f, 0.05f, 1f);
 
         /// <summary>Runs every scenario and prints a categorized summary via the shared runner.</summary>
-        [MenuItem("Minecraft Clone/Dev/Validate UI Blur Render")]
+        [MenuItem("Minecraft Clone/Dev/Validate UI Blur Render", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>

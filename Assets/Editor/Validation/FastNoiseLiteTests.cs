@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using Benchmarks;
+using Editor.Dev;
 using Libraries;
 using Unity.Burst;
 using Unity.Collections;
@@ -215,7 +216,7 @@ namespace Editor.Validation
 
         #region Menu Entry
 
-        [MenuItem(MENU_PATH)]
+        [MenuItem(MENU_PATH, priority = DevMenuPriority.Validation)]
         public static void Run()
         {
             FastNoiseLite.InitializeLookupTables();

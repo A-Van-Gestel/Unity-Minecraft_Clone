@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Data;
+using Editor.Dev;
 using Editor.Validation.Behavior.Framework;
 using Helpers;
 using Jobs;
@@ -52,7 +53,7 @@ namespace Editor.Validation.Behavior
         /// from each chunk's own active fluids, so this also guards that band sizing is deterministic across the serial
         /// baseline, the concurrent schedule, and run-to-run.
         /// </summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Fluid Parallel Determinism (Cross-Chunk Halo, Y-band)")]
+        [MenuItem("Minecraft Clone/Dev/Validate Fluid Parallel Determinism (Cross-Chunk Halo, Y-band)", priority = DevMenuPriority.DeepValidation)]
         public static void RunHaloBand() => RunHaloInternal();
 
         private static void RunHaloInternal()

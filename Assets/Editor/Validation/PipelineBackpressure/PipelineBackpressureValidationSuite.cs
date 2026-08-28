@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using Benchmarks;
 using Data;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using Helpers;
 using UnityEditor;
@@ -45,7 +46,7 @@ namespace Editor.Validation.PipelineBackpressure
         private const int REOPEN_AT = 128;
 
         /// <summary>Runs every scenario and prints a categorized summary via the shared runner.</summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Pipeline Backpressure")]
+        [MenuItem("Minecraft Clone/Dev/Validate Pipeline Backpressure", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>

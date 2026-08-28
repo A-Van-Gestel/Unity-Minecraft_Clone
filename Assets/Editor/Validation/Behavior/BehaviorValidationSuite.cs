@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using UnityEditor;
 
@@ -24,7 +25,7 @@ namespace Editor.Validation.Behavior
         /// <see cref="ValidationSuiteRunner"/>. Baseline failures mark the suite red; known-bug
         /// reproductions are reported as warnings.
         /// </summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Behavior")]
+        [MenuItem("Minecraft Clone/Dev/Validate Behavior", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>

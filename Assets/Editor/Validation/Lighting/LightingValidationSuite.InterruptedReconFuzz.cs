@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Editor.Dev;
 using Editor.Validation.Lighting.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -234,7 +235,7 @@ namespace Editor.Validation.Lighting
         /// Nightly deep sweep of the interrupted-reconciliation fuzz — far more seeds than the per-suite B91,
         /// logging the first failing seed's full case (or a clean all-converged summary).
         /// </summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Lighting Engine (Interrupted Reconciliation Fuzz)")]
+        [MenuItem("Minecraft Clone/Dev/Validate Lighting Engine (Interrupted Reconciliation Fuzz)", priority = DevMenuPriority.DeepValidation)]
         public static void RunInterruptedReconNightly()
         {
             for (int seed = 0; seed < INTERRUPTED_RECON_NIGHTLY_SEEDS; seed++)

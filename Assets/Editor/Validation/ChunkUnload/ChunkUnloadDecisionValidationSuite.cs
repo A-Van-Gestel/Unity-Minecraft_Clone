@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using Helpers;
 using UnityEditor;
@@ -23,7 +24,7 @@ namespace Editor.Validation.ChunkUnload
     public static partial class ChunkUnloadDecisionValidationSuite
     {
         /// <summary>Runs every scenario and prints a categorized summary via the shared runner.</summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Chunk Unload Decision")]
+        [MenuItem("Minecraft Clone/Dev/Validate Chunk Unload Decision", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Data;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using Serialization;
 using UnityEditor;
@@ -63,7 +64,7 @@ namespace Editor.Validation.SerializationRoundTrip
     public static partial class SerializationRoundTripValidationSuite
     {
         /// <summary>Runs every scenario and prints a categorized summary via the shared runner.</summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Serialization Round-Trip")]
+        [MenuItem("Minecraft Clone/Dev/Validate Serialization Round-Trip", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>

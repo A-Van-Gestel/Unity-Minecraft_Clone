@@ -22,7 +22,7 @@ namespace Editor.Dev
         /// Runs <see cref="McpEvalScratch.Run"/> inside a tagged try/catch. Invoke via
         /// <c>Unity_ManageMenuItem</c> after editing the scratch body and refreshing the AssetDatabase.
         /// </summary>
-        [MenuItem("Minecraft Clone/Dev/MCP Eval")]
+        [MenuItem("Minecraft Clone/Dev/MCP Eval", priority = DevMenuPriority.Diagnostics)]
         public static void Run()
         {
             Debug.Log($"{Tag} begin");

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -23,7 +24,7 @@ namespace Editor.Validation.Commands
         /// <see cref="ValidationSuiteRunner"/>. Baseline failures mark the suite red; known-bug
         /// reproductions are reported as warnings.
         /// </summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Command Console")]
+        [MenuItem("Minecraft Clone/Dev/Validate Command Console", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>
