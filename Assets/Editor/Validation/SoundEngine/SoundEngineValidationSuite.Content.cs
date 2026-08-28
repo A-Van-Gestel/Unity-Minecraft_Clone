@@ -130,7 +130,7 @@ namespace Editor.Validation.SoundEngine
 
             if (count > 0)
                 return FailSound(scenario, $"{count} block(s) still resolve to None — run " +
-                                           $"'Minecraft Clone/Dev/Prefill Sound Materials'. First few: {unassigned}");
+                                           $"'Minecraft Clone/Dev/Audio/Prefill Sound Materials'. First few: {unassigned}");
 
             return true;
         }

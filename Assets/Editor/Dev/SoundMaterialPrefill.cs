@@ -21,7 +21,7 @@ namespace Editor.Dev
         private const string DATABASE_PATH = "Assets/Resources/Data/BlockDatabase.asset";
 
         /// <summary>Menu entry: suggests and writes a sound material for every block in the database.</summary>
-        [MenuItem("Minecraft Clone/Dev/Prefill Sound Materials")]
+        [MenuItem("Minecraft Clone/Dev/Audio/Prefill Sound Materials")]
         public static void Run()
         {
             BlockDatabase database = AssetDatabase.LoadAssetAtPath<BlockDatabase>(DATABASE_PATH);
