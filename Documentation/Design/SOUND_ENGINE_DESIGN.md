@@ -458,9 +458,12 @@ architecture, so clips can be swapped or upgraded at any time without code chang
 
 **Shipped content (2026-08-28):** [Kenney — Impact Sounds](https://kenney.nl/assets/impact-sounds) v1.0,
 **CC0**, 75 of its 130 clips under `Assets/Audio/Blocks/kenney_impact/`, covering 12 of the 14 `SoundMaterial` groups
-(5 variants each for break and step; `Wood`, `Glass` and `Metal` also carry distinct place clips). `None`
-is silent by design and `Liquid` is unfilled — an impact pack has no water content, so fluids stay silent
-until a water/splash source is chosen. Recorded in `REFERENCES_AND_CREDITS.md` and `CreditsDatabase.asset`.
+(5 variants each; `Wood`, `Glass` and `Metal` also carry distinct place clips), plus
+[NOX Sound — Essentials Series (Footsteps)](https://www.asoundeffect.com/sounddesigner/nox-sound/), also
+**CC0**, 114 clips under `Assets/Audio/Blocks/nox_footsteps/` supplying every material's footstep channel
+and the `Leaves` / `Plant` / `Liquid` break sounds an impact pack cannot cover. **All 13 sounding materials
+now have both break and step content**; only `None` is silent, by design. One folder per pack under
+`Assets/Audio/Blocks/`. Recorded in `REFERENCES_AND_CREDITS.md` and `CreditsDatabase.asset`.
 
 Candidate sources for further clip content. **License hygiene rule:** licensing on these sites is
 per-asset (or per-pack), *not* per-site — verify the license of every individual download, and

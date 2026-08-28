@@ -314,3 +314,33 @@ MonoBehaviour:
     version: 1.0
     notes: 75 of the pack's 130 clips, 5 variants per family. Crediting is not required
       by CC0.
+  - name: Essentials Series (Footsteps)
+    author: NOX_SOUND
+    category: 6
+    licenseType: 5
+    customLicenseText: 
+    url: https://www.asoundeffect.com/sounddesigner/nox-sound/
+    usageDescription: Footstep clips for every block sound material, plus the break
+      sounds for leaves, plants and liquids.
+    sourceFiles:
+    - Footsteps_DirtyGround_Walk
+    - Footsteps_Walk_Grass_Mono
+    - Footsteps_Grass_Tall_Movement
+    - Footsteps_Gravel_Walk
+    - Footsteps_Leaves_Walk
+    - Footsteps_Leaves_Run
+    - Footsteps_MetalV1_Walk
+    - Footsteps_Mud_Walk
+    - Footsteps_Rock_Walk
+    - Footsteps_Sand_Walk
+    - Footsteps_Snow_Walk
+    - Footsteps_Tile_Walk
+    - Footsteps_WaterV1_Walk
+    - Footsteps_Water_Jump_Light
+    - Footsteps_Wood_Walk
+    projectFiles:
+    - Assets/Audio/Blocks/nox_footsteps/
+    version: 
+    notes: '114 of the pack''s clips, converted from 24-bit/48kHz WAV to OGG Vorbis.
+      License stated in the pack''s Essentials_Series_README.pdf: ''All these sounds
+      are under CC0 license.'''

@@ -80,8 +80,20 @@ including the three-step permission rule for "free to download but no attached l
       `impactPlate_medium`, `impactSoft_heavy`, `impactSoft_medium`, `impactWood_medium` (5 variants each).
     * *Source:* `Assets/Audio/Blocks/kenney_impact/` (one folder per pack)
     * *Notes:* Block break / place / footstep one-shots, mapped to `SoundMaterial` groups in
-      `BlockSoundDatabase.asset`. The `Liquid` group is deliberately unfilled — an impact pack has no
-      water or splash content.
+      `BlockSoundDatabase.asset`. Supplies the break/place channels. Its footstep clips were
+      superseded by the NOX Sound pack below, which covers surfaces an impact pack does not.
+
+* [**Essentials Series (Footsteps)**](https://www.asoundeffect.com/sounddesigner/nox-sound/) by **NOX_SOUND**
+    * *License:* CC0 (Public Domain) — stated in the pack's own `Essentials_Series_README.pdf`:
+      *"All these sounds are under CC0 license."*
+    * *Files used:* 114 clips from 15 walk/movement families across 12 surfaces — `DirtyGround`, `Grass`
+      (incl. `Tall_Movement`), `Gravel`, `Leaves` (walk + run), `MetalV1`, `Mud`, `Rock`, `Sand`, `Snow`,
+      `Tile`, `Water` (walk + light jump), `Wood`.
+    * *Source:* `Assets/Audio/Blocks/nox_footsteps/`
+    * *Notes:* Supplies every material's footstep channel, plus the break sounds for `Leaves`, `Plant` and
+      `Liquid` — the three groups the impact pack left silent. Converted from 24-bit/48 kHz mono WAV to OGG
+      Vorbis (9x smaller) with `Tools/Python/convert_audio_pack.py`; the unconverted pack stays outside the
+      repository.
 
 ## ✒️ Fonts
 
