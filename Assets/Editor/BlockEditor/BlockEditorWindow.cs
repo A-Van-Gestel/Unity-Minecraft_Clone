@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Data;
+using Data.Enums;
 using Editor.DataGeneration;
 using Editor.Libraries;
 using UnityEditor;
@@ -134,6 +135,24 @@ namespace Editor.BlockEditor
         #endregion
 
         #region Data Persistence
+
+        /// <summary>Where the sound groups the Sound Material dropdown auditions are authored.</summary>
+        private const string SOUND_DATABASE_PATH = "Assets/Resources/Data/BlockSoundDatabase.asset";
+
+        /// <summary>Width of the audition button beside the Sound Material dropdown.</summary>
+        private const float SOUND_PLAY_BUTTON_WIDTH = 30f;
+
+        /// <summary>Lazily loaded so the Block Editor still opens when no sound database exists yet.</summary>
+        private BlockSoundDatabase _soundDatabase;
+
+        /// <summary>The sound events the Sound section reports, in the order it lists them.</summary>
+        private static readonly BlockSoundEvent[] s_soundEvents =
+        {
+            BlockSoundEvent.Break,
+            BlockSoundEvent.Place,
+            BlockSoundEvent.Step,
+            BlockSoundEvent.Hit,
+        };
 
         private void LoadBlockData()
         {
@@ -270,12 +289,14 @@ namespace Editor.BlockEditor
         /// <param name="initialTags">Initial tags to assign to the new preset.</param>
         /// <param name="initialWorldGenCanReplaceTags">Initial world-gen canReplaceTags to assign to the new preset.</param>
         /// <param name="initialPlacementCanReplaceTags">Initial placement canReplaceTags to assign to the new preset.</param>
+        /// <param name="initialSoundMaterial">Initial sound material to assign to the new preset.</param>
         /// <returns>The created preset, or null if the user canceled.</returns>
         private static BlockTagPreset CreateTagPresetAsset(
             string defaultFileName,
             BlockTags initialTags = BlockTags.NONE,
             BlockTags initialWorldGenCanReplaceTags = BlockTags.NONE,
-            BlockTags initialPlacementCanReplaceTags = BlockTags.NONE)
+            BlockTags initialPlacementCanReplaceTags = BlockTags.NONE,
+            SoundMaterial initialSoundMaterial = SoundMaterial.None)
         {
             string path = EditorUtility.SaveFilePanelInProject(
                 "Save New Block Tag Preset",
@@ -291,6 +312,7 @@ namespace Editor.BlockEditor
             newPreset.tags = initialTags;
             newPreset.worldGenCanReplaceTags = initialWorldGenCanReplaceTags;
             newPreset.placementCanReplaceTags = initialPlacementCanReplaceTags;
+            newPreset.soundMaterial = initialSoundMaterial;
 
             AssetDatabase.CreateAsset(newPreset, path);
             AssetDatabase.SaveAssets();

@@ -649,9 +649,10 @@ namespace Editor.BlockEditor
                 _selectedBlock.worldGenCanReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("World-Gen Can Replace", "What tags can this block replace during world generation (structures, flora, ores)?"), _selectedBlock.worldGenCanReplaceTags);
                 _selectedBlock.placementCanReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("Placement Can Replace", "What tags can this block replace when placed by the player? Normally the soft set: REPLACEABLE, LIQUID."), _selectedBlock.placementCanReplaceTags);
 
-                EditorGUILayout.Space();
-                _selectedBlock.soundMaterial = (SoundMaterial)EditorGUILayout.EnumPopup(new GUIContent("Sound Material", "Which sound group this block uses for break/place/step. Independent of the tags above — tags only seed this value when the prefill utility runs."), _selectedBlock.soundMaterial);
 
+                EditorUILayoutHelper.DrawSeparator();
+                EditorUILayoutHelper.SubHeader("Sound");
+                DrawSoundSection();
 
                 EditorUILayoutHelper.DrawSeparator();
                 EditorUILayoutHelper.SubHeader("Face Textures (ID)");
@@ -810,6 +811,97 @@ namespace Editor.BlockEditor
             EditorGUI.indentLevel--;
         }
 
+        /// <summary>
+        /// Draws the block's sound material and, per event, what it actually resolves to — with an audition
+        /// button on each row so the choice can be judged by ear where it is made.
+        /// </summary>
+        private void DrawSoundSection()
+        {
+            _selectedBlock.soundMaterial = (SoundMaterial)EditorGUILayout.EnumPopup(
+                new GUIContent("Sound Material",
+                    "Which sound group this block uses for break/place/step. Independent of the tags above — " +
+                    "tags only seed this value when the prefill utility runs."),
+                _selectedBlock.soundMaterial);
+
+            if (_selectedBlock.soundMaterial == SoundMaterial.None)
+            {
+                EditorGUILayout.LabelField(" ", "Silent — no break, place or step sound.", EditorStyles.miniLabel);
+                return;
+            }
+
+            BlockSoundGroup group = ResolveSoundGroup(_selectedBlock.soundMaterial);
+            if (group == null)
+            {
+                EditorGUILayout.LabelField(" ",
+                    $"No '{_selectedBlock.soundMaterial}' group in the sound database — this block is silent.",
+                    EditorStyles.miniLabel);
+                return;
+            }
+
+            foreach (BlockSoundEvent evt in s_soundEvents) DrawSoundEventRow(group, evt);
+        }
+
+        /// <summary>
+        /// Draws one event row: what it resolves to, and a button that auditions it the way the game picks.
+        /// </summary>
+        /// <param name="group">The block's resolved sound group.</param>
+        /// <param name="evt">The event this row reports.</param>
+        private static void DrawSoundEventRow(BlockSoundGroup group, BlockSoundEvent evt)
+        {
+            // The effective clips, fallback included — what the player would actually hear, which is the
+            // question this row exists to answer.
+            AudioClip[] effective = group.GetClips(evt);
+            bool viaFallback = evt == BlockSoundEvent.Place && (group.placeClips == null || group.placeClips.Length == 0);
+
+            string state;
+            if (effective == null || effective.Length == 0) state = "silent — no clips";
+            else if (viaFallback) state = $"{effective.Length} clip(s), reusing Break";
+            else state = $"{effective.Length} clip(s)";
+
+            EditorGUILayout.BeginHorizontal();
+
+            EditorGUILayout.LabelField(new GUIContent($"    {evt}", SoundEventTooltip(evt)), GUILayout.Width(EditorGUIUtility.labelWidth));
+            EditorGUILayout.LabelField(state, EditorStyles.miniLabel);
+
+            using (new EditorGUI.DisabledScope(effective == null || effective.Length == 0))
+            {
+                if (GUILayout.Button(new GUIContent("▶", $"Audition this material's {evt} sound."),
+                        GUILayout.Width(SOUND_PLAY_BUTTON_WIDTH)) && effective is { Length: > 0 })
+                    EditorAudioPreview.Play(effective[Random.Range(0, effective.Length)]);
+            }
+
+            EditorGUILayout.EndHorizontal();
+        }
+
+        /// <summary>Explains what triggers a given block sound event.</summary>
+        /// <param name="evt">The event to describe.</param>
+        /// <returns>The tooltip text for that event's row.</returns>
+        private static string SoundEventTooltip(BlockSoundEvent evt)
+        {
+            return evt switch
+            {
+                BlockSoundEvent.Break => "Played when this block is destroyed.",
+                BlockSoundEvent.Place => "Played when this block is placed. Falls back to the Break clips when unauthored.",
+                BlockSoundEvent.Step => "Played as the player walks on this block.",
+                _ => "Played while mining. Not triggered by the current engine.",
+            };
+        }
+
+        /// <summary>
+        /// Returns the sound group a material resolves to, loading the database on first use.
+        /// </summary>
+        /// <param name="material">The material to resolve.</param>
+        /// <returns>The group, or null when the database or the group is missing.</returns>
+        private BlockSoundGroup ResolveSoundGroup(SoundMaterial material)
+        {
+            if (material == SoundMaterial.None) return null;
+
+            if (_soundDatabase == null)
+                _soundDatabase = AssetDatabase.LoadAssetAtPath<BlockSoundDatabase>(SOUND_DATABASE_PATH);
+
+            return _soundDatabase == null ? null : _soundDatabase.Get(material);
+        }
+
         // --- Helper methods for list management ---
 
         private void AddNewBlock()
@@ -929,7 +1021,8 @@ namespace Editor.BlockEditor
                 $"BTP_{_selectedBlock.blockName}.asset",
                 _selectedBlock.tags,
                 _selectedBlock.worldGenCanReplaceTags,
-                _selectedBlock.placementCanReplaceTags);
+                _selectedBlock.placementCanReplaceTags,
+                _selectedBlock.soundMaterial);
 
             // Automatically assign the newly created preset to the current block.
             if (newPreset != null)

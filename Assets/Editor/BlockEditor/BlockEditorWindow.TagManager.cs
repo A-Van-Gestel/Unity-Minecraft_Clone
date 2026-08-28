@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Data;
+using Data.Enums;
 using Editor.Libraries;
 using UnityEditor;
 using UnityEngine;
@@ -173,6 +174,14 @@ namespace Editor.BlockEditor
                     new GUIContent("Placement Can Replace", "The player-placement replacement tags included in this preset."),
                     _selectedPreset.placementCanReplaceTags);
 
+                EditorGUILayout.Space();
+
+                _selectedPreset.soundMaterial = (SoundMaterial)EditorGUILayout.EnumPopup(
+                    new GUIContent("Sound Material",
+                        "The sound group blocks using this preset default to. Copied down alongside the tag " +
+                        "masks when 'Revert to Base Preset' is used in the Block Editor tab."),
+                    _selectedPreset.soundMaterial);
+
                 if (EditorGUI.EndChangeCheck())
                 {
                     // Auto-save changes to the ScriptableObject asset
@@ -229,7 +238,8 @@ namespace Editor.BlockEditor
                 $"{_selectedPreset.name} (Copy).asset",
                 _selectedPreset.tags,
                 _selectedPreset.worldGenCanReplaceTags,
-                _selectedPreset.placementCanReplaceTags);
+                _selectedPreset.placementCanReplaceTags,
+                _selectedPreset.soundMaterial);
 
             if (newPreset == null) return;
 
