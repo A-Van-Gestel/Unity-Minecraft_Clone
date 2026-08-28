@@ -1,0 +1,262 @@
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Text;
+using Audio;
+using Data;
+using Data.Enums;
+using Editor.Dev;
+using Editor.Validation.Framework;
+using UI.Enums;
+using UnityEditor;
+using UnityEngine;
+
+namespace Editor.Validation.SoundEngine
+{
+    /// <summary>
+    /// <see cref="SoundEngineValidationSuite"/> — the authored side: the shipped databases, the prefill
+    /// heuristic that seeded them, and the volume plumbing behind the Audio settings tab.
+    /// <para>
+    /// These scenarios run against the real project assets rather than fixtures. That is the point: the
+    /// resolution chain can be perfect while every block still resolves to <c>None</c> because nobody ran the
+    /// prefill, and no fixture-based test would ever notice.
+    /// </para>
+    /// </summary>
+    public static partial class SoundEngineValidationSuite
+    {
+        private const string BLOCK_DATABASE_PATH = "Assets/Resources/Data/BlockDatabase.asset";
+        private const string SOUND_DATABASE_PATH = "Assets/Resources/Data/BlockSoundDatabase.asset";
+
+        /// <summary>Decibel tolerance for the volume-curve comparisons.</summary>
+        private const float DECIBEL_TOLERANCE = 0.01f;
+
+        /// <summary>
+        /// Prefill fixtures: (name, tags) and the material the heuristic must produce. These pin the ordering
+        /// decisions that are easy to get wrong — flora tags outranking the name match, and "snow" outranking
+        /// "grass" for a snow-topped grass block.
+        /// </summary>
+        private static readonly (string Name, BlockTags Tags, SoundMaterial Expected)[] s_prefillCases =
+        {
+            ("Air", BlockTags.NONE, SoundMaterial.None),
+            ("Stone", BlockTags.SOLID | BlockTags.ROCK, SoundMaterial.Stone),
+            ("Coal Ore", BlockTags.SOLID | BlockTags.MINERAL, SoundMaterial.Stone),
+            ("Dirt", BlockTags.SOLID | BlockTags.SOIL, SoundMaterial.Dirt),
+            ("Grass", BlockTags.SOLID | BlockTags.SOIL | BlockTags.ORGANIC, SoundMaterial.Grass),
+            ("Grass Snowy", BlockTags.SOLID | BlockTags.SOIL, SoundMaterial.Snow),
+            ("Grass Blades", BlockTags.PLANT | BlockTags.REPLACEABLE, SoundMaterial.Plant),
+            ("Oak Leaves", BlockTags.SOLID | BlockTags.LEAVES | BlockTags.ORGANIC, SoundMaterial.Leaves),
+            ("Oak Log", BlockTags.SOLID | BlockTags.WOOD, SoundMaterial.Wood),
+            ("Sand", BlockTags.SOLID | BlockTags.SOIL | BlockTags.GRAVITY_AFFECTED, SoundMaterial.Sand),
+            ("Gravel", BlockTags.SOLID | BlockTags.SOIL | BlockTags.GRAVITY_AFFECTED, SoundMaterial.Gravel),
+            ("Water", BlockTags.LIQUID, SoundMaterial.Liquid),
+            ("Glass", BlockTags.SOLID | BlockTags.MAN_MADE, SoundMaterial.Glass),
+            ("Debug Lamp 01", BlockTags.DEBUG, SoundMaterial.Stone),
+        };
+
+        static partial void AddContentScenarios(List<Scenario> scenarios)
+        {
+            scenarios.Add(new Scenario("Sound Database Holds One Group Per Material", RunDatabaseSizing));
+            scenarios.Add(new Scenario("Every Placeable Block Has An Authored Sound Material", RunMaterialCensus));
+            scenarios.Add(new Scenario("Prefill Heuristic Classifies Its Fixture Palette", RunPrefillHeuristic));
+            scenarios.Add(new Scenario("Volume Sliders Convert To The Mixer Decibel Curve", RunVolumeCurve));
+            scenarios.Add(new Scenario("Category Volumes Fold In The Master Slider", RunCategoryVolumes));
+            scenarios.Add(new Scenario("Audio Settings Tab Is In The Generator's Tab Order", RunSettingsTabOrder));
+        }
+
+        /// <summary>
+        /// The shipped sound database must expose exactly one group per enum value, and must answer a material
+        /// past its range with null rather than throwing inside a trigger site.
+        /// </summary>
+        private static bool RunDatabaseSizing()
+        {
+            const string scenario = "Sound Database Holds One Group Per Material";
+
+            BlockSoundDatabase database = AssetDatabase.LoadAssetAtPath<BlockSoundDatabase>(SOUND_DATABASE_PATH);
+            if (database == null)
+                return FailSound(scenario, $"no BlockSoundDatabase at '{SOUND_DATABASE_PATH}'.");
+
+            if (database.GroupCount != BlockSoundDatabase.MaterialCount)
+                return FailSound(scenario, $"asset holds {database.GroupCount} groups, expected " +
+                                           $"{BlockSoundDatabase.MaterialCount} (one per SoundMaterial).");
+
+            foreach (SoundMaterial material in (SoundMaterial[])Enum.GetValues(typeof(SoundMaterial)))
+            {
+                if (database.Get(material) == null)
+                    return FailSound(scenario, $"no group for {material}.");
+            }
+
+            if (database.Get((SoundMaterial)200) != null)
+                return FailSound(scenario, "an out-of-range material returned a group instead of null.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// The census: every block a player can place or break must resolve to a real sound group. This is the
+        /// scenario that goes red when a new block is authored without a sound material, or when the prefill
+        /// was never run against a grown palette.
+        /// </summary>
+        private static bool RunMaterialCensus()
+        {
+            const string scenario = "Every Placeable Block Has An Authored Sound Material";
+
+            BlockDatabase database = AssetDatabase.LoadAssetAtPath<BlockDatabase>(BLOCK_DATABASE_PATH);
+            if (database == null || database.blockTypes == null)
+                return FailSound(scenario, $"no BlockDatabase at '{BLOCK_DATABASE_PATH}'.");
+
+            StringBuilder unassigned = new StringBuilder();
+            int count = 0;
+
+            for (int i = 0; i < database.blockTypes.Length; i++)
+            {
+                BlockType block = database.blockTypes[i];
+                if (block == null) continue;
+
+                // Air is the one block that is legitimately silent; everything else is placeable and must
+                // give the player feedback.
+                bool isAir = string.Equals(block.blockName, "Air", StringComparison.OrdinalIgnoreCase);
+                if (isAir)
+                {
+                    if (block.soundMaterial != SoundMaterial.None)
+                        return FailSound(scenario, $"Air is authored as {block.soundMaterial}; it must be None.");
+                    continue;
+                }
+
+                if (block.soundMaterial != SoundMaterial.None) continue;
+
+                count++;
+                if (count <= 10) unassigned.Append($"[{i}] {block.blockName}; ");
+            }
+
+            if (count > 0)
+                return FailSound(scenario, $"{count} block(s) still resolve to None — run " +
+                                           $"'Minecraft Clone/Dev/Prefill Sound Materials'. First few: {unassigned}");
+
+            return true;
+        }
+
+        /// <summary>
+        /// Pins the prefill heuristic's classification, so a later edit to its rule order cannot quietly
+        /// re-file half the palette the next time it is run.
+        /// </summary>
+        private static bool RunPrefillHeuristic()
+        {
+            const string scenario = "Prefill Heuristic Classifies Its Fixture Palette";
+
+            foreach ((string name, BlockTags tags, SoundMaterial expected) in s_prefillCases)
+            {
+                BlockType block = new BlockType { blockName = name, tags = tags };
+                SoundMaterial actual = SoundMaterialPrefill.Suggest(block);
+
+                if (actual != expected)
+                    return FailSound(scenario, $"'{name}' (tags {tags}) suggested {actual}, expected {expected}.");
+            }
+
+            if (SoundMaterialPrefill.Suggest(null) != SoundMaterial.None)
+                return FailSound(scenario, "a null block did not suggest None.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// The linear-to-decibel curve behind every volume slider: unity is 0 dB, zero is the silence floor,
+        /// half amplitude is the textbook −6.02 dB, and the curve never rises as the slider falls.
+        /// </summary>
+        private static bool RunVolumeCurve()
+        {
+            const string scenario = "Volume Sliders Convert To The Mixer Decibel Curve";
+
+            if (Mathf.Abs(AudioVolumes.LinearToDecibels(1f)) > DECIBEL_TOLERANCE)
+                return FailSound(scenario, $"full volume produced {AudioVolumes.LinearToDecibels(1f)} dB, expected 0.");
+
+            if (!Mathf.Approximately(AudioVolumes.LinearToDecibels(0f), AudioVolumes.SilenceDecibels))
+                return FailSound(scenario, $"zero produced {AudioVolumes.LinearToDecibels(0f)} dB, expected " +
+                                           $"{AudioVolumes.SilenceDecibels}.");
+
+            if (Mathf.Abs(AudioVolumes.LinearToDecibels(0.5f) - (-6.0206f)) > DECIBEL_TOLERANCE)
+                return FailSound(scenario, $"half volume produced {AudioVolumes.LinearToDecibels(0.5f)} dB, " +
+                                           "expected -6.02.");
+
+            float previous = float.MinValue;
+            for (int step = 0; step <= 100; step++)
+            {
+                float decibels = AudioVolumes.LinearToDecibels(step / 100f);
+                if (decibels < previous)
+                    return FailSound(scenario, $"the curve fell at {step}%: {decibels} dB after {previous} dB.");
+                if (decibels < AudioVolumes.SilenceDecibels)
+                    return FailSound(scenario, $"{step}% produced {decibels} dB, below the silence floor.");
+
+                previous = decibels;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Category gain must fold in the master slider — the defect this catches is a master slider that
+        /// moves the UI and nothing else.
+        /// </summary>
+        private static bool RunCategoryVolumes()
+        {
+            const string scenario = "Category Volumes Fold In The Master Slider";
+
+            Settings settings = new Settings
+            {
+                masterVolume = 0.5f,
+                musicVolume = 0.8f,
+                ambientVolume = 0.6f,
+                blockVolume = 0.4f,
+                fluidVolume = 0.2f,
+                uiVolume = 1f,
+            };
+
+            AudioVolumes.Apply(settings);
+
+            if (!Mathf.Approximately(AudioVolumes.GetLinear(AudioCategory.Master), 0.5f))
+                return FailSound(scenario, $"master returned {AudioVolumes.GetLinear(AudioCategory.Master)}, expected 0.5.");
+            if (!Mathf.Approximately(AudioVolumes.GetLinear(AudioCategory.Blocks), 0.2f))
+                return FailSound(scenario, $"blocks returned {AudioVolumes.GetLinear(AudioCategory.Blocks)}, expected " +
+                                           "0.4 x 0.5 = 0.2.");
+            if (!Mathf.Approximately(AudioVolumes.GetLinear(AudioCategory.Music), 0.4f))
+                return FailSound(scenario, $"music returned {AudioVolumes.GetLinear(AudioCategory.Music)}, expected 0.4.");
+
+            settings.masterVolume = 0f;
+            AudioVolumes.Apply(settings);
+            if (AudioVolumes.GetLinear(AudioCategory.Blocks) > 0.0001f)
+                return FailSound(scenario, "a zeroed master slider did not silence the block category.");
+
+            // Left as the shipped defaults rather than the fixture's values: this static table is process-wide,
+            // and a later suite in a Validate All run would otherwise inherit a half-muted mixer.
+            AudioVolumes.Apply(new Settings());
+            return true;
+        }
+
+        /// <summary>
+        /// Every <see cref="SettingsTab"/> value must appear in the generator's tab-order array, or the tab is
+        /// silently dropped from the settings menu at runtime. Reflection is the only way in: the array is
+        /// private, and the runtime check that mirrors it only fires with a live UI.
+        /// </summary>
+        private static bool RunSettingsTabOrder()
+        {
+            const string scenario = "Audio Settings Tab Is In The Generator's Tab Order";
+
+            FieldInfo field = typeof(UI.SettingsUIGenerator).GetField("s_tabOrder",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            if (field == null)
+                return FailSound(scenario, "SettingsUIGenerator.s_tabOrder was not found — has it been renamed?");
+
+            SettingsTab[] order = field.GetValue(null) as SettingsTab[];
+            if (order == null)
+                return FailSound(scenario, "s_tabOrder did not read back as a SettingsTab[].");
+
+            foreach (SettingsTab tab in (SettingsTab[])Enum.GetValues(typeof(SettingsTab)))
+            {
+                if (Array.IndexOf(order, tab) < 0)
+                    return FailSound(scenario, $"SettingsTab.{tab} is missing from s_tabOrder — its settings " +
+                                               "would never render.");
+            }
+
+            return true;
+        }
+    }
+}
