@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Data;
 using Data.Enums;
 using Editor.Libraries;
@@ -26,7 +27,7 @@ namespace Editor.SoundEditor
         private BlockDatabase _blockDatabase;
         private SoundMaterial _selected = SoundMaterial.Stone;
 
-        /// <summary>Family name → its variant clips, ordered by variant index.</summary>
+        /// <summary>Pack-qualified family key (<c>folder/family</c>) → its variant clips, in variant order.</summary>
         private readonly Dictionary<string, AudioClip[]> _families = new Dictionary<string, AudioClip[]>();
 
         /// <summary>Family names for the dropdowns, with the empty choice at index 0.</summary>
@@ -103,7 +104,8 @@ namespace Editor.SoundEditor
 
         /// <summary>
         /// Groups every clip under <see cref="CLIP_FOLDER"/> into families by stripping the trailing
-        /// <c>_NNN</c> variant suffix, so a pack's numbered variants present as one choice.
+        /// <c>_NNN</c> variant suffix, so a pack's numbered variants present as one choice, and qualifies
+        /// each family by its folder so packs stay separate.
         /// </summary>
         private void BuildFamilyIndex()
         {
@@ -117,7 +119,7 @@ namespace Editor.SoundEditor
                 AudioClip clip = AssetDatabase.LoadAssetAtPath<AudioClip>(path);
                 if (clip == null) continue;
 
-                string family = FamilyOf(clip.name);
+                string family = QualifiedFamilyOf(clip, path);
                 if (!collected.TryGetValue(family, out List<AudioClip> list))
                 {
                     list = new List<AudioClip>();
@@ -152,6 +154,25 @@ namespace Editor.SoundEditor
                 int index = (byte)block.soundMaterial;
                 if ((uint)index < (uint)_blockUsage.Length) _blockUsage[index]++;
             }
+        }
+
+        /// <summary>
+        /// Builds the pack-qualified family key for a clip: the folder it lives in, then its family.
+        /// </summary>
+        /// <param name="clip">The clip to key.</param>
+        /// <param name="assetPath">The clip's asset path, used to derive the owning folder.</param>
+        /// <returns>A key of the form <c>folder/family</c>.</returns>
+        /// <remarks>
+        /// Qualifying by folder is what keeps two packs apart: the family name alone is just the filename
+        /// prefix, so same-named families from different packs would otherwise merge into one entry and
+        /// silently pool their clips. The separator is deliberate — Unity's popup renders a '/' as a
+        /// submenu, so each pack folder becomes its own group for free.
+        /// </remarks>
+        private static string QualifiedFamilyOf(AudioClip clip, string assetPath)
+        {
+            string folder = Path.GetFileName(Path.GetDirectoryName(assetPath));
+            string family = FamilyOf(clip.name);
+            return string.IsNullOrEmpty(folder) ? family : folder + "/" + family;
         }
 
         /// <summary>Strips a trailing <c>_NNN</c> variant suffix from a clip name.</summary>
@@ -294,7 +315,7 @@ namespace Editor.SoundEditor
         {
             AudioClip[] current = GetClips(group, evt);
             string currentFamily = current is { Length: > 0 } && current[0] != null
-                ? FamilyOf(current[0].name)
+                ? QualifiedFamilyOf(current[0], AssetDatabase.GetAssetPath(current[0]))
                 : NO_FAMILY;
 
             EditorGUILayout.BeginHorizontal();
