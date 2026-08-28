@@ -1,4 +1,5 @@
 using Data;
+using Data.Enums;
 using Editor.BlockEditor.Helpers;
 using Editor.DataGeneration;
 using Editor.Libraries;
@@ -543,6 +544,7 @@ namespace Editor.BlockEditor
                     BlockTags presetTags = _selectedBlock.tagPreset.tags;
                     BlockTags presetWorldGen = _selectedBlock.tagPreset.worldGenCanReplaceTags;
                     BlockTags presetPlacement = _selectedBlock.tagPreset.placementCanReplaceTags;
+                    SoundMaterial presetSound = _selectedBlock.tagPreset.soundMaterial;
                     BlockTags currentTags = _selectedBlock.tags;
                     BlockTags currentWorldGen = _selectedBlock.worldGenCanReplaceTags;
                     BlockTags currentPlacement = _selectedBlock.placementCanReplaceTags;
@@ -558,7 +560,8 @@ namespace Editor.BlockEditor
                     bool hasTagOverrides = tagsAdded != BlockTags.NONE || tagsRemoved != BlockTags.NONE;
                     bool hasWorldGenOverrides = worldGenAdded != BlockTags.NONE || worldGenRemoved != BlockTags.NONE;
                     bool hasPlacementOverrides = placementAdded != BlockTags.NONE || placementRemoved != BlockTags.NONE;
-                    bool hasAnyOverride = hasTagOverrides || hasWorldGenOverrides || hasPlacementOverrides;
+                    bool hasSoundOverride = _selectedBlock.soundMaterial != presetSound;
+                    bool hasAnyOverride = hasTagOverrides || hasWorldGenOverrides || hasPlacementOverrides || hasSoundOverride;
 
                     // --- Override Summary ---
                     if (hasAnyOverride)
@@ -591,6 +594,12 @@ namespace Editor.BlockEditor
                             summary = summary.TrimEnd();
                         }
 
+                        if (hasSoundOverride)
+                        {
+                            if (summary.Length > 0) summary += "\n";
+                            summary += $"Sound Material: {presetSound} -> {_selectedBlock.soundMaterial}";
+                        }
+
                         EditorGUILayout.HelpBox($"Overrides detected vs '{_selectedBlock.tagPreset.name}':\n{summary}", MessageType.Warning);
                     }
                     else
@@ -608,6 +617,7 @@ namespace Editor.BlockEditor
                         _selectedBlock.tags = presetTags;
                         _selectedBlock.worldGenCanReplaceTags = presetWorldGen;
                         _selectedBlock.placementCanReplaceTags = presetPlacement;
+                        _selectedBlock.soundMaterial = presetSound;
                         hasUnsavedChanges = true;
                     }
 
@@ -624,6 +634,7 @@ namespace Editor.BlockEditor
                             _selectedBlock.tagPreset.tags = currentTags;
                             _selectedBlock.tagPreset.worldGenCanReplaceTags = currentWorldGen;
                             _selectedBlock.tagPreset.placementCanReplaceTags = currentPlacement;
+                            _selectedBlock.tagPreset.soundMaterial = _selectedBlock.soundMaterial;
                             EditorUtility.SetDirty(_selectedBlock.tagPreset);
                             AssetDatabase.SaveAssets();
                         }
@@ -637,6 +648,9 @@ namespace Editor.BlockEditor
                 _selectedBlock.tags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("Tags", "What tags does this block have? A block can have multiple tags."), _selectedBlock.tags);
                 _selectedBlock.worldGenCanReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("World-Gen Can Replace", "What tags can this block replace during world generation (structures, flora, ores)?"), _selectedBlock.worldGenCanReplaceTags);
                 _selectedBlock.placementCanReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("Placement Can Replace", "What tags can this block replace when placed by the player? Normally the soft set: REPLACEABLE, LIQUID."), _selectedBlock.placementCanReplaceTags);
+
+                EditorGUILayout.Space();
+                _selectedBlock.soundMaterial = (SoundMaterial)EditorGUILayout.EnumPopup(new GUIContent("Sound Material", "Which sound group this block uses for break/place/step. Independent of the tags above — tags only seed this value when the prefill utility runs."), _selectedBlock.soundMaterial);
 
 
                 EditorUILayoutHelper.DrawSeparator();
@@ -855,6 +869,7 @@ namespace Editor.BlockEditor
                 tags = _selectedBlock.tags,
                 worldGenCanReplaceTags = _selectedBlock.worldGenCanReplaceTags,
                 placementCanReplaceTags = _selectedBlock.placementCanReplaceTags,
+                soundMaterial = _selectedBlock.soundMaterial,
                 isActive = _selectedBlock.isActive,
                 metadataSchema = _selectedBlock.metadataSchema,
                 placementMetadataMode = _selectedBlock.placementMetadataMode,

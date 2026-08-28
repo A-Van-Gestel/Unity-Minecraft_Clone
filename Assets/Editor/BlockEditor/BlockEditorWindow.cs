@@ -170,6 +170,7 @@ namespace Editor.BlockEditor
                     tags = blockType.tags,
                     worldGenCanReplaceTags = blockType.worldGenCanReplaceTags,
                     placementCanReplaceTags = blockType.placementCanReplaceTags,
+                    soundMaterial = blockType.soundMaterial,
                     isActive = blockType.isActive,
                     metadataSchema = blockType.metadataSchema,
                     placementMetadataMode = blockType.placementMetadataMode,

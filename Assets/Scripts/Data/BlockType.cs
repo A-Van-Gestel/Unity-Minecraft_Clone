@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
+using Data.Enums;
 using MyBox;
 using UnityEngine;
 
@@ -115,6 +116,11 @@ namespace Data
                  "(REPLACEABLE, LIQUID) — any other tag (structural, or PLANT which also tags solid leaves) makes the " +
                  "placement ray tunnel through that surface.")]
         public BlockTags placementCanReplaceTags;
+
+        [Header("Sound")]
+        [Tooltip("Which sound group this block uses for break/place/step. Independent of tags — tags seed " +
+                 "the value once at author time, but the runtime never consults them for audio.")]
+        public SoundMaterial soundMaterial;
 
         [Header("Block Behavior")]
         [Tooltip("Indicates whether the block has any block behavior.")]
