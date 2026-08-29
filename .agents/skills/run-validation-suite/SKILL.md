@@ -45,14 +45,14 @@ The authoritative list of suites the aggregate runs is `ValidationSuiteRegistry.
 against. **Read the registry rather than trusting any list, here or elsewhere** — it is one line per
 suite and it is the only place that cannot go stale.
 
-Standard inventory — **24 suites**, in registry run/report order, which is also the display-name
+Standard inventory — **27 suites**, in registry run/report order, which is also the display-name
 spelling `RunSelected` expects:
 
 **Lighting Engine · Meshing · Behavior · Placement · Physics Solver · Voxel Occlusion · Mesh Build
 Queue · Light Work Scheduler · Chunk Math · Chunk Unload Decision · Pool Prune Decision · Pipeline
-Backpressure · Save Durability · Deserialization Robustness · Serialization Round-Trip · Migration
-Chain · Spawn · Command Console · World Clock · Sky & Celestial · Sky Render · UI Blur Render · Worm
-Carver · Validation Framework**
+Backpressure · Chunk Pipeline · Save Durability · Deserialization Robustness · Serialization
+Round-Trip · Migration Chain · Spawn · Command Console · World Clock · Sky & Celestial · Sky Render ·
+UI Blur Render · Worm Carver · Biome Selection · Sound Engine · Validation Framework**
 
 Each has a `Minecraft Clone/Dev/Validate <name>` menu item, plus the aggregate **Validate All** —
 **with two where the menu path is NOT the display name**: `Voxel Occlusion` → *Validate Occlusion*,
