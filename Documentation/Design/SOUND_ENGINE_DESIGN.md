@@ -630,10 +630,13 @@ architecture, so clips can be swapped or upgraded at any time without code chang
 
 **Ambience beds (2026-08-29):** [NOX Sound — Essentials Series (Nature)](https://www.asoundeffect.com/sounddesigner/nox-sound/),
 **CC0** under the same series README as the footsteps pack, 6 of its 18 loops under
-`Assets/Audio/Ambience/nox_nature/`: `Cave_Dark` (cave bed), `Wind_Calm` (fallback bed), `Sea` (Ocean),
-`Forest_Birds` (Forrest), `Cicadas` (Grasslands), `Wind_Forest` (Steep Grasslands). Mountain and Desert
-deliberately ride the fallback rather than inventing a distinction — an exposed peak and a desert both read as
-wind. Kept **stereo** and imported as **Streaming**, which is why `BlockAudioImportPostprocessor` now carries two
+`Assets/Audio/Ambience/nox_nature/`. **As wired (verified against the assets 2026-08-29):** `Cave_Dark` is the
+cave bed and `Wind_Calm` the fallback bed on `AmbienceDatabase`; per biome, Ocean → `Sea`, Forrest →
+`Forest_Birds`, Grasslands and Steep Grasslands → `Wind_Forest`, Desert and Mountain → `Wind_Calm`. All six
+Standard biomes carry a bed, so the database fallback is reached only by a world type that answers no biome
+(the Legacy generator). `Cicadas` is imported but **currently referenced by nothing** — it was the original
+Grasslands pick and was swapped out in the editor as too repetitive at the bed layer's duty cycle, which is
+part of what S6 (§11) exists to solve. Kept **stereo** and imported as **Streaming**, which is why `BlockAudioImportPostprocessor` now carries two
 profiles: the mono / decompress-on-load one-shot profile for `Assets/Audio/Blocks/`, and a stereo / streaming
 profile for `Assets/Audio/Ambience/`. Forcing a 2D bed to mono would discard the stereo image that makes it a
 bed, and decompressing a 30 s stereo loop holds megabytes of PCM resident for no benefit.
@@ -759,7 +762,8 @@ field needs no timer of its own.
 adding the list alongside `ambientLoop`. Two fields describing one thing would need a precedence rule that
 every future reader has to learn, and the old field would linger as a trap. The migration is an editor pass
 moving each wired clip into a single-entry list, with the assets re-verified by read-back — the check that
-caught a silently-null reference during S2's wiring.
+caught a silently-null reference during S2's wiring. **Six** Standard biome assets carry a bed today (all of
+them); the four Legacy assets have the field at null and need no migration.
 
 **Verification.** A track outside its Y-range must never be selected; the play-chance distribution needs a
 spread assertion rather than a bounds check (a stuck RNG passes bounds); and `ResolveBedMix`'s existing
