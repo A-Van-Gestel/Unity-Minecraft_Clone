@@ -13,6 +13,8 @@ MonoBehaviour:
   m_Name: LegacyMountain
   m_EditorClassIdentifier: 
   biomeName: Mountain
+  ambientLoop: {fileID: 0}
+  musicPool: []
   offset: -231
   scale: 0.8
   terrainHeight: 110

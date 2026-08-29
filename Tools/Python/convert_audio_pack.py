@@ -42,11 +42,15 @@ def collect(source: pathlib.Path) -> dict:
     return families
 
 
-def convert(src: pathlib.Path, dst: pathlib.Path, quality: int) -> bool:
-    """Encode one WAV to OGG Vorbis, forcing mono. Returns True on success."""
+def convert(src: pathlib.Path, dst: pathlib.Path, quality: int, channels: int) -> bool:
+    """Encode one WAV to OGG Vorbis at *channels* channels. Returns True on success.
+
+    Mono is right for the 3D one-shot voices, where a stereo clip does not spatialize. Ambience beds
+    play from 2D sources and must stay stereo, which is what ``--stereo`` is for.
+    """
     result = subprocess.run(
         ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src),
-         "-ac", "1", "-c:a", "libvorbis", "-q:a", str(quality), str(dst)],
+         "-ac", str(channels), "-c:a", "libvorbis", "-q:a", str(quality), str(dst)],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
@@ -62,6 +66,11 @@ def main() -> int:
     parser.add_argument("--families", help="Comma-separated family names to convert. Omit to list what is available.")
     parser.add_argument("--max-variants", type=int, default=8, help="Cap on variants kept per family (default 8).")
     parser.add_argument("--quality", type=int, default=4, help="libvorbis -q:a value (default 4).")
+    parser.add_argument("--stereo", action="store_true",
+                        help="Keep two channels. For 2D ambience beds; one-shots must stay mono.")
+    parser.add_argument("--flat", action="store_true",
+                        help="Name outputs after the source stem instead of appending a _NNN variant index. "
+                             "For families that are a single clip, such as ambience loops.")
     args = parser.parse_args()
 
     if shutil.which("ffmpeg") is None:
@@ -96,8 +105,8 @@ def main() -> int:
         picked = families[name][: args.max_variants]
         written = 0
         for index, wav in enumerate(picked):
-            target = out / f"{name}_{index:03d}.ogg"
-            if convert(wav, target, args.quality):
+            target = out / (f"{wav.stem}.ogg" if args.flat else f"{name}_{index:03d}.ogg")
+            if convert(wav, target, args.quality, 2 if args.stereo else 1):
                 written += 1
                 total_out += target.stat().st_size
                 total_in += wav.stat().st_size

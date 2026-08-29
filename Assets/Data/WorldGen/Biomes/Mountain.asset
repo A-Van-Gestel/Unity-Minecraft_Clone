@@ -13,6 +13,8 @@ MonoBehaviour:
   m_Name: Mountain
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.StandardBiomeAttributes
   biomeName: Mountain
+  ambientLoop: {fileID: 8300000, guid: f8da20e74d48620449e7fd49c5dd04af, type: 3}
+  musicPool: []
   debugPreviewColor: {r: 0.55, g: 0.55, b: 0.6, a: 1}
   biomeWeightNoiseConfig:
     seedOffset: -231

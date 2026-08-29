@@ -13,6 +13,8 @@ MonoBehaviour:
   m_Name: LegacyForrest
   m_EditorClassIdentifier: 
   biomeName: Forrest
+  ambientLoop: {fileID: 0}
+  musicPool: []
   offset: 875465
   scale: 0.17
   terrainHeight: 60

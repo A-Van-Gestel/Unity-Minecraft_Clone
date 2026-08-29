@@ -344,3 +344,24 @@ MonoBehaviour:
     notes: '114 of the pack''s clips, converted from 24-bit/48kHz WAV to OGG Vorbis.
       License stated in the pack''s Essentials_Series_README.pdf: ''All these sounds
       are under CC0 license.'''
+  - name: Essentials Series (Nature)
+    author: NOX_SOUND
+    category: 6
+    licenseType: 5
+    customLicenseText: 
+    url: https://www.asoundeffect.com/sounddesigner/nox-sound/
+    usageDescription: Biome ambience beds and the underground cave bed.
+    sourceFiles:
+    - Ambiance_Cave_Dark_Loop_Stereo
+    - Ambiance_Wind_Calm_Loop_Stereo
+    - Ambiance_Sea_Loop_Stereo
+    - Ambiance_Forest_Birds_Loop_Stereo
+    - Ambiance_Cicadas_Loop_Stereo
+    - Ambiance_Wind_Forest_Loop_Stereo
+    projectFiles:
+    - Assets/Audio/Ambience/nox_nature/
+    version: 
+    notes: "6 of the pack's 18 loops, converted from 24-bit/48kHz stereo WAV to OGG
+      Vorbis and kept stereo \u2014 they play from 2D sources, unlike the mono block
+      one-shots. Same Essentials Series README as the footsteps pack: 'All these
+      sounds are under CC0 license.'"
