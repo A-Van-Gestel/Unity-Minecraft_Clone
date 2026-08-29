@@ -57,6 +57,18 @@ namespace Audio
         /// <summary>The sky light reaching the listener's head, 0–15. Zero means no sky at all: underground.</summary>
         public readonly byte SkylightAtHead;
 
+        /// <summary>
+        /// How far the listener's head sits below the terrain surface, in blocks. Negative above ground,
+        /// zero when no surface could be read.
+        /// </summary>
+        /// <remarks>
+        /// The signal <see cref="SkylightAtHead"/> cannot provide: sky exposure is zero both in a cavern
+        /// sixty blocks down and under a roof one block thick, so a bed layer keyed on exposure alone keeps
+        /// the surface audible deep underground. Zero is the safe default — it reads as "at the surface" and
+        /// ducks nothing.
+        /// </remarks>
+        public readonly int DepthBelowSurface;
+
         /// <summary>True when the listener's head cell holds a fluid.</summary>
         public readonly bool Submerged;
 
@@ -72,9 +84,11 @@ namespace Audio
         /// <param name="submerged">Whether the head cell holds a fluid.</param>
         /// <param name="weights">Per-biome influence at the listener's column.</param>
         /// <param name="hasWeights">Whether <paramref name="weights"/> was populated.</param>
+        /// <param name="depthBelowSurface">Blocks below the terrain surface; negative above it.</param>
         public AudioContext(int biomeIndex, BiomeBase biome, bool hasBiome, byte skylightAtHead, bool submerged,
-            BiomeWeights weights = default, bool hasWeights = false)
+            BiomeWeights weights = default, bool hasWeights = false, int depthBelowSurface = 0)
         {
+            DepthBelowSurface = depthBelowSurface;
             BiomeIndex = biomeIndex;
             Biome = biome;
             HasBiome = hasBiome;

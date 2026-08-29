@@ -4966,6 +4966,37 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     }
 
     /// <summary>
+    /// Reads the Y of the highest sky-obstructing block in a <b>voxel-space</b> column — the terrain
+    /// surface above (or below) the caller.
+    /// </summary>
+    /// <param name="voxelX">Voxel-space X of the column.</param>
+    /// <param name="voxelZ">Voxel-space Z of the column.</param>
+    /// <param name="surfaceY">The surface Y; 0 when the column's chunk is not loaded.</param>
+    /// <returns>True when the column's chunk is loaded and its heightmap could be read.</returns>
+    /// <remarks>
+    /// A free read of the heightmap the lighting system already maintains per column — no generator call
+    /// and no ray. Distinct from sky light, which cannot tell a deep cavern from a covered shed: both read
+    /// zero exposure, but only one of them is far below the surface.
+    /// <para>
+    /// Y needs no origin conversion (the floating origin is XZ-only), and chunks are full-height columns,
+    /// so the stored value is already a world Y.
+    /// </para>
+    /// </remarks>
+    public bool TryGetSurfaceHeight(int voxelX, int voxelZ, out int surfaceY)
+    {
+        Chunk chunk = GetChunkFromVector3(new Vector3Int(voxelX, 0, voxelZ));
+        if (chunk?.ChunkData?.heightMap == null)
+        {
+            surfaceY = 0;
+            return false;
+        }
+
+        Vector3Int localPos = chunk.GetVoxelPositionInChunkFromGlobalVector3(new Vector3Int(voxelX, 0, voxelZ));
+        surfaceY = chunk.ChunkData.heightMap[localPos.x + VoxelData.ChunkWidth * localPos.z];
+        return true;
+    }
+
+    /// <summary>
     /// Reads a voxel's packed light value.
     /// </summary>
     /// <param name="voxelPos">World voxel position.</param>

@@ -43,6 +43,7 @@ namespace Editor.Validation.SoundEngine
             scenarios.Add(new Scenario("A New Bed Takes A Silent Source Before The Quietest Audible One",
                 RunBedSlotPreference));
             scenarios.Add(new Scenario("Cave Bed Ducks The Biome Bed By Its Authored Amount", RunBiomeDuck));
+            scenarios.Add(new Scenario("Depth Below The Surface Silences The Biome Beds", RunDepthDuck));
             scenarios.Add(new Scenario("Submersion Cutoff Sweeps Monotonically In Log Space", RunLowPassSweep));
             scenarios.Add(new Scenario("Music Gap Stays Inside Its Authored Bounds", RunMusicGap));
             scenarios.Add(new Scenario("Music Never Picks The Same Track Twice Running", RunTrackPick));
@@ -416,6 +417,71 @@ namespace Editor.Validation.SoundEngine
                 return FailSound(scenario, "a zero duck attenuated the biome bed.");
             if (Mathf.Abs(AmbienceResolution.BiomeDuck(4f, 2f)) > AMBIENCE_EPSILON)
                 return FailSound(scenario, "out-of-range inputs were not clamped, producing a negative gain.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// The depth gate: fully present above ground, fully silent past the authored depth, and monotonic
+        /// through the taper between them.
+        /// </summary>
+        /// <remarks>
+        /// Exactness at both ends is the point, not a nicety. Anything above zero deep underground is the
+        /// defect this scenario exists for — the surface bed audible in a cavern — and anything below one at
+        /// the surface would quietly attenuate ordinary daylight ambience.
+        /// </remarks>
+        private static bool RunDepthDuck()
+        {
+            const string scenario = "Depth Below The Surface Silences The Biome Beds";
+            const int fullDepth = 24;
+            const int taper = 12;
+
+            // Above ground and at the surface: untouched.
+            foreach (int depth in new[] { -64, -8, -1, 0 })
+            {
+                if (!ExactValue.Equal(AmbienceResolution.DepthDuck(depth, fullDepth, taper), 1f))
+                    return FailSound(scenario, $"depth {depth} attenuated the beds above ground.");
+            }
+
+            // Inside the taper's top: still fully present, so a cave mouth blends instead of stepping.
+            if (!ExactValue.Equal(AmbienceResolution.DepthDuck(fullDepth - taper, fullDepth, taper), 1f))
+                return FailSound(scenario, "the taper started before its authored depth.");
+
+            // Past the authored depth: exactly silent, at the boundary and far beyond it.
+            foreach (int depth in new[] { fullDepth, fullDepth + 1, 200 })
+            {
+                if (!ExactValue.IsZero(AmbienceResolution.DepthDuck(depth, fullDepth, taper)))
+                    return FailSound(scenario, $"depth {depth} left the surface beds audible underground.");
+            }
+
+            // Monotonic, and strictly decreasing somewhere inside the taper — a constant 1 that snaps to 0
+            // at the boundary would satisfy every check above while being the hard cut this taper replaces.
+            float previous = 1f;
+            bool decreased = false;
+            for (int depth = 0; depth <= fullDepth; depth++)
+            {
+                float duck = AmbienceResolution.DepthDuck(depth, fullDepth, taper);
+                if (duck > previous) return FailSound(scenario, $"the duck rose at depth {depth}.");
+                if (duck < previous) decreased = true;
+                previous = duck;
+            }
+
+            if (!decreased) return FailSound(scenario, "the duck never eased — the taper is not doing anything.");
+
+            // Halfway through the taper should be halfway down, or the fade is not linear in depth.
+            float midpoint = AmbienceResolution.DepthDuck(fullDepth - taper / 2, fullDepth, taper);
+            if (Mathf.Abs(midpoint - 0.5f) > AMBIENCE_EPSILON)
+                return FailSound(scenario, $"the taper midpoint was {midpoint}, not 0.5.");
+
+            // A zero taper is the authored hard gate: present right up to the depth, silent at it.
+            if (!ExactValue.Equal(AmbienceResolution.DepthDuck(fullDepth - 1, fullDepth, 0), 1f))
+                return FailSound(scenario, "a zero taper faded early.");
+            if (!ExactValue.IsZero(AmbienceResolution.DepthDuck(fullDepth, fullDepth, 0)))
+                return FailSound(scenario, "a zero taper did not cut off at its depth.");
+
+            // A zero depth disables the gate rather than silencing everything at ground level.
+            if (!ExactValue.Equal(AmbienceResolution.DepthDuck(500, 0, taper), 1f))
+                return FailSound(scenario, "a zero full-duck depth silenced the beds instead of disabling the gate.");
 
             return true;
         }

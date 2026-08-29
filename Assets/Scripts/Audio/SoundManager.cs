@@ -363,6 +363,12 @@ namespace Audio
             bool hasWeights = world.TryGetBiomeWeights(
                 headVoxelCell.x, headVoxelCell.z, _biomeFalloffRadius, out BiomeWeights weights);
 
+            // An unreadable column reports depth 0 — "at the surface" — so a chunk that has not finished
+            // loading cannot silence the beds. Failing toward audible is the safe direction here.
+            int depth = world.TryGetSurfaceHeight(headVoxelCell.x, headVoxelCell.z, out int surfaceY)
+                ? surfaceY - headVoxelCell.y
+                : 0;
+
             Context = new AudioContext(
                 hasBiome ? tracker.Current.Index : -1,
                 hasBiome ? tracker.Current.Attributes : null,
@@ -370,7 +376,8 @@ namespace Audio
                 skylight,
                 submerged,
                 weights,
-                hasWeights);
+                hasWeights,
+                depth);
             HasContext = true;
         }
 

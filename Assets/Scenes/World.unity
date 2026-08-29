@@ -1786,7 +1786,9 @@ MonoBehaviour:
   _caveMaxSkylight: 0
   _caveDwellSeconds: 3
   _caveFadeSeconds: 4
-  _caveDuck: 0.7
+  _caveDuck: 1
+  _fullDuckDepth: 24
+  _duckTaperBlocks: 12
 --- !u!1 &568008936
 GameObject:
   m_ObjectHideFlags: 0

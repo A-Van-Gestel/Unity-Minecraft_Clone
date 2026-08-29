@@ -334,6 +334,38 @@ namespace Audio
         }
 
         /// <summary>
+        /// Attenuates the surface beds by how deep below the terrain the listener has gone.
+        /// </summary>
+        /// <param name="depthBelowSurface">Blocks below the surface; zero or negative is above ground.</param>
+        /// <param name="fullDuckDepth">Depth at which the surface beds are fully silent.</param>
+        /// <param name="taperBlocks">How many blocks above that depth the fade spans. Zero is a hard gate.</param>
+        /// <returns>The multiplier to apply to the biome beds, 1 at the surface and 0 at full depth.</returns>
+        /// <remarks>
+        /// Separate from <see cref="BiomeDuck"/>, which answers a different question. That one ducks the
+        /// surface under a cave bed that is fading in; this one silences it because the surface is simply
+        /// not where the listener is any more — and it applies whether or not a cave bed exists to duck
+        /// under. Keying only on sky exposure conflated the two, which is why a deep cavern still played its
+        /// biome at the cave duck's leftover 30%.
+        /// <para>
+        /// Tapered rather than switched, so a cave mouth blends: at the taper's top the surface is still
+        /// fully present, and it thins out as the passage descends.
+        /// </para>
+        /// </remarks>
+        public static float DepthDuck(int depthBelowSurface, int fullDuckDepth, int taperBlocks)
+        {
+            if (depthBelowSurface <= 0 || fullDuckDepth <= 0) return 1f;
+            if (depthBelowSurface >= fullDuckDepth) return 0f;
+
+            int taper = Mathf.Max(0, taperBlocks);
+            int fadeStart = fullDuckDepth - taper;
+            if (depthBelowSurface <= fadeStart) return 1f;
+
+            // taper == 0 leaves fadeStart == fullDuckDepth, so the branches above have already answered and
+            // this division cannot be reached with a zero denominator.
+            return 1f - (depthBelowSurface - fadeStart) / (float)taper;
+        }
+
+        /// <summary>
         /// The low-pass cutoff for the current submersion fade.
         /// </summary>
         /// <param name="dryHertz">Cutoff when fully out of fluid — high enough to be inaudible as a filter.</param>

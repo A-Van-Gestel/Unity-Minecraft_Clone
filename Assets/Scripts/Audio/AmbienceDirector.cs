@@ -87,10 +87,21 @@ namespace Audio
         [SerializeField]
         private float _caveFadeSeconds = 4f;
 
-        [Tooltip("How much of the biome bed the fully faded-in cave bed removes.")]
+        [Tooltip("How much of the biome bed the fully faded-in cave bed removes. 1 silences it entirely.")]
         [Range(0f, 1f)]
         [SerializeField]
-        private float _caveDuck = 0.7f;
+        private float _caveDuck = 1f;
+
+        [Header("Depth Gate")]
+        [Tooltip("Blocks below the terrain surface at which the biome beds are fully silent.")]
+        [Range(1, 128)]
+        [SerializeField]
+        private int _fullDuckDepth = 24;
+
+        [Tooltip("How many blocks above that depth the biome beds fade out over. Zero is a hard cut-off.")]
+        [Range(0, 64)]
+        [SerializeField]
+        private int _duckTaperBlocks = 12;
 
         private AudioSource[] _bedSources;
         private AudioLowPassFilter[] _bedFilters;
@@ -236,8 +247,16 @@ namespace Audio
 
             float categoryGain = CategoryGain();
             float trim = BedTrim(manager);
-            float duck = AmbienceResolution.BiomeDuck(_caveFade, _caveDuck);
             float layer = _restAudible ? 1f : 0f;
+
+            // The stronger of the two ducks wins rather than the two compounding: they answer overlapping
+            // questions, and multiplying them would attenuate twice for one cause in a deep cave — where the
+            // cave bed is fading in *because* the listener is deep.
+            float depthDuck = manager.HasContext
+                ? AmbienceResolution.DepthDuck(
+                    manager.Context.DepthBelowSurface, _fullDuckDepth, _duckTaperBlocks)
+                : 1f;
+            float duck = Mathf.Min(AmbienceResolution.BiomeDuck(_caveFade, _caveDuck), depthDuck);
 
             for (int i = 0; i < _bedSources.Length; i++)
             {
