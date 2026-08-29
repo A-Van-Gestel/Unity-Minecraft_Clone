@@ -1,6 +1,6 @@
 # Sound Engine Design
 
-**Version:** 1.9  
+**Version:** 1.10  
 **Date:** 2026-08-29  
 **Status:** **Partially implemented — S0, S1 and S2 shipped and confirmed in game.** The `SoundMaterial`
 channel, the shared `BlockSoundDatabase`, the BlockEditor dropdown and prefill, the volume settings, the
@@ -865,6 +865,20 @@ fallback. `Every Standard Biome Authors An Ambience Track` is the census that no
 track pool to `BiomeBase`, and the asymmetry is deliberate rather than overlooked. The music pool is
 untouched.
 
+**Authoring (added 2026-08-29).** Tracks and pools are no longer inspector-only. The Sound Editor gained an
+**Ambience** tab — the first editor surface `AmbienceDatabase` has ever had, its five fields having been
+reachable only through the raw inspector — and the World Gen Preview's Biome Editor gained an **Audio**
+sub-tab. Both render one shared `AmbienceTrackListDrawer`, so the two cannot drift; they exist separately
+because "what ambience content exists and does it sound right" is asked while auditioning a clip library and
+"what should this place sound like" is asked while tuning a biome.
+
+The drawer carries the one thing a raw inspector cannot: a **roll preview** that runs the shipped
+`AmbienceResolution.SelectTrackIndex` across a salt sweep at an author-chosen altitude, reporting which track
+wins and how often. That is what makes the altitude band authorable at all — before it, setting a Y range and
+checking the result meant flying there in game. `BiomeConfigValidator` also gained audio checks (no track;
+a clipless slot; a band outside the world's 0–`ChunkHeight`; a duplicated clip; all-zero weights), filed
+under an **appended** sub-tab index so the existing constants keep their meaning.
+
 ---
 
 ## Document History
@@ -888,6 +902,11 @@ contemporaneous notes.*
   assertion does, and the two mutations that separate them are recorded there. Both phases confirmed in game
   the same evening; S5's placement defaults were **wrong on first hearing** and were retuned from
   `spatialBlend` 0.7 / `spread` 120° to **1.0 / 0°**, in the scene as well as in code — see §10.
+
+* **v1.10** - Ambience authoring UI (2026-08-29): a Sound Editor **Ambience** tab (the first editor surface
+  for `AmbienceDatabase`), an **Audio** sub-tab in the Biome Editor, a shared `AmbienceTrackListDrawer` with
+  in-place auditioning and a roll preview driven by the shipped picker, and audio entries in
+  `BiomeConfigValidator`. No runtime code changed. Recorded in §11 under *Authoring*.
 
 * **v1.6** - S2's runtime shipped (2026-08-29): `AudioContext`, the pure `AmbienceResolution` decision layer,
   `AmbienceDatabase`, `ambientLoop`/`musicPool` on `BiomeBase`, an `AmbienceDirector` running a four-source bed
