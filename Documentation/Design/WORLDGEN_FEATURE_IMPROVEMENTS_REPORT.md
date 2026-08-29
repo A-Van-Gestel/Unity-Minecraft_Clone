@@ -904,6 +904,12 @@ model is invisible at the surface).
 building a separate temperature noise just for snow would recreate the unsynchronized-sampler
 problem). Land in the wave right after TF-2/TF-3. Coordinate the tint channel with RF-3.
 
+> **Not unblocked by the managed biome query (2026-08-29).** The `World.TryGetBiomeAt` query built for
+> the sound engine's §6.2 prerequisite is a *main-thread, ~1 Hz, listener-centric* answer; §3's tint is
+> a *per-column, mesh-time, Burst* value. TF-11 gains only the shared `Jobs/Helpers/BiomeSelection`
+> helper — which is where TF-3 will replace the uniform-random cell pick with climate-space selection,
+> now in one place instead of the seven it was duplicated across.
+
 **Architecture/serialization risks.**
 
 - The tint change touches meshing + all three block shaders (read the tint stream where it is

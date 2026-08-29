@@ -710,7 +710,13 @@ TF-11 snow line).
    per-particle voxel queries.
 3. **Type by climate:** at the camera position, sample the TF-9 Layer-2 temperature axis (with
    TF-11's altitude lapse) → rain vs. snow. Degrades gracefully pre-TF-3: a single global type
-   toggle until the climate axis exists.
+   toggle until the climate axis exists. *Update 2026-08-29: the pre-TF-3 fallback no longer has to be
+   a global toggle — `World.TryGetBiomeAt` / `BiomeTracker` (built as the sound engine's §6.2
+   prerequisite, see [`SOUND_ENGINE_DESIGN.md`](SOUND_ENGINE_DESIGN.md) §6.2) answers "which biome is
+   the camera in" on the main thread with boundary hysteresis already applied, so precipitation type
+   can be authored per biome until the climate axis lands. Subscribe to the shared `BiomeTracker` on
+   `World` rather than sampling the query directly — a second timer would disagree with the ambience
+   crossfade at every border.*
 4. **Storm sky:** drive RF-1's event multiplier (`SkylightColor` darkening) + RF-2 fog density +
    cloud plane color/density from the weather state — all existing or planned uniforms; zero
    lighting-engine contact (the BFS/per-voxel light is untouched, same shader-only contract as

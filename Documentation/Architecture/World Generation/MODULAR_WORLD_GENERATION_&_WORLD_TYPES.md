@@ -229,6 +229,14 @@ namespace Jobs.Generators
         /// </summary>
         IEnumerable<VoxelMod> ExpandStructure(StructureSpawnMarker marker);
 
+        /// <summary>
+        /// Resolves the biome at a voxel-space column on the main thread, through the same
+        /// Jobs/Helpers/BiomeSelection arithmetic the generation job uses. Returns false on
+        /// generators with no Voronoi selection to answer with (the legacy generator).
+        /// Sampled ~1 Hz by World.BiomeTracker; not a per-voxel query.
+        /// </summary>
+        bool TryGetBiomeAt(int voxelX, int voxelZ, out BiomeSample sample);
+
         /// <summary>Terrain generation diagnostics for one column. Main-thread only; used by DebugScreen.</summary>
         TerrainDebugInfo GetTerrainDebugInfo(int globalX, int globalZ);
 

@@ -1,14 +1,15 @@
 # Sound Engine Design
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Date:** 2026-08-29  
 **Status:** **Partially implemented — S0 and S1 shipped and confirmed in game.** The `SoundMaterial`
 channel, the shared `BlockSoundDatabase`, the BlockEditor dropdown and prefill, the volume settings, the
 pooled one-shot voices and the break / place / footstep triggers all exist; the `AudioMixer` is authored
 with its seven exposed volume parameters; two CC0 packs supply content, so all 13 sounding materials have
 break and step clips. Footsteps sample two cells, so wading and cross-mesh flora sound (§5.1). The
-`Validate Sound Engine` suite guards the resolution chain (13 baselines). Not yet done: phases S2, S3, and the
-remainder of S4.  
+`Validate Sound Engine` suite guards the resolution chain (13 baselines). **S2's one hard prerequisite — the
+§6.2 managed biome query — shipped and confirmed in game on 2026-08-29** and is guarded by its own `Validate Biome Selection` suite
+(10 baselines); S2 itself is still outstanding, as are S3 and the remainder of S4.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > Design for the VoxelEngine's audio system: block sounds (break / place / step), fluid and
@@ -83,7 +84,7 @@ biome data model (`BiomeBase` / `StandardBiomeAttributes`, `BiomeBlender`).
 | Break/place path | `PlayerInteraction` → `World.AddModification(VoxelMod)` (`World.cs:1807`), with `VoxelModSource.Live` vs `WorldGen` already distinguishing player edits from generation.                                                                                                                                                                                              |
 | Footsteps        | No hook, but `World.GetVoxelState` makes "block under feet" a trivial query.                                                                                                                                                                                                                                                                                          |
 | Fluids           | `FluidTickJob` — Burst, worker thread. **Cannot touch managed audio.**                                                                                                                                                                                                                                                                                                |
-| Biomes           | `StandardBiomeAttributes : BiomeBase` ScriptableObjects. Biome-at-position is currently computed **only inside Burst worldgen jobs** (`BiomeBlender`, hash-based); there is **no managed "biome under the listener" query** — §6.2 makes this a prerequisite.                                                                                                         |
+| Biomes           | `StandardBiomeAttributes : BiomeBase` ScriptableObjects. At audit time biome-at-position was computed inside Burst worldgen jobs, with no purpose-built managed query — §6.2 made one a prerequisite. **Shipped 2026-08-29** (§6.2).                                                                                                                     |
 | Sky light        | Per-voxel sky light is queryable at the listener — a free "how underground am I" signal for cave ambience (§6.1).                                                                                                                                                                                                                                                     |
 | Pooling          | `Helpers/DynamicPool<T>` / `ConcurrentDynamicPool<T>` — the pooled `AudioSource` set (§5.1) follows these conventions.                                                                                                                                                                                                                                                |
 
@@ -412,10 +413,47 @@ low-pass on everything except UI — cheap and dramatic.
 
 Already queryable per-voxel — no work needed beyond a helper on `SoundManager`.
 
-### 6.2 Managed biome-at-position query ⚠️ *the one real prerequisite*
+### 6.2 Managed biome-at-position query ✅ *shipped and confirmed in game 2026-08-29*
 
-Biome selection currently exists **only inside Burst worldgen jobs** (`BiomeBlender`,
-hash-based). Layer 3 needs "dominant biome at the listener XZ" on the main thread. Two options:
+> **Correction to the original audit.** This section claimed there was *no* managed biome query at all.
+> That overstated the gap: `IChunkGenerator.GetTerrainDebugInfo` → `WorldJobManager.GetTerrainDebugInfo`
+> already returned a biome index **and** name on the main thread, and `TerrainGenDebugOverlay` consumed it
+> on every column change. What was missing was a *purpose-built* query — the debug path also runs the full
+> multi-noise spline blend to produce diagnostics no audio consumer wants. The prerequisite was real; it was
+> smaller than written.
+
+**As shipped.** Option (a) below, with the selection arithmetic extracted rather than duplicated:
+
+- `Jobs/Helpers/BiomeSelection` is now the single definition of "which biome owns this column"
+  (`SelectIndex` for the primary Voronoi cell, `SelectSurfaceIndex` for the snoise-dithered surface
+  index). It replaced **seven** copies of the same four lines across the generation job, the worm
+  carver, the generator's three managed paths and the editor cross-section preview — so the managed
+  query cannot drift from the job path, because there is only one path.
+- `IChunkGenerator.TryGetBiomeAt(voxelX, voxelZ, out BiomeSample)`, surfaced through
+  `WorldJobManager` and `World`. `BiomeSample` carries `Index`, `SurfaceIndex`, `Name` and the
+  authored `BiomeBase`, so consumers read biome data directly instead of re-deriving a lookup.
+  The legacy generator returns false (it selects by per-biome Perlin weight and has no answer of
+  this shape); callers must handle that.
+- `BiomeTracker` (a plain manager on `World`, `WorldTimeManager` pattern) samples at 1 Hz and holds a
+  new biome for a 3 s dwell before committing, raising `BiomeChanged`. This is what §5.3's crossfade
+  hysteresis should subscribe to rather than implementing its own timer — RF-7 and the debug readout
+  use the same instance.
+- **Parity is pinned by a golden captured from the pre-extraction inline code**, not by the helper
+  checking itself: `Validate Biome Selection` compares both the helper and `TryGetBiomeAt` against
+  2560 recorded columns spanning ±2²⁴ in both coordinate precisions.
+
+> **`SurfaceIndex` is approximate; `Index` is exact.** The dithered surface index re-samples through
+> `noise.snoise`, whose Burst codegen differs from the managed one this query runs under, so ~0.4% of
+> columns (those whose jittered sample straddles a Voronoi edge) report a different surface biome than
+> the generator placed. The primary index is bit-stable — `FastNoiseLite`'s cellular path agrees exactly.
+> Ambience selection reads `Index`, so S2 is unaffected; the caveat matters only if something later tries
+> to use `SurfaceIndex` as ground truth for the block underfoot (read the voxel instead).
+
+`AudioContext.BiomeIndex` (§5.3) is now a read of `BiomeTracker.Current.Index`. Note the field is a
+`byte` in the §5.3 sketch while the query returns `int` — widen the struct field when S2 is written
+rather than casting at the call site.
+
+The two options as originally evaluated:
 
 | Option                                                | How                                                                                                                                                     | Trade-off                                                                                                        |
 |-------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
@@ -454,7 +492,7 @@ job and the managed query) and is seed-safe by construction.
 |---------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|-------------------|
 | **S0 — Data foundation** ✅ | `SoundMaterial` enum, `BlockSoundGroup`/`BlockSoundDatabase`, `BlockType.soundMaterial` + `BlockTagPreset` field, BlockEditor dropdown, prefill utility, mixer asset + settings wiring (§5.4). Credits plumbing (§9): append `Audio` to `CreditCategory`, "🔊 Audio" section in `REFERENCES_AND_CREDITS.md` + `CreditsDatabase` entries per imported pack. |   🟢   | —                 |
 | **S1 — One-shots** ✅       | `SoundManager` + pooled 3D sources, break/place hooks in `PlayerInteraction`, footsteps in the player controller.                                                                                                                                                                                                                                          |   🟢   | S0                |
-| **S2 — Ambience & music** | `AudioContext`, biome audio fields on `BiomeBase`, managed biome query (§6.2 option a), beds + crossfades, cave ambience, music scheduler, underwater snapshot.                                                                                                                                                                                            |   🟡   | S0; §6.2 refactor |
+| **S2 — Ambience & music** | `AudioContext`, biome audio fields on `BiomeBase`, managed biome query (§6.2 option a), beds + crossfades, cave ambience, music scheduler, underwater snapshot.                                                                                                                                                                                            |   🟡   | S0; §6.2 ✅        |
 | **S3 — Fluid emitters**   | Burst emitter scan job, clustering, looping emitter pool with fades.                                                                                                                                                                                                                                                                                       |   🟡   | S1 (pool infra)   |
 | **S4 — Later**            | **Two-cell footstep sampling** ✅ (occupied cell + supporting cell, a non-solid occupant layered over the support — see the §5.1 note; shipped 2026-08-29). Still open: ungrounded/swimming steps (deferred — no swimming mechanic exists, `FLUID_BUGS.md` §02), v2 apply-site break/place hook (`VoxelModSource.Live` filter), hit/mining sounds, weather (RF-7), time-of-day (RF-1), `LEAVES` wind emitters.                                                                                                                                                                                                              |   —    | feature-gated     |
 
@@ -543,6 +581,13 @@ attached license" source.
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.4** - The §6.2 managed biome query shipped (2026-08-29), unblocking S2: a shared `BiomeSelection`
+  helper (replacing seven duplicated copies of the selection arithmetic), `IChunkGenerator.TryGetBiomeAt`
+  returning a `BiomeSample`, a 1 Hz `BiomeTracker` with a 3 s dwell, and a `Validate Biome Selection` suite
+  whose oracle is a golden captured from the pre-extraction code. §6.2 also corrects an overstatement in the
+  original audit: a managed biome index/name was already reachable via `GetTerrainDebugInfo`, so the gap was
+  a *purpose-built* query, not the capability. The query was built for three consumers at once — S2 ambience,
+  RF-7 weather, and the debug readout — so §6.2 is no longer sound-specific.
 * **v1.3** - Two-cell footstep sampling shipped (2026-08-29), closing the v1.2 limitation: `SoundResolution`
   gained `StepCells` + `ResolveStepMaterials`, `PlayerFootsteps` samples the occupied and the supporting cell,
   and the Sound Engine suite grew from 11 to 13 baselines. The occupant **layers over** the support rather
@@ -574,8 +619,8 @@ contemporaneous notes.*
 ---
 
 **Last Updated:** 2026-08-29 (S4's two-cell footstep sampling shipped; §5.1 limitation closed)  
-**Next Review:** when S2 or S3 is scheduled. S2 must first build the §6.2 managed biome query and decide
-where liquid contact state lives, since neither exists. S3 must re-verify the §5.2 scan against the fluid
+**Next Review:** when S2 or S3 is scheduled. S2 no longer needs to build the §6.2 biome query (shipped), but
+must still decide where liquid contact state lives, since that does not exist. S3 must re-verify the §5.2 scan against the fluid
 tick as re-architected by the TG-4 arc (see
 [`../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`](../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md))
 and settle the missing fluid-presence flag.
