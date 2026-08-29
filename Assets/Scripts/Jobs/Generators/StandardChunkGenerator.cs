@@ -655,6 +655,28 @@ namespace Jobs.Generators
         }
 
         /// <inheritdoc />
+        public bool TryGetBiomeAt(int voxelX, int voxelZ, out BiomeSample sample)
+        {
+            if (_standardBiomes == null || _standardBiomes.Length == 0)
+            {
+                sample = default;
+                return false;
+            }
+
+            int index = BiomeSelection.SelectIndex(
+                ref _biomeSelectionNoise, voxelX, voxelZ, _standardBiomes.Length,
+                _isSingleBiomeMode, _forceBiomeIndex);
+
+            int surfaceIndex = BiomeSelection.SelectSurfaceIndex(
+                ref _biomeSelectionNoise, voxelX, voxelZ, _standardBiomes.Length,
+                _biomesJobData[index].SurfaceBlockDitheringWidth, _seed,
+                _isSingleBiomeMode, _forceBiomeIndex);
+
+            sample = new BiomeSample(index, surfaceIndex, _standardBiomes[index]);
+            return true;
+        }
+
+        /// <inheritdoc />
         public TerrainDebugInfo GetTerrainDebugInfo(int globalX, int globalZ)
         {
             int biomeIndex = BiomeSelection.SelectIndex(

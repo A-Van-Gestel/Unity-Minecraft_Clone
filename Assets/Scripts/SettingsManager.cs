@@ -891,37 +891,41 @@ public class Settings
     [Tooltip("Shows the WORLD block: position, render position, origin chunk, looking angle, chunk coord and seed.")]
     public bool debugHudShowWorldInfo = true;
 
-    [SettingField(SettingsTab.DebugScreen, Label = "Player Info", Order = 3)]
+    [SettingField(SettingsTab.DebugScreen, Label = "Biome", Order = 3)]
+    [Tooltip("Shows the biome line in the WORLD block: the biome at the player, and the surface biome underfoot when the two differ at a boundary.")]
+    public bool debugHudShowBiome = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Player Info", Order = 4)]
     [Tooltip("Shows the PLAYER block: grounded/flying/noclip state, speed and velocity.")]
     public bool debugHudShowPlayerInfo = true;
 
-    [SettingField(SettingsTab.DebugScreen, Label = "Chunk & Pool Stats", Order = 4)]
+    [SettingField(SettingsTab.DebugScreen, Label = "Chunk & Pool Stats", Order = 5)]
     [Tooltip("Shows the CHUNK block: active voxel/chunk counts, pool sizes, mesh queue and voxel-modification totals.")]
     public bool debugHudShowChunkStats = true;
 
-    [SettingField(SettingsTab.DebugScreen, Label = "Section Info", Order = 5)]
+    [SettingField(SettingsTab.DebugScreen, Label = "Section Info", Order = 6)]
     [Tooltip("Shows the SECTION block for the section the player currently occupies.")]
     public bool debugHudShowSectionInfo = true;
 
-    [SettingField(SettingsTab.DebugScreen, Label = "Ground Voxel", Order = 6)]
+    [SettingField(SettingsTab.DebugScreen, Label = "Ground Voxel", Order = 7)]
     [Tooltip("Shows the GROUND VOXEL inspector (the voxel directly under the player).")]
     public bool debugHudShowGroundVoxel = true;
 
-    [SettingField(SettingsTab.DebugScreen, Label = "Target Voxel", Order = 7)]
+    [SettingField(SettingsTab.DebugScreen, Label = "Target Voxel", Order = 8)]
     [Tooltip("Shows the TARGET VOXEL inspector (the voxel the player is looking at).")]
     public bool debugHudShowTargetVoxel = true;
 
-    [SettingField(SettingsTab.DebugScreen, Label = "Chunk Lifecycle (CP-1)", Order = 8)]
+    [SettingField(SettingsTab.DebugScreen, Label = "Chunk Lifecycle (CP-1)", Order = 9)]
     [Tooltip("Shows the CP-1 lifecycle observability block: unload deferrals, save/deserialize counts, load-arm " +
              "faults, stuck-loading detector and pool churn.\n\n" +
              TooltipTags.Note + "Off by default — a diagnostic block for chunk-pipeline debugging.")]
     public bool debugHudShowChunkLifecycle = false;
 
-    [SettingField(SettingsTab.DebugScreen, Label = "Performance Panel", Order = 9)]
+    [SettingField(SettingsTab.DebugScreen, Label = "Performance Panel", Order = 10)]
     [Tooltip("Shows the performance panel (frame time, CPU phases, memory, GC). Also the panel shown in Performance mode.")]
     public bool debugHudShowPerformance = true;
 
-    [SettingField(SettingsTab.DebugScreen, Label = "Visualization Info", Order = 10)]
+    [SettingField(SettingsTab.DebugScreen, Label = "Visualization Info", Order = 11)]
     [Tooltip("Shows the debug-visualization mode line and visualizer pool count.")]
     public bool debugHudShowVisualization = true;
 

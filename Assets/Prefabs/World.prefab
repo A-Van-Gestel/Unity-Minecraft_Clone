@@ -113,6 +113,7 @@ MonoBehaviour:
     debugHudShowFps: 1
     debugHudShowGraphicsApi: 1
     debugHudShowWorldInfo: 1
+    debugHudShowBiome: 1
     debugHudShowPlayerInfo: 1
     debugHudShowChunkStats: 1
     debugHudShowSectionInfo: 1

@@ -98,6 +98,25 @@ namespace Editor.WorldTools.Libraries
         }
 
         /// <summary>
+        /// Resolves the biome at a voxel-space column through the initialized generator — the same
+        /// query the runtime exposes, so editor tools and baselines exercise the production path.
+        /// </summary>
+        /// <param name="voxelX">Voxel-space X of the column.</param>
+        /// <param name="voxelZ">Voxel-space Z of the column.</param>
+        /// <param name="sample">The resolved biome; <c>default</c> when the method returns false.</param>
+        /// <returns>True when the runner is initialized and the generator answered.</returns>
+        public bool TryGetBiomeAt(int voxelX, int voxelZ, out BiomeSample sample)
+        {
+            if (!_isInitialized)
+            {
+                sample = default;
+                return false;
+            }
+
+            return _generator.TryGetBiomeAt(voxelX, voxelZ, out sample);
+        }
+
+        /// <summary>
         /// Expands a structure spawn marker into its constituent voxel modifications.
         /// Must be called on the main thread after generation completes.
         /// </summary>

@@ -93,6 +93,17 @@ namespace Jobs.Generators
         IEnumerable<VoxelMod> ExpandStructure(StructureSpawnMarker marker);
 
         /// <summary>
+        /// Resolves the biome at a column on the main thread, through the same selection the
+        /// generation job uses. Cheap enough for a ~1 Hz sampler; not for a per-voxel loop.
+        /// </summary>
+        /// <param name="voxelX">Voxel-space X of the column.</param>
+        /// <param name="voxelZ">Voxel-space Z of the column.</param>
+        /// <param name="sample">The resolved biome, or <c>default</c> when this generator has no
+        /// biome selection to answer with.</param>
+        /// <returns>True when <paramref name="sample"/> was populated.</returns>
+        bool TryGetBiomeAt(int voxelX, int voxelZ, out BiomeSample sample);
+
+        /// <summary>
         /// Returns terrain generation diagnostic data at the given column.
         /// Main-thread only, used by <see cref="DebugScreen"/> for runtime inspection.
         /// </summary>

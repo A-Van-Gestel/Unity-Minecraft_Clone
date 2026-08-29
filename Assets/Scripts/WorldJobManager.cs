@@ -442,6 +442,17 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     public byte GetVoxel(Vector3Int globalPos) => _chunkGenerator.GetVoxel(globalPos);
 
     /// <summary>
+    /// Resolves the biome at a voxel-space column, delegated to the active generator strategy.
+    /// Returns false when the active world type has no biome selection to answer with.
+    /// </summary>
+    /// <param name="voxelX">Voxel-space X of the column.</param>
+    /// <param name="voxelZ">Voxel-space Z of the column.</param>
+    /// <param name="sample">The resolved biome, or <c>default</c>.</param>
+    /// <returns>True when <paramref name="sample"/> was populated.</returns>
+    public bool TryGetBiomeAt(int voxelX, int voxelZ, out BiomeSample sample) =>
+        _chunkGenerator.TryGetBiomeAt(voxelX, voxelZ, out sample);
+
+    /// <summary>
     /// Returns terrain generation diagnostic data at the given column.
     /// Delegated to the active generator strategy.
     /// </summary>

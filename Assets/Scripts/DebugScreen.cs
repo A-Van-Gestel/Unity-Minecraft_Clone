@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using Data;
+using Data.WorldTypes;
 using DebugVisualizations;
 using Helpers;
 using Helpers.UI;
@@ -408,6 +409,8 @@ public class DebugScreen : MonoBehaviour
             _topLeftBuilder.Append("Chunk: ").Append(_world.PlayerChunkCoord.X).Append(" / ").Append(_world.PlayerChunkCoord.Z).AppendLine();
             _topLeftBuilder.Append("Seed: ").Append(_world.worldData.seed).AppendLine();
 
+            AppendBiomeLine();
+
             // RF-1: the clock, so a lighting observation can be correlated with the time that produced it.
             WorldTimeManager clock = _world.TimeManager;
             if (clock != null)
@@ -484,6 +487,40 @@ public class DebugScreen : MonoBehaviour
             _topLeftBuilder.AppendLine("TARGET VOXEL:");
             AppendVoxelInspectorInfo(_targetVoxelState, _targetVoxelPos, _topLeftBuilder);
         }
+    }
+
+    /// <summary>
+    /// Appends the biome line to the WORLD block. Reads the tracker's <b>raw</b> sample, not its debounced
+    /// one: the dwell exists to keep ambience crossfades from restarting at a boundary, and applying it to a
+    /// diagnostic readout only makes the readout lie for a few seconds after the player crosses.
+    /// </summary>
+    private void AppendBiomeLine()
+    {
+        if (!_world.settings.debugHudShowBiome) return;
+
+        BiomeTracker tracker = _world.BiomeTracker;
+        if (tracker == null || !tracker.HasBiome)
+        {
+            // Legacy worlds answer no biome query at all, so the line states that rather than vanishing.
+            _topLeftBuilder.AppendLine("Biome: —");
+            return;
+        }
+
+        BiomeSample shown = tracker.Latest;
+        _topLeftBuilder.Append("Biome: ").Append(shown.Name)
+            .Append(" (#").Append(shown.Index).Append(')');
+
+        // Only worth showing where they disagree: within a few blocks of a boundary the surface pass
+        // dithers, so the block underfoot can belong to the neighbouring biome.
+        if (shown.SurfaceIndex != shown.Index)
+            _topLeftBuilder.Append(" | Surface: #").Append(shown.SurfaceIndex);
+
+        // The committed biome is what ambience and weather will act on, so show it while it lags —
+        // that divergence is the dwell working, and it is exactly what a debug readout should expose.
+        if (tracker.Current.Index != shown.Index)
+            _topLeftBuilder.Append(" | Committed: ").Append(tracker.Current.Name);
+
+        _topLeftBuilder.AppendLine();
     }
 
     private void PopulateMiddleLeftBuilder()

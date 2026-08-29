@@ -92,6 +92,14 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// </summary>
     private TimeOfDaySettings _activeTimeOfDaySettings;
 
+    /// <summary>
+    /// Debounced "which biome is the player in", sampled on a timer from <see cref="Update"/>. Null
+    /// until the world starts, and on world types whose generator answers no biome query — read
+    /// <see cref="BiomeTracker.HasBiome"/> before using it.
+    /// </summary>
+    [NonSerialized]
+    public BiomeTracker BiomeTracker;
+
     [Header("Player")]
     public Player player;
 
@@ -900,6 +908,10 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         _activeTimeOfDaySettings = ResolveTimeOfDaySettings();
         TimeManager = new WorldTimeManager(_activeTimeOfDaySettings);
         RestoreWorldTime(loadedMetadata);
+
+        // Fresh per world: a new instance starts with no committed biome, so the first sample after
+        // load commits immediately instead of serving a dwell against a previous world's biome.
+        BiomeTracker = new BiomeTracker(TryGetBiomeAt);
         ApplySkyRenderSettings();
 
         // Initialize global shader properties
@@ -2414,6 +2426,11 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         AdvanceWorldTime();
 
         PlayerChunkCoord = WorldOrigin.UnityToChunk(_playerTransform.position);
+
+        // Voxel space, not render space: the query samples generation noise, which only ever agrees
+        // with the generator in voxel coordinates. Ticked before the origin shift below so the cell
+        // and the transform it came from belong to the same frame.
+        BiomeTracker.Tick(Time.deltaTime, WorldOrigin.UnityToVoxelCell(_playerTransform.position));
 
         // WS-4b: re-anchor before anything consumes this frame's positions. PlayerChunkCoord is voxel-chunk space, so
         // the shift cannot change it — every distance loop below is unaffected by construction.
@@ -4903,6 +4920,27 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     public bool TryGetVoxel(int x, int y, int z, out VoxelState state)
     {
         return worldData.TryGetVoxel(x, y, z, out state);
+    }
+
+    /// <summary>
+    /// Resolves the biome at a <b>voxel-space</b> column. Convenience wrapper over
+    /// <see cref="WorldJobManager.TryGetBiomeAt"/> for callers that already hold the world.
+    /// </summary>
+    /// <param name="voxelX">Voxel-space X of the column.</param>
+    /// <param name="voxelZ">Voxel-space Z of the column.</param>
+    /// <param name="sample">The resolved biome; <c>default</c> when the method returns false.</param>
+    /// <returns>True when the world is running a generator that answers biome queries.</returns>
+    /// <remarks>Re-evaluates selection noise per call — sample it on a timer (see
+    /// <c>BiomeTracker</c>), never per frame and never per voxel.</remarks>
+    public bool TryGetBiomeAt(int voxelX, int voxelZ, out BiomeSample sample)
+    {
+        if (JobManager == null)
+        {
+            sample = default;
+            return false;
+        }
+
+        return JobManager.TryGetBiomeAt(voxelX, voxelZ, out sample);
     }
 
     /// <summary>

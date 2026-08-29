@@ -116,6 +116,18 @@ namespace Legacy
         }
 
         /// <inheritdoc />
+        /// <remarks>
+        /// The legacy generator selects biomes by per-biome Perlin weight rather than a single
+        /// Voronoi sample, so it has no column-to-biome answer of the shape the query promises.
+        /// Callers fall back to "unknown" rather than being handed a differently-derived index.
+        /// </remarks>
+        public bool TryGetBiomeAt(int voxelX, int voxelZ, out BiomeSample sample)
+        {
+            sample = default;
+            return false;
+        }
+
+        /// <inheritdoc />
         public TerrainDebugInfo GetTerrainDebugInfo(int globalX, int globalZ) => default;
 
         /// <inheritdoc />
