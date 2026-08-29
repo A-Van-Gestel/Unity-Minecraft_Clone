@@ -677,17 +677,19 @@ namespace Jobs.Generators
         }
 
         /// <inheritdoc />
-        public bool TryGetBiomeWeights(int voxelX, int voxelZ, float falloffRadius, out BiomeWeights weights)
+        public bool TryGetBiomeWeights(int voxelX, int voxelZ, float falloffRadius, out BiomeWeights weights,
+            out BiomeDirections directions)
         {
             if (_standardBiomes == null || _standardBiomes.Length == 0)
             {
                 weights = default;
+                directions = default;
                 return false;
             }
 
-            BiomeSelection.SelectWeights(
+            BiomeSelection.SelectWeightsDirectional(
                 ref _biomeSelectionNoise, voxelX, voxelZ, _standardBiomes.Length, falloffRadius,
-                _isSingleBiomeMode, _forceBiomeIndex, out weights);
+                _isSingleBiomeMode, _forceBiomeIndex, out weights, out directions);
             return true;
         }
 

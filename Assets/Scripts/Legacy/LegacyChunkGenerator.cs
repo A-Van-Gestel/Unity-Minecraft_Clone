@@ -131,9 +131,11 @@ namespace Legacy
         /// <inheritdoc />
         /// <remarks>Declines for the same reason <see cref="TryGetBiomeAt"/> does: this generator selects by
         /// per-biome Perlin weight, so it has no cellular neighborhood to weigh.</remarks>
-        public bool TryGetBiomeWeights(int voxelX, int voxelZ, float falloffRadius, out BiomeWeights weights)
+        public bool TryGetBiomeWeights(int voxelX, int voxelZ, float falloffRadius, out BiomeWeights weights,
+            out BiomeDirections directions)
         {
             weights = default;
+            directions = default;
             return false;
         }
 

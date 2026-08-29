@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: LegacyMountain
   m_EditorClassIdentifier: 
   biomeName: Mountain
-  ambientLoop: {fileID: 0}
+  ambientTracks: []
   musicPool: []
   offset: -231
   scale: 0.8

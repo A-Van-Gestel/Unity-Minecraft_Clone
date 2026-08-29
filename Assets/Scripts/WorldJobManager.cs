@@ -458,9 +458,11 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <param name="voxelZ">Voxel-space Z of the column.</param>
     /// <param name="falloffRadius">How far past the nearest cell a cell still contributes.</param>
     /// <param name="weights">The contributing biomes and their normalized weights.</param>
+    /// <param name="directions">Each contributor's offset from the column, in blocks.</param>
     /// <returns>True when the generator answered.</returns>
-    public bool TryGetBiomeWeights(int voxelX, int voxelZ, float falloffRadius, out BiomeWeights weights) =>
-        _chunkGenerator.TryGetBiomeWeights(voxelX, voxelZ, falloffRadius, out weights);
+    public bool TryGetBiomeWeights(int voxelX, int voxelZ, float falloffRadius, out BiomeWeights weights,
+        out BiomeDirections directions) =>
+        _chunkGenerator.TryGetBiomeWeights(voxelX, voxelZ, falloffRadius, out weights, out directions);
 
     /// <summary>
     /// Returns terrain generation diagnostic data at the given column.

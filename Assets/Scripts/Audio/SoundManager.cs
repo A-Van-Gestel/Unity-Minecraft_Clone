@@ -150,6 +150,17 @@ namespace Audio
         public bool HasContext { get; private set; }
 
         /// <summary>
+        /// The transform the context is sampled at, or null before a camera exists.
+        /// </summary>
+        /// <remarks>
+        /// The main camera, which also carries the scene's <c>AudioListener</c> — so a consumer placing a
+        /// source relative to this transform is placing it in the same frame Unity pans in. Surfaced for the
+        /// directional beds (§10), which need the listener's position every frame while the context behind
+        /// them is only re-sampled on the interval.
+        /// </remarks>
+        public Transform Listener => _listener;
+
+        /// <summary>
         /// The ambience content shared by the bed director and the music scheduler, or null when none is
         /// assigned.
         /// </summary>
@@ -361,7 +372,8 @@ namespace Audio
             // listener, so debouncing them would only delay a change that never was a jump. The tracker's
             // hysteresis still serves what it was built for — the biome readout and RF-7.
             bool hasWeights = world.TryGetBiomeWeights(
-                headVoxelCell.x, headVoxelCell.z, _biomeFalloffRadius, out BiomeWeights weights);
+                headVoxelCell.x, headVoxelCell.z, _biomeFalloffRadius, out BiomeWeights weights,
+                out BiomeDirections directions);
 
             // An unreadable column reports depth 0 — "at the surface" — so a chunk that has not finished
             // loading cannot silence the beds. Failing toward audible is the safe direction here.
@@ -377,7 +389,9 @@ namespace Audio
                 submerged,
                 weights,
                 hasWeights,
-                depth);
+                depth,
+                headVoxelCell.y,
+                directions);
             HasContext = true;
         }
 

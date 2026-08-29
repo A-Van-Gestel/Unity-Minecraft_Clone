@@ -14,9 +14,10 @@ namespace Data.WorldTypes
         public string biomeName = "New Biome";
 
         [Header("Audio")]
-        [Tooltip("Ambience bed looped while the listener is in this biome. Empty falls back to the " +
-                 "AmbienceDatabase's default bed.")]
-        public AudioClip ambientLoop;
+        [Tooltip("Ambience beds eligible while the listener is in this biome, each carrying an altitude " +
+                 "band and a relative weight. Empty — or no track eligible at the listener's altitude — " +
+                 "falls back to the AmbienceDatabase's default bed.")]
+        public AmbienceTrack[] ambientTracks;
 
         [Tooltip("Music tracks eligible while the listener is in this biome. Empty falls back to the " +
                  "AmbienceDatabase's global pool.")]

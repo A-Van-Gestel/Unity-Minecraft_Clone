@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: LegacyDesert
   m_EditorClassIdentifier: 
   biomeName: Desert
-  ambientLoop: {fileID: 0}
+  ambientTracks: []
   musicPool: []
   offset: 1250
   scale: 0.068

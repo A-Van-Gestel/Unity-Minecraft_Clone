@@ -5,6 +5,7 @@ using System.Text;
 using Audio;
 using Data;
 using Data.Enums;
+using Data.WorldTypes;
 using Editor.Dev;
 using Editor.Validation.Framework;
 using UI.Enums;
@@ -55,12 +56,66 @@ namespace Editor.Validation.SoundEngine
 
         static partial void AddContentScenarios(List<Scenario> scenarios)
         {
+            scenarios.Add(new Scenario("Every Standard Biome Authors An Ambience Track", RunBiomeBedCensus));
             scenarios.Add(new Scenario("Sound Database Holds One Group Per Material", RunDatabaseSizing));
             scenarios.Add(new Scenario("Every Placeable Block Has An Authored Sound Material", RunMaterialCensus));
             scenarios.Add(new Scenario("Prefill Heuristic Classifies Its Fixture Palette", RunPrefillHeuristic));
             scenarios.Add(new Scenario("Volume Sliders Convert To The Mixer Decibel Curve", RunVolumeCurve));
             scenarios.Add(new Scenario("Category Volumes Fold In The Master Slider", RunCategoryVolumes));
             scenarios.Add(new Scenario("Audio Settings Tab Is In The Generator's Tab Order", RunSettingsTabOrder));
+        }
+
+        /// <summary>
+        /// The census over authored biome beds: every Standard biome must offer at least one playable
+        /// ambience track, and every track must carry a clip and a band that can actually be reached.
+        /// </summary>
+        /// <remarks>
+        /// The one scenario that reads the shipped biome assets. Everything else in the ambience half runs on
+        /// fixtures built in memory, so a change that emptied <c>ambientTracks</c> on all six assets — the
+        /// §11 field migration being the obvious way — would leave the whole suite green and the world
+        /// playing nothing but the database fallback. Silence is exactly the failure that reports nothing on
+        /// its own.
+        /// </remarks>
+        private static bool RunBiomeBedCensus()
+        {
+            const string scenario = "Every Standard Biome Authors An Ambience Track";
+
+            string[] guids = AssetDatabase.FindAssets("t:StandardBiomeAttributes");
+            if (guids == null || guids.Length == 0)
+                return FailSound(scenario, "no StandardBiomeAttributes assets found in the project.");
+
+            foreach (string guid in guids)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                BiomeBase biome = AssetDatabase.LoadAssetAtPath<BiomeBase>(path);
+                if (biome == null) return FailSound(scenario, $"'{path}' did not load as a biome.");
+
+                if (biome.ambientTracks == null || biome.ambientTracks.Length == 0)
+                    return FailSound(scenario, $"'{biome.biomeName}' ({path}) authors no ambience track.");
+
+                bool playable = false;
+                for (int i = 0; i < biome.ambientTracks.Length; i++)
+                {
+                    AmbienceTrack track = biome.ambientTracks[i];
+                    if (track.clip == null)
+                        return FailSound(scenario, $"'{biome.biomeName}' track {i} has no clip.");
+
+                    // An inverted band is tolerated by the resolver; a band that excludes the entire world is
+                    // an authoring slip that reads in game as a biome that simply went quiet.
+                    float low = Mathf.Min(track.yRange.x, track.yRange.y);
+                    float high = Mathf.Max(track.yRange.x, track.yRange.y);
+                    if (high < 0f || low > VoxelData.ChunkHeight)
+                        return FailSound(scenario,
+                            $"'{biome.biomeName}' track {i} spans [{low}, {high}], entirely outside the " +
+                            $"world's 0–{VoxelData.ChunkHeight} range.");
+
+                    playable = true;
+                }
+
+                if (!playable) return FailSound(scenario, $"'{biome.biomeName}' has no playable track.");
+            }
+
+            return true;
         }
 
         /// <summary>

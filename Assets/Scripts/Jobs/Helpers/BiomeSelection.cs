@@ -159,11 +159,12 @@ namespace Jobs.Helpers
         /// contributor and therefore the smallest, and its share is absorbed by the renormalization.
         /// </para>
         /// <para>
-        /// <c>unsafe</c> because <c>CellularEdgeData</c> carries its cells in fixed buffers, the same reason
-        /// <see cref="BiomeBlender.CalculateBlendedTerrainHeight"/> is. Nothing escapes the method.
+        /// The arithmetic lives in <see cref="SelectWeightsDirectional"/>; this overload is that call with
+        /// the bearings discarded. One loop serves both, so the weights an ambience bed is mixed at and the
+        /// direction it is placed in cannot drift apart.
         /// </para>
         /// </remarks>
-        public static unsafe void SelectWeights(
+        public static void SelectWeights(
             ref FastNoiseLite selectionNoise,
             int voxelX,
             int voxelZ,
@@ -173,38 +174,91 @@ namespace Jobs.Helpers
             int forceBiomeIndex,
             out BiomeWeights weights)
         {
+            SelectWeightsDirectional(ref selectionNoise, voxelX, voxelZ, biomeCount, falloffRadius,
+                isSingleBiomeMode, forceBiomeIndex, out weights, out _);
+        }
+
+        /// <summary>
+        /// Resolves how strongly each nearby biome influences a column <i>and</i> which way each one lies.
+        /// </summary>
+        /// <param name="selectionNoise">The global biome selection noise (Cellular, normalized to [0,1]).</param>
+        /// <param name="voxelX">Voxel-space X of the column.</param>
+        /// <param name="voxelZ">Voxel-space Z of the column.</param>
+        /// <param name="biomeCount">Number of biomes in the world type.</param>
+        /// <param name="falloffRadius">
+        /// How far past the nearest cell a cell still contributes, in cellular-distance units. Larger values
+        /// widen the transition; at or below zero only the primary biome contributes.
+        /// </param>
+        /// <param name="isSingleBiomeMode">When true, selection is bypassed for <paramref name="forceBiomeIndex"/>.</param>
+        /// <param name="forceBiomeIndex">The biome to force in single-biome mode.</param>
+        /// <param name="weights">The contributing biomes and their normalized weights, nearest first.</param>
+        /// <param name="directions">Each contributor's offset in blocks, index-aligned with the weights.</param>
+        /// <remarks>
+        /// <para>
+        /// The single implementation behind <see cref="SelectWeights"/>, which discards the bearings. One
+        /// loop rather than two, so what the ambience mix weighs and what it points at can never disagree —
+        /// affordable precisely because neither entry point runs inside the generation job: the terrain path
+        /// blends heights through <see cref="BiomeBlender"/>, on the narrower
+        /// <see cref="FastNoiseLite.CellularEdgeData"/>.
+        /// </para>
+        /// <para>
+        /// A biome's bearing is that of the <b>first cell that resolved to it</b>. Cells arrive sorted by
+        /// distance, so that is its nearest contributing cell — which is a real place, where a centroid over
+        /// scattered cells would often point at somewhere the biome is not.
+        /// </para>
+        /// </remarks>
+        public static unsafe void SelectWeightsDirectional(
+            ref FastNoiseLite selectionNoise,
+            int voxelX,
+            int voxelZ,
+            int biomeCount,
+            float falloffRadius,
+            bool isSingleBiomeMode,
+            int forceBiomeIndex,
+            out BiomeWeights weights,
+            out BiomeDirections directions)
+        {
             weights = default;
+            directions = default;
 
             if (biomeCount <= 0) return;
 
             if (isSingleBiomeMode)
             {
+                // A forced biome is everywhere, so it has no bearing — the zero offset says exactly that.
                 weights.Count = 1;
                 weights.Indices = new int4(math.clamp(forceBiomeIndex, 0, biomeCount - 1), 0, 0, 0);
                 weights.Weights = new float4(1f, 0f, 0f, 0f);
                 return;
             }
 
-            selectionNoise.GetCellularEdgeData(voxelX, voxelZ, out FastNoiseLite.CellularEdgeData edgeData);
+            selectionNoise.GetCellularCellData(voxelX, voxelZ, out FastNoiseLite.CellularCellData cellData);
+
+            // Offsets come back in noise space. A zero frequency would be a misconfigured noise rather than a
+            // far-away biome, so it reports no bearing instead of an infinite one.
+            float frequency = selectionNoise.GetFrequency();
+            float blocksPerNoiseUnit = frequency > 0f ? 1f / frequency : 0f;
 
             float radius = math.max(0f, falloffRadius);
-            float nearest = edgeData.Distances[0];
+            float nearest = cellData.Distances[0];
 
             int count = 0;
             int4 indices = new int4(-1, -1, -1, -1);
             float4 raw = float4.zero;
+            float4 offsetsX = float4.zero;
+            float4 offsetsZ = float4.zero;
             float total = 0f;
 
-            for (int cell = 0; cell < FastNoiseLite.CellularEdgeData.MaxCells; cell++)
+            for (int cell = 0; cell < FastNoiseLite.CellularCellData.MaxCells; cell++)
             {
                 // A zero radius degenerates to "primary only", which is what the first cell already is.
                 float share = radius <= 0f
                     ? (cell == 0 ? 1f : 0f)
-                    : math.max(0f, 1f - (edgeData.Distances[cell] - nearest) / radius);
+                    : math.max(0f, 1f - (cellData.Distances[cell] - nearest) / radius);
 
                 if (share <= 0f) continue;
 
-                int biome = IndexFromCellHash(edgeData.Hashes[cell], biomeCount);
+                int biome = IndexFromCellHash(cellData.Hashes[cell], biomeCount);
 
                 int slot = -1;
                 for (int i = 0; i < count; i++)
@@ -219,6 +273,11 @@ namespace Jobs.Helpers
                     if (count == BiomeWeights.MaxBiomes) continue;
                     slot = count++;
                     indices[slot] = biome;
+
+                    // Recorded only when the slot is created: this is the first, and therefore nearest, cell
+                    // that resolved to this biome. A later cell of the same biome is further away.
+                    offsetsX[slot] = cellData.OffsetsX[cell] * blocksPerNoiseUnit;
+                    offsetsZ[slot] = cellData.OffsetsY[cell] * blocksPerNoiseUnit;
                 }
 
                 raw[slot] += share;
@@ -230,14 +289,18 @@ namespace Jobs.Helpers
                 // Every cell fell outside the radius, which only happens at radius 0 with a degenerate
                 // distance table. The column still sits somewhere, so report that rather than nothing.
                 weights.Count = 1;
-                weights.Indices = new int4(IndexFromCellHash(edgeData.Hashes[0], biomeCount), 0, 0, 0);
+                weights.Indices = new int4(IndexFromCellHash(cellData.Hashes[0], biomeCount), 0, 0, 0);
                 weights.Weights = new float4(1f, 0f, 0f, 0f);
+                directions.OffsetsX = new float4(cellData.OffsetsX[0] * blocksPerNoiseUnit, 0f, 0f, 0f);
+                directions.OffsetsZ = new float4(cellData.OffsetsY[0] * blocksPerNoiseUnit, 0f, 0f, 0f);
                 return;
             }
 
             weights.Count = count;
             weights.Indices = indices;
             weights.Weights = raw / total;
+            directions.OffsetsX = offsetsX;
+            directions.OffsetsZ = offsetsZ;
         }
 
         /// <summary>

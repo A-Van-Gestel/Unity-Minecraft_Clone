@@ -30,6 +30,15 @@ namespace Editor.Validation.SoundEngine
         /// <summary>Ticks a fade gets to settle exactly on its target before the scenario calls it stuck.</summary>
         private const int FADE_CONVERGENCE_TICK_BUDGET = 64;
 
+        /// <summary>Bottom of the altitude band a fixture track spans when the scenario does not test bands.</summary>
+        private const float TRACK_BAND_LOW = -1024f;
+
+        /// <inheritdoc cref="TRACK_BAND_LOW"/>
+        private const float TRACK_BAND_HIGH = 1024f;
+
+        /// <summary>Rolls the distribution scenario draws before comparing frequencies against the weights.</summary>
+        private const int TRACK_DISTRIBUTION_ROLLS = 4000;
+
         static partial void AddAmbienceScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario("Cave Dwell Holds A Reading Before Committing It", RunCaveDwell));
@@ -50,6 +59,10 @@ namespace Editor.Validation.SoundEngine
             scenarios.Add(new Scenario("Bed Mix Weights Every Nearby Biome And Normalizes", RunBedMix));
             scenarios.Add(new Scenario("Beds Sharing A Clip Merge Onto One Source", RunBedMixMerge));
             scenarios.Add(new Scenario("Ambience Rest Cycle Alternates Inside Its Authored Bounds", RunRestCycle));
+            scenarios.Add(new Scenario("Bed Bearings Survive The Mix And Merge By Weight", RunBedBearings));
+            scenarios.Add(new Scenario("A Track Outside Its Altitude Band Is Never Selected", RunTrackBand));
+            scenarios.Add(new Scenario("Track Play Chance Spreads Across The Eligible Set In Proportion",
+                RunTrackDistribution));
         }
 
         /// <summary>
@@ -157,24 +170,47 @@ namespace Editor.Validation.SoundEngine
 
             try
             {
-                authored.ambientLoop = biomeLoop;
+                authored.ambientTracks = new[] { Track(biomeLoop, TRACK_BAND_LOW, TRACK_BAND_HIGH, 1f) };
 
-                if (AmbienceResolution.SelectBiomeLoop(new AudioContext(0, authored, true, 15, false), fallback) != biomeLoop)
+                if (AmbienceResolution.SelectBiomeLoop(new AudioContext(0, authored, true, 15, false), fallback, 0u) != biomeLoop)
                     return FailSound(scenario, "an authored biome bed was not selected.");
 
-                if (AmbienceResolution.SelectBiomeLoop(new AudioContext(0, bare, true, 15, false), fallback) != fallback)
+                if (AmbienceResolution.SelectBiomeLoop(new AudioContext(0, bare, true, 15, false), fallback, 0u) != fallback)
                     return FailSound(scenario, "a biome with no bed did not fall back to the default.");
 
-                if (AmbienceResolution.SelectBiomeLoop(new AudioContext(0, null, true, 15, false), fallback) != fallback)
+                if (AmbienceResolution.SelectBiomeLoop(new AudioContext(0, null, true, 15, false), fallback, 0u) != fallback)
                     return FailSound(scenario, "a null biome asset did not fall back to the default.");
 
                 // The legacy generator answers no biome for a whole session: this must be the fallback bed,
                 // not silence, or that world type loses its ambience entirely and reports nothing.
-                if (AmbienceResolution.SelectBiomeLoop(new AudioContext(-1, authored, false, 15, false), fallback) != fallback)
+                if (AmbienceResolution.SelectBiomeLoop(new AudioContext(-1, authored, false, 15, false), fallback, 0u) != fallback)
                     return FailSound(scenario, "a world with no biome answer did not fall back to the default.");
 
-                if (AmbienceResolution.SelectBiomeLoop(new AudioContext(0, bare, true, 15, false), null) != null)
+                if (AmbienceResolution.SelectBiomeLoop(new AudioContext(0, bare, true, 15, false), null, 0u) != null)
                     return FailSound(scenario, "an unauthored fallback resolved to something other than null.");
+
+                // Since §11 there is a fourth hole with the same consequence: a biome whose tracks are all
+                // authored for other altitudes offers nothing *here*, and that must read as the fallback
+                // rather than as a bed the layer forgot to start.
+                StandardBiomeAttributes outOfBand = ScriptableObject.CreateInstance<StandardBiomeAttributes>();
+                try
+                {
+                    outOfBand.ambientTracks = new[] { Track(biomeLoop, 200f, 300f, 1f) };
+
+                    AudioContext atSeaLevel = new AudioContext(0, outOfBand, true, 15, false,
+                        default, false, 0, 64);
+                    if (AmbienceResolution.SelectBiomeLoop(atSeaLevel, fallback, 0u) != fallback)
+                        return FailSound(scenario, "a biome with no track in band did not fall back.");
+
+                    AudioContext inBand = new AudioContext(0, outOfBand, true, 15, false,
+                        default, false, 0, 250);
+                    if (AmbienceResolution.SelectBiomeLoop(inBand, fallback, 0u) != biomeLoop)
+                        return FailSound(scenario, "a track inside its band was not selected.");
+                }
+                finally
+                {
+                    Object.DestroyImmediate(outOfBand);
+                }
 
                 return true;
             }
@@ -555,6 +591,247 @@ namespace Editor.Validation.SoundEngine
         }
 
         /// <summary>
+        /// Bed bearings through the mix (§10): each entry keeps its biome's direction, a merged entry
+        /// carries the weighted mean of the directions that merged into it, and an entry with no direction
+        /// says so rather than guessing one.
+        /// </summary>
+        /// <remarks>
+        /// The mean is the part worth pinning. Two biomes sharing a clip already collapse onto one source,
+        /// and that source has to be placed <i>somewhere</i> — averaging by weight puts it between them, in
+        /// proportion. The degenerate case matters just as much: contributors on opposite sides cancel to
+        /// nothing, and "nothing" has to survive as "play this flat" rather than being normalized into an
+        /// arbitrary heading.
+        /// </remarks>
+        private static bool RunBedBearings()
+        {
+            const string scenario = "Bed Bearings Survive The Mix And Merge By Weight";
+
+            AudioClip[] loops = MakeClips(3);
+            AudioClip shared = AudioClip.Create("ValidationSharedBearingBed", 16, 1, 8000, false);
+            AudioClip fallback = AudioClip.Create("ValidationBearingFallback", 16, 1, 8000, false);
+
+            AudioClip[] clips = new AudioClip[BiomeWeights.MaxBiomes];
+            float[] weights = new float[BiomeWeights.MaxBiomes];
+            Vector2[] directions = new Vector2[BiomeWeights.MaxBiomes];
+
+            BiomeBase[] distinct = BiomesWithLoops(new[] { loops[0], loops[1] });
+            try
+            {
+                // Distinct clips: each entry keeps its own biome's bearing, untouched.
+                AudioContext twoWays = DirectedContext(
+                    new[] { 0, 1 }, new[] { 0.6f, 0.4f },
+                    new[] { new Vector2(100f, 0f), new Vector2(0f, -50f) });
+
+                int count = AmbienceResolution.ResolveBedMix(
+                    twoWays, distinct, fallback, 0.01f, 0u, clips, weights, directions);
+
+                if (count != 2) return FailSound(scenario, $"two distinct beds produced {count} entries.");
+                if ((directions[0] - new Vector2(100f, 0f)).magnitude > AMBIENCE_EPSILON)
+                    return FailSound(scenario, $"the first bearing came through as {directions[0]}.");
+                if ((directions[1] - new Vector2(0f, -50f)).magnitude > AMBIENCE_EPSILON)
+                    return FailSound(scenario, $"the second bearing came through as {directions[1]}.");
+            }
+            finally
+            {
+                foreach (BiomeBase biome in distinct) Object.DestroyImmediate(biome);
+            }
+
+            BiomeBase[] merging = BiomesWithLoops(new[] { shared, shared });
+            try
+            {
+                // Merged: 75% of the weight lies due east at 100, 25% due north at 200. The mean is the
+                // weighted average of the two vectors, not of their lengths and not the nearer one.
+                AudioContext merged = DirectedContext(
+                    new[] { 0, 1 }, new[] { 0.75f, 0.25f },
+                    new[] { new Vector2(100f, 0f), new Vector2(0f, 200f) });
+
+                int count = AmbienceResolution.ResolveBedMix(
+                    merged, merging, fallback, 0.01f, 0u, clips, weights, directions);
+
+                if (count != 1) return FailSound(scenario, $"one shared clip produced {count} entries.");
+
+                Vector2 expected = new Vector2(0.75f * 100f, 0.25f * 200f);
+                if ((directions[0] - expected).magnitude > 0.01f)
+                    return FailSound(scenario, $"the merged bearing was {directions[0]}, not the weighted mean {expected}.");
+
+                // Opposed contributors cancel: the clip genuinely is not coming from anywhere.
+                AudioContext opposed = DirectedContext(
+                    new[] { 0, 1 }, new[] { 0.5f, 0.5f },
+                    new[] { new Vector2(80f, 0f), new Vector2(-80f, 0f) });
+
+                count = AmbienceResolution.ResolveBedMix(
+                    opposed, merging, fallback, 0.01f, 0u, clips, weights, directions);
+
+                if (count != 1) return FailSound(scenario, $"opposed contributors produced {count} entries.");
+                if (directions[0].magnitude > AMBIENCE_EPSILON)
+                    return FailSound(scenario, $"opposed bearings left {directions[0]} instead of cancelling.");
+            }
+            finally
+            {
+                foreach (BiomeBase biome in merging) Object.DestroyImmediate(biome);
+            }
+
+            // The unweighted world (the legacy generator) has one bed and no bearing at all for it.
+            AudioContext unweighted = new AudioContext(-1, null, false, 15, false);
+            int single = AmbienceResolution.ResolveBedMix(
+                unweighted, null, fallback, 0.01f, 0u, clips, weights, directions);
+
+            if (single != 1) return FailSound(scenario, $"the unweighted fallback produced {single} entries.");
+            if (directions[0].magnitude > AMBIENCE_EPSILON)
+                return FailSound(scenario, $"the fallback bed claimed a bearing of {directions[0]}.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// The altitude band gate (§11): a track is eligible only inside its own band, at both ends of it,
+        /// and no roll of the dice can reach one that is out of band.
+        /// </summary>
+        /// <remarks>
+        /// Swept across every salt rather than checked at one, because the failure this guards is a bounds
+        /// test that is *usually* right — an exclusive comparison at a boundary, or a filter applied to the
+        /// weight sum but not to the pick, both leave a gate that holds for most inputs and leaks for a few.
+        /// </remarks>
+        private static bool RunTrackBand()
+        {
+            const string scenario = "A Track Outside Its Altitude Band Is Never Selected";
+
+            AudioClip low = AudioClip.Create("ValidationLowBed", 16, 1, 8000, false);
+            AudioClip high = AudioClip.Create("ValidationHighBed", 16, 1, 8000, false);
+
+            AmbienceTrack[] tracks =
+            {
+                Track(low, 0f, 100f, 1f),
+                Track(high, 101f, 200f, 1f),
+            };
+
+            for (uint salt = 0; salt < 256; salt++)
+            {
+                uint hash = AmbienceResolution.TrackHash(salt, 0);
+
+                for (int y = -20; y <= 220; y++)
+                {
+                    int picked = AmbienceResolution.SelectTrackIndex(tracks, y, hash);
+
+                    bool lowEligible = y >= 0 && y <= 100;
+                    bool highEligible = y >= 101 && y <= 200;
+
+                    if (!lowEligible && !highEligible)
+                    {
+                        if (picked != -1)
+                            return FailSound(scenario, $"y={y} is outside every band but selected track {picked}.");
+                        continue;
+                    }
+
+                    if (picked < 0)
+                        return FailSound(scenario, $"y={y} had an eligible track but selected none.");
+                    if (lowEligible && picked != 0)
+                        return FailSound(scenario, $"y={y} is only in the low band but selected track {picked}.");
+                    if (highEligible && picked != 1)
+                        return FailSound(scenario, $"y={y} is only in the high band but selected track {picked}.");
+                }
+            }
+
+            // A band authored with its ends inverted describes the same span, not an empty one.
+            AmbienceTrack[] inverted = { Track(low, 100f, 0f, 1f) };
+            if (AmbienceResolution.SelectTrackIndex(inverted, 50, AmbienceResolution.TrackHash(0, 0)) != 0)
+                return FailSound(scenario, "an inverted band excluded an altitude inside it.");
+
+            // A track with no clip is not a track, however wide its band.
+            AmbienceTrack[] clipless = { Track(null, TRACK_BAND_LOW, TRACK_BAND_HIGH, 1f) };
+            if (AmbienceResolution.SelectTrackIndex(clipless, 0, AmbienceResolution.TrackHash(0, 0)) != -1)
+                return FailSound(scenario, "a track with no clip was selected.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// The play-chance distribution (§11): over many rolls each eligible track must surface in rough
+        /// proportion to its weight.
+        /// </summary>
+        /// <remarks>
+        /// A spread assertion, not a bounds check. "The pick is always a valid index" is satisfied by a
+        /// generator that returns the same index every time — which is precisely the bug worth catching,
+        /// since a bed that never varies is the complaint §11 exists to answer. Asserting proportion also
+        /// catches the milder version: a roulette whose cursor arithmetic favors the first entry.
+        /// </remarks>
+        private static bool RunTrackDistribution()
+        {
+            const string scenario = "Track Play Chance Spreads Across The Eligible Set In Proportion";
+            const float tolerance = 0.04f;
+
+            AudioClip[] clips = MakeClips(3);
+            AmbienceTrack[] tracks =
+            {
+                Track(clips[0], TRACK_BAND_LOW, TRACK_BAND_HIGH, 6f),
+                Track(clips[1], TRACK_BAND_LOW, TRACK_BAND_HIGH, 3f),
+                Track(clips[2], TRACK_BAND_LOW, TRACK_BAND_HIGH, 1f),
+            };
+
+            float[] expected = { 0.6f, 0.3f, 0.1f };
+            int[] hits = new int[tracks.Length];
+
+            for (uint salt = 0; salt < TRACK_DISTRIBUTION_ROLLS; salt++)
+            {
+                int picked = AmbienceResolution.SelectTrackIndex(tracks, 0, AmbienceResolution.TrackHash(salt, 0));
+                if ((uint)picked >= (uint)tracks.Length)
+                    return FailSound(scenario, $"salt {salt} selected {picked}, outside the track list.");
+
+                hits[picked]++;
+            }
+
+            for (int i = 0; i < tracks.Length; i++)
+            {
+                if (hits[i] == 0)
+                    return FailSound(scenario, $"track {i} never surfaced in {TRACK_DISTRIBUTION_ROLLS} rolls.");
+
+                float share = hits[i] / (float)TRACK_DISTRIBUTION_ROLLS;
+                if (Mathf.Abs(share - expected[i]) > tolerance)
+                    return FailSound(scenario,
+                        $"track {i} surfaced {share:0.###} of the time, not its authored {expected[i]:0.###}.");
+            }
+
+            // All-zero weights are an author saying nothing about proportion, not asking for silence.
+            AmbienceTrack[] unweighted =
+            {
+                Track(clips[0], TRACK_BAND_LOW, TRACK_BAND_HIGH, 0f),
+                Track(clips[1], TRACK_BAND_LOW, TRACK_BAND_HIGH, 0f),
+            };
+
+            bool sawFirst = false;
+            bool sawSecond = false;
+            for (uint salt = 0; salt < TRACK_DISTRIBUTION_ROLLS; salt++)
+            {
+                int picked = AmbienceResolution.SelectTrackIndex(unweighted, 0, AmbienceResolution.TrackHash(salt, 1));
+                if (picked < 0) return FailSound(scenario, "an all-zero-weight pool selected nothing.");
+
+                sawFirst |= picked == 0;
+                sawSecond |= picked == 1;
+            }
+
+            if (!sawFirst || !sawSecond)
+                return FailSound(scenario, "an all-zero-weight pool did not spread across both tracks.");
+
+            // Two biomes must not roll in lockstep, or a shoreline changes both its beds in one breath.
+            int agreements = 0;
+            for (uint salt = 0; salt < TRACK_DISTRIBUTION_ROLLS; salt++)
+            {
+                int a = AmbienceResolution.SelectTrackIndex(tracks, 0, AmbienceResolution.TrackHash(salt, 0));
+                int b = AmbienceResolution.SelectTrackIndex(tracks, 0, AmbienceResolution.TrackHash(salt, 1));
+                if (a == b) agreements++;
+            }
+
+            // Independent draws over this weighting agree ~46% of the time; near-total agreement means the
+            // biome index never reached the hash.
+            float agreementRate = agreements / (float)TRACK_DISTRIBUTION_ROLLS;
+            if (agreementRate > 0.75f)
+                return FailSound(scenario,
+                    $"two biomes agreed on {agreementRate:0.##} of rolls — the biome index is not salting the hash.");
+
+            return true;
+        }
+
+        /// <summary>
         /// Builds an <see cref="AudioContext"/> carrying a weighted biome neighborhood.
         /// </summary>
         /// <param name="indices">Biome indices, nearest first.</param>
@@ -573,6 +850,31 @@ namespace Editor.Validation.SoundEngine
         }
 
         /// <summary>
+        /// Builds an <see cref="AudioContext"/> carrying a weighted neighborhood and each contributor's
+        /// bearing.
+        /// </summary>
+        /// <param name="indices">Biome indices, nearest first.</param>
+        /// <param name="weights">Their weights, index-aligned.</param>
+        /// <param name="offsets">Their offsets in blocks, index-aligned.</param>
+        /// <returns>A context with weights and directions populated.</returns>
+        private static AudioContext DirectedContext(int[] indices, float[] weights, Vector2[] offsets)
+        {
+            BiomeWeights biomeWeights = new BiomeWeights { Count = indices.Length };
+            BiomeDirections biomeDirections = new BiomeDirections();
+
+            for (int i = 0; i < indices.Length; i++)
+            {
+                biomeWeights.Indices[i] = indices[i];
+                biomeWeights.Weights[i] = weights[i];
+                biomeDirections.OffsetsX[i] = offsets[i].x;
+                biomeDirections.OffsetsZ[i] = offsets[i].y;
+            }
+
+            return new AudioContext(indices[0], null, true, 15, false, biomeWeights, true, 0, 0,
+                biomeDirections);
+        }
+
+        /// <summary>
         /// Builds a biome list whose entries carry the given beds.
         /// </summary>
         /// <param name="loops">One bed per biome; a null entry means that biome authors none.</param>
@@ -588,12 +890,23 @@ namespace Editor.Validation.SoundEngine
             for (int i = 0; i < loops.Length; i++)
             {
                 StandardBiomeAttributes biome = ScriptableObject.CreateInstance<StandardBiomeAttributes>();
-                biome.ambientLoop = loops[i];
+                biome.ambientTracks = loops[i] != null
+                    ? new[] { Track(loops[i], TRACK_BAND_LOW, TRACK_BAND_HIGH, 1f) }
+                    : System.Array.Empty<AmbienceTrack>();
                 biomes[i] = biome;
             }
 
             return biomes;
         }
+
+        /// <summary>Builds one authored ambience track.</summary>
+        /// <param name="clip">The loop the track plays.</param>
+        /// <param name="low">Bottom of its altitude band, inclusive.</param>
+        /// <param name="high">Top of its altitude band, inclusive.</param>
+        /// <param name="chance">Its weight relative to the biome's other eligible tracks.</param>
+        /// <returns>The track.</returns>
+        private static AmbienceTrack Track(AudioClip clip, float low, float high, float chance) =>
+            new AmbienceTrack { clip = clip, yRange = new Vector2(low, high), playChance = chance };
 
         /// <summary>
         /// The mix a weighted neighborhood resolves to: one entry per contributing biome, sub-threshold
@@ -613,7 +926,7 @@ namespace Editor.Validation.SoundEngine
             try
             {
                 AudioContext shoreline = WeightedContext(new[] { 0, 1 }, new[] { 0.7f, 0.3f });
-                int count = AmbienceResolution.ResolveBedMix(shoreline, biomes, fallback, 0.05f, clips, weights);
+                int count = AmbienceResolution.ResolveBedMix(shoreline, biomes, fallback, 0.05f, 0u, clips, weights);
 
                 if (count != 2) return FailSound(scenario, $"a two-biome column produced {count} beds, not 2.");
                 if (clips[0] != loops[0] || clips[1] != loops[1])
@@ -624,7 +937,7 @@ namespace Editor.Validation.SoundEngine
                 // A 2% neighbor is dropped — and the remaining two must be scaled back up to fill the mix,
                 // or every bed quietly ducks by the amount that was discarded.
                 AudioContext withSliver = WeightedContext(new[] { 0, 1, 2 }, new[] { 0.6f, 0.38f, 0.02f });
-                count = AmbienceResolution.ResolveBedMix(withSliver, biomes, fallback, 0.05f, clips, weights);
+                count = AmbienceResolution.ResolveBedMix(withSliver, biomes, fallback, 0.05f, 0u, clips, weights);
 
                 if (count != 2) return FailSound(scenario, $"the sub-threshold biome was not dropped ({count} beds).");
 
@@ -637,7 +950,7 @@ namespace Editor.Validation.SoundEngine
                 try
                 {
                     count = AmbienceResolution.ResolveBedMix(
-                        WeightedContext(new[] { 0, 1 }, new[] { 0.5f, 0.5f }), bare, fallback, 0.05f, clips, weights);
+                        WeightedContext(new[] { 0, 1 }, new[] { 0.5f, 0.5f }), bare, fallback, 0.05f, 0u, clips, weights);
 
                     if (count != 2) return FailSound(scenario, $"an unauthored biome bed produced {count} entries.");
                     if (clips[0] != fallback) return FailSound(scenario, "an unauthored biome bed did not fall back.");
@@ -649,7 +962,7 @@ namespace Editor.Validation.SoundEngine
 
                 // No weighted answer at all (the legacy generator) must still produce a bed.
                 AudioContext unweighted = new AudioContext(-1, null, false, 15, false);
-                count = AmbienceResolution.ResolveBedMix(unweighted, biomes, fallback, 0.05f, clips, weights);
+                count = AmbienceResolution.ResolveBedMix(unweighted, biomes, fallback, 0.05f, 0u, clips, weights);
                 if (count != 1 || clips[0] != fallback)
                     return FailSound(scenario, "a world with no weighted query did not fall back to one bed.");
 
@@ -681,7 +994,7 @@ namespace Editor.Validation.SoundEngine
             try
             {
                 AudioContext context = WeightedContext(new[] { 0, 1, 2 }, new[] { 0.4f, 0.35f, 0.25f });
-                int count = AmbienceResolution.ResolveBedMix(context, biomes, fallback, 0.01f, clips, weights);
+                int count = AmbienceResolution.ResolveBedMix(context, biomes, fallback, 0.01f, 0u, clips, weights);
 
                 if (count != 2)
                     return FailSound(scenario, $"three biomes over two clips produced {count} entries, not 2.");
@@ -697,7 +1010,7 @@ namespace Editor.Validation.SoundEngine
                 try
                 {
                     count = AmbienceResolution.ResolveBedMix(
-                        WeightedContext(new[] { 0, 1 }, new[] { 0.5f, 0.5f }), bothBare, fallback, 0.01f,
+                        WeightedContext(new[] { 0, 1 }, new[] { 0.5f, 0.5f }), bothBare, fallback, 0.01f, 0u,
                         clips, weights);
 
                     if (count != 1)
@@ -708,6 +1021,50 @@ namespace Editor.Validation.SoundEngine
                 finally
                 {
                     foreach (BiomeBase biome in bothBare) Object.DestroyImmediate(biome);
+                }
+
+                // Since §11 the merge carries a third route in: two biomes that each list the shared track
+                // among their own can now *roll* it in the same breath, which is a live case rather than the
+                // authoring accident the fallback route represents. Each biome's alternative is parked out of
+                // band at the test altitude, so both are certain to land on the shared clip.
+                BiomeBase[] sharedRollers = new BiomeBase[2];
+                for (int i = 0; i < sharedRollers.Length; i++)
+                {
+                    StandardBiomeAttributes biome = ScriptableObject.CreateInstance<StandardBiomeAttributes>();
+                    biome.ambientTracks = new[]
+                    {
+                        Track(shared, 0f, 100f, 1f),
+                        Track(other, 500f, 600f, 1f),
+                    };
+                    sharedRollers[i] = biome;
+                }
+
+                try
+                {
+                    BiomeWeights pair = new BiomeWeights { Count = 2 };
+                    pair.Indices[0] = 0;
+                    pair.Indices[1] = 1;
+                    pair.Weights[0] = 0.55f;
+                    pair.Weights[1] = 0.45f;
+
+                    for (uint salt = 0; salt < 64; salt++)
+                    {
+                        AudioContext atSeaLevel = new AudioContext(0, null, true, 15, false, pair, true, 0, 50);
+                        count = AmbienceResolution.ResolveBedMix(
+                            atSeaLevel, sharedRollers, fallback, 0.01f, salt, clips, weights);
+
+                        if (count != 1)
+                            return FailSound(scenario,
+                                $"salt {salt}: two biomes rolling one shared track produced {count} sources, not 1.");
+                        if (clips[0] != shared)
+                            return FailSound(scenario, $"salt {salt}: the merged entry did not carry the shared track.");
+                        if (Mathf.Abs(weights[0] - 1f) > AMBIENCE_EPSILON)
+                            return FailSound(scenario, $"salt {salt}: the merged weight was {weights[0]}, not 1.");
+                    }
+                }
+                finally
+                {
+                    foreach (BiomeBase biome in sharedRollers) Object.DestroyImmediate(biome);
                 }
 
                 return true;

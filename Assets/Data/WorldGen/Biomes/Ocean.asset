@@ -13,7 +13,10 @@ MonoBehaviour:
   m_Name: Ocean
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.StandardBiomeAttributes
   biomeName: Ocean
-  ambientLoop: {fileID: 8300000, guid: b9870d9318e88574b9374747313b55f1, type: 3}
+  ambientTracks:
+  - clip: {fileID: 8300000, guid: b9870d9318e88574b9374747313b55f1, type: 3}
+    yRange: {x: 0, y: 128}
+    playChance: 1
   musicPool: []
   debugPreviewColor: {r: 0.31372374, g: 0.68530166, b: 0.8867924, a: 1}
   biomeWeightNoiseConfig:

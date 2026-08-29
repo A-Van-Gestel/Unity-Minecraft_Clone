@@ -312,6 +312,15 @@ namespace Libraries
             return mCoordinatePrecision;
         }
 
+        /// <summary>
+        /// The active sample frequency. Needed by callers that consume <see cref="CellularCellData"/>'s
+        /// offsets, which are expressed in noise space: world units are <c>offset / frequency</c>.
+        /// </summary>
+        public float GetFrequency()
+        {
+            return mFrequency;
+        }
+
         #endregion
 
         #region Public Noise API
@@ -2000,6 +2009,218 @@ namespace Libraries
                     for (int i = 0; i < N; i++)
                     {
                         edgeData.Distances[i] = math.sqrt(edgeData.Distances[i]);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// The same 5×5 cellular neighbourhood <see cref="CellularEdgeData"/> reports, plus the offset from
+        /// the sample point to each cell's jittered centre — the direction the cell lies in.
+        /// </summary>
+        /// <remarks>
+        /// A separate struct rather than two more arrays on <see cref="CellularEdgeData"/>, because that one
+        /// is built per column inside the terrain generation job: doubling its stack footprint to serve a
+        /// 4 Hz audio read would be paid by every column of the world. This one exists for callers that want
+        /// bearings and can afford the width (SOUND_ENGINE_DESIGN.md §10).
+        /// <para>
+        /// Offsets are in <b>noise space</b>, like <see cref="Distances"/> — divide by
+        /// <see cref="GetFrequency"/> for world units. For the Euclidean distance function the two agree by
+        /// construction: <c>|Offset[i]| == Distances[i]</c>.
+        /// </para>
+        /// </remarks>
+        public unsafe struct CellularCellData
+        {
+            /// <inheritdoc cref="CellularEdgeData.MaxCells"/>
+            public const int MaxCells = CellularEdgeData.MaxCells;
+
+            public fixed int Hashes[MaxCells];
+            public fixed float Distances[MaxCells];
+
+            /// <summary>X of the offset from the sample point to each cell's centre, in noise space.</summary>
+            public fixed float OffsetsX[MaxCells];
+
+            /// <inheritdoc cref="OffsetsX"/>
+            public fixed float OffsetsY[MaxCells];
+        }
+
+        /// <summary>
+        /// Samples the cellular neighbourhood around a point, keeping each cell's direction as well as its
+        /// distance.
+        /// </summary>
+        /// <param name="x">Sample X, in world units.</param>
+        /// <param name="y">Sample Y, in world units.</param>
+        /// <param name="cellData">The neighbourhood, sorted nearest-first.</param>
+        public void GetCellularCellData(double x, double y, out CellularCellData cellData)
+        {
+            if (mCoordinatePrecision == CoordinatePrecision.Classic32)
+            {
+                float fx = (float)x;
+                float fy = (float)y;
+                TransformNoiseCoordinate(ref fx, ref fy);
+                SingleCellularCellData(mSeed, fx, fy, out cellData);
+                return;
+            }
+
+            TransformNoiseCoordinate(ref x, ref y);
+            SingleCellularCellData(mSeed, x, y, out cellData);
+        }
+
+        private void SingleCellularCellData(int seed, float x, float y, out CellularCellData cellData)
+        {
+            int xr = FastRound(x);
+            int yr = FastRound(y);
+
+            cellData = default;
+            const int N = CellularCellData.MaxCells;
+            unsafe
+            {
+                for (int i = 0; i < N; i++)
+                {
+                    cellData.Distances[i] = float.MaxValue;
+                    cellData.Hashes[i] = 0;
+                }
+            }
+
+            float cellularJitter = 0.43701595f * mCellularJitterModifier;
+            int xPrimed = (xr - 2) * PrimeX;
+            int yPrimedBase = (yr - 2) * PrimeY;
+            unsafe
+            {
+                for (int xi = xr - 2; xi <= xr + 2; xi++)
+                {
+                    int yPrimed = yPrimedBase;
+                    for (int yi = yr - 2; yi <= yr + 2; yi++)
+                    {
+                        int hash = Hash(seed, xPrimed, yPrimed);
+                        int idx = hash & (255 << 1);
+
+                        float vecX = xi - x + Lookup.Data.RandVecs2D[idx] * cellularJitter;
+                        float vecY = yi - y + Lookup.Data.RandVecs2D[idx | 1] * cellularJitter;
+
+                        float newDistance;
+                        if (mCellularDistanceFunction == CellularDistanceFunction.Euclidean || mCellularDistanceFunction == CellularDistanceFunction.EuclideanSq)
+                            newDistance = vecX * vecX + vecY * vecY;
+                        else if (mCellularDistanceFunction == CellularDistanceFunction.Manhattan)
+                            newDistance = math.abs(vecX) + math.abs(vecY);
+                        else
+                            newDistance = math.abs(vecX) + math.abs(vecY) + (vecX * vecX + vecY * vecY);
+
+                        for (int i = 0; i < N; i++)
+                        {
+                            if (newDistance < cellData.Distances[i])
+                            {
+                                for (int j = N - 1; j > i; j--)
+                                {
+                                    cellData.Distances[j] = cellData.Distances[j - 1];
+                                    cellData.Hashes[j] = cellData.Hashes[j - 1];
+                                    cellData.OffsetsX[j] = cellData.OffsetsX[j - 1];
+                                    cellData.OffsetsY[j] = cellData.OffsetsY[j - 1];
+                                }
+
+                                cellData.Distances[i] = newDistance;
+                                cellData.Hashes[i] = hash;
+                                cellData.OffsetsX[i] = vecX;
+                                cellData.OffsetsY[i] = vecY;
+                                break;
+                            }
+                        }
+
+                        yPrimed += PrimeY;
+                    }
+
+                    xPrimed += PrimeX;
+                }
+            }
+
+            if (mCellularDistanceFunction == CellularDistanceFunction.Euclidean || mCellularDistanceFunction == CellularDistanceFunction.EuclideanSq)
+            {
+                unsafe
+                {
+                    for (int i = 0; i < N; i++)
+                    {
+                        cellData.Distances[i] = math.sqrt(cellData.Distances[i]);
+                    }
+                }
+            }
+        }
+
+        private void SingleCellularCellData(int seed, double x, double y, out CellularCellData cellData)
+        {
+            int xr = FastRound(x);
+            int yr = FastRound(y);
+            float xLocal = (float)(x - xr);
+            float yLocal = (float)(y - yr);
+
+            cellData = default;
+            const int N = CellularCellData.MaxCells;
+            unsafe
+            {
+                for (int i = 0; i < N; i++)
+                {
+                    cellData.Distances[i] = float.MaxValue;
+                    cellData.Hashes[i] = 0;
+                }
+            }
+
+            float cellularJitter = 0.43701595f * mCellularJitterModifier;
+            int xPrimed = (xr - 2) * PrimeX;
+            int yPrimedBase = (yr - 2) * PrimeY;
+            unsafe
+            {
+                for (int dxi = -2; dxi <= 2; dxi++)
+                {
+                    int yPrimed = yPrimedBase;
+                    for (int dyi = -2; dyi <= 2; dyi++)
+                    {
+                        int hash = Hash(seed, xPrimed, yPrimed);
+                        int idx = hash & (255 << 1);
+
+                        float vecX = dxi - xLocal + Lookup.Data.RandVecs2D[idx] * cellularJitter;
+                        float vecY = dyi - yLocal + Lookup.Data.RandVecs2D[idx | 1] * cellularJitter;
+
+                        float newDistance;
+                        if (mCellularDistanceFunction == CellularDistanceFunction.Euclidean || mCellularDistanceFunction == CellularDistanceFunction.EuclideanSq)
+                            newDistance = vecX * vecX + vecY * vecY;
+                        else if (mCellularDistanceFunction == CellularDistanceFunction.Manhattan)
+                            newDistance = math.abs(vecX) + math.abs(vecY);
+                        else
+                            newDistance = math.abs(vecX) + math.abs(vecY) + (vecX * vecX + vecY * vecY);
+
+                        for (int i = 0; i < N; i++)
+                        {
+                            if (newDistance < cellData.Distances[i])
+                            {
+                                for (int j = N - 1; j > i; j--)
+                                {
+                                    cellData.Distances[j] = cellData.Distances[j - 1];
+                                    cellData.Hashes[j] = cellData.Hashes[j - 1];
+                                    cellData.OffsetsX[j] = cellData.OffsetsX[j - 1];
+                                    cellData.OffsetsY[j] = cellData.OffsetsY[j - 1];
+                                }
+
+                                cellData.Distances[i] = newDistance;
+                                cellData.Hashes[i] = hash;
+                                cellData.OffsetsX[i] = vecX;
+                                cellData.OffsetsY[i] = vecY;
+                                break;
+                            }
+                        }
+
+                        yPrimed += PrimeY;
+                    }
+
+                    xPrimed += PrimeX;
+                }
+            }
+
+            if (mCellularDistanceFunction == CellularDistanceFunction.Euclidean || mCellularDistanceFunction == CellularDistanceFunction.EuclideanSq)
+            {
+                unsafe
+                {
+                    for (int i = 0; i < N; i++)
+                    {
+                        cellData.Distances[i] = math.sqrt(cellData.Distances[i]);
                     }
                 }
             }

@@ -112,11 +112,14 @@ namespace Jobs.Generators
         /// <param name="voxelZ">Voxel-space Z of the column.</param>
         /// <param name="falloffRadius">How far past the nearest cell a cell still contributes.</param>
         /// <param name="weights">The contributing biomes and their normalized weights, nearest first.</param>
+        /// <param name="directions">Each contributor's offset from the column, in blocks, index-aligned.</param>
         /// <returns>True when <paramref name="weights"/> was populated.</returns>
         /// <remarks>A separate method rather than more fields on <see cref="BiomeSample"/>: the readout and
         /// the weather system want one biome, and widening the shared answer would make both pay for a
-        /// cellular neighbourhood walk they never read.</remarks>
-        bool TryGetBiomeWeights(int voxelX, int voxelZ, float falloffRadius, out BiomeWeights weights);
+        /// cellular neighborhood walk they never read. The bearings ride along on this one because they
+        /// fall out of the same walk — answering them separately would walk the neighborhood twice.</remarks>
+        bool TryGetBiomeWeights(int voxelX, int voxelZ, float falloffRadius, out BiomeWeights weights,
+            out BiomeDirections directions);
 
         /// <summary>
         /// Returns terrain generation diagnostic data at the given column.

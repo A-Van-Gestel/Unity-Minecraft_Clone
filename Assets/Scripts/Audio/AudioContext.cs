@@ -54,6 +54,14 @@ namespace Audio
         /// <summary>False when the generator does not answer weighted biome queries (the legacy one does not).</summary>
         public readonly bool HasWeights;
 
+        /// <summary>
+        /// Which way each contributor in <see cref="Weights"/> lies, in blocks — what lets a bed be placed at
+        /// its biome's bearing instead of played flat (§10). Index-aligned with the weights, and meaningful
+        /// under the same <see cref="HasWeights"/> flag: both come out of one cellular walk, so a second flag
+        /// could only ever disagree with the first.
+        /// </summary>
+        public readonly BiomeDirections Directions;
+
         /// <summary>The sky light reaching the listener's head, 0–15. Zero means no sky at all: underground.</summary>
         public readonly byte SkylightAtHead;
 
@@ -68,6 +76,17 @@ namespace Audio
         /// ducks nothing.
         /// </remarks>
         public readonly int DepthBelowSurface;
+
+        /// <summary>
+        /// The voxel-space Y of the listener's head cell — the altitude an ambience track's authored band is
+        /// tested against (§11).
+        /// </summary>
+        /// <remarks>
+        /// Carried outright rather than derived from <see cref="DepthBelowSurface"/>: that one is a distance
+        /// from a surface that itself moves with the terrain, so it answers "how buried am I", never "how
+        /// high am I". A track authored for build height needs the second question.
+        /// </remarks>
+        public readonly int ListenerVoxelY;
 
         /// <summary>True when the listener's head cell holds a fluid.</summary>
         public readonly bool Submerged;
@@ -85,10 +104,15 @@ namespace Audio
         /// <param name="weights">Per-biome influence at the listener's column.</param>
         /// <param name="hasWeights">Whether <paramref name="weights"/> was populated.</param>
         /// <param name="depthBelowSurface">Blocks below the terrain surface; negative above it.</param>
+        /// <param name="listenerVoxelY">Voxel-space Y of the listener's head cell.</param>
+        /// <param name="directions">Each contributor's bearing, index-aligned with <paramref name="weights"/>.</param>
         public AudioContext(int biomeIndex, BiomeBase biome, bool hasBiome, byte skylightAtHead, bool submerged,
-            BiomeWeights weights = default, bool hasWeights = false, int depthBelowSurface = 0)
+            BiomeWeights weights = default, bool hasWeights = false, int depthBelowSurface = 0,
+            int listenerVoxelY = 0, BiomeDirections directions = default)
         {
+            Directions = directions;
             DepthBelowSurface = depthBelowSurface;
+            ListenerVoxelY = listenerVoxelY;
             BiomeIndex = biomeIndex;
             Biome = biome;
             HasBiome = hasBiome;

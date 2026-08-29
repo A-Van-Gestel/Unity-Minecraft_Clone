@@ -91,6 +91,9 @@ namespace Editor.Validation.Generation
                 new Scenario("B13 blended terrain height is bit-identical to the golden", B13_BlendedHeightGolden),
                 new Scenario("B14 biome weights normalize, and their primary matches SelectIndex", B14_WeightsShape),
                 new Scenario("B15 biome weights move continuously across a boundary", B15_WeightsContinuity),
+                new Scenario("B16 cell offsets agree with their own recorded distance", B16_OffsetDistanceIdentity),
+                new Scenario("B17 stepping along a reported bearing closes the distance to that biome",
+                    B17_BearingPointsAtTheBiome),
             };
             return ValidationSuiteRunner.Execute("Biome Selection", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
@@ -99,6 +102,239 @@ namespace Editor.Validation.Generation
         {
             if (!condition) Debug.LogError($"  [ASSERT FAILED] {message}");
             return condition;
+        }
+
+        /// <summary>
+        /// Blocks of slack the bearing step allows, covering both the re-rounding of the stepped column to
+        /// integers and Classic32's coordinate quantisation out at the ±2²⁴ bands (measured ~1.6 blocks).
+        /// </summary>
+        private const float BEARING_STEP_TOLERANCE = 4f;
+
+        /// <summary>Shortest bearing, in blocks, that leaves room to step along and still be measured.</summary>
+        private const float BEARING_MIN_DISTANCE = 64f;
+
+        /// <summary>
+        /// How far the probe walks along a reported bearing, in blocks.
+        /// <para>
+        /// Deliberately long relative to <see cref="BEARING_STEP_TOLERANCE"/>. The step is the signal and the
+        /// tolerance is the noise floor, so a short step in the far coordinate bands leaves the two the same
+        /// size — which is a gate that cannot tell a correct bearing from a slightly wrong one, rather than a
+        /// strict one.
+        /// </para>
+        /// </summary>
+        private const float BEARING_STEP_BLOCKS = 32f;
+
+        /// <summary>Usable samples B17 needs before it is allowed to pass.</summary>
+        private const int BEARING_MIN_SAMPLES = 64;
+
+        /// <summary>
+        /// The offsets <c>CellularCellData</c> carries must describe the very cells whose distances sit
+        /// beside them: <c>|offset[i]| == Distances[i]</c> under each distance function's own metric.
+        /// </summary>
+        /// <remarks>
+        /// The library's golden file cannot see this — adding a field changes no noise value, so
+        /// <c>FastNoiseLiteGoldenValues.txt</c> stays bit-identical whether the offsets are right, stale, or
+        /// never written. This is the self-consistency check that does see it, and what it catches is the
+        /// insertion sort: the offsets are shifted through the same 25-deep sort as the distances, and an
+        /// offset left behind by one shift would pair every cell with a neighbour's direction.
+        /// <para>
+        /// Both precision overloads, because they are separate implementations — the Precise64 one measures
+        /// from a rounded lattice origin rather than the sample point, which is exactly the reference-frame
+        /// mistake that would leave the far coordinate bands pointing nowhere.
+        /// </para>
+        /// </remarks>
+        private static bool B16_OffsetDistanceIdentity()
+        {
+            if (!TryLoadBiomes(out StandardBiomeAttributes[] biomes, out string error))
+                return Expect(false, error);
+
+            FastNoiseLite.InitializeLookupTables();
+            FastNoiseLite.CoordinatePrecision previous = FastNoiseFactory.GlobalCoordinatePrecision;
+
+            int checkedCells = 0;
+
+            try
+            {
+                foreach (FastNoiseLite.CoordinatePrecision precision in new[]
+                         {
+                             FastNoiseLite.CoordinatePrecision.Classic32,
+                             FastNoiseLite.CoordinatePrecision.Precise64,
+                         })
+                {
+                    FastNoiseFactory.GlobalCoordinatePrecision = precision;
+
+                    foreach (FastNoiseLite.CellularDistanceFunction metric in new[]
+                             {
+                                 FastNoiseLite.CellularDistanceFunction.Euclidean,
+                                 FastNoiseLite.CellularDistanceFunction.EuclideanSq,
+                                 FastNoiseLite.CellularDistanceFunction.Manhattan,
+                             })
+                    {
+                        foreach (int seed in BiomeSelectionGoldenCapture.Seeds)
+                        {
+                            FastNoiseLite noise = BiomeSelectionGoldenCapture.CreateSelectionNoise(biomes, seed);
+                            noise.SetCellularDistanceFunction(metric);
+
+                            foreach (int origin in BiomeSelectionGoldenCapture.BandOrigins)
+                            {
+                                for (int c = 0; c < 16; c++)
+                                {
+                                    int gx = origin + c * 37;
+                                    int gz = origin - c * 37;
+
+                                    noise.GetCellularCellData(gx, gz, out FastNoiseLite.CellularCellData cells);
+
+                                    unsafe
+                                    {
+                                        for (int i = 0; i < FastNoiseLite.CellularCellData.MaxCells; i++)
+                                        {
+                                            float ox = cells.OffsetsX[i];
+                                            float oz = cells.OffsetsY[i];
+
+                                            float measured =
+                                                metric == FastNoiseLite.CellularDistanceFunction.Manhattan
+                                                    ? Mathf.Abs(ox) + Mathf.Abs(oz)
+                                                    : Mathf.Sqrt(ox * ox + oz * oz);
+
+                                            float recorded = cells.Distances[i];
+
+                                            // Relative, because the far bands work in much larger numbers
+                                            // than the origin does and a fixed epsilon would only be
+                                            // meaningful at one of them.
+                                            float slack = Mathf.Max(1e-4f, Mathf.Abs(recorded) * 1e-4f);
+                                            if (Mathf.Abs(measured - recorded) > slack)
+                                            {
+                                                return Expect(false,
+                                                    $"{precision}/{metric} seed {seed} at ({gx}, {gz}) cell {i}: " +
+                                                    $"offset measures {measured} but distance records {recorded}.");
+                                            }
+
+                                            checkedCells++;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                FastNoiseFactory.GlobalCoordinatePrecision = previous;
+            }
+
+            // A silently-empty sweep would pass every assertion above.
+            return Expect(checkedCells > 1000, $"only {checkedCells} cells were compared.");
+        }
+
+        /// <summary>
+        /// The bearing must point at the biome: stepping a few blocks along a contributor's reported
+        /// direction has to leave the listener measurably closer to it.
+        /// </summary>
+        /// <remarks>
+        /// This is the assertion B16 cannot make. A sign flip (<c>sample − cell</c> instead of
+        /// <c>cell − sample</c>) and a transposed X/Z both preserve <c>|offset|</c> exactly, so B16 stays
+        /// green while every bed in the game points the wrong way; so does a bearing left in noise space
+        /// rather than converted to blocks, which is right in direction and out by a factor of ~380 in
+        /// length. Walking the direction and re-measuring catches all three, because only a correct bearing
+        /// gets closer.
+        /// <para>
+        /// One-sided on purpose: the step may land nearer a <i>different</i> cell of the same biome, which
+        /// makes the new distance smaller than predicted but never larger. The sample floor is what stops the
+        /// scenario passing on a run where nothing was measurable.
+        /// </para>
+        /// </remarks>
+        private static bool B17_BearingPointsAtTheBiome()
+        {
+            if (!TryLoadBiomes(out StandardBiomeAttributes[] biomes, out string error))
+                return Expect(false, error);
+
+            FastNoiseLite.InitializeLookupTables();
+            FastNoiseLite.CoordinatePrecision previous = FastNoiseFactory.GlobalCoordinatePrecision;
+
+            int samples = 0;
+
+            try
+            {
+                foreach (FastNoiseLite.CoordinatePrecision precision in new[]
+                         {
+                             FastNoiseLite.CoordinatePrecision.Classic32,
+                             FastNoiseLite.CoordinatePrecision.Precise64,
+                         })
+                {
+                    FastNoiseFactory.GlobalCoordinatePrecision = precision;
+
+                    foreach (int seed in BiomeSelectionGoldenCapture.Seeds)
+                    {
+                        FastNoiseLite noise = BiomeSelectionGoldenCapture.CreateSelectionNoise(biomes, seed);
+
+                        foreach (int origin in BiomeSelectionGoldenCapture.BandOrigins)
+                        {
+                            for (int c = 0; c < 64; c++)
+                            {
+                                int gx = origin + c * 37;
+                                int gz = origin - c * 37;
+
+                                BiomeSelection.SelectWeightsDirectional(ref noise, gx, gz, biomes.Length,
+                                    WEIGHT_FALLOFF_RADIUS, false, 0,
+                                    out BiomeWeights weights, out BiomeDirections directions);
+
+                                for (int slot = 0; slot < weights.Count; slot++)
+                                {
+                                    float ox = directions.OffsetsX[slot];
+                                    float oz = directions.OffsetsZ[slot];
+                                    float distance = Mathf.Sqrt(ox * ox + oz * oz);
+                                    if (distance < BEARING_MIN_DISTANCE) continue;
+
+                                    int biome = weights.Indices[slot];
+                                    float step = Mathf.Min(BEARING_STEP_BLOCKS, distance * 0.25f);
+
+                                    int sx = gx + Mathf.RoundToInt(ox / distance * step);
+                                    int sz = gz + Mathf.RoundToInt(oz / distance * step);
+
+                                    BiomeSelection.SelectWeightsDirectional(ref noise, sx, sz, biomes.Length,
+                                        WEIGHT_FALLOFF_RADIUS, false, 0,
+                                        out BiomeWeights stepped, out BiomeDirections steppedDirections);
+
+                                    int steppedSlot = -1;
+                                    for (int i = 0; i < stepped.Count; i++)
+                                    {
+                                        if (stepped.Indices[i] != biome) continue;
+                                        steppedSlot = i;
+                                        break;
+                                    }
+
+                                    // The biome dropped out of the neighbourhood; nothing to measure here.
+                                    if (steppedSlot < 0) continue;
+
+                                    float nx = steppedDirections.OffsetsX[steppedSlot];
+                                    float nz = steppedDirections.OffsetsZ[steppedSlot];
+                                    float steppedDistance = Mathf.Sqrt(nx * nx + nz * nz);
+
+                                    if (steppedDistance > distance - step + BEARING_STEP_TOLERANCE)
+                                    {
+                                        return Expect(false,
+                                            $"{precision} seed {seed}: at ({gx}, {gz}) biome {biome} reported " +
+                                            $"{distance:0.0} blocks away on bearing ({ox:0.0}, {oz:0.0}); " +
+                                            $"stepping {step:0.0} blocks along it left it {steppedDistance:0.0} " +
+                                            "blocks away, so the bearing does not point at the biome.");
+                                    }
+
+                                    samples++;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                FastNoiseFactory.GlobalCoordinatePrecision = previous;
+            }
+
+            return Expect(samples >= BEARING_MIN_SAMPLES,
+                $"only {samples} usable bearings were measured, below the {BEARING_MIN_SAMPLES} floor — " +
+                "a run with nothing to measure must not read as a pass.");
         }
 
         // --- Scenarios ---------------------------------------------------------------------------

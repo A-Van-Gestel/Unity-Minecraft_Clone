@@ -85,20 +85,122 @@ namespace Audio
         }
 
         /// <summary>
+        /// Picks which of a biome's ambience tracks should sound at the listener's altitude.
+        /// </summary>
+        /// <param name="tracks">The biome's authored tracks. Null or empty selects nothing.</param>
+        /// <param name="listenerVoxelY">The listener's voxel-space Y, tested against each track's band.</param>
+        /// <param name="hash">A per-roll hash (see <see cref="TrackHash"/>).</param>
+        /// <returns>The chosen track index, or -1 when no track is eligible here.</returns>
+        /// <remarks>
+        /// <para>
+        /// A <b>weighted roulette over the eligible set</b>, not an independent roll per track: exactly one
+        /// eligible track always wins, so <c>playChance</c> reads as "how often, relative to the others" and
+        /// a bed can never lose its roll into silence. Making the layer go quiet is the rest cycle's job, and
+        /// it already does it — a second, hidden source of silence here would be indistinguishable from a
+        /// missing clip.
+        /// </para>
+        /// <para>
+        /// All-zero weights fall back to a uniform pick rather than to nothing. An author who leaves every
+        /// weight at zero has said nothing about proportion, which is not the same as asking for silence.
+        /// </para>
+        /// </remarks>
+        public static int SelectTrackIndex(AmbienceTrack[] tracks, int listenerVoxelY, uint hash)
+        {
+            if (tracks == null || tracks.Length == 0) return -1;
+
+            float total = 0f;
+            int eligible = 0;
+            int lastEligible = -1;
+
+            for (int i = 0; i < tracks.Length; i++)
+            {
+                if (!tracks[i].IsEligibleAt(listenerVoxelY)) continue;
+
+                eligible++;
+                lastEligible = i;
+                total += Mathf.Max(0f, tracks[i].playChance);
+            }
+
+            if (eligible == 0) return -1;
+            if (eligible == 1) return lastEligible;
+
+            // The low 24 bits: a different range than NextGapSeconds and PickClipIndex read, so a roll and a
+            // music decision sharing a salt would still not move together.
+            float roll = (hash & 0xFFFFFFu) / (float)0xFFFFFF;
+
+            if (total <= 0f)
+            {
+                int uniform = Mathf.Min((int)(roll * eligible), eligible - 1);
+                return NthEligible(tracks, listenerVoxelY, uniform);
+            }
+
+            float cursor = roll * total;
+            for (int i = 0; i < tracks.Length; i++)
+            {
+                if (!tracks[i].IsEligibleAt(listenerVoxelY)) continue;
+
+                cursor -= Mathf.Max(0f, tracks[i].playChance);
+                if (cursor <= 0f) return i;
+            }
+
+            // Only reachable when float error leaves a sliver at the top of the range.
+            return lastEligible;
+        }
+
+        /// <summary>Returns the index of the n-th eligible track, or -1 when there are fewer than that.</summary>
+        /// <param name="tracks">The biome's authored tracks.</param>
+        /// <param name="listenerVoxelY">The listener's voxel-space Y.</param>
+        /// <param name="ordinal">How many eligible tracks to skip.</param>
+        private static int NthEligible(AmbienceTrack[] tracks, int listenerVoxelY, int ordinal)
+        {
+            int seen = 0;
+            for (int i = 0; i < tracks.Length; i++)
+            {
+                if (!tracks[i].IsEligibleAt(listenerVoxelY)) continue;
+                if (seen == ordinal) return i;
+                seen++;
+            }
+
+            return -1;
+        }
+
+        /// <summary>
+        /// Resolves one biome's ambience clip for this roll and altitude.
+        /// </summary>
+        /// <param name="biome">The biome asset, or null.</param>
+        /// <param name="listenerVoxelY">The listener's voxel-space Y.</param>
+        /// <param name="rollSalt">The bed layer's roll generation.</param>
+        /// <param name="biomeIndex">The biome's index — salts the roll so two biomes roll independently.</param>
+        /// <returns>The chosen clip, or null when the biome offers none here.</returns>
+        public static AudioClip SelectBiomeTrackClip(BiomeBase biome, int listenerVoxelY, uint rollSalt,
+            int biomeIndex)
+        {
+            if (biome == null) return null;
+
+            int track = SelectTrackIndex(biome.ambientTracks, listenerVoxelY, TrackHash(rollSalt, biomeIndex));
+            return track >= 0 ? biome.ambientTracks[track].clip : null;
+        }
+
+        /// <summary>
         /// Selects the ambience bed for a context, falling back when the biome has none.
         /// </summary>
         /// <param name="context">The sampled listener context.</param>
         /// <param name="fallbackLoop">The <c>AmbienceDatabase</c> default bed.</param>
+        /// <param name="rollSalt">The bed layer's roll generation, advanced when the layer wakes.</param>
         /// <returns>The clip to loop, or null when neither the biome nor the fallback is authored.</returns>
         /// <remarks>
-        /// Two distinct holes fall through to the same fallback: a biome that simply has no bed authored yet,
-        /// and a world with no biome answer at all (the legacy generator never answers). Neither may resolve
-        /// to silence-by-accident — a missing clip must be visibly the fallback, not an empty layer.
+        /// Three distinct holes fall through to the same fallback: a biome with no bed authored yet, a biome
+        /// whose tracks are all out of band at this altitude, and a world with no biome answer at all (the
+        /// legacy generator never answers). None of them may resolve to silence-by-accident — a missing clip
+        /// must be visibly the fallback, not an empty layer.
         /// </remarks>
-        public static AudioClip SelectBiomeLoop(AudioContext context, AudioClip fallbackLoop)
+        public static AudioClip SelectBiomeLoop(AudioContext context, AudioClip fallbackLoop, uint rollSalt)
         {
             if (!context.HasBiome || context.Biome == null) return fallbackLoop;
-            return context.Biome.ambientLoop != null ? context.Biome.ambientLoop : fallbackLoop;
+
+            AudioClip clip = SelectBiomeTrackClip(
+                context.Biome, context.ListenerVoxelY, rollSalt, context.BiomeIndex);
+            return clip != null ? clip : fallbackLoop;
         }
 
         /// <summary>
@@ -108,8 +210,13 @@ namespace Audio
         /// <param name="biomes">Biome assets indexed by biome index — the world type's list.</param>
         /// <param name="fallbackLoop">The <c>AmbienceDatabase</c> default bed.</param>
         /// <param name="minWeight">Contributions at or below this are dropped before renormalizing.</param>
+        /// <param name="rollSalt">The bed layer's roll generation, advanced when the layer wakes.</param>
         /// <param name="clips">Receives the clip per entry. Must hold at least <see cref="BiomeWeights.MaxBiomes"/>.</param>
         /// <param name="weights">Receives the normalized weight per entry, index-aligned with <paramref name="clips"/>.</param>
+        /// <param name="directions">
+        /// Optional. Receives each entry's bearing in blocks, index-aligned with <paramref name="clips"/>. A
+        /// zero vector means the entry has no bearing and should be played flat.
+        /// </param>
         /// <returns>How many entries were written.</returns>
         /// <remarks>
         /// <para>
@@ -119,7 +226,8 @@ namespace Audio
         /// <b>Duplicate clips merge.</b> Two neighboring biomes with no authored bed both resolve to the
         /// fallback, and playing one clip on two sources flanges rather than layers — the same rule
         /// <c>SoundResolution.ResolveStepMaterials</c> applies when a footstep's two cells share a material.
-        /// Their weights are summed onto one entry instead.
+        /// Their weights are summed onto one entry instead. Since §11 the rule carries more traffic than the
+        /// fallback case: two biomes listing the same track can now roll it in the same breath.
         /// </para>
         /// <para>
         /// <b>Sub-threshold contributors are dropped, then the rest renormalize.</b> Without the second half,
@@ -135,21 +243,27 @@ namespace Audio
             BiomeBase[] biomes,
             AudioClip fallbackLoop,
             float minWeight,
+            uint rollSalt,
             AudioClip[] clips,
-            float[] weights)
+            float[] weights,
+            Vector2[] directions = null)
         {
             if (clips == null || weights == null) return 0;
 
             int capacity = Mathf.Min(clips.Length, weights.Length);
+            if (directions != null) capacity = Mathf.Min(capacity, directions.Length);
             if (capacity <= 0) return 0;
 
             if (!context.HasWeights || context.Weights.Count <= 0)
             {
-                AudioClip single = SelectBiomeLoop(context, fallbackLoop);
+                AudioClip single = SelectBiomeLoop(context, fallbackLoop, rollSalt);
                 if (single == null) return 0;
 
                 clips[0] = single;
                 weights[0] = 1f;
+
+                // A fallback bed stands for a world, not a place — it has no direction to be heard from.
+                if (directions != null) directions[0] = Vector2.zero;
                 return 1;
             }
 
@@ -162,8 +276,8 @@ namespace Audio
                 if (weight <= minWeight) continue;
 
                 int biomeIndex = context.Weights.Indices[i];
-                AudioClip clip = biomes != null && (uint)biomeIndex < (uint)biomes.Length && biomes[biomeIndex] != null
-                    ? biomes[biomeIndex].ambientLoop
+                AudioClip clip = biomes != null && (uint)biomeIndex < (uint)biomes.Length
+                    ? SelectBiomeTrackClip(biomes[biomeIndex], context.ListenerVoxelY, rollSalt, biomeIndex)
                     : null;
 
                 clip ??= fallbackLoop;
@@ -177,15 +291,24 @@ namespace Audio
                     break;
                 }
 
+                // Index-aligned with the weights by construction — one cellular walk produced both.
+                Vector2 bearing = new Vector2(context.Directions.OffsetsX[i], context.Directions.OffsetsZ[i]);
+
                 if (existing >= 0)
                 {
                     weights[existing] += weight;
+
+                    // Merged entries carry the weight-weighted mean of their contributors' bearings, summed
+                    // here and divided through below. Two biomes on opposite sides sharing one clip cancel to
+                    // roughly zero, which is the honest answer: that clip is not coming from anywhere.
+                    if (directions != null) directions[existing] += bearing * weight;
                 }
                 else
                 {
                     if (count == capacity) continue;
                     clips[count] = clip;
                     weights[count] = weight;
+                    if (directions != null) directions[count] = bearing * weight;
                     count++;
                 }
 
@@ -194,7 +317,14 @@ namespace Audio
 
             if (count == 0 || total <= 0f) return 0;
 
-            for (int i = 0; i < count; i++) weights[i] /= total;
+            for (int i = 0; i < count; i++)
+            {
+                // The bearing divides by this entry's own raw weight, not by the mix total: it is a mean over
+                // the contributors that merged here, and must not shrink because the rest of the mix is loud.
+                if (directions != null && weights[i] > 0f) directions[i] /= weights[i];
+                weights[i] /= total;
+            }
+
             return count;
         }
 
@@ -430,6 +560,20 @@ namespace Audio
             if (pool[index] != null && pool[index] == lastTrack) index = (index + 1) % pool.Length;
             return index;
         }
+
+        /// <summary>
+        /// Hashes one biome's ambience-track roll.
+        /// </summary>
+        /// <param name="rollSalt">The bed layer's roll generation.</param>
+        /// <param name="biomeIndex">The biome being rolled for.</param>
+        /// <returns>A well-mixed hash, deterministic for a given pair.</returns>
+        /// <remarks>
+        /// The biome index is folded in rather than every biome sharing the generation's hash: two biomes
+        /// contributing to one mix would otherwise roll in lockstep, so a shoreline would flip both its beds
+        /// to their second track at the same moment — a coincidence the ear reads as a glitch.
+        /// </remarks>
+        public static uint TrackHash(uint rollSalt, int biomeIndex) =>
+            ScheduleHash(unchecked(rollSalt * 2654435761u + (uint)biomeIndex));
 
         /// <summary>
         /// Hashes one scheduling decision into the value the gap and track pickers consume.

@@ -4951,18 +4951,21 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// <param name="voxelZ">Voxel-space Z of the column.</param>
     /// <param name="falloffRadius">How far past the nearest cell a cell still contributes.</param>
     /// <param name="weights">The contributing biomes and their normalized weights, nearest first.</param>
+    /// <param name="directions">Each contributor's offset from the column, in blocks, index-aligned.</param>
     /// <returns>True when the world is running a generator that answers biome queries.</returns>
     /// <remarks>Walks a cellular neighbourhood per call — sample it on a timer, never per frame and never
     /// per voxel, exactly as <see cref="TryGetBiomeAt"/> requires.</remarks>
-    public bool TryGetBiomeWeights(int voxelX, int voxelZ, float falloffRadius, out BiomeWeights weights)
+    public bool TryGetBiomeWeights(int voxelX, int voxelZ, float falloffRadius, out BiomeWeights weights,
+        out BiomeDirections directions)
     {
         if (JobManager == null)
         {
             weights = default;
+            directions = default;
             return false;
         }
 
-        return JobManager.TryGetBiomeWeights(voxelX, voxelZ, falloffRadius, out weights);
+        return JobManager.TryGetBiomeWeights(voxelX, voxelZ, falloffRadius, out weights, out directions);
     }
 
     /// <summary>

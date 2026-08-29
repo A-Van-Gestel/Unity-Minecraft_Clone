@@ -1778,6 +1778,10 @@ MonoBehaviour:
   _ambientGroup: {fileID: -7782680200459302735, guid: 06f869aadb3bc9347b4c686bb85bb7a9, type: 2}
   _fadeSeconds: 3
   _minBedWeight: 0.05
+  _bedSpatialBlend: 1
+  _bedSpread: 0
+  _bedRadius: 12
+  _bearingSmoothSeconds: 6
   _restCycleEnabled: 1
   _minAudibleSeconds: 45
   _maxAudibleSeconds: 120

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Audio;
 using Data.WorldTypes;
 using Jobs.Helpers;
+using UnityEngine;
 
 namespace Commands
 {
@@ -53,7 +54,8 @@ namespace Commands
             AudioContext context = manager.Context;
 
             lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
-                $"Listener: skylight {context.SkylightAtHead}/15 | depth {context.DepthBelowSurface} below surface | " +
+                $"Listener: y {context.ListenerVoxelY} | skylight {context.SkylightAtHead}/15 | " +
+                $"depth {context.DepthBelowSurface} below surface | " +
                 (context.Submerged ? "submerged" : "dry")));
 
             AppendBiomes(lines, context, manager.Biomes);
@@ -88,7 +90,17 @@ namespace Commands
                     : $"#{index}";
 
                 if (i > 0) breakdown += ", ";
-                breakdown += $"{name} {weights.Weights[i] * 100f:0.#}%";
+
+                // The bearing beside the weight, because "which way is the forest" and "how much forest is
+                // there" are answered by the same walk and go wrong independently.
+                float offsetX = context.Directions.OffsetsX[i];
+                float offsetZ = context.Directions.OffsetsZ[i];
+                float distance = Mathf.Sqrt(offsetX * offsetX + offsetZ * offsetZ);
+                string bearing = distance > 0f
+                    ? $" @ {Mathf.Repeat(Mathf.Atan2(offsetX, offsetZ) * Mathf.Rad2Deg, 360f):0}° {distance:0} blocks"
+                    : " @ no bearing";
+
+                breakdown += $"{name} {weights.Weights[i] * 100f:0.#}%{bearing}";
             }
 
             lines.Add(new ConsoleLine(ConsoleLineSeverity.Info, $"Biome weights: {breakdown}"));
@@ -123,15 +135,18 @@ namespace Commands
 
             lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
                 $"Rest cycle: {(director.DiagRestAudible ? "audible" : "resting")}, " +
-                $"{director.DiagRestRemaining:0.0}s left"));
+                $"{director.DiagRestRemaining:0.0}s left | track roll #{director.DiagRollSalt}"));
 
             for (int slot = 0; slot < director.DiagBedCount; slot++)
             {
                 director.DiagBed(slot, out string clipName, out float fade, out float volume);
                 if (clipName == "-" && volume <= 0f) continue;
 
+                director.DiagBedBearing(slot, out float compass, out float spatialBlend);
+                string placement = spatialBlend > 0f ? $"{compass:0}° @ blend {spatialBlend:0.00}" : "flat";
+
                 lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
-                    $"  Bed {slot}: {clipName} | fade {fade:0.00} | volume {volume:0.000}"));
+                    $"  Bed {slot}: {clipName} | fade {fade:0.00} | volume {volume:0.000} | {placement}"));
             }
         }
 

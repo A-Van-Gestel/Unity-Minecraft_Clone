@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: LegacyGrasslands
   m_EditorClassIdentifier: 
   biomeName: Grasslands
-  ambientLoop: {fileID: 0}
+  ambientTracks: []
   musicPool: []
   offset: 250
   scale: 0.042
