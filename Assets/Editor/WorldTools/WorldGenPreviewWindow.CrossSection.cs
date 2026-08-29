@@ -1082,14 +1082,9 @@ namespace Editor.WorldTools
             floraSurfaceY = -1;
             bool floraHighestBlockFound = false;
 
-            int biomeIndex;
-            if (forceBiomeIdx >= 0)
-                biomeIndex = forceBiomeIdx;
-            else
-            {
-                float biomeNoise = data.SelectionNoise.GetNoise(globalX, globalZ);
-                biomeIndex = math.clamp((int)math.floor(biomeNoise * data.Biomes.Length), 0, data.Biomes.Length - 1);
-            }
+            int biomeIndex = BiomeSelection.SelectIndex(
+                ref data.SelectionNoise, globalX, globalZ, data.Biomes.Length,
+                forceBiomeIdx >= 0, forceBiomeIdx);
 
             floraBiomeIndex = biomeIndex;
             StandardBiomeAttributesJobData biome = data.Biomes[biomeIndex];

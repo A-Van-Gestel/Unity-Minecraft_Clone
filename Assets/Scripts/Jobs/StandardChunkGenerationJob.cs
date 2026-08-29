@@ -22,12 +22,6 @@ namespace Jobs
     [BurstCompile]
     public struct StandardChunkGenerationJob : IJobFor
     {
-        /// <summary>Wrap period mask (2¹⁸ − 1 blocks) for float-only snoise inputs on the Precise64 path.</summary>
-        private const int DITHER_WRAP_MASK = (1 << 18) - 1;
-
-        /// <summary>Half the dither wrap period — offsets the wrap seams away from the spawn region.</summary>
-        private const int DITHER_WRAP_HALF = 1 << 17;
-
         #region Input Data
 
         [ReadOnly]
@@ -221,48 +215,17 @@ namespace Jobs
             int globalZ = z + ChunkPosition.y;
 
             // --- BIOME SELECTION (Voronoi / Cellular) ---
-            int biomeIndex;
-            if (IsSingleBiomeMode)
-            {
-                biomeIndex = ForceBiomeIndex;
-            }
-            else
-            {
-                // Single evaluation per column — O(1) regardless of biome count.
-                float biomeNoise = BiomeSelectionNoise.GetNoise(globalX, globalZ);
-                // Noise is enforced to [0,1] normalization internally
-                biomeIndex = (int)math.floor(biomeNoise * Biomes.Length);
-                biomeIndex = math.clamp(biomeIndex, 0, Biomes.Length - 1);
-            }
+            int biomeIndex = BiomeSelection.SelectIndex(
+                ref BiomeSelectionNoise, globalX, globalZ, Biomes.Length, IsSingleBiomeMode, ForceBiomeIndex);
 
             StandardBiomeAttributesJobData biome = Biomes[biomeIndex];
 
             // --- SURFACE BIOME DITHERING ---
-            // Calculate a secondary biome index for surface/strata block types to organically dither boundaries
-            // We use Simplex noise (snoise) with an irrational scale (0.23f) and distinct offsets
-            // to avoid grid-aligned repeating artifacts commonly seen with Perlin (cnoise).
-            // Precise64: snoise is float-only, so its inputs wrap to a 2^18-block period (half-period
-            // offset keeps the wrap seams away from spawn) — the dither pattern repeats invisibly
-            // instead of collapsing into far-distance banding.
-            bool preciseNoise = BiomeSelectionNoise.GetCoordinatePrecision() == FastNoiseLite.CoordinatePrecision.Precise64;
-            int dgx = preciseNoise ? ((globalX + DITHER_WRAP_HALF) & DITHER_WRAP_MASK) - DITHER_WRAP_HALF : globalX;
-            int dgz = preciseNoise ? ((globalZ + DITHER_WRAP_HALF) & DITHER_WRAP_MASK) - DITHER_WRAP_HALF : globalZ;
-            float ditherNoiseX = noise.snoise(new float2(dgx * 0.23f + 1337f, dgz * 0.23f + BaseSeed));
-            float ditherNoiseZ = noise.snoise(new float2(dgx * 0.23f - 42f, dgz * 0.23f - BaseSeed));
-            double ditherX = globalX + ditherNoiseX * biome.SurfaceBlockDitheringWidth * 30f;
-            double ditherZ = globalZ + ditherNoiseZ * biome.SurfaceBlockDitheringWidth * 30f;
-
-            int surfaceBiomeIndex;
-            if (IsSingleBiomeMode)
-            {
-                surfaceBiomeIndex = ForceBiomeIndex;
-            }
-            else
-            {
-                float ditheredBiomeNoise = BiomeSelectionNoise.GetNoise(ditherX, ditherZ);
-                surfaceBiomeIndex = (int)math.floor(ditheredBiomeNoise * Biomes.Length);
-                surfaceBiomeIndex = math.clamp(surfaceBiomeIndex, 0, Biomes.Length - 1);
-            }
+            // Surface/strata blocks resolve through a jittered re-sample so boundaries dither
+            // organically instead of following the hard Voronoi edge.
+            int surfaceBiomeIndex = BiomeSelection.SelectSurfaceIndex(
+                ref BiomeSelectionNoise, globalX, globalZ, Biomes.Length,
+                biome.SurfaceBlockDitheringWidth, BaseSeed, IsSingleBiomeMode, ForceBiomeIndex);
 
             StandardBiomeAttributesJobData surfaceBiome = Biomes[surfaceBiomeIndex];
 

@@ -346,10 +346,8 @@ namespace Jobs
 
         private int GetBiomeIndex(double worldX, double worldZ)
         {
-            if (IsSingleBiomeMode) return ForceBiomeIndex;
-            float biomeNoise = BiomeSelectionNoise.GetNoise(worldX, worldZ);
-            int idx = (int)math.floor(biomeNoise * Biomes.Length);
-            return math.clamp(idx, 0, Biomes.Length - 1);
+            return BiomeSelection.SelectIndex(
+                ref BiomeSelectionNoise, worldX, worldZ, Biomes.Length, IsSingleBiomeMode, ForceBiomeIndex);
         }
 
         private float GetTerrainHeight(double worldX, double worldZ)

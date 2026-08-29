@@ -517,17 +517,9 @@ namespace Jobs.Generators
             if (y == 0) return 8;
 
             // Biome selection
-            int biomeIndex;
-            if (_isSingleBiomeMode)
-            {
-                biomeIndex = _forceBiomeIndex;
-            }
-            else
-            {
-                float biomeNoise = _biomeSelectionNoise.GetNoise(globalPos.x, globalPos.z);
-                biomeIndex = (int)math.floor(biomeNoise * _biomesJobData.Length);
-                biomeIndex = math.clamp(biomeIndex, 0, _biomesJobData.Length - 1);
-            }
+            int biomeIndex = BiomeSelection.SelectIndex(
+                ref _biomeSelectionNoise, globalPos.x, globalPos.z, _biomesJobData.Length,
+                _isSingleBiomeMode, _forceBiomeIndex);
 
             StandardBiomeAttributesJobData biome = _biomesJobData[biomeIndex];
 
@@ -665,16 +657,9 @@ namespace Jobs.Generators
         /// <inheritdoc />
         public TerrainDebugInfo GetTerrainDebugInfo(int globalX, int globalZ)
         {
-            int biomeIndex;
-            if (_isSingleBiomeMode)
-            {
-                biomeIndex = _forceBiomeIndex;
-            }
-            else
-            {
-                float biomeNoise = _biomeSelectionNoise.GetNoise(globalX, globalZ);
-                biomeIndex = math.clamp((int)math.floor(biomeNoise * _biomesJobData.Length), 0, _biomesJobData.Length - 1);
-            }
+            int biomeIndex = BiomeSelection.SelectIndex(
+                ref _biomeSelectionNoise, globalX, globalZ, _biomesJobData.Length,
+                _isSingleBiomeMode, _forceBiomeIndex);
 
             StandardBiomeAttributesJobData biome = _biomesJobData[biomeIndex];
 
@@ -733,16 +718,9 @@ namespace Jobs.Generators
                 int gx = originX + px * scale;
                 int gz = originZ + pz * scale;
 
-                int biomeIndex;
-                if (_isSingleBiomeMode)
-                {
-                    biomeIndex = _forceBiomeIndex;
-                }
-                else
-                {
-                    float biomeNoise = _biomeSelectionNoise.GetNoise(gx, gz);
-                    biomeIndex = math.clamp((int)math.floor(biomeNoise * _biomesJobData.Length), 0, _biomesJobData.Length - 1);
-                }
+                int biomeIndex = BiomeSelection.SelectIndex(
+                    ref _biomeSelectionNoise, gx, gz, _biomesJobData.Length,
+                    _isSingleBiomeMode, _forceBiomeIndex);
 
                 byte r, g, b;
                 switch (mode)
