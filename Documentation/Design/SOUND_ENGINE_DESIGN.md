@@ -2,7 +2,7 @@
 
 **Version:** 1.8  
 **Date:** 2026-08-29  
-**Status:** **Partially implemented — S0, S1 and S2's runtime shipped.** The `SoundMaterial`
+**Status:** **Partially implemented — S0, S1 and S2 shipped and confirmed in game.** The `SoundMaterial`
 channel, the shared `BlockSoundDatabase`, the BlockEditor dropdown and prefill, the volume settings, the
 pooled one-shot voices and the break / place / footstep triggers all exist; the `AudioMixer` is authored
 with its seven exposed volume parameters; two CC0 packs supply content, so all 13 sounding materials have
@@ -795,7 +795,8 @@ contemporaneous notes.*
   through v1.7, v1.7a and v1.7b — the same lag this document's v1.3 entry recorded fixing once before. Both carry the decisions already taken — a separate noise query rather than
   a wider `CellularEdgeData`, stereo beds kept via `spread`, and `ambientLoop` replaced rather than shadowed —
   so a later session executes them instead of re-deciding them. Neither is started.
-* **v1.7b** - `/sound` console readout added and the cave duck raised to 1 (2026-08-29). The depth gate alone
+* **v1.7b** - `/sound` console readout added and the cave duck raised to 1 (2026-08-29, **confirmed in
+  game**: birds no longer audible deep underground). The depth gate alone
   did not close the complaint: at ~11 blocks down the taper has barely started, so `_caveDuck` at 0.7 was still
   the binding multiplier and left the biome bed at 30% under a fully committed cave bed. `/sound` exists
   because that took arithmetic to work out from a symptom — the bed gain is the product of five independent
@@ -806,7 +807,8 @@ contemporaneous notes.*
   signal cannot distinguish a cavern from a roof. `AmbienceResolution.DepthDuck` + `World.TryGetSurfaceHeight`
   read the lighting heightmap for a true depth-below-surface, tapered so a cave mouth still blends. Suite 30→31.
 * **v1.7** - Ambience became a weighted mix of the surrounding biomes rather than a selection of one
-  (2026-08-29), from in-game feedback that a shoreline switched instead of blending. `SelectWeights` +
+  (2026-08-29, **confirmed in game**: overlapping biome beds and the crossfade between them both work),
+  from in-game feedback that a shoreline switched instead of blending. `SelectWeights` +
   `TryGetBiomeWeights` expose the cellular neighbourhood `BiomeBlender` was already computing for terrain;
   the bed roster drives one source per contributing biome at its share of the mix, merging biomes that
   resolve to the same clip and renormalizing after dropping sub-threshold ones. The `BiomeTracker` dwell was
