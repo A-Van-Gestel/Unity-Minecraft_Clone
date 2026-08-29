@@ -51,7 +51,7 @@ namespace Jobs.Helpers
             BlendCurve* curves = stackalloc BlendCurve[N];
             for (int i = 0; i < N; i++)
             {
-                b[i] = GetBiomeIndex(edgeData.Hashes[i], biomes.Length);
+                b[i] = BiomeSelection.IndexFromCellHash(edgeData.Hashes[i], biomes.Length);
                 rad[i] = biomes[b[i]].BlendRadius;
                 bw[i] = biomes[b[i]].BlendWeight;
                 curves[i] = biomes[b[i]].BlendCurve;
@@ -115,18 +115,6 @@ namespace Jobs.Helpers
             }
 
             return finalHeight;
-        }
-
-        private static int GetBiomeIndex(int hash, int biomesLength)
-        {
-            // FastNoiseLite natively maps cellular hash to a [-1, 1] interval.
-            float noiseValue = hash * (1.0f / 2147483648.0f);
-
-            // Replicate FastNoiseConfig.normalizeToZeroOne = true
-            noiseValue = (noiseValue + 1.0f) * 0.5f;
-
-            int idx = (int)math.floor(noiseValue * biomesLength);
-            return math.clamp(idx, 0, biomesLength - 1);
         }
 
         /// <summary>

@@ -1,3 +1,4 @@
+using Jobs.Helpers;
 using System.Collections.Generic;
 using Data;
 using Data.JobData;
@@ -124,6 +125,15 @@ namespace Legacy
         public bool TryGetBiomeAt(int voxelX, int voxelZ, out BiomeSample sample)
         {
             sample = default;
+            return false;
+        }
+
+        /// <inheritdoc />
+        /// <remarks>Declines for the same reason <see cref="TryGetBiomeAt"/> does: this generator selects by
+        /// per-biome Perlin weight, so it has no cellular neighborhood to weigh.</remarks>
+        public bool TryGetBiomeWeights(int voxelX, int voxelZ, float falloffRadius, out BiomeWeights weights)
+        {
+            weights = default;
             return false;
         }
 

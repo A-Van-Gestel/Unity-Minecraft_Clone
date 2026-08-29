@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Text;
 using Data;
 using Data.WorldTypes;
 using Editor.DataGeneration;
@@ -87,6 +88,9 @@ namespace Editor.Validation.Generation
                 new Scenario("B10 tracker holds its answer when the query declines", B10_TrackerQueryDeclines),
                 new Scenario("B12 tracker credits a frame hitch to the dwell, not one interval", B12_TrackerHitchCredit),
                 new Scenario("B11 Burst parity (compiled primary index == golden; surface divergence bounded)", B11_BurstParity),
+                new Scenario("B13 blended terrain height is bit-identical to the golden", B13_BlendedHeightGolden),
+                new Scenario("B14 biome weights normalize, and their primary matches SelectIndex", B14_WeightsShape),
+                new Scenario("B15 biome weights move continuously across a boundary", B15_WeightsContinuity),
             };
             return ValidationSuiteRunner.Execute("Biome Selection", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
@@ -98,6 +102,256 @@ namespace Editor.Validation.Generation
         }
 
         // --- Scenarios ---------------------------------------------------------------------------
+
+        /// <summary>
+        /// Pins <c>BiomeBlender.CalculateBlendedTerrainHeight</c> against a table captured before its
+        /// cell-hash-to-biome-index mapping was folded onto <see cref="BiomeSelection"/>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Whole-table text comparison rather than a per-column tolerance, and it re-runs
+        /// <c>TerrainHeightGoldenCapture.Emit</c> rather than walking its own columns. Both are deliberate:
+        /// the assertion is bit-identity — a refactor of index arithmetic that shifts a height by 1e-6 has
+        /// changed the terrain of every existing world — and a baseline that chose its own sample columns
+        /// could pass while disagreeing with the table everywhere the two failed to overlap.
+        /// </para>
+        /// <para>
+        /// This is the only coverage the generation path's height blending has. Before it existed, the fold
+        /// it guards would have been an ungated edit to per-column generation code.
+        /// </para>
+        /// </remarks>
+        private static bool B13_BlendedHeightGolden()
+        {
+            string path = TerrainHeightGoldenCapture.GoldenFilePath;
+            if (!File.Exists(path))
+            {
+                return Expect(false,
+                    $"Terrain height golden missing at {path}. It is committed with the suite — restore it " +
+                    "from git rather than re-capturing, which would re-bless current behavior.");
+            }
+
+            List<string> expected = new List<string>();
+            foreach (string line in File.ReadAllLines(path))
+            {
+                if (line.Length == 0 || line[0] == '#') continue;
+                expected.Add(line);
+            }
+
+            if (expected.Count == 0) return Expect(false, "Terrain height golden has no data rows.");
+
+            FastNoiseLite.InitializeLookupTables();
+
+            StringBuilder sb = new StringBuilder();
+            int rows = TerrainHeightGoldenCapture.Emit(sb);
+            if (rows <= 0) return Expect(false, "Height capture produced no rows.");
+
+            List<string> actual = new List<string>();
+            foreach (string line in sb.ToString().Split('\n'))
+            {
+                string trimmed = line.TrimEnd('\r');
+                if (trimmed.Length == 0 || trimmed[0] == '#') continue;
+                actual.Add(trimmed);
+            }
+
+            if (actual.Count != expected.Count)
+            {
+                return Expect(false,
+                    $"Height row count changed: golden has {expected.Count}, capture produced {actual.Count}. " +
+                    "The sampled column set moved, so the comparison would be meaningless.");
+            }
+
+            int mismatches = 0;
+            string firstMismatch = null;
+            for (int i = 0; i < expected.Count; i++)
+            {
+                if (expected[i] == actual[i]) continue;
+
+                mismatches++;
+                firstMismatch ??= $"row {i}: golden '{expected[i]}' vs now '{actual[i]}'";
+            }
+
+            if (mismatches > 0)
+            {
+                return Expect(false,
+                    $"{mismatches} of {expected.Count} blended-height rows changed. First: {firstMismatch}");
+            }
+
+            Debug.Log($"  B13: {expected.Count} blended-height rows bit-identical to the golden.");
+            return true;
+        }
+
+        /// <summary>Falloff radius the weight scenarios sample at. Wide enough that borders show blends.</summary>
+        private const float WEIGHT_FALLOFF_RADIUS = 0.6f;
+
+        /// <summary>
+        /// The shape contract of <c>BiomeSelection.SelectWeights</c>: a bounded contributor count, weights
+        /// that sum to 1, and a primary that agrees with the biome the terrain was actually generated from.
+        /// </summary>
+        /// <remarks>
+        /// The agreement is the load-bearing half. The weights walk the cellular neighbourhood and map each
+        /// cell through <c>IndexFromCellHash</c>, while <c>SelectIndex</c> samples the noise at the column —
+        /// two different routes to the same answer. If they disagree, the ambience would name a biome the
+        /// player is not standing in, and the disagreement would be invisible anywhere the two happened to
+        /// coincide.
+        /// </remarks>
+        private static bool B14_WeightsShape()
+        {
+            if (!TryLoadBiomes(out StandardBiomeAttributes[] biomes, out string error))
+                return Expect(false, error);
+
+            FastNoiseLite.InitializeLookupTables();
+            FastNoiseLite.CoordinatePrecision previous = FastNoiseFactory.GlobalCoordinatePrecision;
+
+            int columns = 0;
+            int blended = 0;
+            int primaryMismatches = 0;
+            string firstMismatch = null;
+
+            try
+            {
+                foreach (FastNoiseLite.CoordinatePrecision precision in new[]
+                         {
+                             FastNoiseLite.CoordinatePrecision.Classic32,
+                             FastNoiseLite.CoordinatePrecision.Precise64,
+                         })
+                {
+                    FastNoiseFactory.GlobalCoordinatePrecision = precision;
+
+                    foreach (int seed in BiomeSelectionGoldenCapture.Seeds)
+                    {
+                        FastNoiseLite noise = BiomeSelectionGoldenCapture.CreateSelectionNoise(biomes, seed);
+
+                        foreach (int origin in BiomeSelectionGoldenCapture.BandOrigins)
+                        {
+                            for (int c = 0; c < 64; c++)
+                            {
+                                int gx = origin + c * 37;
+                                int gz = origin - c * 37;
+
+                                BiomeSelection.SelectWeights(ref noise, gx, gz, biomes.Length,
+                                    WEIGHT_FALLOFF_RADIUS, false, 0, out BiomeWeights weights);
+
+                                columns++;
+                                if (weights.Count > 1) blended++;
+
+                                if (weights.Count < 1 || weights.Count > BiomeWeights.MaxBiomes)
+                                    return Expect(false, $"weight count {weights.Count} at ({gx}, {gz}).");
+
+                                float sum = 0f;
+                                for (int i = 0; i < weights.Count; i++)
+                                {
+                                    if (weights.Weights[i] <= 0f)
+                                        return Expect(false, $"non-positive weight at ({gx}, {gz}).");
+                                    if ((uint)weights.Indices[i] >= (uint)biomes.Length)
+                                        return Expect(false, $"biome index {weights.Indices[i]} out of range at ({gx}, {gz}).");
+
+                                    for (int j = 0; j < i; j++)
+                                    {
+                                        if (weights.Indices[j] == weights.Indices[i])
+                                            return Expect(false, $"biome {weights.Indices[i]} listed twice at ({gx}, {gz}).");
+                                    }
+
+                                    sum += weights.Weights[i];
+                                }
+
+                                if (Mathf.Abs(sum - 1f) > 1e-4f)
+                                    return Expect(false, $"weights summed to {sum} at ({gx}, {gz}).");
+
+                                int expected = BiomeSelection.SelectIndex(ref noise, gx, gz, biomes.Length, false, 0);
+                                if (weights.Primary() == expected) continue;
+
+                                primaryMismatches++;
+                                firstMismatch ??= $"({gx}, {gz}) {precision} seed {seed}: " +
+                                                  $"weights say {weights.Primary()}, SelectIndex says {expected}";
+                            }
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                FastNoiseFactory.GlobalCoordinatePrecision = previous;
+            }
+
+            if (primaryMismatches > 0)
+            {
+                return Expect(false,
+                    $"{primaryMismatches} of {columns} columns disagreed with SelectIndex. First: {firstMismatch}");
+            }
+
+            // A table where every column reports exactly one biome would satisfy every assertion above while
+            // proving nothing about blending — the feature would be a switch again and this would stay green.
+            if (blended * 10 < columns)
+            {
+                return Expect(false,
+                    $"only {blended} of {columns} columns blended more than one biome — the sample is not " +
+                    "exercising boundaries, so the normalization assertions are near-vacuous.");
+            }
+
+            Debug.Log($"  B14: {columns} columns, {blended} blended, primary matches SelectIndex everywhere.");
+            return true;
+        }
+
+        /// <summary>
+        /// The property the ambience layer actually rests on: walking a straight line, no biome's weight can
+        /// jump. A weight that steps is a bed that pops.
+        /// </summary>
+        private static bool B15_WeightsContinuity()
+        {
+            if (!TryLoadBiomes(out StandardBiomeAttributes[] biomes, out string error))
+                return Expect(false, error);
+
+            FastNoiseLite.InitializeLookupTables();
+            FastNoiseLite.CoordinatePrecision previous = FastNoiseFactory.GlobalCoordinatePrecision;
+
+            const float maxStepPerBlock = 0.15f;
+            float largestStep = 0f;
+            string worst = null;
+
+            try
+            {
+                FastNoiseFactory.GlobalCoordinatePrecision = FastNoiseLite.CoordinatePrecision.Classic32;
+                FastNoiseLite noise = BiomeSelectionGoldenCapture.CreateSelectionNoise(biomes, 1337);
+
+                // One block at a time: the transect has to sample at the resolution the player moves at, or a
+                // step could hide between samples.
+                for (int start = 0; start < 4; start++)
+                {
+                    int baseX = start * 733;
+                    int baseZ = start * -911;
+
+                    BiomeSelection.SelectWeights(ref noise, baseX, baseZ, biomes.Length,
+                        WEIGHT_FALLOFF_RADIUS, false, 0, out BiomeWeights previousWeights);
+
+                    for (int step = 1; step <= 512; step++)
+                    {
+                        BiomeSelection.SelectWeights(ref noise, baseX + step, baseZ, biomes.Length,
+                            WEIGHT_FALLOFF_RADIUS, false, 0, out BiomeWeights current);
+
+                        for (int b = 0; b < biomes.Length; b++)
+                        {
+                            float delta = Mathf.Abs(current.WeightOf(b) - previousWeights.WeightOf(b));
+                            if (delta <= largestStep) continue;
+
+                            largestStep = delta;
+                            worst = $"biome {b} moved {delta:0.000} in one block at ({baseX + step}, {baseZ})";
+                        }
+
+                        previousWeights = current;
+                    }
+                }
+            }
+            finally
+            {
+                FastNoiseFactory.GlobalCoordinatePrecision = previous;
+            }
+
+            if (largestStep > maxStepPerBlock)
+                return Expect(false, $"weights are not continuous: {worst} (cap {maxStepPerBlock}).");
+
+            Debug.Log($"  B15: largest single-block weight change {largestStep:0.000} (cap {maxStepPerBlock}).");
+            return true;
+        }
 
         private static bool B1_GoldenParity()
         {

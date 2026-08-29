@@ -1,3 +1,4 @@
+using Jobs.Helpers;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -451,6 +452,15 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <returns>True when <paramref name="sample"/> was populated.</returns>
     public bool TryGetBiomeAt(int voxelX, int voxelZ, out BiomeSample sample) =>
         _chunkGenerator.TryGetBiomeAt(voxelX, voxelZ, out sample);
+
+    /// <summary>Forwards to the active generator's <c>TryGetBiomeWeights</c>.</summary>
+    /// <param name="voxelX">Voxel-space X of the column.</param>
+    /// <param name="voxelZ">Voxel-space Z of the column.</param>
+    /// <param name="falloffRadius">How far past the nearest cell a cell still contributes.</param>
+    /// <param name="weights">The contributing biomes and their normalized weights.</param>
+    /// <returns>True when the generator answered.</returns>
+    public bool TryGetBiomeWeights(int voxelX, int voxelZ, float falloffRadius, out BiomeWeights weights) =>
+        _chunkGenerator.TryGetBiomeWeights(voxelX, voxelZ, falloffRadius, out weights);
 
     /// <summary>
     /// Returns terrain generation diagnostic data at the given column.

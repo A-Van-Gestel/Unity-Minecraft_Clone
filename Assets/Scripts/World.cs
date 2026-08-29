@@ -1,3 +1,4 @@
+using Jobs.Helpers;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -4941,6 +4942,27 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         }
 
         return JobManager.TryGetBiomeAt(voxelX, voxelZ, out sample);
+    }
+
+    /// <summary>
+    /// Resolves how strongly each nearby biome influences a <b>voxel-space</b> column.
+    /// </summary>
+    /// <param name="voxelX">Voxel-space X of the column.</param>
+    /// <param name="voxelZ">Voxel-space Z of the column.</param>
+    /// <param name="falloffRadius">How far past the nearest cell a cell still contributes.</param>
+    /// <param name="weights">The contributing biomes and their normalized weights, nearest first.</param>
+    /// <returns>True when the world is running a generator that answers biome queries.</returns>
+    /// <remarks>Walks a cellular neighbourhood per call — sample it on a timer, never per frame and never
+    /// per voxel, exactly as <see cref="TryGetBiomeAt"/> requires.</remarks>
+    public bool TryGetBiomeWeights(int voxelX, int voxelZ, float falloffRadius, out BiomeWeights weights)
+    {
+        if (JobManager == null)
+        {
+            weights = default;
+            return false;
+        }
+
+        return JobManager.TryGetBiomeWeights(voxelX, voxelZ, falloffRadius, out weights);
     }
 
     /// <summary>

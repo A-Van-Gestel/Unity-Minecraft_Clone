@@ -677,6 +677,21 @@ namespace Jobs.Generators
         }
 
         /// <inheritdoc />
+        public bool TryGetBiomeWeights(int voxelX, int voxelZ, float falloffRadius, out BiomeWeights weights)
+        {
+            if (_standardBiomes == null || _standardBiomes.Length == 0)
+            {
+                weights = default;
+                return false;
+            }
+
+            BiomeSelection.SelectWeights(
+                ref _biomeSelectionNoise, voxelX, voxelZ, _standardBiomes.Length, falloffRadius,
+                _isSingleBiomeMode, _forceBiomeIndex, out weights);
+            return true;
+        }
+
+        /// <inheritdoc />
         public TerrainDebugInfo GetTerrainDebugInfo(int globalX, int globalZ)
         {
             int biomeIndex = BiomeSelection.SelectIndex(

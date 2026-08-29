@@ -5,6 +5,7 @@ using Data.WorldTypes;
 using Jobs;
 using Jobs.Data;
 using Jobs.Generators;
+using Jobs.Helpers;
 using Libraries;
 using Unity.Collections;
 using Unity.Jobs;
@@ -223,15 +224,7 @@ namespace Editor.Validation.Generation
                 CaveZoneNoises = _caveZoneNoises,
                 IsSingleBiomeMode = true,
                 ForceBiomeIndex = math.max(0, WormBiomeIndex),
-                MultiNoise = new MultiNoiseData
-                {
-                    ContinentalnessNoises = _contNoises,
-                    ErosionNoises = _erosionNoises,
-                    PeaksValleysNoises = _pvNoises,
-                    ContinentalnessSplines = _contSplines,
-                    ErosionSplines = _erosionSplines,
-                    PeaksValleysSplines = _pvSplines,
-                },
+                MultiNoise = BuildMultiNoise(),
                 TrunkConfig = _trunkConfig,
                 FeatureFlags = GenerationFeatureFlags.Default,
                 UseCellLocalFrame = _useCellLocal,
@@ -248,9 +241,43 @@ namespace Editor.Validation.Generation
                 LastTotalSteps += telemetry[i].ActualSteps;
                 _lastTelemetry.Add(telemetry[i]);
             }
+
             telemetry.Dispose();
             return mask;
         }
+
+        /// <summary>
+        /// Evaluates the blended terrain height at a column, on the same biome and multi-noise inputs the
+        /// generation job runs on.
+        /// </summary>
+        /// <param name="voxelX">Voxel-space X of the column.</param>
+        /// <param name="voxelZ">Voxel-space Z of the column.</param>
+        /// <param name="borderFade">How deep the column sits inside its primary Voronoi cell.</param>
+        /// <returns>The blended height, in blocks.</returns>
+        /// <remarks>
+        /// Deliberately <b>not</b> single-biome mode, unlike <see cref="RunWormMask"/>: the value being
+        /// captured is the multi-cell blend, and forcing one biome would bypass the very arithmetic the
+        /// golden exists to pin.
+        /// </remarks>
+        public float EvaluateBlendedHeight(int voxelX, int voxelZ, out float borderFade)
+        {
+            MultiNoiseData multiNoise = BuildMultiNoise();
+            return BiomeBlender.CalculateBlendedTerrainHeight(
+                voxelX, voxelZ, ref _selectionNoise, ref _biomes, ref multiNoise,
+                false, 0, out borderFade);
+        }
+
+        /// <summary>Bundles the per-biome multi-noise arrays into the struct the generation code reads.</summary>
+        /// <returns>The multi-noise inputs for this fixture's world type and seed.</returns>
+        private MultiNoiseData BuildMultiNoise() => new MultiNoiseData
+        {
+            ContinentalnessNoises = _contNoises,
+            ErosionNoises = _erosionNoises,
+            PeaksValleysNoises = _pvNoises,
+            ContinentalnessSplines = _contSplines,
+            ErosionSplines = _erosionSplines,
+            PeaksValleysSplines = _pvSplines,
+        };
 
         private static StandardBiomeAttributes[] LoadBiomes()
         {
