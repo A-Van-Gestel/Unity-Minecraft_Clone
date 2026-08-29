@@ -111,6 +111,7 @@ Findings are from static code review of the Standard generation pipeline
 | TF-17 | Trivial world types: Flat/Creative, Void, Custom Noise Playground                                                     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | TF-18 | Worldgen authoring gaps: world-type split-view comparison + seed browser                                              |   🟡   |  🟢  |    ⚪    |  ✅   |  ✅   |
 | TF-19 | `Legacy.asmdef` boundary — legacy isolation is folder convention, not compile-enforced                                |   🟡   |  🟡  |    ⚪    |  ✅   |  ✅   |
+| TF-20 | `StandardChunkGenerationJob` still compiles at `FloatMode.Default` while its siblings use `Fast`                      |   🟢   |  🟡  |   🟡    |  ⚠️  |  ✅   |
 
 **TF-15..TF-19 provenance.** Migrated 2026-08-17 from
 [`../Architecture/World Generation/MODULAR_WORLD_GENERATION_&_WORLD_TYPES.md`](../Architecture/World%20Generation/MODULAR_WORLD_GENERATION_&_WORLD_TYPES.md)
@@ -1232,6 +1233,42 @@ when the project gains contributors, or the first accidental legacy reference sl
 The existing folder layout is already asmdef-ready, so adding the files is non-breaking; the *only*
 real work is the factory bridge. Note that adding an `.asmdef` changes compilation units, which is
 exactly the situation the Execution Protocol's stale-DLL / phantom-`CS0103` warnings cover.
+
+---
+
+### TF-20 — Generation job float mode
+
+**Classification:** Minor (performance; no new behavior) — but **Seed ⚠️**, which is what keeps it off the
+"just do it" list.
+
+**What exists today.** `StandardChunkGenerationJob` is plain `[BurstCompile]`, i.e. `FloatMode.Default`,
+while `StandardWormCarverJob`, `MeshGenerationJob`, `VoxelVisualizerJob` and the shared
+`Jobs/Helpers/BiomeSelection` are all `FloatMode.Fast`. `BURST_COMPILER_GUIDE.md` §233 explicitly endorses
+`Fast` for "mesh generation, noise". Measured elsewhere in the project at roughly **23% faster overall**.
+
+**Why it has not simply been switched.** `Fast` licenses reassociation across *every* float expression in the
+job — multi-noise spline heights, the 3D density band, cave thresholds, the surface dither — not just the
+cheap parts. Measured evidence that the modes genuinely differ here already exists: the Biome Selection
+suite's B11 baseline records the surface-dither index diverging from the managed reference on 10/2560 columns
+at `Default` versus 12/2560 at `Fast`. Terrain is **persisted**, so flipping the mode does not rewrite
+existing chunks — it makes newly generated ones disagree with their already-saved neighbours, producing a
+seam at the edge of every explored region in every existing world.
+
+**What adopting it needs.**
+
+1. A before/after capture proving the ~23% holds for *this* job specifically (the figure comes from
+   elsewhere), via the `perf-benchmark` protocol.
+2. A deliberate call on the seam: accept it for existing saves, or gate the mode behind the world's
+   `level.dat` so old worlds keep generating the old way. The second is the only option that preserves
+   continuity, and it means the float mode becomes save-format state.
+3. Re-running the generation goldens afterwards — the Worm Carver B5 mask hash and the Biome Selection B11
+   bounds both pin current behavior and would legitimately move.
+
+**Note on the helper attribute.** `BiomeSelection` carries `FloatMode.Fast` while its two callers differ.
+Measured 2026-08-29 to be **inert**: a 4-chunk generation checksum was byte-identical with the helper marked
+`Fast` versus `Default`, because inlined code takes the *caller's* float mode. It is a latent hazard only if
+Burst's inlining/direct-call rules change — the lever that actually matters is the job's own attribute, which
+is what this item is about.
 
 ---
 

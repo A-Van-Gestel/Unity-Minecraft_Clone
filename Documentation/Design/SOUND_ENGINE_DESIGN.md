@@ -1,6 +1,6 @@
 # Sound Engine Design
 
-**Version:** 1.4  
+**Version:** 1.5  
 **Date:** 2026-08-29  
 **Status:** **Partially implemented — S0 and S1 shipped and confirmed in game.** The `SoundMaterial`
 channel, the shared `BlockSoundDatabase`, the BlockEditor dropdown and prefill, the volume settings, the
@@ -295,10 +295,24 @@ an immediate step (slightly louder) and resets the accumulator.
 > ground the player is actually walking on, which reads as a disconnect the moment the two materials differ
 > — the same reason Minecraft plays a splash *alongside* the footfall rather than replacing it.
 >
-> Three cases add no second layer: a *solid* occupant (the only way to occupy a solid cell is to stand on a
-> sub-voxel shape such as a half slab, which would layer a footfall over itself), a silent one, and one
-> whose material already matches the support (two voices of one material flange rather than layer). An
-> unloaded or out-of-world cell reads as air, so a missing occupant never silences a known supporting block.
+> Three cases add no second layer: a *solid* occupant, a silent one, and one whose material already matches
+> the support (two voices of one material flange rather than layer). An unloaded or out-of-world cell reads as
+> air, so a missing occupant never silences a known supporting block.
+>
+> **Sub-voxel support** (fixed and confirmed in game 2026-08-29). The original rule mis-stated why a solid occupant is skipped —
+> it claimed such a cell could only be occupied by standing on a half slab, "which would layer a footfall over
+> itself". That was wrong, and it hid a real bug: the support cell is always *one below* the occupied one, so
+> standing on a slab sounded whatever the slab was placed on. A stone slab over dirt played **dirt**.
+> `SoundResolution.OccupantCarriesFeet` now asks the shared `BlockCollisionBoundsUtility.GetBounds` — the same
+> sub-voxel resolver the physics solver and the interaction ray read — whether the occupied cell's block has
+> its collision surface at the feet, using the solver's own `VoxelRigidbody.GroundProbeSkin` tolerance. When it
+> does, `ResolveStep` promotes that block to the support and layers nothing over it. One definition of "what am
+> I standing on", shared by the ear and the collision response.
+>
+> The tolerance is one-sided on purpose: the vertical resolve parks a resting body `COLLISION_EPSILON` *above*
+> its surface, so an exact-equality test would never fire in game. This covers any single-AABB partial block
+> whose top meets the feet — `BlockCollisionBounds` is one box per block, so a shape needing two (stairs) is
+> still approximated by its enclosing volume.
 >
 > Both halves live in the pure `SoundResolution` layer, which is why the suite can pin them (the two
 > `Step ...` baselines); the wiring in `PlayerFootsteps.PlayStep` stays an in-game check.
@@ -581,6 +595,14 @@ attached license" source.
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.5** - Footsteps became sub-voxel aware (2026-08-29, confirmed in game), fixing a bug the §5.1 note had recorded as
+  correct design: the support cell was always one below the occupied one, so standing on a half slab sounded
+  the block *under* the slab. `SoundResolution` gained `OccupantCarriesFeet` + `ResolveStep`, reading the
+  shared collision-bounds resolver and the physics solver's own ground tolerance (now exposed as
+  `VoxelRigidbody.GroundProbeSkin`), and the suite grew a 14th baseline pinning the slab case and the
+  tolerance band. Also removed `PlayerFootsteps._landingEmphasis`: every sound group is authored at volume 1
+  and the product is `Clamp01`'d, so the landing step was bit-identical to a walking one — the knob had never
+  been audible, and expressing emphasis would mean scaling *walking* down instead.
 * **v1.4** - The §6.2 managed biome query shipped (2026-08-29), unblocking S2: a shared `BiomeSelection`
   helper (replacing seven duplicated copies of the selection arithmetic), `IChunkGenerator.TryGetBiomeAt`
   returning a `BiomeSample`, a 1 Hz `BiomeTracker` with a 3 s dwell, and a `Validate Biome Selection` suite
