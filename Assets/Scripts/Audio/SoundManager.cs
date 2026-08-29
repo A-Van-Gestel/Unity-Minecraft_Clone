@@ -1,5 +1,9 @@
 using Data;
 using Data.Enums;
+using Data.WorldTypes;
+using Helpers;
+using Jobs.BurstData;
+using Jobs.Helpers;
 using UnityEngine;
 using UnityEngine.Audio;
 
@@ -32,6 +36,10 @@ namespace Audio
         [SerializeField]
         private BlockSoundDatabase _blockSounds;
 
+        [Tooltip("Cave bed, fallback bed and global music pool, shared by every world-ambience consumer.")]
+        [SerializeField]
+        private AmbienceDatabase _ambience;
+
         [Header("Mixer")]
         [Tooltip("The game's audio mixer. Optional: without one, category volumes are applied directly to each source.")]
         [SerializeField]
@@ -52,9 +60,42 @@ namespace Audio
         [SerializeField]
         private float _maxDistance = 20f;
 
+        [Header("Listener Context")]
+        [Tooltip("Seconds between AudioContext samples. Bounds how late the cave and underwater layers react.")]
+        [Range(0.1f, 2f)]
+        [SerializeField]
+        private float _contextInterval = 0.25f;
+
+        [Tooltip("How far past the nearest biome cell a neighbouring biome still contributes to the ambience " +
+                 "mix. Larger values widen the band over which two biomes are heard together.")]
+        [Range(0f, 2f)]
+        [SerializeField]
+        private float _biomeFalloffRadius = 0.6f;
+
+        [Header("Underwater")]
+        [Tooltip("Seconds the low-pass takes to sweep fully in or out when the head enters or leaves a fluid.")]
+        [Range(0.05f, 2f)]
+        [SerializeField]
+        private float _submergedFadeSeconds = 0.35f;
+
+        [Tooltip("Low-pass cutoff while out of fluid. High enough to be inaudible as a filter.")]
+        [Range(5000f, 22000f)]
+        [SerializeField]
+        private float _dryCutoffHertz = 22000f;
+
+        [Tooltip("Low-pass cutoff while fully submerged. Lower is more muffled.")]
+        [Range(200f, 5000f)]
+        [SerializeField]
+        private float _wetCutoffHertz = 900f;
+
         private AudioSource[] _voices;
+        private AudioLowPassFilter[] _voiceFilters;
         private float[] _voiceStartTime;
         private uint _eventCounter;
+
+        private Transform _listener;
+        private float _contextTimer;
+        private float _submergedWeight;
 
         /// <summary>Tracks which (material, event) pairs have already warned about missing clips.</summary>
         private bool[] _missingClipWarned;
@@ -77,6 +118,7 @@ namespace Audio
 
             s_instance = this;
             BuildVoices();
+            LowPassCutoffHertz = _dryCutoffHertz;
 
             AudioVolumes.SetMixer(_mixer);
             AudioVolumes.Apply(SettingsManager.LoadSettings());
@@ -85,6 +127,79 @@ namespace Audio
         private void OnDestroy()
         {
             if (s_instance == this) s_instance = null;
+        }
+
+        private void Update()
+        {
+            SampleContext();
+            AdvanceSubmersion();
+        }
+
+        /// <summary>
+        /// The most recent listener context snapshot, shared by every world-ambience consumer. Meaningful
+        /// only when <see cref="HasContext"/> is true.
+        /// </summary>
+        /// <remarks>
+        /// Sampled once here rather than once per consumer: the beds, the music scheduler and the underwater
+        /// filter must agree about where the listener is, and three independent timers would disagree at
+        /// exactly the moments that matter — a cave mouth, a shoreline, a biome border.
+        /// </remarks>
+        public AudioContext Context { get; private set; }
+
+        /// <summary>True once a context has been sampled against a live world.</summary>
+        public bool HasContext { get; private set; }
+
+        /// <summary>
+        /// The ambience content shared by the bed director and the music scheduler, or null when none is
+        /// assigned.
+        /// </summary>
+        /// <remarks>
+        /// Held here rather than once per consumer: two slots pointing at one asset can be half-wired, and
+        /// the failure is silent — the beds keep working while music loses its fallback pool. Both consumers
+        /// already reach through this manager for <see cref="Context"/>, so this adds no coupling they did
+        /// not have.
+        /// </remarks>
+        public AmbienceDatabase Ambience => _ambience;
+
+        /// <summary>
+        /// The active world type's biome assets, indexed by biome index, or null when no world is loaded.
+        /// </summary>
+        /// <remarks>
+        /// Surfaced here so the bed mix can look up one clip per contributing biome. A single
+        /// <c>BiomeSample</c> carries only the biome the listener stands in, which is exactly the answer the
+        /// weighted mix exists to stop relying on.
+        /// </remarks>
+        public BiomeBase[] Biomes
+        {
+            get
+            {
+                World world = World.Instance;
+                return world != null && world.ActiveWorldType != null ? world.ActiveWorldType.biomes : null;
+            }
+        }
+
+        /// <summary>
+        /// The low-pass cutoff the submersion fade currently calls for. Consumers owning their own sources
+        /// (the ambience beds, the music scheduler) apply it so the whole mix muffles together.
+        /// </summary>
+        public float LowPassCutoffHertz { get; private set; }
+
+        /// <summary>
+        /// Applies the current submersion cutoff to a source's low-pass filter, enabling it only while it
+        /// would be audible.
+        /// </summary>
+        /// <param name="filter">The filter to drive. Null is ignored.</param>
+        /// <remarks>
+        /// Toggled rather than left on at a transparent cutoff: an always-enabled filter is a DSP block per
+        /// source for a state the player is in almost never.
+        /// </remarks>
+        public void ApplySubmersionFilter(AudioLowPassFilter filter)
+        {
+            if (filter == null) return;
+
+            bool wet = _submergedWeight > 0f;
+            if (filter.enabled != wet) filter.enabled = wet;
+            if (wet) filter.cutoffFrequency = LowPassCutoffHertz;
         }
 
         /// <summary>The size of the fixed voice roster — the hard ceiling on concurrent one-shots.</summary>
@@ -200,10 +315,85 @@ namespace Audio
             return _voices[oldest];
         }
 
+        /// <summary>
+        /// Re-samples <see cref="Context"/> when the interval elapses.
+        /// </summary>
+        /// <remarks>
+        /// Sky light is read from the <b>stored</b> exposure channel, never <c>World.GetEffectiveSkylight</c>:
+        /// the effective value is time-darkened, so after RF-1's day/night cycle shipped it falls to zero
+        /// across the entire open surface at night — which would fade the cave bed in over the whole world
+        /// every evening. Exposure is what "is there sky above me" actually means.
+        /// </remarks>
+        private void SampleContext()
+        {
+            _contextTimer += Time.unscaledDeltaTime;
+            if (_contextTimer < _contextInterval) return;
+
+            _contextTimer = 0f;
+
+            World world = World.Instance;
+            if (world == null)
+            {
+                HasContext = false;
+                return;
+            }
+
+            if (_listener == null) _listener = Camera.main != null ? Camera.main.transform : null;
+            if (_listener == null)
+            {
+                HasContext = false;
+                return;
+            }
+
+            Vector3Int headVoxelCell = WorldOrigin.UnityToVoxelCell(_listener.position);
+
+            byte skylight = world.TryGetLightData(headVoxelCell, out ushort lightData)
+                ? LightBitMapping.GetSkylight(lightData)
+                : (byte)0;
+
+            bool submerged = world.TryGetVoxel(headVoxelCell.x, headVoxelCell.y, headVoxelCell.z, out VoxelState head) &&
+                             AmbienceResolution.IsSubmerged(world.BlockTypes, head.ID);
+
+            BiomeTracker tracker = world.BiomeTracker;
+            bool hasBiome = tracker is { HasBiome: true };
+
+            // Sampled raw, not through BiomeTracker's dwell: the weights already move continuously with the
+            // listener, so debouncing them would only delay a change that never was a jump. The tracker's
+            // hysteresis still serves what it was built for — the biome readout and RF-7.
+            bool hasWeights = world.TryGetBiomeWeights(
+                headVoxelCell.x, headVoxelCell.z, _biomeFalloffRadius, out BiomeWeights weights);
+
+            Context = new AudioContext(
+                hasBiome ? tracker.Current.Index : -1,
+                hasBiome ? tracker.Current.Attributes : null,
+                hasBiome,
+                skylight,
+                submerged,
+                weights,
+                hasWeights);
+            HasContext = true;
+        }
+
+        /// <summary>Moves the submersion fade toward the sampled state and pushes the cutoff to the voices.</summary>
+        private void AdvanceSubmersion()
+        {
+            float target = HasContext && Context.Submerged ? 1f : 0f;
+            float step = _submergedFadeSeconds <= 0f
+                ? 1f
+                : Time.unscaledDeltaTime / _submergedFadeSeconds;
+
+            _submergedWeight = Mathf.MoveTowards(_submergedWeight, target, step);
+            LowPassCutoffHertz = AmbienceResolution.LowPassCutoff(_dryCutoffHertz, _wetCutoffHertz, _submergedWeight);
+
+            if (_voiceFilters == null) return;
+            foreach (AudioLowPassFilter filter in _voiceFilters) ApplySubmersionFilter(filter);
+        }
+
         private void BuildVoices()
         {
             int count = Mathf.Max(1, _voiceCount);
             _voices = new AudioSource[count];
+            _voiceFilters = new AudioLowPassFilter[count];
             _voiceStartTime = new float[count];
             _missingClipWarned = new bool[BlockSoundDatabase.MaterialCount * EVENT_COUNT];
 
@@ -221,7 +411,12 @@ namespace Audio
                 source.maxDistance = _maxDistance;
                 source.outputAudioMixerGroup = _blocksGroup;
 
+                AudioLowPassFilter filter = voiceObject.AddComponent<AudioLowPassFilter>();
+                filter.cutoffFrequency = _dryCutoffHertz;
+                filter.enabled = false;
+
                 _voices[i] = source;
+                _voiceFilters[i] = filter;
             }
         }
 

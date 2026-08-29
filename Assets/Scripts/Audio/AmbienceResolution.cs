@@ -1,0 +1,421 @@
+using Data;
+using Data.WorldTypes;
+using Jobs.Helpers;
+using UnityEngine;
+
+namespace Audio
+{
+    /// <summary>
+    /// The pure half of world ambience: every decision the beds, the cave layer and the music scheduler make
+    /// before a source is touched — dwell filtering, bed and pool selection, crossfade gains, the submerged
+    /// test and the low-pass sweep (SOUND_ENGINE_DESIGN.md §5.3).
+    /// </summary>
+    /// <remarks>
+    /// Free of scene state for the same reason <see cref="SoundResolution"/> is: these are the choices that
+    /// fail silently in a running game — a bed that never fades out, a cave layer that flaps at a cave mouth,
+    /// a scheduler that re-picks the track it is already playing — and none of them need a sound to be
+    /// audible in order to be asserted. The tunables are parameters rather than constants because the scene
+    /// components own them as serialized knobs.
+    /// </remarks>
+    public static class AmbienceResolution
+    {
+        /// <summary>
+        /// Advances a dwell filter and returns the value that should be committed.
+        /// </summary>
+        /// <remarks>
+        /// The same shape as <c>BiomeTracker</c>'s biome dwell, and for the same reason: a cave mouth, like a
+        /// biome border, is a place the player crosses repeatedly in a few seconds, and an undebounced signal
+        /// would restart a multi-second crossfade on every crossing. Held time resets whenever the candidate
+        /// agrees with what is already committed, so walking back out cancels a pending change outright
+        /// rather than leaving it half-served.
+        /// </remarks>
+        /// <param name="candidate">The raw signal this tick.</param>
+        /// <param name="committed">The value currently in force.</param>
+        /// <param name="deltaTime">Seconds since the previous tick.</param>
+        /// <param name="dwellSeconds">Seconds the candidate must disagree before it commits. Zero commits immediately.</param>
+        /// <param name="heldSeconds">How long the candidate has disagreed so far; updated in place.</param>
+        /// <returns>The value to commit — <paramref name="committed"/> until the dwell is served.</returns>
+        public static bool TickDwell(bool candidate, bool committed, float deltaTime, float dwellSeconds,
+            ref float heldSeconds)
+        {
+            if (candidate == committed)
+            {
+                heldSeconds = 0f;
+                return committed;
+            }
+
+            heldSeconds += Mathf.Max(0f, deltaTime);
+            if (heldSeconds < dwellSeconds) return committed;
+
+            heldSeconds = 0f;
+            return candidate;
+        }
+
+        /// <summary>
+        /// Whether the listener counts as underground for the cave bed.
+        /// </summary>
+        /// <param name="skylightAtHead">Sky light at the listener's head, 0–15.</param>
+        /// <param name="maxSkylight">The highest sky light still considered underground. Zero means "no sky at all".</param>
+        /// <returns>True when the listener is under enough cover to hear the cave bed.</returns>
+        /// <remarks>
+        /// A threshold rather than a strict <c>== 0</c> test: an overhang or a one-block shaft leaks a level
+        /// or two of sky into a space that plainly reads as a cave, and the caller's own dwell already keeps
+        /// a marginal reading from flapping.
+        /// </remarks>
+        public static bool IsUnderground(byte skylightAtHead, byte maxSkylight) => skylightAtHead <= maxSkylight;
+
+        /// <summary>
+        /// True when the block filling the listener's head cell is a fluid.
+        /// </summary>
+        /// <param name="blockTypes">The block database array, indexed by block ID.</param>
+        /// <param name="headBlockId">The block in the cell the listener's head occupies.</param>
+        /// <returns>True when that block is a fluid of any type.</returns>
+        /// <remarks>
+        /// Read from the voxel rather than from a contact state: <c>Assets/Scripts/Physics/</c> computes no
+        /// liquid contact of any kind, and inventing one for a 4 Hz query would put an audio feature inside
+        /// the solver's hot path. The consequence is that submersion is decided per cell, so a head just
+        /// under a partly-filled surface reads dry until it enters the cell below.
+        /// </remarks>
+        public static bool IsSubmerged(BlockType[] blockTypes, ushort headBlockId)
+        {
+            if (blockTypes == null || headBlockId >= blockTypes.Length) return false;
+
+            BlockType block = blockTypes[headBlockId];
+            return block != null && block.fluidType != FluidType.None;
+        }
+
+        /// <summary>
+        /// Selects the ambience bed for a context, falling back when the biome has none.
+        /// </summary>
+        /// <param name="context">The sampled listener context.</param>
+        /// <param name="fallbackLoop">The <c>AmbienceDatabase</c> default bed.</param>
+        /// <returns>The clip to loop, or null when neither the biome nor the fallback is authored.</returns>
+        /// <remarks>
+        /// Two distinct holes fall through to the same fallback: a biome that simply has no bed authored yet,
+        /// and a world with no biome answer at all (the legacy generator never answers). Neither may resolve
+        /// to silence-by-accident — a missing clip must be visibly the fallback, not an empty layer.
+        /// </remarks>
+        public static AudioClip SelectBiomeLoop(AudioContext context, AudioClip fallbackLoop)
+        {
+            if (!context.HasBiome || context.Biome == null) return fallbackLoop;
+            return context.Biome.ambientLoop != null ? context.Biome.ambientLoop : fallbackLoop;
+        }
+
+        /// <summary>
+        /// Resolves the set of beds that should be audible at the listener, and how loud each should be.
+        /// </summary>
+        /// <param name="context">The sampled listener context.</param>
+        /// <param name="biomes">Biome assets indexed by biome index — the world type's list.</param>
+        /// <param name="fallbackLoop">The <c>AmbienceDatabase</c> default bed.</param>
+        /// <param name="minWeight">Contributions at or below this are dropped before renormalizing.</param>
+        /// <param name="clips">Receives the clip per entry. Must hold at least <see cref="BiomeWeights.MaxBiomes"/>.</param>
+        /// <param name="weights">Receives the normalized weight per entry, index-aligned with <paramref name="clips"/>.</param>
+        /// <returns>How many entries were written.</returns>
+        /// <remarks>
+        /// <para>
+        /// Three things happen here that a naive "one source per contributing biome" would get wrong.
+        /// </para>
+        /// <para>
+        /// <b>Duplicate clips merge.</b> Two neighboring biomes with no authored bed both resolve to the
+        /// fallback, and playing one clip on two sources flanges rather than layers — the same rule
+        /// <c>SoundResolution.ResolveStepMaterials</c> applies when a footstep's two cells share a material.
+        /// Their weights are summed onto one entry instead.
+        /// </para>
+        /// <para>
+        /// <b>Sub-threshold contributors are dropped, then the rest renormalize.</b> Without the second half,
+        /// dropping a 2% neighbor would quietly duck everything else by 2%.
+        /// </para>
+        /// <para>
+        /// <b>No weights mean the fallback</b>, not silence — the legacy generator answers no weighted query
+        /// for a whole session, and that world still needs a bed.
+        /// </para>
+        /// </remarks>
+        public static int ResolveBedMix(
+            AudioContext context,
+            BiomeBase[] biomes,
+            AudioClip fallbackLoop,
+            float minWeight,
+            AudioClip[] clips,
+            float[] weights)
+        {
+            if (clips == null || weights == null) return 0;
+
+            int capacity = Mathf.Min(clips.Length, weights.Length);
+            if (capacity <= 0) return 0;
+
+            if (!context.HasWeights || context.Weights.Count <= 0)
+            {
+                AudioClip single = SelectBiomeLoop(context, fallbackLoop);
+                if (single == null) return 0;
+
+                clips[0] = single;
+                weights[0] = 1f;
+                return 1;
+            }
+
+            int count = 0;
+            float total = 0f;
+
+            for (int i = 0; i < context.Weights.Count && i < BiomeWeights.MaxBiomes; i++)
+            {
+                float weight = context.Weights.Weights[i];
+                if (weight <= minWeight) continue;
+
+                int biomeIndex = context.Weights.Indices[i];
+                AudioClip clip = biomes != null && (uint)biomeIndex < (uint)biomes.Length && biomes[biomeIndex] != null
+                    ? biomes[biomeIndex].ambientLoop
+                    : null;
+
+                clip ??= fallbackLoop;
+                if (clip == null) continue;
+
+                int existing = -1;
+                for (int j = 0; j < count; j++)
+                {
+                    if (clips[j] != clip) continue;
+                    existing = j;
+                    break;
+                }
+
+                if (existing >= 0)
+                {
+                    weights[existing] += weight;
+                }
+                else
+                {
+                    if (count == capacity) continue;
+                    clips[count] = clip;
+                    weights[count] = weight;
+                    count++;
+                }
+
+                total += weight;
+            }
+
+            if (count == 0 || total <= 0f) return 0;
+
+            for (int i = 0; i < count; i++) weights[i] /= total;
+            return count;
+        }
+
+        /// <summary>
+        /// Advances the ambience layer's rest cycle — the alternation between audible and silent stretches.
+        /// </summary>
+        /// <param name="audible">Whether the layer is currently sounding.</param>
+        /// <param name="deltaTime">Seconds since the previous tick.</param>
+        /// <param name="minAudibleSeconds">Shortest audible stretch.</param>
+        /// <param name="maxAudibleSeconds">Longest audible stretch.</param>
+        /// <param name="minRestSeconds">Shortest silent stretch.</param>
+        /// <param name="maxRestSeconds">Longest silent stretch.</param>
+        /// <param name="hash">A per-transition hash (see <see cref="ScheduleHash"/>).</param>
+        /// <param name="remainingSeconds">Time left in the current stretch; updated in place.</param>
+        /// <returns>Whether the layer should be audible after this tick.</returns>
+        /// <remarks>
+        /// A layer-wide cycle rather than one per bed: the beds are already varying with the listener's
+        /// position, and a second independent source of variation per bed reads as randomness rather than as
+        /// the world going quiet. The cave bed is deliberately not gated by this — a cave that falls silent
+        /// reads as broken rather than as restful.
+        /// </remarks>
+        public static bool TickRestCycle(
+            bool audible,
+            float deltaTime,
+            float minAudibleSeconds,
+            float maxAudibleSeconds,
+            float minRestSeconds,
+            float maxRestSeconds,
+            uint hash,
+            ref float remainingSeconds)
+        {
+            remainingSeconds -= Mathf.Max(0f, deltaTime);
+            if (remainingSeconds > 0f) return audible;
+
+            bool flipped = !audible;
+            remainingSeconds = flipped
+                ? NextGapSeconds(minAudibleSeconds, maxAudibleSeconds, hash)
+                : NextGapSeconds(minRestSeconds, maxRestSeconds, hash);
+            return flipped;
+        }
+
+        /// <summary>
+        /// Selects the music pool for a context, falling back when the biome authors none.
+        /// </summary>
+        /// <param name="context">The sampled listener context.</param>
+        /// <param name="fallbackPool">The <c>AmbienceDatabase</c> global pool.</param>
+        /// <returns>The pool to pick the next track from; may be null or empty.</returns>
+        public static AudioClip[] SelectMusicPool(AudioContext context, AudioClip[] fallbackPool)
+        {
+            if (!context.HasBiome || context.Biome == null) return fallbackPool;
+
+            AudioClip[] pool = context.Biome.musicPool;
+            return pool is { Length: > 0 } ? pool : fallbackPool;
+        }
+
+        /// <summary>
+        /// Advances one source's fade toward its target at the authored rate.
+        /// </summary>
+        /// <param name="currentFade">The source's fade position, [0, 1].</param>
+        /// <param name="targetFade">Where it is heading — 1 for the selected bed, 0 for every other.</param>
+        /// <param name="deltaTime">Seconds since the previous tick.</param>
+        /// <param name="fadeSeconds">Seconds a full 0↔1 traversal takes. Zero or fewer snaps.</param>
+        /// <returns>The new fade position, clamped to [0, 1].</returns>
+        /// <remarks>
+        /// Each source owns its own fade rather than two sharing one crossfade timer. A paired timer has no
+        /// answer for a change arriving mid-fade: whichever source the pair reassigns is cut at whatever gain
+        /// it happened to hold. Independent fades make that case ordinary — a bed the player returns to is
+        /// still playing, so its target simply flips back to 1, and it rises from where it was.
+        /// </remarks>
+        public static float AdvanceFade(float currentFade, float targetFade, float deltaTime, float fadeSeconds)
+        {
+            float target = Mathf.Clamp01(targetFade);
+            float step = fadeSeconds <= 0f ? 1f : Mathf.Max(0f, deltaTime) / fadeSeconds;
+            return Mathf.MoveTowards(Mathf.Clamp01(currentFade), target, step);
+        }
+
+        /// <summary>
+        /// Converts a source's fade position to its output gain.
+        /// </summary>
+        /// <param name="fade">The fade position, [0, 1].</param>
+        /// <returns>The equal-power gain, <c>√fade</c>.</returns>
+        /// <remarks>
+        /// Equal power, not linear amplitude: two uncorrelated loops summed with linear gains dip audibly at
+        /// the midpoint, which on a multi-second bed handover reads as the ambience briefly dropping out.
+        /// Because two beds handing over hold complementary fades, this mapping keeps the pairwise identity
+        /// <c>g(f)² + g(1−f)² == 1</c> — which is what the suite pins — while still being defined for one
+        /// source alone, or for three mid-handover.
+        /// </remarks>
+        public static float GainFromFade(float fade) => Mathf.Sqrt(Mathf.Clamp01(fade));
+
+        /// <summary>
+        /// Chooses which bed source should carry a newly selected clip.
+        /// </summary>
+        /// <param name="slotClips">The clip each bed source currently holds; null where free.</param>
+        /// <param name="slotFades">Each source's fade position, index-aligned with <paramref name="slotClips"/>.</param>
+        /// <param name="wanted">The clip that should now be audible. Null selects nothing.</param>
+        /// <returns>The slot index to use, or -1 when there is nothing to place.</returns>
+        /// <remarks>
+        /// Preference order, and the reason for each: a source <b>already carrying this clip</b> wins, so
+        /// walking back into the biome you just left resumes the bed that is still audible instead of
+        /// restarting it; then any <b>silent</b> source, which can be claimed with nothing to interrupt;
+        /// and only if every source is still audible, the <b>quietest</b> — the one whose interruption is
+        /// least heard. The last case needs one change per source inside a single fade, and each change is
+        /// itself gated by the biome dwell.
+        /// </remarks>
+        public static int SelectBedSlot(AudioClip[] slotClips, float[] slotFades, AudioClip wanted)
+        {
+            if (wanted == null || slotClips == null || slotFades == null) return -1;
+
+            int quietest = -1;
+            float quietestFade = float.MaxValue;
+
+            for (int i = 0; i < slotClips.Length && i < slotFades.Length; i++)
+            {
+                if (slotClips[i] == wanted) return i;
+
+                if (slotFades[i] < quietestFade)
+                {
+                    quietestFade = slotFades[i];
+                    quietest = i;
+                }
+            }
+
+            // A silent slot is already the quietest, so the "free slot" preference needs no separate pass.
+            return quietest;
+        }
+
+        /// <summary>
+        /// Attenuates the biome bed under the cave bed.
+        /// </summary>
+        /// <param name="caveWeight">How far the cave layer has faded in, [0, 1].</param>
+        /// <param name="duckAmount">How much of the biome bed the fully-faded cave layer removes, [0, 1].</param>
+        /// <returns>The multiplier to apply to the biome bed's gain.</returns>
+        public static float BiomeDuck(float caveWeight, float duckAmount)
+        {
+            return 1f - Mathf.Clamp01(caveWeight) * Mathf.Clamp01(duckAmount);
+        }
+
+        /// <summary>
+        /// The low-pass cutoff for the current submersion fade.
+        /// </summary>
+        /// <param name="dryHertz">Cutoff when fully out of fluid — high enough to be inaudible as a filter.</param>
+        /// <param name="wetHertz">Cutoff when fully submerged.</param>
+        /// <param name="submergedWeight">How far the submerged fade has progressed, [0, 1].</param>
+        /// <returns>The cutoff frequency to set on the filtered sources.</returns>
+        /// <remarks>
+        /// Interpolated in log space because pitch perception is: a linear sweep from 22 kHz to 800 Hz spends
+        /// almost all of its travel in a range the ear cannot distinguish, then slams shut at the end.
+        /// </remarks>
+        public static float LowPassCutoff(float dryHertz, float wetHertz, float submergedWeight)
+        {
+            float dry = Mathf.Max(1f, dryHertz);
+            float wet = Mathf.Max(1f, wetHertz);
+            return Mathf.Exp(Mathf.Lerp(Mathf.Log(dry), Mathf.Log(wet), Mathf.Clamp01(submergedWeight)));
+        }
+
+        /// <summary>
+        /// The silence to wait before the next music track.
+        /// </summary>
+        /// <param name="minSeconds">Shortest gap.</param>
+        /// <param name="maxSeconds">Longest gap.</param>
+        /// <param name="hash">A per-pick hash (see <see cref="ScheduleHash"/>).</param>
+        /// <returns>A gap inside [min, max], bounds included, ordered even if the two are authored inverted.</returns>
+        public static float NextGapSeconds(float minSeconds, float maxSeconds, uint hash)
+        {
+            float min = Mathf.Min(minSeconds, maxSeconds);
+            float max = Mathf.Max(minSeconds, maxSeconds);
+            if (max <= min) return min;
+
+            // A different bit range than SoundResolution.PickClipIndex consumes, so the gap and the track
+            // choice do not move in lockstep across successive picks.
+            float t = ((hash >> 8) & 0xFFFF) / 65535f;
+            return Mathf.Lerp(min, max, t);
+        }
+
+        /// <summary>
+        /// Picks the next music track, avoiding an immediate repeat.
+        /// </summary>
+        /// <param name="pool">The resolved track pool. Null or empty selects nothing.</param>
+        /// <param name="lastTrack">The clip played previously, or null when nothing has played yet.</param>
+        /// <param name="hash">A per-pick hash (see <see cref="ScheduleHash"/>).</param>
+        /// <returns>The track index, or -1 when the pool is empty.</returns>
+        /// <remarks>
+        /// <para>
+        /// Compares the <b>clip</b>, not the index it sat at last time. The pool is re-resolved at every pick
+        /// and changes with the biome, so an index carried across pools names a different track — it would
+        /// suppress an innocent one and miss an actual repeat of a clip that merely moved position.
+        /// </para>
+        /// <para>
+        /// The guard steps to the neighbor rather than re-rolling: a re-roll can land on the same track
+        /// again, and with a two-track pool it does so half the time — exactly the pool size where hearing
+        /// the same track twice in a row is most obvious.
+        /// </para>
+        /// </remarks>
+        public static int PickTrackIndex(AudioClip[] pool, AudioClip lastTrack, uint hash)
+        {
+            if (pool == null || pool.Length == 0) return -1;
+            if (pool.Length == 1) return 0;
+
+            int index = (int)(hash % (uint)pool.Length);
+            if (pool[index] != null && pool[index] == lastTrack) index = (index + 1) % pool.Length;
+            return index;
+        }
+
+        /// <summary>
+        /// Hashes one scheduling decision into the value the gap and track pickers consume.
+        /// </summary>
+        /// <param name="salt">A per-pick varying value — normally a monotonic pick counter.</param>
+        /// <returns>A well-mixed hash, deterministic for a given salt.</returns>
+        public static uint ScheduleHash(uint salt)
+        {
+            unchecked
+            {
+                uint h = salt * 2246822519u;
+                h ^= h >> 15;
+                h *= 2654435761u;
+                h ^= h >> 13;
+                h *= 3266489917u;
+                h ^= h >> 16;
+                return h;
+            }
+        }
+    }
+}

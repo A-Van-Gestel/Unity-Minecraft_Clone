@@ -12,5 +12,14 @@ namespace Data.WorldTypes
     {
         [Tooltip("The name of the biome. Shown in editor tools and in the in-game biome readout.")]
         public string biomeName = "New Biome";
+
+        [Header("Audio")]
+        [Tooltip("Ambience bed looped while the listener is in this biome. Empty falls back to the " +
+                 "AmbienceDatabase's default bed.")]
+        public AudioClip ambientLoop;
+
+        [Tooltip("Music tracks eligible while the listener is in this biome. Empty falls back to the " +
+                 "AmbienceDatabase's global pool.")]
+        public AudioClip[] musicPool;
     }
 }

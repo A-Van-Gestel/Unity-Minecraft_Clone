@@ -9,8 +9,9 @@ namespace Editor.Validation.SoundEngine
     /// Validation suite for the sound engine's resolution chain — the "Sound Engine" suite. Covers the pure
     /// block-sound resolution (<see cref="Audio.SoundResolution"/>: material lookup, clip pick, pitch
     /// envelope, place-to-break fallback), the authored content census over the shipped
-    /// <c>BlockDatabase</c>/<c>BlockSoundDatabase</c>, the prefill heuristic, and the volume/settings
-    /// plumbing. Every scenario is a baseline (must stay green).
+    /// <c>BlockDatabase</c>/<c>BlockSoundDatabase</c>, the prefill heuristic, the volume/settings plumbing,
+    /// and the world-ambience decisions (<see cref="Audio.AmbienceResolution"/>: cave dwell, bed and music
+    /// selection, crossfade and duck gains, submersion). Every scenario is a baseline (must stay green).
     /// </summary>
     /// <remarks>
     /// Deliberately silent: nothing here plays a sound or needs an <c>AudioListener</c>. What a break, place
@@ -35,6 +36,7 @@ namespace Editor.Validation.SoundEngine
             List<Scenario> scenarios = new List<Scenario>();
             AddResolutionScenarios(scenarios);
             AddContentScenarios(scenarios);
+            AddAmbienceScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Sound Engine", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
 
@@ -43,5 +45,8 @@ namespace Editor.Validation.SoundEngine
 
         /// <summary>Registers the authored-content, prefill and settings-plumbing baselines (partial file .Content.cs).</summary>
         static partial void AddContentScenarios(List<Scenario> scenarios);
+
+        /// <summary>Registers the world-ambience baselines (partial file .Ambience.cs).</summary>
+        static partial void AddAmbienceScenarios(List<Scenario> scenarios);
     }
 }

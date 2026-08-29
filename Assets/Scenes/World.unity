@@ -1700,6 +1700,8 @@ GameObject:
   m_Component:
   - component: {fileID: 516268958}
   - component: {fileID: 516268959}
+  - component: {fileID: 516268961}
+  - component: {fileID: 516268960}
   m_Layer: 0
   m_Name: SoundManager
   m_TagString: Untagged
@@ -1735,10 +1737,56 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Audio.SoundManager
   _blockSounds: {fileID: 11400000, guid: 7bb2797a3c62f1b48b74b58950734b13, type: 2}
+  _ambience: {fileID: 11400000, guid: fa19c4dae1167d149a69085f26e51fe8, type: 2}
   _mixer: {fileID: 24100000, guid: 06f869aadb3bc9347b4c686bb85bb7a9, type: 2}
   _blocksGroup: {fileID: -4932264678354281645, guid: 06f869aadb3bc9347b4c686bb85bb7a9, type: 2}
   _voiceCount: 24
   _maxDistance: 20
+  _contextInterval: 0.25
+  _biomeFalloffRadius: 0.6
+  _submergedFadeSeconds: 0.35
+  _dryCutoffHertz: 22000
+  _wetCutoffHertz: 900
+--- !u!114 &516268960
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 516268957}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7af0f092631b5b8449861e8b39de407a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Audio.MusicScheduler
+  _musicGroup: {fileID: 9208659110021617912, guid: 06f869aadb3bc9347b4c686bb85bb7a9, type: 2}
+  _minGapSeconds: 180
+  _maxGapSeconds: 480
+  _openingGapSeconds: 60
+--- !u!114 &516268961
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 516268957}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e753f5e92197da3428621b7d930ac6fc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Audio.AmbienceDirector
+  _ambientGroup: {fileID: -7782680200459302735, guid: 06f869aadb3bc9347b4c686bb85bb7a9, type: 2}
+  _fadeSeconds: 3
+  _minBedWeight: 0.05
+  _restCycleEnabled: 1
+  _minAudibleSeconds: 45
+  _maxAudibleSeconds: 120
+  _minRestSeconds: 20
+  _maxRestSeconds: 60
+  _caveMaxSkylight: 0
+  _caveDwellSeconds: 3
+  _caveFadeSeconds: 4
+  _caveDuck: 0.7
 --- !u!1 &568008936
 GameObject:
   m_ObjectHideFlags: 0
