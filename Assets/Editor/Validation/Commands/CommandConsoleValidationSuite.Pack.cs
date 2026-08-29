@@ -15,6 +15,7 @@ namespace Editor.Validation.Commands
         static partial void AddCommandPackScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario("B32: Installer count-floor — RegisterAll registers exactly InstalledCommandCount commands (+/help); a dropped registration reds the suite (CMD-3)", Pack_InstallerCountFloor));
+            scenarios.Add(new Scenario("B33: /sound arity + no-audio-layer fallback — a diagnostic readout must never throw when audio is missing", Pack_Sound));
             scenarios.Add(new Scenario("B33: /seed prints the world seed; takes no args; errors gracefully without a world (CMD-3 Wave A)", Pack_Seed));
             scenarios.Add(new Scenario("B34: /where prints voxel/chunk/region/origin for the player's position; errors gracefully without a world (CMD-3 Wave A)", Pack_Where));
             scenarios.Add(new Scenario("B35: /origin shows the anchor; '/origin force' re-anchors onto the player's chunk; garbage args error (CMD-3 Wave A)", Pack_Origin));
@@ -41,6 +42,31 @@ namespace Editor.Validation.Commands
             CommandResult help = engine.Execute("/help");
             ok &= Expect(help.Lines.Count == expected + 1, // header line + one line per command
                 $"/help lists every registered command ({expected} + header), got {help.Lines.Count} lines");
+            return ok;
+        }
+
+        /// <summary>
+        /// <c>/sound</c> is a diagnostic readout, so the two ways it can misbehave are taking arguments it
+        /// does not understand and throwing when the audio layer is absent.
+        /// </summary>
+        /// <remarks>
+        /// A headless suite run has no <c>SoundManager</c>, which is the interesting case: a readout that
+        /// dereferences its way to a NullReferenceException is worse than useless precisely when something is
+        /// wrong with audio, since that is when it gets typed.
+        /// </remarks>
+        private static bool Pack_Sound()
+        {
+            CommandEngine engine = new CommandEngine();
+            ConsoleCommandInstaller.RegisterAll(engine.Registry);
+
+            bool ok = ExpectTeleportError(engine, "/sound extra", "takes no arguments",
+                "/sound rejects arguments");
+
+            CommandResult result = engine.Execute("/sound");
+            ok &= Expect(result.Lines.Count >= 1 && result.Lines[0].Severity == ConsoleLineSeverity.Error &&
+                         result.Lines[0].Text.Contains("No SoundManager"),
+                "/sound without an audio layer reports it rather than throwing");
+
             return ok;
         }
 

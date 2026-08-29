@@ -26,6 +26,11 @@ namespace Audio
         /// </summary>
         private const int BED_VOICE_COUNT = 4;
 
+        private static AmbienceDirector s_instance;
+
+        /// <summary>The active director, or null when the scene has none. Diagnostics only.</summary>
+        public static AmbienceDirector Instance => s_instance;
+
         /// <summary>Fade level below which a source is treated as finished and released.</summary>
         private const float SILENT_FADE = 0f;
 
@@ -129,8 +134,21 @@ namespace Audio
         private float _undergroundHeld;
         private float _caveFade;
 
+        /// <summary>
+        /// Clears the singleton back-reference on play-mode entry. Required because this project runs with
+        /// Reload Domain disabled, so a stale reference would otherwise leak into the next play session.
+        /// </summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics() => s_instance = null;
+
+        private void OnDestroy()
+        {
+            if (s_instance == this) s_instance = null;
+        }
+
         private void Awake()
         {
+            s_instance = this;
             _bedSources = new AudioSource[BED_VOICE_COUNT];
             _bedFilters = new AudioLowPassFilter[BED_VOICE_COUNT];
             _bedFades = new float[BED_VOICE_COUNT];
@@ -162,6 +180,75 @@ namespace Audio
             UpdateBiomeBeds(manager, deltaTime);
             ApplySubmersion(manager);
         }
+
+        /// <summary>How far the cave bed has faded in, [0, 1]. Diagnostics only.</summary>
+        public float DiagCaveFade => _caveFade;
+
+        /// <summary>Whether the dwell filter has committed to "underground". Diagnostics only.</summary>
+        public bool DiagUndergroundCommitted => _undergroundCommitted;
+
+        /// <summary>Whether the rest cycle currently allows the beds to sound. Diagnostics only.</summary>
+        public bool DiagRestAudible => _restAudible;
+
+        /// <summary>Seconds left in the current rest-cycle stretch. Diagnostics only.</summary>
+        public float DiagRestRemaining => _restRemaining;
+
+        /// <summary>The cave bed's share of the duck at the current fade. Diagnostics only.</summary>
+        public float DiagCaveDuck => AmbienceResolution.BiomeDuck(_caveFade, _caveDuck);
+
+        /// <summary>
+        /// The depth gate's multiplier at the sampled depth, or 1 when no context exists yet.
+        /// Diagnostics only.
+        /// </summary>
+        public float DiagDepthDuck
+        {
+            get
+            {
+                SoundManager manager = SoundManager.Instance;
+                return manager is { HasContext: true }
+                    ? AmbienceResolution.DepthDuck(
+                        manager.Context.DepthBelowSurface, _fullDuckDepth, _duckTaperBlocks)
+                    : 1f;
+            }
+        }
+
+        /// <summary>The depth past which the beds are fully silent. Diagnostics only.</summary>
+        public int DiagFullDuckDepth => _fullDuckDepth;
+
+        /// <summary>How many blocks the depth gate fades over. Diagnostics only.</summary>
+        public int DiagDuckTaperBlocks => _duckTaperBlocks;
+
+        /// <summary>How many bed sources the roster holds. Diagnostics only.</summary>
+        public int DiagBedCount => _bedSources?.Length ?? 0;
+
+        /// <summary>
+        /// Reports one bed source's live state.
+        /// </summary>
+        /// <param name="slot">Roster index, below <see cref="DiagBedCount"/>.</param>
+        /// <param name="clipName">The clip it carries, or "-" when free.</param>
+        /// <param name="fade">Its fade position, [0, 1].</param>
+        /// <param name="volume">The gain actually written to the source this frame.</param>
+        /// <remarks>
+        /// Reports the <i>written</i> volume rather than recomputing it, so a readout can never agree with a
+        /// mix that the director is not actually producing.
+        /// </remarks>
+        public void DiagBed(int slot, out string clipName, out float fade, out float volume)
+        {
+            if (_bedSources == null || (uint)slot >= (uint)_bedSources.Length)
+            {
+                clipName = "-";
+                fade = 0f;
+                volume = 0f;
+                return;
+            }
+
+            clipName = _bedClips[slot] != null ? _bedClips[slot].name : "-";
+            fade = _bedFades[slot];
+            volume = _bedSources[slot] != null ? _bedSources[slot].volume : 0f;
+        }
+
+        /// <summary>The cave source's live gain. Diagnostics only.</summary>
+        public float DiagCaveVolume => _caveSource != null ? _caveSource.volume : 0f;
 
         /// <summary>Advances the underground dwell and the cave bed's own fade.</summary>
         /// <param name="manager">The audio owner supplying the context and the content.</param>
