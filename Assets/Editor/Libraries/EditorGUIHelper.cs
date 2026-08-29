@@ -21,26 +21,41 @@ namespace Editor.Libraries
             s_centeredIntFieldStyle = null;
         }
 
+        /// <summary>Width the two stepper buttons and their spacing consume, deducted from a bounded field.</summary>
+        private const float STEPPER_BUTTON_SPAN = 52f;
+
         #region Numeric Inputs
 
         /// <summary>
         /// Draws a centered integer field flanked by ◀ and ▶ stepper buttons.
         /// </summary>
-        public static int IntFieldWithSteppers(int value, int min = 0, int max = int.MaxValue)
+        /// <param name="value">Current value.</param>
+        /// <param name="min">Lowest value the ◀ button will reach.</param>
+        /// <param name="max">Highest value the ▶ button will reach.</param>
+        /// <param name="width">
+        /// Total width of the control including both buttons. Zero (the default) expands to fill, which is
+        /// what a field on its own line wants; give a width when the control shares a row with something
+        /// that deserves the space — an expanding stepper will otherwise crowd out a slider beside it.
+        /// </param>
+        public static int IntFieldWithSteppers(int value, int min = 0, int max = int.MaxValue, float width = 0f)
         {
             s_centeredIntFieldStyle ??= new GUIStyle(EditorStyles.numberField)
             {
                 alignment = TextAnchor.MiddleCenter,
             };
 
-            GUILayout.BeginHorizontal();
+            if (width > 0f) GUILayout.BeginHorizontal(GUILayout.Width(width));
+            else GUILayout.BeginHorizontal();
 
             if (GUILayout.Button("◀", GUILayout.Width(22), GUILayout.Height(18)))
             {
                 value = Mathf.Max(min, value - 1);
             }
 
-            value = EditorGUILayout.IntField(value, s_centeredIntFieldStyle);
+            value = width > 0f
+                ? EditorGUILayout.IntField(value, s_centeredIntFieldStyle,
+                    GUILayout.Width(Mathf.Max(24f, width - STEPPER_BUTTON_SPAN)))
+                : EditorGUILayout.IntField(value, s_centeredIntFieldStyle);
 
             if (GUILayout.Button("▶", GUILayout.Width(22), GUILayout.Height(18)))
             {
@@ -50,6 +65,76 @@ namespace Editor.Libraries
             GUILayout.EndHorizontal();
 
             return value;
+        }
+
+        #endregion
+
+        #region Audio
+
+        /// <summary>
+        /// Draws an audition button that becomes a stop button while its own clip is playing.
+        /// </summary>
+        /// <param name="clip">The clip to audition. Null disables the button.</param>
+        /// <param name="playTooltip">Tooltip shown while the button offers playback.</param>
+        /// <param name="width">Button width.</param>
+        /// <remarks>
+        /// A play button that stays a play button while sounding gives the user no way back — an ambience
+        /// bed is a 30-second loop, so "wait for it to end" is not an answer. The window-level Stop button
+        /// remains, and is still the way to silence a preview started from a row that has scrolled away.
+        /// </remarks>
+        public static void PlayStopButton(AudioClip clip, string playTooltip, float width)
+        {
+            bool playing = EditorAudioPreview.IsPlayingClip(clip);
+
+            using (new EditorGUI.DisabledScope(clip == null || !EditorAudioPreview.IsAvailable))
+            {
+                GUIContent content = playing
+                    ? new GUIContent("⏹", "Stop this clip.")
+                    : new GUIContent("▶", playTooltip);
+
+                if (!GUILayout.Button(content, GUILayout.Width(width))) return;
+
+                if (playing) EditorAudioPreview.StopAll();
+                else EditorAudioPreview.Play(clip);
+            }
+        }
+
+        /// <summary>
+        /// Draws an audition button for a set of variants, playing a random one as the game would.
+        /// </summary>
+        /// <param name="variants">The clips to choose between. Null or empty disables the button.</param>
+        /// <param name="playTooltip">Tooltip shown while the button offers playback.</param>
+        /// <param name="width">Button width.</param>
+        /// <remarks>
+        /// Shows stop while <i>any</i> of the variants is the one sounding: which variant was picked is the
+        /// point of the control, so the button cannot key its state to a single clip decided in advance.
+        /// </remarks>
+        public static void PlayStopButton(AudioClip[] variants, string playTooltip, float width)
+        {
+            bool empty = variants == null || variants.Length == 0;
+            bool playing = false;
+
+            if (!empty)
+            {
+                foreach (AudioClip variant in variants)
+                {
+                    if (!EditorAudioPreview.IsPlayingClip(variant)) continue;
+                    playing = true;
+                    break;
+                }
+            }
+
+            using (new EditorGUI.DisabledScope(empty || !EditorAudioPreview.IsAvailable))
+            {
+                GUIContent content = playing
+                    ? new GUIContent("⏹", "Stop the variant currently playing.")
+                    : new GUIContent("▶", playTooltip);
+
+                if (!GUILayout.Button(content, GUILayout.Width(width))) return;
+
+                if (playing) EditorAudioPreview.StopAll();
+                else if (!empty) EditorAudioPreview.Play(variants[UnityEngine.Random.Range(0, variants.Length)]);
+            }
         }
 
         #endregion
