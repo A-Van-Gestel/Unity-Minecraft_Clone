@@ -1,19 +1,22 @@
 # Sound Engine Design
 
-**Version:** 1.8  
+**Version:** 1.9  
 **Date:** 2026-08-29  
 **Status:** **Partially implemented — S0, S1 and S2 shipped and confirmed in game.** The `SoundMaterial`
 channel, the shared `BlockSoundDatabase`, the BlockEditor dropdown and prefill, the volume settings, the
 pooled one-shot voices and the break / place / footstep triggers all exist; the `AudioMixer` is authored
 with its seven exposed volume parameters; two CC0 packs supply content, so all 13 sounding materials have
 break and step clips. Footsteps sample two cells, so wading and cross-mesh flora sound (§5.1). The
-`Validate Sound Engine` suite guards the resolution chain and the ambience decisions (31 baselines).
+`Validate Sound Engine` suite guards the resolution chain and the ambience decisions (35 baselines).
 **S2's runtime shipped on 2026-08-29** — `AudioContext`, the `AmbienceResolution` decision layer, the
 `AmbienceDirector` bed pair with its cave layer, the `MusicScheduler` and the underwater low-pass — on top of
 the §6.2 managed biome query, which shipped the same day and is guarded by its own `Validate Biome Selection`
-suite (15 baselines). **Ambience content is in (§9): six CC0 loops cover the cave bed, the fallback bed and
-four of the six biomes.** Music has no content yet, so the scheduler runs and picks nothing. S3 and the
-remainder of S4 are still outstanding.  
+suite (17 baselines). **Ambience content is in (§9): six CC0 loops cover the cave bed, the fallback bed and
+four of the six biomes.** Music has no content yet, so the scheduler runs and picks nothing. **S5 and S6 shipped on
+2026-08-29**: the biome beds are now placed at their biome's bearing rather than played flat (§10), and
+`BiomeBase.ambientLoop` has become a list of altitude-banded, weighted `AmbienceTrack`s (§11). **Both are
+confirmed in game**, S5 after its placement defaults were retuned by ear. S3 and the remainder of S4 are
+still outstanding.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > Design for the VoxelEngine's audio system: block sounds (break / place / step), fluid and
@@ -24,8 +27,8 @@ remainder of S4 are still outstanding.
 > Burst-job-produces / main-thread-consumes).
 >
 >
-> Status: **S0 + S1 shipped** (2026-08-28), S4's two-cell footstep sampling and **S2** — runtime and
-> ambience content — (2026-08-29); S2's *music* content, S3 and the rest of S4 outstanding. Section 2's "current state" table describes
+> Status: **S0 + S1 shipped** (2026-08-28), S4's two-cell footstep sampling, **S2** — runtime and
+> ambience content — and **S5 + S6** (2026-08-29); S2's *music* content, S3 and the rest of S4 outstanding. Section 2's "current state" table describes
 > the project *before* that work — it is kept as the historical audit it was written as.
 
 **Audited:** 2026-07-03, at commit `2dde457` (branch `main`).
@@ -370,6 +373,12 @@ is untouched. This is the highest-effort layer and ships **last** (§8).
 
 ### 5.3 Layer 3 — world-layer ambience & music ✅ *runtime shipped 2026-08-29*
 
+> **Extended the same day by S5 and S6.** The beds described below are now *placed* at each biome's bearing
+> rather than played flat (§10), and each biome offers a *pool* of altitude-banded tracks rather than one
+> loop (§11). Everything else here — the weighted mix, the per-source fades, the rest cycle, the two ducks,
+> the constant-power gain — is unchanged, and deliberately so: S5 pans without re-gaining and S6 changes only
+> which clip a biome resolves to, so neither disturbs the arithmetic this section describes.
+
 2D (non-spatial) layered sources with slow crossfades, driven by an **`AudioContext`** snapshot
 sampled at the listener.
 
@@ -397,7 +406,8 @@ half-wired with the beds working and music silently missing its fallback pool.
 All of the selection arithmetic lives in the pure `AmbienceResolution` layer, which is why the suite can pin
 it (10 `S2` baselines); the audible result stays an in-game judgment.
 
-- **Biome ambience beds — a weighted mix, not a selection:** `BiomeBase` carries `AudioClip ambientLoop`
+- **Biome ambience beds — a weighted mix, not a selection:** `BiomeBase` carries
+  `AmbienceTrack[] ambientTracks` (since S6, §11 — it was a single `AudioClip ambientLoop` when S2 shipped)
   and `AudioClip[] musicPool`; `AmbienceDirector` owns a roster of four bed sources, each running **its own
   fade**, and drives every one of them from `BiomeWeights` (§6.2) rather than from a single chosen biome.
   Each contributing biome's bed targets its share of the mix, so standing on a shore keeps the ocean audible
@@ -590,8 +600,8 @@ job and the managed query) and is seed-safe by construction.
 | **S1 — One-shots** ✅       | `SoundManager` + pooled 3D sources, break/place hooks in `PlayerInteraction`, footsteps in the player controller.                                                                                                                                                                                                                                          |   🟢   | S0                |
 | **S2 — Ambience & music** ✅ | **Shipped 2026-08-29.** Runtime: `AudioContext` + the pure `AmbienceResolution` layer, `AmbienceDatabase`, biome audio fields on `BiomeBase`, `AmbienceDirector` (four-source bed roster weighted by `BiomeWeights` + rest cycle + cave layer + duck), `MusicScheduler`, per-source underwater low-pass, 16 suite baselines. Ambience content imported (§9): 6 CC0 loops covering the cave bed, the fallback bed and 4 of 6 biomes. **Music content outstanding** — the scheduler runs and finds an empty pool. |   🟡   | S0; §6.2 ✅        |
 | **S3 — Fluid emitters**   | Burst emitter scan job, clustering, looping emitter pool with fades.                                                                                                                                                                                                                                                                                       |   🟡   | S1 (pool infra)   |
-| **S5 — Directional beds** | Carry each biome's bearing out of the cellular neighbourhood and place the bed sources in the world, so an unseen biome can be located by ear. Detail in §10. |   🟡   | S2 ✅              |
-| **S6 — Track pool**       | Replace the single `BiomeBase.ambientLoop` with a list of tracks carrying a Y-range and a play chance, so a biome varies with altitude and does not repeat itself. Detail in §11. |   🟡   | S2 ✅              |
+| **S5 — Directional beds** ✅ | **Shipped 2026-08-29.** `FastNoiseLite.CellularCellData` carries each cell's offset alongside its distance; `BiomeSelection.SelectWeightsDirectional` turns that into a per-biome bearing in blocks; `AmbienceDirector` places each bed on its bearing at a fixed radius. Detail in §10. |   🟡   | S2 ✅              |
+| **S6 — Track pool** ✅     | **Shipped 2026-08-29.** `BiomeBase.ambientLoop` replaced by `AmbienceTrack[] ambientTracks` (clip + Y band + relative weight); the six Standard biome assets migrated; the pick is a weighted roulette re-rolled when the rest cycle wakes. Detail in §11. |   🟡   | S2 ✅              |
 | **S4 — Later**            | **Two-cell footstep sampling** ✅ (occupied cell + supporting cell, a non-solid occupant layered over the support — see the §5.1 note; shipped 2026-08-29). Still open: ungrounded/swimming steps (deferred — no swimming mechanic exists, `FLUID_BUGS.md` §02), v2 apply-site break/place hook (`VoxelModSource.Live` filter), hit/mining sounds, weather (RF-7), time-of-day (RF-1), `LEAVES` wind emitters.                                                                                                                                                                                                              |   —    | feature-gated     |
 
 S0+S1 alone deliver the largest perceived-quality jump (block feedback + footsteps) and validate
@@ -634,9 +644,10 @@ architecture, so clips can be swapped or upgraded at any time without code chang
 cave bed and `Wind_Calm` the fallback bed on `AmbienceDatabase`; per biome, Ocean → `Sea`, Forrest →
 `Forest_Birds`, Grasslands and Steep Grasslands → `Wind_Forest`, Desert and Mountain → `Wind_Calm`. All six
 Standard biomes carry a bed, so the database fallback is reached only by a world type that answers no biome
-(the Legacy generator). `Cicadas` is imported but **currently referenced by nothing** — it was the original
-Grasslands pick and was swapped out in the editor as too repetitive at the bed layer's duty cycle, which is
-part of what S6 (§11) exists to solve. Kept **stereo** and imported as **Streaming**, which is why `BlockAudioImportPostprocessor` now carries two
+(the Legacy generator). `Cicadas` was imported, then left **referenced by nothing** — it was the original Grasslands pick and was
+swapped out in the editor as too repetitive at the bed layer's duty cycle. S6 (§11) is what let it back in:
+it is now Grasslands' second track at a relative weight of 0.25, so it surfaces roughly one wake in five
+rather than every time. Kept **stereo** and imported as **Streaming**, which is why `BlockAudioImportPostprocessor` now carries two
 profiles: the mono / decompress-on-load one-shot profile for `Assets/Audio/Blocks/`, and a stereo / streaming
 profile for `Assets/Audio/Ambience/`. Forcing a 2D bed to mono would discard the stereo image that makes it a
 bed, and decompressing a 30 s stereo loop holds megabytes of PCM resident for no benefit.
@@ -704,8 +715,10 @@ attached license" source.
 
 ## 10. S5 — Directional ambience beds
 
-**Status: planned, not started.** Filed 2026-08-29 from in-game feedback: a player should be able to turn on
-the spot and hear which way an unseen biome lies.
+**Status: shipped and confirmed in game 2026-08-29.** Filed the same day from in-game feedback: a player
+should be able to turn on the spot and hear which way an unseen biome lies. Confirmed against that ask —
+standing on a mountain with the ocean ahead and a forest to the right, the three beds are placeable by ear
+with the eyes shut.
 
 **Approach.** Place each bed's `AudioSource` at the bearing of its biome and let Unity pan it, rather than
 scaling gain by a dot product against the listener's facing. A gain multiplier misbehaves the moment the head
@@ -729,23 +742,73 @@ overloads need the change or the far bands lose direction.
 **Also needed:** `FastNoiseLite` has `SetFrequency` but no getter, and the offsets are in noise space — world
 blocks are `offset ÷ frequency`.
 
-**Verification.** The library's `FastNoiseLiteGoldenValues.txt` must stay bit-identical (adding a field changes
-no noise value), but it cannot see the offsets, so it is not sufficient. The gate that actually exercises the
-new data is a self-consistency assertion: for the Euclidean path, `|offset|` must equal the recorded
-`Distances[i]`. That catches a wrong reference frame, a missed swap in the insertion sort, and a botched
-frequency conversion — none of which the golden would notice.
+**Verification. As shipped, and the plan's own gate was not enough.** The golden held: `FastNoiseLite.cs` is
+**purely additive** (221 insertions, 0 deletions) and `FastNoiseLiteGoldenValues.txt` is byte-identical, with
+all 15 050 library tests green. The self-consistency assertion this section originally named became **B16**
+(`|offset| == Distances[i]`, both precision overloads, across Euclidean / EuclideanSq / Manhattan).
+
+But the claim made for it here was **wrong**, and worth recording as the correction it is: `|offset|` is
+invariant under a **sign flip** and under an **X↔Z transposition**, so B16 cannot catch "a wrong reference
+frame" — the very failure it was filed to catch, and the most likely one. What does catch it is **B17**: step
+32 blocks along a reported bearing, re-query, and assert the distance to that biome fell by about the step.
+Only a correct bearing gets closer, so one assertion covers sign, axis order and the noise-space→blocks
+conversion at once.
+
+This was demonstrated rather than argued. Negating both offsets in both overloads left **B16 green and B17
+red**; removing the offsets' shift from the insertion sort turned **both** red. B17 also carries a
+sample-count floor, because a run with nothing measurable would otherwise pass every assertion it makes.
+
+One measurement note the first run surfaced: an 8-block step at the ±2²⁴ band produced only ~6.4 blocks of
+signal against ~1.6 blocks of Classic32 coordinate quantisation. The step is the signal and the tolerance is
+the noise floor; they must not be the same size, which is why the probe walks 32 blocks and requires a
+bearing of at least 64.
+
+**Placement, as shipped.** Each bed source sits at a **fixed radius** on its bearing, with `minDistance` set
+to that same radius — inside `minDistance` a logarithmic rolloff attenuates by exactly nothing, so the source
+is *panned* and never re-gained. That is what keeps the §5.3 arithmetic honest: the mix weights, the
+constant-power fade identity and both ducks still describe what is actually heard. Placing a source at the
+biome's real distance would have multiplied all of them by a distance curve, silently. It also makes the
+minimum-distance clamp this section originally asked for unnecessary.
+
+A bearing that resolves to **zero** — the fallback bed, a merged entry whose contributors cancel, or a world
+that answers no weighted query at all — drops that source to `spatialBlend = 0` rather than inventing a
+heading. A bed with no direction should sound like it has none. The cave bed is never placed for the same
+reason: it is the space the listener is *inside*.
+
+Merged entries (two biomes resolving to one clip) carry the **weight-weighted mean** of their contributors'
+bearings, so the single source lands between them in proportion — and cancels to "no bearing" when they are
+opposed. Pinned by the `Bed Bearings Survive The Mix And Merge By Weight` baseline.
+
+**Serialized knobs, as tuned by ear:** `spatialBlend` **1.0**, `spread` **0°**, radius 12 blocks, bearing
+smoothing 6 s.
+
+The first two shipped at 0.7 / 120° and the feature was **inaudible** — bearings correct in `/sound`, nothing
+locatable. `spread` is not a free width control: it fans a stereo source's two channels apart across speaker
+space, so it trades directly against the localization S5 exists to provide, and 120° had erased it well
+before the beds sounded any wider. `spatialBlend` below 1 compounds that by leaving its remaining share
+unpanned in the centre. A stereo bed keeps its image by being *stereo content*, not by being spread — which
+inverts the reasoning in the "beds stay stereo" decision above: `spread` is what makes stereo compatible with
+3D placement, not what preserves the image.
+
+Diagnosing this took the live sources rather than the symptom: every value was already correct
+(`spatialBlend` 0.7 applied, three beds playing at distinct 12-block offsets matching the biomes on screen),
+which ruled out the whole placement path in one read and left tuning as the only remaining cause.
 
 **Known limitation.** A biome's cells are scattered, so this points at a biome's *nearest cell*, not its
 centroid. At a shoreline that reads correctly; standing inside a biome the nearest cell is close and its
-bearing swings as the listener walks, so the source needs a minimum-distance clamp and heavy smoothing or a
-bed the player is inside will slide around their head. This is a tuning problem that needs ears, not analysis.
+bearing swings as the listener walks. The smoothing knob is the mitigation, and whether 6 s is enough is an
+ears question, not an analysis one. Nothing in the suite covers the placement itself — every baseline stops
+at the pure layer, exactly as the rendered output does in every other suite here.
 
 ---
 
 ## 11. S6 — Ambience track pool
 
-**Status: planned, not started.** Filed 2026-08-29 from in-game feedback: one clip per biome repeats audibly,
-and a bed that suits sea level is wrong near build height.
+**Status: shipped and confirmed in game 2026-08-29.** Filed the same day from in-game feedback: one clip per
+biome repeats audibly, and a bed that suits sea level is wrong near build height. Confirmed in Grasslands —
+`Wind_Forest` carries most wakes and `Cicadas` surfaces at roughly its authored quarter share. The Y ranges
+are still placeholders: every migrated track spans the whole world, so the altitude half of §11 is
+*implemented and unexercised* until someone authors a banded track.
 
 **Approach.** `BiomeBase.ambientLoop` (a single `AudioClip`) becomes a list of entries:
 
@@ -765,10 +828,42 @@ moving each wired clip into a single-entry list, with the assets re-verified by 
 caught a silently-null reference during S2's wiring. **Six** Standard biome assets carry a bed today (all of
 them); the four Legacy assets have the field at null and need no migration.
 
-**Verification.** A track outside its Y-range must never be selected; the play-chance distribution needs a
-spread assertion rather than a bounds check (a stuck RNG passes bounds); and `ResolveBedMix`'s existing
-"biomes resolving to the same clip merge onto one source" rule must still hold once two biomes can randomly
-roll the *same* shared track — that baseline needs extending, not rewriting.
+**The pick is a weighted roulette** over the tracks eligible at the listener's altitude: `playChance` is a
+weight relative to the biome's other eligible tracks, and exactly one always wins. The alternative — an
+independent roll per track, falling through when all of them fail — was rejected because a bed losing its
+roll is a *second*, hidden source of silence, indistinguishable in game from a missing clip. Making the layer
+go quiet is the rest cycle's job and it already does it. All-zero weights fall back to a uniform pick: an
+author who set nothing has said nothing about proportion, which is not a request for silence.
+
+The roll is a **pure function of (roll generation, biome index, altitude)** — no cached selection to
+invalidate. The generation advances when the rest cycle wakes, which §11 already identified as the one moment
+nothing audible is cut; with the rest cycle switched off it advances on the same authored audible-stretch
+timer, or every biome would keep its first track for the session. The biome index is folded into the hash so
+two biomes in one mix do not roll in lockstep — a shoreline flipping both its beds in the same breath reads
+as a glitch.
+
+**Migration, as shipped.** The clip→biome mapping was **read off the six assets before the field was
+replaced**, because the old field no longer exists to read afterwards; the pass then wrote each clip into a
+single-entry list spanning the world's full Y range. Verified by reading the six `.asset` files **back from
+disk** (an editor write reporting success is not evidence) and by a `git diff` showing 27 insertions and 6
+deletions confined to the audio field. The four Legacy assets needed no migration (the field was
+already null) and Unity reserialized them to `ambientTracks: []` on its own.
+
+**Verification.** Three new baselines plus one extension, all proven red before they were trusted:
+a track outside its band is never selected at any salt or altitude (`IsEligibleAt` stubbed to `true` turns it
+red); the play chance spreads in proportion over 4 000 rolls, with every eligible track hit at least once and
+a lockstep check between two biomes (a roulette stubbed to "first eligible" turns it red) — a spread
+assertion, because "the pick is a valid index" is satisfied by a generator that returns the same index every
+time, which is the bug §11 exists to fix; and `ResolveBedMix`'s merge rule now covers two biomes *rolling*
+the same shared track across 64 salts, not only two biomes falling back to it.
+
+One gap the migration exposed and closed: nothing in the suite read the shipped biome assets, so emptying
+`ambientTracks` on all six would have left every baseline green and the world playing nothing but the
+fallback. `Every Standard Biome Authors An Ambience Track` is the census that now fails instead.
+
+**Not covered.** `AmbienceDatabase.DefaultLoop` and the cave loop are still single clips — §11 scopes the
+track pool to `BiomeBase`, and the asymmetry is deliberate rather than overlooked. The music pool is
+untouched.
 
 ---
 
@@ -777,6 +872,22 @@ roll the *same* shared track — that baseline needs extending, not rewriting.
 *Entries below the newest are reconstructed from git history — this document predates the
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
+
+* **v1.9** - S5 and S6 shipped (2026-08-29). **S5:** `FastNoiseLite` gained `CellularCellData` — the same 5×5
+  neighbourhood plus each cell's offset — as a *separate* struct, because `CellularEdgeData` is built per
+  column inside the generation job and must not double in width for a 4 Hz audio read; `BiomeSelection`'s
+  weight walk and bearing walk are one shared loop, affordable because neither entry point runs in that job.
+  Beds are placed at a fixed radius with `minDistance` set to match, so the source pans without being
+  re-gained and §5.3's mix arithmetic still describes what is heard. **S6:** `BiomeBase.ambientLoop` became
+  `AmbienceTrack[] ambientTracks`, picked by weighted roulette over the tracks eligible at the listener's
+  altitude and re-rolled when the rest cycle wakes; the six Standard assets were migrated from a mapping
+  captured before the field was removed, and verified by reading the files back from disk. Suites: Sound
+  Engine 31→35, Biome Selection 15→17, `Validate All` 625→631 across 27 suites. **§10's own verification
+  claim was wrong and is corrected in place**: `|offset| == Distances[i]` is invariant under a sign flip and
+  an axis swap, so it cannot catch the wrong reference frame it was filed to catch — a step-along-the-bearing
+  assertion does, and the two mutations that separate them are recorded there. Both phases confirmed in game
+  the same evening; S5's placement defaults were **wrong on first hearing** and were retuned from
+  `spatialBlend` 0.7 / `spread` 120° to **1.0 / 0°**, in the scene as well as in code — see §10.
 
 * **v1.6** - S2's runtime shipped (2026-08-29): `AudioContext`, the pure `AmbienceResolution` decision layer,
   `AmbienceDatabase`, `ambientLoop`/`musicPool` on `BiomeBase`, an `AmbienceDirector` running a four-source bed
