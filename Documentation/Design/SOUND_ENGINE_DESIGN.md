@@ -7,7 +7,7 @@ channel, the shared `BlockSoundDatabase`, the BlockEditor dropdown and prefill, 
 pooled one-shot voices and the break / place / footstep triggers all exist; the `AudioMixer` is authored
 with its seven exposed volume parameters; two CC0 packs supply content, so all 13 sounding materials have
 break and step clips. Footsteps sample two cells, so wading and cross-mesh flora sound (§5.1). The
-`Validate Sound Engine` suite guards the resolution chain and the ambience decisions (30 baselines).
+`Validate Sound Engine` suite guards the resolution chain and the ambience decisions (31 baselines).
 **S2's runtime shipped on 2026-08-29** — `AudioContext`, the `AmbienceResolution` decision layer, the
 `AmbienceDirector` bed pair with its cave layer, the `MusicScheduler` and the underwater low-pass — on top of
 the §6.2 managed biome query, which shipped the same day and is guarded by its own `Validate Biome Selection`
@@ -430,6 +430,16 @@ it (10 `S2` baselines); the audible result stays an in-game judgment.
   a lower default on the Ambient slider, for the same reason `BlockSoundGroup.volume` is one — the pack is
   mastered hot relative to the block one-shots, which is a fact about the clips. A slider default would
   leave 100% meaning "too loud" and would never reach a settings file that already exists.
+- **Depth gate:** the biome beds fade out entirely as the listener descends below the terrain surface,
+  tapering to silence past an authored depth. Distinct from the cave duck and needed alongside it, because
+  sky exposure alone cannot tell a deep cavern from a covered shed — both read zero, so a layer keyed only on
+  exposure left the surface bed playing at the cave duck's leftover share far underground. Depth comes from
+  `World.TryGetSurfaceHeight`, a free read of the per-column heightmap the lighting system already maintains;
+  the stronger of the two ducks applies rather than the two compounding, since in a deep cave the cave bed is
+  fading in *because* the listener is deep. The cave duck is **1** — a fully committed cave bed leaves no
+  surface bed behind at all. At 0.7 it left 30% playing, which is audible as birdsong in a dark cave and was
+  the shape of the original complaint; the depth gate does not reach that case on its own, because a cave
+  twelve blocks down is barely into the taper.
 - **Cave ambience:** a sustained underground reading fades in a cave bed and ducks the biome bed. The
   test is a **threshold** (`SkylightAtHead <= caveMaxSkylight`, authored at 0) rather than a strict
   `== 0`, so an overhang or a one-block shaft does not disqualify a space that plainly reads as a cave,
@@ -709,6 +719,16 @@ contemporaneous notes.*
   `fluidType`, at the cost of cell-level rather than surface-level precision. Also corrects two stale counts the
   header carried (the Sound Engine suite was 14 baselines, not 13; Biome Selection is 12, not 10). **Content is
   deliberately not part of this**: no bed or track is imported, so the layer ships silent.
+* **v1.7b** - `/sound` console readout added and the cave duck raised to 1 (2026-08-29). The depth gate alone
+  did not close the complaint: at ~11 blocks down the taper has barely started, so `_caveDuck` at 0.7 was still
+  the binding multiplier and left the biome bed at 30% under a fully committed cave bed. `/sound` exists
+  because that took arithmetic to work out from a symptom — the bed gain is the product of five independent
+  multipliers, and it now prints each of them plus which duck is binding. Command count 15→16, Command Console
+  suite gains B33.
+* **v1.7a** - Added the depth gate (2026-08-29), from in-game feedback that a biome bed stayed audible deep
+  underground: `_caveDuck` at 0.7 left the surface bed at 30% by construction, and the cave layer's sky-exposure
+  signal cannot distinguish a cavern from a roof. `AmbienceResolution.DepthDuck` + `World.TryGetSurfaceHeight`
+  read the lighting heightmap for a true depth-below-surface, tapered so a cave mouth still blends. Suite 30→31.
 * **v1.7** - Ambience became a weighted mix of the surrounding biomes rather than a selection of one
   (2026-08-29), from in-game feedback that a shoreline switched instead of blending. `SelectWeights` +
   `TryGetBiomeWeights` expose the cellular neighbourhood `BiomeBlender` was already computing for terrain;
@@ -773,7 +793,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-29 (ambience became a weighted biome mix + rest cycle; music content still outstanding)  
+**Last Updated:** 2026-08-29 (weighted biome mix + rest cycle + depth gate; music content still outstanding)  
 **Next Review:** when S2's music content or S3 is scheduled. S2's runtime and its ambience beds are done and
 need no further design work — what remains is a music pool under §9. S3 must re-verify the §5.2 scan against the fluid
 tick as re-architected by the TG-4 arc (see
