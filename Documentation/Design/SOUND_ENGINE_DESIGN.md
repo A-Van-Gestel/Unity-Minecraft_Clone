@@ -1,15 +1,19 @@
 # Sound Engine Design
 
-**Version:** 1.5  
+**Version:** 1.6  
 **Date:** 2026-08-29  
-**Status:** **Partially implemented — S0 and S1 shipped and confirmed in game.** The `SoundMaterial`
+**Status:** **Partially implemented — S0, S1 and S2's runtime shipped.** The `SoundMaterial`
 channel, the shared `BlockSoundDatabase`, the BlockEditor dropdown and prefill, the volume settings, the
 pooled one-shot voices and the break / place / footstep triggers all exist; the `AudioMixer` is authored
 with its seven exposed volume parameters; two CC0 packs supply content, so all 13 sounding materials have
 break and step clips. Footsteps sample two cells, so wading and cross-mesh flora sound (§5.1). The
-`Validate Sound Engine` suite guards the resolution chain (13 baselines). **S2's one hard prerequisite — the
-§6.2 managed biome query — shipped and confirmed in game on 2026-08-29** and is guarded by its own `Validate Biome Selection` suite
-(10 baselines); S2 itself is still outstanding, as are S3 and the remainder of S4.  
+`Validate Sound Engine` suite guards the resolution chain and the ambience decisions (30 baselines).
+**S2's runtime shipped on 2026-08-29** — `AudioContext`, the `AmbienceResolution` decision layer, the
+`AmbienceDirector` bed pair with its cave layer, the `MusicScheduler` and the underwater low-pass — on top of
+the §6.2 managed biome query, which shipped the same day and is guarded by its own `Validate Biome Selection`
+suite (15 baselines). **Ambience content is in (§9): six CC0 loops cover the cave bed, the fallback bed and
+four of the six biomes.** Music has no content yet, so the scheduler runs and picks nothing. S3 and the
+remainder of S4 are still outstanding.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > Design for the VoxelEngine's audio system: block sounds (break / place / step), fluid and
@@ -20,8 +24,8 @@ break and step clips. Footsteps sample two cells, so wading and cross-mesh flora
 > Burst-job-produces / main-thread-consumes).
 >
 >
-> Status: **S0 + S1 shipped** (2026-08-28), plus S4's two-cell footstep sampling (2026-08-29); S2, S3 and the
-> rest of S4 outstanding. Section 2's "current state" table describes
+> Status: **S0 + S1 shipped** (2026-08-28), S4's two-cell footstep sampling and **S2** — runtime and
+> ambience content — (2026-08-29); S2's *music* content, S3 and the rest of S4 outstanding. Section 2's "current state" table describes
 > the project *before* that work — it is kept as the historical audit it was written as.
 
 **Audited:** 2026-07-03, at commit `2dde457` (branch `main`).
@@ -78,7 +82,7 @@ biome data model (`BiomeBase` / `StandardBiomeAttributes`, `BiomeBlender`).
 
 | Area             | State                                                                                                                                                                                                                                                                                                                                                                 |
 |------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Audio code       | **None.** No `AudioSource`/`AudioClip`/mixer usage anywhere in `Assets/Scripts/`.                                                                                                                                                                                                                                                                                     |
+| Audio code       | **None** at audit time. No `AudioSource`/`AudioClip`/mixer usage anywhere in `Assets/Scripts/`.                                                                                                                                                                                                                                                                                     |
 | Block data       | `BlockType` (serializable class) inside `BlockDatabase.asset`, authored via the BlockEditor window; `BlockTagPreset` assets as authoring helpers; `BlockIDs` auto-generated constants.                                                                                                                                                                                |
 | Tags             | `BlockTags : uint` — 17 flags used of 32. Material flags (`SOIL`, `WOOD`, `PLANT`, `LEAVES`, `ROCK`, `MINERAL`, `ORGANIC`) carry a comment "for tools, sounds, interactions" but were never consumed by audio. The recent worldGen/placement split affected only the two `canReplaceTags` masks; the base `tags` mask is shared by placement, fluids, and raycasting. |
 | Break/place path | `PlayerInteraction` → `World.AddModification(VoxelMod)` (`World.cs:1807`), with `VoxelModSource.Live` vs `WorldGen` already distinguishing player edits from generation.                                                                                                                                                                                              |
@@ -321,9 +325,12 @@ an immediate step (slightly louder) and resets the accumulator.
 > Deliberately deferred rather than fixed here — there is no swimming *mechanic* to sound
 > ([`../Bugs/FLUID_BUGS.md`](../Bugs/FLUID_BUGS.md) §02 "No player effect": no buoyancy or swimming
 > simulation, fluids are merely non-solid), and strokes would want their own clips distinct from walking and
-> wading. Independently, `Assets/Scripts/Physics/` computes **no** liquid contact state at all, which is what
-> leaves `AudioContext.Submerged` (§5.3) and the §7 underwater snapshot without a source — an `S2`
-> prerequisite, not a footstep one.
+> wading. `Assets/Scripts/Physics/` still computes **no** liquid contact state at all — but that turned out not to
+> block `AudioContext.Submerged` (§5.3): S2 reads the block filling the listener's head cell and asks whether its
+> `fluidType` is anything but `None`, the same read-only posture footsteps already take. The prerequisite this
+> section recorded was real for the *footstep* case and overstated for the submerged one. What the cell-level read
+> costs is precision at the surface: a fluid voxel is only partly filled, so a head just under the waterline reads
+> dry until it enters the cell below.
 
 **Directionality** is free: 3D sources + the `AudioListener` on the player camera.
 
@@ -361,36 +368,77 @@ existing benchmark-harness pattern.
 Cost is bounded and independent of fluid activity (the scan volume is constant); the simulation
 is untouched. This is the highest-effort layer and ships **last** (§8).
 
-### 5.3 Layer 3 — world-layer ambience & music
+### 5.3 Layer 3 — world-layer ambience & music ✅ *runtime shipped 2026-08-29*
 
 2D (non-spatial) layered sources with slow crossfades, driven by an **`AudioContext`** snapshot
-sampled ~1/s at the listener:
+sampled at the listener.
 
-```csharp
-public struct AudioContext
-{
-    public byte BiomeIndex;      // §6.2 — dominant biome at the listener
-    public byte SkylightAtHead;  // 0–15; low ⇒ underground
-    public bool Submerged;       // head in fluid ⇒ underwater snapshot (§7)
-    // Future inputs — reserved, not implemented:
-    // public float TimeOfDay;   // RF-1
-    // public byte Weather;      // RF-7
-}
-```
+**As shipped.** `AudioContext` is a `readonly struct` carrying `BiomeIndex`, the resolved `BiomeBase`,
+`HasBiome`, `SkylightAtHead` and `Submerged`, with the RF-1/RF-7 seats reserved as comments. Four
+decisions differ from the sketch above, each for a reason worth keeping:
 
-Design the struct now so RF-1/RF-7 *plug in* rather than bolt on; v1 populates biome + sky light
+- **`BiomeIndex` is an `int`, not a `byte`.** The query answers in `int`; a cast at the call site
+  would be a truncation waiting for the biome list to grow.
+- **The struct carries the biome *asset*, not only its index.** Bed and pool selection read the
+  authored clips directly rather than each re-deriving a lookup — the same reason `BiomeSample` does it.
+- **`HasBiome` is a field of its own.** The legacy generator's `TryGetBiomeAt` returns false for a whole
+  session, and "no biome answer" must select the fallback bed rather than degrade to silence.
+- **Sky light is read from the stored *exposure* channel, never `World.GetEffectiveSkylight`.** The
+  effective value is time-darkened, so since RF-1 shipped it falls to zero across the whole open surface at
+  night — keying the cave bed off it would fade caves in over the entire world every evening. §6.1's claim
+  that sky light is a "free, already-correct underground signal" holds only for the exposure channel.
 
-+ submerged only.
+`SoundManager` owns the sampling and publishes `Context` once, rather than each consumer running its own
+timer: the beds, the scheduler and the underwater filter have to agree about where the listener is, and
+independent timers disagree at exactly the moments that matter — a cave mouth, a shoreline, a biome border.
+It holds the `AmbienceDatabase` for the same reason — one slot to wire, so the two consumers cannot end up
+half-wired with the beds working and music silently missing its fallback pool.
 
-- **Biome ambience beds:** `BiomeBase` gains optional audio fields (`AudioClip ambientLoop`,
-  `AudioClip[] musicPool`) — ScriptableObjects are the natural home, mirroring how biomes already
-  carry generation parameters. Crossfade beds over ~2–4 s on biome change (with a short
-  hysteresis so border-strolling doesn't flap).
-- **Cave ambience:** `SkylightAtHead == 0` (sustained for a few seconds) fades in a cave bed and
-  ducks the biome bed — the sky-light value is a free, already-correct "underground" signal.
-- **Music scheduler:** deliberately simple v1 — pick a random clip from the context's pool, play,
-  then wait a randomized silence gap (e.g. 3–8 min); re-resolve the pool at each pick so biome
-  changes influence the *next* track, never interrupt the current one.
+All of the selection arithmetic lives in the pure `AmbienceResolution` layer, which is why the suite can pin
+it (10 `S2` baselines); the audible result stays an in-game judgment.
+
+- **Biome ambience beds — a weighted mix, not a selection:** `BiomeBase` carries `AudioClip ambientLoop`
+  and `AudioClip[] musicPool`; `AmbienceDirector` owns a roster of four bed sources, each running **its own
+  fade**, and drives every one of them from `BiomeWeights` (§6.2) rather than from a single chosen biome.
+  Each contributing biome's bed targets its share of the mix, so standing on a shore keeps the ocean audible
+  and quiet under the forest instead of switching between them one block apart. Gain is `√fade`, so two beds
+  handing over — holding complementary fades — sum to **constant power**; a linear amplitude pair dips
+  audibly at the midpoint.
+  <br>
+  Three rules the mix resolution applies, each guarding a defect that is inaudible as a bug and obvious as a
+  symptom: contributors below a floor are **dropped and the rest renormalized** (otherwise a 2% neighbour
+  quietly ducks everything else by 2%); biomes resolving to the **same clip merge onto one source**
+  (two sources playing one loop flange rather than layer — the rule `SoundResolution` already applies to a
+  footstep's two cells); and a world with **no weighted answer** falls back to a single default bed rather
+  than to silence, which is the legacy generator's whole session.
+  <br>
+  Independent per-source fades rather than one shared crossfade timer, because a paired timer has no answer
+  for a change arriving *before the previous handover finished*: whichever source the pair reassigns gets cut
+  at whatever gain it happened to hold. With per-source fades that case is ordinary — a bed the listener
+  moves back toward is still playing, so its target simply rises again from where it had reached.
+  <br>
+  **No debounce.** Ambience does not read `BiomeTracker.Current`: a weight moves continuously with the
+  listener (measured at ≤0.005 per block), so there is no jump to debounce, and a dwell would only delay a
+  change that was never abrupt. The tracker's 3 s hysteresis still serves what it was built for — the biome
+  readout and RF-7, where a flickering name is worse than a late one.
+- **Rest cycle:** the bed layer alternates audible and silent stretches on randomized durations, so
+  ambience has quiet in it rather than running continuously. Layer-wide rather than per bed: the mix already
+  varies with the listener's position, and a second independent variation per source reads as randomness
+  rather than as the world going quiet. The **cave bed is never gated** — a cave that falls silent reads as
+  broken, not restful.
+- **Bed level:** `AmbienceDatabase.BedVolume` trims every bed before the category gain. A content trim, not
+  a lower default on the Ambient slider, for the same reason `BlockSoundGroup.volume` is one — the pack is
+  mastered hot relative to the block one-shots, which is a fact about the clips. A slider default would
+  leave 100% meaning "too loud" and would never reach a settings file that already exists.
+- **Cave ambience:** a sustained underground reading fades in a cave bed and ducks the biome bed. The
+  test is a **threshold** (`SkylightAtHead <= caveMaxSkylight`, authored at 0) rather than a strict
+  `== 0`, so an overhang or a one-block shaft does not disqualify a space that plainly reads as a cave,
+  and it rides its own dwell filter so a cave mouth cannot flap the layer.
+- **Music scheduler:** deliberately simple — pick a track from the context's pool, play, then wait a
+  randomized silence gap; re-resolve the pool at each pick so biome changes influence the *next* track,
+  never interrupt the current one. The repeat guard compares the **clip**, not the index it sat at: the pool
+  changes with the biome, so an index carried across pools names a different track. It then steps to the
+  neighbouring index rather than re-rolling, since a re-roll can repeat — with a two-track pool, half the time.
 - **Wind in grass/trees:** v1 = a biome ambient loop whose volume is modulated by listener sky
   exposure (already in the context). An honest per-tree emitter version would be a `LEAVES`
   emitter kind in the §5.2 scan — deferred.
@@ -416,8 +464,16 @@ one is assigned and is applied per source when one is not, so the mixer asset ca
 without a code change. Sliders map linearly 0–1 → dB via the standard `20 * log10(x)` conversion with a
 floor at −80 dB.
 
-**Underwater:** `AudioContext.Submerged` drives an `AudioMixer` snapshot transition applying a
-low-pass on everything except UI — cheap and dramatic.
+**Underwater ✅ shipped, but not as a snapshot.** `AudioContext.Submerged` drives an `AudioLowPassFilter`
+on each non-UI source — the one-shot voices, the ambience beds and the music source — swept between a dry and a
+wet cutoff over a short fade. A mixer snapshot was the original design and was **not** built: the mixer asset
+carries a single snapshot and no effects, authoring one needs editor API the §5.4 setup tool does not cover, and a
+per-source filter keeps the whole layer mixer-optional exactly as `AudioVolumes` already is. `SoundManager` owns
+the fade and hands the cutoff out through `ApplySubmersionFilter`, so every source muffles together; the filters
+are **disabled** while dry rather than parked at a transparent cutoff, so a state the player is almost never in
+costs no DSP block per voice. The sweep interpolates in **log space** — a linear ramp from 22 kHz to 900 Hz spends
+nearly all its travel in a range the ear cannot distinguish, then slams shut at the end. A snapshot remains a
+valid later refactor and would change no calling code.
 
 ---
 
@@ -463,7 +519,23 @@ Already queryable per-voxel — no work needed beyond a helper on `SoundManager`
 > Ambience selection reads `Index`, so S2 is unaffected; the caveat matters only if something later tries
 > to use `SurfaceIndex` as ground truth for the block underfoot (read the voxel instead).
 
-`AudioContext.BiomeIndex` (§5.3) is now a read of `BiomeTracker.Current.Index`. Note the field is a
+**Weighted neighbourhood (added 2026-08-29).** `IChunkGenerator.TryGetBiomeWeights(voxelX, voxelZ,
+falloffRadius, out BiomeWeights)` answers *what is around this column*, where `TryGetBiomeAt` answers what it
+sits in. `BiomeSelection.SelectWeights` walks the cellular neighbourhood `FastNoiseLite.GetCellularEdgeData`
+already returns, maps each cell through the shared `IndexFromCellHash`, and accumulates **per biome** — 25
+cells routinely share a handful of biomes, and a per-biome consumer wants one weight each. It is deliberately
+*not* `BiomeBlender`'s terrain weighting: that one is tuned per biome (`BlendRadius`, `BlendWeight`,
+`BlendCurve`) to shape how landforms bleed together, and coupling the two would make retuning a mountain's
+silhouette silently retune what the player hears.
+
+That fold is what put `IndexFromCellHash` in `BiomeSelection` at all: `BiomeBlender` carried a private copy
+of the mapping, an eighth survivor of the seven the helper originally replaced. Because it runs per column in
+the generation job and no suite covered blended height, the fold was gated by a **terrain-height golden
+captured before it** (`Validate Biome Selection` B13, 1920 rows, bit-identical after) rather than by
+inspection. B14 pins that the weighted primary agrees with `SelectIndex` on every sampled column, and B15
+that no biome's weight moves more than 0.15 per block — the property the beds' smoothness rests on.
+
+`AudioContext.BiomeIndex` (§5.3) is a read of `BiomeTracker.Current.Index`. Note the field is a
 `byte` in the §5.3 sketch while the query returns `int` — widen the struct field when S2 is written
 rather than casting at the call site.
 
@@ -506,20 +578,27 @@ job and the managed query) and is seed-safe by construction.
 |---------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|-------------------|
 | **S0 — Data foundation** ✅ | `SoundMaterial` enum, `BlockSoundGroup`/`BlockSoundDatabase`, `BlockType.soundMaterial` + `BlockTagPreset` field, BlockEditor dropdown, prefill utility, mixer asset + settings wiring (§5.4). Credits plumbing (§9): append `Audio` to `CreditCategory`, "🔊 Audio" section in `REFERENCES_AND_CREDITS.md` + `CreditsDatabase` entries per imported pack. |   🟢   | —                 |
 | **S1 — One-shots** ✅       | `SoundManager` + pooled 3D sources, break/place hooks in `PlayerInteraction`, footsteps in the player controller.                                                                                                                                                                                                                                          |   🟢   | S0                |
-| **S2 — Ambience & music** | `AudioContext`, biome audio fields on `BiomeBase`, managed biome query (§6.2 option a), beds + crossfades, cave ambience, music scheduler, underwater snapshot.                                                                                                                                                                                            |   🟡   | S0; §6.2 ✅        |
+| **S2 — Ambience & music** ✅ | **Shipped 2026-08-29.** Runtime: `AudioContext` + the pure `AmbienceResolution` layer, `AmbienceDatabase`, biome audio fields on `BiomeBase`, `AmbienceDirector` (four-source bed roster weighted by `BiomeWeights` + rest cycle + cave layer + duck), `MusicScheduler`, per-source underwater low-pass, 16 suite baselines. Ambience content imported (§9): 6 CC0 loops covering the cave bed, the fallback bed and 4 of 6 biomes. **Music content outstanding** — the scheduler runs and finds an empty pool. |   🟡   | S0; §6.2 ✅        |
 | **S3 — Fluid emitters**   | Burst emitter scan job, clustering, looping emitter pool with fades.                                                                                                                                                                                                                                                                                       |   🟡   | S1 (pool infra)   |
 | **S4 — Later**            | **Two-cell footstep sampling** ✅ (occupied cell + supporting cell, a non-solid occupant layered over the support — see the §5.1 note; shipped 2026-08-29). Still open: ungrounded/swimming steps (deferred — no swimming mechanic exists, `FLUID_BUGS.md` §02), v2 apply-site break/place hook (`VoxelModSource.Live` filter), hit/mining sounds, weather (RF-7), time-of-day (RF-1), `LEAVES` wind emitters.                                                                                                                                                                                                              |   —    | feature-gated     |
 
 S0+S1 alone deliver the largest perceived-quality jump (block feedback + footsteps) and validate
 the whole data model; S2 and S3 are independent of each other and can land in either order.
 
+**S2's remaining half is music content.** The bed layer is authored (§9); the scheduler is not, and finds an
+empty pool at every pick. Filling `AmbienceDatabase.DefaultMusicPool` and the per-biome `musicPool` fields
+touches no code — but the §9 policy makes music the slower half, since the candidate sources need per-pack
+licence clearance (and, for two of them, an email) where the ambience beds did not.
+
 **Validation is built alongside, not after**: this is a core system, so each phase adds
 its baselines to a `Validate Sound Engine` editor suite in the established validation-suite style
 as the phase lands — S0 pins the resolution chain (material → group → clip pick, place→break
 fallback, prefill heuristic output), S1 pins trigger-site decisions (which material/event a given
 break/place/step resolves to — assertable without playing audio, extended by S4's two step baselines: the
-sampled cell pair and the occupant layering rule), S2 pins the `AudioContext`
-derivation and biome-query parity (§6.2: managed helper vs. job path bit-identical), S3 pins the
+sampled cell pair and the occupant layering rule), S2 pins the ambience decisions — the cave dwell, bed and music-pool selection including both fallback
+holes, the bed roster's slot choice and per-source fade convergence, the constant-power gain identity, the duck,
+the submersion test and its log-space cutoff sweep, and the scheduler's gap and clip-based no-repeat pick
+(biome-query parity is pinned separately by `Validate Biome Selection`, §6.2) — S3 pins the
 scan/cluster output (candidate sets and cluster centroids for fixture worlds). The audible layer
 on top stays verified in-game, as with every other suite.
 
@@ -536,6 +615,25 @@ on top stays verified in-game, as with every other suite.
 
 Clip content comes from free/CC0 sources; `BlockSoundDatabase` isolates content from
 architecture, so clips can be swapped or upgraded at any time without code changes.
+
+**Ambience beds (2026-08-29):** [NOX Sound — Essentials Series (Nature)](https://www.asoundeffect.com/sounddesigner/nox-sound/),
+**CC0** under the same series README as the footsteps pack, 6 of its 18 loops under
+`Assets/Audio/Ambience/nox_nature/`: `Cave_Dark` (cave bed), `Wind_Calm` (fallback bed), `Sea` (Ocean),
+`Forest_Birds` (Forrest), `Cicadas` (Grasslands), `Wind_Forest` (Steep Grasslands). Mountain and Desert
+deliberately ride the fallback rather than inventing a distinction — an exposed peak and a desert both read as
+wind. Kept **stereo** and imported as **Streaming**, which is why `BlockAudioImportPostprocessor` now carries two
+profiles: the mono / decompress-on-load one-shot profile for `Assets/Audio/Blocks/`, and a stereo / streaming
+profile for `Assets/Audio/Ambience/`. Forcing a 2D bed to mono would discard the stereo image that makes it a
+bed, and decompressing a 30 s stereo loop holds megabytes of PCM resident for no benefit.
+
+The pack's other 12 loops are earmarked but **not** imported: rain ×2 → RF-7, `Night` → RF-1, the three fire
+loops (already mono, right for 3D emitters) and the four river/stream/waterfall loops → S3. Two further NOX
+packs sit beside it in the same download — `Iceland_Flows` (23 loops) and `São Miguel Flows` (14) — both strong
+S3 material, but they are **separately branded, outside the Essentials Series, and carry their own datasheet**,
+so §9's per-pack rule means each needs its own licence check before import.
+
+**No music content is imported yet.** The music sources below carry the heaviest verification burden, which is
+why the beds shipped ahead of them rather than waiting.
 
 **Shipped content (2026-08-28):** [Kenney — Impact Sounds](https://kenney.nl/assets/impact-sounds) v1.0,
 **CC0**, 75 of its 130 clips under `Assets/Audio/Blocks/kenney_impact/`, covering 12 of the 14 `SoundMaterial` groups
@@ -595,6 +693,41 @@ attached license" source.
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.6** - S2's runtime shipped (2026-08-29): `AudioContext`, the pure `AmbienceResolution` decision layer,
+  `AmbienceDatabase`, `ambientLoop`/`musicPool` on `BiomeBase`, an `AmbienceDirector` running a four-source bed
+  roster under a dwell-filtered cave layer, a `MusicScheduler`, and a per-source underwater low-pass; the suite
+  grew from 14 to 27 baselines. The bed layer is **per-source fades, not a paired crossfade** — a review found the
+  paired form hard-cut an audible source whenever a change arrived mid-handover, which no amount of remapping
+  fixes for three beds; independent fades make the returning-bed case ordinary and reduce the interrupt to a
+  four-deep pile-up. The music repeat guard likewise compares clips rather than pool indices, since the pool is
+  re-resolved per pick. Four design points changed against the sketch, and all four are recorded in §5.3 and §5.4 rather
+  than only in code: `BiomeIndex` widened to `int` and the struct now carries the biome asset and a `HasBiome`
+  flag; the cave layer keys off **stored sky exposure**, because the effective value RF-1 introduced falls to zero
+  across the whole surface at night; the bed crossfade is constant power; and the underwater treatment is a
+  per-source filter, **not** the mixer snapshot the design called for (the mixer has one snapshot and no effects).
+  §5.1's "no liquid contact state" note is corrected: it blocked nothing — submersion is a read of the head cell's
+  `fluidType`, at the cost of cell-level rather than surface-level precision. Also corrects two stale counts the
+  header carried (the Sound Engine suite was 14 baselines, not 13; Biome Selection is 12, not 10). **Content is
+  deliberately not part of this**: no bed or track is imported, so the layer ships silent.
+* **v1.7** - Ambience became a weighted mix of the surrounding biomes rather than a selection of one
+  (2026-08-29), from in-game feedback that a shoreline switched instead of blending. `SelectWeights` +
+  `TryGetBiomeWeights` expose the cellular neighbourhood `BiomeBlender` was already computing for terrain;
+  the bed roster drives one source per contributing biome at its share of the mix, merging biomes that
+  resolve to the same clip and renormalizing after dropping sub-threshold ones. The `BiomeTracker` dwell was
+  **removed from the ambience path** — a continuous weight has no jump to debounce — which also closed the
+  "previous biome still audible deep into the new one" complaint. Added a layer-wide rest cycle so ambience
+  has silence in it (cave bed exempt), and an `AmbienceDatabase.BedVolume` content trim at 0.35, chosen over
+  a lower slider default because the pack is mastered hot and a default would not reach existing settings.
+  Getting there needed the eighth copy of the cell-hash→index mapping folded onto `BiomeSelection`, which
+  touches per-column generation code: gated by a **terrain-height golden captured beforehand** (B13, the
+  first coverage blended height has ever had) and proven non-vacuous by mutation. Suites: Sound Engine 27→30,
+  Biome Selection 12→15.
+* **v1.6a** - Ambience content imported (2026-08-29): 6 CC0 loops from NOX Sound's Nature Essentials fill
+  the cave bed, the fallback bed and four of the six biomes, so S2 is no longer silent.
+  `BlockAudioImportPostprocessor` gained a second profile — its `AUDIO_ROOT` covered the whole audio tree and
+  would have forced these beds to mono and decompress-on-load, which is correct for 3D one-shots and wrong for
+  2D loops in both respects. `convert_audio_pack.py` gained `--stereo` and `--flat` for the same reason. Music
+  content is still outstanding.
 * **v1.5** - Footsteps became sub-voxel aware (2026-08-29, confirmed in game), fixing a bug the §5.1 note had recorded as
   correct design: the support cell was always one below the occupied one, so standing on a half slab sounded
   the block *under* the slab. `SoundResolution` gained `OccupantCarriesFeet` + `ResolveStep`, reading the
@@ -640,9 +773,9 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-29 (S4's two-cell footstep sampling shipped; §5.1 limitation closed)  
-**Next Review:** when S2 or S3 is scheduled. S2 no longer needs to build the §6.2 biome query (shipped), but
-must still decide where liquid contact state lives, since that does not exist. S3 must re-verify the §5.2 scan against the fluid
+**Last Updated:** 2026-08-29 (ambience became a weighted biome mix + rest cycle; music content still outstanding)  
+**Next Review:** when S2's music content or S3 is scheduled. S2's runtime and its ambience beds are done and
+need no further design work — what remains is a music pool under §9. S3 must re-verify the §5.2 scan against the fluid
 tick as re-architected by the TG-4 arc (see
 [`../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`](../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md))
 and settle the missing fluid-presence flag.

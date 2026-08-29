@@ -95,6 +95,30 @@ including the three-step permission rule for "free to download but no attached l
       Vorbis (9x smaller) with `Tools/Python/convert_audio_pack.py`; the unconverted pack stays outside the
       repository.
 
+* [**Essentials Series (Nature)**](https://www.asoundeffect.com/sounddesigner/nox-sound/) by **NOX_SOUND**
+    * *License:* CC0 (Public Domain) — the same `Essentials_Series_README.pdf` that covers the footsteps
+      pack above, which sits at the download's root and states *"All these sounds are under CC0 license."*
+    * *Files used:* 6 of the pack's 18 ambience loops — `Ambiance_Cave_Dark_Loop_Stereo`,
+      `Ambiance_Wind_Calm_Loop_Stereo`, `Ambiance_Sea_Loop_Stereo`, `Ambiance_Forest_Birds_Loop_Stereo`,
+      `Ambiance_Cicadas_Loop_Stereo`, `Ambiance_Wind_Forest_Loop_Stereo`.
+    * *Source:* `Assets/Audio/Ambience/nox_nature/`
+    * *Notes:* S2's world-ambience beds — the cave bed and the fallback bed on `AmbienceDatabase.asset`,
+      and the per-biome beds on Ocean, Forrest, Grasslands and Steep Grasslands. Converted from 24-bit/48 kHz
+      WAV to OGG Vorbis (16x smaller) with `Tools/Python/convert_audio_pack.py --stereo --flat`. Kept
+      **stereo** and imported as **Streaming**, unlike the mono decompress-on-load block one-shots: these
+      play from 2D sources where the stereo image is the point, and a 30 s stereo loop would otherwise hold
+      megabytes of PCM resident. The remaining 12 loops (rain, night, fire, river/stream/waterfall) are
+      earmarked for RF-7, RF-1 and S3 respectively but are not imported.
+
+> [!NOTE]
+> **Licence scope for every NOX Sound pack.** All of them arrived in one download from the same itch.io
+> page, with `Essentials_Series_README.pdf` at its root stating *"All these sounds are under CC0 license."*
+> That one file is the licence artifact for the whole set — including the packs whose folders do not carry
+> "Essentials" branding (`Iceland_Packs_NOX_SOUND`, `São Miguel Flows`). Their own `DOCS` carry **no licence
+> text**: the São Miguel datasheet is a file listing, format table, linktree and gear note, nothing more, and
+> the Iceland folder holds only the recordist's location photographs. Recorded explicitly because §9's
+> per-asset rule would otherwise send a future reader looking for a per-pack licence that does not exist.
+
 ## ✒️ Fonts
 
 * [**Monocraft**](https://github.com/IdreesInc/Monocraft) by [IdreesInc](https://github.com/IdreesInc)
