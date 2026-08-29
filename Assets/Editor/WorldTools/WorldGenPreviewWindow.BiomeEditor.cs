@@ -23,7 +23,7 @@ namespace Editor.WorldTools
 
         private static readonly string[] s_beSubTabLabels =
         {
-            "Terrain", "Surface & Strata", "Blending", "Caves & Lodes", "Flora",
+            "Terrain", "Surface & Strata", "Blending", "Caves & Lodes", "Flora", "Audio",
         };
 
         private static readonly GUIContent s_emptyLabel = new GUIContent(" ");
@@ -47,6 +47,12 @@ namespace Editor.WorldTools
         private bool _beShowSeaLevel = true;
         private bool _beShowBorders;
         private bool _beAutoGenerate = true;
+
+        /// <summary>Altitude the Audio sub-tab's roll preview reports at. Sea level is the useful default.</summary>
+        private int _beAudioPreviewY = 64;
+
+        /// <summary>Repaint pump that keeps the Audio sub-tab's play/stop buttons honest while a clip sounds.</summary>
+        private EditorApplication.CallbackFunction _previewRepaint;
 
         private void DrawBiomeEditorTab()
         {
@@ -98,6 +104,7 @@ namespace Editor.WorldTools
                 case 2: DrawBeBlendingSubTab(); break;
                 case 3: DrawBeCavesLodesSubTab(); break;
                 case 4: DrawBeFloraSubTab(); break;
+                case 5: DrawBeAudioSubTab(); break;
             }
 
             EditorGUILayout.EndScrollView();
@@ -614,6 +621,38 @@ namespace Editor.WorldTools
             }
 
             EditorGUILayout.Space(4);
+        }
+
+        #endregion
+
+        #region Sub-Tab: Audio
+
+        /// <summary>
+        /// Draws the biome's ambience beds and music pool (SOUND_ENGINE_DESIGN.md §11).
+        /// </summary>
+        /// <remarks>
+        /// Lives beside the terrain and flora sub-tabs rather than only in the Sound Editor because "what
+        /// should this place sound like" is a question asked while tuning a biome, not while auditioning a
+        /// clip library. The rows themselves are the shared
+        /// <see cref="AmbienceTrackListDrawer"/>, so the two surfaces cannot drift apart.
+        /// </remarks>
+        private void DrawBeAudioSubTab()
+        {
+            EditorUILayoutHelper.SectionHeader("Ambience");
+
+            AmbienceTrackListDrawer.DrawBiomeAudio(
+                _biomeSerializedObject.FindProperty("ambientTracks"),
+                _biomeSerializedObject.FindProperty("musicPool"),
+                ref _beAudioPreviewY,
+                "This biome authors no ambience track, so it falls back to the AmbienceDatabase's default " +
+                "bed. That is a valid state, not an error — but it means the biome sounds like everywhere " +
+                "else that has no bed.");
+
+            EditorGUILayout.Space();
+            EditorUILayoutHelper.SectionNote(
+                "The audible mix — biome weights, the cave duck, the depth gate and the bed bearings — is a " +
+                "runtime question. Use the in-game <b>/sound</b> readout for that; this tab authors the " +
+                "content it draws from.");
         }
 
         #endregion

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Data;
 using Data.WorldTypes;
 using Jobs.Data;
 using Libraries;
@@ -40,6 +41,13 @@ namespace Editor.WorldTools.Libraries
         private const int SUB_TAB_CAVES = 3;
 
         /// <summary>
+        /// The Audio sub-tab's index. Deliberately <b>appended</b> past Flora (4) rather than inserted: the
+        /// constants above are matched against a live <c>_beSubTabIndex</c>, so renumbering would silently
+        /// file every existing warning under the wrong tab.
+        /// </summary>
+        private const int SUB_TAB_AUDIO = 5;
+
+        /// <summary>
         /// Runs all validators against the given biome and returns any warnings.
         /// </summary>
         /// <param name="biome">The biome configuration to validate.</param>
@@ -63,6 +71,7 @@ namespace Editor.WorldTools.Libraries
             ValidateWormYAttraction(biome, results);
             ValidateTrunkTraversal(biome, results);
             ValidateWormMaskSeeking(biome, results);
+            ValidateAmbienceTracks(biome, results);
 
             return results;
         }
@@ -514,6 +523,106 @@ namespace Editor.WorldTools.Libraries
         /// </summary>
         /// <param name="config">The trunk worm configuration to validate. Null is treated as disabled (no warnings).</param>
         /// <returns>List of validation results, empty if no issues detected.</returns>
+        /// <summary>
+        /// Checks a biome's authored ambience tracks for the states that are silent rather than loud
+        /// (SOUND_ENGINE_DESIGN.md §11).
+        /// </summary>
+        /// <param name="biome">The biome configuration to validate.</param>
+        /// <param name="results">Receives any findings.</param>
+        /// <remarks>
+        /// Every one of these is legal at runtime and produces no error — the resolver falls back or skips.
+        /// That is exactly why they are worth surfacing while the biome is on screen: the Sound Engine suite's
+        /// census catches an unauthored bed on the next validation run, which is a red result tomorrow rather
+        /// than a warning now.
+        /// </remarks>
+        private static void ValidateAmbienceTracks(StandardBiomeAttributes biome, List<BiomeValidationResult> results)
+        {
+            if (biome.ambientTracks == null || biome.ambientTracks.Length == 0)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Info,
+                    SubTabIndex = SUB_TAB_AUDIO,
+                    Message = "No ambience track authored — this biome falls back to the AmbienceDatabase's " +
+                              "default bed, so it sounds like every other biome without one.",
+                });
+                return;
+            }
+
+            float totalWeight = 0f;
+            bool coversAnyAltitude = false;
+
+            for (int i = 0; i < biome.ambientTracks.Length; i++)
+            {
+                AmbienceTrack track = biome.ambientTracks[i];
+                totalWeight += Mathf.Max(0f, track.playChance);
+
+                if (track.clip == null)
+                {
+                    results.Add(new BiomeValidationResult
+                    {
+                        Severity = ValidationSeverity.Warning,
+                        SubTabIndex = SUB_TAB_AUDIO,
+                        Message = $"Track {i} has no clip — it is skipped, and the slot does nothing.",
+                    });
+                    continue;
+                }
+
+                float low = Mathf.Min(track.yRange.x, track.yRange.y);
+                float high = Mathf.Max(track.yRange.x, track.yRange.y);
+
+                if (high < 0f || low > VoxelData.ChunkHeight)
+                {
+                    results.Add(new BiomeValidationResult
+                    {
+                        Severity = ValidationSeverity.Warning,
+                        SubTabIndex = SUB_TAB_AUDIO,
+                        Message = $"Track {i} ('{track.clip.name}') spans Y {low:0}–{high:0}, entirely outside " +
+                                  $"the world's 0–{VoxelData.ChunkHeight} range, so it can never be selected.",
+                    });
+                    continue;
+                }
+
+                coversAnyAltitude = true;
+
+                for (int j = 0; j < i; j++)
+                {
+                    if (biome.ambientTracks[j].clip != track.clip) continue;
+
+                    results.Add(new BiomeValidationResult
+                    {
+                        Severity = ValidationSeverity.Info,
+                        SubTabIndex = SUB_TAB_AUDIO,
+                        Message = $"Tracks {j} and {i} both play '{track.clip.name}'. That is only useful if " +
+                                  "their altitude bands differ — otherwise it just doubles the clip's weight.",
+                    });
+                    break;
+                }
+            }
+
+            if (!coversAnyAltitude)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Warning,
+                    SubTabIndex = SUB_TAB_AUDIO,
+                    Message = "No authored track is reachable at any altitude in this world — the biome is " +
+                              "silent apart from the fallback bed.",
+                });
+            }
+
+            if (totalWeight <= 0f && biome.ambientTracks.Length > 1)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Info,
+                    SubTabIndex = SUB_TAB_AUDIO,
+                    Message = "Every play chance is zero, so the tracks are picked evenly. Set relative " +
+                              "weights if one should surface less often than the others.",
+                });
+            }
+        }
+
         public static List<BiomeValidationResult> ValidateTrunkWormConfig(TrunkWormConfig config)
         {
             List<BiomeValidationResult> results = new List<BiomeValidationResult>();
