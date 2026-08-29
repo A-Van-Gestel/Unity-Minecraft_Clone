@@ -4,6 +4,7 @@ using Audio;
 using Data;
 using Data.Enums;
 using Editor.Validation.Framework;
+using Physics;
 using UnityEngine;
 
 namespace Editor.Validation.SoundEngine
@@ -31,6 +32,8 @@ namespace Editor.Validation.SoundEngine
             scenarios.Add(new Scenario("Pitch Stays Inside The Group's Envelope", RunPitchEnvelope));
             scenarios.Add(new Scenario("Event Hash Separates Materials And Events", RunEventHash));
             scenarios.Add(new Scenario("Step Samples The Occupied Cell And The Supporting Cell", RunStepCells));
+            scenarios.Add(new Scenario("A Sub-Voxel Block Under The Feet Is The Support, Not The Cell Below",
+                RunStepSubVoxelSupport));
             scenarios.Add(new Scenario("A Non-Solid Occupant Layers Over The Supporting Block", RunStepOccupantLayering));
         }
 
@@ -209,6 +212,124 @@ namespace Editor.Validation.SoundEngine
 
             return true;
         }
+
+        /// <summary>
+        /// The sub-voxel support rule: standing on a half slab, the slab fills the player's own cell and the
+        /// cell below holds whatever it was placed on. Sounding the cell below names a block the player never
+        /// touched — walking a stone slab laid over dirt used to play dirt.
+        /// </summary>
+        /// <remarks>
+        /// The tolerance cases are the fragile part and the reason they are pinned: a resting body is parked
+        /// <c>COLLISION_EPSILON</c> (0.001) <i>above</i> its surface by the vertical resolve, so an exact
+        /// equality test would never fire in game, and a symmetric window twice the probe skin would start
+        /// claiming support from blocks the player is genuinely falling past.
+        /// </remarks>
+        private static bool RunStepSubVoxelSupport()
+        {
+            const string scenario = "A Sub-Voxel Block Under The Feet Is The Support, Not The Cell Below";
+
+            const ushort air = 0;
+            const ushort dirt = 1;
+            const ushort stoneSlab = 2;
+            const ushort stone = 3;
+            const ushort water = 4;
+            const ushort glassPane = 5;
+
+            BlockType[] blocks =
+            {
+                new BlockType { blockName = "Air", isSolid = false, soundMaterial = SoundMaterial.None },
+                new BlockType { blockName = "Dirt", isSolid = true, soundMaterial = SoundMaterial.Dirt },
+                new BlockType
+                {
+                    blockName = "Stone Half Slab", isSolid = true, soundMaterial = SoundMaterial.Stone,
+                    collisionBounds = new BlockCollisionBounds
+                    {
+                        mode = CollisionBoundsMode.CustomAABB,
+                        min = new Vector3(0f, 0f, 0f),
+                        max = new Vector3(1f, 0.5f, 1f),
+                    },
+                },
+                new BlockType { blockName = "Stone", isSolid = true, soundMaterial = SoundMaterial.Stone },
+                new BlockType { blockName = "Water", isSolid = false, soundMaterial = SoundMaterial.Liquid },
+                new BlockType
+                {
+                    blockName = "Glass Pane", isSolid = false, soundMaterial = SoundMaterial.Glass,
+                    collisionBounds = new BlockCollisionBounds
+                    {
+                        mode = CollisionBoundsMode.CustomAABB,
+                        min = new Vector3(0f, 0f, 0f),
+                        max = new Vector3(1f, 0.5f, 1f),
+                    },
+                },
+            };
+
+            // The regression itself: a stone slab over dirt must sound like stone, not dirt.
+            SoundResolution.ResolveStep(blocks, stoneSlab, 0, dirt, 64, 64.5f + PHYSICS_REST_OFFSET,
+                out SoundMaterial slabSupport, out SoundMaterial slabOccupant);
+            if (slabSupport != SoundMaterial.Stone)
+                return FailSound(scenario, $"a stone slab over dirt sounded {slabSupport}, expected Stone.");
+            if (slabOccupant != SoundMaterial.None)
+                return FailSound(scenario, $"the slab layered {slabOccupant} over itself; expected no second layer.");
+
+            // The ordinary case must be untouched: feet on a full block top, occupant cell empty.
+            SoundResolution.ResolveStep(blocks, air, 0, stone, 64, 64f + PHYSICS_REST_OFFSET,
+                out SoundMaterial flatSupport, out SoundMaterial flatOccupant);
+            if (flatSupport != SoundMaterial.Stone || flatOccupant != SoundMaterial.None)
+                return FailSound(scenario,
+                    $"standing on a full block resolved ({flatSupport}, {flatOccupant}), expected (Stone, None).");
+
+            // Layering must survive the new path: wading is still a splash over the riverbed.
+            SoundResolution.ResolveStep(blocks, water, 0, dirt, 64, 64f + PHYSICS_REST_OFFSET,
+                out SoundMaterial wadeSupport, out SoundMaterial wadeOccupant);
+            if (wadeSupport != SoundMaterial.Dirt || wadeOccupant != SoundMaterial.Liquid)
+                return FailSound(scenario,
+                    $"wading resolved ({wadeSupport}, {wadeOccupant}), expected (Dirt, Liquid).");
+
+            // A non-solid block cannot carry the feet however its bounds are authored — the player falls through
+            // it, so the block below is still the support and the pane layers over it.
+            SoundResolution.ResolveStep(blocks, glassPane, 0, dirt, 64, 64.5f + PHYSICS_REST_OFFSET,
+                out SoundMaterial paneSupport, out SoundMaterial paneOccupant);
+            if (paneSupport != SoundMaterial.Dirt || paneOccupant != SoundMaterial.Glass)
+                return FailSound(scenario,
+                    $"a non-solid sub-voxel block resolved ({paneSupport}, {paneOccupant}), expected (Dirt, Glass).");
+
+            // --- Tolerance band -------------------------------------------------------------------
+            // gap = feetY - slabTop. In game this is +COLLISION_EPSILON; the band must accept that and
+            // reject a body genuinely above the surface.
+            (float Gap, bool ShouldCarry, string Case)[] gapCases =
+            {
+                (0f, true, "flush contact"),
+                (VoxelRigidbody.GroundProbeSkin * 0.5f, true, "the in-game resting offset"),
+                (VoxelRigidbody.GroundProbeSkin, true, "the far edge of the probe skin"),
+                (VoxelRigidbody.GroundProbeSkin * 2f, false, "clearly above the surface"),
+                (0.1f, false, "falling past the slab"),
+                (-VoxelRigidbody.GroundProbeSkin * 2f, false, "embedded below the surface"),
+            };
+
+            foreach ((float gap, bool shouldCarry, string label) in gapCases)
+            {
+                bool carries = SoundResolution.OccupantCarriesFeet(blocks, stoneSlab, 0, 64, 64.5f + gap);
+                if (carries != shouldCarry)
+                    return FailSound(scenario,
+                        $"{label} (gap {gap:R}): carries={carries}, expected {shouldCarry}.");
+            }
+
+            // Guards inherited from the material path must survive the bounds lookup, which dereferences
+            // collisionBounds unconditionally.
+            if (SoundResolution.OccupantCarriesFeet(null, stoneSlab, 0, 64, 64.5f))
+                return FailSound(scenario, "a null database claimed to carry the feet.");
+            if (SoundResolution.OccupantCarriesFeet(blocks, 99, 0, 64, 64.5f))
+                return FailSound(scenario, "an out-of-range block ID claimed to carry the feet.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// The height the vertical resolve parks a resting body above its surface. Mirrors
+        /// <c>VoxelRigidbody.COLLISION_EPSILON</c>, which is private — kept as a local literal so this suite
+        /// pins the in-game geometry rather than following a constant that could change underneath it.
+        /// </summary>
+        private const float PHYSICS_REST_OFFSET = 0.001f;
 
         /// <summary>
         /// The sampling geometry itself: which two cells a step reads for a given feet height. Below y = 0 a

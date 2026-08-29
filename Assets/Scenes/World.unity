@@ -363,7 +363,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Audio.PlayerFootsteps
   _strideLength: 1.5
-  _landingEmphasis: 1.4
   _occupantLayerVolume: 0.9
 --- !u!1 &154747208
 GameObject:

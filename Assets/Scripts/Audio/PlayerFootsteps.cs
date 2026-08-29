@@ -23,11 +23,6 @@ namespace Audio
         [SerializeField]
         private float _strideLength = 1.5f;
 
-        [Tooltip("Volume multiplier for the step played on landing, relative to a walking step.")]
-        [Range(1f, 3f)]
-        [SerializeField]
-        private float _landingEmphasis = 1.4f;
-
         [Tooltip("Volume of the layered step from a non-solid block occupying the player's own cell " +
                  "(water, flora), relative to the step from the block underneath.")]
         [Range(0f, 1f)]
@@ -39,11 +34,20 @@ namespace Audio
         private Vector3 _lastStepPosition;
         private bool _wasGrounded;
 
+        /// <summary>
+        /// Whether <see cref="_wasGrounded"/> has been seeded from a live physics state yet.
+        /// </summary>
+        /// <remarks>
+        /// Seeding in <c>Awake</c> is too early: <see cref="VoxelRigidbody.IsGrounded"/> is false before the
+        /// first solve, so a player already standing on the ground when the world finishes loading would take
+        /// the landing branch and thud once for a fall that never happened.
+        /// </remarks>
+        private bool _groundedSeeded;
+
         private void Awake()
         {
             _body = GetComponent<VoxelRigidbody>();
             _lastStepPosition = transform.position;
-            _wasGrounded = _body != null && _body.IsGrounded;
         }
 
         private void Update()
@@ -54,6 +58,14 @@ namespace Audio
             if (_world == null || SoundManager.Instance == null) return;
 
             bool grounded = _body.IsGrounded;
+
+            if (!_groundedSeeded)
+            {
+                _groundedSeeded = true;
+                _wasGrounded = grounded;
+                _lastStepPosition = transform.position;
+                return;
+            }
 
             if (!grounded)
             {
@@ -68,7 +80,7 @@ namespace Audio
             {
                 _wasGrounded = true;
                 _lastStepPosition = transform.position;
-                PlayStep(_landingEmphasis);
+                PlayStep();
                 return;
             }
 
@@ -77,15 +89,14 @@ namespace Audio
             if (delta.sqrMagnitude < _strideLength * _strideLength) return;
 
             _lastStepPosition = transform.position;
-            PlayStep(1f);
+            PlayStep();
         }
 
         /// <summary>
         /// Plays a step: the supporting block always, plus a layered one-shot for a non-solid block
         /// occupying the player's own cell.
         /// </summary>
-        /// <param name="emphasis">Volume multiplier — above 1 for the landing step.</param>
-        private void PlayStep(float emphasis)
+        private void PlayStep()
         {
             Vector3 unityPos = transform.position;
             SoundResolution.StepCells(unityPos.y, out int occupantUnityY, out int supportUnityY);
@@ -98,10 +109,13 @@ namespace Audio
 
             // A cell outside the loaded world resolves to Air rather than aborting the step: an unloaded
             // occupant must not silence a perfectly known supporting block below it.
-            ushort occupantId = TryGetBlockId(voxelX, occupantUnityY + origin.y, voxelZ);
-            ushort supportId = TryGetBlockId(voxelX, supportUnityY + origin.y, voxelZ);
+            TryGetBlock(voxelX, occupantUnityY + origin.y, voxelZ, out ushort occupantId, out byte occupantMeta);
+            TryGetBlock(voxelX, supportUnityY + origin.y, voxelZ, out ushort supportId, out _);
 
-            SoundResolution.ResolveStepMaterials(_world.BlockTypes, occupantId, supportId,
+            // Unity-space Y throughout: the collision bounds this resolves against are authored and evaluated
+            // in render space, and the feet position below is too.
+            SoundResolution.ResolveStep(_world.BlockTypes, occupantId, occupantMeta, supportId,
+                occupantUnityY, unityPos.y,
                 out SoundMaterial supportMaterial, out SoundMaterial occupantMaterial);
 
             // Played at the foot position, not the block center: the listener is on the camera, and a step
@@ -110,21 +124,34 @@ namespace Audio
 
             // Both calls are unconditional: a None material is already silent, and each takes its own voice
             // and event salt, so the two layers get independent clips and pitch rather than flanging.
-            SoundManager.Instance.PlayBlockSound(supportMaterial, BlockSoundEvent.Step, feetPos, emphasis);
+            SoundManager.Instance.PlayBlockSound(supportMaterial, BlockSoundEvent.Step, feetPos);
             SoundManager.Instance.PlayBlockSound(occupantMaterial, BlockSoundEvent.Step, feetPos,
-                emphasis * _occupantLayerVolume);
+                _occupantLayerVolume);
         }
 
         /// <summary>
-        /// Reads one voxel's block ID, treating an unloaded or out-of-world cell as air.
+        /// Reads one voxel's block ID and metadata, treating an unloaded or out-of-world cell as air.
         /// </summary>
+        /// <remarks>
+        /// The metadata is what lets a rotated sub-voxel shape resolve its real collision volume, so it is read
+        /// alongside the ID rather than defaulted.
+        /// </remarks>
         /// <param name="voxelX">Voxel-world X.</param>
         /// <param name="voxelY">Voxel-world Y.</param>
         /// <param name="voxelZ">Voxel-world Z.</param>
-        /// <returns>The block ID, or <see cref="BlockIDs.Air"/> when the cell cannot be read.</returns>
-        private ushort TryGetBlockId(int voxelX, int voxelY, int voxelZ)
+        /// <param name="blockId">The block ID, or <see cref="BlockIDs.Air"/> when the cell cannot be read.</param>
+        /// <param name="meta">The voxel's raw metadata byte, or 0 when the cell cannot be read.</param>
+        private void TryGetBlock(int voxelX, int voxelY, int voxelZ, out ushort blockId, out byte meta)
         {
-            return _world.TryGetVoxel(voxelX, voxelY, voxelZ, out VoxelState state) ? state.ID : BlockIDs.Air;
+            if (_world.TryGetVoxel(voxelX, voxelY, voxelZ, out VoxelState state))
+            {
+                blockId = state.ID;
+                meta = state.Meta;
+                return;
+            }
+
+            blockId = BlockIDs.Air;
+            meta = 0;
         }
     }
 }

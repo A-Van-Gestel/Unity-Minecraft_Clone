@@ -21,12 +21,23 @@ namespace Physics
         private const float COLLISION_EPSILON = 0.001f;
         private const float COLLISION_JITTER_TOLERANCE = 0.001f;
 
-        // How far below the feet the grounded check looks. The overlap test in World.CheckPhysicsCollision is strict,
-        // so a body resting on a surface — which the vertical resolve parks COLLISION_EPSILON above it — does NOT
-        // overlap that surface. Probing the un-extended AABB therefore only ever detects an *embedded* body, and a
-        // correctly-standing one reads as airborne. Must stay above COLLISION_EPSILON (or it cannot span the
-        // stand-off) and far below the thinnest collision volume (0.25) so it never grounds a genuinely falling body.
-        private const float GROUND_PROBE_SKIN = COLLISION_EPSILON * 2f;
+        /// <summary>
+        /// How far below the feet a surface may sit and still count as supporting the body.
+        /// </summary>
+        /// <remarks>
+        /// The overlap test in <c>World.CheckPhysicsCollision</c> is strict, so a body resting on a surface —
+        /// which the vertical resolve parks <c>COLLISION_EPSILON</c> above it — does NOT overlap that surface.
+        /// Probing the un-extended AABB therefore only ever detects an <i>embedded</i> body, and a
+        /// correctly-standing one reads as airborne. Must stay above <c>COLLISION_EPSILON</c> (or it cannot span
+        /// the stand-off) and far below the thinnest collision volume (0.25) so it never grounds a genuinely
+        /// falling body.
+        /// <para>
+        /// Public because "what is this body standing on" is asked outside the solver too — the footstep audio
+        /// resolves which cell carries the feet with this same tolerance, so a slab reads as the support to the
+        /// ear exactly when it does to the solver. One definition, or the two answers drift.
+        /// </para>
+        /// </remarks>
+        public const float GroundProbeSkin = COLLISION_EPSILON * 2f;
 
         [Tooltip("The padding added to the player bounds to avoid snagging flush walls.")]
         [Min(0.1f)]
@@ -458,12 +469,12 @@ namespace Physics
             }
             else
             {
-                // Explicitly check ground when vertical movement is 0, probing GROUND_PROBE_SKIN below the feet so a
+                // Explicitly check ground when vertical movement is 0, probing GroundProbeSkin below the feet so a
                 // body already resting on a surface registers — flush contact is not overlap, so an un-extended probe
                 // would only ever find ground under a body embedded in it.
                 Bounds groundProbeAABB = verticalFutureAABB;
                 groundProbeAABB.SetMinMax(
-                    new Vector3(verticalFutureAABB.min.x, verticalFutureAABB.min.y - GROUND_PROBE_SKIN,
+                    new Vector3(verticalFutureAABB.min.x, verticalFutureAABB.min.y - GroundProbeSkin,
                         verticalFutureAABB.min.z),
                     verticalFutureAABB.max);
 
@@ -491,7 +502,7 @@ namespace Physics
             // so the support its downward sweep then finds sits at or below that lift, and the post-step-up box
             // cannot rise further. The stand-offs are added because the solver parks bodies an epsilon off contact.
             envelope.SetMinMax(
-                new Vector3(envelope.min.x, envelope.min.y - GROUND_PROBE_SKIN, envelope.min.z),
+                new Vector3(envelope.min.x, envelope.min.y - GroundProbeSkin, envelope.min.z),
                 new Vector3(envelope.max.x, envelope.max.y + stepHeight + collisionPadding + COLLISION_EPSILON,
                     envelope.max.z));
 
