@@ -85,6 +85,7 @@ namespace Editor.Validation.Generation
                 new Scenario("B8 tracker ignores an excursion shorter than the dwell", B8_TrackerShortExcursion),
                 new Scenario("B9 tracker commits a sustained change, and only after the dwell", B9_TrackerSustainedChange),
                 new Scenario("B10 tracker holds its answer when the query declines", B10_TrackerQueryDeclines),
+                new Scenario("B12 tracker credits a frame hitch to the dwell, not one interval", B12_TrackerHitchCredit),
                 new Scenario("B11 Burst parity (compiled primary index == golden; surface divergence bounded)", B11_BurstParity),
             };
             return ValidationSuiteRunner.Execute("Biome Selection", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
@@ -349,6 +350,41 @@ namespace Editor.Validation.Generation
             Debug.Log($"  [B6] distinct biome names across the sweep: {names.Count}");
             ok &= Expect(names.Count > 1,
                 "The sweep must cross more than one biome, else B6 proves nothing about index-to-asset mapping");
+            return ok;
+        }
+
+        private static bool B12_TrackerHitchCredit()
+        {
+            ScriptedQuery q = new ScriptedQuery { NextIndex = 1 };
+            List<int> events = new List<int>();
+            BiomeTracker tracker = new BiomeTracker(q.Query, SAMPLE_INTERVAL, DWELL_SECONDS);
+            tracker.BiomeChanged += s => events.Add(s.Index);
+
+            tracker.Tick(SAMPLE_INTERVAL, Vector3Int.zero); // commits 1
+            events.Clear();
+
+            // One frame swallowing the whole dwell — a chunk-streaming hitch. The tracker samples once, but
+            // the elapsed time it consumed must reach the dwell, or a "3 s" wait silently becomes far longer
+            // in wall clock and the ambience switch it gates lags past its documented timing.
+            q.NextIndex = 6;
+            tracker.Tick(DWELL_SECONDS, Vector3Int.zero); // opens the candidate
+            tracker.Tick(DWELL_SECONDS, Vector3Int.zero); // one hitch is more than the whole dwell
+
+            bool ok = Expect(tracker.Current.Index == 6,
+                $"a hitch longer than the dwell must commit on the next sample (committed {tracker.Current.Index})");
+            ok &= Expect(events.Count == 1, $"the hitch commit must raise exactly one event (raised {events.Count})");
+
+            // Non-vacuity: the same number of Ticks at the normal cadence must NOT commit, or B12 would pass
+            // on a tracker that ignores the dwell entirely.
+            ScriptedQuery q2 = new ScriptedQuery { NextIndex = 1 };
+            BiomeTracker paced = new BiomeTracker(q2.Query, SAMPLE_INTERVAL, DWELL_SECONDS);
+            paced.Tick(SAMPLE_INTERVAL, Vector3Int.zero);
+            q2.NextIndex = 6;
+            paced.Tick(SAMPLE_INTERVAL, Vector3Int.zero);
+            paced.Tick(SAMPLE_INTERVAL, Vector3Int.zero);
+
+            ok &= Expect(paced.Current.Index == 1,
+                "two normal-cadence samples must not satisfy the dwell — otherwise B12 proves nothing about crediting");
             return ok;
         }
 

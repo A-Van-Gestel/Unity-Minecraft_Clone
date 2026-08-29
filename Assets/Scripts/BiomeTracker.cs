@@ -104,6 +104,10 @@ public class BiomeTracker
         if (_sampleTimer < _sampleInterval) return;
 
         // Consume whole intervals rather than zeroing: a long frame must not swallow the elapsed time.
+        // How much it consumed is carried to the dwell below — a chunk-streaming hitch elapses several
+        // intervals in one frame, and crediting only one would stretch a 3 s dwell across far more than
+        // 3 s of wall clock.
+        float elapsed = _sampleTimer - _sampleTimer % _sampleInterval;
         _sampleTimer %= _sampleInterval;
 
         if (!_query(listenerVoxelCell.x, listenerVoxelCell.z, out BiomeSample sample))
@@ -135,7 +139,7 @@ public class BiomeTracker
             return;
         }
 
-        _candidateHeldSeconds += _sampleInterval;
+        _candidateHeldSeconds += elapsed;
         if (_candidateHeldSeconds >= _dwellSeconds)
             Commit(_candidateSample);
     }
