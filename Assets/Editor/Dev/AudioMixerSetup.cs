@@ -115,7 +115,12 @@ namespace Editor.Dev
             {
                 if (children.GetArrayElementAtIndex(i).objectReferenceValue != stray) continue;
 
+                // Object-reference arrays need two calls: the first nulls the slot, the second removes it.
+                // Stopping after one leaves a null child the mixer window trips over.
                 children.DeleteArrayElementAtIndex(i);
+                if (i < children.arraySize && children.GetArrayElementAtIndex(i).objectReferenceValue == null)
+                    children.DeleteArrayElementAtIndex(i);
+
                 unlinked = true;
             }
 

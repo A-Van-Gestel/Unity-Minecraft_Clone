@@ -46,6 +46,10 @@ namespace Editor.SoundEditor
         private GUIStyle _listButtonStyle;
 
         private const string NO_FAMILY = "(none — silent)";
+
+        /// <summary>Marks a family the index no longer knows, so it reads as unresolved rather than absent.</summary>
+        private const string UNINDEXED_SUFFIX = "  (unindexed)";
+
         private const string CLIP_FOLDER = "Assets/Audio";
         private const float LIST_WIDTH = 220f;
         private const float PLAY_BUTTON_WIDTH = 30f;
@@ -322,10 +326,24 @@ namespace Editor.SoundEditor
 
             EditorGUILayout.LabelField(new GUIContent(evt.ToString(), TooltipFor(evt)), GUILayout.Width(60));
 
-            int index = Mathf.Max(0, Array.IndexOf(_familyNames, currentFamily));
-            int picked = EditorGUILayout.Popup(index, _familyNames);
+            // A family the index does not know — its folder was renamed, or moved out of the audio root —
+            // must not collapse onto entry 0, which reads as "(none)". That reports authored clips as missing
+            // while the count column beside it still shows them, and the ▶ button still plays them.
+            int index = Array.IndexOf(_familyNames, currentFamily);
+            string[] options = _familyNames;
+            if (index < 0)
+            {
+                options = new string[_familyNames.Length + 1];
+                Array.Copy(_familyNames, options, _familyNames.Length);
+                options[^1] = currentFamily + UNINDEXED_SUFFIX;
+                index = options.Length - 1;
+            }
+
+            int picked = EditorGUILayout.Popup(index, options);
             if (picked != index)
             {
+                // Safe against the synthetic entry: it is always the current selection, so reaching here
+                // means picked indexes a real family.
                 Undo.RecordObject(_database, "Assign Sound Family");
                 SetClips(group, evt, picked == 0 ? Array.Empty<AudioClip>() : _families[_familyNames[picked]]);
                 EditorUtility.SetDirty(_database);

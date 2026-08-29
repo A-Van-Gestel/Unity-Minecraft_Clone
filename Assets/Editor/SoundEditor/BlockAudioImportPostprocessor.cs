@@ -33,7 +33,10 @@ namespace Editor.SoundEditor
 
             // Only stamp a clip the first time. Re-stamping on every reimport would silently revert a
             // deliberate per-clip override made in the inspector.
-            if (!string.IsNullOrEmpty(importer.userData)) return;
+            // Matched on OUR marker, not on userData being non-empty: another tool's data in that field is
+            // not evidence this clip was ever configured here, and treating it as such leaves the clip stereo
+            // and lazily loaded — exactly the state this postprocessor exists to prevent.
+            if (importer.userData != null && importer.userData.Contains(STAMP)) return;
 
             importer.forceToMono = true;
             importer.loadInBackground = false;
@@ -43,7 +46,11 @@ namespace Editor.SoundEditor
             settings.compressionFormat = AudioCompressionFormat.Vorbis;
             importer.defaultSampleSettings = settings;
 
-            importer.userData = STAMP;
+            // Appended rather than assigned: userData is shared project-wide, so overwriting it would
+            // destroy whatever another importer or tool put there.
+            importer.userData = string.IsNullOrEmpty(importer.userData)
+                ? STAMP
+                : importer.userData + ";" + STAMP;
         }
 
         /// <summary>Marks a clip as already stamped, so later reimports leave manual overrides alone.</summary>
