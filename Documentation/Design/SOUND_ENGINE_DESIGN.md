@@ -1,6 +1,6 @@
 # Sound Engine Design
 
-**Version:** 1.6  
+**Version:** 1.8  
 **Date:** 2026-08-29  
 **Status:** **Partially implemented — S0, S1 and S2's runtime shipped.** The `SoundMaterial`
 channel, the shared `BlockSoundDatabase`, the BlockEditor dropdown and prefill, the volume settings, the
@@ -590,6 +590,8 @@ job and the managed query) and is seed-safe by construction.
 | **S1 — One-shots** ✅       | `SoundManager` + pooled 3D sources, break/place hooks in `PlayerInteraction`, footsteps in the player controller.                                                                                                                                                                                                                                          |   🟢   | S0                |
 | **S2 — Ambience & music** ✅ | **Shipped 2026-08-29.** Runtime: `AudioContext` + the pure `AmbienceResolution` layer, `AmbienceDatabase`, biome audio fields on `BiomeBase`, `AmbienceDirector` (four-source bed roster weighted by `BiomeWeights` + rest cycle + cave layer + duck), `MusicScheduler`, per-source underwater low-pass, 16 suite baselines. Ambience content imported (§9): 6 CC0 loops covering the cave bed, the fallback bed and 4 of 6 biomes. **Music content outstanding** — the scheduler runs and finds an empty pool. |   🟡   | S0; §6.2 ✅        |
 | **S3 — Fluid emitters**   | Burst emitter scan job, clustering, looping emitter pool with fades.                                                                                                                                                                                                                                                                                       |   🟡   | S1 (pool infra)   |
+| **S5 — Directional beds** | Carry each biome's bearing out of the cellular neighbourhood and place the bed sources in the world, so an unseen biome can be located by ear. Detail in §10. |   🟡   | S2 ✅              |
+| **S6 — Track pool**       | Replace the single `BiomeBase.ambientLoop` with a list of tracks carrying a Y-range and a play chance, so a biome varies with altitude and does not repeat itself. Detail in §11. |   🟡   | S2 ✅              |
 | **S4 — Later**            | **Two-cell footstep sampling** ✅ (occupied cell + supporting cell, a non-solid occupant layered over the support — see the §5.1 note; shipped 2026-08-29). Still open: ungrounded/swimming steps (deferred — no swimming mechanic exists, `FLUID_BUGS.md` §02), v2 apply-site break/place hook (`VoxelModSource.Live` filter), hit/mining sounds, weather (RF-7), time-of-day (RF-1), `LEAVES` wind emitters.                                                                                                                                                                                                              |   —    | feature-gated     |
 
 S0+S1 alone deliver the largest perceived-quality jump (block feedback + footsteps) and validate
@@ -697,6 +699,75 @@ attached license" source.
 
 ---
 
+## 10. S5 — Directional ambience beds
+
+**Status: planned, not started.** Filed 2026-08-29 from in-game feedback: a player should be able to turn on
+the spot and hear which way an unseen biome lies.
+
+**Approach.** Place each bed's `AudioSource` at the bearing of its biome and let Unity pan it, rather than
+scaling gain by a dot product against the listener's facing. A gain multiplier misbehaves the moment the head
+turns — rotating in place would swell and mute a forest that has not moved — while a positioned source
+responds to rotation for free and stays correct when the listener *walks*.
+
+**The data already exists and is discarded.** `FastNoiseLite.SingleCellularEdgeData` computes
+`vecX`/`vecY` — the offset from the sample point to each jittered cell centre — at
+`FastNoiseLite.cs:1885` (Classic32) and `:1962` (Precise64), uses it for the distance, and drops it. Both
+overloads need the change or the far bands lose direction.
+
+**Decisions already taken** (2026-08-29, so a later session does not re-litigate them):
+
+- **A separate query, not a wider `CellularEdgeData`.** That struct is built per column inside the generation
+  job; adding two more 25-element arrays would roughly double a hot-path stack temporary for the benefit of a
+  4 Hz audio read. The audio path gets its own method instead, and the generation path is untouched.
+- **Beds stay stereo.** `AudioSource.spread` governs the width of a *3D stereo* source, so directionality does
+  not force the mono downmix that would undo S2's stereo/streaming import profile. `spatialBlend` and `spread`
+  become the two serialized knobs.
+
+**Also needed:** `FastNoiseLite` has `SetFrequency` but no getter, and the offsets are in noise space — world
+blocks are `offset ÷ frequency`.
+
+**Verification.** The library's `FastNoiseLiteGoldenValues.txt` must stay bit-identical (adding a field changes
+no noise value), but it cannot see the offsets, so it is not sufficient. The gate that actually exercises the
+new data is a self-consistency assertion: for the Euclidean path, `|offset|` must equal the recorded
+`Distances[i]`. That catches a wrong reference frame, a missed swap in the insertion sort, and a botched
+frequency conversion — none of which the golden would notice.
+
+**Known limitation.** A biome's cells are scattered, so this points at a biome's *nearest cell*, not its
+centroid. At a shoreline that reads correctly; standing inside a biome the nearest cell is close and its
+bearing swings as the listener walks, so the source needs a minimum-distance clamp and heavy smoothing or a
+bed the player is inside will slide around their head. This is a tuning problem that needs ears, not analysis.
+
+---
+
+## 11. S6 — Ambience track pool
+
+**Status: planned, not started.** Filed 2026-08-29 from in-game feedback: one clip per biome repeats audibly,
+and a bed that suits sea level is wrong near build height.
+
+**Approach.** `BiomeBase.ambientLoop` (a single `AudioClip`) becomes a list of entries:
+
+```csharp
+AmbienceTrack { AudioClip clip; Vector2 yRange; float playChance; }
+```
+
+One change covers both asks — variation within a biome, altitude-dependent beds, and a weight so a
+characterful loop (the cicadas) surfaces occasionally rather than every time. It composes with the rest cycle
+already shipped: each time the layer wakes from a rest stretch is the natural moment to re-roll, so the chance
+field needs no timer of its own.
+
+**Decision already taken** (2026-08-29): **replace the field and migrate the four wired assets**, rather than
+adding the list alongside `ambientLoop`. Two fields describing one thing would need a precedence rule that
+every future reader has to learn, and the old field would linger as a trap. The migration is an editor pass
+moving each wired clip into a single-entry list, with the assets re-verified by read-back — the check that
+caught a silently-null reference during S2's wiring.
+
+**Verification.** A track outside its Y-range must never be selected; the play-chance distribution needs a
+spread assertion rather than a bounds check (a stuck RNG passes bounds); and `ResolveBedMix`'s existing
+"biomes resolving to the same clip merge onto one source" rule must still hold once two biomes can randomly
+roll the *same* shared track — that baseline needs extending, not rewriting.
+
+---
+
 ## Document History
 
 *Entries below the newest are reconstructed from git history — this document predates the
@@ -719,6 +790,11 @@ contemporaneous notes.*
   `fluidType`, at the cost of cell-level rather than surface-level precision. Also corrects two stale counts the
   header carried (the Sound Engine suite was 14 baselines, not 13; Biome Selection is 12, not 10). **Content is
   deliberately not part of this**: no bed or track is imported, so the layer ships silent.
+* **v1.8** - Filed S5 (directional beds) and S6 (track pool) as §10 and §11 (2026-08-29), from in-game
+  feedback on the shipped S2 layer. Also corrects the header stamp, which had sat at 1.6 while the history ran
+  through v1.7, v1.7a and v1.7b — the same lag this document's v1.3 entry recorded fixing once before. Both carry the decisions already taken — a separate noise query rather than
+  a wider `CellularEdgeData`, stereo beds kept via `spread`, and `ambientLoop` replaced rather than shadowed —
+  so a later session executes them instead of re-deciding them. Neither is started.
 * **v1.7b** - `/sound` console readout added and the cave duck raised to 1 (2026-08-29). The depth gate alone
   did not close the complaint: at ~11 blocks down the taper has barely started, so `_caveDuck` at 0.7 was still
   the binding multiplier and left the biome bed at 30% under a fully committed cave bed. `/sound` exists
@@ -794,7 +870,7 @@ contemporaneous notes.*
 ---
 
 **Last Updated:** 2026-08-29 (weighted biome mix + rest cycle + depth gate; music content still outstanding)  
-**Next Review:** when S2's music content or S3 is scheduled. S2's runtime and its ambience beds are done and
+**Next Review:** when S5, S6, S2's music content or S3 is scheduled. S2's runtime and its ambience beds are done and
 need no further design work — what remains is a music pool under §9. S3 must re-verify the §5.2 scan against the fluid
 tick as re-architected by the TG-4 arc (see
 [`../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`](../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md))
