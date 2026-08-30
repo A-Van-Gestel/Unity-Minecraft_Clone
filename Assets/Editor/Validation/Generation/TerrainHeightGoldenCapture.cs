@@ -16,8 +16,10 @@ namespace Editor.Validation.Generation
     /// Unlike <see cref="BiomeSelectionGoldenCapture"/>, this one calls the live
     /// <c>BiomeBlender.CalculateBlendedTerrainHeight</c> rather than a copy of it. The two are captured
     /// differently because they answer different questions: the selection golden had to reproduce code that
-    /// was <i>already</i> refactored, while this table was captured <b>before</b> its subject changed, so
-    /// "what the function returned that day" is exactly the oracle wanted.
+    /// was <i>already</i> refactored, while this one's subject was still callable as-is, so "what the
+    /// function returns" is exactly the oracle wanted. It was captured alongside the fold it guards rather
+    /// than ahead of it — the fold being a verbatim move, the table stands for both sides of it, and from
+    /// here on it pins every <i>later</i> change to blended height.
     /// </para>
     /// <para>
     /// What it guards: <c>BiomeBlender</c> maps a cellular cell hash to a biome index, and that mapping is a
@@ -70,13 +72,12 @@ namespace Editor.Validation.Generation
             StringBuilder sb = new StringBuilder();
             sb.Append("# Blended Terrain Height Golden — captured ")
                 .AppendLine(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
-            sb.AppendLine("# Oracle: BiomeBlender.CalculateBlendedTerrainHeight as it stood before the");
-            sb.AppendLine("# cell-hash-to-biome-index mapping was folded onto BiomeSelection.");
+            sb.AppendLine("# Oracle: BiomeBlender.CalculateBlendedTerrainHeight, captured in the same commit");
+            sb.AppendLine("# that folded the cell-hash-to-biome-index mapping onto BiomeSelection. That fold");
+            sb.AppendLine("# is a verbatim move of the arithmetic, so this table stands for both sides of it.");
             sb.AppendLine("# Columns: precision seed x z height borderFade (round-trip 'R' formatted)");
 
             int rows = Emit(sb);
-            if (rows < 0) return;
-
             File.WriteAllText(GoldenFilePath, sb.ToString());
             AssetDatabase.Refresh();
             Debug.Log($"[TerrainHeightGolden] Wrote {rows} rows to {GoldenFilePath}");
@@ -86,7 +87,7 @@ namespace Editor.Validation.Generation
         /// Walks every precision / seed / band combination, appending one row per sampled column.
         /// </summary>
         /// <param name="sb">Receives the rows.</param>
-        /// <returns>Rows written, or -1 when a fixture could not be built.</returns>
+        /// <returns>Rows written.</returns>
         /// <remarks>
         /// Shared with the suite so the baseline re-evaluates the <i>same</i> columns in the <i>same</i>
         /// order as the capture. A baseline that picked its own columns could pass while disagreeing with

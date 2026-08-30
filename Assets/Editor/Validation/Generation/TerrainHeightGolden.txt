@@ -1,6 +1,7 @@
 # Blended Terrain Height Golden — captured 2026-08-29 18:39:29
-# Oracle: BiomeBlender.CalculateBlendedTerrainHeight as it stood before the
-# cell-hash-to-biome-index mapping was folded onto BiomeSelection.
+# Oracle: BiomeBlender.CalculateBlendedTerrainHeight, captured in the same commit
+# that folded the cell-hash-to-biome-index mapping onto BiomeSelection. That fold
+# is a verbatim move of the arithmetic, so this table stands for both sides of it.
 # Columns: precision seed x z height borderFade (round-trip 'R' formatted)
 Classic32 1337 0 0 62.0084076 0.22480996
 Classic32 1337 37 -37 61.18806 0.415147454
