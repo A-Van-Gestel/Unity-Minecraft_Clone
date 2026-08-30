@@ -30,6 +30,8 @@ Before implementing any UI widget or editor-side generation, check if it already
 | `EditorPreviewMaterialUtility`  | Cached preview materials — never create preview materials directly            |
 | `MeshPreviewWidget`             | `PreviewRenderUtility` wrapper: 3D mesh previews, camera/lighting/zoom, cleanup |
 | `CrossSectionBlockColorMap`     | Block-ID → preview color palette for cross-section renderers                  |
+| `EditorAudioPreview`            | Auditioning clips in the editor: play/stop, is-playing, repaint-while-playing |
+| `AudioLoudnessAnalyzer`         | EBU R128 loudness (LUFS + true peak) of an audio file, via ffmpeg             |
 
 **World-gen tooling — `Assets/Editor/WorldTools/Libraries/`:**
 
