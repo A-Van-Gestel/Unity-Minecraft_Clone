@@ -957,6 +957,15 @@ namespace Data
             if (!wasOldEmissive && isNewEmissive) sections[sectionY].emissiveCount++;
             else if (wasOldEmissive && !isNewEmissive) sections[sectionY].emissiveCount--;
 
+            // Handle the S3 emitter-scan predicate, on the same palette-independent footing as the emissive
+            // count above. Tested on the whole packed value rather than the id: a fluid voxel becomes and
+            // stops being an emitter through its level nibble alone, with the id never changing.
+            bool wasOldFlowing = FluidBlockLookup.IsEmitterFluid(oldValue);
+            bool isNewFlowing = FluidBlockLookup.IsEmitterFluid(value);
+
+            if (!wasOldFlowing && isNewFlowing) sections[sectionY].emitterFluidCount++;
+            else if (wasOldFlowing && !isNewFlowing) sections[sectionY].emitterFluidCount--;
+
             // Set voxel
             sections[sectionY].voxels[index] = value;
 

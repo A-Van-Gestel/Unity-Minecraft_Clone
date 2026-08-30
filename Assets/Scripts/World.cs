@@ -620,6 +620,10 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             // exists — ChunkSection.emissiveCount maintenance consults it on every voxel write.
             EmissiveBlockLookup.Initialize(BlockTypes);
 
+            // S3 emitter scan: same footing, same reason — ChunkSection.emitterFluidCount maintenance
+            // consults this on every voxel write, and the scan skips any section it reports as flow-free.
+            FluidBlockLookup.Initialize(BlockTypes);
+
             // --- Prepare Job-Safe Data (Block Types & Custom Meshes only — biomes are owned by the generator) ---
             PrepareGlobalJobData();
 

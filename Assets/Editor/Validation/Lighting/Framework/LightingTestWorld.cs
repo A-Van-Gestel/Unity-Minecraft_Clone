@@ -181,6 +181,7 @@ namespace Editor.Validation.Lighting.Framework
             // ChunkSection.emissiveCount maintenance (SetVoxel / RecalculateCounts) consults it, and the
             // band derivation reads the resulting counts. Mirrors World.Awake's production binding.
             EmissiveBlockLookup.Initialize(_blockTypes);
+            FluidBlockLookup.Initialize(_blockTypes);
             _getBlockData = id => _blockTypes[id];
             _getLoadedChunkByOrigin = originXZ =>
                 _chunks.TryGetValue(new Vector2Int(
