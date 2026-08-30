@@ -7,14 +7,15 @@ namespace Editor.SoundEditor
 {
     /// <summary>
     /// Authoring window for the game's audio content: the per-material block sounds
-    /// (<see cref="BlockSoundDatabase"/>) and the world ambience beds and music pools
-    /// (<see cref="AmbienceDatabase"/> and the per-biome tracks).
+    /// (<see cref="BlockSoundDatabase"/>), the world ambience beds and music pools
+    /// (<see cref="AmbienceDatabase"/> and the per-biome tracks), and the fluid emitter loops
+    /// (<see cref="EmitterSoundDatabase"/>).
     /// </summary>
     /// <remarks>
     /// One window rather than two, because judging content is an ear problem and the audition primitive,
     /// the clip folder and the dirty/save flow are all shared. This file owns only the shared state, the
     /// lifecycle and the tab router; each tab lives in its own partial
-    /// (<c>.Blocks.cs</c>, <c>.Ambience.cs</c>).
+    /// (<c>.Blocks.cs</c>, <c>.Ambience.cs</c>, <c>.Emitters.cs</c>, <c>.Loudness.cs</c>).
     /// </remarks>
     public partial class SoundEditorWindow : EditorWindow
     {
@@ -26,9 +27,14 @@ namespace Editor.SoundEditor
         /// <summary>Set by any tab that edited an asset; cleared when the toolbar Save flushes them to disk.</summary>
         private bool _dirty;
 
+        /// <summary>
+        /// Which tab is showing. Serialized so the selection survives the domain reload that follows every
+        /// script edit — without it, editing a tab's code bounces the window back to the first tab.
+        /// </summary>
+        [SerializeField]
         private int _tabIndex;
 
-        private static readonly string[] s_tabLabels = { "🧱 Blocks", "🔊 Ambience" };
+        private static readonly string[] s_tabLabels = { "🧱 Blocks", "🔊 Ambience", "💧 Emitters", "📊 Loudness" };
 
         /// <summary>Repaint pump that keeps the play/stop buttons honest while a clip is sounding.</summary>
         private EditorApplication.CallbackFunction _previewRepaint;
@@ -83,6 +89,7 @@ namespace Editor.SoundEditor
             BuildFamilyIndex();
             BuildBlockUsage();
             ReloadAmbience();
+            ReloadEmitters();
             _dirty = false;
         }
 
@@ -106,6 +113,14 @@ namespace Editor.SoundEditor
 
                 case 1:
                     DrawAmbienceTab();
+                    break;
+
+                case 2:
+                    DrawEmittersTab();
+                    break;
+
+                case 3:
+                    DrawLoudnessTab();
                     break;
             }
         }
