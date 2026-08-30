@@ -13,8 +13,11 @@ namespace Editor.SoundEditor
     /// both ears regardless of where the voxel is — and decompress-on-load keeps the decoder off the play call
     /// for clips that short. Ambience beds are the reverse case: they play from 2D sources where the stereo
     /// image is the entire point, and they are half-minute loops that would each hold megabytes of PCM
-    /// resident if decompressed. Both were previously applied by a one-off script, which silently stopped
-    /// covering anything imported afterwards.
+    /// resident if decompressed. Fluid emitter loops (S3) are the third case and share neither: they play
+    /// from 3D sources, so they must be mono like the one-shots, but they are long loops, so they are kept
+    /// compressed in memory rather than decompressed. Streaming is wrong for them too — several emitters
+    /// can be audible at once, and each stream is a decoder the mix does not need. Both profiles were
+    /// previously applied by a one-off script, which silently stopped covering anything imported afterwards.
     /// </remarks>
     public class BlockAudioImportPostprocessor : AssetPostprocessor
     {
@@ -24,12 +27,18 @@ namespace Editor.SoundEditor
         /// <summary>Clips under this folder get the 2D looping-bed profile instead of the one-shot profile.</summary>
         private const string AMBIENCE_ROOT = "Assets/Audio/Ambience/";
 
+        /// <summary>Clips under this folder get the 3D looping-emitter profile (S3).</summary>
+        private const string EMITTER_ROOT = "Assets/Audio/Emitters/";
+
         /// <summary>Marks a one-shot clip as stamped, so later reimports leave manual overrides alone.</summary>
         private const string BLOCK_STAMP = "blockAudioDefaults";
 
         /// <summary>Marks an ambience bed as stamped. Distinct from <see cref="BLOCK_STAMP"/> so the two
         /// profiles cannot be mistaken for one another if a clip is ever moved between the folders.</summary>
         private const string AMBIENCE_STAMP = "ambienceAudioDefaults";
+
+        /// <summary>Marks a fluid emitter loop as stamped. Distinct from the other two for the same reason.</summary>
+        private const string EMITTER_STAMP = "emitterAudioDefaults";
 
         /// <summary>
         /// Applies the profile the clip's folder calls for, before the clip is imported.
@@ -45,7 +54,8 @@ namespace Editor.SoundEditor
             if (!assetPath.StartsWith(AUDIO_ROOT)) return;
 
             bool isAmbience = assetPath.StartsWith(AMBIENCE_ROOT);
-            string stamp = isAmbience ? AMBIENCE_STAMP : BLOCK_STAMP;
+            bool isEmitter = assetPath.StartsWith(EMITTER_ROOT);
+            string stamp = isAmbience ? AMBIENCE_STAMP : isEmitter ? EMITTER_STAMP : BLOCK_STAMP;
 
             // Only stamp a clip the first time. Re-stamping on every reimport would silently revert a
             // deliberate per-clip override made in the inspector.
@@ -64,6 +74,16 @@ namespace Editor.SoundEditor
                 importer.forceToMono = false;
                 importer.loadInBackground = true;
                 settings.loadType = AudioClipLoadType.Streaming;
+            }
+            else if (isEmitter)
+            {
+                // Mono because a stereo clip does not spatialize on a 3D source, and the whole point of an
+                // emitter is that the player can turn toward it. Compressed in memory rather than
+                // decompressed: these are loops, not one-shots, and the decode cost is paid by a source
+                // that fades in over a second anyway.
+                importer.forceToMono = true;
+                importer.loadInBackground = true;
+                settings.loadType = AudioClipLoadType.CompressedInMemory;
             }
             else
             {

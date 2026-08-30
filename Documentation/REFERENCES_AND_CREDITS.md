@@ -98,17 +98,48 @@ including the three-step permission rule for "free to download but no attached l
 * [**Essentials Series (Nature)**](https://www.asoundeffect.com/sounddesigner/nox-sound/) by **NOX_SOUND**
     * *License:* CC0 (Public Domain) — the same `Essentials_Series_README.pdf` that covers the footsteps
       pack above, which sits at the download's root and states *"All these sounds are under CC0 license."*
-    * *Files used:* 6 of the pack's 18 ambience loops — `Ambiance_Cave_Dark_Loop_Stereo`,
+    * *Files used:* 8 of the pack's 18 ambience loops. Six beds — `Ambiance_Cave_Dark_Loop_Stereo`,
       `Ambiance_Wind_Calm_Loop_Stereo`, `Ambiance_Sea_Loop_Stereo`, `Ambiance_Forest_Birds_Loop_Stereo`,
-      `Ambiance_Cicadas_Loop_Stereo`, `Ambiance_Wind_Forest_Loop_Stereo`.
-    * *Source:* `Assets/Audio/Ambience/nox_nature/`
+      `Ambiance_Cicadas_Loop_Stereo`, `Ambiance_Wind_Forest_Loop_Stereo` — plus two S3 emitter loops,
+      `Ambiance_Stream_Calm_Loop_Stereo` and `Ambiance_Waterfall_Calm_Loop_Stereo`.
+    * *Source:* `Assets/Audio/Ambience/nox_nature/` (beds) and `Assets/Audio/Emitters/nox_nature/` (emitters)
     * *Notes:* S2's world-ambience beds — the cave bed and the fallback bed on `AmbienceDatabase.asset`,
       and the per-biome beds on Ocean, Forrest, Grasslands and Steep Grasslands. Converted from 24-bit/48 kHz
       WAV to OGG Vorbis (16x smaller) with `Tools/Python/convert_audio_pack.py --stereo --flat`. Kept
       **stereo** and imported as **Streaming**, unlike the mono decompress-on-load block one-shots: these
       play from 2D sources where the stereo image is the point, and a 30 s stereo loop would otherwise hold
-      megabytes of PCM resident. The remaining 12 loops (rain, night, fire, river/stream/waterfall) are
-      earmarked for RF-7, RF-1 and S3 respectively but are not imported.
+      megabytes of PCM resident. The two S3 loops take the opposite treatment for the opposite reason —
+      downmixed to **mono** and imported **CompressedInMemory**, because they play from 3D sources where a
+      stereo image would stop them spatializing, and several can be audible at once. They are converted to
+      mono at encode time rather than left to the importer's `forceToMono`, since the downmix is identical
+      either way and the mono file is half the size in a repository with no Git LFS. Renamed
+      `..._Loop_Mono` accordingly, so the filename does not claim a channel count the asset does not have.
+      The remaining 10 loops (rain, night, fire, `River_Moderate`, `Waterfall_Strong`) are earmarked for
+      RF-7, RF-1 and a future emitter kind but are **not** imported — deliberately, per §9's `Cicadas`
+      lesson: an imported clip that nothing references is dead weight nobody notices.
+
+* [**Lava loop**](https://freesound.org/people/Audionautics/sounds/133901/) by
+  [**Audionautics**](https://freesound.org/people/Audionautics/) on Freesound
+    * *License:* **CC BY 3.0** (Attribution) — per the download's own `license.txt`. **Attribution is
+      required**, and this entry plus the matching `CreditsDatabase.asset` row are what satisfies it.
+      Required credit line: *"Lava loop.wav by Audionautics -- https://freesound.org/s/133901/ --
+      License: Attribution 3.0"*.
+    * *Files used:* `133901__audionautics__lava-loop` (74.8 s).
+    * *Source:* `Assets/Audio/Emitters/audionautics_freesound/`
+    * *Notes:* The `LavaFlow` emitter loop (S3). Knowingly accepted as non-CC0 under §9's rule that
+      attribution-required licences are usable when recorded — the CC0 alternative below covers `LavaFall`,
+      so taking both is what makes flowing and falling lava distinguishable at all. Converted to mono OGG
+      Vorbis with ffmpeg (`-ac 1 -c:a libvorbis -q:a 5`, the settings
+      `Tools/Python/convert_audio_pack.py` uses; the script itself renames to the `<family>_NNN` one-shot
+      convention, which is wrong for a single named loop).
+
+* [**Lava Loop 4**](https://freesound.org/people/Fission9/sounds/474852/) by
+  [**Fission9**](https://freesound.org/people/Fission9/) on Freesound
+    * *License:* CC0 (Public Domain) — per the download's own `license.txt`. Crediting is not required;
+      recorded here because the project credits every third-party asset.
+    * *Files used:* `474852__fission9__lava-loop-4` (39.5 s).
+    * *Source:* `Assets/Audio/Emitters/fission9_freesound/`
+    * *Notes:* The `LavaFall` emitter loop (S3). Same mono OGG conversion as the entry above.
 
 > [!NOTE]
 > **Licence scope for every NOX Sound pack.** All of them arrived in one download from the same itch.io

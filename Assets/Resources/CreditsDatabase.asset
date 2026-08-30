@@ -350,7 +350,8 @@ MonoBehaviour:
     licenseType: 5
     customLicenseText: 
     url: https://www.asoundeffect.com/sounddesigner/nox-sound/
-    usageDescription: Biome ambience beds and the underground cave bed.
+    usageDescription: Biome ambience beds, the underground cave bed, and the S3 water
+      emitter loops.
     sourceFiles:
     - Ambiance_Cave_Dark_Loop_Stereo
     - Ambiance_Wind_Calm_Loop_Stereo
@@ -358,10 +359,42 @@ MonoBehaviour:
     - Ambiance_Forest_Birds_Loop_Stereo
     - Ambiance_Cicadas_Loop_Stereo
     - Ambiance_Wind_Forest_Loop_Stereo
+    - Ambiance_Stream_Calm_Loop_Stereo
+    - Ambiance_Waterfall_Calm_Loop_Stereo
     projectFiles:
     - Assets/Audio/Ambience/nox_nature/
+    - Assets/Audio/Emitters/nox_nature/
     version: 
-    notes: "6 of the pack's 18 loops, converted from 24-bit/48kHz stereo WAV to OGG
-      Vorbis and kept stereo \u2014 they play from 2D sources, unlike the mono block
-      one-shots. Same Essentials Series README as the footsteps pack: 'All these
-      sounds are under CC0 license.'"
+    notes: '8 of the pack''s 18 loops, converted from 24-bit/48kHz stereo WAV to
+      OGG Vorbis. The six beds stay stereo (2D sources); the two emitter loops are
+      downmixed to mono, because a stereo clip does not spatialize on the 3D source
+      an emitter plays from. Same Essentials Series README as the footsteps pack:
+      ''All these sounds are under CC0 license.'''
+  - name: Lava loop
+    author: Audionautics
+    category: 6
+    licenseType: 10
+    customLicenseText: CC BY 3.0 (Attribution)
+    url: https://freesound.org/people/Audionautics/sounds/133901/
+    usageDescription: The flowing-lava emitter loop.
+    sourceFiles:
+    - 133901__audionautics__lava-loop
+    projectFiles:
+    - Assets/Audio/Emitters/audionautics_freesound/
+    version: 
+    notes: 'Attribution required: "Lava loop.wav by Audionautics -- https://freesound.org/s/133901/
+      -- License: Attribution 3.0". Converted to mono OGG Vorbis.'
+  - name: Lava Loop 4
+    author: Fission9
+    category: 6
+    licenseType: 5
+    customLicenseText: 
+    url: https://freesound.org/people/Fission9/sounds/474852/
+    usageDescription: The falling-lava emitter loop.
+    sourceFiles:
+    - 474852__fission9__lava-loop-4
+    projectFiles:
+    - Assets/Audio/Emitters/fission9_freesound/
+    version: 
+    notes: CC0 per the download's own license.txt; crediting is not required. Converted
+      to mono OGG Vorbis.
