@@ -1702,6 +1702,7 @@ GameObject:
   - component: {fileID: 516268959}
   - component: {fileID: 516268961}
   - component: {fileID: 516268960}
+  - component: {fileID: 516268962}
   m_Layer: 0
   m_Name: SoundManager
   m_TagString: Untagged
@@ -1793,6 +1794,25 @@ MonoBehaviour:
   _caveDuck: 1
   _fullDuckDepth: 24
   _duckTaperBlocks: 12
+--- !u!114 &516268962
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 516268957}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8397cd2c92ada3742b9e913c31518cb2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Audio.FluidEmitterDirector
+  _emitterSounds: {fileID: 11400000, guid: 5b5b2629852d17e4a9877ddbabe97184, type: 2}
+  _fluidsGroup: {fileID: 5268279365025211474, guid: 06f869aadb3bc9347b4c686bb85bb7a9, type: 2}
+  _scanInterval: 0.75
+  _defaultAudibleRadius: 24
+  _positionChaseSpeed: 8
+  _fadeSeconds: 1.5
+  _saturationWeight: 48
 --- !u!1 &568008936
 GameObject:
   m_ObjectHideFlags: 0
