@@ -24,11 +24,20 @@ namespace Audio
         /// <summary>How many looping sources the emitter budget holds.</summary>
         private const int EMITTER_VOICE_COUNT = 6;
 
+        /// <summary>
+        /// How many source slots the roster holds. Exposed so diagnostics can walk it rather than mirroring
+        /// the count and silently missing sources when it grows.
+        /// </summary>
+        public static int VoiceCount => EMITTER_VOICE_COUNT;
+
         /// <summary>Fade level below which a source is treated as finished and released.</summary>
         private const float SILENT_FADE = 0.001f;
 
-        /// <summary>Multiplier from an emitter's audible radius to the rolloff's outer distance.</summary>
-        private const float MAX_DISTANCE_HEADROOM = 4f;
+        /// <summary>
+        /// Multiplier from an emitter's full-volume radius to the distance at which it falls silent. Public
+        /// because the authoring UI derives the plateau from an authored radius and must not mirror it.
+        /// </summary>
+        public const float MaxDistanceHeadroom = 4f;
 
         /// <summary>How many points the rolloff falloff is sampled at between full gain and silence.</summary>
         private const int ROLLOFF_SAMPLES = 8;
@@ -129,7 +138,7 @@ namespace Audio
 
             // One curve for every source and every kind: minDistance is always maxDistance/HEADROOM, so the
             // shape over NORMALIZED distance is identical at any radius — only the distances differ per kind.
-            _rolloffCurve = FluidEmitterResolution.BuildRolloffCurve(1f / MAX_DISTANCE_HEADROOM, 1f, ROLLOFF_SAMPLES);
+            _rolloffCurve = FluidEmitterResolution.BuildRolloffCurve(1f / MaxDistanceHeadroom, 1f, ROLLOFF_SAMPLES);
 
             for (int i = 0; i < EMITTER_VOICE_COUNT; i++) _sources[i] = BuildSource($"Emitter {i}", out _filters[i]);
         }
@@ -280,7 +289,10 @@ namespace Audio
 
             kind = _kinds[slot];
             fade = _fades[slot];
-            unityPos = _sources[slot].transform.position;
+
+            // The slot can be in range while its source is not built — the roster is populated in Awake, and
+            // a diagnostics reader can reach this from OnGUI before or after that.
+            if (_sources[slot] != null) unityPos = _sources[slot].transform.position;
         }
 
         /// <summary>Schedules a scan around the listener, when there is a world and a listener to scan around.</summary>
@@ -409,6 +421,9 @@ namespace Audio
             }
         }
 
+        /// <summary>The director's fallback silence distance, for kinds that author none.</summary>
+        public float DefaultAudibleRadius => _defaultAudibleRadius;
+
         /// <summary>
         /// The distance at which a kind falls silent — its authored radius, or the director's default.
         /// </summary>
@@ -432,7 +447,7 @@ namespace Audio
         private static void ApplyRadius(AudioSource source, float radius)
         {
             source.maxDistance = radius;
-            source.minDistance = radius / MAX_DISTANCE_HEADROOM;
+            source.minDistance = radius / MaxDistanceHeadroom;
         }
 
         /// <summary>
