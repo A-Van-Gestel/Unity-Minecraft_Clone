@@ -163,6 +163,9 @@ namespace Audio
         /// <inheritdoc cref="_mixClips"/>
         private float[] _mixWeights;
 
+        /// <summary>The source each mix entry was assigned this frame, or -1 where none was free.</summary>
+        private int[] _mixSlots;
+
         /// <summary>Each mix entry's bearing in blocks; zero where the entry has no direction.</summary>
         private Vector2[] _mixDirections;
 
@@ -214,6 +217,7 @@ namespace Audio
             _caveSource = BuildSource("Cave Bed", out _caveFilter, false);
 
             _mixClips = new AudioClip[BED_VOICE_COUNT];
+            _mixSlots = new int[BED_VOICE_COUNT];
             _mixWeights = new float[BED_VOICE_COUNT];
             _mixDirections = new Vector2[BED_VOICE_COUNT];
             _bedBearings = new Vector2[BED_VOICE_COUNT];
@@ -433,7 +437,7 @@ namespace Audio
                     _mixDirections)
                 : 0;
 
-            for (int i = 0; i < mixCount; i++) ClaimSlot(_mixClips[i]);
+            ClaimMixSlots(mixCount);
 
             float categoryGain = CategoryGain();
             float trim = BedTrim(manager);
@@ -546,12 +550,30 @@ namespace Audio
                 listener.position + new Vector3(unit.x, 0f, unit.y) * _bedRadius;
         }
 
-        /// <summary>Gives a clip a source to play on, if it does not already have one.</summary>
-        /// <param name="clip">The clip that should be audible. Null claims nothing.</param>
-        private void ClaimSlot(AudioClip clip)
+        /// <summary>Gives every clip in the mix a source to play on, if it does not already have one.</summary>
+        /// <param name="mixCount">How many leading entries of the mix scratch are in the mix.</param>
+        /// <remarks>
+        /// Resolved as a set rather than one clip at a time: <see cref="ClaimSlot"/> zeroes the fade of the
+        /// source it claims, so claiming per clip would make that source the quietest again and let the next
+        /// clip in the same mix evict it — leaving one bed audible out of four, each eviction having opened
+        /// and abandoned a streaming source on the way.
+        /// </remarks>
+        private void ClaimMixSlots(int mixCount)
         {
-            int slot = AmbienceResolution.SelectBedSlot(_bedClips, _bedFades, clip);
-            if (slot < 0 || _bedClips[slot] == clip) return;
+            AmbienceResolution.AssignBedSlots(_bedClips, _bedFades, _mixClips, mixCount, _mixSlots);
+
+            for (int m = 0; m < mixCount; m++)
+            {
+                if (_mixSlots[m] >= 0) ClaimSlot(_mixSlots[m], _mixClips[m]);
+            }
+        }
+
+        /// <summary>Gives a clip a source to play on, if it does not already have one.</summary>
+        /// <param name="slot">The source chosen for it by <see cref="AmbienceResolution.AssignBedSlots"/>.</param>
+        /// <param name="clip">The clip that should be audible. Null claims nothing.</param>
+        private void ClaimSlot(int slot, AudioClip clip)
+        {
+            if (clip == null || _bedClips[slot] == clip) return;
 
             _bedClips[slot] = clip;
             _bedFades[slot] = 0f;

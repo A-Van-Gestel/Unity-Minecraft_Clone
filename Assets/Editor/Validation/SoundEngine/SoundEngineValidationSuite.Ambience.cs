@@ -51,12 +51,16 @@ namespace Editor.Validation.SoundEngine
             scenarios.Add(new Scenario("A Returning Bed Reclaims Its Own Still-Audible Source", RunBedSlotReclaim));
             scenarios.Add(new Scenario("A New Bed Takes A Silent Source Before The Quietest Audible One",
                 RunBedSlotPreference));
+            scenarios.Add(new Scenario("Every Bed In One Mix Gets Its Own Source", RunBedMixSlotAssignment));
             scenarios.Add(new Scenario("Cave Bed Ducks The Biome Bed By Its Authored Amount", RunBiomeDuck));
             scenarios.Add(new Scenario("Depth Below The Surface Silences The Biome Beds", RunDepthDuck));
             scenarios.Add(new Scenario("Submersion Cutoff Sweeps Monotonically In Log Space", RunLowPassSweep));
             scenarios.Add(new Scenario("Music Gap Stays Inside Its Authored Bounds", RunMusicGap));
             scenarios.Add(new Scenario("Music Never Picks The Same Track Twice Running", RunTrackPick));
+            scenarios.Add(new Scenario("A Music Pool With Empty Slots Still Picks A Track", RunTrackPickHoles));
             scenarios.Add(new Scenario("Bed Mix Weights Every Nearby Biome And Normalizes", RunBedMix));
+            scenarios.Add(new Scenario("A Mix Whose Contributors All Fall Under The Threshold Still Sounds",
+                RunBedMixAllSubThreshold));
             scenarios.Add(new Scenario("Beds Sharing A Clip Merge Onto One Source", RunBedMixMerge));
             scenarios.Add(new Scenario("Ambience Rest Cycle Alternates Inside Its Authored Bounds", RunRestCycle));
             scenarios.Add(new Scenario("Bed Bearings Survive The Mix And Merge By Weight", RunBedBearings));
@@ -436,6 +440,127 @@ namespace Editor.Validation.SoundEngine
                 return FailSound(scenario, $"claimed slot {quietest} rather than the quietest audible slot 1.");
 
             return true;
+        }
+
+        /// <summary>
+        /// A whole mix assigned at once: no two entries may land on the same source, and an entry must not
+        /// take a source another entry is already carrying its own clip on.
+        /// </summary>
+        /// <remarks>
+        /// Entered on <b>tied</b> fades because that is the state the layer wakes from a rest stretch in —
+        /// every source released, so every fade reads zero. Resolving the mix one clip at a time answers the
+        /// same source for all of them there, since claiming zeroes the fade of what it just claimed.
+        /// </remarks>
+        private static bool RunBedMixSlotAssignment()
+        {
+            const string scenario = "Every Bed In One Mix Gets Its Own Source";
+
+            AudioClip[] clips = MakeClips(5);
+            int[] slots = new int[4];
+
+            AudioClip[] free = { null, null, null, null };
+            float[] tied = { 0f, 0f, 0f, 0f };
+            AudioClip[] mix = { clips[0], clips[1], clips[2], clips[3] };
+
+            int assigned = AmbienceResolution.AssignBedSlots(free, tied, mix, 4, slots);
+            if (assigned != 4) return FailSound(scenario, $"a four-bed mix on a free roster assigned {assigned} sources.");
+            if (!SlotsAreDistinct(slots, 4))
+                return FailSound(scenario,
+                    $"entries collapsed onto shared sources ({slots[0]}, {slots[1]}, {slots[2]}, {slots[3]}).");
+
+            // Reclaim beats novelty: a fresh clip must not evict the source a later entry resumes on.
+            AudioClip[] carrying = { clips[0], clips[1], null, null };
+            float[] audible = { 0.5f, 0.5f, 0f, 0f };
+            AudioClip[] arriving = { clips[4], clips[1] };
+
+            assigned = AmbienceResolution.AssignBedSlots(carrying, audible, arriving, 2, slots);
+            if (assigned != 2) return FailSound(scenario, $"a two-bed mix assigned {assigned} sources.");
+            if (slots[1] != 1)
+                return FailSound(scenario, $"the returning bed was moved off its own source to slot {slots[1]}.");
+            if (slots[0] == 1)
+                return FailSound(scenario, "an arriving bed evicted the source a returning bed was carrying.");
+
+            // Every source audible and every entry new: still one source each, never a shared one.
+            AudioClip[] busy = { clips[0], clips[1], clips[2], clips[3] };
+            float[] busyFades = { 0.9f, 0.2f, 0.75f, 0.5f };
+            AudioClip[] replacements = { MakeClips(1)[0], MakeClips(1)[0], MakeClips(1)[0], MakeClips(1)[0] };
+
+            assigned = AmbienceResolution.AssignBedSlots(busy, busyFades, replacements, 4, slots);
+            if (assigned != 4 || !SlotsAreDistinct(slots, 4))
+                return FailSound(scenario, "a full handover did not give every arriving bed its own source.");
+
+            if (AmbienceResolution.AssignBedSlots(null, tied, mix, 4, slots) != 0 ||
+                AmbienceResolution.AssignBedSlots(free, null, mix, 4, slots) != 0 ||
+                AmbienceResolution.AssignBedSlots(free, tied, null, 4, slots) != 0 ||
+                AmbienceResolution.AssignBedSlots(free, tied, mix, 4, null) != 0)
+            {
+                return FailSound(scenario, "a null argument assigned sources instead of reporting none.");
+            }
+
+            return true;
+        }
+
+        /// <summary>Whether the leading entries of a slot assignment are all distinct and all resolved.</summary>
+        /// <param name="slots">The assignment to check.</param>
+        /// <param name="count">How many leading entries are in the mix.</param>
+        /// <returns>True when every entry got its own source.</returns>
+        private static bool SlotsAreDistinct(int[] slots, int count)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                if (slots[i] < 0) return false;
+
+                for (int j = i + 1; j < count; j++)
+                {
+                    if (slots[i] == slots[j]) return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// A threshold that drops every contributor must reach the fallback, not silence.
+        /// </summary>
+        /// <remarks>
+        /// Reachable from authored values alone: the weight floor ranges to 0.5, and an evenly-split border
+        /// hands it two contributors of exactly 0.5. Falling to zero beds there leaves the biome layer
+        /// silent with nothing fading in behind it — the one outcome the mix is documented never to produce.
+        /// </remarks>
+        private static bool RunBedMixAllSubThreshold()
+        {
+            const string scenario = "A Mix Whose Contributors All Fall Under The Threshold Still Sounds";
+
+            AudioClip[] loops = MakeClips(2);
+            AudioClip fallback = AudioClip.Create("ValidationSubThresholdFallback", 16, 1, 8000, false);
+            BiomeBase[] biomes = BiomesWithLoops(loops);
+
+            AudioClip[] clips = new AudioClip[BiomeWeights.MaxBiomes];
+            float[] weights = new float[BiomeWeights.MaxBiomes];
+
+            try
+            {
+                AudioContext border = WeightedContext(new[] { 0, 1 }, new[] { 0.5f, 0.5f });
+                int count = AmbienceResolution.ResolveBedMix(border, biomes, fallback, 0.5f, 0u, clips, weights);
+
+                if (count != 1)
+                    return FailSound(scenario, $"an evenly-split border under a 0.5 floor produced {count} beds, not 1.");
+                if (clips[0] != fallback)
+                    return FailSound(scenario, "the surviving bed was not the fallback.");
+                if (Mathf.Abs(weights[0] - 1f) > AMBIENCE_EPSILON)
+                    return FailSound(scenario, $"the fallback bed came through at weight {weights[0]}, not 1.");
+
+                // A four-way corner under a lower floor is the same hole reached from ordinary authoring.
+                AudioContext corner = WeightedContext(new[] { 0, 1 }, new[] { 0.25f, 0.25f });
+                if (AmbienceResolution.ResolveBedMix(corner, biomes, fallback, 0.3f, 0u, clips, weights) != 1)
+                    return FailSound(scenario, "a corner under a 0.3 floor did not fall back to one bed.");
+
+                return true;
+            }
+            finally
+            {
+                foreach (BiomeBase biome in biomes) Object.DestroyImmediate(biome);
+            }
         }
 
         /// <summary>The duck the cave bed applies to the biome bed, including both authoring extremes.</summary>
@@ -1131,6 +1256,57 @@ namespace Editor.Validation.SoundEngine
                 return FailSound(scenario, "flipped while the current stretch still had time left.");
             if (Mathf.Abs(held - 9.5f) > AMBIENCE_EPSILON)
                 return FailSound(scenario, $"the remaining time went to {held} instead of 9.5.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// A pool with empty slots must still play: the picker steps past them rather than resolving to
+        /// nothing.
+        /// </summary>
+        /// <remarks>
+        /// Half-filled pools are ordinary — the pool editor appends an empty slot before the author assigns
+        /// a clip, and an in-progress import looks the same. Resolving to nothing costs a whole authored gap
+        /// of silence per landing, so a two-slot pool with one clip would be quiet roughly half the time,
+        /// with nothing logged to say why.
+        /// </remarks>
+        private static bool RunTrackPickHoles()
+        {
+            const string scenario = "A Music Pool With Empty Slots Still Picks A Track";
+
+            AudioClip[] clips = MakeClips(2);
+
+            if (AmbienceResolution.PickTrackIndex(new AudioClip[] { null, null }, null, 0u) != -1)
+                return FailSound(scenario, "an all-empty pool did not report -1.");
+            if (AmbienceResolution.PickTrackIndex(new AudioClip[] { null }, null, 0u) != -1)
+                return FailSound(scenario, "a single empty slot did not report -1.");
+
+            AudioClip[] holed = { null, clips[0], null, null };
+            for (uint salt = 1; salt <= AMBIENCE_SWEEP_STEPS; salt++)
+            {
+                int index = AmbienceResolution.PickTrackIndex(holed, null, AmbienceResolution.ScheduleHash(salt));
+                if (index != 1)
+                    return FailSound(scenario, $"a pool holding one clip at index 1 answered {index}.");
+            }
+
+            // With one clip left, repeating it is the only answer there is — and still better than silence.
+            if (AmbienceResolution.PickTrackIndex(holed, clips[0], 0u) != 1)
+                return FailSound(scenario, "a pool with a single remaining clip refused to repeat it.");
+
+            // Two clips among holes: every pick must be one of them, and never the one just played.
+            AudioClip[] sparse = { clips[0], null, null, clips[1], null };
+            AudioClip last = null;
+
+            for (uint salt = 1; salt <= AMBIENCE_SWEEP_STEPS; salt++)
+            {
+                int index = AmbienceResolution.PickTrackIndex(sparse, last, AmbienceResolution.ScheduleHash(salt));
+                if ((uint)index >= (uint)sparse.Length || sparse[index] == null)
+                    return FailSound(scenario, $"a sparse pool answered empty slot {index}.");
+                if (sparse[index] == last)
+                    return FailSound(scenario, "a sparse pool repeated a track back to back.");
+
+                last = sparse[index];
+            }
 
             return true;
         }

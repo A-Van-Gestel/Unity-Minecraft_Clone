@@ -7,7 +7,7 @@ channel, the shared `BlockSoundDatabase`, the BlockEditor dropdown and prefill, 
 pooled one-shot voices and the break / place / footstep triggers all exist; the `AudioMixer` is authored
 with its seven exposed volume parameters; two CC0 packs supply content, so all 13 sounding materials have
 break and step clips. Footsteps sample two cells, so wading and cross-mesh flora sound (§5.1). The
-`Validate Sound Engine` suite guards the resolution chain and the ambience decisions (35 baselines).
+`Validate Sound Engine` suite guards the resolution chain and the ambience decisions (38 baselines).
 **S2's runtime shipped on 2026-08-29** — `AudioContext`, the `AmbienceResolution` decision layer, the
 `AmbienceDirector` bed pair with its cave layer, the `MusicScheduler` and the underwater low-pass — on top of
 the §6.2 managed biome query, which shipped the same day and is guarded by its own `Validate Biome Selection`

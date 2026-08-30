@@ -20,6 +20,12 @@ namespace Audio
     public static class AmbienceResolution
     {
         /// <summary>
+        /// Bed sources <see cref="AssignBedSlots"/> can book-keep in one pass — the width of the mask it
+        /// tracks them with, well above the four-voice roster the director actually owns.
+        /// </summary>
+        private const int MAX_TRACKED_BED_SLOTS = 32;
+
+        /// <summary>
         /// Advances a dwell filter and returns the value that should be committed.
         /// </summary>
         /// <remarks>
@@ -234,8 +240,10 @@ namespace Audio
         /// dropping a 2% neighbor would quietly duck everything else by 2%.
         /// </para>
         /// <para>
-        /// <b>No weights mean the fallback</b>, not silence — the legacy generator answers no weighted query
-        /// for a whole session, and that world still needs a bed.
+        /// <b>No surviving contributor means the fallback</b>, not silence — whether because the world
+        /// answered no weighted query at all (the legacy generator does this for a whole session) or because
+        /// the threshold dropped every contributor, as it does on an evenly-split border. Both worlds still
+        /// need a bed.
         /// </para>
         /// </remarks>
         public static int ResolveBedMix(
@@ -254,7 +262,7 @@ namespace Audio
             if (directions != null) capacity = Mathf.Min(capacity, directions.Length);
             if (capacity <= 0) return 0;
 
-            if (!context.HasWeights || context.Weights.Count <= 0)
+            int EmitFallbackBed()
             {
                 AudioClip single = SelectBiomeLoop(context, fallbackLoop, rollSalt);
                 if (single == null) return 0;
@@ -266,6 +274,8 @@ namespace Audio
                 if (directions != null) directions[0] = Vector2.zero;
                 return 1;
             }
+
+            if (!context.HasWeights || context.Weights.Count <= 0) return EmitFallbackBed();
 
             int count = 0;
             float total = 0f;
@@ -315,7 +325,9 @@ namespace Audio
                 total += weight;
             }
 
-            if (count == 0 || total <= 0f) return 0;
+            // Every contributor filtered out is still an answered query, so it takes the same fallback as an
+            // unanswered one: a threshold high enough to drop an evenly-split border must not read as silence.
+            if (count == 0 || total <= 0f) return EmitFallbackBed();
 
             for (int i = 0; i < count; i++)
             {
@@ -453,6 +465,86 @@ namespace Audio
         }
 
         /// <summary>
+        /// Assigns a whole bed mix to sources in one pass, so no two entries land on the same source.
+        /// </summary>
+        /// <param name="slotClips">The clip each bed source currently holds; null where free.</param>
+        /// <param name="slotFades">Each source's fade position, index-aligned with <paramref name="slotClips"/>.</param>
+        /// <param name="mixClips">The clips that should now be audible.</param>
+        /// <param name="mixCount">How many leading entries of <paramref name="mixClips"/> are in the mix.</param>
+        /// <param name="slots">Receives the chosen slot per mix entry, or -1 where none was available.</param>
+        /// <returns>How many entries were assigned a slot.</returns>
+        /// <remarks>
+        /// <para>
+        /// Two passes, because the choice is a <i>set</i> and not a sequence of independent ones. Pass one
+        /// hands every entry the source already carrying its clip; pass two gives what is left the quietest
+        /// source none of them has taken. Choosing per entry instead lets a fresh bed take a source a later
+        /// entry was about to resume — and, once the caller zeroes a claimed source's fade, lets every entry
+        /// in the mix pick the same source and evict one another.
+        /// </para>
+        /// <para>
+        /// The preference inside pass two is <see cref="SelectBedSlot"/>'s, for the same reasons: a silent
+        /// source is already the quietest, so it is claimed before anything audible is interrupted.
+        /// </para>
+        /// </remarks>
+        public static int AssignBedSlots(
+            AudioClip[] slotClips, float[] slotFades, AudioClip[] mixClips, int mixCount, int[] slots)
+        {
+            if (slotClips == null || slotFades == null || mixClips == null || slots == null) return 0;
+
+            // Capped at the mask width rather than allocating a per-call scratch: this runs every frame, and
+            // a roster that large would be a mixing decision long before it was a bookkeeping one.
+            int slotCount = Mathf.Min(Mathf.Min(slotClips.Length, slotFades.Length), MAX_TRACKED_BED_SLOTS);
+            int count = Mathf.Min(mixCount, Mathf.Min(mixClips.Length, slots.Length));
+            if (slotCount <= 0 || count <= 0) return 0;
+
+            for (int m = 0; m < count; m++) slots[m] = -1;
+
+            // A source is "taken" once some entry has been given it this pass, whatever its fade now reads.
+            uint taken = 0u;
+            int assigned = 0;
+
+            for (int m = 0; m < count; m++)
+            {
+                AudioClip wanted = mixClips[m];
+                if (wanted == null) continue;
+
+                for (int i = 0; i < slotCount; i++)
+                {
+                    if ((taken & (1u << i)) != 0u || slotClips[i] != wanted) continue;
+
+                    slots[m] = i;
+                    taken |= 1u << i;
+                    assigned++;
+                    break;
+                }
+            }
+
+            for (int m = 0; m < count; m++)
+            {
+                if (slots[m] >= 0 || mixClips[m] == null) continue;
+
+                int quietest = -1;
+                float quietestFade = float.MaxValue;
+
+                for (int i = 0; i < slotCount; i++)
+                {
+                    if ((taken & (1u << i)) != 0u || slotFades[i] >= quietestFade) continue;
+
+                    quietestFade = slotFades[i];
+                    quietest = i;
+                }
+
+                if (quietest < 0) continue;
+
+                slots[m] = quietest;
+                taken |= 1u << quietest;
+                assigned++;
+            }
+
+            return assigned;
+        }
+
+        /// <summary>
         /// Attenuates the biome bed under the cave bed.
         /// </summary>
         /// <param name="caveWeight">How far the cave layer has faded in, [0, 1].</param>
@@ -535,10 +627,10 @@ namespace Audio
         /// <summary>
         /// Picks the next music track, avoiding an immediate repeat.
         /// </summary>
-        /// <param name="pool">The resolved track pool. Null or empty selects nothing.</param>
+        /// <param name="pool">The resolved track pool. Null, empty, or all-empty selects nothing.</param>
         /// <param name="lastTrack">The clip played previously, or null when nothing has played yet.</param>
         /// <param name="hash">A per-pick hash (see <see cref="ScheduleHash"/>).</param>
-        /// <returns>The track index, or -1 when the pool is empty.</returns>
+        /// <returns>The index of a filled slot, or -1 when the pool holds no clip at all.</returns>
         /// <remarks>
         /// <para>
         /// Compares the <b>clip</b>, not the index it sat at last time. The pool is re-resolved at every pick
@@ -554,11 +646,40 @@ namespace Audio
         public static int PickTrackIndex(AudioClip[] pool, AudioClip lastTrack, uint hash)
         {
             if (pool == null || pool.Length == 0) return -1;
-            if (pool.Length == 1) return 0;
 
-            int index = (int)(hash % (uint)pool.Length);
-            if (pool[index] != null && pool[index] == lastTrack) index = (index + 1) % pool.Length;
+            int filled = 0;
+            foreach (AudioClip clip in pool)
+            {
+                if (clip != null) filled++;
+            }
+
+            if (filled == 0) return -1;
+
+            int index = NextFilled(pool, (int)(hash % (uint)pool.Length));
+            if (filled > 1 && pool[index] == lastTrack) index = NextFilled(pool, (index + 1) % pool.Length);
             return index;
+        }
+
+        /// <summary>
+        /// Walks forward from an index to the first slot holding a clip, wrapping.
+        /// </summary>
+        /// <param name="pool">The pool being read; must hold at least one non-null entry.</param>
+        /// <param name="from">Where to start looking, inclusive.</param>
+        /// <returns>The index of a filled slot.</returns>
+        /// <remarks>
+        /// Empty slots are ordinary: the pool editor appends one before the author assigns a clip, and a
+        /// half-filled pool is what an in-progress import looks like. Landing on one used to burn a whole
+        /// authored gap of silence, so the picker steps past them instead of resolving to nothing.
+        /// </remarks>
+        private static int NextFilled(AudioClip[] pool, int from)
+        {
+            for (int step = 0; step < pool.Length; step++)
+            {
+                int index = (from + step) % pool.Length;
+                if (pool[index] != null) return index;
+            }
+
+            return from;
         }
 
         /// <summary>
