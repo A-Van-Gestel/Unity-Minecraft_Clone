@@ -39,6 +39,15 @@ namespace Editor.Validation.SoundEngine
         /// <summary>Rolls the distribution scenario draws before comparing frequencies against the weights.</summary>
         private const int TRACK_DISTRIBUTION_ROLLS = 4000;
 
+        /// <summary>
+        /// The per-track gain the S7 fixtures author. Deliberately neither 0 nor 1: an identity value would
+        /// pass a chain that dropped the term entirely, which is the one defect these scenarios exist for.
+        /// </summary>
+        private const float FIXTURE_TRACK_VOLUME = 0.4f;
+
+        /// <inheritdoc cref="FIXTURE_TRACK_VOLUME"/>
+        private const float FIXTURE_OTHER_VOLUME = 0.8f;
+
         static partial void AddAmbienceScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario("Cave Dwell Holds A Reading Before Committing It", RunCaveDwell));
@@ -67,6 +76,11 @@ namespace Editor.Validation.SoundEngine
             scenarios.Add(new Scenario("A Track Outside Its Altitude Band Is Never Selected", RunTrackBand));
             scenarios.Add(new Scenario("Track Play Chance Spreads Across The Eligible Set In Proportion",
                 RunTrackDistribution));
+            scenarios.Add(new Scenario("Bed Source Volume Folds In Every Gain That Governs A Bed",
+                RunBedSourceVolume));
+            scenarios.Add(new Scenario("An Unauthored Track Volume Plays At Full Level", RunTrackVolumeDefault));
+            scenarios.Add(new Scenario("Bed Mix Carries Each Track's Volume And Merges Them By Weight",
+                RunBedMixVolumes));
         }
 
         /// <summary>
@@ -1033,6 +1047,41 @@ namespace Editor.Validation.SoundEngine
         private static AmbienceTrack Track(AudioClip clip, float low, float high, float chance) =>
             new AmbienceTrack { clip = clip, yRange = new Vector2(low, high), playChance = chance };
 
+        /// <summary>Builds one authored ambience track carrying a content trim.</summary>
+        /// <param name="clip">The loop the track plays.</param>
+        /// <param name="chance">Its weight relative to the biome's other eligible tracks.</param>
+        /// <param name="volume">Its authored content trim.</param>
+        /// <returns>The track, spanning the whole world.</returns>
+        /// <remarks>
+        /// The band is fixed at the full sweep because every scenario that cares about gain is indifferent
+        /// to altitude, and one that authored both would fail for two reasons at once.
+        /// </remarks>
+        private static AmbienceTrack TrackAt(AudioClip clip, float chance, float volume) =>
+            new AmbienceTrack
+            {
+                clip = clip,
+                yRange = new Vector2(TRACK_BAND_LOW, TRACK_BAND_HIGH),
+                playChance = chance,
+                volume = volume,
+            };
+
+        /// <summary>Builds a biome list whose entries carry one bed each, at an authored volume.</summary>
+        /// <param name="loops">One bed per biome.</param>
+        /// <param name="volumes">Their authored trims, index-aligned.</param>
+        /// <returns>Biome assets to be destroyed by the caller.</returns>
+        private static BiomeBase[] BiomesWithVolumes(AudioClip[] loops, float[] volumes)
+        {
+            BiomeBase[] biomes = new BiomeBase[loops.Length];
+            for (int i = 0; i < loops.Length; i++)
+            {
+                StandardBiomeAttributes biome = ScriptableObject.CreateInstance<StandardBiomeAttributes>();
+                biome.ambientTracks = new[] { TrackAt(loops[i], 1f, volumes[i]) };
+                biomes[i] = biome;
+            }
+
+            return biomes;
+        }
+
         /// <summary>
         /// The mix a weighted neighborhood resolves to: one entry per contributing biome, sub-threshold
         /// contributors dropped, and the survivors renormalized so dropping one does not duck the rest.
@@ -1353,6 +1402,220 @@ namespace Editor.Validation.SoundEngine
                 if (poolB[carried] == poolA[2])
                     return FailSound(scenario,
                         "repeated the previous track after the pool changed — the guard compares positions, not clips.");
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// The composed bed gain (S7). Every gain that governs a bed meets in one expression, and only the
+        /// fade passes through the equal-power curve — a content trim folded in before the square root, or
+        /// dropped altogether, is inaudible in a table of measurements and obvious in the room.
+        /// </summary>
+        /// <remarks>
+        /// The reason the chain is a function at all. Composed inline in the director it was reachable only
+        /// by playing the game, so the one baseline that mentioned bed gain asserted <c>GainFromFade</c> on
+        /// its own and stayed green no matter what the director multiplied it by.
+        /// </remarks>
+        private static bool RunBedSourceVolume()
+        {
+            const string scenario = "Bed Source Volume Folds In Every Gain That Governs A Bed";
+
+            // With every other gain at unity the chain must be exactly the fade curve, or the two have
+            // drifted apart and the constant-power scenario no longer describes what a bed plays.
+            for (int i = 0; i <= AMBIENCE_SWEEP_STEPS; i++)
+            {
+                float fade = i / (float)AMBIENCE_SWEEP_STEPS;
+                float composed = AmbienceResolution.BedSourceVolume(fade, 1f, 1f, 1f, 1f);
+                if (Mathf.Abs(composed - AmbienceResolution.GainFromFade(fade)) > AMBIENCE_EPSILON)
+                    return FailSound(scenario,
+                        $"at fade={fade:0.000} the chain gave {composed}, not the fade curve's " +
+                        $"{AmbienceResolution.GainFromFade(fade)}.");
+            }
+
+            // Linear in the trim, NOT equal-power: a track authored at 0.25 is a quarter of the amplitude.
+            // Routing it through the fade curve would make it half, which reads as the trim not working.
+            float trimmed = AmbienceResolution.BedSourceVolume(1f, 0.25f, 1f, 1f, 1f);
+            if (Mathf.Abs(trimmed - 0.25f) > AMBIENCE_EPSILON)
+                return FailSound(scenario, $"a track volume of 0.25 produced {trimmed}, not 0.25.");
+
+            // Every term multiplies, none is dropped: four halvings are a sixteenth.
+            float all = AmbienceResolution.BedSourceVolume(1f, 0.5f, 0.5f, 0.5f, 0.5f);
+            if (Mathf.Abs(all - 0.0625f) > AMBIENCE_EPSILON)
+                return FailSound(scenario, $"four gains of 0.5 composed to {all}, not 0.0625.");
+
+            // A silent fade stays exactly silent whatever else is authored — a released slot is recognized
+            // by a volume of zero, and a trim must not leave a sliver behind.
+            if (!ExactValue.IsZero(AmbienceResolution.BedSourceVolume(0f, 0.5f, 1f, 1f, 1f)))
+                return FailSound(scenario, "a fade of 0 did not produce silence.");
+
+            // Trims attenuate only. An out-of-range authoring must not amplify the bed above the level the
+            // fade and the ducks agreed on.
+            float above = AmbienceResolution.BedSourceVolume(1f, 4f, 1f, 1f, 1f);
+            if (!ExactValue.Equal(above, 1f))
+                return FailSound(scenario, $"a track volume of 4 was not clamped: it gave {above}.");
+            if (!ExactValue.IsZero(AmbienceResolution.BedSourceVolume(1f, -1f, 1f, 1f, 1f)))
+                return FailSound(scenario, "a negative track volume was not clamped to silence.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// The unset rule (S7): a track deserialized from an asset written before the volume field existed
+        /// holds 0, and must be heard at full level rather than not at all.
+        /// </summary>
+        /// <remarks>
+        /// The trap this whole feature had to step around. Ten authored tracks across six shipped assets
+        /// would have gone silent on the frame the field landed, and silence is the one failure that reports
+        /// nothing — the beds simply stop, and nothing in the console says why.
+        /// </remarks>
+        private static bool RunTrackVolumeDefault()
+        {
+            const string scenario = "An Unauthored Track Volume Plays At Full Level";
+
+            AmbienceTrack unset = Track(MakeClips(1)[0], TRACK_BAND_LOW, TRACK_BAND_HIGH, 1f);
+            if (!ExactValue.Equal(unset.EffectiveVolume, 1f))
+                return FailSound(scenario,
+                    $"an unauthored track read as {unset.EffectiveVolume}, not full level.");
+
+            AmbienceTrack authored = TrackAt(MakeClips(1)[0], 1f, FIXTURE_TRACK_VOLUME);
+            if (!ExactValue.Equal(authored.EffectiveVolume, FIXTURE_TRACK_VOLUME))
+                return FailSound(scenario,
+                    $"an authored {FIXTURE_TRACK_VOLUME} read back as {authored.EffectiveVolume}.");
+
+            AudioClip loop = MakeClips(1)[0];
+            BiomeBase[] biomes = BiomesWithVolumes(new[] { loop }, new[] { FIXTURE_TRACK_VOLUME });
+            try
+            {
+                AudioClip selected = AmbienceResolution.SelectBiomeTrackClip(biomes[0], 0, 0u, 0,
+                    out float volume);
+
+                if (selected != loop) return FailSound(scenario, "the fixture biome did not resolve its bed.");
+                if (!ExactValue.Equal(volume, FIXTURE_TRACK_VOLUME))
+                    return FailSound(scenario,
+                        $"the resolver reported {volume} for a track authored at {FIXTURE_TRACK_VOLUME}.");
+
+                // A biome that resolves no track reports full level, not silence: the caller falls back to
+                // the database bed, whose own gain governs it.
+                StandardBiomeAttributes bare = ScriptableObject.CreateInstance<StandardBiomeAttributes>();
+                try
+                {
+                    bare.ambientTracks = System.Array.Empty<AmbienceTrack>();
+                    if (AmbienceResolution.SelectBiomeTrackClip(bare, 0, 0u, 0, out float bareVolume) != null)
+                        return FailSound(scenario, "a biome with no tracks resolved a clip.");
+                    if (!ExactValue.Equal(bareVolume, 1f))
+                        return FailSound(scenario, $"a biome with no tracks reported a gain of {bareVolume}.");
+                }
+                finally
+                {
+                    Object.DestroyImmediate(bare);
+                }
+            }
+            finally
+            {
+                foreach (BiomeBase biome in biomes) Object.DestroyImmediate(biome);
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// The mix's volume channel (S7): each entry carries the gain of the track that produced it, merged
+        /// entries carry the weight-weighted mean of theirs, and the fallback carries the database's.
+        /// </summary>
+        /// <remarks>
+        /// The gain has to survive the same collapse the bearing does. Entries merge <b>by clip</b>, so the
+        /// two biomes that share a bed today arrive as one source that can only be played at one level; a
+        /// channel that merged by overwriting would hand that source whichever contributor the weight walk
+        /// happened to visit last.
+        /// </remarks>
+        private static bool RunBedMixVolumes()
+        {
+            const string scenario = "Bed Mix Carries Each Track's Volume And Merges Them By Weight";
+
+            AudioClip[] loops = MakeClips(2);
+            AudioClip shared = MakeClips(1)[0];
+            AudioClip fallback = AudioClip.Create("ValidationVolumeFallback", 16, 1, 8000, false);
+
+            AudioClip[] clips = new AudioClip[BiomeWeights.MaxBiomes];
+            float[] weights = new float[BiomeWeights.MaxBiomes];
+            float[] volumes = new float[BiomeWeights.MaxBiomes];
+
+            BiomeBase[] distinct = BiomesWithVolumes(loops,
+                new[] { FIXTURE_TRACK_VOLUME, FIXTURE_OTHER_VOLUME });
+            try
+            {
+                // Distinct clips: each entry keeps its own track's trim, whatever the mix weights are.
+                int count = AmbienceResolution.ResolveBedMix(
+                    WeightedContext(new[] { 0, 1 }, new[] { 0.6f, 0.4f }), distinct, fallback, 0.01f, 0u,
+                    clips, weights, null, volumes);
+
+                if (count != 2) return FailSound(scenario, $"two distinct beds produced {count} entries.");
+
+                // Tolerant, unlike the fallback assertions below: even an unmerged entry is scaled by its
+                // raw weight and divided back out, so an authored 0.8 returns as 0.8000001.
+                if (Mathf.Abs(volumes[0] - FIXTURE_TRACK_VOLUME) > AMBIENCE_EPSILON)
+                    return FailSound(scenario, $"the first entry carried {volumes[0]}.");
+                if (Mathf.Abs(volumes[1] - FIXTURE_OTHER_VOLUME) > AMBIENCE_EPSILON)
+                    return FailSound(scenario, $"the second entry carried {volumes[1]}.");
+            }
+            finally
+            {
+                foreach (BiomeBase biome in distinct) Object.DestroyImmediate(biome);
+            }
+
+            BiomeBase[] merging = BiomesWithVolumes(new[] { shared, shared },
+                new[] { FIXTURE_TRACK_VOLUME, FIXTURE_OTHER_VOLUME });
+            try
+            {
+                // 75% of the weight authored at 0.4, 25% at 0.8: the mean is 0.5, not either contributor and
+                // not their unweighted average.
+                int count = AmbienceResolution.ResolveBedMix(
+                    WeightedContext(new[] { 0, 1 }, new[] { 0.75f, 0.25f }), merging, fallback, 0.01f, 0u,
+                    clips, weights, null, volumes);
+
+                if (count != 1) return FailSound(scenario, $"one shared clip produced {count} entries.");
+
+                const float expected = 0.75f * FIXTURE_TRACK_VOLUME + 0.25f * FIXTURE_OTHER_VOLUME;
+                if (Mathf.Abs(volumes[0] - expected) > AMBIENCE_EPSILON)
+                    return FailSound(scenario,
+                        $"the merged gain was {volumes[0]}, not the weighted mean {expected}.");
+            }
+            finally
+            {
+                foreach (BiomeBase biome in merging) Object.DestroyImmediate(biome);
+            }
+
+            // The fallback bed answers with the gain authored for the fallback bed, not with a biome's.
+            AudioContext unweighted = new AudioContext(-1, null, false, 15, false);
+            int single = AmbienceResolution.ResolveBedMix(
+                unweighted, null, fallback, 0.01f, 0u, clips, weights, null, volumes,
+                FIXTURE_OTHER_VOLUME);
+
+            if (single != 1) return FailSound(scenario, $"the unweighted fallback produced {single} entries.");
+            if (!ExactValue.Equal(volumes[0], FIXTURE_OTHER_VOLUME))
+                return FailSound(scenario,
+                    $"the fallback bed carried {volumes[0]}, not its authored {FIXTURE_OTHER_VOLUME}.");
+
+            // A biome that authors no track of its own is playing the fallback clip, so it must take the
+            // fallback's gain too — not the unity the track lookup reports for "nothing selected".
+            BiomeBase[] bare = BiomesWithLoops(new AudioClip[] { null });
+            try
+            {
+                int count = AmbienceResolution.ResolveBedMix(
+                    WeightedContext(new[] { 0 }, new[] { 1f }), bare, fallback, 0.01f, 0u,
+                    clips, weights, null, volumes, FIXTURE_TRACK_VOLUME);
+
+                if (count != 1) return FailSound(scenario, $"a bedless biome produced {count} entries.");
+                if (clips[0] != fallback) return FailSound(scenario, "a bedless biome did not take the fallback.");
+                if (!ExactValue.Equal(volumes[0], FIXTURE_TRACK_VOLUME))
+                    return FailSound(scenario,
+                        $"a bedless biome played the fallback at {volumes[0]}, not its authored " +
+                        $"{FIXTURE_TRACK_VOLUME}.");
+            }
+            finally
+            {
+                foreach (BiomeBase biome in bare) Object.DestroyImmediate(biome);
             }
 
             return true;

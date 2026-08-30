@@ -74,11 +74,139 @@ namespace Editor.Validation.SoundEngine
             scenarios.Add(new Scenario("Loudness Meter Output Parses To Its Summary Values", RunLoudnessParse));
             scenarios.Add(new Scenario("Normalization Never Raises A Clip Toward The Target", RunLoudnessTrim));
             scenarios.Add(new Scenario("A Meter Floor Reading Is Not Treated As A Measurement", RunLoudnessFloor));
+            scenarios.Add(new Scenario("A Clip Is Writable Only When Every Entry Governing It Is",
+                RunClaimWritability));
+            scenarios.Add(new Scenario("A Clip Claimed By Two Roles Is Judged By The Writable One And Never Written",
+                RunClaimCrossRole));
+        }
+
+        /// <summary>
+        /// The quietest a shipped bed may be authored and still count as content. Well under any trim the
+        /// Loudness tab would propose — this catches an authoring slip or a bad migration, not a taste call.
+        /// </summary>
+        private const float MIN_SHIPPED_BED_VOLUME = 0.01f;
+
+        /// <summary>
+        /// The writability rule behind the Loudness tab's Apply button (S7 review). Every governing entry has
+        /// to carry a volume field, not merely one of them.
+        /// </summary>
+        /// <remarks>
+        /// This rule decides whether a button <b>writes to an asset</b>, and both the row and the Apply pass
+        /// read it from here — which is the fix it exists to pin. It was previously computed in the table and
+        /// never consulted by the writers, so a row saying "Apply cannot act on it" was written anyway.
+        /// </remarks>
+        private static bool RunClaimWritability()
+        {
+            const string scenario = "A Clip Is Writable Only When Every Entry Governing It Is";
+
+            AudioClipClaim single = new AudioClipClaim();
+            single.Add(AudioCategory.Ambient, 0.4f, true, "Desert track");
+
+            if (!single.IsWritable) return FailSound(scenario, "a lone writable entry was not writable.");
+            if (!single.HasAuthoredVolume) return FailSound(scenario, "a lone writable entry reported no gain.");
+            if (!Mathf.Approximately(single.Volume, 0.4f))
+                return FailSound(scenario, $"the authored volume read back as {single.Volume}.");
+
+            // Two entries in one role agreeing: still writable, and still one number to show.
+            AudioClipClaim agreeing = new AudioClipClaim();
+            agreeing.Add(AudioCategory.Ambient, 0.4f, true, "Desert track");
+            agreeing.Add(AudioCategory.Ambient, 0.4f, true, "Mountain track");
+
+            if (!agreeing.IsWritable) return FailSound(scenario, "two agreeing writable entries were not writable.");
+            if (!agreeing.VolumesAgree) return FailSound(scenario, "two entries at 0.4 were reported as disagreeing.");
+            if (agreeing.Entries != 2) return FailSound(scenario, $"two entries counted as {agreeing.Entries}.");
+
+            // Disagreeing: still writable — Apply writing one trim to both is what makes them agree — but
+            // there is no single authored number for the column to show.
+            AudioClipClaim disagreeing = new AudioClipClaim();
+            disagreeing.Add(AudioCategory.Ambient, 0.4f, true, "Desert track");
+            disagreeing.Add(AudioCategory.Ambient, 0.8f, true, "Mountain track");
+
+            if (!disagreeing.IsWritable) return FailSound(scenario, "disagreeing writable entries were not writable.");
+            if (disagreeing.VolumesAgree)
+                return FailSound(scenario, "0.4 and 0.8 were reported as agreeing.");
+
+            // A role with no gain field at all is never writable, however many entries it has.
+            AudioClipClaim music = new AudioClipClaim();
+            music.Add(AudioCategory.Music, 1f, false, "default music pool");
+
+            if (music.IsWritable) return FailSound(scenario, "a music pool entry was reported as writable.");
+            if (music.HasAuthoredVolume)
+                return FailSound(scenario, "a music pool entry claimed to carry an authored gain.");
+            if (string.IsNullOrEmpty(music.BlockedReason))
+                return FailSound(scenario, "an unwritable claim gave no reason.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// The cross-role rule (S7 review): a clip claimed by two roles is judged under the role that owns
+        /// its gain, and is never written.
+        /// </summary>
+        /// <remarks>
+        /// Unreachable from the shipped content — there is no music yet — which is exactly why it is pinned
+        /// here rather than left to be discovered when §9's music lands. Each role normalizes against its own
+        /// target, so such a clip has two different correct trims and Apply must not silently pick one.
+        /// </remarks>
+        private static bool RunClaimCrossRole()
+        {
+            const string scenario = "A Clip Claimed By Two Roles Is Judged By The Writable One And Never Written";
+
+            // Claimed by the gainless role FIRST, which is the order the databases are actually walked in.
+            AudioClipClaim claim = new AudioClipClaim();
+            claim.Add(AudioCategory.Music, 1f, false, "default music pool");
+            claim.Add(AudioCategory.Ambient, 0.4f, true, "Forrest track");
+
+            if (!claim.IsCrossRole) return FailSound(scenario, "two roles claiming one clip was not detected.");
+            if (claim.IsWritable)
+                return FailSound(scenario, "a cross-role clip was reported writable — Apply would have to " +
+                                           "pick one of two targets silently.");
+
+            if (claim.Category != AudioCategory.Ambient)
+                return FailSound(scenario,
+                    $"the clip is judged as {claim.Category}; the role owning its only gain is Ambient. " +
+                    "Judging it by whichever database was walked first compares it against the wrong target.");
+
+            // The gain still exists and still moves what the game plays, so the table must not deny it: the
+            // deviation bar is drawn from this number.
+            if (!claim.HasAuthoredVolume)
+                return FailSound(scenario, "a cross-role clip with a real authored gain reported none.");
+
+            if (string.IsNullOrEmpty(claim.BlockedReason))
+                return FailSound(scenario, "a cross-role claim gave no reason for being unwritable.");
+
+            // TWO WRITABLE ROLES: the case the cross-role rule actually carries. Both entries have a gain
+            // field, so the "every entry writable" rule is satisfied and only IsCrossRole can stop Apply
+            // trimming a clip against the Blocks target while it also plays as an ambience bed.
+            AudioClipClaim bothWritable = new AudioClipClaim();
+            bothWritable.Add(AudioCategory.Blocks, 1f, true, "Grass Step");
+            bothWritable.Add(AudioCategory.Ambient, 1f, true, "Forrest track");
+
+            if (!bothWritable.IsCrossRole)
+                return FailSound(scenario, "a block clip also used as an ambience bed was not cross-role.");
+            if (bothWritable.IsWritable)
+                return FailSound(scenario,
+                    "a clip claimed by two WRITABLE roles was reported writable. Every entry has a gain " +
+                    "field, so only the cross-role rule stops Apply normalizing it against one role's " +
+                    "target while the other role plays it at that level too.");
+
+            // Order-independent: the same two entries in the other order must reach the same verdict.
+            AudioClipClaim reversed = new AudioClipClaim();
+            reversed.Add(AudioCategory.Ambient, 0.4f, true, "Forrest track");
+            reversed.Add(AudioCategory.Music, 1f, false, "default music pool");
+
+            if (!reversed.IsCrossRole || reversed.IsWritable || reversed.Category != AudioCategory.Ambient)
+                return FailSound(scenario,
+                    $"claim order changed the verdict: crossRole={reversed.IsCrossRole}, " +
+                    $"writable={reversed.IsWritable}, category={reversed.Category}.");
+
+            return true;
         }
 
         /// <summary>
         /// The census over authored biome beds: every Standard biome must offer at least one playable
-        /// ambience track, and every track must carry a clip and a band that can actually be reached.
+        /// ambience track, and every track must carry a clip, a band that can actually be reached, and a
+        /// gain that can actually be heard.
         /// </summary>
         /// <remarks>
         /// The one scenario that reads the shipped biome assets. Everything else in the ambience half runs on
@@ -120,10 +248,55 @@ namespace Editor.Validation.SoundEngine
                             $"'{biome.biomeName}' track {i} spans [{low}, {high}], entirely outside the " +
                             $"world's 0–{VoxelData.ChunkHeight} range.");
 
+                    // The S7 gain, on the real assets. An unauthored 0 is read as full level and is fine;
+                    // a small positive value is not, and is exactly what a mis-migration or a stray Apply
+                    // would leave behind — a bed that is technically playing and inaudible in the room.
+                    float volume = track.EffectiveVolume;
+                    if (volume < MIN_SHIPPED_BED_VOLUME || volume > 1f)
+                        return FailSound(scenario,
+                            $"'{biome.biomeName}' track {i} is authored at {volume}, outside the audible " +
+                            $"range [{MIN_SHIPPED_BED_VOLUME}, 1].");
+
                     playable = true;
                 }
 
                 if (!playable) return FailSound(scenario, $"'{biome.biomeName}' has no playable track.");
+            }
+
+            return CensusDatabaseBedVolumes(scenario);
+        }
+
+        /// <summary>
+        /// The same audibility check over the two beds the database owns rather than a biome.
+        /// </summary>
+        /// <param name="scenario">The calling scenario's name, for the failure message.</param>
+        /// <returns>True when both beds are authored inside the audible range.</returns>
+        /// <remarks>
+        /// Folded into the bed census rather than given a scenario of its own: it is the same question about
+        /// the same content, and the fallback bed is routinely the same clip as a biome's track.
+        /// </remarks>
+        private static bool CensusDatabaseBedVolumes(string scenario)
+        {
+            string[] guids = AssetDatabase.FindAssets("t:AmbienceDatabase");
+            if (guids == null || guids.Length == 0)
+                return FailSound(scenario, "no AmbienceDatabase asset found in the project.");
+
+            foreach (string guid in guids)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                AmbienceDatabase database = AssetDatabase.LoadAssetAtPath<AmbienceDatabase>(path);
+                if (database == null) return FailSound(scenario, $"'{path}' did not load as a database.");
+
+                if (database.CaveLoop != null &&
+                    (database.CaveLoopVolume < MIN_SHIPPED_BED_VOLUME || database.CaveLoopVolume > 1f))
+                    return FailSound(scenario,
+                        $"the cave bed is authored at {database.CaveLoopVolume}, outside the audible range.");
+
+                if (database.DefaultLoop != null &&
+                    (database.DefaultLoopVolume < MIN_SHIPPED_BED_VOLUME || database.DefaultLoopVolume > 1f))
+                    return FailSound(scenario,
+                        $"the fallback bed is authored at {database.DefaultLoopVolume}, outside the audible " +
+                        "range.");
             }
 
             return true;
