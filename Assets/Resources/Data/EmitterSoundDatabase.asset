@@ -17,7 +17,7 @@ MonoBehaviour:
     volume: 1
     audibleRadius: 0
   - loop: {fileID: 8300000, guid: 029311db03989f44c9bc0fe239748168, type: 3}
-    volume: 1
+    volume: 0.95499265
     audibleRadius: 0
   - loop: {fileID: 8300000, guid: 00707f3dabd48984996cc19f5367b078, type: 3}
     volume: 1
