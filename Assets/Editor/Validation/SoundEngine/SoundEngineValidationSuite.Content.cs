@@ -73,6 +73,7 @@ namespace Editor.Validation.SoundEngine
             scenarios.Add(new Scenario("Audio Settings Tab Is In The Generator's Tab Order", RunSettingsTabOrder));
             scenarios.Add(new Scenario("Loudness Meter Output Parses To Its Summary Values", RunLoudnessParse));
             scenarios.Add(new Scenario("Normalization Never Raises A Clip Toward The Target", RunLoudnessTrim));
+            scenarios.Add(new Scenario("A Meter Floor Reading Is Not Treated As A Measurement", RunLoudnessFloor));
         }
 
         /// <summary>
@@ -506,6 +507,49 @@ namespace Editor.Validation.SoundEngine
             // And the result always stays inside the authored range.
             if (!SoundEditorWindow.TryComputeTrim(0f, -80f, out float extreme) || extreme < 0f || extreme > 1f)
                 return FailSound(scenario, $"an extreme excess produced {extreme}, outside [0, 1].");
+
+            return true;
+        }
+
+        /// <summary>
+        /// Pins the separation between a real loudness reading and the meter's floor.
+        /// </summary>
+        /// <remarks>
+        /// EBU R128 gates on 400 ms blocks, so a shorter clip has no qualifying block and ffmpeg reports
+        /// −70.0 LUFS. That is "unmeasurable", not "silent" — a 0.15 s clip peaking at −1.1 dBFS reads −70.
+        /// Treating it as a measurement put 45 one-shots in the same column as the loops, dragged the
+        /// median target to −40.3 and made every proposed trim wrong, while each individual row still looked
+        /// plausible. <c>IsValid</c> alone cannot catch this: the measurement succeeded, it just has no
+        /// program loudness to report.
+        /// </remarks>
+        private static bool RunLoudnessFloor()
+        {
+            const string scenario = "A Meter Floor Reading Is Not Treated As A Measurement";
+
+            AudioLoudnessMeasurement floored =
+                AudioLoudnessAnalyzer.ParseMeterOutput("  I:  -70.0 LUFS   Peak:  -1.1 dBFS");
+
+            if (!floored.IsValid)
+                return FailSound(scenario, "a floor reading failed to parse; it is a successful measurement.");
+            if (floored.IsMeasurable)
+                return FailSound(scenario, "a -70.0 LUFS floor reading reported itself as measurable. It " +
+                                           "would then enter the median and the trim proposals as if it were " +
+                                           "the quietest content in the project.");
+
+            // The peak survives: it is a sample-domain measure and stays valid however short the clip is.
+            if (Mathf.Abs(floored.TruePeakDb - (-1.1f)) > 0.001f)
+                return FailSound(scenario, $"true peak was lost on a floored clip (got {floored.TruePeakDb}). " +
+                                           "A clip too short to gate can still be clipping.");
+
+            // Anything above the floor is a real reading.
+            AudioLoudnessMeasurement quiet =
+                AudioLoudnessAnalyzer.ParseMeterOutput("  I:  -69.9 LUFS   Peak:  -3.0 dBFS");
+            if (!quiet.IsMeasurable)
+                return FailSound(scenario, "a genuine -69.9 LUFS reading was discarded as a floor value.");
+
+            // And a failed measurement is never measurable, whatever its zeroed fields say.
+            if (AudioLoudnessAnalyzer.ParseMeterOutput("ffmpeg: no such file").IsMeasurable)
+                return FailSound(scenario, "a failed measurement reported itself as measurable.");
 
             return true;
         }

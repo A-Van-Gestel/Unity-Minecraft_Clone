@@ -39,6 +39,20 @@ namespace Editor.Libraries
         /// <summary>True when the measurement completed and parsed.</summary>
         public readonly bool IsValid;
 
+        /// <summary>
+        /// Whether the integrated loudness is a real reading rather than the meter's floor.
+        /// </summary>
+        /// <remarks>
+        /// <para>EBU R128 gates on 400 ms blocks, so a clip shorter than one block has no qualifying block
+        /// and ffmpeg reports <see cref="AudioLoudnessAnalyzer.IntegratedFloorLufs"/> — which means
+        /// <i>unmeasurable</i>, not <i>silent</i>. A 0.15 s clip peaking at −1.1 dBFS still reads −70.</para>
+        /// <para>Detected from the floor value rather than predicted from duration: the floor is what ffmpeg
+        /// actually reports, and a genuinely unmeasurable long clip lands on it too. Anything averaging or
+        /// comparing across clips — a median, a "quietest", a proposed trim — must exclude these, or a set
+        /// mixing one-shots with loops produces a statistic that describes neither.</para>
+        /// </remarks>
+        public bool IsMeasurable => IsValid && IntegratedLufs > AudioLoudnessAnalyzer.IntegratedFloorLufs;
+
         /// <summary>Why the measurement failed, or null when it succeeded.</summary>
         public readonly string Error;
 
@@ -95,6 +109,12 @@ namespace Editor.Libraries
     /// </remarks>
     public static class AudioLoudnessAnalyzer
     {
+        /// <summary>
+        /// The integrated loudness ffmpeg reports when it has nothing to measure — a clip shorter than the
+        /// EBU R128 gating block, or one with no program content above the gate.
+        /// </summary>
+        public const float IntegratedFloorLufs = -70f;
+
         /// <summary>How long a single measurement may run before it is abandoned.</summary>
         private const int TIMEOUT_MS = 30000;
 
