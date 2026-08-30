@@ -224,7 +224,14 @@ namespace Editor.Libraries
                 if (share > 0f) EditorGUI.DrawRect(fill, new Color(0.24f, 0.48f, 0.36f));
 
                 string label = clip != null ? clip.name : "(no clip)";
-                string suffix = hits[i] == 0 ? "out of band" : $"{share * 100f:0.#}%";
+
+                // A track that never rolled is not necessarily out of band: a zero play chance beside
+                // positive-weight peers also scores nothing, and the two are fixed by different fields.
+                string suffix = clip == null
+                    ? "no clip"
+                    : authored[i].IsEligibleAt(previewY)
+                        ? $"{share * 100f:0.#}%"
+                        : "out of band";
                 EditorGUI.LabelField(row, $"  {label} — {suffix}", EditorStyles.miniLabel);
             }
         }
