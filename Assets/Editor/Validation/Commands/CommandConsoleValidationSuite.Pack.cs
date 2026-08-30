@@ -193,7 +193,7 @@ namespace Editor.Validation.Commands
                 ok &= ExpectTeleportError(stub.Engine, "/time gusty", "Usage", "unknown subcommands are rejected");
                 ok &= ExpectTeleportError(stub.Engine, "/time freeze now", "Usage", "freeze takes no argument");
 
-                // Beyond 2^24 a float's neighbours are more than one tick apart, and the cast to long
+                // Beyond 2^24 a float's neighbors are more than one tick apart, and the cast to long
                 // eventually goes out of range — rejected rather than handed to the clock as garbage.
                 ok &= ExpectTeleportError(stub.Engine, "/time add 1e30", "whole number", "an astronomically large tick delta is rejected");
                 ok &= ExpectTeleportError(stub.Engine, "/time add 99999999", "whole number", "a delta past the exact-float range is rejected");
