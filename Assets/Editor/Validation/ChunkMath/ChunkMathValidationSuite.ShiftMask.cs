@@ -5,6 +5,9 @@ using Editor.Validation.Framework;
 using Helpers;
 using UnityEngine;
 
+// ReSharper disable ConvertToConstant.Local
+// ReSharper disable HeuristicUnreachableCode
+
 namespace Editor.Validation
 {
     /// <summary>
@@ -73,12 +76,15 @@ namespace Editor.Validation
         /// <see cref="ChunkMath.SECTION_SIZE"/> (a Tier A height change is exactly the edit that could do
         /// it) — section arrays would then under-cover the column with no error raised. This guard fails
         /// loudly instead, and pins <see cref="ChunkMath.CHUNK_VOLUME"/> to the same coupling.
+        /// <para>The volume term is definitional — <see cref="ChunkMath.CHUNK_VOLUME"/> is <i>declared</i> as
+        /// sections × section volume — so <c>divides</c> and <c>reconstructs</c> are the load-bearing terms,
+        /// the only two a constant edit can actually break.</para>
         /// </summary>
         private static bool RunSectionHeightCouplingGuard()
         {
-            const bool divides = ChunkMath.CHUNK_HEIGHT % ChunkMath.SECTION_SIZE == 0;
-            const bool reconstructs = ChunkMath.SECTIONS_PER_CHUNK * ChunkMath.SECTION_SIZE == ChunkMath.CHUNK_HEIGHT;
-            const bool volumeOk = ChunkMath.CHUNK_VOLUME == ChunkMath.SECTIONS_PER_CHUNK * ChunkMath.SECTION_VOLUME;
+            bool divides = ChunkMath.CHUNK_HEIGHT % ChunkMath.SECTION_SIZE == 0;
+            bool reconstructs = ChunkMath.SECTIONS_PER_CHUNK * ChunkMath.SECTION_SIZE == ChunkMath.CHUNK_HEIGHT;
+            bool volumeOk = ChunkMath.CHUNK_VOLUME == ChunkMath.SECTIONS_PER_CHUNK * ChunkMath.SECTION_VOLUME;
             if (divides && reconstructs && volumeOk)
             {
                 Debug.Log("[PASS] Section/Height Coupling Guard");
@@ -100,13 +106,14 @@ namespace Editor.Validation
         /// <c>SeamWakeDecision.WakeSeamSlab</c> all index sections that way; were the two constants to diverge,
         /// each would read the wrong cells with no error raised.
         /// <para>Companion to <see cref="RunSectionHeightCouplingGuard"/>, which pins the vertical half of the
-        /// same coupling.</para>
+        /// same coupling. As there, the volume term is definitional — <see cref="ChunkMath.SECTION_VOLUME"/> is
+        /// <i>declared</i> as the cube — so <c>spansWidth</c> is the load-bearing term here.</para>
         /// </summary>
         private static bool RunSectionWidthCouplingGuard()
         {
-            const bool spansWidth = ChunkMath.CHUNK_WIDTH == ChunkMath.SECTION_SIZE;
-            const bool volumeOk = ChunkMath.SECTION_VOLUME ==
-                                  ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE;
+            bool spansWidth = ChunkMath.CHUNK_WIDTH == ChunkMath.SECTION_SIZE;
+            bool volumeOk = ChunkMath.SECTION_VOLUME ==
+                            ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE;
             if (spansWidth && volumeOk)
             {
                 Debug.Log("[PASS] Section/Width Coupling Guard");
