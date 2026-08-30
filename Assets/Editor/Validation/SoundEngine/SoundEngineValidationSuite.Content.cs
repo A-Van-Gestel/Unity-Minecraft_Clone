@@ -7,6 +7,8 @@ using Data;
 using Data.Enums;
 using Data.WorldTypes;
 using Editor.Dev;
+using Editor.Libraries;
+using Editor.SoundEditor;
 using Editor.Validation.Framework;
 using UI.Enums;
 using UnityEditor;
@@ -69,6 +71,8 @@ namespace Editor.Validation.SoundEngine
             scenarios.Add(new Scenario("Volume Sliders Convert To The Mixer Decibel Curve", RunVolumeCurve));
             scenarios.Add(new Scenario("Category Volumes Fold In The Master Slider", RunCategoryVolumes));
             scenarios.Add(new Scenario("Audio Settings Tab Is In The Generator's Tab Order", RunSettingsTabOrder));
+            scenarios.Add(new Scenario("Loudness Meter Output Parses To Its Summary Values", RunLoudnessParse));
+            scenarios.Add(new Scenario("Normalization Never Raises A Clip Toward The Target", RunLoudnessTrim));
         }
 
         /// <summary>
@@ -381,6 +385,127 @@ namespace Editor.Validation.SoundEngine
                 if (loadType != AudioClipLoadType.CompressedInMemory)
                     return FailSound(scenario, $"'{path}' imports as {loadType}, not CompressedInMemory.");
             }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Captured ffmpeg EBU R128 output, trimmed to the shape the parser has to survive: per-frame lines
+        /// that repeat the same labels, then the summary block the values must actually come from.
+        /// </summary>
+        private const string FFMPEG_METER_SAMPLE = @"[Parsed_ebur128_0 @ 0000] t: 1.0    M: -26.4 S:-120.7     I: -99.9 LUFS       LRA:   0.0 LU
+[Parsed_ebur128_0 @ 0000] t: 2.0    M: -25.9 S: -26.2     I: -30.1 LUFS       LRA:   0.3 LU
+[Parsed_ebur128_0 @ 0000] Summary:
+
+  Integrated loudness:
+    I:         -25.7 LUFS
+    Threshold: -35.7 LUFS
+
+  Loudness range:
+    LRA:         0.7 LU
+    Threshold: -45.6 LUFS
+    LRA low:   -26.0 LUFS
+    LRA high:  -25.3 LUFS
+
+  True peak:
+    Peak:       -1.1 dBFS
+";
+
+        /// <summary>
+        /// Pins the loudness meter's output parsing — the half of
+        /// <see cref="AudioLoudnessAnalyzer"/> that actually breaks.
+        /// </summary>
+        /// <remarks>
+        /// <para>Runs against captured output rather than invoking ffmpeg, for two reasons. It must pass on a
+        /// machine with no ffmpeg installed — the suite has no "skipped" state for a baseline, so a
+        /// dependency-gated scenario could only be a vacuous pass or a spurious red. And the failure modes
+        /// worth pinning are textual: ffmpeg repeats <c>I:</c> and <c>LRA:</c> on every per-frame line, so
+        /// reading the FIRST match yields a running value rather than the summary, and the numbers use a
+        /// decimal point while this project is routinely run under a comma-separator locale.</para>
+        /// <para>Whether ffmpeg itself reports sane values is verified by running the tool, not here.</para>
+        /// </remarks>
+        private static bool RunLoudnessParse()
+        {
+            const string scenario = "Loudness Meter Output Parses To Its Summary Values";
+
+            AudioLoudnessMeasurement parsed = AudioLoudnessAnalyzer.ParseMeterOutput(FFMPEG_METER_SAMPLE);
+            if (!parsed.IsValid)
+                return FailSound(scenario, $"a complete meter summary failed to parse: {parsed.Error}");
+
+            // The summary values, not the per-frame ones that precede them.
+            if (Mathf.Abs(parsed.IntegratedLufs - (-25.7f)) > 0.001f)
+                return FailSound(scenario, $"integrated loudness parsed as {parsed.IntegratedLufs}, not -25.7 — " +
+                                           "a per-frame line was read instead of the summary.");
+            if (Mathf.Abs(parsed.TruePeakDb - (-1.1f)) > 0.001f)
+                return FailSound(scenario, $"true peak parsed as {parsed.TruePeakDb}, not -1.1.");
+            if (Mathf.Abs(parsed.LoudnessRange - 0.7f) > 0.001f)
+                return FailSound(scenario, $"loudness range parsed as {parsed.LoudnessRange}, not 0.7.");
+
+            // A positive true peak is the clipping case, and its sign must survive the parse.
+            AudioLoudnessMeasurement clipping =
+                AudioLoudnessAnalyzer.ParseMeterOutput("  I:  -29.5 LUFS   Peak:  1.7 dBFS");
+            if (!clipping.IsValid || Mathf.Abs(clipping.TruePeakDb - 1.7f) > 0.001f)
+                return FailSound(scenario, $"a positive true peak parsed as {clipping.TruePeakDb}, not 1.7 — " +
+                                           "clipping clips would be reported as safe.");
+
+            // Output with no summary must fail loudly rather than reporting a silent 0 LUFS.
+            AudioLoudnessMeasurement empty = AudioLoudnessAnalyzer.ParseMeterOutput("ffmpeg: no such file");
+            if (empty.IsValid)
+                return FailSound(scenario, "output carrying no measurement parsed as valid — an unmeasured " +
+                                           "clip would read as 0 LUFS, which is not silence but a lie.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// Pins the trim decision behind the Loudness tab's Apply button.
+        /// </summary>
+        /// <remarks>
+        /// <para>The defect this exists for: the previous version answered "cannot reach the target" with a
+        /// trim of 1, which callers wrote — so an emitter deliberately authored at 0.3 was reset to 1.0 and
+        /// made <i>louder</i> by a button labeled "apply trims toward target". The contract is now that no
+        /// trim exists for such a clip at all, so the caller has nothing to write.</para>
+        /// <para>Idempotence is asserted for the same reason: the trim is derived from the file's loudness
+        /// rather than composed with the current volume, so applying twice must land on the same number
+        /// instead of compounding.</para>
+        /// </remarks>
+        private static bool RunLoudnessTrim()
+        {
+            const string scenario = "Normalization Never Raises A Clip Toward The Target";
+            const float target = -26f;
+
+            // Above the target: attenuate by exactly the excess.
+            if (!SoundEditorWindow.TryComputeTrim(-20f, target, out float trim))
+                return FailSound(scenario, "a clip louder than the target produced no trim.");
+
+            float expected = Mathf.Pow(10f, -6f / 20f);
+            if (Mathf.Abs(trim - expected) > 0.0001f)
+                return FailSound(scenario, $"a 6 LU excess gave a trim of {trim}, not {expected}.");
+
+            // Applying the trim lands the effective loudness on the target.
+            float effective = -20f + 20f * Mathf.Log10(trim);
+            if (Mathf.Abs(effective - target) > 0.01f)
+                return FailSound(scenario, $"after trimming, effective loudness is {effective}, not {target}.");
+
+            // Idempotent: the trim is a function of the file, so a second pass writes the same value.
+            SoundEditorWindow.TryComputeTrim(-20f, target, out float again);
+            if (!Mathf.Approximately(trim, again))
+                return FailSound(scenario, "applying twice produced a different trim — the computation " +
+                                           "compounds instead of being derived from the file.");
+
+            // Below the target: no trim can raise it, so there must be nothing to write.
+            if (SoundEditorWindow.TryComputeTrim(-35f, target, out float quiet))
+                return FailSound(scenario, $"a clip quieter than the target offered a trim of {quiet}. " +
+                                           "Writing it would RAISE a deliberately quiet clip toward full " +
+                                           "volume, which is the opposite of applying a trim.");
+
+            // Exactly at the target is also nothing to do.
+            if (SoundEditorWindow.TryComputeTrim(target, target, out float _))
+                return FailSound(scenario, "a clip already at the target offered a trim.");
+
+            // And the result always stays inside the authored range.
+            if (!SoundEditorWindow.TryComputeTrim(0f, -80f, out float extreme) || extreme < 0f || extreme > 1f)
+                return FailSound(scenario, $"an extreme excess produced {extreme}, outside [0, 1].");
 
             return true;
         }
