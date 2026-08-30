@@ -204,6 +204,15 @@ namespace Audio
 
         private void Awake()
         {
+            // The same guard SoundManager carries, and for a louder reason: two directors would each build a
+            // full bed roster and play the same ambience twice, which sums rather than doubling gain.
+            if (s_instance != null && s_instance != this)
+            {
+                Debug.LogWarning($"AmbienceDirector: a second instance on {name} was disabled; {s_instance.name} keeps ownership.");
+                enabled = false;
+                return;
+            }
+
             s_instance = this;
             _bedSources = new AudioSource[BED_VOICE_COUNT];
             _bedFilters = new AudioLowPassFilter[BED_VOICE_COUNT];
