@@ -1,7 +1,7 @@
 # Sound Engine Design
 
-**Version:** 1.10  
-**Date:** 2026-08-29  
+**Version:** 1.11  
+**Date:** 2026-08-30  
 **Status:** **Partially implemented — S0, S1 and S2 shipped and confirmed in game.** The `SoundMaterial`
 channel, the shared `BlockSoundDatabase`, the BlockEditor dropdown and prefill, the volume settings, the
 pooled one-shot voices and the break / place / footstep triggers all exist; the `AudioMixer` is authored
@@ -15,8 +15,14 @@ suite (17 baselines). **Ambience content is in (§9): six CC0 loops cover the ca
 four of the six biomes.** Music has no content yet, so the scheduler runs and picks nothing. **S5 and S6 shipped on
 2026-08-29**: the biome beds are now placed at their biome's bearing rather than played flat (§10), and
 `BiomeBase.ambientLoop` has become a list of altitude-banded, weighted `AmbienceTrack`s (§11). **Both are
-confirmed in game**, S5 after its placement defaults were retuned by ear. S3 and the remainder of S4 are
-still outstanding.  
+confirmed in game**, S5 after its placement defaults were retuned by ear. **S3's runtime shipped on
+2026-08-30** (§5.2): the per-section `emitterFluidCount` predicate, the Burst `FluidEmitterScanJob`
+binning into a world-anchored grid, the pure `FluidEmitterResolution` and the six-source
+`FluidEmitterDirector`, guarded by 20 more suite baselines (58 total), **with content for all four emitter
+kinds** (§9). **Confirmed in game**, including an ear pass that cut lava's audible radius to 10 blocks — the same
+kind of retune S5's placement defaults got — and a review pass whose fixes were confirmed the same day with
+no noticeable regressions; restoring the single-root gain made the mix *better*, not merely more correct.
+Per-kind volume trims are still all 1.0 and have not been balanced against each other. The remainder of S4 is still outstanding.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > Design for the VoxelEngine's audio system: block sounds (break / place / step), fluid and
@@ -28,7 +34,8 @@ still outstanding.
 >
 >
 > Status: **S0 + S1 shipped** (2026-08-28), S4's two-cell footstep sampling, **S2** — runtime and
-> ambience content — and **S5 + S6** (2026-08-29); S2's *music* content, S3 and the rest of S4 outstanding. Section 2's "current state" table describes
+> ambience content — and **S5 + S6** (2026-08-29), **S3** — runtime and emitter content — (2026-08-30);
+> S2's *music* content and the rest of S4 outstanding. Section 2's "current state" table describes
 > the project *before* that work — it is kept as the historical audit it was written as.
 
 **Audited:** 2026-07-03, at commit `2dde457` (branch `main`).
@@ -337,39 +344,117 @@ an immediate step (slightly louder) and resets the accumulator.
 
 **Directionality** is free: 3D sources + the `AudioListener` on the player camera.
 
-### 5.2 Layer 2 — fluid & ambient loop emitters
+> **Known, deliberately unfixed: the one-shot voices never reach silence.** They use
+> `AudioRolloffMode.Logarithmic`, where `maxDistance` is where attenuation *stops*, not where the sound
+> becomes inaudible — so a voice sits at `minDistance / maxDistance` (1/20, about −26 dB) at *every*
+> distance beyond it. On a 0.3 s clip that is inaudible in practice, which is why it has been left alone;
+> the same defect was audible enough on the §5.2 looping emitters to need the custom curve they now use.
+> If one-shots ever gain a long clip, or the roster grows enough for the floors to sum, fix it there too.
+
+### 5.2 Layer 2 — fluid & ambient loop emitters ✅ *runtime shipped 2026-08-30*
 
 The one genuinely hard problem: fluid simulation runs in `FluidTickJob` (Burst, worker thread) —
 audio cannot be triggered from it, and per-flow-event one-shots would be spam anyway. The design
 is **listener-centric emitter scanning**, fully decoupled from the simulation (this is also what
 Minecraft effectively does):
 
-1. **Scan** (every 0.5–1 s): a small Burst `IJob` over the resident `ChunkData` of the ~2-chunk
-   radius around the listener, collecting *sound-emitting voxel candidates* into a
-   `NativeList<SoundEmitterCandidate>` (`position : int3`, `kind : byte`):
-    - flowing water / lava (fluid voxel with level < source level),
-    - waterfall columns (falling-fluid flag / vertical flow),
-    - future ambient blocks (fire, portals, buzzing ore…) — table-driven off a
-      `BlockTypeJobData` predicate so new kinds are data, not code.
-      The scan **reads** voxel data only — same read pattern as the meshing gather; it never touches
-      the fluid tick. Schedule it alongside other frame jobs and consume the list next frame
-      (produce-on-worker / consume-on-main, the standard project pattern).
-2. **Cluster** (main thread): greedy distance clustering (~4–6 block radius) of candidates per
-   kind. A 20-block waterfall becomes **one** emitter at the centroid, not 20.
-3. **Assign** a fixed budget (~4–8) of pooled **looping** 3D sources to the nearest/loudest
-   clusters; fade in on appear, fade out on disappear, lerp position when a cluster centroid
-   drifts (listener moved, flood advanced). Never hard-cut a loop.
+1. **Select** (main thread, every 0.5–1 s): walk the chunk columns within the ~2-chunk radius and
+   snapshot only the sections that hold a *sounding* fluid, nearest first and capped at 48. The
+   predicate is `ChunkSection.emitterFluidCount`, maintained incrementally by `ChunkData.SetVoxel`
+   through the palette-independent `FluidBlockLookup`, exactly as `emissiveCount` is. Runtime-only,
+   never serialized, so the save format is untouched. The snapshot copies the block palette too rather
+   than referencing `World`'s: the job outlives the frame that scheduled it, and world teardown frees
+   that array with no ordering guarantee against the director's own.
 
-**Performance requirements — by construction, then profiled.** The scan is not a "tune it later"
-prototype: it is written to the project's hot-path standards from the start — Burst-compiled,
-linear voxel-array iteration (no per-voxel virtual/managed calls), a reused `NativeList` (no
-per-scan allocation), early-out on chunks with no fluid sections (**no such flag exists yet** —
-`ChunkSection` tracks only `nonAirCount`/`IsEmpty`, so S3 must add one or pick another predicate), and the whole scan off the main thread. Cadence (0.5–1 s) and radius (~2 chunks)
-are then tuned against the profiler once the layer exists; the scan is a candidate for the
-existing benchmark-harness pattern.
+   A count is only meaningful under the palette it was computed with — the same id can be a fluid in
+   one and not another — so each section also records `FluidBlockLookup.Generation`, and the scan
+   recomputes any section whose stamp is stale. Without it a rebind leaves counts permanently wrong in
+   the *silent* direction, which is the one direction with no symptom.
 
-Cost is bounded and independent of fluid activity (the scan volume is constant); the simulation
-is untouched. This is the highest-effort layer and ships **last** (§8).
+   **Water and lava are deliberately asymmetric.** Water sounds only when it *moves* (level nibble
+   non-zero): a still ocean is all source blocks, counts zero, is never copied, and gets its
+   ambience from the §5.3 `Sea` bed instead. Lava sounds in **every** state, including a level-0
+   pool — there is no lava bed to carry it, and it is a hazard the player should hear before
+   seeing. The test is keyed on `FluidType`, which is already the category axis rather than a block
+   identity, so a future lava-like fluid inherits the behaviour without touching the predicate.
+   Counting sounding rather than *all* fluid voxels is what keeps the common expensive case free,
+   and lava costs nothing extra today because **no biome or lode places it** — it is player-built
+   only.
+2. **Scan** (`FluidEmitterScanJob`, Burst `IJob`): read the snapshot linearly and accumulate every
+   sounding voxel into a bin of a **world-anchored** grid (8-block cells, one slot per kind), as a
+   weight plus a position sum. Kinds are `WaterFlow` / `WaterFall` / `LavaFlow` / `LavaFall`,
+   split by `BlockTypeJobData.FluidType` and the falling flag — so a still lava pool, which is not
+   falling, resolves to `LavaFlow` and needs no fifth kind or extra clip. The scan **reads** voxel data only
+   — same read pattern as the meshing gather; it never touches the fluid tick, and it is completed
+   a frame after scheduling (produce-on-worker / consume-on-main).
+3. **Rank** (`FluidEmitterResolution.Collect`): merge vertically adjacent bins of one kind into a
+   single candidate — a 20-block waterfall is one sound, not three stacked copies of itself — then
+   keep the heaviest few. Integer sums and grid order make the result order-independent, so an
+   unchanged world always resolves to the same ordered set. Horizontally adjacent bins stay
+   separate: a wide river *should* occupy more than one point in the mix.
+4. **Assign** a fixed budget of 6 pooled **looping** 3D sources (`FluidEmitterDirector`), keyed by
+   the candidate's stable world cell so a stream that is still there keeps its own source and its
+   fade instead of restarting. Fade in on appear, fade out on disappear, chase the centroid when
+   it drifts. Never hard-cut a loop — **except on a teleport**, below.
+
+   **How far a kind carries is content, not a director setting.** `EmitterSoundEntry.audibleRadius`
+   authors the silence distance per kind (0 falls back to the director's `_defaultAudibleRadius`,
+   24 blocks). Lava authors **10**: it reads as too present at the shared default, which is a
+   property of the recording and of what lava is, not of the emitter machinery. Every kind shares
+   one rolloff curve even so — `minDistance` is always a fixed fraction of the radius, so the
+   shape over *normalized* distance is radius-independent and only the two distances change.
+   That coupling is invisible and therefore pinned by a baseline.
+
+**Emitters must be able to stop.** Four rules exist only for that, the first three added after the
+first in-game pass (2026-08-30) found emitters that outlived the water, and **confirmed in game** the
+same day — emitters now fall silent as the listener leaves them:
+
+- **A scan that finds nothing still runs.** Skipping the job when no nearby section holds flow left
+  the previous scan's targets standing, so emitters kept sounding at their old positions until the
+  listener wandered back into flowing water. Finding nothing is a result, not a reason to skip.
+- **The rolloff curve reaches zero.** Unity's built-in logarithmic mode does not: `maxDistance` is
+  where it *stops attenuating*, so a 6 m / 24 m source sits at a quarter of full volume at *every*
+  distance beyond 24 m. The emitters use `AudioRolloffMode.Custom` with a curve
+  (`FluidEmitterResolution.BuildRolloffCurve`) that keeps the inverse-distance shape and lands on
+  silence, interpolated piecewise-linearly so it cannot bulge above 1 or rise with distance.
+- **Distance is re-checked every frame, and a teleport cuts immediately.** Scans are ~0.75 s apart
+  while the listener moves continuously, so an emitter left behind at speed has its target zeroed
+  the frame it leaves audible range rather than waiting for a scan. A jump further than one scan
+  radius in a single frame (`/spawn`, a world teleport) silences the roster outright and forces a
+  rescan: fading a waterfall out over seconds from a place the player is no longer standing reads
+  as the sound following them. That test is in **voxel** space, never Unity space — the engine
+  re-anchors its render origin as the player travels (WS-*), and a Unity-space test would read a
+  re-anchor as a teleport and cut the world's emitters at random.
+- **A world re-anchor translates the roster.** `World.ShiftOrigin` re-derives chunks and borders and
+  patches the player, but it cannot know about these sources. Their *voxel* positions survive a shift
+  by construction — it is the Unity transforms that go stale, by a chunk-aligned jump — so the director
+  watches `WorldOrigin.OriginVoxel` and offsets every source by the delta, exactly as the player is
+  offset. Nothing else in the system would notice, which is why it has its own baseline.
+
+**One square root, on the fade.** A source's volume is
+`FluidEmitterResolution.SourceVolume(fade, clusterGain, trim, categoryGain)`. `GainFromFade` is an
+equal-power crossfade curve and `GainFromWeight` is already the perceptual shaping of cluster size, so
+the cluster term enters *linearly*. Folding it into the fade target instead — as the first
+implementation did — applies both roots to it (`(w/sat)^0.25`), which flattens cluster size almost out
+of existence and, because the fade then travels a shorter distance, collapses a quiet emitter's fade-out
+to a fraction of the authored time. Composed in the pure layer so a suite can see the whole product; a
+test of `GainFromWeight` alone cannot.
+
+The grid is anchored to world coordinates rather than to the listener on purpose. A
+listener-relative grid re-cuts its cell boundaries every time the player moves, so voxels crossing
+a boundary jump the centroid they contribute to; snapping to the world lattice keeps a given
+river's bins identical from scan to scan, and an emitter moves only when the water does.
+
+**Future ambient blocks** (fire, portals, buzzing ore…) are not wired: the kind taxonomy is a
+fluid one today. Making them data rather than code wants an emitter field on `BlockType`, which is
+a `BlockDatabase` schema change and belongs with S4.
+
+**Performance — by construction, then profiled.** The scan is written to the project's hot-path
+standards: Burst-compiled, linear voxel-array iteration, reused persistent native scratch (no
+per-scan allocation), the section-count early-out above, and the whole scan off the main thread.
+The per-tick main-thread cost is the snapshot memcpy alone, bounded by the sounding-section count
+and hard-capped at 48 × 16 KB. Cadence and radius are tuned against the profiler now that the
+layer exists; the scan is a candidate for the existing benchmark-harness pattern.
 
 ### 5.3 Layer 3 — world-layer ambience & music ✅ *runtime shipped 2026-08-29*
 
@@ -599,13 +684,19 @@ job and the managed query) and is seed-safe by construction.
 | **S0 — Data foundation** ✅ | `SoundMaterial` enum, `BlockSoundGroup`/`BlockSoundDatabase`, `BlockType.soundMaterial` + `BlockTagPreset` field, BlockEditor dropdown, prefill utility, mixer asset + settings wiring (§5.4). Credits plumbing (§9): append `Audio` to `CreditCategory`, "🔊 Audio" section in `REFERENCES_AND_CREDITS.md` + `CreditsDatabase` entries per imported pack. |   🟢   | —                 |
 | **S1 — One-shots** ✅       | `SoundManager` + pooled 3D sources, break/place hooks in `PlayerInteraction`, footsteps in the player controller.                                                                                                                                                                                                                                          |   🟢   | S0                |
 | **S2 — Ambience & music** ✅ | **Shipped 2026-08-29.** Runtime: `AudioContext` + the pure `AmbienceResolution` layer, `AmbienceDatabase`, biome audio fields on `BiomeBase`, `AmbienceDirector` (four-source bed roster weighted by `BiomeWeights` + rest cycle + cave layer + duck), `MusicScheduler`, per-source underwater low-pass, 16 suite baselines. Ambience content imported (§9): 6 CC0 loops covering the cave bed, the fallback bed and 4 of 6 biomes. **Music content outstanding** — the scheduler runs and finds an empty pool. |   🟡   | S0; §6.2 ✅        |
-| **S3 — Fluid emitters**   | Burst emitter scan job, clustering, looping emitter pool with fades.                                                                                                                                                                                                                                                                                       |   🟡   | S1 (pool infra)   |
+| **S3 — Fluid emitters** 🟡 | **Runtime shipped 2026-08-30.** `ChunkSection.emitterFluidCount` + `FluidBlockLookup` (the scan predicate), `FluidEmitterScanJob` (Burst, world-anchored bin grid), `FluidEmitterScanner` (section selection + snapshot + scheduling), the pure `FluidEmitterResolution` (vertical merge, ranking, slot assignment, gain) and `FluidEmitterDirector` (6 looping 3D sources on the `Fluids` group), content for all four kinds (§9), 20 suite baselines. Detail in §5.2. |   🟡   | S2 (director pattern) |
 | **S5 — Directional beds** ✅ | **Shipped 2026-08-29.** `FastNoiseLite.CellularCellData` carries each cell's offset alongside its distance; `BiomeSelection.SelectWeightsDirectional` turns that into a per-biome bearing in blocks; `AmbienceDirector` places each bed on its bearing at a fixed radius. Detail in §10. |   🟡   | S2 ✅              |
 | **S6 — Track pool** ✅     | **Shipped 2026-08-29.** `BiomeBase.ambientLoop` replaced by `AmbienceTrack[] ambientTracks` (clip + Y band + relative weight); the six Standard biome assets migrated; the pick is a weighted roulette re-rolled when the rest cycle wakes. Detail in §11. |   🟡   | S2 ✅              |
 | **S4 — Later**            | **Two-cell footstep sampling** ✅ (occupied cell + supporting cell, a non-solid occupant layered over the support — see the §5.1 note; shipped 2026-08-29). Still open: ungrounded/swimming steps (deferred — no swimming mechanic exists, `FLUID_BUGS.md` §02), v2 apply-site break/place hook (`VoxelModSource.Live` filter), hit/mining sounds, weather (RF-7), time-of-day (RF-1), `LEAVES` wind emitters.                                                                                                                                                                                                              |   —    | feature-gated     |
 
 S0+S1 alone deliver the largest perceived-quality jump (block feedback + footsteps) and validate
 the whole data model; S2 and S3 are independent of each other and can land in either order.
+
+**S3 depends on S2, not S1.** The phase table originally listed "S1 (pool infra)", but S1's voice
+roster is a fixed set of short one-shots with stealing — the wrong lifetime model for long-lived
+fading loops. The pattern S3 actually reuses is S2's: a director owning a source roster on top of
+a pure, suite-pinnable resolution layer, and `AmbienceResolution.AdvanceFade`/`GainFromFade`
+themselves.
 
 **S2's remaining half is music content.** The bed layer is authored (§9); the scheduler is not, and finds an
 empty pool at every pick. Filling `AmbienceDatabase.DefaultMusicPool` and the per-biome `musicPool` fields
@@ -621,8 +712,23 @@ sampled cell pair and the occupant layering rule), S2 pins the ambience decision
 holes, the bed roster's slot choice and per-source fade convergence, the constant-power gain identity, the duck,
 the submersion test and its log-space cutoff sweep, and the scheduler's gap and clip-based no-repeat pick
 (biome-query parity is pinned separately by `Validate Biome Selection`, §6.2) — S3 pins the
-scan/cluster output (candidate sets and cluster centroids for fixture worlds). The audible layer
+scan/cluster output: the section-count differential (the incremental count against a full recount,
+across an edit sequence and a pool recycle), the managed/job-side sounding-test parity including its
+water/lava asymmetry, the grid's
+world anchoring, the still-body and radius-cull negatives, the stream centroid, the waterfall
+vertical merge, kind separation, slot reclaim and preference, and the gain curve. The audible layer
 on top stays verified in-game, as with every other suite.
+
+**Two S3 hazards are outside what any editor suite can reach**, and are recorded here rather than
+counted as covered. The "an empty scan still runs" rule lives in `FluidEmitterScanner.Begin`'s control
+flow, which needs a live `World`; the suite can only pin its consequence (an empty grid yields no
+candidates). The palette-lifetime fix guards a teardown-ordering race between two GameObjects, which no
+suite can stage at all. Both are in-game/inspection concerns.
+
+The section-count differential is the load-bearing one. The count decides whether a section is
+snapshotted at all, so an under-count produces *no* sound rather than a wrong one — indistinguishable
+from "no water nearby" unless something checks. It was proved red by a mutation that skips falling
+voxels (the waterfall-goes-silent failure) before being accepted.
 
 ### Extension roadmap (post-S4, in intended order)
 
@@ -652,11 +758,29 @@ profiles: the mono / decompress-on-load one-shot profile for `Assets/Audio/Block
 profile for `Assets/Audio/Ambience/`. Forcing a 2D bed to mono would discard the stereo image that makes it a
 bed, and decompressing a 30 s stereo loop holds megabytes of PCM resident for no benefit.
 
-The pack's other 12 loops are earmarked but **not** imported: rain ×2 → RF-7, `Night` → RF-1, the three fire
-loops (already mono, right for 3D emitters) and the four river/stream/waterfall loops → S3. Two further NOX
-packs sit beside it in the same download — `Iceland_Flows` (23 loops) and `São Miguel Flows` (14) — both strong
-S3 material, but they are **separately branded, outside the Essentials Series, and carry their own datasheet**,
-so §9's per-pack rule means each needs its own licence check before import.
+**Emitter loops (2026-08-30).** S3's four kinds are content-complete. Two more loops came from the same NOX
+Nature pack — `Stream_Calm` → `WaterFlow`, `Waterfall_Calm` → `WaterFall` — under `Assets/Audio/Emitters/nox_nature/`.
+Lava came from Freesound: [Audionautics — *Lava loop*](https://freesound.org/people/Audionautics/sounds/133901/)
+(**CC BY 3.0**, attribution recorded) → `LavaFlow`, and
+[Fission9 — *Lava Loop 4*](https://freesound.org/people/Fission9/sounds/474852/) (**CC0**) → `LavaFall`. Both
+downloads shipped their own `license.txt` and source URL, which is the licence artifact §9 asks for. Taking the
+attribution-required clip was a deliberate call: with only one lava recording both lava kinds would resolve to
+the same clip and the flow/fall split would buy nothing.
+
+All four are downmixed to **mono** and imported **CompressedInMemory**, which is the exact opposite of the bed
+profile and for the opposite reason — they play from 3D sources, where a stereo clip does not spatialize, and
+several can be audible at once, where streaming would cost a decoder each. `BlockAudioImportPostprocessor`
+therefore now carries **three** profiles keyed by folder, each with its own stamp. The mono downmix happens at
+encode time rather than being left to `forceToMono`: the result is identical and the file is half the size,
+which matters in a repository with no Git LFS.
+
+`Waterfall_Strong` and `River_Moderate` were auditioned and **not** imported — deliberately, per the `Cicadas`
+lesson above: an unreferenced clip is dead weight nobody notices. The pack's other 10 loops are earmarked but
+not imported either: rain ×2 → RF-7, `Night` → RF-1, and the three fire loops → a future ambient-block emitter
+kind (S4), which needs an emitter field on `BlockType` before it has anywhere to hang. Two further NOX packs sit
+beside it in the same download — `Iceland_Flows` (23 loops) and `São Miguel Flows` (14) — both strong material
+for a richer water set, but they are **separately branded, outside the Essentials Series, and carry their own
+datasheet**, so §9's per-pack rule means each needs its own licence check before import.
 
 **No music content is imported yet.** The music sources below carry the heaviest verification burden, which is
 why the beds shipped ahead of them rather than waiting.
@@ -903,6 +1027,32 @@ contemporaneous notes.*
   the same evening; S5's placement defaults were **wrong on first hearing** and were retuned from
   `spatialBlend` 0.7 / `spread` 120° to **1.0 / 0°**, in the scene as well as in code — see §10.
 
+* **v1.11** - S3's runtime shipped (2026-08-30). The fluid-presence flag §5.2 had been waiting on became
+  `ChunkSection.flowingFluidCount` (renamed `emitterFluidCount` later the same day, below) — flowing voxels
+  only, not fluid voxels, which is what lets a still ocean cost the scan nothing — maintained incrementally through the palette-independent `FluidBlockLookup` on the
+  `emissiveCount` precedent, and runtime-only, so the save format is untouched. Clustering went to a
+  **world-anchored bin grid** rather than §5.2's original greedy distance clustering: integer weight/position
+  sums are order-independent, so an unchanged world always resolves to the same ordered set, where greedy
+  clustering's output shifts with candidate order as the listener moves. Vertical merging keeps a waterfall one
+  emitter; horizontal spread is deliberately left as several. Also corrected §8's dependency — S3 builds on S2's
+  director/resolution split, not on S1's one-shot voice roster, whose lifetime model is the opposite one. 11
+  baselines added, plus an emitter census and an import-profile guard (51 total); the section-count differential
+  was proved red first. Content shipped the same day (§9): the NOX `Stream_Calm` and `Waterfall_Calm` loops, plus
+  two Freesound lava loops — one **CC BY 3.0**, knowingly accepted so flowing and falling lava are distinguishable
+  rather than sharing one clip. All four are mono / CompressedInMemory, a third import profile that is the exact
+  inverse of the ambience beds' stereo / streaming one. A first in-game pass the same day found emitters
+  outliving the water they came from, in three separate ways — an empty scan skipping the job entirely, Unity's
+  logarithmic rolloff never reaching silence, and per-scan-only distance checks — each now fixed and pinned
+  (53 baselines). The rolloff bound assertion earned its keep immediately: smoothed curve tangents put gain at
+  1.000149 across the plateau, so the curve is piecewise-linear instead. The stop behaviour is confirmed in
+  game; the mix itself is not yet tuned by ear. A second in-game pass made the predicate **asymmetric** on the
+  user's call: water still sounds only when it moves, but lava sounds at any level, including a still pool —
+  it has no ambience bed of its own and is a hazard worth hearing early. The predicate is keyed on
+  `FluidType`, so `flowingFluidCount` became `emitterFluidCount`; still lava resolves to `LavaFlow`, needing no
+  fifth kind. Proved red on both sides before acceptance. A third pass moved the audible radius onto the
+  content entry (`audibleRadius`, per kind) and cut lava to 10 blocks by ear; `_emitterRadius` became
+  `_defaultAudibleRadius` and now means the *silence* distance rather than the full-volume one.
+
 * **v1.10** - Ambience authoring UI (2026-08-29): a Sound Editor **Ambience** tab (the first editor surface
   for `AmbienceDatabase`), an **Audio** sub-tab in the Biome Editor, a shared `AmbienceTrackListDrawer` with
   in-place auditioning and a roll preview driven by the shipped picker, and audio entries in
@@ -1005,9 +1155,12 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-29 (weighted biome mix + rest cycle + depth gate; music content still outstanding)  
-**Next Review:** when S5, S6, S2's music content or S3 is scheduled. S2's runtime and its ambience beds are done and
-need no further design work — what remains is a music pool under §9. S3 must re-verify the §5.2 scan against the fluid
-tick as re-architected by the TG-4 arc (see
-[`../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`](../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md))
-and settle the missing fluid-presence flag.
+**Last Updated:** 2026-08-30 (S3 fluid emitters complete and confirmed in game; music content still outstanding)  
+**Next Review:** when S2's music content is scheduled. S2's runtime and its ambience beds are done and
+need no further design work — what remains is a music pool under §9. S3's runtime is done too: the fluid-presence flag it
+was waiting on is now `ChunkSection.emitterFluidCount`, and the scan reads a main-thread voxel snapshot rather than the
+tick's own state, so the TG-4 re-architecture (see
+[`../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`](../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md)) does not
+reach it. S3 is done and confirmed, radius included. The one loose thread is per-kind volume balance — every
+`EmitterSoundEntry.volume` is still 1.0, so the four clips are only as level-matched as the recordings happen to
+be.
