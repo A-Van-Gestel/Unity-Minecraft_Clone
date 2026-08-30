@@ -138,8 +138,9 @@ asset instead of ad-hoc `AssetDatabase.LoadAssetAtPath` calls per repaint.
 **Integrated loudness is undefined for short clips.** EBU R128 gates on 400 ms blocks, so a clip
 shorter than one block has no qualifying block and ffmpeg returns its **-70.0 LUFS floor** — which
 means "unmeasurable", not "silent". Measured in this project: 0.15 s and 0.36 s clips both report
--70.0; 0.55 s and 0.78 s clips measure normally. Roughly 45 of the 199 shipped clips are affected,
-all of them block one-shots. Any statistic taken over a mixed set (a median, a mean, a "quietest")
+-70.0; 0.55 s and 0.78 s clips measure normally. 56 of the 199 shipped clips are affected, all of them block one-shots;
+11 of those still true-peak above -1 dBFS, so excluding them from the loudness statistics must not
+exclude them from the clipping check. Any statistic taken over a mixed set (a median, a mean, a "quietest")
 is poisoned by them, and so is every trim derived from it. Filter by duration, or measure short
 clips with a different metric (`astats` RMS / `volumedetect` mean_volume) before comparing them
 against loops.
