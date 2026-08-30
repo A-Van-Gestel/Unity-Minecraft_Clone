@@ -15,7 +15,6 @@ namespace Editor.Validation.Commands
         static partial void AddCommandPackScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario("B32: Installer count-floor — RegisterAll registers exactly InstalledCommandCount commands (+/help); a dropped registration reds the suite (CMD-3)", Pack_InstallerCountFloor));
-            scenarios.Add(new Scenario("B33: /sound arity + no-audio-layer fallback — a diagnostic readout must never throw when audio is missing", Pack_Sound));
             scenarios.Add(new Scenario("B33: /seed prints the world seed; takes no args; errors gracefully without a world (CMD-3 Wave A)", Pack_Seed));
             scenarios.Add(new Scenario("B34: /where prints voxel/chunk/region/origin for the player's position; errors gracefully without a world (CMD-3 Wave A)", Pack_Where));
             scenarios.Add(new Scenario("B35: /origin shows the anchor; '/origin force' re-anchors onto the player's chunk; garbage args error (CMD-3 Wave A)", Pack_Origin));
@@ -28,6 +27,7 @@ namespace Editor.Validation.Commands
             scenarios.Add(new Scenario("B42: /setblock — ForcePlace mod enqueued via World.PlaceBlockCommand; unloaded target reports 'queued'; parse/Y/wrap/unknown-block tiers (CMD-3 Wave C)", Pack_SetBlock));
             scenarios.Add(new Scenario("B43: /chunk info — reports 'not loaded' for an unloaded chunk; rejects unknown subcommands; graceful without a world (CMD-3 Wave C)", Pack_ChunkInfo));
             scenarios.Add(new Scenario("B55: /wind — compass 'toward' polar set, vector set, off, and the query round-trip; speed uncapped above zero; rejects negative speed/bad direction; graceful without a world", Pack_Wind));
+            scenarios.Add(new Scenario("B57: /sound arity + no-audio-layer fallback — a diagnostic readout must never throw when audio is missing", Pack_Sound));
         }
 
         private static bool Pack_InstallerCountFloor()
