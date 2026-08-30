@@ -13,6 +13,8 @@ MonoBehaviour:
   m_Name: AmbienceDatabase
   m_EditorClassIdentifier: Assembly-CSharp::Data.AmbienceDatabase
   _caveLoop: {fileID: 8300000, guid: b03752a7130f073438ab038174174359, type: 3}
+  _caveLoopVolume: 0.5432504
   _defaultLoop: {fileID: 8300000, guid: f8da20e74d48620449e7fd49c5dd04af, type: 3}
+  _defaultLoopVolume: 1
   _bedVolume: 0.35
   _defaultMusicPool: []

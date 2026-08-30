@@ -154,6 +154,16 @@ namespace Audio
         /// <summary>The clip each bed source carries, mirrored so the slot chooser stays a pure call.</summary>
         private AudioClip[] _bedClips;
 
+        /// <summary>
+        /// The authored content trim governing each bed source, index-aligned with <see cref="_bedSources"/>.
+        /// </summary>
+        /// <remarks>
+        /// Held per source rather than read from the mix each frame because a bed that has left the mix is
+        /// still audible while it fades out, and must fade from the level it was playing at — reverting it
+        /// to unity for the seconds it takes to leave would make a trimmed bed swell on its way out.
+        /// </remarks>
+        private float[] _bedTrackVolumes;
+
         private AudioSource _caveSource;
         private AudioLowPassFilter _caveFilter;
 
@@ -162,6 +172,9 @@ namespace Audio
 
         /// <inheritdoc cref="_mixClips"/>
         private float[] _mixWeights;
+
+        /// <summary>Each mix entry's authored content trim, index-aligned with <see cref="_mixClips"/>.</summary>
+        private float[] _mixVolumes;
 
         /// <summary>The source each mix entry was assigned this frame, or -1 where none was free.</summary>
         private int[] _mixSlots;
@@ -218,6 +231,7 @@ namespace Audio
             _bedFilters = new AudioLowPassFilter[BED_VOICE_COUNT];
             _bedFades = new float[BED_VOICE_COUNT];
             _bedClips = new AudioClip[BED_VOICE_COUNT];
+            _bedTrackVolumes = new float[BED_VOICE_COUNT];
 
             for (int i = 0; i < BED_VOICE_COUNT; i++)
                 _bedSources[i] = BuildSource($"Bed {i}", out _bedFilters[i], true);
@@ -228,6 +242,7 @@ namespace Audio
             _mixClips = new AudioClip[BED_VOICE_COUNT];
             _mixSlots = new int[BED_VOICE_COUNT];
             _mixWeights = new float[BED_VOICE_COUNT];
+            _mixVolumes = new float[BED_VOICE_COUNT];
             _mixDirections = new Vector2[BED_VOICE_COUNT];
             _bedBearings = new Vector2[BED_VOICE_COUNT];
 
@@ -388,7 +403,8 @@ namespace Audio
                 _caveSource.clip = null;
             }
 
-            _caveSource.volume = _caveFade * BedTrim(manager) * CategoryGain();
+            _caveSource.volume =
+                _caveFade * CaveTrim(manager) * BedTrim(manager) * CategoryGain();
         }
 
         /// <summary>Advances the audible/resting alternation that gives the bed layer its quiet stretches.</summary>
@@ -443,7 +459,8 @@ namespace Audio
             int mixCount = manager.HasContext
                 ? AmbienceResolution.ResolveBedMix(
                     manager.Context, biomes, fallback, _minBedWeight, _rollSalt, _mixClips, _mixWeights,
-                    _mixDirections)
+                    _mixDirections, _mixVolumes,
+                    ambience != null ? ambience.DefaultLoopVolume : 1f)
                 : 0;
 
             ClaimMixSlots(mixCount);
@@ -471,6 +488,7 @@ namespace Audio
                 {
                     if (_bedClips[i] == null || _bedClips[i] != _mixClips[m]) continue;
                     target = _mixWeights[m] * layer;
+                    _bedTrackVolumes[i] = _mixVolumes[m];
                     PlaceBed(i, _mixDirections[m], listener, deltaTime);
                     placed = true;
                     break;
@@ -495,11 +513,12 @@ namespace Audio
 
                     _bedSources[i].volume = 0f;
                     _bedBearings[i] = Vector2.zero;
+                    _bedTrackVolumes[i] = 1f;
                     continue;
                 }
 
-                _bedSources[i].volume =
-                    AmbienceResolution.GainFromFade(_bedFades[i]) * duck * trim * categoryGain;
+                _bedSources[i].volume = AmbienceResolution.BedSourceVolume(
+                    _bedFades[i], _bedTrackVolumes[i], duck, trim, categoryGain);
             }
         }
 
@@ -587,6 +606,10 @@ namespace Audio
             _bedClips[slot] = clip;
             _bedFades[slot] = 0f;
 
+            // Reset with the fade, for the same reason the bearing is: the trim belongs to the clip, and the
+            // frame that claims this slot has not matched it against the mix yet.
+            _bedTrackVolumes[slot] = 1f;
+
             // Cleared with the fade: a slot taken over from an audible bed would otherwise start the new clip
             // pointing wherever the old one did, and swing across from there in full view of the listener.
             _bedBearings[slot] = Vector2.zero;
@@ -600,6 +623,16 @@ namespace Audio
         /// <returns>The bed trim, or 1 when no database is assigned.</returns>
         private static float BedTrim(SoundManager manager) =>
             manager.Ambience != null ? manager.Ambience.BedVolume : 1f;
+
+        /// <summary>The cave bed's own content trim, beside the pack-wide one.</summary>
+        /// <param name="manager">The audio owner holding the database.</param>
+        /// <returns>The cave loop's trim, or 1 when no database is assigned.</returns>
+        /// <remarks>
+        /// The biome beds take theirs from the resolved mix, but the cave bed is not part of that mix — it is
+        /// selected by depth alone — so its trim is read straight from the database here.
+        /// </remarks>
+        private static float CaveTrim(SoundManager manager) =>
+            manager.Ambience != null ? manager.Ambience.CaveLoopVolume : 1f;
 
         /// <summary>Pushes the manager's submersion cutoff to every source this component owns.</summary>
         /// <param name="manager">The audio owner driving the submersion fade.</param>

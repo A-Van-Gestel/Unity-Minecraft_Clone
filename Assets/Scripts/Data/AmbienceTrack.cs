@@ -25,8 +25,25 @@ namespace Data
         [Tooltip("How often this track surfaces relative to the biome's other eligible tracks. A relative " +
                  "weight, not an independent probability: exactly one eligible track is always chosen, so a " +
                  "0.1 beside a 1.0 is heard roughly one time in eleven.")]
-        [Range(0,1)]
+        [Range(0, 1)]
         public float playChance;
+
+        [Tooltip("Content trim for this track, multiplied into the bed gain. Normalizes one loop against " +
+                 "the others without touching the Ambient slider. Left at 0 it means unset and plays at " +
+                 "full level.")]
+        [Range(0, 1)]
+        public float volume;
+
+        /// <summary>
+        /// The gain this track contributes to the bed, with an unauthored value read as full level.
+        /// </summary>
+        /// <remarks>
+        /// Zero means <i>unset</i>, not silent — the same defensive shape <c>EmitterSoundEntry.audibleRadius</c>
+        /// uses, and for the same reason: this field arrived after the tracks did, so a track deserialized
+        /// from an asset written before it holds 0 and must still be heard. Silencing a track is what
+        /// removing it, or clearing its clip, is for.
+        /// </remarks>
+        public float EffectiveVolume => volume <= 0f ? 1f : volume;
 
         /// <summary>
         /// Whether this track may be heard at an altitude.

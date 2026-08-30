@@ -179,12 +179,36 @@ namespace Audio
         /// <param name="biomeIndex">The biome's index — salts the roll so two biomes roll independently.</param>
         /// <returns>The chosen clip, or null when the biome offers none here.</returns>
         public static AudioClip SelectBiomeTrackClip(BiomeBase biome, int listenerVoxelY, uint rollSalt,
-            int biomeIndex)
+            int biomeIndex) =>
+            SelectBiomeTrackClip(biome, listenerVoxelY, rollSalt, biomeIndex, out _);
+
+        /// <summary>
+        /// Resolves one biome's ambience clip for this roll and altitude, with the track's own gain.
+        /// </summary>
+        /// <param name="biome">The biome asset, or null.</param>
+        /// <param name="listenerVoxelY">The listener's voxel-space Y.</param>
+        /// <param name="rollSalt">The bed layer's roll generation.</param>
+        /// <param name="biomeIndex">The biome's index — salts the roll so two biomes roll independently.</param>
+        /// <param name="volume">
+        /// Receives the chosen track's <see cref="AmbienceTrack.EffectiveVolume"/>, or 1 when none was chosen.
+        /// </param>
+        /// <returns>The chosen clip, or null when the biome offers none here.</returns>
+        /// <remarks>
+        /// Unity gain, not a weight: it multiplies the bed source rather than competing with the other
+        /// tracks. A caller that ignores it plays the track at full level, which is what every caller did
+        /// before the field existed.
+        /// </remarks>
+        public static AudioClip SelectBiomeTrackClip(BiomeBase biome, int listenerVoxelY, uint rollSalt,
+            int biomeIndex, out float volume)
         {
+            volume = 1f;
             if (biome == null) return null;
 
             int track = SelectTrackIndex(biome.ambientTracks, listenerVoxelY, TrackHash(rollSalt, biomeIndex));
-            return track >= 0 ? biome.ambientTracks[track].clip : null;
+            if (track < 0) return null;
+
+            volume = biome.ambientTracks[track].EffectiveVolume;
+            return biome.ambientTracks[track].clip;
         }
 
         /// <summary>
@@ -200,13 +224,38 @@ namespace Audio
         /// legacy generator never answers). None of them may resolve to silence-by-accident — a missing clip
         /// must be visibly the fallback, not an empty layer.
         /// </remarks>
-        public static AudioClip SelectBiomeLoop(AudioContext context, AudioClip fallbackLoop, uint rollSalt)
+        public static AudioClip SelectBiomeLoop(AudioContext context, AudioClip fallbackLoop, uint rollSalt) =>
+            SelectBiomeLoop(context, fallbackLoop, rollSalt, 1f, out _);
+
+        /// <summary>
+        /// Selects the ambience bed for a context and the gain that governs it, falling back when the biome
+        /// has none.
+        /// </summary>
+        /// <param name="context">The sampled listener context.</param>
+        /// <param name="fallbackLoop">The <c>AmbienceDatabase</c> default bed.</param>
+        /// <param name="rollSalt">The bed layer's roll generation, advanced when the layer wakes.</param>
+        /// <param name="fallbackVolume">The gain authored for the fallback bed itself.</param>
+        /// <param name="volume">Receives the gain governing the returned clip.</param>
+        /// <returns>The clip to loop, or null when neither the biome nor the fallback is authored.</returns>
+        /// <remarks>
+        /// The gain follows whichever branch won, and the two are authored in different places: a track's own
+        /// trim when a track was selected, the database's when the fallback answered. One clip serving both
+        /// roles — as the default bed routinely does — is therefore only heard at one level if both are
+        /// authored to agree, which is what the Loudness tab's Apply writes.
+        /// </remarks>
+        public static AudioClip SelectBiomeLoop(AudioContext context, AudioClip fallbackLoop, uint rollSalt,
+            float fallbackVolume, out float volume)
         {
+            volume = fallbackVolume;
             if (!context.HasBiome || context.Biome == null) return fallbackLoop;
 
             AudioClip clip = SelectBiomeTrackClip(
-                context.Biome, context.ListenerVoxelY, rollSalt, context.BiomeIndex);
-            return clip != null ? clip : fallbackLoop;
+                context.Biome, context.ListenerVoxelY, rollSalt, context.BiomeIndex, out float trackVolume);
+
+            if (clip == null) return fallbackLoop;
+
+            volume = trackVolume;
+            return clip;
         }
 
         /// <summary>
@@ -223,6 +272,10 @@ namespace Audio
         /// Optional. Receives each entry's bearing in blocks, index-aligned with <paramref name="clips"/>. A
         /// zero vector means the entry has no bearing and should be played flat.
         /// </param>
+        /// <param name="volumes">
+        /// Optional. Receives each entry's authored gain, index-aligned with <paramref name="clips"/>.
+        /// </param>
+        /// <param name="fallbackVolume">The gain authored for <paramref name="fallbackLoop"/> itself.</param>
         /// <returns>How many entries were written.</returns>
         /// <remarks>
         /// <para>
@@ -245,6 +298,13 @@ namespace Audio
         /// the threshold dropped every contributor, as it does on an evenly-split border. Both worlds still
         /// need a bed.
         /// </para>
+        /// <para>
+        /// <paramref name="volumes"/> and <paramref name="fallbackVolume"/> trail the bearing parameter
+        /// rather than sitting beside the content they describe, so that every existing positional caller
+        /// keeps compiling. A gain merges the way a bearing does — as the weight-weighted mean of the
+        /// contributors that landed on the entry — because the merged entry is one source: two biomes
+        /// authoring the same clip at different trims are heard at neither one alone.
+        /// </para>
         /// </remarks>
         public static int ResolveBedMix(
             AudioContext context,
@@ -254,21 +314,26 @@ namespace Audio
             uint rollSalt,
             AudioClip[] clips,
             float[] weights,
-            Vector2[] directions = null)
+            Vector2[] directions = null,
+            float[] volumes = null,
+            float fallbackVolume = 1f)
         {
             if (clips == null || weights == null) return 0;
 
             int capacity = Mathf.Min(clips.Length, weights.Length);
             if (directions != null) capacity = Mathf.Min(capacity, directions.Length);
+            if (volumes != null) capacity = Mathf.Min(capacity, volumes.Length);
             if (capacity <= 0) return 0;
 
             int EmitFallbackBed()
             {
-                AudioClip single = SelectBiomeLoop(context, fallbackLoop, rollSalt);
+                AudioClip single = SelectBiomeLoop(
+                    context, fallbackLoop, rollSalt, fallbackVolume, out float singleVolume);
                 if (single == null) return 0;
 
                 clips[0] = single;
                 weights[0] = 1f;
+                if (volumes != null) volumes[0] = singleVolume;
 
                 // A fallback bed stands for a world, not a place — it has no direction to be heard from.
                 if (directions != null) directions[0] = Vector2.zero;
@@ -286,11 +351,20 @@ namespace Audio
                 if (weight <= minWeight) continue;
 
                 int biomeIndex = context.Weights.Indices[i];
+                float volume = fallbackVolume;
                 AudioClip clip = biomes != null && (uint)biomeIndex < (uint)biomes.Length
-                    ? SelectBiomeTrackClip(biomes[biomeIndex], context.ListenerVoxelY, rollSalt, biomeIndex)
+                    ? SelectBiomeTrackClip(
+                        biomes[biomeIndex], context.ListenerVoxelY, rollSalt, biomeIndex, out volume)
                     : null;
 
-                clip ??= fallbackLoop;
+                // A biome that resolved no track of its own is playing the fallback clip, so the fallback's
+                // gain governs it — not the 1 the track lookup reports when it selected nothing.
+                if (clip == null)
+                {
+                    clip = fallbackLoop;
+                    volume = fallbackVolume;
+                }
+
                 if (clip == null) continue;
 
                 int existing = -1;
@@ -307,6 +381,7 @@ namespace Audio
                 if (existing >= 0)
                 {
                     weights[existing] += weight;
+                    if (volumes != null) volumes[existing] += volume * weight;
 
                     // Merged entries carry the weight-weighted mean of their contributors' bearings, summed
                     // here and divided through below. Two biomes on opposite sides sharing one clip cancel to
@@ -318,6 +393,7 @@ namespace Audio
                     if (count == capacity) continue;
                     clips[count] = clip;
                     weights[count] = weight;
+                    if (volumes != null) volumes[count] = volume * weight;
                     if (directions != null) directions[count] = bearing * weight;
                     count++;
                 }
@@ -334,6 +410,12 @@ namespace Audio
                 // The bearing divides by this entry's own raw weight, not by the mix total: it is a mean over
                 // the contributors that merged here, and must not shrink because the rest of the mix is loud.
                 if (directions != null && weights[i] > 0f) directions[i] /= weights[i];
+
+                // Divides by the entry's own raw weight for the same reason the bearing does: it is a mean
+                // over what merged here, and a gain that shrank because the rest of the mix is loud would
+                // attenuate twice — the normalized weight already carries that half.
+                if (volumes != null) volumes[i] = weights[i] > 0f ? volumes[i] / weights[i] : 1f;
+
                 weights[i] /= total;
             }
 
@@ -426,6 +508,26 @@ namespace Audio
         /// source alone, or for three mid-handover.
         /// </remarks>
         public static float GainFromFade(float fade) => Mathf.Sqrt(Mathf.Clamp01(fade));
+
+        /// <summary>
+        /// Composes one biome bed source's output volume from every gain that governs it.
+        /// </summary>
+        /// <param name="fade">The source's fade position, [0, 1].</param>
+        /// <param name="trackVolume">The authored per-track content trim.</param>
+        /// <param name="duck">The stronger of the cave and depth ducks.</param>
+        /// <param name="trim">The database's pack-wide bed trim.</param>
+        /// <param name="categoryGain">The Ambient category gain, or 1 when a mixer group carries it.</param>
+        /// <returns>The volume to write to the source.</returns>
+        /// <remarks>
+        /// A function rather than an expression at the call site, mirroring
+        /// <c>FluidEmitterResolution.SourceVolume</c>: the chain is what decides whether a bed is heard at
+        /// the level it was authored at, and inline in the director it is reachable only by playing the
+        /// game. Only <paramref name="fade"/> passes through the equal-power curve — the rest are already
+        /// gains, and squaring a content trim would attenuate it twice.
+        /// </remarks>
+        public static float BedSourceVolume(float fade, float trackVolume, float duck, float trim,
+            float categoryGain) =>
+            GainFromFade(fade) * Mathf.Clamp01(trackVolume) * duck * trim * categoryGain;
 
         /// <summary>
         /// Chooses which bed source should carry a newly selected clip.

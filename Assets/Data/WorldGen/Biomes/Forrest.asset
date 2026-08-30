@@ -17,6 +17,7 @@ MonoBehaviour:
   - clip: {fileID: 8300000, guid: 8ad192d5c1b75c74ca19fd5d983360c4, type: 3}
     yRange: {x: 0, y: 128}
     playChance: 1
+    volume: 1
   musicPool: []
   debugPreviewColor: {r: 0.15, g: 0.45, b: 0.2, a: 1}
   biomeWeightNoiseConfig:

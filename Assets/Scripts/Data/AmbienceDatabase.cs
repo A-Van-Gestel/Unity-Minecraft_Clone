@@ -19,9 +19,19 @@ namespace Data
         [SerializeField]
         private AudioClip _caveLoop;
 
+        [Tooltip("Content trim for the cave bed alone. 0 means unset and plays at full level.")]
+        [Range(0f, 1f)]
+        [SerializeField]
+        private float _caveLoopVolume;
+
         [Tooltip("Looped when the biome has no bed of its own, or when the world answers no biome at all.")]
         [SerializeField]
         private AudioClip _defaultLoop;
+
+        [Tooltip("Content trim for the fallback bed alone. 0 means unset and plays at full level.")]
+        [Range(0f, 1f)]
+        [SerializeField]
+        private float _defaultLoopVolume;
 
         [Tooltip("Content trim applied to every ambience bed, before the Ambient volume slider. " +
                  "These recordings are mastered louder than the block one-shots.")]
@@ -39,6 +49,26 @@ namespace Data
 
         /// <summary>The bed used when no biome bed applies, or null when none is authored.</summary>
         public AudioClip DefaultLoop => _defaultLoop;
+
+        /// <summary>
+        /// The cave bed's own content trim, with an unauthored value read as full level.
+        /// </summary>
+        /// <remarks>
+        /// Per-clip rather than folded into <see cref="BedVolume"/>: that one trim describes the whole pack,
+        /// while this one normalizes a single loop against the rest of the role. Zero reads as unset for the
+        /// same reason <see cref="AmbienceTrack.EffectiveVolume"/> does.
+        /// </remarks>
+        public float CaveLoopVolume => _caveLoopVolume <= 0f ? 1f : _caveLoopVolume;
+
+        /// <summary>
+        /// The fallback bed's own content trim, with an unauthored value read as full level.
+        /// </summary>
+        /// <remarks>
+        /// The fallback loop is routinely also some biome's authored track, and a trim written for the track
+        /// would otherwise not reach the world that falls back to the same clip — the same clip would change
+        /// level depending on which path selected it.
+        /// </remarks>
+        public float DefaultLoopVolume => _defaultLoopVolume <= 0f ? 1f : _defaultLoopVolume;
 
         /// <summary>The music pool used when the biome authors none. May be null or empty.</summary>
         public AudioClip[] DefaultMusicPool => _defaultMusicPool;
