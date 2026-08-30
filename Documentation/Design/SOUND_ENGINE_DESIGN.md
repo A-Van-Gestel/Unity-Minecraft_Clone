@@ -1005,6 +1005,48 @@ under an **appended** sub-tab index so the existing constants keep their meaning
 
 ---
 
+## 12. S7 — Per-track ambience gain (filed, not started)
+
+**Status: filed 2026-08-30.** The Sound Editor's Loudness tab measures every shipped clip and can write a
+normalizing trim into the authored volume — but only for the two roles that *have* one. Blocks carry
+`BlockSoundGroup.volume` and emitters carry `EmitterSoundEntry.volume`; **ambience and music carry no
+per-clip gain at all**, so their rows are measured, compared, and then marked `no trim field`.
+
+Measured role medians at filing (143 comparable clips of 199; the remainder are shorter than the meter's
+400 ms gating block and have no integrated loudness): **Fluids −26.0**, **Ambient −34.1**,
+**Blocks −36.7 LUFS**.
+
+### What is missing
+
+- `AmbienceTrack` is `{ clip, yRange, playChance }`. Bed loudness comes from `AmbienceDatabase.BedVolume` —
+  **one float for every bed** — and from `AmbienceDirector`'s `GainFromFade × duck × trim × categoryGain`
+  chain. There is no per-track knob to normalize into.
+- `AmbienceDatabase.DefaultMusicPool` and `BiomeBase.musicPool` are bare `AudioClip[]`, not structs, so a
+  music track has nowhere to hold a volume without a type change — and `MusicScheduler` would have to carry
+  it through its pick.
+
+### Three traps, found while scoping
+
+1. **A new serialized float defaults to 0, not 1.** `AmbienceTrack` is a struct inside
+   `BiomeBase.ambientTracks[]`, and **10 biome assets** carry tracks (6 Standard + 4 Legacy). Adding a
+   `volume` field makes every existing track deserialize at 0 — *silent*. Either migrate the assets or have
+   the director read it as "0 means unset", the same defensive shape `EmitterSoundEntry.audibleRadius`
+   already uses.
+2. **A clip can be governed by several entries.** `Wind_Calm` is the database fallback bed *and* Desert's
+   *and* Mountain's track. Per-track gain is still the right granularity, but "one clip, one volume" does
+   not hold, so the Loudness tab cannot show a single authored number for such a clip — it inherits the same
+   ambiguity block groups already have, and must say so rather than silently pick one.
+3. **The bed gain chain is pinned by a baseline.** `AmbienceDirector` composes the bed volume at a single
+   site (search for `GainFromFade(_bedFades[i])`), and the Sound Engine suite asserts the constant-power
+   gain identity over it. A new multiplicand must be reflected there or that scenario goes red — correctly.
+
+### Recommendation
+
+Do **ambience**; defer **music** until §9's music content exists. Music needs a type change plus scheduler
+plumbing, against zero assets to tune today.
+
+---
+
 ## Document History
 
 *Entries below the newest are reconstructed from git history — this document predates the
@@ -1156,7 +1198,7 @@ contemporaneous notes.*
 ---
 
 **Last Updated:** 2026-08-30 (S3 fluid emitters complete and confirmed in game; music content still outstanding)  
-**Next Review:** when S2's music content is scheduled. S2's runtime and its ambience beds are done and
+**Next Review:** when S2's music content or S7 (per-track ambience gain, §12) is scheduled. S2's runtime and its ambience beds are done and
 need no further design work — what remains is a music pool under §9. S3's runtime is done too: the fluid-presence flag it
 was waiting on is now `ChunkSection.emitterFluidCount`, and the scan reads a main-thread voxel snapshot rather than the
 tick's own state, so the TG-4 re-architecture (see
