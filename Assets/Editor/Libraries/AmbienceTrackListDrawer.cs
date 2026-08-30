@@ -82,6 +82,7 @@ namespace Editor.Libraries
                 SerializedProperty clip = element.FindPropertyRelative("clip");
                 SerializedProperty yRange = element.FindPropertyRelative("yRange");
                 SerializedProperty chance = element.FindPropertyRelative("playChance");
+                SerializedProperty volume = element.FindPropertyRelative("volume");
                 if (clip == null || yRange == null || chance == null) continue;
 
                 EditorUILayoutHelper.BeginGroup();
@@ -104,6 +105,12 @@ namespace Editor.Libraries
                     "Weight relative to this biome's other eligible tracks. 0.25 beside a 1.0 is heard " +
                     "roughly one wake in five. All-zero weights fall back to an even pick."));
 
+                if (volume != null)
+                    EditorGUILayout.PropertyField(volume, new GUIContent("Volume",
+                        "Content trim for this loop, multiplied into the bed gain. Normalizes one track " +
+                        "against the others without moving the Ambient slider. 0 means unset and plays at " +
+                        "full level — the Sound Editor's Loudness tab writes this field."));
+
                 EditorUILayoutHelper.EndGroup();
 
                 if (!remove) continue;
@@ -122,12 +129,14 @@ namespace Editor.Libraries
             SerializedProperty addedClip = added.FindPropertyRelative("clip");
             SerializedProperty addedRange = added.FindPropertyRelative("yRange");
             SerializedProperty addedChance = added.FindPropertyRelative("playChance");
+            SerializedProperty addedVolume = added.FindPropertyRelative("volume");
 
             // Inserting copies the previous element, which would silently duplicate a clip and its band.
             // A new row starts empty, world-spanning and at full weight — the authoring default.
             if (addedClip != null) addedClip.objectReferenceValue = null;
             if (addedRange != null) addedRange.vector2Value = new Vector2(0f, VoxelData.ChunkHeight);
             if (addedChance != null) addedChance.floatValue = 1f;
+            if (addedVolume != null) addedVolume.floatValue = 1f;
         }
 
         /// <summary>
@@ -264,6 +273,7 @@ namespace Editor.Libraries
                     clip = element.FindPropertyRelative("clip")?.objectReferenceValue as AudioClip,
                     yRange = element.FindPropertyRelative("yRange")?.vector2Value ?? Vector2.zero,
                     playChance = element.FindPropertyRelative("playChance")?.floatValue ?? 0f,
+                    volume = element.FindPropertyRelative("volume")?.floatValue ?? 0f,
                 };
             }
 

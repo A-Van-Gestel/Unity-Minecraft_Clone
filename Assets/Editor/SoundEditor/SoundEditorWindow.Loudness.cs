@@ -39,9 +39,21 @@ namespace Editor.SoundEditor
     /// target to −40.3, which made every proposed trim wrong; they are now kept out of every target, out of
     /// Apply, and shown as "too short" with their length. Their <b>true peak is still reported</b> — that is
     /// a sample-domain measure and stays valid at any length, so a 0.15 s clip can and does clip.</para>
-    /// <para><b>A row with no authored volume says so.</b> Ambience tracks carry clip, band and weight but no
-    /// gain, so no trim could ever be written for one; the row shows "no trim field" instead of a number
-    /// Apply would silently ignore.</para>
+    /// <para><b>A row with no authored volume says so.</b> Music pools are bare clip arrays with nowhere to
+    /// hold a gain, so no trim could ever be written for one; the row shows "no trim field" instead of a
+    /// number Apply would silently ignore, and names the reason in its tooltip.</para>
+    /// <para><b>A clip can be governed by several authored volumes at once</b> — the default ambience bed is
+    /// also two biomes' authored track, and five footstep clips sit in both the Dirt and Grass groups — so
+    /// the volume column reports "multi" rather than picking one of them to display. What Apply does with
+    /// such a clip depends on the role, and the roles differ: <b>Ambient and Fluids carry a gain per entry</b>,
+    /// so the same file-derived trim is written to every entry governing the clip and they end up agreeing.
+    /// <b>Blocks carry one volume for a whole <see cref="BlockSoundGroup"/></b> — four clip arrays sharing a
+    /// single float — so a group moves as a unit, anchored on the <i>median</i> of its own clips, and a clip
+    /// in two groups genuinely ends up governed by two different volumes.</para>
+    /// <para><b>Every row proposes the number Apply will actually write.</b> A block row is therefore anchored
+    /// on its group's median rather than on its own loudness. Showing the per-clip trim there advertised a
+    /// value the button would never write: only a group's median clip could reach "applied", and every other
+    /// row sat on an arrow that pressing Apply did not clear.</para>
     /// </remarks>
     public partial class SoundEditorWindow
     {
@@ -96,14 +108,34 @@ namespace Editor.SoundEditor
             public float DurationSeconds;
 
             /// <summary>
-            /// Whether any authored volume field governs this clip, and so whether Apply can act on it.
+            /// What the databases say about this clip's authored gain, or null when none references it.
             /// </summary>
             /// <remarks>
-            /// False for the ambience beds: <c>AmbienceTrack</c> is clip/band/weight with no gain, so a
-            /// suggested trim for one could never be written. Showing it anyway invited the user to act on
-            /// a number the button silently ignores.
+            /// Held rather than flattened into a handful of row fields, so the row and the Apply pass read one
+            /// object and cannot drift apart. <see cref="AudioClipClaim.IsWritable"/> is the single rule for
+            /// "may Apply write this", and it is the same object the button consults.
             /// </remarks>
-            public bool HasTrimField;
+            public AudioClipClaim Claim;
+
+            /// <summary>
+            /// The loudness Apply will anchor this clip's trim on, which is not always its own.
+            /// </summary>
+            /// <remarks>
+            /// Per clip for the roles whose entries carry a gain each (Ambient, Fluids), but a whole
+            /// <see cref="BlockSoundGroup"/> shares one float, so a block clip's trim is anchored on its
+            /// group's <b>median</b> and the group moves as a unit. Showing the clip's own proposal there was
+            /// a number Apply would never write: only a group's median clip could ever reach "applied", and
+            /// every other row sat on an arrow that pressing the button did not clear.
+            /// </remarks>
+            public float AnchorLufs;
+
+            /// <summary>Whether this clip is anchored by two groups that disagree about its trim.</summary>
+            /// <remarks>
+            /// Five footstep clips sit in both the Dirt and Grass groups. Each group is trimmed by its own
+            /// median, so such a clip genuinely ends up governed by two different volumes — there is no single
+            /// authored number and no single "applied" state to report until the two medians coincide.
+            /// </remarks>
+            public bool AnchorAmbiguous;
 
             /// <summary>
             /// Which mixer role this clip plays, and so which target it is judged against.
@@ -119,7 +151,8 @@ namespace Editor.SoundEditor
             public bool Unclaimed;
 
             /// <summary>
-            /// The authored volume currently governing this clip, or 1 where none exists.
+            /// The authored volume currently governing this clip, or 1 where none exists. Where several entries
+            /// govern it and disagree, the first one found — see <see cref="VolumesAgree"/>.
             /// </summary>
             /// <remarks>
             /// Shown because the file loudness alone does not say what the game plays: a clip already trimmed
@@ -260,7 +293,7 @@ namespace Editor.SoundEditor
             EditorGUILayout.Space(8);
             EditorUILayoutHelper.SubHeader($"{category} — {rows.Count} clip(s), {comparable} comparable");
 
-            bool writable = CategoryHasTrimField(category);
+            bool writable = AudioClipClaim.CategoryHasTrimField(category);
             if (!writable)
                 EditorUILayoutHelper.SectionNote(
                     "No per-clip volume field exists for this role, so it is measured and compared but never " +
@@ -369,9 +402,13 @@ namespace Editor.SoundEditor
             if (!row.Measurement.IsValid)
             {
                 // Never a number here: a 0 would read as silence rather than as "not measured".
+                // Stands in for every column after the name, so it must be as wide as all of them: the
+                // volume column was inserted later and its width was never added here, which left the
+                // audition button on these rows out of line with the rest of the table.
                 EditorGUILayout.LabelField(new GUIContent("unmeasured", row.Measurement.Error),
                     EditorStyles.miniLabel,
-                    GUILayout.Width(PEAK_COLUMN_WIDTH + DEVIATION_BAR_WIDTH + TRIM_COLUMN_WIDTH));
+                    GUILayout.Width(LUFS_COLUMN_WIDTH + PEAK_COLUMN_WIDTH + VOLUME_COLUMN_WIDTH +
+                                    DEVIATION_BAR_WIDTH + TRIM_COLUMN_WIDTH));
                 EditorGUIHelper.PlayStopButton(row.Clip, "Audition this clip.", PLAY_BUTTON_WIDTH);
                 EditorGUILayout.EndHorizontal();
                 return;
@@ -400,28 +437,39 @@ namespace Editor.SoundEditor
 
             if (!measurable)
             {
-                // Width matched to the bar plus the trim column it stands in for: without it the label
+                // Width matched to the volume, bar and trim columns it stands in for: without it the label
                 // stretches to fill the row and shoves the audition button to the far right, out of line
                 // with every measurable row.
                 EditorGUILayout.LabelField(new GUIContent($"too short ({row.DurationSeconds:0.00} s)",
                         "No integrated loudness, so excluded from the target and from Apply."),
                     EditorStyles.miniLabel,
-                    GUILayout.Width(DEVIATION_BAR_WIDTH + TRIM_COLUMN_WIDTH));
+                    GUILayout.Width(VOLUME_COLUMN_WIDTH + DEVIATION_BAR_WIDTH + TRIM_COLUMN_WIDTH));
                 EditorGUIHelper.PlayStopButton(row.Clip, "Audition this clip.", PLAY_BUTTON_WIDTH);
                 EditorGUILayout.EndHorizontal();
                 return;
             }
 
             float target = TargetFor(row.Category);
+            AudioClipClaim claim = row.Claim;
 
             // The authored gain, shown because the file loudness alone does not say what the game plays.
-            if (row.HasTrimField)
+            // Keyed on whether a volume EXISTS, not on whether Apply may write it: the deviation bar below is
+            // drawn from this same number, so denying it here would have the row contradict itself.
+            if (claim == null || !claim.HasAuthoredVolume)
+                EditorGUILayout.LabelField(new GUIContent("   —", "No authored volume governs this clip."),
+                    EditorStyles.miniLabel, GUILayout.Width(VOLUME_COLUMN_WIDTH));
+            else if (claim.VolumesAgree)
                 EditorGUILayout.LabelField(
                     new GUIContent($"vol {row.CurrentVolume:0.00}",
-                        "The authored volume currently applied to this clip."),
+                        claim.Entries > 1
+                            ? $"{claim.Entries} entries author this clip, all at " +
+                              $"{row.CurrentVolume:0.00}: {claim.Owners}."
+                            : "The authored volume currently applied to this clip."),
                     EditorStyles.miniLabel, GUILayout.Width(VOLUME_COLUMN_WIDTH));
             else
-                EditorGUILayout.LabelField(new GUIContent("   —", "No authored volume governs this clip."),
+                EditorGUILayout.LabelField(
+                    new GUIContent("vol multi",
+                        $"{claim.Entries} entries author this clip at different volumes: {claim.Owners}."),
                     EditorStyles.miniLabel, GUILayout.Width(VOLUME_COLUMN_WIDTH));
 
             // The bar compares EFFECTIVE loudness — file plus authored gain — against the target, so a clip
@@ -429,25 +477,37 @@ namespace Editor.SoundEditor
             float effective = EffectiveLoudness(row);
             DrawDeviationBar(effective - target);
 
-            if (!row.HasTrimField)
+            if (claim == null || !claim.IsWritable)
             {
                 EditorGUILayout.LabelField(
                     new GUIContent("no trim field",
-                        "No authored volume governs this clip — ambience tracks carry clip, band and weight " +
-                        "but no gain — so Apply cannot act on it. The measurement is still valid."),
+                        claim == null
+                            ? "No database references this clip, so Apply cannot act on it."
+                            : $"Apply cannot act on this clip because {claim.BlockedReason}. The " +
+                              "measurement is still valid."),
                     EditorStyles.miniLabel, GUILayout.Width(TRIM_COLUMN_WIDTH));
             }
-            else if (!TryComputeTrim(row.Measurement.IntegratedLufs, target, out float proposed))
+            else if (row.AnchorAmbiguous)
+            {
+                // Two groups, two medians, two volumes for one clip. Naming a single proposal here would be
+                // picking one of them, and no authored value can satisfy both until they coincide.
+                EditorGUILayout.LabelField(
+                    new GUIContent("multi",
+                        $"Two block groups trim this clip by different medians ({claim.Owners}), so it has " +
+                        "no single proposal. Apply still moves each group onto its own target."),
+                    EditorStyles.miniLabel, GUILayout.Width(TRIM_COLUMN_WIDTH));
+            }
+            else if (!TryComputeTrim(row.AnchorLufs, target, out float proposed))
             {
                 EditorGUILayout.LabelField(
                     new GUIContent(
-                        Mathf.Abs(row.Measurement.IntegratedLufs - target) <= DEVIATION_TOLERANCE_LU
+                        Mathf.Abs(row.AnchorLufs - target) <= DEVIATION_TOLERANCE_LU
                             ? "at target"
                             : "below target",
                         "Authored trims only attenuate, so this clip cannot be raised to the target."),
                     EditorStyles.miniLabel, GUILayout.Width(TRIM_COLUMN_WIDTH));
             }
-            else if (Mathf.Abs(row.CurrentVolume - proposed) <= TRIM_APPLIED_EPSILON)
+            else if (claim.VolumesAgree && Mathf.Abs(row.CurrentVolume - proposed) <= TRIM_APPLIED_EPSILON)
             {
                 EditorGUILayout.LabelField(
                     new GUIContent("applied", $"Already trimmed to {proposed:0.00}, which puts it on target."),
@@ -457,7 +517,10 @@ namespace Editor.SoundEditor
             {
                 EditorGUILayout.LabelField(
                     new GUIContent($"-> x{proposed:0.00}",
-                        $"Apply would change the volume from {row.CurrentVolume:0.00} to {proposed:0.00}."),
+                        row.Category == AudioCategory.Blocks
+                            ? $"Apply would move this clip's whole group from {row.CurrentVolume:0.00} to " +
+                              $"{proposed:0.00}, anchored on the group's median."
+                            : $"Apply would change the volume from {row.CurrentVolume:0.00} to {proposed:0.00}."),
                     GUILayout.Width(TRIM_COLUMN_WIDTH));
             }
 
@@ -521,17 +584,25 @@ namespace Editor.SoundEditor
         /// <para>Only the fields that exist are written. Emitters carry one volume per kind, so the mapping is
         /// exact. Block sounds carry <b>one</b> volume for a whole <see cref="BlockSoundGroup"/> — four clip
         /// arrays sharing a single float — so a group is anchored on the <i>median</i> of its own clips and
-        /// moves as a unit; per-clip correction is impossible without a schema change. Ambience tracks have
-        /// no volume field at all and are reported only.</para>
+        /// moves as a unit; per-clip correction is impossible without a schema change. Ambience carries one
+        /// volume per track, so its mapping is per clip like the emitters', except that a clip several tracks
+        /// share takes the same trim in all of them. Music has no volume field at all and is reported only.</para>
         /// <para>Non-destructive: the audio files are untouched, the writes go through
         /// <see cref="Undo.RecordObject"/>, and nothing is saved until the toolbar's Save.</para>
         /// </remarks>
         private void ApplyLoudnessTrims(AudioCategory category)
         {
             float target = TargetFor(category);
-            int written = category == AudioCategory.Fluids
-                ? ApplyEmitterTrims(target)
-                : ApplyBlockGroupTrims(target);
+
+            // A switch, not a two-way test: the previous form treated everything that was not Fluids as
+            // Blocks, so admitting a third writable role would have written block trims for it.
+            int written = category switch
+            {
+                AudioCategory.Fluids => ApplyEmitterTrims(target),
+                AudioCategory.Blocks => ApplyBlockGroupTrims(target),
+                AudioCategory.Ambient => ApplyAmbienceTrims(target),
+                _ => 0,
+            };
 
             if (written > 0)
             {
@@ -553,10 +624,14 @@ namespace Editor.SoundEditor
         /// </remarks>
         private void RefreshCurrentVolumes()
         {
-            BuildCategoryMap(out Dictionary<string, float> volumes);
+            Dictionary<string, AudioClipClaim> claims = BuildClaims();
 
             foreach (LoudnessRow row in _loudnessRows)
-                row.CurrentVolume = volumes.TryGetValue(row.AssetPath, out float volume) ? volume : 1f;
+            {
+                bool claimed = claims.TryGetValue(row.AssetPath, out AudioClipClaim claim);
+                row.CurrentVolume = claimed ? claim.Volume : 1f;
+                row.Claim = claimed ? claim : null;
+            }
         }
 
         /// <summary>Trims each emitter kind so its clip lands on the target.</summary>
@@ -566,13 +641,16 @@ namespace Editor.SoundEditor
             if (_emitterDatabase == null) return 0;
 
             int written = 0;
+            Dictionary<string, AudioClipClaim> claims = BuildClaims();
 
             foreach (FluidEmitterKind kind in (FluidEmitterKind[])System.Enum.GetValues(typeof(FluidEmitterKind)))
             {
                 EmitterSoundEntry entry = _emitterDatabase.Get(kind);
                 if (entry?.loop == null) continue;
 
-                if (!TryFindMeasurement(AssetDatabase.GetAssetPath(entry.loop), out float lufs)) continue;
+                string path = AssetDatabase.GetAssetPath(entry.loop);
+                if (!IsWritableClip(claims, path)) continue;
+                if (!TryFindMeasurement(path, out float lufs)) continue;
                 if (!TryComputeTrim(lufs, target, out float trim)) continue;
                 if (Mathf.Approximately(entry.volume, trim)) continue;
 
@@ -586,6 +664,123 @@ namespace Editor.SoundEditor
 
             if (written > 0) EditorUtility.SetDirty(_emitterDatabase);
             return written;
+        }
+
+        /// <summary>
+        /// Trims every ambience bed — each biome track and the two database beds — onto the target.
+        /// </summary>
+        /// <returns>How many entries were changed.</returns>
+        /// <remarks>
+        /// <para>Per clip, not per asset: unlike a block group, each track carries its own gain, so a bed is
+        /// corrected exactly. A clip several tracks share is written in every one of them — the trim comes
+        /// from the file's loudness alone, so the same number is right wherever that clip plays, and leaving
+        /// one entry behind is what would make the clip audibly change level depending on which biome
+        /// selected it.</para>
+        /// <para>The database's two beds are written through a <see cref="SerializedObject"/> because their
+        /// fields are private, and through the tab's own one where it exists, so an Ambience tab holding a
+        /// stale copy cannot write these values back out.</para>
+        /// </remarks>
+        private int ApplyAmbienceTrims(float target)
+        {
+            int written = 0;
+            Dictionary<string, AudioClipClaim> claims = BuildClaims();
+
+            foreach (BiomeBase biome in _ambienceBiomes)
+            {
+                if (biome == null || biome.ambientTracks == null) continue;
+
+                int inBiome = 0;
+                for (int i = 0; i < biome.ambientTracks.Length; i++)
+                {
+                    AudioClip clip = biome.ambientTracks[i].clip;
+                    if (clip == null) continue;
+
+                    string path = AssetDatabase.GetAssetPath(clip);
+                    if (!IsWritableClip(claims, path)) continue;
+                    if (!TryFindMeasurement(path, out float lufs)) continue;
+                    if (!TryComputeTrim(lufs, target, out float trim)) continue;
+                    if (Mathf.Approximately(biome.ambientTracks[i].EffectiveVolume, trim)) continue;
+
+                    // Recorded on the asset's first real write, so an apply that changes nothing leaves no
+                    // undo step behind — the same rule the emitter and block writers follow.
+                    if (inBiome == 0) Undo.RecordObject(biome, "Normalize ambience loudness");
+
+                    biome.ambientTracks[i].volume = trim;
+                    inBiome++;
+                }
+
+                if (inBiome == 0) continue;
+
+                EditorUtility.SetDirty(biome);
+                written += inBiome;
+            }
+
+            return written + ApplyDatabaseBedTrims(target, claims);
+        }
+
+        /// <summary>
+        /// Whether Apply may write the volume governing a clip.
+        /// </summary>
+        /// <param name="claims">The claim map for the current databases.</param>
+        /// <param name="assetPath">The clip's asset path.</param>
+        /// <returns>True when every authored volume governing it is writable.</returns>
+        /// <remarks>
+        /// The writers consult the same rule the table draws rather than trusting their own walk to have
+        /// found only writable entries. A guard that is only rendered is not a guard: without this, a row
+        /// reading "Apply cannot act on it" would still be written the moment the button was pressed.
+        /// </remarks>
+        private static bool IsWritableClip(Dictionary<string, AudioClipClaim> claims, string assetPath) =>
+            !string.IsNullOrEmpty(assetPath) && claims.TryGetValue(assetPath, out AudioClipClaim claim) &&
+            claim.IsWritable;
+
+        /// <summary>Trims the cave and fallback beds, whose gains live on the database itself.</summary>
+        /// <param name="target">The Ambient baseline.</param>
+        /// <returns>How many of the two were changed.</returns>
+        private int ApplyDatabaseBedTrims(float target, Dictionary<string, AudioClipClaim> claims)
+        {
+            if (_ambience == null) return 0;
+
+            SerializedObject serialized = _ambienceSerialized ?? new SerializedObject(_ambience);
+            serialized.Update();
+
+            int written = 0;
+            written += TryWriteBedTrim(serialized, "_caveLoopVolume", _ambience.CaveLoop, target, claims) ? 1 : 0;
+            written += TryWriteBedTrim(serialized, "_defaultLoopVolume", _ambience.DefaultLoop, target, claims)
+                ? 1
+                : 0;
+
+            // Registers its own undo step and marks the asset dirty, so neither is done by hand here.
+            if (written > 0) serialized.ApplyModifiedProperties();
+            return written;
+        }
+
+        /// <summary>Writes one database bed's trim, when the clip was measured and the value would move.</summary>
+        /// <param name="serialized">The ambience database, already updated.</param>
+        /// <param name="propertyName">The backing field holding that bed's gain.</param>
+        /// <param name="clip">The bed clip the gain governs.</param>
+        /// <param name="target">The Ambient baseline.</param>
+        /// <param name="claims">The claim map, consulted for writability.</param>
+        /// <returns>True when the property was changed.</returns>
+        private bool TryWriteBedTrim(SerializedObject serialized, string propertyName, AudioClip clip,
+            float target, Dictionary<string, AudioClipClaim> claims)
+        {
+            if (clip == null) return false;
+
+            SerializedProperty property = serialized.FindProperty(propertyName);
+            if (property == null) return false;
+
+            string path = AssetDatabase.GetAssetPath(clip);
+            if (!IsWritableClip(claims, path)) return false;
+            if (!TryFindMeasurement(path, out float lufs)) return false;
+            if (!TryComputeTrim(lufs, target, out float trim)) return false;
+
+            // Against the effective value, not the raw one: an unauthored 0 plays at full level, so a trim
+            // of 1 for it is not a change and must not open an undo step.
+            float effective = property.floatValue <= 0f ? 1f : property.floatValue;
+            if (Mathf.Approximately(effective, trim)) return false;
+
+            property.floatValue = trim;
+            return true;
         }
 
         /// <summary>
@@ -603,26 +798,10 @@ namespace Editor.SoundEditor
                 BlockSoundGroup group = _database.Get(material);
                 if (group == null) continue;
 
-                List<float> measured = new List<float>();
-                foreach (BlockSoundEvent evt in (BlockSoundEvent[])System.Enum.GetValues(typeof(BlockSoundEvent)))
-                {
-                    // The Blocks tab's raw accessor, not group.GetClips: the latter answers an empty
-                    // placeClips with breakClips, which would count every such group's break clips twice
-                    // and drag the median toward them.
-                    AudioClip[] clips = GetClips(group, evt);
-                    if (clips == null) continue;
-
-                    foreach (AudioClip clip in clips)
-                    {
-                        if (clip != null && TryFindMeasurement(AssetDatabase.GetAssetPath(clip), out float lufs))
-                            measured.Add(lufs);
-                    }
-                }
-
-                if (measured.Count == 0) continue;
-
-                measured.Sort();
-                if (!TryComputeTrim(measured[measured.Count / 2], target, out float trim)) continue;
+                // The same anchor the table drew its proposal from, by construction rather than by two
+                // walks that happen to agree.
+                if (!TryGroupAnchorLufs(group, out float anchor)) continue;
+                if (!TryComputeTrim(anchor, target, out float trim)) continue;
                 if (Mathf.Approximately(group.volume, trim)) continue;
 
                 if (written == 0) Undo.RecordObject(_database, "Normalize block sound loudness");
@@ -704,7 +883,7 @@ namespace Editor.SoundEditor
             _loudnessCancelled = false;
 
             string[] guids = AssetDatabase.FindAssets("t:AudioClip", new[] { AUDIO_ROOT });
-            Dictionary<string, AudioCategory> categories = BuildCategoryMap(out Dictionary<string, float> volumes);
+            Dictionary<string, AudioClipClaim> claims = BuildClaims();
 
             try
             {
@@ -720,6 +899,7 @@ namespace Editor.SoundEditor
                     }
 
                     AudioClip clip = AssetDatabase.LoadAssetAtPath<AudioClip>(path);
+                    bool claimed = claims.TryGetValue(path, out AudioClipClaim claim);
 
                     _loudnessRows.Add(new LoudnessRow
                     {
@@ -730,13 +910,10 @@ namespace Editor.SoundEditor
 
                         // Metadata, not samples — length is readable for every import profile, unlike GetData.
                         DurationSeconds = clip == null ? 0f : clip.length,
-                        Category = categories.TryGetValue(path, out AudioCategory category)
-                            ? category
-                            : AudioCategory.Master,
-                        Unclaimed = !categories.ContainsKey(path),
-                        CurrentVolume = volumes.TryGetValue(path, out float volume) ? volume : 1f,
-                        HasTrimField = categories.TryGetValue(path, out AudioCategory owned) &&
-                                       CategoryHasTrimField(owned),
+                        Category = claimed ? claim.Category : AudioCategory.Master,
+                        Unclaimed = !claimed,
+                        CurrentVolume = claimed ? claim.Volume : 1f,
+                        Claim = claimed ? claim : null,
                         Measurement = AudioLoudnessAnalyzer.Measure(path),
                     });
                 }
@@ -752,9 +929,105 @@ namespace Editor.SoundEditor
                 return byPack != 0 ? byPack : string.CompareOrdinal(a.DisplayName, b.DisplayName);
             });
 
+            // Anchors need every measurement to exist first — a group's median is not knowable until the
+            // last clip in it has been read — so this is a second pass rather than part of the loop above.
+            ResolveTrimAnchors();
+
             // Dropped rather than kept: a target the user chose lives in preferences and TargetFor reads it
             // back, while one merely seeded from the old median should re-seed from the new one.
             _loudnessTargets.Clear();
+        }
+
+        /// <summary>
+        /// Records, for every measured row, the loudness its trim will be anchored on.
+        /// </summary>
+        /// <remarks>
+        /// The whole point is that the table and the Apply pass agree. Both read
+        /// <see cref="TryGroupAnchorLufs"/> for the block groups rather than each walking the database its own
+        /// way — the previous arrangement had the row proposing a per-clip trim while Apply wrote a per-group
+        /// one, so most block rows advertised a number the button would never write.
+        /// </remarks>
+        private void ResolveTrimAnchors()
+        {
+            Dictionary<string, List<float>> groupAnchors = new Dictionary<string, List<float>>();
+
+            if (_database != null)
+            {
+                foreach (SoundMaterial material in (SoundMaterial[])System.Enum.GetValues(typeof(SoundMaterial)))
+                {
+                    BlockSoundGroup group = _database.Get(material);
+                    if (group == null || !TryGroupAnchorLufs(group, out float anchor)) continue;
+
+                    foreach (BlockSoundEvent evt in (BlockSoundEvent[])System.Enum.GetValues(typeof(BlockSoundEvent)))
+                    {
+                        AudioClip[] clips = GetClips(group, evt);
+                        if (clips == null) continue;
+
+                        foreach (AudioClip clip in clips)
+                        {
+                            if (clip == null) continue;
+
+                            string path = AssetDatabase.GetAssetPath(clip);
+                            if (string.IsNullOrEmpty(path)) continue;
+
+                            if (!groupAnchors.TryGetValue(path, out List<float> anchors))
+                                groupAnchors[path] = anchors = new List<float>();
+
+                            if (!anchors.Contains(anchor)) anchors.Add(anchor);
+                        }
+                    }
+                }
+            }
+
+            foreach (LoudnessRow row in _loudnessRows)
+            {
+                row.AnchorLufs = row.Measurement.IntegratedLufs;
+                row.AnchorAmbiguous = false;
+
+                if (row.Category != AudioCategory.Blocks) continue;
+                if (!groupAnchors.TryGetValue(row.AssetPath, out List<float> anchors) || anchors.Count == 0)
+                    continue;
+
+                row.AnchorLufs = anchors[0];
+                row.AnchorAmbiguous = anchors.Count > 1;
+            }
+        }
+
+        /// <summary>
+        /// The loudness a block group's trim is anchored on: the median of the clips it actually holds.
+        /// </summary>
+        /// <param name="group">The group.</param>
+        /// <param name="lufs">Receives the median integrated loudness of its measured clips.</param>
+        /// <returns>False when none of the group's clips has a gated reading.</returns>
+        /// <remarks>
+        /// Median rather than per clip because <see cref="BlockSoundGroup.volume"/> is <b>one</b> float over
+        /// four clip arrays: the group can only move as a unit, so anchoring anywhere else guarantees that
+        /// most of its clips miss the target. The raw <c>GetClips</c> accessor, not <c>group.GetClips</c>,
+        /// which answers an empty <c>placeClips</c> with <c>breakClips</c> and would count those twice.
+        /// </remarks>
+        private bool TryGroupAnchorLufs(BlockSoundGroup group, out float lufs)
+        {
+            lufs = 0f;
+            if (group == null) return false;
+
+            List<float> measured = new List<float>();
+            foreach (BlockSoundEvent evt in (BlockSoundEvent[])System.Enum.GetValues(typeof(BlockSoundEvent)))
+            {
+                AudioClip[] clips = GetClips(group, evt);
+                if (clips == null) continue;
+
+                foreach (AudioClip clip in clips)
+                {
+                    if (clip != null && TryFindMeasurement(AssetDatabase.GetAssetPath(clip), out float value))
+                        measured.Add(value);
+                }
+            }
+
+            if (measured.Count == 0) return false;
+
+            measured.Sort();
+            lufs = measured[measured.Count / 2];
+            return true;
         }
 
         /// <summary>
@@ -816,30 +1089,29 @@ namespace Editor.SoundEditor
         }
 
         /// <summary>
-        /// Maps every clip a database references to the mixer role it plays.
+        /// Maps every clip a database references to the role it plays and the volumes that govern it.
         /// </summary>
-        /// <returns>Asset path to role, for each claimed clip.</returns>
+        /// <returns>Asset path to claim, for each claimed clip.</returns>
         /// <remarks>
         /// Built from the databases rather than from folder names: the role is what decides how loud a clip
         /// should be, and a folder is only a hint at it. A clip no database references is left unclaimed and
         /// judged against nothing — which is itself worth seeing.
         /// </remarks>
-        private Dictionary<string, AudioCategory> BuildCategoryMap(out Dictionary<string, float> volumes)
+        private Dictionary<string, AudioClipClaim> BuildClaims()
         {
-            Dictionary<string, AudioCategory> map = new Dictionary<string, AudioCategory>();
+            Dictionary<string, AudioClipClaim> claims = new Dictionary<string, AudioClipClaim>();
 
-            // A local rather than the out parameter directly: a local function cannot capture one.
-            Dictionary<string, float> gains = new Dictionary<string, float>();
-
-            void Claim(AudioClip clip, AudioCategory category, float volume)
+            void Claim(AudioClip clip, AudioCategory category, float volume, bool writable, string owner)
             {
                 if (clip == null) return;
 
                 string path = AssetDatabase.GetAssetPath(clip);
                 if (string.IsNullOrEmpty(path)) return;
 
-                map[path] = category;
-                gains[path] = volume;
+                if (!claims.TryGetValue(path, out AudioClipClaim claim))
+                    claims[path] = claim = new AudioClipClaim();
+
+                claim.Add(category, volume, writable, owner);
             }
 
             if (_emitterDatabase != null)
@@ -847,7 +1119,7 @@ namespace Editor.SoundEditor
                 foreach (FluidEmitterKind kind in (FluidEmitterKind[])System.Enum.GetValues(typeof(FluidEmitterKind)))
                 {
                     EmitterSoundEntry entry = _emitterDatabase.Get(kind);
-                    Claim(entry?.loop, AudioCategory.Fluids, entry?.volume ?? 1f);
+                    Claim(entry?.loop, AudioCategory.Fluids, entry?.volume ?? 1f, true, $"{kind} emitter");
                 }
             }
 
@@ -863,19 +1135,23 @@ namespace Editor.SoundEditor
                         AudioClip[] clips = GetClips(group, evt);
                         if (clips == null) continue;
 
-                        foreach (AudioClip clip in clips) Claim(clip, AudioCategory.Blocks, group.volume);
+                        foreach (AudioClip clip in clips)
+                            Claim(clip, AudioCategory.Blocks, group.volume, true, $"{material} {evt}");
                     }
                 }
             }
 
             if (_ambience != null)
             {
-                Claim(_ambience.CaveLoop, AudioCategory.Ambient, 1f);
-                Claim(_ambience.DefaultLoop, AudioCategory.Ambient, 1f);
+                Claim(_ambience.CaveLoop, AudioCategory.Ambient, _ambience.CaveLoopVolume, true, "cave bed");
+                Claim(_ambience.DefaultLoop, AudioCategory.Ambient, _ambience.DefaultLoopVolume, true,
+                    "fallback bed");
 
                 if (_ambience.DefaultMusicPool != null)
                 {
-                    foreach (AudioClip clip in _ambience.DefaultMusicPool) Claim(clip, AudioCategory.Music, 1f);
+                    // Music has nowhere to hold a gain, so it claims a role without claiming writability.
+                    foreach (AudioClip clip in _ambience.DefaultMusicPool)
+                        Claim(clip, AudioCategory.Music, 1f, false, "default music pool");
                 }
             }
 
@@ -885,28 +1161,18 @@ namespace Editor.SoundEditor
 
                 if (biome.ambientTracks != null)
                 {
-                    foreach (AmbienceTrack track in biome.ambientTracks) Claim(track.clip, AudioCategory.Ambient, 1f);
+                    foreach (AmbienceTrack track in biome.ambientTracks)
+                        Claim(track.clip, AudioCategory.Ambient, track.EffectiveVolume, true,
+                            $"{biome.name} track");
                 }
 
                 if (biome.musicPool == null) continue;
-                foreach (AudioClip clip in biome.musicPool) Claim(clip, AudioCategory.Music, 1f);
+                foreach (AudioClip clip in biome.musicPool)
+                    Claim(clip, AudioCategory.Music, 1f, false, $"{biome.name} music");
             }
 
-            volumes = gains;
-            return map;
+            return claims;
         }
-
-        /// <summary>
-        /// Whether a role has an authored volume field a trim could be written to.
-        /// </summary>
-        /// <param name="category">The role.</param>
-        /// <returns>True when Apply can act on clips in this role.</returns>
-        /// <remarks>
-        /// Ambience and music carry no per-clip gain — <c>AmbienceTrack</c> is clip, band and weight, and a
-        /// music pool is a bare clip array — so their rows are measured and compared but never written.
-        /// </remarks>
-        private static bool CategoryHasTrimField(AudioCategory category) =>
-            category == AudioCategory.Blocks || category == AudioCategory.Fluids;
 
         /// <summary>The pack folder a clip belongs to, used to group the table.</summary>
         /// <param name="assetPath">The clip's asset path.</param>
