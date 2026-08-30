@@ -37,6 +37,7 @@ namespace Editor.Validation.SoundEngine
             AddResolutionScenarios(scenarios);
             AddContentScenarios(scenarios);
             AddAmbienceScenarios(scenarios);
+            AddEmitterScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Sound Engine", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
 
@@ -48,5 +49,8 @@ namespace Editor.Validation.SoundEngine
 
         /// <summary>Registers the world-ambience baselines (partial file .Ambience.cs).</summary>
         static partial void AddAmbienceScenarios(List<Scenario> scenarios);
+
+        /// <summary>Registers the S3 fluid-emitter baselines (partial file .Emitters.cs).</summary>
+        static partial void AddEmitterScenarios(List<Scenario> scenarios);
     }
 }

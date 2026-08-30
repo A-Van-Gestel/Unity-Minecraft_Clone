@@ -27,6 +27,10 @@ namespace Editor.Validation.SoundEngine
     {
         private const string BLOCK_DATABASE_PATH = "Assets/Resources/Data/BlockDatabase.asset";
         private const string SOUND_DATABASE_PATH = "Assets/Resources/Data/BlockSoundDatabase.asset";
+        private const string EMITTER_DATABASE_PATH = "Assets/Resources/Data/EmitterSoundDatabase.asset";
+
+        /// <summary>Folder the S3 emitter loops live under; everything in it must carry the emitter profile.</summary>
+        private const string EMITTER_AUDIO_ROOT = "Assets/Audio/Emitters";
 
         /// <summary>Decibel tolerance for the volume-curve comparisons.</summary>
         private const float DECIBEL_TOLERANCE = 0.01f;
@@ -57,6 +61,8 @@ namespace Editor.Validation.SoundEngine
         static partial void AddContentScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario("Every Standard Biome Authors An Ambience Track", RunBiomeBedCensus));
+            scenarios.Add(new Scenario("Every Fluid Emitter Kind Authors A Loop", RunEmitterCensus));
+            scenarios.Add(new Scenario("Emitter Clips Import Mono And Compressed In Memory", RunEmitterImportProfile));
             scenarios.Add(new Scenario("Sound Database Holds One Group Per Material", RunDatabaseSizing));
             scenarios.Add(new Scenario("Every Placeable Block Has An Authored Sound Material", RunMaterialCensus));
             scenarios.Add(new Scenario("Prefill Heuristic Classifies Its Fixture Palette", RunPrefillHeuristic));
@@ -309,6 +315,71 @@ namespace Editor.Validation.SoundEngine
                 if (Array.IndexOf(order, tab) < 0)
                     return FailSound(scenario, $"SettingsTab.{tab} is missing from s_tabOrder — its settings " +
                                                "would never render.");
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// The census over authored emitter content: every <see cref="FluidEmitterKind"/> must resolve to a
+        /// real clip. A missing entry is silent by design — <c>FluidEmitterDirector</c> holds the source
+        /// quiet rather than playing the previous kind's clip — so nothing else would report it.
+        /// </summary>
+        private static bool RunEmitterCensus()
+        {
+            const string scenario = "Every Fluid Emitter Kind Authors A Loop";
+
+            EmitterSoundDatabase database = AssetDatabase.LoadAssetAtPath<EmitterSoundDatabase>(EMITTER_DATABASE_PATH);
+            if (database == null)
+                return FailSound(scenario, $"no EmitterSoundDatabase at '{EMITTER_DATABASE_PATH}'.");
+
+            if (database.EntryCount != EmitterSoundDatabase.KindCount)
+                return FailSound(scenario, $"the asset holds {database.EntryCount} entries for " +
+                                           $"{EmitterSoundDatabase.KindCount} kinds — a kind appended to the enum " +
+                                           "would index past the end.");
+
+            foreach (FluidEmitterKind kind in (FluidEmitterKind[])Enum.GetValues(typeof(FluidEmitterKind)))
+            {
+                EmitterSoundEntry entry = database.Get(kind);
+                if (entry == null)
+                    return FailSound(scenario, $"{kind} has no entry.");
+                if (entry.loop == null)
+                    return FailSound(scenario, $"{kind} authors no loop — that emitter is silent in game.");
+                if (entry.volume <= 0f)
+                    return FailSound(scenario, $"{kind} is authored at volume {entry.volume}, which is silence.");
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Pins the third import profile. An emitter clip that imported stereo would not spatialize — it
+        /// would sit in both ears wherever the water actually is — and one left on decompress-on-load would
+        /// hold its whole PCM resident for a loop that fades in over a second.
+        /// </summary>
+        private static bool RunEmitterImportProfile()
+        {
+            const string scenario = "Emitter Clips Import Mono And Compressed In Memory";
+
+            if (!AssetDatabase.IsValidFolder(EMITTER_AUDIO_ROOT))
+                return FailSound(scenario, $"'{EMITTER_AUDIO_ROOT}' does not exist — the emitter content is missing.");
+
+            string[] guids = AssetDatabase.FindAssets("t:AudioClip", new[] { EMITTER_AUDIO_ROOT });
+            if (guids.Length == 0)
+                return FailSound(scenario, $"no clips under '{EMITTER_AUDIO_ROOT}'.");
+
+            foreach (string guid in guids)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (AssetImporter.GetAtPath(path) is not AudioImporter importer)
+                    return FailSound(scenario, $"'{path}' has no AudioImporter.");
+
+                if (!importer.forceToMono)
+                    return FailSound(scenario, $"'{path}' is not forced to mono — it will not spatialize.");
+
+                AudioClipLoadType loadType = importer.defaultSampleSettings.loadType;
+                if (loadType != AudioClipLoadType.CompressedInMemory)
+                    return FailSound(scenario, $"'{path}' imports as {loadType}, not CompressedInMemory.");
             }
 
             return true;
