@@ -1,6 +1,6 @@
 # Sound Engine Design
 
-**Version:** 1.11  
+**Version:** 1.12  
 **Date:** 2026-08-30  
 **Status:** **Partially implemented — S0, S1 and S2 shipped and confirmed in game.** The `SoundMaterial`
 channel, the shared `BlockSoundDatabase`, the BlockEditor dropdown and prefill, the volume settings, the
@@ -22,7 +22,9 @@ binning into a world-anchored grid, the pure `FluidEmitterResolution` and the si
 kinds** (§9). **Confirmed in game**, including an ear pass that cut lava's audible radius to 10 blocks — the same
 kind of retune S5's placement defaults got — and a review pass whose fixes were confirmed the same day with
 no noticeable regressions; restoring the single-root gain made the mix *better*, not merely more correct.
-Per-kind volume trims are still all 1.0 and have not been balanced against each other. The remainder of S4 is still outstanding.  
+Per-kind volume trims are still all 1.0 and have not been balanced against each other. **S7 shipped on
+2026-08-30** (§12): ambience beds carry a per-track gain, so the Loudness tab can normalize the Ambient role
+the way it already does Blocks and Fluids; music is deliberately excluded until it has content. The remainder of S4 is still outstanding.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > Design for the VoxelEngine's audio system: block sounds (break / place / step), fluid and
@@ -521,7 +523,11 @@ it (10 `S2` baselines); the audible result stays an in-game judgment.
   varies with the listener's position, and a second independent variation per source reads as randomness
   rather than as the world going quiet. The **cave bed is never gated** — a cave that falls silent reads as
   broken, not restful.
-- **Bed level:** `AmbienceDatabase.BedVolume` trims every bed before the category gain. A content trim, not
+- **Bed level:** `AmbienceDatabase.BedVolume` trims every bed before the category gain. *Since S7 (§12) a
+  second, narrower trim sits beside it: each `AmbienceTrack` — and each of the database's two own beds —
+  carries its own gain, which the mix carries per entry and `AmbienceResolution.BedSourceVolume` folds into
+  the source volume. `BedVolume` still describes the whole pack; the per-track gain normalizes one loop
+  against another.* A content trim, not
   a lower default on the Ambient slider, for the same reason `BlockSoundGroup.volume` is one — the pack is
   mastered hot relative to the block one-shots, which is a fact about the clips. A slider default would
   leave 100% meaning "too loud" and would never reach a settings file that already exists.
@@ -1005,49 +1011,100 @@ under an **appended** sub-tab index so the existing constants keep their meaning
 
 ---
 
-## 12. S7 — Per-track ambience gain (filed, not started)
+## 12. S7 — Per-track ambience gain ✅ *shipped 2026-08-30*
 
-**Status: filed 2026-08-30.** The Sound Editor's Loudness tab measures every shipped clip and can write a
-normalizing trim into the authored volume — but only for the two roles that *have* one. Blocks carry
-`BlockSoundGroup.volume` and emitters carry `EmitterSoundEntry.volume`; **ambience and music carry no
-per-clip gain at all**, so their rows are measured, compared, and then marked `no trim field`.
+**Status: shipped 2026-08-30, ambience only.** The Sound Editor's Loudness tab measures every shipped clip
+and can write a normalizing trim into the authored volume. Before S7 only two roles *had* one — blocks carry
+`BlockSoundGroup.volume` and emitters carry `EmitterSoundEntry.volume` — so ambience and music rows were
+measured, compared, and then marked `no trim field`. Ambience now carries a gain per bed; **music still does
+not**, deliberately (see the end of this section).
 
 Measured role medians at filing (143 comparable clips of 199; the remainder are shorter than the meter's
 400 ms gating block and have no integrated loudness): **Fluids −26.0**, **Ambient −34.1**,
 **Blocks −36.7 LUFS**.
 
-### What is missing
+### What shipped
 
-- `AmbienceTrack` is `{ clip, yRange, playChance }`. Bed loudness comes from `AmbienceDatabase.BedVolume` —
-  **one float for every bed** — and from `AmbienceDirector`'s `GainFromFade × duck × trim × categoryGain`
-  chain. There is no per-track knob to normalize into.
-- `AmbienceDatabase.DefaultMusicPool` and `BiomeBase.musicPool` are bare `AudioClip[]`, not structs, so a
-  music track has nowhere to hold a volume without a type change — and `MusicScheduler` would have to carry
-  it through its pick.
+- **`AmbienceTrack.volume`**, a `[Range(0,1)]` content trim beside the clip, band and weight, read through
+  **`AmbienceTrack.EffectiveVolume`**.
+- **`AmbienceDatabase._caveLoopVolume` and `._defaultLoopVolume`**, the same field for the two beds the
+  database owns rather than a biome. Without them the fallback bed — routinely the *same clip* as a biome's
+  track — would have changed level depending on which path selected it.
+- **`AmbienceResolution.BedSourceVolume(fade, trackVolume, duck, trim, categoryGain)`**, the composed bed
+  gain as a function, mirroring `FluidEmitterResolution.SourceVolume`. The trim multiplies *outside* the
+  equal-power curve: only the fade passes through `√`, because the rest are already gains.
+- **A volume channel through `ResolveBedMix`**, index-aligned with the clips and merged the way the bearing
+  is — as the weight-weighted mean of the contributors that landed on the entry. Entries merge **by clip**,
+  so two biomes sharing a bed arrive as one source that can only be played at one level.
+- **The authoring field** in `AmbienceTrackListDrawer`, so it reaches both the Sound Editor's Ambience tab
+  and the WorldGen Biome Editor from one edit.
+- **The Loudness tab writes it**: `CategoryHasTrimField` admits `Ambient`, and `ApplyAmbienceTrims` walks
+  the biome assets and the database's two beds.
+- **Three new suite baselines plus an extended asset census** (61 → 64 Sound Engine baselines).
 
-### Three traps, found while scoping
+### The three traps, and what each one cost
 
-1. **A new serialized float defaults to 0, not 1.** `AmbienceTrack` is a struct inside
-   `BiomeBase.ambientTracks[]`, and **10 biome assets** carry tracks (6 Standard + 4 Legacy). Adding a
-   `volume` field makes every existing track deserialize at 0 — *silent*. Either migrate the assets or have
-   the director read it as "0 means unset", the same defensive shape `EmitterSoundEntry.audibleRadius`
-   already uses.
+1. **A new serialized float defaults to 0, not 1.** Answered twice over: `EffectiveVolume` reads 0 as
+   *unset* — the same defensive shape `EmitterSoundEntry.audibleRadius` uses — **and** the shipped assets
+   were migrated to carry `volume: 1` explicitly, so the Loudness tab shows an authored number rather than
+   an inferred one. The migration is **7 tracks across 6 Standard biome assets**, not the 10 assets this
+   section estimated while scoping: the 4 Legacy biomes carry `ambientTracks: []`.
 2. **A clip can be governed by several entries.** `Wind_Calm` is the database fallback bed *and* Desert's
-   *and* Mountain's track. Per-track gain is still the right granularity, but "one clip, one volume" does
-   not hold, so the Loudness tab cannot show a single authored number for such a clip — it inherits the same
-   ambiguity block groups already have, and must say so rather than silently pick one.
-3. **The bed gain chain is pinned by a baseline.** `AmbienceDirector` composes the bed volume at a single
-   site (search for `GainFromFade(_bedFades[i])`), and the Sound Engine suite asserts the constant-power
-   gain identity over it. A new multiplicand must be reflected there or that scenario goes red — correctly.
+   *and* Mountain's track. The tab's claim map accumulated per clip instead of last-writer-wins, and the
+   volume column reports **`multi`** — with a tooltip naming the owners — when they disagree. Apply writes
+   the same trim to *all* of them, which is sound only because `TryComputeTrim` derives the trim from the
+   file's own loudness and never from the volume the entry happens to carry.
+3. **The bed gain chain was *not* pinned by a baseline.** This section originally claimed it was. It was
+   not: `RunBedGainCurve` asserts `GainFromFade` — a pure static function — in isolation, while the director
+   composed the chain inline, where no editor scenario could reach it. Adding a multiplicand there would
+   have left the suite green and proved nothing. Extracting `BedSourceVolume` is what made the trap's claim
+   true; both halves of the chain were then prove-red confirmed, one by dropping the trim from the
+   composition and one by stopping the mix carrying it.
 
-### Recommendation
+### Review pass (2026-08-30)
 
-Do **ambience**; defer **music** until §9's music content exists. Music needs a type change plus scheduler
-plumbing, against zero assets to tune today.
+A `/code-review` over the change found six items, all in the editor half — the runtime gain chain came
+through clean. Three were mine, three predated S7:
+
+- **The writability guard was drawn but never enforced.** `HasTrimField` was computed for the table and
+  consulted by nothing; `ApplyAmbienceTrims` walked every track regardless. A row could say "Apply cannot act
+  on it" and be written the moment the button was pressed. The claim record now lives in
+  `Editor/Libraries/AudioClipClaim`, and the row and all three writers read `IsWritable` from that one object.
+- **A clip claimed by two roles is never writable.** Each role normalizes against its own target, so such a
+  clip has two different correct trims and Apply must not silently pick one. It is judged under the role that
+  owns its gain — not whichever database was walked first, which is what the accumulating map did before.
+  Unreachable from shipped content (there is no music yet), so it is pinned by two suite baselines built on
+  synthetic claims instead. The load-bearing case is **two *writable* roles**: with one writable and one not,
+  the "every entry writable" rule already blocks it, and a prove-red mutation of the cross-role guard alone
+  moved nothing.
+- **Block rows advertised a trim Apply would never write.** `ApplyBlockGroupTrims` anchors a group on the
+  median of its own clips, while the row proposed that clip's own trim — so only a group's median clip could
+  ever read `applied`, and the other ~114 sat on an arrow pressing the button did not clear. Row and writer
+  now share `TryGroupAnchorLufs`. A clip in two groups (five footstep clips are in both Dirt and Grass) is
+  genuinely governed by two volumes and reports `multi` rather than naming one of them.
+- Pre-existing: the `unmeasured` and `too short` substitute labels never had the volume column's width added
+  when that column was introduced, leaving their audition buttons out of line with every other row.
+
+### Music: still deferred
+
+`AmbienceDatabase.DefaultMusicPool` and `BiomeBase.musicPool` remain bare `AudioClip[]`, so a music track
+has nowhere to hold a volume without a type change, and `MusicScheduler` would have to carry it through its
+pick. §9 tracks the content; revisit S7-music once it lands, and not before — there is nothing to tune
+against.
 
 ---
 
 ## Document History
+
+* **v1.12** - S7 shipped, ambience only (2026-08-30). The per-track gain is a *separate multiplicand*, not a
+  weight: the mix's weights are renormalized to sum to 1, so a gain folded into one would be divided straight
+  back out. It therefore travels as its own channel through `ResolveBedMix`, merging by the weight-weighted
+  mean the bearings already use, because entries merge by clip and a merged entry is one source. The scoping
+  note's third trap was wrong in a way worth recording: the "baseline pinning the bed gain chain" pinned only
+  `GainFromFade`, so the chain had to be *extracted* into `BedSourceVolume` before a baseline could reach it
+  — a green suite over an inline chain would have proved nothing. The unset rule and an explicit asset
+  migration were both taken rather than either alone, so that a track authored outside the drawer is still
+  audible and the tab still shows a real authored number.
 
 *Entries below the newest are reconstructed from git history — this document predates the
 project's Document History convention, so they record what the commits changed rather than
