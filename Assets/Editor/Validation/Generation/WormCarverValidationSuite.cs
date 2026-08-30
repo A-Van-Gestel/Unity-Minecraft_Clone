@@ -129,8 +129,6 @@ namespace Editor.Validation.Generation
             using WormCarverTestFixture fx = new WormCarverTestFixture(SEED, FastNoiseLite.CoordinatePrecision.Classic32);
             ulong hash = HashGrid(fx, IN_BAND_CHUNK);
             Debug.Log($"  [B5] Classic32 in-band grid hash = {hash}UL");
-            if (CLASSIC_IN_BAND_GOLDEN == 0UL)
-                return Expect(false, $"Golden not yet recorded — bake CLASSIC_IN_BAND_GOLDEN = {hash}UL and re-run");
             return Expect(hash == CLASSIC_IN_BAND_GOLDEN,
                 "Classic32 in-band mask must stay bit-identical to the recorded golden (cellOrigin==0 collapse)");
         }
