@@ -38,10 +38,34 @@ namespace Audio
         [SerializeField]
         private float _openingGapSeconds = 60f;
 
+        [Header("Fades")]
+        [Tooltip("Seconds a track takes to fade in, and to fade out again at its end or when something " +
+                 "replaces it. An interruption spends this twice — once leaving, once arriving — so the " +
+                 "silence a forced pick opens is double this value. Clamped down for a clip too short to " +
+                 "afford two full fades.")]
+        [Range(0f, 15f)]
+        [SerializeField]
+        private float _fadeSeconds = 3f;
+
+        /// <summary>Fade level at or below which the source is treated as silent and released.</summary>
+        private const float SILENT_FADE = 0f;
+
         private AudioSource _source;
         private AudioLowPassFilter _filter;
 
         private float _gapRemaining;
+
+        /// <summary>Where the current track's fade has reached, [0, 1].</summary>
+        private float _fade;
+
+        /// <summary>Whether the current track is fading out with nothing queued behind it.</summary>
+        private bool _stopping;
+
+        /// <summary>The track waiting for the current one to finish fading out, or null.</summary>
+        private AudioClip _pendingTrack;
+
+        /// <inheritdoc cref="_pendingTrack"/>
+        private float _pendingVolume = 1f;
 
         /// <summary>
         /// Which pick this session is on. <b>Seeded randomly</b>, not started at zero.
@@ -89,6 +113,12 @@ namespace Audio
         /// <summary>The volume last written to the music source.</summary>
         public float DiagSourceVolume => _source == null ? 0f : _source.volume;
 
+        /// <summary>How far the current track has faded in, [0, 1].</summary>
+        public float DiagFade => _fade;
+
+        /// <summary>The track waiting on the current one's fade-out, or null when nothing is queued.</summary>
+        public AudioClip DiagPendingTrack => _pendingTrack;
+
         /// <summary>
         /// Clears the singleton back-reference on play-mode entry. Required because this project runs with
         /// Reload Domain disabled, so a stale reference would otherwise leak into the next play session.
@@ -135,17 +165,105 @@ namespace Audio
             SoundManager manager = SoundManager.Instance;
             if (manager == null || _source == null) return;
 
+            float deltaTime = Time.unscaledDeltaTime;
+
+            AdvanceFade(deltaTime);
+
             // The category gain joins here only while no mixer group is routing this source.
             float categoryGain = _musicGroup == null ? AudioVolumes.GetLinear(AudioCategory.Music) : 1f;
-            _source.volume = MusicResolution.SourceVolume(_trackVolume, PoolVolume(manager), categoryGain);
+            _source.volume = MusicResolution.SourceVolume(_fade, _trackVolume, PoolVolume(manager), categoryGain);
             manager.ApplySubmersionFilter(_filter);
 
             if (_source.isPlaying) return;
 
-            _gapRemaining -= Time.unscaledDeltaTime;
+            // A queued track waiting on a fade-out that has finished starts here rather than in the command
+            // that queued it, so every start goes through the same path and inherits the same fade-in.
+            if (StartPending()) return;
+
+            _gapRemaining -= deltaTime;
             if (_gapRemaining > 0f) return;
 
             PickNextTrack(manager);
+        }
+
+        /// <summary>
+        /// Moves the fade toward what the current state asks for and releases the source once it is silent.
+        /// </summary>
+        /// <param name="deltaTime">Unscaled seconds since the last frame.</param>
+        /// <remarks>
+        /// One fade position serves every reason a track's level moves — the opening fade-in, the tail, a
+        /// console stop and a queued replacement — because they are not independent: a stop arriving during
+        /// a fade-in has to continue down from wherever the fade had reached, and a second timer would have
+        /// to guess that level. The target is what varies; the position never jumps.
+        /// </remarks>
+        private void AdvanceFade(float deltaTime)
+        {
+            AudioClip clip = _source.clip;
+
+            // A source that is not sounding holds no level, and is zeroed rather than left where it was. A
+            // track that ran out rewinds AudioSource.time to zero, which the tail target reads as "not in
+            // the tail" and would walk the fade back up — leaving the next track to travel all the way down
+            // again before it could start.
+            if (clip == null || !_source.isPlaying)
+            {
+                _fade = 0f;
+                return;
+            }
+
+            float fadeSeconds = MusicResolution.EffectiveFadeSeconds(clip.length, _fadeSeconds);
+
+            // A stop or a queued replacement overrides the tail: both mean this track is leaving now, and
+            // the tail target would otherwise hold the fade at 1 for the whole body of the track.
+            float target = _stopping || _pendingTrack != null
+                ? 0f
+                : MusicResolution.TailFadeTarget(_source.time, clip.length, fadeSeconds);
+
+            _fade = AmbienceResolution.AdvanceFade(_fade, target, deltaTime, fadeSeconds);
+
+            // Released only once the fade has actually arrived, which is the difference between this and the
+            // Stop() it replaced. The natural end needs no release: the source runs out on its own with the
+            // fade already at zero.
+            if (_fade <= SILENT_FADE && target <= SILENT_FADE)
+            {
+                _source.Stop();
+                _source.clip = null;
+            }
+        }
+
+        /// <summary>
+        /// Starts the queued track, if one is waiting and the source is free.
+        /// </summary>
+        /// <returns>True when a track started.</returns>
+        private bool StartPending()
+        {
+            if (_pendingTrack == null) return false;
+
+            _lastTrack = _pendingTrack;
+            _trackVolume = _pendingVolume;
+            _source.clip = _pendingTrack;
+            _pendingTrack = null;
+            _fade = 0f;
+            _stopping = false;
+            _source.volume = 0f;
+            _source.Play();
+            return true;
+        }
+
+        /// <summary>
+        /// Queues a track, fading out whatever is playing first.
+        /// </summary>
+        /// <param name="track">The clip to play.</param>
+        /// <param name="volume">The trim to play it at.</param>
+        /// <remarks>
+        /// Queued rather than started, because a source cannot fade out and play a different clip at the
+        /// same time. An idle source picks the track up on the same frame — <see cref="StartPending"/> runs
+        /// before the gap is touched — so only an interruption actually waits.
+        /// </remarks>
+        private void QueueTrack(AudioClip track, float volume)
+        {
+            _pendingTrack = track;
+            _pendingVolume = volume <= 0f ? 1f : volume;
+            _stopping = false;
         }
 
         /// <summary>
@@ -194,10 +312,7 @@ namespace Audio
                     out MusicTrack track, dark, daylightWeightWhenDark))
                 return false;
 
-            _lastTrack = track.clip;
-            _trackVolume = track.EffectiveVolume;
-            _source.clip = track.clip;
-            _source.Play();
+            QueueTrack(track.clip, track.EffectiveVolume);
             return true;
         }
 
@@ -208,25 +323,24 @@ namespace Audio
             manager.Ambience != null ? manager.Ambience.MusicVolume : 1f;
 
         /// <summary>
-        /// Forces the next pick immediately, cutting whatever is playing.
+        /// Forces the next pick, fading out whatever is playing.
         /// </summary>
-        /// <returns>The track that started, or null when neither pool offered one.</returns>
+        /// <returns>The track that was queued, or null when neither pool offered one.</returns>
         /// <remarks>
         /// Backs <c>/music next</c>. Gaps run to eight minutes, so without this, confirming a weighting or
         /// trim change by ear means waiting out a silence per attempt. Named for advancing rather than
         /// skipping because it is equally the way to start a track during a gap, where there is nothing to
-        /// skip.
+        /// skip — and during a gap the queued track starts on the same frame, with only the fade-in to wait
+        /// out.
         /// </remarks>
         public AudioClip ForcePick()
         {
             SoundManager manager = SoundManager.Instance;
             if (manager == null || _source == null) return null;
 
-            _source.Stop();
-
             uint gapHash = AmbienceResolution.ScheduleHash(++_pickCounter);
             _gapRemaining = AmbienceResolution.NextGapSeconds(_minGapSeconds, _maxGapSeconds, gapHash);
-            return PlayPick(manager, MusicResolution.PickHash(_pickCounter)) ? _source.clip : null;
+            return PlayPick(manager, MusicResolution.PickHash(_pickCounter)) ? _pendingTrack : null;
         }
 
         /// <summary>
@@ -237,30 +351,30 @@ namespace Audio
         /// <remarks>
         /// For the <c>/music</c> console command, so one track can be auditioned in context. The gap is
         /// re-armed like every other entry point that starts audio: without it an audition landing on an
-        /// almost-spent gap is cut off by the scheduler's own pick moments later.
+        /// almost-spent gap is cut off by the scheduler's own pick moments later. Queued rather than
+        /// started, so an audition replacing an audible track fades across instead of cutting it.
         /// </remarks>
         public void ForceTrack(AudioClip track, float volume)
         {
             if (_source == null || track == null) return;
 
-            _source.Stop();
-            _lastTrack = track;
-            _trackVolume = volume <= 0f ? 1f : volume;
-            _source.clip = track;
-            _source.Play();
+            QueueTrack(track, volume);
 
             _gapRemaining = AmbienceResolution.NextGapSeconds(
                 _minGapSeconds, _maxGapSeconds, AmbienceResolution.ScheduleHash(++_pickCounter));
         }
 
-        /// <summary>Stops the current track and re-arms the gap.</summary>
-        /// <remarks>For the <c>/music</c> console command.</remarks>
+        /// <summary>Fades the current track out and re-arms the gap.</summary>
+        /// <remarks>
+        /// For the <c>/music</c> console command. The source is released by the fade itself once it reaches
+        /// silence, so any track queued behind it is dropped here rather than left to start after the stop.
+        /// </remarks>
         public void StopTrack()
         {
             if (_source == null) return;
 
-            _source.Stop();
-            _source.clip = null;
+            _stopping = true;
+            _pendingTrack = null;
             _gapRemaining = AmbienceResolution.NextGapSeconds(
                 _minGapSeconds, _maxGapSeconds, AmbienceResolution.ScheduleHash(++_pickCounter));
         }

@@ -1,7 +1,7 @@
 # Sound Engine Design
 
-**Version:** 1.15  
-**Date:** 2026-08-30  
+**Version:** 1.16  
+**Date:** 2026-08-31  
 **Status:** **Partially implemented — S0–S3 and S5–S8 shipped; all confirmed in game except S8, which is
 awaiting its listening pass.** The `SoundMaterial`
 channel, the shared `BlockSoundDatabase`, the BlockEditor dropdown and prefill, the volume settings, the
@@ -25,7 +25,10 @@ kind of retune S5's placement defaults got — and a review pass whose fixes wer
 no noticeable regressions; restoring the single-root gain made the mix *better*, not merely more correct.
 Per-kind volume trims are still all 1.0 and have not been balanced against each other. **S7 shipped on
 2026-08-30** (§12): ambience beds carry a per-track gain, so the Loudness tab can normalize the Ambient role
-the way it already does Blocks and Fluids; music is deliberately excluded until it has content. The remainder of S4 is still outstanding.  
+the way it already does Blocks and Fluids; music is deliberately excluded until it has content. **S10 shipped on 2026-08-31** (§15): music now fades
+in, out at its tail, and across every interruption, and quitting to the main menu fades the whole listener
+down before the scene is torn down — music was the only sounding layer without an envelope. The suite stands
+at 76 baselines. The remainder of S4 is still outstanding.  
 **Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
 
 > Design for the VoxelEngine's audio system: block sounds (break / place / step), fluid and
@@ -575,6 +578,12 @@ it (10 `S2` baselines); the audible result stays an in-game judgment.
   Each track carries its own `volume`, folded into the source by `MusicResolution.SourceVolume` with the
   database's pack-wide `_musicVolume` and the category gain, so the Loudness tab can normalize music the way
   it normalizes every other role.
+  <br>
+  **Fades (S10, §15).** A track fades in over `_fadeSeconds`, fades out again over the last `_fadeSeconds`
+  of its own length, and fades across any interruption — a forced pick or a named audition is *queued* and
+  starts when the outgoing fade reaches zero, because one source cannot fade out and play a different clip
+  at once. The curve is **decibel-linear**, not the beds' equal-power `√`: equal power is for two sources
+  trading places, and a source fading alone under it hangs near full level and then drops.
 - **Wind in grass/trees:** v1 = a biome ambient loop whose volume is modulated by listener sky
   exposure (already in the context). An honest per-tree emitter version would be a `LEAVES`
   emitter kind in the §5.2 scan — deferred.
@@ -720,6 +729,7 @@ job and the managed query) and is seed-safe by construction.
 | **S6 — Track pool** ✅     | **Shipped 2026-08-29.** `BiomeBase.ambientLoop` replaced by `AmbienceTrack[] ambientTracks` (clip + Y band + relative weight); the six Standard biome assets migrated; the pick is a weighted roulette re-rolled when the rest cycle wakes. Detail in §11. |   🟡   | S2 ✅              |
 | **S7 — Per-track gain** ✅ | **Shipped 2026-08-30.** `AmbienceTrack.volume` plus per-clip trims for the database's own two beds, composed by `AmbienceResolution.BedSourceVolume`; the Loudness tab writes the Ambient role. Detail in §12. |   🟢   | S2 ✅; S6 ✅        |
 | **S8 — Music pools** ✅   | **Shipped 2026-08-30.** `MusicTrack` (clip + weight + volume) replacing both bare `AudioClip[]` pools, the `MusicResolution` layer (biome-share pool roll, then a weighted roulette, with a cross-pool repeat guard), a fourth import profile, `/music`, and the first music content (§9). Detail in §13. |   🟡   | S2 ✅; S7 ✅        |
+| **S10 — Music fades** ✅ | **Shipped 2026-08-31.** A single fade position on the music source driven by targets (opening fade-in, tail, stop, queued replacement), a decibel-linear `MusicResolution.GainFromFade` with an exact zero, `TailFadeTarget` and the short-clip `EffectiveFadeSeconds` clamp, a pending-track queue so an interruption fades across, and a listener fade before the world scene is torn down. Detail in §15. |   🟢   | S8 ✅              |
 | **S4 — Later**            | **Two-cell footstep sampling** ✅ (occupied cell + supporting cell, a non-solid occupant layered over the support — see the §5.1 note; shipped 2026-08-29). Still open: ungrounded/swimming steps (deferred — no swimming mechanic exists, `FLUID_BUGS.md` §02), v2 apply-site break/place hook (`VoxelModSource.Live` filter), hit/mining sounds, weather (RF-7), time-of-day (RF-1), `LEAVES` wind emitters.                                                                                                                                                                                                              |   —    | feature-gated     |
 
 S0+S1 alone deliver the largest perceived-quality jump (block feedback + footsteps) and validate
@@ -1280,8 +1290,93 @@ scheme becomes.
 
 ---
 
+## 15. S10 — Music fades ✅ *shipped 2026-08-31*
+
+**Status: shipped 2026-08-31, awaiting its listening pass.** Filed and built the same day, out of order with
+respect to S9 (§14), which stays filed: the two are independent — S9 changes *which* track is chosen, this
+changes how any chosen track arrives and leaves.
+
+### The gap this closed
+
+Every other sounding layer already had an envelope. The biome beds run independent per-source fades at
+`_fadeSeconds` (3 s), the cave bed at `_caveFadeSeconds` (4 s), the fluid emitters fade in on appear and out
+on disappear, and each of them is only ever `Stop()`ed once its fade has actually reached zero. **Music alone
+had none.** `_source.Play()` started a track at full level, `_source.Stop()` cut one mid-phrase for
+`/music next` and `/music stop`, and a track reaching its end simply ceased. The layer with the longest,
+most exposed material was the one entering and leaving hardest.
+
+### What shipped
+
+- **`MusicScheduler._fadeSeconds`** (default 3 s — 5 s was tried first and read as slow, because an
+  interruption spends the value twice), and one fade position that every reason a track's level
+  moves is expressed as a *target* for. The opening fade-in, the tail, a console stop and a queued
+  replacement are not independent: a stop arriving during a fade-in has to continue down from wherever the
+  fade had reached, and a second timer would have to guess that level. The position never jumps; only the
+  target varies. The advance itself is `AmbienceResolution.AdvanceFade`, unchanged and shared.
+- **`MusicResolution.GainFromFade`** — a **decibel-linear** curve across a `FadeFloorDecibels` (−60 dB)
+  travel, returning an exact zero at the bottom. Deliberately *not* the equal-power `√` curve
+  `AmbienceResolution.GainFromFade` uses, for the reason the cave bed already avoids it (§5.3): equal power
+  is the right mapping for two sources trading places, and applied to a source fading alone it hangs near
+  full level and then drops. Amplitude-linear was rejected for the opposite failure — loudness is
+  logarithmic, so a linear ramp spends most of its seconds in a range the ear has stopped hearing.
+- **`MusicResolution.TailFadeTarget`** — the last `_fadeSeconds` of a clip ramp the target to zero, so a
+  track ends rather than stops.
+- **`MusicResolution.EffectiveFadeSeconds`** — the authored fade clamped to a quarter of the clip's own
+  length, so two full fades fit with the track still audible at level in between.
+- **A pending-track queue.** A source cannot fade out and play a different clip at the same time, so
+  `ForcePick`/`ForceTrack` queue rather than start; the queued track begins when the outgoing fade reaches
+  zero. An *idle* source picks it up on the same frame, so only an interruption actually waits. `/music`
+  reports the queued track and the live fade position.
+- **`PauseMenuController` fades `AudioListener.volume`** over 0.4 s before saving and leaving the world.
+  Every layer owns its own fade, but none of them survives the scene teardown, so the only lever that can
+  carry all of them off together is the one above them all. Restored to full afterwards —
+  `AudioListener.volume` is global state that outlives the scene, and leaving it down would open the main
+  menu, and every world entered from it, in silence.
+- **Four suite baselines** (76 total): the composed gain now asserts the fade term *and* that it is the only
+  curved one, plus the curve's decibel spacing and exact zero, the tail ramp, and the short-clip clamp.
+
+### Why the two least interesting-looking assertions are the load-bearing ones
+
+**The exact zero.** The curve is asymptotic, so without the explicit `return 0f` a "finished" fade leaves the
+track playing at the floor's own gain — quiet enough to pass every listening test on a trimmed mixer, and
+audible the moment someone opens the Music slider. Nothing downstream re-checks it, because the source is
+released on the *fade position*, not on the volume.
+
+**The short-clip clamp.** Every shipped track is a multi-minute piece, so an unclamped fade is invisible
+until content arrives that is not — at which point a clip shorter than twice the fade is pulled into its tail
+before its fade-in has arrived and never plays at level at all, and one shorter than the fade itself is
+inaudible end to end. The baseline asserts the *consequence* (the fade-in completes before the tail begins,
+read off the same `TailFadeTarget` the scheduler uses) rather than the clamp's arithmetic, which would only
+restate the implementation.
+
+Both were proved red before being accepted: removing the clamp fails the short-clip baseline alone; removing
+the exact zero fails the curve baseline and the composed-gain one, and nothing else.
+
+### One trap worth recording
+
+A non-looping `AudioSource` that runs out **rewinds `time` to zero**. Read naively, the tail target then says
+"not in the tail" and walks the fade back up on a stopped source — silent in itself, but it leaves the *next*
+track to travel all the way back down before it can start, turning a finished track into a five-second
+delay. The fade advance zeroes its position whenever the source is not sounding, which is what makes that
+case ordinary rather than special.
+
+### Not done
+
+Ambience is untouched: it already fades. The one hard cut left in it is `AmbienceDirector.ClaimSlot` taking
+over a still-audible bed source, which needs a retiring-source concept in the roster and is reachable only
+when all four voices are audible at once — the headroom `BED_VOICE_COUNT = 4` exists to provide. Filed, not
+built.
+
+
 ## Document History
 
+* **v1.16** - S10 music fades (2026-08-31). Music was the only sounding layer with no envelope: it started
+  at full level, was cut mid-phrase by `/music next` and `/music stop`, and simply ceased at a track's end.
+  §15 records the shipped fade — one fade position driven by targets, a decibel-linear curve with an exact
+  zero, a tail, a short-clip clamp, a pending-track queue, and a listener fade before the world scene is torn
+  down — plus why the exact zero and the clamp are the load-bearing assertions and the `AudioSource.time`
+  rewind that made a finished track cost the next one five seconds. §5.3 gained the fade paragraph; the
+  suite stands at 76 baselines. S9 (§14) is untouched and still filed.
 * **v1.15** - Cave music + S9 filed (2026-08-31). `MusicTrack.environment` gates where an entry may play,
   and the dwell-filtered underground answer moved out of `AmbienceDirector` into `AudioContext` so the beds
   and the scheduler cannot disagree at a cave mouth — §5.3 had already argued that rule for the sampled
@@ -1464,7 +1559,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-30 (S3 fluid emitters complete and confirmed in game; music content still outstanding)  
+**Last Updated:** 2026-08-31 (S10 music fades shipped, awaiting its listening pass)  
 **Next Review:** when S2's music content or S7 (per-track ambience gain, §12) is scheduled. S2's runtime and its ambience beds are done and
 need no further design work — what remains is a music pool under §9. S3's runtime is done too: the fluid-presence flag it
 was waiting on is now `ChunkSection.emitterFluidCount`, and the scan reads a main-thread voxel snapshot rather than the

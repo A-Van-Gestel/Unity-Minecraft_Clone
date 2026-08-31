@@ -52,11 +52,11 @@ namespace Commands
                     AudioClip picked = scheduler.ForcePick();
                     return picked == null
                         ? CommandResult.Error("Neither pool offered a track — nothing is authored.")
-                        : CommandResult.Info($"Now playing '{picked.name}'.");
+                        : CommandResult.Info($"Fading in '{picked.name}'.");
 
                 case "stop":
                     scheduler.StopTrack();
-                    return CommandResult.Info("Stopped; the gap has been re-armed.");
+                    return CommandResult.Info("Fading out; the gap has been re-armed.");
 
                 case "play":
                     if (args.Count < 2)
@@ -91,9 +91,15 @@ namespace Commands
             AudioClip current = scheduler.DiagCurrentTrack;
             lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
                 current != null
-                    ? $"Playing: {current.name} | track trim {scheduler.DiagTrackVolume:0.00} | " +
+                    ? $"Playing: {current.name} | fade {scheduler.DiagFade:0.00} | " +
+                      $"track trim {scheduler.DiagTrackVolume:0.00} | " +
                       $"source volume {scheduler.DiagSourceVolume:0.000}"
                     : $"Silent | next pick in {scheduler.DiagGapRemaining:0.0}s"));
+
+            AudioClip pending = scheduler.DiagPendingTrack;
+            if (pending != null)
+                lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
+                    $"Queued: {pending.name}, waiting on the current fade-out."));
 
             lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
                 $"Share: {database.BiomeMusicShare:0.00} toward the biome pool | " +
@@ -185,7 +191,7 @@ namespace Commands
                 TryFind(biome != null ? biome.musicTracks : null, name, out found))
             {
                 scheduler.ForceTrack(found.clip, found.EffectiveVolume);
-                return CommandResult.Info($"Now playing '{found.clip.name}' at trim {found.EffectiveVolume:0.00}.");
+                return CommandResult.Info($"Fading in '{found.clip.name}' at trim {found.EffectiveVolume:0.00}.");
             }
 
             return CommandResult.Error($"No authored track matches '{name}'. Run '/music' to list both pools.");

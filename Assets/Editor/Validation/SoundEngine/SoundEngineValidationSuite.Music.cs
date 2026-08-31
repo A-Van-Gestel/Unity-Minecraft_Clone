@@ -9,7 +9,8 @@ namespace Editor.Validation.SoundEngine
 {
     /// <summary>
     /// <see cref="SoundEngineValidationSuite"/> — the music decisions (§5.3): which pool a pick reaches for,
-    /// which track wins inside it, the repeat guard, and the gain a track plays at.
+    /// which track wins inside it, the repeat guard, and the gain a track plays at — including the
+    /// fade curve and the tail that gain rides on.
     /// </summary>
     /// <remarks>
     /// The half of the music layer that can be asserted without a scene. Every defect here is silent in the
@@ -44,6 +45,11 @@ namespace Editor.Validation.SoundEngine
             scenarios.Add(new Scenario("A Music Pool With Empty Slots Still Picks A Track", RunMusicHoles));
             scenarios.Add(new Scenario("Music Source Volume Folds In Every Gain That Governs A Track",
                 RunMusicSourceVolume));
+            scenarios.Add(new Scenario("Music Fade Curve Is Decibel-Linear And Reaches True Silence",
+                RunMusicFadeCurve));
+            scenarios.Add(new Scenario("A Track's Tail Fades Out As The Clip Runs Out", RunMusicTailFade));
+            scenarios.Add(new Scenario("A Clip Too Short For Its Fade Gets A Shorter One",
+                RunMusicShortClipFade));
             scenarios.Add(new Scenario("The Gap Before A Track Does Not Determine Which Track Plays",
                 RunMusicGapTrackIndependence));
             scenarios.Add(new Scenario("Dark Tracks Are Barred From Daylight And Favoured In The Dark",
@@ -305,32 +311,186 @@ namespace Editor.Validation.SoundEngine
         }
 
         /// <summary>
-        /// The composed music gain: the track's trim, the pack trim and the category gain all multiply, and
-        /// none of them is dropped.
+        /// The composed music gain: the fade curve, the track's trim, the pack trim and the category gain
+        /// all multiply, and none of them is dropped.
         /// </summary>
+        /// <remarks>
+        /// Only the fade is curved. A trim that went through <see cref="MusicResolution.GainFromFade"/> too
+        /// would be re-shaped into a level the Loudness tab never measured, and at the tab's own working
+        /// range the error is small enough to read as a mastering difference rather than as a bug.
+        /// </remarks>
         private static bool RunMusicSourceVolume()
         {
             const string scenario = "Music Source Volume Folds In Every Gain That Governs A Track";
 
-            if (!ExactValue.Equal(MusicResolution.SourceVolume(1f, 1f, 1f), 1f))
-                return FailSound(scenario, "three unity gains did not compose to 1.");
+            if (!ExactValue.Equal(MusicResolution.SourceVolume(1f, 1f, 1f, 1f), 1f))
+                return FailSound(scenario, "four unity gains did not compose to 1.");
 
-            float trimmed = MusicResolution.SourceVolume(0.25f, 1f, 1f);
+            float trimmed = MusicResolution.SourceVolume(1f, 0.25f, 1f, 1f);
             if (Mathf.Abs(trimmed - 0.25f) > AMBIENCE_EPSILON)
                 return FailSound(scenario, $"a track volume of 0.25 produced {trimmed}.");
 
-            float all = MusicResolution.SourceVolume(0.5f, 0.5f, 0.5f);
+            float all = MusicResolution.SourceVolume(1f, 0.5f, 0.5f, 0.5f);
             if (Mathf.Abs(all - 0.125f) > AMBIENCE_EPSILON)
                 return FailSound(scenario, $"three gains of 0.5 composed to {all}, not 0.125.");
 
-            if (!ExactValue.IsZero(MusicResolution.SourceVolume(0f, 1f, 1f)))
+            if (!ExactValue.IsZero(MusicResolution.SourceVolume(1f, 0f, 1f, 1f)))
                 return FailSound(scenario, "a track volume of 0 did not produce silence.");
 
             // Trims attenuate only: an out-of-range authoring must not amplify the track.
-            if (!ExactValue.Equal(MusicResolution.SourceVolume(4f, 1f, 1f), 1f))
+            if (!ExactValue.Equal(MusicResolution.SourceVolume(1f, 4f, 1f, 1f), 1f))
                 return FailSound(scenario, "a track volume above 1 was not clamped.");
-            if (!ExactValue.IsZero(MusicResolution.SourceVolume(-1f, 1f, 1f)))
+            if (!ExactValue.IsZero(MusicResolution.SourceVolume(1f, -1f, 1f, 1f)))
                 return FailSound(scenario, "a negative track volume was not clamped to silence.");
+
+            // The fade term is present and is the ONLY curved one: at the half-fade the composed volume must
+            // be the curve's own value, not 0.5, and the trims beside it must still enter linearly.
+            float halfFade = MusicResolution.SourceVolume(0.5f, 1f, 1f, 1f);
+            if (Mathf.Abs(halfFade - MusicResolution.GainFromFade(0.5f)) > AMBIENCE_EPSILON)
+                return FailSound(scenario, $"a half fade produced {halfFade}, not the fade curve's value.");
+
+            float curvedAndTrimmed = MusicResolution.SourceVolume(0.5f, 0.5f, 1f, 1f);
+            if (Mathf.Abs(curvedAndTrimmed - MusicResolution.GainFromFade(0.5f) * 0.5f) > AMBIENCE_EPSILON)
+                return FailSound(scenario, "a trim beside a half fade was not applied linearly.");
+
+            if (!ExactValue.IsZero(MusicResolution.SourceVolume(0f, 1f, 1f, 1f)))
+                return FailSound(scenario, "a zero fade did not produce silence.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// The music fade curve: decibel-linear across its authored floor, monotonic, and exactly silent at
+        /// the bottom.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The exact zero is the load-bearing half. The curve is asymptotic, so the floor's own gain is
+        /// non-zero — a fade that "finished" would leave the track playing at the floor level, quiet enough
+        /// to pass every listening test on a trimmed mixer and audible the moment someone opens the Music
+        /// slider. Nothing else in the scheduler re-checks it: the source is released on the fade position,
+        /// not on the volume.
+        /// </para>
+        /// <para>
+        /// The decibel spacing is asserted at the midpoint rather than sampled everywhere, because it is the
+        /// one property that distinguishes this curve from the amplitude-linear and equal-power ones it was
+        /// chosen over — both of which pass a monotonicity check unchanged.
+        /// </para>
+        /// </remarks>
+        private static bool RunMusicFadeCurve()
+        {
+            const string scenario = "Music Fade Curve Is Decibel-Linear And Reaches True Silence";
+
+            if (!ExactValue.IsZero(MusicResolution.GainFromFade(0f)))
+                return FailSound(scenario, "a fully faded-out source was not exactly silent.");
+            if (!ExactValue.Equal(MusicResolution.GainFromFade(1f), 1f))
+                return FailSound(scenario, "a fully faded-in source did not play at full level.");
+
+            if (!ExactValue.IsZero(MusicResolution.GainFromFade(-1f)))
+                return FailSound(scenario, "a fade below 0 was not clamped to silence.");
+            if (!ExactValue.Equal(MusicResolution.GainFromFade(4f), 1f))
+                return FailSound(scenario, "a fade above 1 was not clamped to full level.");
+
+            float previous = -1f;
+            for (int step = 0; step <= 32; step++)
+            {
+                float gain = MusicResolution.GainFromFade(step / 32f);
+                if (gain < previous)
+                    return FailSound(scenario, $"the curve fell back at fade {step / 32f}.");
+
+                previous = gain;
+            }
+
+            // Half the fade travel is half the decibel travel — the definition of the curve, and what the
+            // amplitude-linear and equal-power alternatives both fail.
+            float midpoint = MusicResolution.GainFromFade(0.5f);
+            float expected = Mathf.Pow(10f, MusicResolution.FadeFloorDecibels / 2f / 20f);
+            if (Mathf.Abs(midpoint - expected) > AMBIENCE_EPSILON)
+                return FailSound(scenario,
+                    $"the midpoint gain was {midpoint}, not the half-floor level {expected}.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// The tail target: full level through the body of a track, ramping to silence exactly as the clip
+        /// runs out, and never engaging on a clip too short to have a tail.
+        /// </summary>
+        private static bool RunMusicTailFade()
+        {
+            const string scenario = "A Track's Tail Fades Out As The Clip Runs Out";
+
+            const float length = 120f;
+            const float fade = 5f;
+
+            if (!ExactValue.Equal(MusicResolution.TailFadeTarget(0f, length, fade), 1f))
+                return FailSound(scenario, "a track was already fading at its start.");
+            if (!ExactValue.Equal(MusicResolution.TailFadeTarget(length - fade, length, fade), 1f))
+                return FailSound(scenario, "the target left full level before the tail began.");
+
+            float middle = MusicResolution.TailFadeTarget(length - fade * 0.5f, length, fade);
+            if (Mathf.Abs(middle - 0.5f) > AMBIENCE_EPSILON)
+                return FailSound(scenario, $"half way through the tail the target was {middle}, not 0.5.");
+
+            if (!ExactValue.IsZero(MusicResolution.TailFadeTarget(length, length, fade)))
+                return FailSound(scenario, "the target had not reached silence by the clip's end.");
+
+            // Past the end, and a zero-length fade: both must answer rather than produce a negative target.
+            if (!ExactValue.IsZero(MusicResolution.TailFadeTarget(length + 10f, length, fade)))
+                return FailSound(scenario, "a clip time past the end produced a target below silence.");
+            if (!ExactValue.Equal(MusicResolution.TailFadeTarget(length, length, 0f), 1f))
+                return FailSound(scenario, "a zero-second fade still pulled the target down.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// The short-clip clamp: a clip too brief to afford the authored fade twice gets a shorter one, so
+        /// it still reaches full level in between.
+        /// </summary>
+        /// <remarks>
+        /// The half of the fade system every shipped track passes trivially — the music pool is minutes-long
+        /// pieces, so an unclamped fade is invisible until content arrives that is not. Unclamped, a clip
+        /// shorter than twice the fade is pulled into its tail before its fade-in has arrived and never
+        /// plays at level at all; shorter than the fade itself, it is inaudible end to end. Asserted as the
+        /// <i>consequence</i> — the fade fits with room to spare — rather than as the clamp's arithmetic,
+        /// which would restate the implementation.
+        /// </remarks>
+        private static bool RunMusicShortClipFade()
+        {
+            const string scenario = "A Clip Too Short For Its Fade Gets A Shorter One";
+
+            const float authored = 5f;
+
+            // Long content is untouched: the authored value is a maximum, not a target.
+            if (!ExactValue.Equal(MusicResolution.EffectiveFadeSeconds(180f, authored), authored))
+                return FailSound(scenario, "a three-minute track did not get its authored fade.");
+
+            foreach (float length in new[] { 30f, 12f, 8f, 4f, 1f, 0.25f })
+            {
+                float effective = MusicResolution.EffectiveFadeSeconds(length, authored);
+
+                if (effective > authored)
+                    return FailSound(scenario, $"a {length}s clip was given a fade longer than authored.");
+                if (effective < 0f)
+                    return FailSound(scenario, $"a {length}s clip was given a negative fade.");
+
+                // Two full fades must fit with the track still audible at level in between, which is what
+                // "the fade-in arrives before the tail starts" means as a number.
+                if (effective * 2f >= length)
+                    return FailSound(scenario,
+                        $"a {length}s clip's {effective}s fade leaves it no time at full level.");
+
+                // And the consequence, read off the tail target the scheduler actually uses: the moment the
+                // fade-in completes must still be before the tail begins.
+                if (!ExactValue.Equal(MusicResolution.TailFadeTarget(effective, length, effective), 1f))
+                    return FailSound(scenario,
+                        $"a {length}s clip entered its tail before its fade-in had finished.");
+            }
+
+            // A clip whose length is not known yet must not silence the fade.
+            if (!ExactValue.Equal(MusicResolution.EffectiveFadeSeconds(0f, authored), authored))
+                return FailSound(scenario, "an unknown clip length dropped the authored fade.");
 
             return true;
         }

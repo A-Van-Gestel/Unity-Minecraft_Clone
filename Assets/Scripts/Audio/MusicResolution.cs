@@ -29,6 +29,16 @@ namespace Audio
     public static class MusicResolution
     {
         /// <summary>
+        /// The largest share of a clip's own length one fade may occupy.
+        /// </summary>
+        /// <remarks>
+        /// A quarter, so a fade in and a fade out together leave half the clip at level. Consulted only
+        /// by <see cref="EffectiveFadeSeconds"/>, and only ever reached by a clip shorter than four times
+        /// the authored fade.
+        /// </remarks>
+        private const float MAX_FADE_SHARE = 0.25f;
+
+        /// <summary>
         /// Derives the pick hash for a scheduler counter, independent of that counter's gap hash.
         /// </summary>
         /// <param name="pickCounter">The scheduler's pick counter.</param>
@@ -193,8 +203,93 @@ namespace Audio
         }
 
         /// <summary>
+        /// The decibel level a fully faded-out music source sits at before it is treated as silent.
+        /// </summary>
+        /// <remarks>
+        /// The travel of the fade, not a mixer floor: <see cref="GainFromFade"/> maps the fade position
+        /// across this range, so a fade spends its seconds moving through levels the ear reads as evenly
+        /// spaced rather than collapsing in the last instant. Deeper than -60 dB buys nothing audible and
+        /// makes the early part of a fade-out imperceptibly slow.
+        /// </remarks>
+        public const float FadeFloorDecibels = -60f;
+
+        /// <summary>
+        /// Converts a music source's fade position to its output gain.
+        /// </summary>
+        /// <param name="fade">The fade position, [0, 1].</param>
+        /// <returns>The gain, <c>0</c> at the bottom and <c>1</c> at the top.</returns>
+        /// <remarks>
+        /// <para>
+        /// <b>Decibel-linear, not amplitude-linear and not equal-power.</b> Loudness is logarithmic in
+        /// amplitude, so a linear ramp spends most of its seconds in a range the ear has already stopped
+        /// hearing and reads as a fade that ends early; the equal-power <c>√</c> curve
+        /// <see cref="AmbienceResolution.GainFromFade"/> uses is worse here for the reason the cave bed
+        /// avoids it too — it is the right mapping for two sources trading places, and applied to a source
+        /// fading alone it hangs near full level and then drops.
+        /// </para>
+        /// <para>
+        /// Zero is returned exactly rather than left at the floor's own gain. The curve is asymptotic, so
+        /// without this a "silent" source would still be playing at <c>10^(-60/20)</c> — audible on a fully
+        /// open mixer, and enough to keep a stopped track leaking into the gap.
+        /// </para>
+        /// </remarks>
+        public static float GainFromFade(float fade)
+        {
+            float clamped = Mathf.Clamp01(fade);
+            if (clamped <= 0f) return 0f;
+            if (clamped >= 1f) return 1f;
+
+            return Mathf.Pow(10f, FadeFloorDecibels * (1f - clamped) / 20f);
+        }
+
+        /// <summary>
+        /// The fade duration a clip of a given length can actually afford.
+        /// </summary>
+        /// <param name="clipLength">The clip's length in seconds.</param>
+        /// <param name="fadeSeconds">The authored fade duration.</param>
+        /// <returns>The duration to fade this clip in and out over.</returns>
+        /// <remarks>
+        /// A track fades in and out <i>both</i>, so two full fades have to fit inside it with room to be
+        /// heard at level in between. Without this clamp a clip shorter than twice the authored fade never
+        /// reaches full volume at all — the tail target starts pulling it down before the opening fade has
+        /// arrived — and one shorter than the fade itself would play entirely inside its own fade-in. The
+        /// authored value is a maximum, so ordinary multi-minute music is untouched.
+        /// </remarks>
+        public static float EffectiveFadeSeconds(float clipLength, float fadeSeconds)
+        {
+            float authored = Mathf.Max(0f, fadeSeconds);
+            if (clipLength <= 0f) return authored;
+
+            return Mathf.Min(authored, clipLength * MAX_FADE_SHARE);
+        }
+
+        /// <summary>
+        /// The fade position a playing track should be heading toward, from how much of it is left.
+        /// </summary>
+        /// <param name="clipTime">How far into the clip playback has reached, in seconds.</param>
+        /// <param name="clipLength">The clip's length in seconds.</param>
+        /// <param name="fadeSeconds">The fade duration, already through <see cref="EffectiveFadeSeconds"/>.</param>
+        /// <returns>1 while the track is not yet in its tail, ramping to 0 at the clip's end.</returns>
+        /// <remarks>
+        /// A <i>target</i> rather than a gain, so the scheduler's one fade position serves the tail and every
+        /// other reason a track fades. The tail is expressed as the target the ordinary fade advance chases,
+        /// which is what stops a track entering its tail mid-fade-in from jumping: the position keeps moving
+        /// from where it had reached.
+        /// </remarks>
+        public static float TailFadeTarget(float clipTime, float clipLength, float fadeSeconds)
+        {
+            if (fadeSeconds <= 0f || clipLength <= 0f) return 1f;
+
+            float remaining = clipLength - clipTime;
+            if (remaining >= fadeSeconds) return 1f;
+
+            return Mathf.Clamp01(remaining / fadeSeconds);
+        }
+
+        /// <summary>
         /// The volume a music source plays a track at.
         /// </summary>
+        /// <param name="fade">The source's fade position, [0, 1].</param>
         /// <param name="trackVolume">The track's authored content trim.</param>
         /// <param name="poolVolume">The pack-wide music trim from the database.</param>
         /// <param name="categoryGain">The Music category gain, or 1 when a mixer group carries it.</param>
@@ -202,10 +297,13 @@ namespace Audio
         /// <remarks>
         /// A function rather than an expression at the call site, mirroring
         /// <see cref="AmbienceResolution.BedSourceVolume"/>: composed inline in the scheduler the chain is
-        /// reachable only by waiting out a gap in a running game.
+        /// reachable only by waiting out a gap in a running game. Only the fade passes through
+        /// <see cref="GainFromFade"/> — the rest are already gains, and curving a content trim would
+        /// re-shape a level the Loudness tab measured.
         /// </remarks>
-        public static float SourceVolume(float trackVolume, float poolVolume, float categoryGain) =>
-            Mathf.Clamp01(trackVolume) * Mathf.Clamp01(poolVolume) * categoryGain;
+        public static float SourceVolume(float fade, float trackVolume, float poolVolume,
+            float categoryGain) =>
+            GainFromFade(fade) * Mathf.Clamp01(trackVolume) * Mathf.Clamp01(poolVolume) * categoryGain;
 
         /// <summary>Whether a track may be chosen this pick.</summary>
         /// <param name="track">The candidate.</param>
