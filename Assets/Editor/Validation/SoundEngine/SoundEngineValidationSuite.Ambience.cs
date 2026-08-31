@@ -1276,9 +1276,9 @@ namespace Editor.Validation.SoundEngine
         /// dropped altogether, is inaudible in a table of measurements and obvious in the room.
         /// </summary>
         /// <remarks>
-        /// The reason the chain is a function at all. Composed inline in the director it was reachable only
-        /// by playing the game, so the one baseline that mentioned bed gain asserted <c>GainFromFade</c> on
-        /// its own and stayed green no matter what the director multiplied it by.
+        /// The reason the chain is a function at all: composed inline in the director it would be reachable
+        /// only by playing the game, leaving a suite that asserts <c>GainFromFade</c> on its own and stays
+        /// green whatever the director multiplies it by.
         /// </remarks>
         private static bool RunBedSourceVolume()
         {

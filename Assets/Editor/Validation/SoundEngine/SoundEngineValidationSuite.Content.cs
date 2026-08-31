@@ -105,8 +105,8 @@ namespace Editor.Validation.SoundEngine
         /// </summary>
         /// <remarks>
         /// This rule decides whether a button <b>writes to an asset</b>, and both the row and the Apply pass
-        /// read it from here — which is the fix it exists to pin. It was previously computed in the table and
-        /// never consulted by the writers, so a row saying "Apply cannot act on it" was written anyway.
+        /// read it from here. Computing it for the table alone would leave a row that says "Apply cannot act
+        /// on it" being written the moment the button is pressed — a guard that is only drawn is not a guard.
         /// </remarks>
         private static bool RunClaimWritability()
         {
@@ -150,8 +150,7 @@ namespace Editor.Validation.SoundEngine
             if (gainless.HasAuthoredVolume)
                 return FailSound(scenario, "a gainless entry claimed to carry an authored gain.");
             // Naming the cause, not merely being non-empty: the reason is rendered verbatim in the table's
-            // tooltip, and it previously said "a music pool is a bare clip array" for every gainless role —
-            // which stopped being true of music and was never true of UI.
+            // tooltip, so a message hard-coded to one role would be shown for every other one too.
             if (string.IsNullOrEmpty(gainless.BlockedReason))
                 return FailSound(scenario, "an unwritable claim gave no reason.");
             if (!gainless.BlockedReason.Contains(nameof(AudioCategory.UI)))

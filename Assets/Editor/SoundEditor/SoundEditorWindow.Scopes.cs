@@ -13,17 +13,16 @@ namespace Editor.SoundEditor
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Global content used to sit <b>above</b> the biome split as a section of its own. That works only while
-    /// it stays short: the global music pool is an authored list with no upper bound, and at eighteen tracks
-    /// it pushed the biome list and its detail pane past the bottom of the window, where neither could be
-    /// reached — the tab's scroll views were both inside the panes it had displaced. Capping the section's
-    /// height fixed the reachability and looked worse: a row clipped mid-height, and a scroll region sitting
-    /// directly above another one.
+    /// Global content is a <i>selection</i> rather than a section stacked above the biome split, because a
+    /// stacked section only works while it stays short. The global music pool is an authored list with no
+    /// upper bound, and a tall one pushes the list and its detail pane past the bottom of the window — where
+    /// neither can be reached, since this tab's scroll views live inside the panes that got displaced.
+    /// Capping the section's height bounds that rather than removing it, and looks worse: a row clipped
+    /// mid-height under a scroll region sitting directly above another one.
     /// </para>
     /// <para>
-    /// Making global content a <i>selection</i> rather than a stacked banner removes the failure mode instead
-    /// of bounding it — there is only ever one pane of content, so nothing can displace anything. It also
-    /// makes these tabs match the Blocks tab, which has always been list-left / detail-right.
+    /// As a selection there is only ever one pane of content, so nothing can displace anything — and the tabs
+    /// match the Blocks tab, which is list-left / detail-right.
     /// </para>
     /// </remarks>
     public partial class SoundEditorWindow
