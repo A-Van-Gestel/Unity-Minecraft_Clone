@@ -151,6 +151,9 @@ namespace Editor.BlockEditor
             BlockSoundEvent.Break,
             BlockSoundEvent.Place,
             BlockSoundEvent.Step,
+            BlockSoundEvent.Sprint,
+            BlockSoundEvent.JumpStart,
+            BlockSoundEvent.JumpLand,
             BlockSoundEvent.Hit,
         };
 

@@ -23,6 +23,15 @@ namespace Data
         [Tooltip("Played while punching / mining a block of this material. Unauthored in v1.")]
         public AudioClip[] hitClips;
 
+        [Tooltip("Played while the listener runs on this material. Empty falls back to the step clips.")]
+        public AudioClip[] sprintClips;
+
+        [Tooltip("Played when the listener jumps off this material. Empty falls back to the step clips.")]
+        public AudioClip[] jumpStartClips;
+
+        [Tooltip("Played when the listener lands on this material. Empty falls back to the step clips.")]
+        public AudioClip[] jumpLandClips;
+
         [Tooltip("Volume multiplier applied to every clip in this group, on top of the category mixer volume.")]
         [Range(0f, 1f)]
         public float volume = 1f;
@@ -36,7 +45,8 @@ namespace Data
         public float pitchMax = 1.1f;
 
         /// <summary>
-        /// Returns the clip array backing the given event, applying the place-to-break fallback.
+        /// Returns the clip array backing the given event, applying the place-to-break and
+        /// gait/jump-to-step fallbacks.
         /// </summary>
         /// <param name="evt">The one-shot being requested.</param>
         /// <returns>The clip array to pick from; empty or null when this group has no clips for the event.</returns>
@@ -49,6 +59,15 @@ namespace Data
                     return placeClips is { Length: > 0 } ? placeClips : breakClips;
                 case BlockSoundEvent.Step: return stepClips;
                 case BlockSoundEvent.Hit: return hitClips;
+
+                // The gait and jump events fall back to the plain step, so a pack that ships only "walk"
+                // clips for a material still sounds under a sprinting or landing player.
+                case BlockSoundEvent.Sprint:
+                    return sprintClips is { Length: > 0 } ? sprintClips : stepClips;
+                case BlockSoundEvent.JumpStart:
+                    return jumpStartClips is { Length: > 0 } ? jumpStartClips : stepClips;
+                case BlockSoundEvent.JumpLand:
+                    return jumpLandClips is { Length: > 0 } ? jumpLandClips : stepClips;
                 default: return breakClips;
             }
         }

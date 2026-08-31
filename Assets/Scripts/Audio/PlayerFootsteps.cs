@@ -8,7 +8,7 @@ namespace Audio
 {
     /// <summary>
     /// Plays a footstep one-shot for the block under the player every fixed distance traveled on the
-    /// ground, plus an immediate louder step on landing (SOUND_ENGINE_DESIGN.md §5.1).
+    /// ground, and dedicated one-shots for sprinting, jumping off and landing (SOUND_ENGINE_DESIGN.md §5.1).
     /// </summary>
     /// <remarks>
     /// Read-only with respect to physics: it polls <see cref="VoxelRigidbody.IsGrounded"/> and the
@@ -35,6 +35,15 @@ namespace Audio
         private bool _wasGrounded;
 
         /// <summary>
+        /// The <see cref="VoxelRigidbody.JumpCount"/> already sounded, so a jump is heard exactly once.
+        /// </summary>
+        /// <remarks>
+        /// The counter is what separates a jump from walking off a ledge: both leave the ground, and only
+        /// the solver knows which one happened.
+        /// </remarks>
+        private uint _lastJumpCount;
+
+        /// <summary>
         /// Whether <see cref="_wasGrounded"/> has been seeded from a live physics state yet.
         /// </summary>
         /// <remarks>
@@ -48,6 +57,7 @@ namespace Audio
         {
             _body = GetComponent<VoxelRigidbody>();
             _lastStepPosition = transform.position;
+            _lastJumpCount = _body.JumpCount;
         }
 
         private void Update()
@@ -64,8 +74,13 @@ namespace Audio
                 _groundedSeeded = true;
                 _wasGrounded = grounded;
                 _lastStepPosition = transform.position;
+                _lastJumpCount = _body.JumpCount;
                 return;
             }
+
+            // Polled before the grounded branches: the take-off leaves the ground in the same fixed step,
+            // so the jump would otherwise be indistinguishable from stepping off a ledge.
+            TryPlayJumpStart();
 
             if (!grounded)
             {
@@ -80,7 +95,7 @@ namespace Audio
             {
                 _wasGrounded = true;
                 _lastStepPosition = transform.position;
-                PlayStep();
+                PlayFootfall(BlockSoundEvent.JumpLand);
                 return;
             }
 
@@ -89,14 +104,31 @@ namespace Audio
             if (delta.sqrMagnitude < _strideLength * _strideLength) return;
 
             _lastStepPosition = transform.position;
-            PlayStep();
+
+            // The stride is deliberately not shortened while sprinting: it is a distance, so a faster body
+            // already crosses it more often, which is what a running cadence is.
+            PlayFootfall(_body.isSprinting ? BlockSoundEvent.Sprint : BlockSoundEvent.Step);
         }
 
         /// <summary>
-        /// Plays a step: the supporting block always, plus a layered one-shot for a non-solid block
+        /// Sounds a take-off when the solver reports a jump this frame has not been played yet.
+        /// </summary>
+        private void TryPlayJumpStart()
+        {
+            uint jumps = _body.JumpCount;
+            if (jumps == _lastJumpCount) return;
+
+            _lastJumpCount = jumps;
+            PlayFootfall(BlockSoundEvent.JumpStart);
+        }
+
+        /// <summary>
+        /// Plays one footfall: the supporting block always, plus a layered one-shot for a non-solid block
         /// occupying the player's own cell.
         /// </summary>
-        private void PlayStep()
+        /// <param name="evt">Which footfall this is — a stride step, a sprint step, a take-off or a landing.
+        /// Unauthored gait and jump clips fall back to the material's plain step clips.</param>
+        private void PlayFootfall(BlockSoundEvent evt)
         {
             Vector3 unityPos = transform.position;
             SoundResolution.StepCells(unityPos.y, out int occupantUnityY, out int supportUnityY);
@@ -124,9 +156,8 @@ namespace Audio
 
             // Both calls are unconditional: a None material is already silent, and each takes its own voice
             // and event salt, so the two layers get independent clips and pitch rather than flanging.
-            SoundManager.Instance.PlayBlockSound(supportMaterial, BlockSoundEvent.Step, feetPos);
-            SoundManager.Instance.PlayBlockSound(occupantMaterial, BlockSoundEvent.Step, feetPos,
-                _occupantLayerVolume);
+            SoundManager.Instance.PlayBlockSound(supportMaterial, evt, feetPos);
+            SoundManager.Instance.PlayBlockSound(occupantMaterial, evt, feetPos, _occupantLayerVolume);
         }
 
         /// <summary>

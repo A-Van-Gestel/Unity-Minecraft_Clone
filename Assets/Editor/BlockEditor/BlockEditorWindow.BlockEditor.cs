@@ -851,11 +851,11 @@ namespace Editor.BlockEditor
             // The effective clips, fallback included — what the player would actually hear, which is the
             // question this row exists to answer.
             AudioClip[] effective = group.GetClips(evt);
-            bool viaFallback = evt == BlockSoundEvent.Place && (group.placeClips == null || group.placeClips.Length == 0);
+            string borrowedFrom = FallbackSourceFor(group, evt);
 
             string state;
             if (effective == null || effective.Length == 0) state = "silent — no clips";
-            else if (viaFallback) state = $"{effective.Length} clip(s), reusing Break";
+            else if (borrowedFrom != null) state = $"{effective.Length} clip(s), reusing {borrowedFrom}";
             else state = $"{effective.Length} clip(s)";
 
             EditorGUILayout.BeginHorizontal();
@@ -873,6 +873,26 @@ namespace Editor.BlockEditor
             EditorGUILayout.EndHorizontal();
         }
 
+        /// <summary>
+        /// Names the event whose clips an unauthored one is actually sounding, or null when the row's own
+        /// array is what plays.
+        /// </summary>
+        /// <param name="group">The resolved sound group.</param>
+        /// <param name="evt">The event this row reports.</param>
+        /// <returns>The borrowed event's display name, or null when nothing is borrowed.</returns>
+        /// <remarks>Mirrors <see cref="BlockSoundGroup.GetClips"/>, so the row reports what the player hears.</remarks>
+        private static string FallbackSourceFor(BlockSoundGroup group, BlockSoundEvent evt)
+        {
+            return evt switch
+            {
+                BlockSoundEvent.Place when group.placeClips is not { Length: > 0 } => "Break",
+                BlockSoundEvent.Sprint when group.sprintClips is not { Length: > 0 } => "Step",
+                BlockSoundEvent.JumpStart when group.jumpStartClips is not { Length: > 0 } => "Step",
+                BlockSoundEvent.JumpLand when group.jumpLandClips is not { Length: > 0 } => "Step",
+                _ => null,
+            };
+        }
+
         /// <summary>Explains what triggers a given block sound event.</summary>
         /// <param name="evt">The event to describe.</param>
         /// <returns>The tooltip text for that event's row.</returns>
@@ -883,6 +903,9 @@ namespace Editor.BlockEditor
                 BlockSoundEvent.Break => "Played when this block is destroyed.",
                 BlockSoundEvent.Place => "Played when this block is placed. Falls back to the Break clips when unauthored.",
                 BlockSoundEvent.Step => "Played as the player walks on this block.",
+                BlockSoundEvent.Sprint => "Played as the player runs on this block. Falls back to the Step clips when unauthored.",
+                BlockSoundEvent.JumpStart => "Played when the player jumps off this block. Falls back to the Step clips when unauthored.",
+                BlockSoundEvent.JumpLand => "Played when the player lands on this block. Falls back to the Step clips when unauthored.",
                 _ => "Played while mining. Not triggered by the current engine.",
             };
         }

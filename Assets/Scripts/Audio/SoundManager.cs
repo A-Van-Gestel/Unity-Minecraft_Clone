@@ -1,3 +1,4 @@
+using System;
 using Data;
 using Data.Enums;
 using Data.WorldTypes;
@@ -24,7 +25,11 @@ namespace Audio
         private const int DEFAULT_VOICE_COUNT = 24;
 
         /// <summary>Number of <see cref="BlockSoundEvent"/> values, used to size the missing-clip warn table.</summary>
-        private const int EVENT_COUNT = 4;
+        /// <remarks>
+        /// Derived rather than written down: as a literal it silently under-sizes the table the moment an
+        /// event is appended, and the key arithmetic below then folds two materials onto one warn slot.
+        /// </remarks>
+        private static readonly int s_eventCount = Enum.GetValues(typeof(BlockSoundEvent)).Length;
 
         private static SoundManager s_instance;
 
@@ -450,7 +455,7 @@ namespace Audio
             _voices = new AudioSource[count];
             _voiceFilters = new AudioLowPassFilter[count];
             _voiceStartTime = new float[count];
-            _missingClipWarned = new bool[BlockSoundDatabase.MaterialCount * EVENT_COUNT];
+            _missingClipWarned = new bool[BlockSoundDatabase.MaterialCount * s_eventCount];
 
             for (int i = 0; i < count; i++)
             {
@@ -477,7 +482,7 @@ namespace Audio
 
         private void WarnMissingClipsOnce(SoundMaterial material, BlockSoundEvent evt)
         {
-            int key = (byte)material * EVENT_COUNT + (byte)evt;
+            int key = (byte)material * s_eventCount + (byte)evt;
             if (_missingClipWarned == null || (uint)key >= (uint)_missingClipWarned.Length) return;
             if (_missingClipWarned[key]) return;
 

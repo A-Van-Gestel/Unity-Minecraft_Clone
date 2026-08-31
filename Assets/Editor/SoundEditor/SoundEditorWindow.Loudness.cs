@@ -1099,7 +1099,7 @@ namespace Editor.SoundEditor
         /// <returns>False when none of the group's clips has a gated reading.</returns>
         /// <remarks>
         /// Median rather than per clip because <see cref="BlockSoundGroup.volume"/> is <b>one</b> float over
-        /// four clip arrays: the group can only move as a unit, so anchoring anywhere else guarantees that
+        /// every clip array: the group can only move as a unit, so anchoring anywhere else guarantees that
         /// most of its clips miss the target. The raw <c>GetClips</c> accessor, not <c>group.GetClips</c>,
         /// which answers an empty <c>placeClips</c> with <c>breakClips</c> and would count those twice.
         /// </remarks>

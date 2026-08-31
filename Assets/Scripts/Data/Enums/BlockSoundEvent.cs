@@ -17,5 +17,14 @@ namespace Data.Enums
 
         /// <summary>Punching / mining progress. Unauthored in v1.</summary>
         Hit = 3,
+
+        /// <summary>The listener ran on the block. Falls back to <see cref="Step"/> clips when unauthored.</summary>
+        Sprint = 4,
+
+        /// <summary>The listener jumped off the block. Falls back to <see cref="Step"/> clips when unauthored.</summary>
+        JumpStart = 5,
+
+        /// <summary>The listener landed on the block. Falls back to <see cref="Step"/> clips when unauthored.</summary>
+        JumpLand = 6,
     }
 }

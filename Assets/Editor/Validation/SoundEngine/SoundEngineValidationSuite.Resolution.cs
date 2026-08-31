@@ -28,6 +28,7 @@ namespace Editor.Validation.SoundEngine
         {
             scenarios.Add(new Scenario("Block ID Resolves To Its Authored Sound Material", RunResolveMaterial));
             scenarios.Add(new Scenario("Unauthored Place Clips Fall Back To Break Clips", RunPlaceFallback));
+            scenarios.Add(new Scenario("Unauthored Gait And Jump Clips Fall Back To Step Clips", RunGaitFallback));
             scenarios.Add(new Scenario("Clip Pick Is Deterministic And Always In Range", RunClipPick));
             scenarios.Add(new Scenario("Pitch Stays Inside The Group's Envelope", RunPitchEnvelope));
             scenarios.Add(new Scenario("Event Hash Separates Materials And Events", RunEventHash));
@@ -192,15 +193,25 @@ namespace Editor.Validation.SoundEngine
             int materialCollisions = 0;
             int eventCollisions = 0;
 
+            // Every event pair, not just Break vs Step: the gait and jump events land on the same material
+            // within a stride of each other, so two of them sharing a hash flanges audibly.
+            BlockSoundEvent[] events = (BlockSoundEvent[])Enum.GetValues(typeof(BlockSoundEvent));
+
             for (uint salt = 0; salt < RESOLUTION_SWEEP_EVENTS; salt++)
             {
                 if (SoundResolution.EventHash(SoundMaterial.Stone, BlockSoundEvent.Break, salt)
                     == SoundResolution.EventHash(SoundMaterial.Wood, BlockSoundEvent.Break, salt))
                     materialCollisions++;
 
-                if (SoundResolution.EventHash(SoundMaterial.Stone, BlockSoundEvent.Break, salt)
-                    == SoundResolution.EventHash(SoundMaterial.Stone, BlockSoundEvent.Step, salt))
-                    eventCollisions++;
+                for (int a = 0; a < events.Length; a++)
+                {
+                    for (int b = a + 1; b < events.Length; b++)
+                    {
+                        if (SoundResolution.EventHash(SoundMaterial.Stone, events[a], salt)
+                            == SoundResolution.EventHash(SoundMaterial.Stone, events[b], salt))
+                            eventCollisions++;
+                    }
+                }
             }
 
             if (materialCollisions > 0)
@@ -211,6 +222,70 @@ namespace Editor.Validation.SoundEngine
                                            "events identically.");
 
             return true;
+        }
+
+        /// <summary>
+        /// Sprint, jump-off and landing borrow the step clips whenever a material authors none of their own.
+        /// This is what lets a pack with a single "walk" set per material (Kenney, and three of the NOX
+        /// materials) stay fully wired while a richer pack gets the extra fidelity for free.
+        /// </summary>
+        /// <remarks>
+        /// The last two assertions are the load-bearing ones. Falling back to <c>Step</c> is easy to write as
+        /// "fall back to something", and a chain that also caught <c>Hit</c> would put a footstep under a
+        /// pickaxe; one that reached <c>Break</c> would put a shattering block under a landing.
+        /// </remarks>
+        private static bool RunGaitFallback()
+        {
+            const string scenario = "Unauthored Gait And Jump Clips Fall Back To Step Clips";
+
+            AudioClip[] steps = MakeClips(3);
+            AudioClip[] own = MakeClips(2);
+
+            BlockSoundEvent[] borrowers =
+            {
+                BlockSoundEvent.Sprint, BlockSoundEvent.JumpStart, BlockSoundEvent.JumpLand,
+            };
+
+            foreach (BlockSoundEvent evt in borrowers)
+            {
+                BlockSoundGroup stepOnly = new BlockSoundGroup { stepClips = steps };
+                if (!ReferenceEquals(stepOnly.GetClips(evt), steps))
+                    return FailSound(scenario, $"{evt} with no clips of its own did not fall back to the step clips.");
+
+                BlockSoundGroup emptyArray = new BlockSoundGroup { stepClips = steps };
+                SetGaitClips(emptyArray, evt, Array.Empty<AudioClip>());
+                if (!ReferenceEquals(emptyArray.GetClips(evt), steps))
+                    return FailSound(scenario, $"an empty (not null) {evt} array did not fall back.");
+
+                BlockSoundGroup authored = new BlockSoundGroup { stepClips = steps };
+                SetGaitClips(authored, evt, own);
+                if (!ReferenceEquals(authored.GetClips(evt), own))
+                    return FailSound(scenario, $"an authored {evt} array was overridden by the fallback.");
+            }
+
+            // A material with no step content at all stays silent rather than reaching further up the chain.
+            BlockSoundGroup breakOnly = new BlockSoundGroup { breakClips = MakeClips(2) };
+            foreach (BlockSoundEvent evt in borrowers)
+            {
+                if (breakOnly.GetClips(evt) != null)
+                    return FailSound(scenario, $"{evt} fell through an empty Step to the break clips; it must stay silent.");
+            }
+
+            return true;
+        }
+
+        /// <summary>Assigns one of the three gait/jump arrays, which have no shared setter on the group.</summary>
+        /// <param name="group">The group to write into.</param>
+        /// <param name="evt">Which gait or jump event's array to set.</param>
+        /// <param name="clips">The clips to assign.</param>
+        private static void SetGaitClips(BlockSoundGroup group, BlockSoundEvent evt, AudioClip[] clips)
+        {
+            switch (evt)
+            {
+                case BlockSoundEvent.Sprint: group.sprintClips = clips; break;
+                case BlockSoundEvent.JumpStart: group.jumpStartClips = clips; break;
+                default: group.jumpLandClips = clips; break;
+            }
         }
 
         /// <summary>

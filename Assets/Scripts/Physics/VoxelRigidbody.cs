@@ -99,6 +99,17 @@ namespace Physics
         public Vector3 Velocity { get; private set; }
         public float MoveSpeed { get; private set; }
 
+        /// <summary>
+        /// How many jumps this body has taken. Increments on the fixed step that applies the jump impulse.
+        /// </summary>
+        /// <remarks>
+        /// A counter rather than a "jumped this step" flag so a reader polling from <c>Update</c> cannot miss
+        /// one: two fixed steps can run between renders, which would clear a flag before anyone saw it.
+        /// Readers keep the last value they observed and compare. The audio layer uses this to tell a jump
+        /// from walking off a ledge, which look identical from outside the solver.
+        /// </remarks>
+        public uint JumpCount { get; private set; }
+
         private float _verticalMomentum;
         private Vector3 _movementIntent;
         private float _verticalFlyingIntent;
@@ -171,6 +182,7 @@ namespace Physics
                 _verticalMomentum = jumpForce;
                 IsGrounded = false;
                 _jumpRequest = false;
+                JumpCount++;
             }
 
             transform.Translate(Velocity, Space.World);
