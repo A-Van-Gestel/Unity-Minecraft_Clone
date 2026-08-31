@@ -1,14 +1,16 @@
 # Sound Engine Design
 
-**Version:** 1.16  
+**Version:** 1.17  
 **Date:** 2026-08-31  
-**Status:** **Partially implemented — S0–S3 and S5–S8 shipped; all confirmed in game except S8, which is
-awaiting its listening pass.** The `SoundMaterial`
+**Status:** **Partially implemented — S0–S3, S5–S8, S10 and S11 shipped; all confirmed in game except S8
+and S10, which are awaiting their listening pass.** The `SoundMaterial`
 channel, the shared `BlockSoundDatabase`, the BlockEditor dropdown and prefill, the volume settings, the
 pooled one-shot voices and the break / place / footstep triggers all exist; the `AudioMixer` is authored
 with its seven exposed volume parameters; two CC0 packs supply content, so all 13 sounding materials have
-break and step clips. Footsteps sample two cells, so wading and cross-mesh flora sound (§5.1). The
-`Validate Sound Engine` suite guards the resolution chain and the ambience decisions (38 baselines).
+break and step clips. Footsteps sample two cells, so wading and cross-mesh flora sound, and carry a gait and
+jump dimension — sprinting, taking off and landing each have their own clips, falling back to the plain step
+where a pack authors none (§5.1, §16). The
+`Validate Sound Engine` suite guards the resolution chain and the ambience decisions (77 baselines).
 **S2's runtime shipped on 2026-08-29** — `AudioContext`, the `AmbienceResolution` decision layer, the
 `AmbienceDirector` bed pair with its cave layer, the `MusicScheduler` and the underwater low-pass — on top of
 the §6.2 managed biome query, which shipped the same day and is guarded by its own `Validate Biome Selection`
@@ -299,8 +301,8 @@ can hear). v1 ships without this; the API above is already shaped for it.
 
 **Footsteps:** in the player controller — accumulate horizontal distance while grounded; every
 ~1.5 blocks traveled, read the two cells at the feet (`TryGetVoxel` at `floor(position)` and one below),
-resolve their materials and play them layered (see the two-cell note below). Jump-land plays
-an immediate step (slightly louder) and resets the accumulator.
+resolve their materials and play them layered (see the two-cell note below). Landing plays an immediate
+footfall and resets the accumulator.
 
 > **Two-cell sampling** (`S4`, shipped 2026-08-29). A step reads **two** voxels rather than one:
 > `SoundResolution.StepCells` selects the cell the player occupies (`floor(feetY)`) and the cell supporting
@@ -347,6 +349,24 @@ an immediate step (slightly louder) and resets the accumulator.
 > section recorded was real for the *footstep* case and overstated for the submerged one. What the cell-level read
 > costs is precision at the surface: a fluid voxel is only partly filled, so a head just under the waterline reads
 > dry until it enters the cell below.
+
+> **Gait and jump events** (`S11`, shipped and confirmed in game 2026-08-31, §16). A footfall is not always a walking step:
+> `Sprint`, `JumpStart` and `JumpLand` are separate `BlockSoundEvent`s resolving against their own clip
+> arrays on the material's group, and each falls back to `stepClips` when a pack authors none — so a
+> single-family pack stays fully wired while a richer one gets the fidelity for free. All four footfall
+> kinds go through the same two-cell resolution above, which is the point: jumping into a river splashes
+> over the riverbed rather than instead of it.
+>
+> The stride is deliberately **not** shortened while sprinting. It is a distance, so a body moving at
+> `sprintSpeed` already crosses it more often — which is what a running cadence is.
+>
+> Take-off needed a signal the audio layer could not infer. Leaving the ground looks identical from outside
+> the solver whether the player jumped or walked off a ledge, and the obvious read — upward velocity at the
+> transition — is a heuristic standing on the solver's internals. `VoxelRigidbody` therefore exposes a
+> monotonic `JumpCount`, incremented on the fixed step that applies the impulse. A counter rather than a
+> per-step flag: two fixed steps can run between renders, which would clear a flag before an `Update`-driven
+> reader ever saw it. This is the one place footsteps stopped being purely read-only with respect to
+> physics; the physics solver and behaviour suites both stay green (26 and 17 baselines).
 
 **Directionality** is free: 3D sources + the `AudioListener` on the player camera.
 
@@ -838,12 +858,19 @@ The music sources below carry the heaviest verification burden, which is why the
 rather than waiting; they remain the candidates for broadening the pool.
 
 **Shipped content (2026-08-28):** [Kenney — Impact Sounds](https://kenney.nl/assets/impact-sounds) v1.0,
-**CC0**, 75 of its 130 clips under `Assets/Audio/Blocks/kenney_impact/`, covering 12 of the 14 `SoundMaterial` groups
+**CC0**, 55 of its 130 clips under `Assets/Audio/Blocks/kenney_impact/`, covering 12 of the 14 `SoundMaterial` groups
 (5 variants each; `Wood`, `Glass` and `Metal` also carry distinct place clips), plus
 [NOX Sound — Essentials Series (Footsteps)](https://www.asoundeffect.com/sounddesigner/nox-sound/), also
-**CC0**, 114 clips under `Assets/Audio/Blocks/nox_footsteps/` supplying every material's footstep channel
+**CC0**, 361 clips under `Assets/Audio/Blocks/nox_footsteps/` supplying every material's footstep channel
 and the `Leaves` / `Plant` / `Liquid` break sounds an impact pack cannot cover. **All 13 sounding materials
-now have both break and step content**; only `None` is silent, by design. One folder per pack under
+now have both break and step content**; only `None` is silent, by design. **S11 (§16) added 273 of those** —
+156 from the pack's `_Run`, `_Jump_Start` and `_Jump_Land` families (sprint content for 11 materials, jump
+content for 10), plus 117 further variants that lifted every imported family to its full source depth (see
+the variant-cap note in §16). `Gravel` has run clips but no jump clips in the pack, and `Plant` and `Wool` have neither —
+those three fall back to their step clips, which is exactly what the fallback exists for. The pack's
+material-agnostic `Footsteps_Jump_Start` / `Footsteps_Jump_Land` pair was **not** imported to fill them: a
+neutral thump under `Wool`'s Kenney-sourced walk set would mix two packs' character under one group volume,
+which the loudness tool then anchors on a median of both. One folder per pack under
 `Assets/Audio/Blocks/`. Recorded in `REFERENCES_AND_CREDITS.md` and `CreditsDatabase.asset`.
 
 Candidate sources for further clip content. **License hygiene rule:** licensing on these sites is
@@ -1368,8 +1395,149 @@ when all four voices are audible at once — the headroom `BED_VOICE_COUNT = 4` 
 built.
 
 
+---
+
+## 16. S11 — Gait and jump footsteps ✅ *shipped and confirmed in game 2026-08-31*
+
+**Status: shipped and confirmed in game 2026-08-31.** Sprint and jump-land were verified by ear; **jump-take-off was verified by temporarily repointing a material's `JumpStart` family at an obviously different clip**, which is the only honest way to test it — see the note below on why the fallback makes this feature unfalsifiable by ear. Independent of S9 (§14), which stays filed.
+
+### The gap this closed
+
+Every footfall sounded the same. A sprint was a walk that happened more often, and a landing was a walk that
+happened at the bottom of a fall — the design had once given landing an emphasis multiplier, but `S4` removed
+it as a proven no-op (every group is authored at volume 1 and the product is `Clamp01`'d, so the "louder"
+landing was bit-identical to a walking step). The clips to fix this had been sitting unimported in the same
+CC0 pack that supplied the walk families since 2026-08-28.
+
+### What shipped
+
+* Three appended `BlockSoundEvent` values — `Sprint`, `JumpStart`, `JumpLand` — with matching arrays on
+  `BlockSoundGroup` and a fallback to `stepClips` in `GetClips`, alongside the existing `Place → Break` one.
+* `PlayerFootsteps.PlayStep` became `PlayFootfall(BlockSoundEvent)`. Stride footfalls pick `Sprint` or
+  `Step` off `VoxelRigidbody.isSprinting`; the landing branch plays `JumpLand`; take-off is driven by the
+  new `VoxelRigidbody.JumpCount` (see the §5.1 note for why a counter and not a flag).
+* Both editor surfaces list the new events — the Sound Editor's per-material clip rows and the Block
+  Editor's read-only sound section — and both now report the fallback generically instead of special-casing
+  `Place`.
+* 273 new clips (2.9 MB, from 30 MB of source WAV) converted with `Tools/Python/convert_audio_pack.py` and
+  assigned across 11 materials.
+
+### The two defects worth recording
+
+`SoundManager` sized its missing-clip warn table off a **literal** `EVENT_COUNT = 4`, and keys it as
+`material * EVENT_COUNT + evt`. Appending three events without touching that constant does not throw — it
+folds distinct (material, event) pairs onto the same warn slot, so one "no clips authored" warning silences
+unrelated ones. It is now derived from the enum, the way `BlockSoundDatabase.MaterialCount` already was.
+
+The fallback also makes this feature **hard to verify by ear**, and that is worth stating plainly: an
+entirely unwired sprint sounds identical to a correctly wired sprint on a material with no sprint content.
+The in-game check has to be run on a material whose run clips are audibly distinct from its walk clips —
+`Stone` or `Grass` — and jumping in place must produce two separate one-shots, not one.
+
+### The variant cap that was never revisited
+
+`convert_audio_pack.py` defaults to `--max-variants 8`, and the original 2026-08-28 footstep import took that
+default. It was never an authored choice about how much variety a surface deserves — it was a default nobody
+came back to, and it silently truncated **11 of the 15** walk families: `Sand_Walk` kept 8 of 20 clips and
+`Walk_Grass_Mono`, the most-walked surface in the game, kept 8 of **50**. S11's first pass inherited the same
+default and truncated the sprint families identically (`Sand_Run` 8/20, `Grass_Run` and `MetalV1_Run` 8/15).
+
+Every imported family was taken to its full source depth — 114 clips became 387 — and the group arrays were
+re-resolved from their families so the deeper pools are actually referenced. The cost is ~4 MB for the whole
+folder, which was never the constraint; the cap simply outlived the reason for it. The lesson is the one that
+generalizes: a tool default that survives into shipped content is a decision, whether or not anyone made it.
+
+### By-ear curation — do not "restore" these (2026-08-31)
+
+Depth is not the goal; **fit** is. Auditioning the newly-deepened `Grass` pools, 16 clips were removed as
+wrong for the surface: they read as walking through a leaf-strewn field rather than on grass, harsh and out of
+place next to the rest of the family. `Walk_Grass_Mono` therefore ships **35 of its 50** source clips and
+`Grass_Run` **14 of 15** — deliberately, not by truncation.
+
+Removed indices:
+
+| Family | Removed |
+|---|---|
+| `Footsteps_Walk_Grass_Mono` | `002`, `018`–`029`, `035`, `041` |
+| `Footsteps_Grass_Run` | `003` |
+
+**The decision is enforced by a `.curated` sidecar, not by this table.** The curation originally lived only in
+*which files were absent from disk* — encoded nowhere, and therefore undone by the next import. That is not a
+hypothetical: it happened during this very pass, when the missing files were read as data loss and
+"recovered", and the array re-resolve pulled all 16 straight back into the group.
+
+`Assets/Audio/Blocks/nox_footsteps/.curated` now lists them, and `convert_audio_pack.py` honours it: the
+excluded outputs are skipped, a re-import cannot resurrect them, and `--ignore-curated` is the deliberate
+override for a fresh audition pass. Two properties make it safe:
+
+* **Numbering does not shift.** Variants are skipped *after* the index is assigned, so the surviving clips
+  keep their filenames and therefore their `.meta` GUIDs and every `BlockSoundDatabase` reference. Filtering
+  before numbering would silently renumber the family and invalidate the database.
+* **A malformed sidecar is an error, not a shrug.** An unparseable curation file would look like the decision
+  is recorded when it is not, so the converter refuses to run rather than quietly ignoring it.
+
+The file is a dot-file, which Unity does not import — no `.meta`, nothing in the asset database. A run that
+finds a curated variant already on disk reports the path rather than deleting it: removing a Unity asset means
+removing its `.meta` too, and that is the caller's call, not a converter's.
+
+### Unreferenced clips removed
+
+Lifting the variant cap surfaced the opposite problem. A GUID sweep of every `.asset`, `.prefab`, `.unity`
+and `.mixer` against every clip under `Assets/Audio/` found **30 referenced by nothing at all**:
+`Footsteps_Mud_Walk` (10 — `Dirt` resolves to `DirtyGround_Walk`, so it was never wired), and Kenney's
+`footstep_wood` (superseded by NOX's `Wood_Walk`), `impactGeneric_light`, `impactSoft_heavy` and
+`impactMining`. All 30 were deleted with their `.meta` siblings; the sweep now returns zero. `impactMining`
+is the one worth remembering — it is the natural content for the `Hit` event §5.1 still lists as unauthored,
+so re-import it from the pack rather than sourcing something new when `Hit` is built.
+
+This is the `Cicadas` lesson from §9 applied as a rule rather than a note: **the credits record what is in
+use, not what was ever downloaded.** Both `REFERENCES_AND_CREDITS.md` and `CreditsDatabase.asset` now list
+only referenced families, and say what was removed and why, so a future audit can tell "deliberately absent"
+from "forgotten".
+
+### Next: a physics event seam (filed 2026-08-31, wants its own planning session)
+
+`VoxelRigidbody.JumpCount` is a **polling workaround, and should be read as one.** It exists because the
+solver exposes no way to be told that something happened — so the audio layer counts, compares, and infers.
+It works, and the counter shape is right for a poller, but the coupling is backwards: an audio concern
+reached into a physics component because there was nowhere else to reach.
+
+The shape it wants is an observer seam on the body — `JumpStarted` and `Landed` events other systems
+subscribe to — with the sound layer as one subscriber among future others (particles, camera shake, fall
+damage, animation). Each side then stays what it is: the solver announces what it did, and does not know or
+care who listens. That the sound layer would today be the *only* subscriber is not an argument against it —
+it is the reason the seam is cheap to introduce now and expensive later.
+
+Deliberately **not** folded into S11: it is a physics-layer API change with its own blast radius across the
+solver's validation suites, and it wants a planned pass rather than a rider on an audio feature.
+
+### Not done
+
+No per-event volume or pitch envelope: `BlockSoundGroup` carries one `volume` across every array, and the
+loudness tool anchors a group on the median of all its clips, so a quieter walk against a louder landing
+needs a per-event trim and a loudness model that understands it. Landing volume is likewise not scaled by
+fall distance — no fall-distance signal is read anywhere today.
+
+
 ## Document History
 
+* **v1.17** - S11 gait and jump footsteps (2026-08-31). Footfalls gained a gait and jump dimension: `Sprint`,
+  `JumpStart` and `JumpLand` resolve against their own clip arrays and fall back to `stepClips`, so a pack
+  shipping one walk family per material stays fully wired. Two findings are the ones to keep. `SoundManager`
+  sized its warn table off a literal `EVENT_COUNT = 4`, which does not throw when the enum grows — it
+  collides warn keys across materials, silently. And the fallback that makes the feature safe also makes it
+  *unfalsifiable by ear*: an unwired sprint and an unauthored one sound the same, so the in-game check is
+  only meaningful on a material with distinct run content. Take-off needed `VoxelRigidbody.JumpCount`, the
+  first time the footstep layer stopped being purely read-only with respect to physics. The same pass lifted
+  every footstep family to its full source depth: `convert_audio_pack.py`'s `--max-variants 8` default had
+  truncated 11 of the 15 original walk families since 2026-08-28, keeping 8 of `Walk_Grass_Mono`'s 50 clips —
+  114 clips became 361. The same pass swept the other way twice: 30 clips across five families that nothing
+  referenced were deleted, and 16 more were removed from the `Grass` pools **by ear** as wrong for the
+  surface. Both credit surfaces now track *active usage* rather than download history. The by-ear removal
+  existed only as absent files, so a re-import silently undid it — which it did, once, mid-session. It is now
+  enforced by a `.curated` sidecar the converter honours, with the numbering-stability rule that keeps
+  existing GUIDs valid spelled out in §16. §5.1 and §9 updated; the suite stands at 77 baselines. **Confirmed in game the same day.** §5.1's "jump-land plays a slightly louder step" was also corrected — the
+  emphasis knob it described was deleted in v1.5.
 * **v1.16** - S10 music fades (2026-08-31). Music was the only sounding layer with no envelope: it started
   at full level, was cut mid-phrase by `/music next` and `/music stop`, and simply ceased at a track's end.
   §15 records the shipped fade — one fade position driven by targets, a decibel-linear curve with an exact
@@ -1559,7 +1727,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-31 (S10 music fades shipped, awaiting its listening pass)  
+**Last Updated:** 2026-08-31 (S11 gait and jump footsteps shipped and confirmed in game)  
 **Next Review:** when S2's music content or S7 (per-track ambience gain, §12) is scheduled. S2's runtime and its ambience beds are done and
 need no further design work — what remains is a music pool under §9. S3's runtime is done too: the fluid-presence flag it
 was waiting on is now `ChunkSection.emitterFluidCount`, and the scan reads a main-thread voxel snapshot rather than the
