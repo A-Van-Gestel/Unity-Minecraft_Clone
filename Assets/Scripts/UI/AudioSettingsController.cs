@@ -9,7 +9,16 @@ namespace UI
     /// </summary>
     public class AudioSettingsController : MonoBehaviour
     {
-        private void Start() => AudioVolumes.Apply(SettingsManager.LoadSettings());
+        private void Start()
+        {
+            // Scene entry owns the listener. PauseMenuController fades it to zero on the way out of a world
+            // and cannot raise it again — its coroutine dies with the scene — and the value survives play
+            // sessions while domain reload is disabled, so without this a quit would open the next session
+            // silent. This controller is present in both scenes, which is what makes it the right home.
+            AudioListener.volume = 1f;
+
+            AudioVolumes.Apply(SettingsManager.LoadSettings());
+        }
 
         private void OnEnable()
         {

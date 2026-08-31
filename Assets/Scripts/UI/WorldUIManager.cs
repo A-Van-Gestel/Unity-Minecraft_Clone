@@ -231,10 +231,13 @@ namespace UI
                 if (helpController != null)
                     helpController.OnDoneClicked();
             }
-            // 3. If Pause Menu is open, close it
+            // 3. If Pause Menu is open, close it — unless a quit is already in flight. That coroutine
+            // outlives the panel and will save and leave the world regardless, so resuming here would hand
+            // the player back a world that is about to vanish under them.
             else if (IsPauseMenuOpen)
             {
-                IsPauseMenuOpen = false;
+                if (pauseMenuController == null || !pauseMenuController.IsQuitting)
+                    IsPauseMenuOpen = false;
             }
             // 4. If the inventory is open, Escape dismisses it and stops there (Minecraft's behavior) —
             // reaching the pause menu from the inventory takes a second press. Together with the

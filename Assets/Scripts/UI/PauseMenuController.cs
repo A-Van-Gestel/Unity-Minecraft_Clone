@@ -32,6 +32,15 @@ namespace UI
         /// <summary>Whether a quit is already in progress, so a second click cannot start another.</summary>
         private bool _quitting;
 
+        /// <summary>
+        /// Whether the quit fade is running, and the world is therefore on its way out.
+        /// </summary>
+        /// <remarks>
+        /// Read by <see cref="WorldUIManager"/> so Escape cannot resume a world that is already saving:
+        /// the fade outlives the pause panel, because this component does not live on it.
+        /// </remarks>
+        public bool IsQuitting => _quitting;
+
         private void Awake()
         {
             // Check for null references
@@ -191,10 +200,11 @@ namespace UI
         /// carry all of them off together is the one above them all.
         /// </para>
         /// <para>
-        /// <b>Unscaled time</b>, because the pause menu this runs from may be holding the game still, and
-        /// <b>restored to full afterwards</b> — <see cref="AudioListener.volume"/> is global state that
-        /// outlives the scene, so leaving it down would open the main menu, and every world entered from
-        /// it, in silence.
+        /// <b>Unscaled time</b>, because the pause menu this runs from may be holding the game still. The
+        /// fade is deliberately <b>not</b> undone here: <see cref="AudioListener.volume"/> is global state
+        /// that outlives the scene, and restoring it before the teardown it covers puts every still-live
+        /// source back to full for the rest of the frame. <c>AudioSettingsController.Start</c> owns raising
+        /// it again, on entry to whichever scene comes next.
         /// </para>
         /// </remarks>
         private IEnumerator FadeOutAndQuit(bool toMainMenu)
@@ -210,7 +220,6 @@ namespace UI
             AudioListener.volume = 0f;
 
             World.Instance.SaveWorldData();
-            AudioListener.volume = startVolume;
 
             if (toMainMenu)
             {
