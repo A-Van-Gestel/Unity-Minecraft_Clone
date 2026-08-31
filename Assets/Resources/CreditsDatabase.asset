@@ -298,30 +298,28 @@ MonoBehaviour:
     - footstep_concrete
     - footstep_grass
     - footstep_snow
-    - footstep_wood
-    - impactGeneric_light
     - impactGlass_light
     - impactGlass_medium
     - impactMetal_medium
-    - impactMining
     - impactPlank_medium
     - impactPlate_medium
-    - impactSoft_heavy
     - impactSoft_medium
     - impactWood_medium
     projectFiles:
     - Assets/Audio/Blocks/kenney_impact/
     version: 1.0
-    notes: 75 of the pack's 130 clips, 5 variants per family. Crediting is not required
-      by CC0.
+    notes: 55 of the pack's 130 clips, 5 variants per family, all actively referenced.
+      footstep_wood, impactGeneric_light, impactMining and impactSoft_heavy were
+      removed on 2026-08-31 once nothing referenced them; re-import from the pack
+      if a use appears. Crediting is not required by CC0.
   - name: Essentials Series (Footsteps)
     author: NOX_SOUND
     category: 6
     licenseType: 5
     customLicenseText: 
     url: https://www.asoundeffect.com/sounddesigner/nox-sound/
-    usageDescription: Footstep clips for every block sound material, plus the break
-      sounds for leaves, plants and liquids.
+    usageDescription: Footstep, sprint and jump clips for every block sound material,
+      plus the break sounds for leaves, plants and liquids.
     sourceFiles:
     - Footsteps_DirtyGround_Walk
     - Footsteps_Walk_Grass_Mono
@@ -330,7 +328,6 @@ MonoBehaviour:
     - Footsteps_Leaves_Walk
     - Footsteps_Leaves_Run
     - Footsteps_MetalV1_Walk
-    - Footsteps_Mud_Walk
     - Footsteps_Rock_Walk
     - Footsteps_Sand_Walk
     - Footsteps_Snow_Walk
@@ -338,12 +335,45 @@ MonoBehaviour:
     - Footsteps_WaterV1_Walk
     - Footsteps_Water_Jump_Light
     - Footsteps_Wood_Walk
+    - Footsteps_Rock_Run
+    - Footsteps_DirtyGround_Run
+    - Footsteps_Grass_Run
+    - Footsteps_Sand_Run
+    - Footsteps_Gravel_Run
+    - Footsteps_Wood_Run
+    - Footsteps_Tile_Run
+    - Footsteps_MetalV1_Run
+    - Footsteps_Water_Run
+    - Footsteps_Snow_Run
+    - Footsteps_Rock_Jump_Start
+    - Footsteps_DirtyGround_Jump_Start
+    - Footsteps_Grass_Jump_Start
+    - Footsteps_Sand_Jump_Start
+    - Footsteps_Wood_Jump_Start
+    - Footsteps_Leaves_Jump_Start
+    - Footsteps_Tile_Jump_Start
+    - Footsteps_MetalV1_Jump_Start
+    - Footsteps_Snow_Jump_Start
+    - Footsteps_Rock_Jump_Land
+    - Footsteps_DirtyGround_Jump_Land
+    - Footsteps_Grass_Jump_Land
+    - Footsteps_Sand_Jump_Land
+    - Footsteps_Wood_Jump_Land
+    - Footsteps_Leaves_Jump_Land
+    - Footsteps_Tile_Jump_Land
+    - Footsteps_MetalV1_Jump_Land
+    - Footsteps_Snow_Jump_Land
+    - Footsteps_Water_Jump_Big
     projectFiles:
     - Assets/Audio/Blocks/nox_footsteps/
     version: 
-    notes: '114 of the pack''s clips, converted from 24-bit/48kHz WAV to OGG Vorbis.
-      License stated in the pack''s Essentials_Series_README.pdf: ''All these sounds
-      are under CC0 license.'''
+    notes: '361 of the pack''s clips, all actively referenced, converted from 24-bit/48kHz
+      WAV to OGG Vorbis. Mud_Walk was removed on 2026-08-31 - Dirt resolves to DirtyGround_Walk.
+      Walk_Grass_Mono ships 35 of 50 and Grass_Run 14 of 15: the rest were auditioned
+      out the same day as sounding like a leaf-strewn field rather than grass. The
+      excluded variants are listed in nox_footsteps/.curated, which convert_audio_pack.py
+      honours, so a re-import cannot recreate them. License stated in the pack''s
+      Essentials_Series_README.pdf: ''All these sounds are under CC0 license.'''
   - name: Essentials Series (Nature)
     author: NOX_SOUND
     category: 6

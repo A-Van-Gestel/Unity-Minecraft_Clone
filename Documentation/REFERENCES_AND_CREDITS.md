@@ -74,24 +74,36 @@ including the three-step permission rule for "free to download but no attached l
     * *Version:* 1.0 (2019-12-19)
     * *License:* CC0 (Public Domain) — per the pack's own `License.txt`. Crediting is explicitly not
       required; recorded here because the project credits every third-party asset.
-    * *Files used:* 75 of the pack's 130 clips — `footstep_carpet`, `footstep_concrete`,
-      `footstep_grass`, `footstep_snow`, `footstep_wood`, `impactGeneric_light`, `impactGlass_light`,
-      `impactGlass_medium`, `impactMetal_medium`, `impactMining`, `impactPlank_medium`,
-      `impactPlate_medium`, `impactSoft_heavy`, `impactSoft_medium`, `impactWood_medium` (5 variants each).
+    * *Files used:* 55 of the pack's 130 clips, all of them actively referenced — `footstep_carpet`,
+      `footstep_concrete`, `footstep_grass`, `footstep_snow`, `impactGlass_light`, `impactGlass_medium`,
+      `impactMetal_medium`, `impactPlank_medium`, `impactPlate_medium`, `impactSoft_medium`,
+      `impactWood_medium` (5 variants each).
     * *Source:* `Assets/Audio/Blocks/kenney_impact/` (one folder per pack)
     * *Notes:* Block break / place / footstep one-shots, mapped to `SoundMaterial` groups in
       `BlockSoundDatabase.asset`. Supplies the break/place channels. Its footstep clips were
       superseded by the NOX Sound pack below, which covers surfaces an impact pack does not.
+      `footstep_wood`, `impactGeneric_light`, `impactMining` and `impactSoft_heavy` were imported
+      in 2026-08-28 and **removed on 2026-08-31** once nothing referenced them — the first superseded by
+      NOX's `Wood_Walk`, `impactMining` earmarked for the still-unauthored `Hit` event, the other two spare
+      variants. Re-import from the pack if a use appears; this list tracks what is *in use*, not what was
+      ever downloaded.
 
 * [**Essentials Series (Footsteps)**](https://www.asoundeffect.com/sounddesigner/nox-sound/) by **NOX_SOUND**
     * *License:* CC0 (Public Domain) — stated in the pack's own `Essentials_Series_README.pdf`:
       *"All these sounds are under CC0 license."*
-    * *Files used:* 114 clips from 15 walk/movement families across 12 surfaces — `DirtyGround`, `Grass`
-      (incl. `Tall_Movement`), `Gravel`, `Leaves` (walk + run), `MetalV1`, `Mud`, `Rock`, `Sand`, `Snow`,
-      `Tile`, `Water` (walk + light jump), `Wood`.
+    * *Files used:* 361 clips from 43 walk / run / jump families across 11 surfaces, all of them actively
+      referenced — `DirtyGround`, `Grass` (incl. `Tall_Movement`), `Gravel`, `Leaves` (walk + run),
+      `MetalV1`, `Rock`, `Sand`, `Snow`, `Tile`, `Water` (walk + both jumps), `Wood`. Most surfaces carry a
+      `_Run` sprint family and a `_Jump_Start` / `_Jump_Land` pair alongside their walk clips, at the pack's full
+      variant count except where noted below. `Mud_Walk` was imported in 2026-08-28 and **removed on 2026-08-31** —
+      `Dirt` resolves to `DirtyGround_Walk`, so nothing ever referenced it. `Walk_Grass_Mono` ships 35 of 50
+      and `Grass_Run` 14 of 15: the rest were **auditioned out on 2026-08-31** as sounding like a
+      leaf-strewn field rather than grass. The removed indices are listed in
+      `nox_footsteps/.curated`, which `convert_audio_pack.py` honours, so a re-import cannot recreate
+      them; see `SOUND_ENGINE_DESIGN.md` §16.
     * *Source:* `Assets/Audio/Blocks/nox_footsteps/`
-    * *Notes:* Supplies every material's footstep channel, plus the break sounds for `Leaves`, `Plant` and
-      `Liquid` — the three groups the impact pack left silent. Converted from 24-bit/48 kHz mono WAV to OGG
+    * *Notes:* Supplies every material's footstep, sprint and jump channels, plus the break sounds for
+      `Leaves`, `Plant` and `Liquid` — the three groups the impact pack left silent. Converted from 24-bit/48 kHz mono WAV to OGG
       Vorbis (9x smaller) with `Tools/Python/convert_audio_pack.py`; the unconverted pack stays outside the
       repository.
 
