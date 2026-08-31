@@ -56,6 +56,13 @@ namespace Data
         [SerializeField]
         private float _musicVolume = 1f;
 
+        [Tooltip("What a Daylight track's weight is multiplied by while it is dark — underground, or night " +
+                 "above ground. Lower values leave more of the dark to the Dark tracks. 0 keeps daylight " +
+                 "music out of the dark entirely.")]
+        [Range(0f, 1f)]
+        [SerializeField]
+        private float _daylightWeightWhenDark = 0.25f;
+
         /// <summary>The underground ambience bed, or null when none is authored.</summary>
         public AudioClip CaveLoop => _caveLoop;
 
@@ -105,6 +112,16 @@ namespace Data
         /// against the rest of the mix yet.
         /// </remarks>
         public float MusicVolume => _musicVolume <= 0f ? 1f : _musicVolume;
+
+        /// <summary>
+        /// What a <c>Daylight</c> track's weight is multiplied by while it is dark.
+        /// </summary>
+        /// <remarks>
+        /// A scale rather than an exclusion because the dark pool is small: excluding every daylight track
+        /// would loop the few dark ones. Unlike the other gains, <b>0 is meaningful here</b> — it means "no
+        /// daylight music in the dark" — so this one has no unset-reads-as-1 rule.
+        /// </remarks>
+        public float DaylightWeightWhenDark => _daylightWeightWhenDark;
 
         /// <summary>
         /// Content trim for the beds, applied before the category volume.

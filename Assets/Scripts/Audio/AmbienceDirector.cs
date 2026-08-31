@@ -113,17 +113,9 @@ namespace Audio
         [SerializeField]
         private float _maxRestSeconds = 60f;
 
+        // The skylight threshold and dwell time live on SoundManager, with the decision they drive: every
+        // layer reading "am I in a cave" has to read the same answer.
         [Header("Cave Bed")]
-        [Tooltip("Highest stored sky-light exposure at the head that still counts as underground.")]
-        [Range(0, 15)]
-        [SerializeField]
-        private int _caveMaxSkylight;
-
-        [Tooltip("Seconds the underground reading must hold before the cave bed commits either way.")]
-        [Range(0f, 15f)]
-        [SerializeField]
-        private float _caveDwellSeconds = 3f;
-
         [Tooltip("Seconds the cave bed takes to fade in or out once committed.")]
         [Range(0.5f, 15f)]
         [SerializeField]
@@ -199,8 +191,9 @@ namespace Audio
         /// </summary>
         private uint _rollSalt;
 
+        /// <summary>The published underground answer, mirrored for the <c>/sound</c> readout.</summary>
         private bool _undergroundCommitted;
-        private float _undergroundHeld;
+
         private float _caveFade;
 
         /// <summary>
@@ -390,14 +383,9 @@ namespace Audio
         /// </remarks>
         private void UpdateCaveBed(SoundManager manager, float deltaTime)
         {
-            if (manager.HasContext)
-            {
-                bool underground = AmbienceResolution.IsUnderground(
-                    manager.Context.SkylightAtHead, (byte)_caveMaxSkylight);
-
-                _undergroundCommitted = AmbienceResolution.TickDwell(
-                    underground, _undergroundCommitted, deltaTime, _caveDwellSeconds, ref _undergroundHeld);
-            }
+            // Read, not computed: SoundManager commits the underground answer once so every layer that
+            // reacts to a cave reacts at the same instant.
+            if (manager.HasContext) _undergroundCommitted = manager.Context.Underground;
 
             AmbienceDatabase ambience = manager.Ambience;
             AudioClip caveLoop = ambience != null ? ambience.CaveLoop : null;

@@ -86,6 +86,11 @@ namespace Editor.SoundEditor
                 new GUIContent("Music Volume",
                     "Content trim applied to every track before the Music slider. A property of the pack's " +
                     "mastering, not a user preference."));
+            EditorGUILayout.PropertyField(_ambienceSerialized.FindProperty("_daylightWeightWhenDark"),
+                new GUIContent("Daylight Weight When Dark",
+                    "What a Daylight track's weight is multiplied by while it is dark — underground at any " +
+                    "hour, or above ground at night. Lower values leave more of the dark to the Dark " +
+                    "tracks; 0 keeps daylight music out of the dark entirely."));
             EditorUILayoutHelper.EndGroup();
 
             AmbienceTrackListDrawer.DrawMusicTrackList(

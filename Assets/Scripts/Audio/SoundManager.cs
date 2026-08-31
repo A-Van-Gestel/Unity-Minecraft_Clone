@@ -72,6 +72,17 @@ namespace Audio
         [SerializeField]
         private float _biomeFalloffRadius = 0.6f;
 
+        [Tooltip("Sky light at the head at or below which the listener counts as underground.")]
+        [Range(0, 15)]
+        [SerializeField]
+        private int _caveMaxSkylight;
+
+        [Tooltip("Seconds the underground test must disagree with the committed answer before it flips. " +
+                 "Stops a cave mouth flapping every layer that reads it.")]
+        [Range(0f, 15f)]
+        [SerializeField]
+        private float _caveDwellSeconds = 3f;
+
         [Header("Underwater")]
         [Tooltip("Seconds the low-pass takes to sweep fully in or out when the head enters or leaves a fluid.")]
         [Range(0.05f, 2f)]
@@ -95,6 +106,13 @@ namespace Audio
 
         private Transform _listener;
         private float _contextTimer;
+
+        /// <summary>The committed underground answer published on <see cref="AudioContext.Underground"/>.</summary>
+        private bool _undergroundCommitted;
+
+        /// <summary>How long the raw underground test has disagreed with the committed answer.</summary>
+        private float _undergroundHeld;
+
         private float _submergedWeight;
 
         /// <summary>Tracks which (material, event) pairs have already warned about missing clips.</summary>
@@ -340,6 +358,10 @@ namespace Audio
             _contextTimer += Time.unscaledDeltaTime;
             if (_contextTimer < _contextInterval) return;
 
+            // The elapsed time, captured before the reset: the dwell filter advances at the SAMPLE rate,
+            // not per frame. Ticking it per frame only re-evaluated the same skylight reading many times
+            // over, since that reading is refreshed here and nowhere else.
+            float elapsed = _contextTimer;
             _contextTimer = 0f;
 
             World world = World.Instance;
@@ -381,6 +403,16 @@ namespace Audio
                 ? surfaceY - headVoxelCell.y
                 : 0;
 
+            // Committed here rather than by each consumer, so the beds and the music scheduler cannot
+            // disagree about standing in a cave mouth.
+            _undergroundCommitted = AmbienceResolution.TickDwell(
+                AmbienceResolution.IsUnderground(skylight, (byte)_caveMaxSkylight),
+                _undergroundCommitted, elapsed, _caveDwellSeconds, ref _undergroundHeld);
+
+            // Sun below the horizon. No dwell filter: unlike a cave mouth, sunset does not flicker, and the
+            // music layer only reads this between tracks anyway.
+            bool night = world.TimeManager != null && world.TimeManager.SunElevation < 0f;
+
             Context = new AudioContext(
                 hasBiome ? tracker.Current.Index : -1,
                 hasBiome ? tracker.Current.Attributes : null,
@@ -391,7 +423,9 @@ namespace Audio
                 hasWeights,
                 depth,
                 headVoxelCell.y,
-                directions);
+                directions,
+                _undergroundCommitted,
+                night);
             HasContext = true;
         }
 

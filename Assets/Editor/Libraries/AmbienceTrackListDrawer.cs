@@ -1,5 +1,6 @@
 using Audio;
 using Data;
+using Data.Enums;
 using UnityEditor;
 using UnityEngine;
 
@@ -114,6 +115,14 @@ namespace Editor.Libraries
                         "Content trim for this track, multiplied into the music gain. 0 means unset and " +
                         "plays at full level — the Sound Editor's Loudness tab writes this field."));
 
+                SerializedProperty environment = element.FindPropertyRelative("environment");
+                if (environment != null)
+                    EditorGUILayout.PropertyField(environment, new GUIContent("Environment",
+                        "The light this track belongs in. Any plays everywhere; Daylight still plays in " +
+                        "the dark but at a reduced weight (the database's Daylight Weight When Dark); Dark " +
+                        "plays only underground or at night. This is a property of THIS entry, so the same " +
+                        "clip can be a dark track here and an ordinary one in a biome's pool."));
+
                 EditorUILayoutHelper.EndGroup();
 
                 if (!remove) continue;
@@ -137,6 +146,9 @@ namespace Editor.Libraries
             if (addedClip != null) addedClip.objectReferenceValue = null;
             if (addedWeight != null) addedWeight.floatValue = 1f;
             if (addedVolume != null) addedVolume.floatValue = 1f;
+
+            SerializedProperty addedEnvironment = added.FindPropertyRelative("environment");
+            if (addedEnvironment != null) addedEnvironment.enumValueIndex = (int)MusicEnvironment.Any;
         }
 
         /// <summary>

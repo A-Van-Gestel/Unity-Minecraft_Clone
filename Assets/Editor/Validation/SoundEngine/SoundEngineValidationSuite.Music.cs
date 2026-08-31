@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Audio;
 using Data;
+using Data.Enums;
 using Editor.Validation.Framework;
 using UnityEngine;
 
@@ -45,6 +46,9 @@ namespace Editor.Validation.SoundEngine
                 RunMusicSourceVolume));
             scenarios.Add(new Scenario("The Gap Before A Track Does Not Determine Which Track Plays",
                 RunMusicGapTrackIndependence));
+            scenarios.Add(new Scenario("Dark Tracks Are Barred From Daylight And Favoured In The Dark",
+                RunMusicEnvironmentGating));
+            scenarios.Add(new Scenario("A Cave And A Night Sky Are Both Dark", RunMusicDarknessUnion));
         }
 
         /// <summary>
@@ -52,9 +56,9 @@ namespace Editor.Validation.SoundEngine
         /// it, and either pool alone still answers.
         /// </summary>
         /// <remarks>
-        /// The behavior this replaced did the opposite — a biome authoring one regional track shadowed the
-        /// entire global pool for as long as the player stood there, so importing a single desert piece would
-        /// have silenced every other track in the desert.
+        /// Shadowing instead of adding is the failure this guards: a biome authoring one regional track
+        /// would silence every other piece of music for as long as the player stood there, so importing a
+        /// single desert piece would take the whole desert.
         /// </remarks>
         private static bool RunMusicPoolsCombine()
         {
@@ -402,6 +406,151 @@ namespace Editor.Validation.SoundEngine
 
             return true;
         }
+
+        /// <summary>
+        /// The environment gate (§13): Underground tracks never surface, Surface tracks keep playing
+        /// dark but at a reduced weight, and Any is unaffected either way.
+        /// </summary>
+        /// <remarks>
+        /// The reduction is a weight scale rather than an exclusion because the cave pool is small — barring
+        /// every surface track would loop two pieces. That makes the assertion a <i>distribution</i> one: a
+        /// gate that merely filtered would pass a "does an dark track ever play" check while getting
+        /// the proportions completely wrong.
+        /// </remarks>
+        private static bool RunMusicEnvironmentGating()
+        {
+            const string scenario = "Dark Tracks Are Barred From Daylight And Favoured In The Dark";
+            const float daylightWeightWhenDark = 0.25f;
+
+            AudioClip[] clips = MakeClips(4);
+            MusicTrack[] pool =
+            {
+                Environment(clips[0], MusicEnvironment.Daylight),
+                Environment(clips[1], MusicEnvironment.Daylight),
+                Environment(clips[2], MusicEnvironment.Daylight),
+                Environment(clips[3], MusicEnvironment.Dark),
+            };
+
+            // On the surface: the dark track is never chosen, however many rolls are drawn.
+            for (uint salt = 1; salt <= MUSIC_DISTRIBUTION_PICKS; salt++)
+            {
+                if (!MusicResolution.TryPickFrom(pool, null, AmbienceResolution.ScheduleHash(salt),
+                        out MusicTrack track, true, false, daylightWeightWhenDark))
+                    return FailSound(scenario, "a surface pool produced no track.");
+
+                if (track.clip == clips[3])
+                    return FailSound(scenario, "an Underground track was picked on the surface.");
+            }
+
+            // Underground: surface tracks still play, but the cave track takes the share the scale implies.
+            // Three surface tracks at 0.25 sum to 0.75 against the cave track's 1.0, so it should take
+            // 1 / 1.75 of the picks.
+            int cavePicks = 0;
+            for (uint salt = 1; salt <= MUSIC_DISTRIBUTION_PICKS; salt++)
+            {
+                if (!MusicResolution.TryPickFrom(pool, null, AmbienceResolution.ScheduleHash(salt),
+                        out MusicTrack track, true, true, daylightWeightWhenDark))
+                    return FailSound(scenario, "an dark pool produced no track.");
+
+                if (track.clip == clips[3]) cavePicks++;
+            }
+
+            float observed = cavePicks / (float)MUSIC_DISTRIBUTION_PICKS;
+            const float expected = 1f / (1f + 3f * daylightWeightWhenDark);
+            if (Mathf.Abs(observed - expected) > MUSIC_SHARE_TOLERANCE)
+                return FailSound(scenario,
+                    $"dark, the cave track took {observed:0.000} of picks, not the {expected:0.000} " +
+                    "its weight implies against three surface tracks scaled to " +
+                    $"{daylightWeightWhenDark}. Surface tracks are being excluded or not scaled.");
+
+            if (observed >= 0.999f)
+                return FailSound(scenario,
+                    "the cave track took every pick dark — surface tracks are excluded rather than " +
+                    "down-weighted, which loops a small cave pool.");
+
+            // A scale of 0 means "no surface music in caves", and that IS exclusion, not weight zero: a pool
+            // whose weights all sum to zero would otherwise fall back to an even pick.
+            for (uint salt = 1; salt <= AMBIENCE_SWEEP_STEPS; salt++)
+            {
+                if (!MusicResolution.TryPickFrom(pool, null, AmbienceResolution.ScheduleHash(salt),
+                        out MusicTrack track, true, true, 0f))
+                    return FailSound(scenario, "a zero cave weight silenced the pool entirely.");
+
+                if (track.clip != clips[3])
+                    return FailSound(scenario,
+                        "a surface track played dark at a cave weight of 0 — a zero scale must bar " +
+                        "the track, not admit it with no weight.");
+            }
+
+            // The union: a Dark track is barred in daylight and eligible in the dark, and the resolver is
+            // told only "dark" — it must not care WHICH kind of dark, or night would need its own rule.
+            // AudioContext.IsDark is where underground and night are joined; this pins the consequence.
+            MusicTrack darkTrack = Environment(clips[3], MusicEnvironment.Dark);
+            if (darkTrack.EnvironmentWeight(false, daylightWeightWhenDark) > 0f)
+                return FailSound(scenario, "a Dark track was eligible in daylight.");
+            if (darkTrack.EnvironmentWeight(true, daylightWeightWhenDark) <= 0f)
+                return FailSound(scenario, "a Dark track was not eligible in the dark.");
+
+            // A pool of only Dark tracks reads as EMPTY in daylight, so a caller holding another
+            // pool falls through to it rather than being handed a track that may not play here.
+            MusicTrack[] darkOnly = { Environment(clips[3], MusicEnvironment.Dark) };
+            if (MusicResolution.HasEligible(darkOnly, false, daylightWeightWhenDark))
+                return FailSound(scenario, "a dark-only pool reported itself eligible in daylight.");
+            if (!MusicResolution.HasEligible(darkOnly, true, daylightWeightWhenDark))
+                return FailSound(scenario, "a cave-only pool reported itself ineligible dark.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// The union itself: <c>AudioContext.IsDark</c> is true underground OR at night.
+        /// </summary>
+        /// <remarks>
+        /// Pinned separately because the rest of this file exercises <c>MusicResolution</c>, which is simply
+        /// <i>told</i> whether it is dark — so dropping night from the union left every other scenario green
+        /// while cave music stopped playing at night. The composed property is where the feature lives, and
+        /// a test that only ever passes the flag by hand cannot see it.
+        /// </remarks>
+        private static bool RunMusicDarknessUnion()
+        {
+            const string scenario = "A Cave And A Night Sky Are Both Dark";
+
+            if (Context(false, false).IsDark)
+                return FailSound(scenario, "daylight above ground reported dark.");
+
+            if (!Context(true, false).IsDark)
+                return FailSound(scenario, "underground by day did not report dark.");
+
+            if (!Context(false, true).IsDark)
+                return FailSound(scenario,
+                    "night above ground did not report dark — a track written for a cave is meant to suit " +
+                    "the surface after dark, and this is the only place the two are joined.");
+
+            if (!Context(true, true).IsDark)
+                return FailSound(scenario, "underground at night did not report dark.");
+
+            // The cave BED must not follow night: cave ambience under an open midnight sky would be wrong.
+            if (Context(false, true).Underground)
+                return FailSound(scenario,
+                    "night above ground reported UNDERGROUND. The cave bed reads that field, so night would " +
+                    "fade a cave ambience in on the open surface.");
+
+            return true;
+        }
+
+        /// <summary>Builds a listener context with only the light signals set.</summary>
+        /// <param name="underground">Whether the listener is underground.</param>
+        /// <param name="night">Whether the sun is below the horizon.</param>
+        /// <returns>The context.</returns>
+        private static AudioContext Context(bool underground, bool night) =>
+            new AudioContext(0, null, false, 15, false, default, false, 0, 64, default, underground, night);
+
+        /// <summary>Builds one authored music track with an environment.</summary>
+        /// <param name="clip">The track's clip.</param>
+        /// <param name="environment">Where it may play.</param>
+        /// <returns>The track, at full weight and unset volume.</returns>
+        private static MusicTrack Environment(AudioClip clip, MusicEnvironment environment) =>
+            new MusicTrack { clip = clip, weight = 1f, environment = environment };
 
         /// <summary>Builds one authored music track.</summary>
         /// <param name="clip">The track's clip.</param>

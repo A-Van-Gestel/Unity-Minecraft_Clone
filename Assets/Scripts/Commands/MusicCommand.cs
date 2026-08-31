@@ -102,6 +102,14 @@ namespace Commands
 
             // The seed, because the counters are randomized per session: without it "it opened with the
             // wrong track" is not reproducible from the world seed alone.
+            // Which light the next pick will resolve against, and why: "no track ever plays in caves" has
+            // separate causes in the context and in the authoring, and the readout has to separate them.
+            bool dark = manager.HasContext && manager.Context.IsDark;
+            lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
+                $"Light: {(dark ? "dark" : "daylight")} " +
+                $"(underground {manager.Context.Underground}, night {manager.Context.Night}) | " +
+                $"daylight weight when dark {database.DaylightWeightWhenDark:0.00}"));
+
             lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
                 $"Session seed: {scheduler.DiagSessionSeed}"));
 

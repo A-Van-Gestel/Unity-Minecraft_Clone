@@ -47,10 +47,9 @@ namespace Audio
         /// Which pick this session is on. <b>Seeded randomly</b>, not started at zero.
         /// </summary>
         /// <remarks>
-        /// <see cref="AmbienceResolution.ScheduleHash"/> is a pure function of this counter, so a counter
-        /// that started at 0 every launch made the gap lengths and the track order byte-identical across
-        /// sessions — the same opening track after the same silence, every time. Invisible while no music was
-        /// authored; immediately audible with a real pool.
+        /// <see cref="AmbienceResolution.ScheduleHash"/> is a pure function of this counter, so a fixed
+        /// start would make the gap lengths and the track order byte-identical in every session — the same
+        /// opening track after the same silence, every launch.
         /// </remarks>
         private uint _pickCounter;
 
@@ -185,8 +184,14 @@ namespace Audio
             BiomeBase biome = manager.HasContext ? manager.Context.Biome : null;
             MusicTrack[] biomeTracks = biome != null ? biome.musicTracks : null;
 
+            // Underground OR night, from the shared context: a track written for a cave suits the surface
+            // after dark for the same reason, so the two are one question. The cave BED still answers to
+            // Underground alone — cave ambience on the open surface at midnight would be wrong.
+            bool dark = manager.HasContext && manager.Context.IsDark;
+            float daylightWeightWhenDark = manager.Ambience != null ? manager.Ambience.DaylightWeightWhenDark : 1f;
+
             if (!MusicResolution.TryPickTrack(global, biomeTracks, share, _lastTrack, hash,
-                    out MusicTrack track))
+                    out MusicTrack track, dark, daylightWeightWhenDark))
                 return false;
 
             _lastTrack = track.clip;

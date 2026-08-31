@@ -1,4 +1,5 @@
 using System;
+using Data.Enums;
 using UnityEngine;
 
 namespace Data
@@ -31,8 +32,31 @@ namespace Data
         [Range(0f, 1f)]
         public float volume;
 
+        [Tooltip("The light this track belongs in. Any plays everywhere; Daylight is down-weighted in the " +
+                 "dark rather than excluded; Dark plays only underground or at night. Caves and night are " +
+                 "one context — a track written for a cave suits the surface after dark.")]
+        public MusicEnvironment environment;
+
         /// <summary>Whether this track can actually be played.</summary>
         public bool IsPlayable => clip != null;
+
+        /// <summary>
+        /// How this track's weight scales in the listener's current environment.
+        /// </summary>
+        /// <param name="dark">Whether it is dark where the listener stands (underground, or night above ground).</param>
+        /// <param name="daylightWeightWhenDark">What a Daylight track's weight is multiplied by in the dark.</param>
+        /// <returns>A multiplier in [0, 1]; zero means the track is not eligible here at all.</returns>
+        /// <remarks>
+        /// Returning zero is <i>ineligibility</i>, not "weight zero" — the caller must drop the track rather
+        /// than admit it with no weight, because a pool whose weights all sum to zero falls back to an even
+        /// pick and would hand a daylight track the same chance it was meant to lose.
+        /// </remarks>
+        public float EnvironmentWeight(bool dark, float daylightWeightWhenDark) => environment switch
+        {
+            MusicEnvironment.Dark => dark ? 1f : 0f,
+            MusicEnvironment.Daylight => dark ? Mathf.Clamp01(daylightWeightWhenDark) : 1f,
+            _ => 1f,
+        };
 
         /// <summary>
         /// The weight this track carries in its pool's roulette, never negative.

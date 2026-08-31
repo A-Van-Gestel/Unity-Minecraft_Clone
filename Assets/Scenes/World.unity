@@ -1745,6 +1745,8 @@ MonoBehaviour:
   _maxDistance: 20
   _contextInterval: 0.25
   _biomeFalloffRadius: 0.6
+  _caveMaxSkylight: 0
+  _caveDwellSeconds: 3
   _submergedFadeSeconds: 0.35
   _dryCutoffHertz: 22000
   _wetCutoffHertz: 900
@@ -1788,8 +1790,6 @@ MonoBehaviour:
   _maxAudibleSeconds: 120
   _minRestSeconds: 20
   _maxRestSeconds: 60
-  _caveMaxSkylight: 0
-  _caveDwellSeconds: 3
   _caveFadeSeconds: 4
   _caveDuck: 1
   _fullDuckDepth: 24

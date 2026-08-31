@@ -91,6 +91,37 @@ namespace Audio
         /// <summary>True when the listener's head cell holds a fluid.</summary>
         public readonly bool Submerged;
 
+        /// <summary>
+        /// Whether the listener counts as underground, after the dwell filter has committed to it.
+        /// </summary>
+        /// <remarks>
+        /// The <b>committed</b> answer, not the raw skylight test, and sampled once here so every consumer
+        /// agrees. Two consumers running their own dwell timers would disagree at exactly the moments a dwell
+        /// exists for — a cave mouth — and the listener would hear the bed and the music decide they were in
+        /// different places.
+        /// </remarks>
+        public readonly bool Underground;
+
+        /// <summary>Whether the sun is below the horizon.</summary>
+        /// <remarks>
+        /// Fills the <c>TimeOfDay</c> seat this struct reserved for RF-1, in the only form the audio layer
+        /// has needed so far. Read from <c>WorldTimeManager.SunElevation</c>, which is pure day-fraction
+        /// arithmetic over two constants — unlike <c>GlobalLightLevel</c> it cannot dereference a settings
+        /// asset that may not be loaded yet.
+        /// </remarks>
+        public readonly bool Night;
+
+        /// <summary>
+        /// Whether it is dark where the listener stands: underground at any hour, or above ground at night.
+        /// </summary>
+        /// <remarks>
+        /// The union the music layer selects on. Caves and night are the same context — a track written for
+        /// one suits the other — so they are asked as one question rather than composed at each call site.
+        /// The cave <i>bed</i> deliberately does not use this: it answers to <see cref="Underground"/> alone,
+        /// because a cave ambience on the open surface at midnight would simply be wrong.
+        /// </remarks>
+        public bool IsDark => Underground || Night;
+
         // Future inputs — reserved seats, deliberately not implemented (§6.3):
         //   public readonly float TimeOfDay;   // RF-1
         //   public readonly byte Weather;      // RF-7
@@ -108,8 +139,11 @@ namespace Audio
         /// <param name="directions">Each contributor's bearing, index-aligned with <paramref name="weights"/>.</param>
         public AudioContext(int biomeIndex, BiomeBase biome, bool hasBiome, byte skylightAtHead, bool submerged,
             BiomeWeights weights = default, bool hasWeights = false, int depthBelowSurface = 0,
-            int listenerVoxelY = 0, BiomeDirections directions = default)
+            int listenerVoxelY = 0, BiomeDirections directions = default, bool underground = false,
+            bool night = false)
         {
+            Underground = underground;
+            Night = night;
             Directions = directions;
             DepthBelowSurface = depthBelowSurface;
             ListenerVoxelY = listenerVoxelY;

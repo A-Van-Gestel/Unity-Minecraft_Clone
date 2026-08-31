@@ -14,16 +14,16 @@ namespace Audio
     /// <c>NextGapSeconds</c>) that were always general.
     /// </para>
     /// <para>
-    /// <b>A biome's tracks add to the global pool, they do not replace it.</b> The previous rule — a biome
-    /// with any pool of its own shadowed the global one entirely — meant authoring a single regional track
-    /// silenced every other piece of music for as long as the player stood there.
+    /// <b>A biome's tracks add to the global pool, they do not replace it.</b> Shadowing the global pool
+    /// instead would let a single authored regional track silence every other piece of music for as long as
+    /// the player stood there.
     /// </para>
     /// <para>
     /// <b>The pick hash is not the gap hash.</b> <see cref="PickHash"/> re-mixes the pick counter into a
-    /// separate value, because <c>NextGapSeconds</c> consumes bits 8–23 of the hash it is given: handing one
-    /// hash to both made which track played a near-deterministic function of the silence that preceded it,
-    /// and no slice of the remaining bits is wide enough for a roulette. Splitting the <i>hash</i> is the fix;
-    /// splitting the <i>bit ranges</i> is not.
+    /// separate value, because <c>NextGapSeconds</c> consumes bits 8–23 of the hash it is given: one hash
+    /// driving both makes which track plays a near-deterministic function of the silence before it, and no
+    /// slice of the remaining bits is wide enough for a roulette. Independence has to come from a separate
+    /// <i>hash</i>, not from separate bit ranges.
     /// </para>
     /// </remarks>
     public static class MusicResolution
@@ -48,6 +48,8 @@ namespace Audio
         /// <param name="globalTracks">The database's global pool. May be null or empty.</param>
         /// <param name="biomeTracks">The listener's biome pool. May be null or empty.</param>
         /// <param name="biomeShare">How often a pick prefers the biome pool when it offers anything, [0, 1].</param>
+        /// <param name="dark">Whether it is dark where the listener stands (underground, or night above ground). See <c>AudioContext.IsDark</c>.</param>
+        /// <param name="daylightWeightWhenDark">What a Surface track's weight is multiplied by dark.</param>
         /// <param name="lastTrack">The clip that played last, avoided when anything else is available.</param>
         /// <param name="hash">A per-pick hash from <see cref="PickHash"/>, NOT the gap hash.</param>
         /// <param name="track">Receives the chosen track.</param>
@@ -68,12 +70,15 @@ namespace Audio
         /// </para>
         /// </remarks>
         public static bool TryPickTrack(MusicTrack[] globalTracks, MusicTrack[] biomeTracks, float biomeShare,
-            AudioClip lastTrack, uint hash, out MusicTrack track)
+            AudioClip lastTrack, uint hash, out MusicTrack track, bool dark = false,
+            float daylightWeightWhenDark = 1f)
         {
             track = default;
 
-            bool hasGlobal = HasPlayable(globalTracks);
-            bool hasBiome = HasPlayable(biomeTracks);
+            // Eligibility is environment-aware, so a pool holding only Underground tracks counts as EMPTY on
+            // the surface — otherwise the pool roll would keep choosing a pool that cannot answer.
+            bool hasGlobal = HasEligible(globalTracks, dark, daylightWeightWhenDark);
+            bool hasBiome = HasEligible(biomeTracks, dark, daylightWeightWhenDark);
             if (!hasGlobal && !hasBiome) return false;
 
             // The high 8 bits, over a HALF-OPEN range: dividing by 0xFF would make poolRoll reach exactly 1,
@@ -89,9 +94,9 @@ namespace Audio
             // preferred pool fall back to its own last track first would make a single-track biome pool
             // play that track forever, because it always has an answer and the global pool is never
             // reached — the repeat allowance has to be the last resort across both, not within one.
-            return TryPickFrom(chosen, lastTrack, hash, out track, false) ||
-                   TryPickFrom(other, lastTrack, hash, out track, false) ||
-                   TryPickFrom(chosen, lastTrack, hash, out track);
+            return TryPickFrom(chosen, lastTrack, hash, out track, false, dark, daylightWeightWhenDark) ||
+                   TryPickFrom(other, lastTrack, hash, out track, false, dark, daylightWeightWhenDark) ||
+                   TryPickFrom(chosen, lastTrack, hash, out track, true, dark, daylightWeightWhenDark);
         }
 
         /// <summary>
@@ -105,6 +110,8 @@ namespace Audio
         /// Whether the last track may be returned when it is the only playable one left. False lets a caller
         /// holding another pool ask this one for a non-repeat first.
         /// </param>
+        /// <param name="dark">Whether it is dark where the listener stands (underground, or night above ground).</param>
+        /// <param name="daylightWeightWhenDark">What a Surface track's weight is multiplied by dark.</param>
         /// <returns>False when the pool offers nothing playable under those terms.</returns>
         /// <remarks>
         /// A <b>weighted roulette over the eligible set</b>, mirroring <c>AmbienceResolution.SelectTrackIndex</c>:
@@ -114,7 +121,8 @@ namespace Audio
         /// instead of occasionally repeating.
         /// </remarks>
         public static bool TryPickFrom(MusicTrack[] tracks, AudioClip lastTrack, uint hash,
-            out MusicTrack track, bool allowRepeat = true)
+            out MusicTrack track, bool allowRepeat = true, bool dark = false,
+            float daylightWeightWhenDark = 1f)
         {
             track = default;
             if (tracks == null || tracks.Length == 0) return false;
@@ -125,11 +133,11 @@ namespace Audio
 
             for (int i = 0; i < tracks.Length; i++)
             {
-                if (!IsEligible(tracks[i], lastTrack)) continue;
+                if (!IsEligible(tracks[i], lastTrack, dark, daylightWeightWhenDark)) continue;
 
                 eligible++;
                 lastEligible = i;
-                total += tracks[i].EffectiveWeight;
+                total += WeightHere(tracks[i], dark, daylightWeightWhenDark);
             }
 
             // Only the previous track is left: replaying it beats going silent, which is what a pool of one
@@ -138,9 +146,12 @@ namespace Audio
             {
                 if (!allowRepeat) return false;
 
+                // Environment-aware too: replaying the last track beats silence, but not when that track is
+                // barred from where the listener is standing.
                 foreach (MusicTrack musicTrack in tracks)
                 {
                     if (!musicTrack.IsPlayable) continue;
+                    if (musicTrack.EnvironmentWeight(dark, daylightWeightWhenDark) <= 0f) continue;
 
                     track = musicTrack;
                     return true;
@@ -161,15 +172,15 @@ namespace Audio
             if (total <= 0f)
             {
                 int uniform = Mathf.Min((int)(roll * eligible), eligible - 1);
-                return TryNthEligible(tracks, lastTrack, uniform, out track);
+                return TryNthEligible(tracks, lastTrack, uniform, out track, dark, daylightWeightWhenDark);
             }
 
             float cursor = roll * total;
             foreach (MusicTrack musicTrack in tracks)
             {
-                if (!IsEligible(musicTrack, lastTrack)) continue;
+                if (!IsEligible(musicTrack, lastTrack, dark, daylightWeightWhenDark)) continue;
 
-                cursor -= musicTrack.EffectiveWeight;
+                cursor -= WeightHere(musicTrack, dark, daylightWeightWhenDark);
                 if (cursor > 0f) continue;
 
                 track = musicTrack;
@@ -200,8 +211,36 @@ namespace Audio
         /// <param name="track">The candidate.</param>
         /// <param name="lastTrack">The clip that played last.</param>
         /// <returns>True when it has a clip and is not the immediately previous one.</returns>
-        private static bool IsEligible(MusicTrack track, AudioClip lastTrack) =>
-            track.IsPlayable && track.clip != lastTrack;
+        private static bool IsEligible(MusicTrack track, AudioClip lastTrack, bool dark,
+            float daylightWeightWhenDark) =>
+            track.IsPlayable && track.clip != lastTrack &&
+            track.EnvironmentWeight(dark, daylightWeightWhenDark) > 0f;
+
+        /// <summary>The weight a track carries here: its authored weight scaled by the environment.</summary>
+        /// <param name="track">The candidate.</param>
+        /// <param name="dark">Whether it is dark where the listener stands (underground, or night above ground).</param>
+        /// <param name="daylightWeightWhenDark">What a Surface track's weight is multiplied by dark.</param>
+        /// <returns>The scaled weight.</returns>
+        private static float WeightHere(MusicTrack track, bool dark, float daylightWeightWhenDark) =>
+            track.EffectiveWeight * track.EnvironmentWeight(dark, daylightWeightWhenDark);
+
+        /// <summary>Whether a pool offers anything that may play where the listener is standing.</summary>
+        /// <param name="tracks">The pool. May be null.</param>
+        /// <param name="dark">Whether it is dark where the listener stands (underground, or night above ground).</param>
+        /// <param name="daylightWeightWhenDark">What a Surface track's weight is multiplied by dark.</param>
+        /// <returns>True when at least one entry is eligible here.</returns>
+        public static bool HasEligible(MusicTrack[] tracks, bool dark, float daylightWeightWhenDark)
+        {
+            if (tracks == null) return false;
+
+            foreach (MusicTrack musicTrack in tracks)
+            {
+                if (musicTrack.IsPlayable &&
+                    musicTrack.EnvironmentWeight(dark, daylightWeightWhenDark) > 0f) return true;
+            }
+
+            return false;
+        }
 
         /// <summary>Whether a pool offers anything playable at all.</summary>
         /// <param name="tracks">The pool. May be null.</param>
@@ -225,14 +264,14 @@ namespace Audio
         /// <param name="track">Receives the track.</param>
         /// <returns>False when there are fewer eligible tracks than that.</returns>
         private static bool TryNthEligible(MusicTrack[] tracks, AudioClip lastTrack, int ordinal,
-            out MusicTrack track)
+            out MusicTrack track, bool dark, float daylightWeightWhenDark)
         {
             track = default;
 
             int seen = 0;
             foreach (MusicTrack musicTrack in tracks)
             {
-                if (!IsEligible(musicTrack, lastTrack)) continue;
+                if (!IsEligible(musicTrack, lastTrack, dark, daylightWeightWhenDark)) continue;
 
                 if (seen == ordinal)
                 {
