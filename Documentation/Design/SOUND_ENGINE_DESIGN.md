@@ -1,6 +1,6 @@
 # Sound Engine Design
 
-**Version:** 1.14  
+**Version:** 1.15  
 **Date:** 2026-08-30  
 **Status:** **Partially implemented — S0–S3 and S5–S8 shipped; all confirmed in game except S8, which is
 awaiting its listening pass.** The `SoundMaterial`
@@ -1183,6 +1183,40 @@ time, because a single editor rebound only on click points at the other tab's bi
 The WorldGen Biome Editor's Audio sub-tab still shows a biome's beds *and* its music together: it answers
 "what should this biome sound like", where the split does not apply.
 
+### Cave music (added 2026-08-31)
+
+`MusicTrack.environment` (`Any` / `Daylight` / `Dark`) gates the **light** an entry belongs in. `Dark` never
+plays in daylight; `Daylight` still plays in the dark but its weight is scaled by
+`AmbienceDatabase._daylightWeightWhenDark` (0.25). Scaled rather than excluded because the dark pool is small
+— barring every daylight track would loop the two dark pieces. Zero is the exception and means what it says:
+no daylight music in the dark. `Any` is the zero enum value, so nothing needed migrating.
+
+**Caves and night are one context.** A track written for the eerie quiet of a cave suits the surface after
+dark for the same reason, so the flag names the light rather than the place and `AudioContext.IsDark` is the
+union — `Underground || Night`. The enum's byte values never moved when night joined the definition, so no
+asset migrated. The cave **bed** deliberately does not use the union: it answers to `Underground` alone,
+because cave ambience under an open midnight sky would simply be wrong.
+
+`Night` is read from `WorldTimeManager.SunElevation < 0` — pure day-fraction arithmetic over two constants,
+where `GlobalLightLevel` would dereference a settings asset that may not be loaded yet. It fills the
+`TimeOfDay` seat `AudioContext` reserved for RF-1. No dwell filter: unlike a cave mouth, sunset does not
+flicker, and the music layer only reads it between tracks.
+
+**The environment belongs to the entry, not the clip.** The same file can be an `Underground` entry in the
+global pool and an ordinary one in a biome's, each with its own weight — which is why caves did **not** need
+to become a biome to get cave music.
+
+**The underground answer moved to `AudioContext`.** `AmbienceDirector` used to run the skylight test and its
+3-second dwell privately, which was fine while the cave bed was the only consumer. §5.3 already argued the
+general case: `SoundManager` publishes the context once because "the beds, the scheduler and the underwater
+filter have to agree about where the listener is, and independent timers disagree at exactly the moments that
+matter — a cave mouth". A second dwell timer in the music scheduler would have been exactly that bug, so the
+skylight threshold and the dwell moved to `SoundManager` with the decision they drive, and the director now
+reads `Context.Underground`. The dwell advances at the **sample** rate rather than per frame — it was
+previously re-evaluating the same 4 Hz skylight reading every frame.
+
+Authored: `Strange Worlds` and `Whispering Woods` are `Dark`; the other 15 are `Daylight`.
+
 ### Not done
 
 Altitude bands or time-of-day gating for music, and a biome "exclusive" flag that would let a biome
@@ -1190,7 +1224,70 @@ Altitude bands or time-of-day gating for music, and a biome "exclusive" flag tha
 
 ---
 
+## 14. S9 — Mood-driven dynamic pools (filed, not started)
+
+**Status: filed 2026-08-31.** Raised while deciding how night should affect music selection, and filed
+rather than built because it *subsumes that decision* — settling the night question under the current model
+first would be work this replaces.
+
+### The idea
+
+Tag each track with the **mood it gives** rather than the places it belongs. Each *context* the listener is
+in — biome, cave, time of day, later weather — declares which moods it wants and how strongly. The candidate
+pool is assembled per pick from the moods the current context asks for.
+
+### Why it is the right end state
+
+The author reliably knows a song's **mood**; they do not reliably know every situation that mood fits. The
+current `MusicTrack.environment` asks the second question, so every new context (weather, depth, combat,
+boss) means revisiting every track. Mood tagging asks the first, and a new context is then a single
+declaration of what it wants — the content stops needing edits as the game grows.
+
+It also subsumes what exists: `Any` / `Surface` / `Underground` is a two-mood system with the
+context-to-mood mapping hardcoded.
+
+### Why it is deferred
+
+Two contexts (cave, night) that both want the *same* mood, over 17 tracks. A mood system means a mood set, a
+context-to-mood weight table as a new authoring surface, and a resolver rewrite — a matrix authored for a
+2 x 2 problem. **Revisit when either is true:** a third context that wants something *different* from the
+first two (weather and combat are the likely triggers), or a pool past roughly 40 tracks where hand-placing
+each one stops being practical.
+
+### The motivating case, settled 2026-08-31
+
+Dark tracks should be favoured at **night** as well as in caves. Settled under the current model rather than
+waiting for S9, because the honest form costs almost nothing: **caves and night are the same context —
+darkness** — so the enum names the light (`Daylight` / `Dark`) and `AudioContext.IsDark` is the union. See
+§13. The observation survives into the mood model: "dark" is one context, not two, whatever the tagging
+scheme becomes.
+
+### Traps found while scoping
+
+1. **An unclassified track must not fall out of every pool.** Whatever mood enum arrives, its zero value has
+   to mean "plays anywhere" and not "matches nothing" — the same defect `AmbienceTrack.volume` had, where a
+   new serialized field deserialized to a value that silenced existing content. Every track authored before
+   the mood field exists will read zero.
+2. **`environment` is replaced, not extended.** Do not invest further in it meanwhile; a `Night` flag or a
+   multiselect added now is churn this removes. The one exception is the darkness unification above, which
+   the mood model keeps.
+3. **The pool roll and the mood weights overlap.** `_biomeMusicShare` already decides biome-vs-global before
+   any per-track weight applies. If a biome also expresses itself as mood preferences, the two mechanisms
+   answer overlapping questions and one has to give — decide which *before* authoring a matrix against both.
+4. **It has to stay explainable.** `/music` prints each weight's resolved share, and that readout is what
+   made the current weighting tunable at all. With moods, "why is this track eligible" becomes a composed
+   answer, and the command has to show the composition or tuning turns into guesswork.
+
+---
+
 ## Document History
+
+* **v1.15** - Cave music + S9 filed (2026-08-31). `MusicTrack.environment` gates where an entry may play,
+  and the dwell-filtered underground answer moved out of `AmbienceDirector` into `AudioContext` so the beds
+  and the scheduler cannot disagree at a cave mouth — §5.3 had already argued that rule for the sampled
+  context generally, and a second dwell timer would have been exactly the bug it warns about. Music's night
+  behaviour was deliberately **not** settled: mood-driven pools (§14) subsume the question, so answering it
+  under the current model would have been work that gets replaced.
 
 * **v1.14** - S8 review pass (2026-08-31). Three defects, all invisible until content existed. The pick
   counters started at **zero**, and every hash downstream is pure, so each launch replayed the same tracks
