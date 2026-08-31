@@ -110,10 +110,15 @@ namespace Commands
             // wrong track" is not reproducible from the world seed alone.
             // Which light the next pick will resolve against, and why: "no track ever plays in caves" has
             // separate causes in the context and in the authoring, and the readout has to separate them.
-            bool dark = manager.HasContext && manager.Context.IsDark;
+            // Reported as unsampled rather than as daylight: before the first sample the context is all
+            // default, and "daylight, not underground" is indistinguishable from a real reading — the one
+            // answer this command must never give, since separating those causes is why it exists.
+            string light = manager.HasContext
+                ? $"{(manager.Context.IsDark ? "dark" : "daylight")} " +
+                  $"(underground {manager.Context.Underground}, night {manager.Context.Night})"
+                : "not sampled yet";
             lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
-                $"Light: {(dark ? "dark" : "daylight")} " +
-                $"(underground {manager.Context.Underground}, night {manager.Context.Night}) | " +
+                $"Light: {light} | " +
                 $"daylight weight when dark {database.DaylightWeightWhenDark:0.00}"));
 
             lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
