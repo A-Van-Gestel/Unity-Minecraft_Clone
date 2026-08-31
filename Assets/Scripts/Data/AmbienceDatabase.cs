@@ -19,7 +19,7 @@ namespace Data
         [SerializeField]
         private AudioClip _caveLoop;
 
-        [Tooltip("Content trim for the cave bed alone. 0 means unset and plays at full level.")]
+        [Tooltip("Content trim for the cave bed alone. 0 is silent.")]
         [Range(0f, 1f)]
         [SerializeField]
         private float _caveLoopVolume;
@@ -28,7 +28,7 @@ namespace Data
         [SerializeField]
         private AudioClip _defaultLoop;
 
-        [Tooltip("Content trim for the fallback bed alone. 0 means unset and plays at full level.")]
+        [Tooltip("Content trim for the fallback bed alone. 0 is silent.")]
         [Range(0f, 1f)]
         [SerializeField]
         private float _defaultLoopVolume;
@@ -70,24 +70,23 @@ namespace Data
         public AudioClip DefaultLoop => _defaultLoop;
 
         /// <summary>
-        /// The cave bed's own content trim, with an unauthored value read as full level.
+        /// The cave bed's own content trim. Zero is silent.
         /// </summary>
         /// <remarks>
         /// Per-clip rather than folded into <see cref="BedVolume"/>: that one trim describes the whole pack,
-        /// while this one normalizes a single loop against the rest of the role. Zero reads as unset for the
-        /// same reason <see cref="AmbienceTrack.EffectiveVolume"/> does.
+        /// while this one normalizes a single loop against the rest of the role.
         /// </remarks>
-        public float CaveLoopVolume => _caveLoopVolume <= 0f ? 1f : _caveLoopVolume;
+        public float CaveLoopVolume => _caveLoopVolume;
 
         /// <summary>
-        /// The fallback bed's own content trim, with an unauthored value read as full level.
+        /// The fallback bed's own content trim. Zero is silent.
         /// </summary>
         /// <remarks>
         /// The fallback loop is routinely also some biome's authored track, and a trim written for the track
         /// would otherwise not reach the world that falls back to the same clip — the same clip would change
         /// level depending on which path selected it.
         /// </remarks>
-        public float DefaultLoopVolume => _defaultLoopVolume <= 0f ? 1f : _defaultLoopVolume;
+        public float DefaultLoopVolume => _defaultLoopVolume;
 
         /// <summary>The tracks eligible in every biome. May be null or empty.</summary>
         public MusicTrack[] GlobalMusicTracks => _globalMusicTracks;
@@ -109,9 +108,9 @@ namespace Data
         /// The same content-versus-preference split <see cref="BedVolume"/> documents: how hot a pack was
         /// mastered is a fact about the clips, and encoding it in the slider default would leave 100%
         /// meaning "too loud". Unlike the beds this starts at 1 — the music pack has not been level-matched
-        /// against the rest of the mix yet.
+        /// against the rest of the mix yet. Zero is silent, exactly as <see cref="BedVolume"/> is.
         /// </remarks>
-        public float MusicVolume => _musicVolume <= 0f ? 1f : _musicVolume;
+        public float MusicVolume => _musicVolume;
 
         /// <summary>
         /// What a <c>Daylight</c> track's weight is multiplied by while it is dark.

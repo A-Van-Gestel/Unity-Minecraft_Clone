@@ -758,10 +758,9 @@ namespace Editor.SoundEditor
             if (!TryFindMeasurement(path, out float lufs)) return false;
             if (!TryComputeTrim(lufs, target, out trim)) return false;
 
-            // Against the effective value: an unauthored 0 plays at full level, so a trim of 1 for it is not
-            // a change and must not open an undo step.
-            float effective = current <= 0f ? 1f : current;
-            return !Mathf.Approximately(effective, trim);
+            // Against the raw value: 0 is a real trim (silent), so proposing 1 for it IS a change and must
+            // stay writable — reading 0 as full would make a silenced clip unfixable from this tab.
+            return !Mathf.Approximately(current, trim);
         }
 
         /// <summary>
@@ -872,10 +871,9 @@ namespace Editor.SoundEditor
             if (!TryFindMeasurement(path, out float lufs)) return false;
             if (!TryComputeTrim(lufs, target, out float trim)) return false;
 
-            // Against the effective value, not the raw one: an unauthored 0 plays at full level, so a trim
-            // of 1 for it is not a change and must not open an undo step.
-            float effective = property.floatValue <= 0f ? 1f : property.floatValue;
-            if (Mathf.Approximately(effective, trim)) return false;
+            // Against the raw value: 0 is a real trim (silent), so proposing 1 for it IS a change and must
+            // be written — reading 0 as full would make a silenced clip unfixable from this tab.
+            if (Mathf.Approximately(property.floatValue, trim)) return false;
 
             property.floatValue = trim;
             return true;

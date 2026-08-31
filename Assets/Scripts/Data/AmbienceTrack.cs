@@ -29,21 +29,23 @@ namespace Data
         public float playChance;
 
         [Tooltip("Content trim for this track, multiplied into the bed gain. Normalizes one loop against " +
-                 "the others without touching the Ambient slider. Left at 0 it means unset and plays at " +
-                 "full level.")]
+                 "the others without touching the Ambient slider. 0 is silent.")]
         [Range(0, 1)]
         public float volume;
 
         /// <summary>
-        /// The gain this track contributes to the bed, with an unauthored value read as full level.
+        /// The gain this track contributes to the bed. Zero is silent.
         /// </summary>
         /// <remarks>
-        /// Zero means <i>unset</i>, not silent — the same defensive shape <c>EmitterSoundEntry.audibleRadius</c>
-        /// uses, and for the same reason: this field arrived after the tracks did, so a track deserialized
-        /// from an asset written before it holds 0 and must still be heard. Silencing a track is what
-        /// removing it, or clearing its clip, is for.
+        /// A single read point rather than <see cref="volume"/> at each call site, so the trim has one
+        /// meaning across the runtime, the Loudness tab and the suite.
+        /// <para>
+        /// This is a <c>struct</c>, so the field cannot carry a default and an unset track is <b>silent</b>,
+        /// not full. Authoring is covered — both list drawers write 1 on insert — and the shipped assets are
+        /// covered by the content census, which fails a track trimmed below audibility.
+        /// </para>
         /// </remarks>
-        public float EffectiveVolume => volume <= 0f ? 1f : volume;
+        public float EffectiveVolume => volume;
 
         /// <summary>
         /// Whether this track may be heard at an altitude.

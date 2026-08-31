@@ -318,9 +318,10 @@ namespace Editor.Validation.SoundEngine
                             $"'{biome.biomeName}' track {i} spans [{low}, {high}], entirely outside the " +
                             $"world's 0–{VoxelData.ChunkHeight} range.");
 
-                    // The S7 gain, on the real assets. An unauthored 0 is read as full level and is fine;
-                    // a small positive value is not, and is exactly what a mis-migration or a stray Apply
-                    // would leave behind — a bed that is technically playing and inaudible in the room.
+                    // The S7 gain, on the real assets. Zero is silent since the unset-sentinel was removed,
+                    // so this is now the net that catches an unauthored trim as well as the small positive
+                    // value a mis-migration or a stray Apply leaves behind — a bed that is technically
+                    // playing and inaudible in the room.
                     float volume = track.EffectiveVolume;
                     if (volume < MIN_SHIPPED_BED_VOLUME || volume > 1f)
                         return FailSound(scenario,

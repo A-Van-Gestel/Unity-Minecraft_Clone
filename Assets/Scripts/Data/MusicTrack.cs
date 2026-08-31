@@ -27,8 +27,8 @@ namespace Data
         public float weight;
 
         [Tooltip("Content trim for this track, multiplied into the music gain. Normalizes one track against " +
-                 "the others without moving the Music slider. 0 means unset and plays at full level — the " +
-                 "Sound Editor's Loudness tab writes this field.")]
+                 "the others without moving the Music slider. 0 is silent — the Sound Editor's Loudness " +
+                 "tab writes this field.")]
         [Range(0f, 1f)]
         public float volume;
 
@@ -69,12 +69,12 @@ namespace Data
         public float EffectiveWeight => Mathf.Max(0f, weight);
 
         /// <summary>
-        /// The gain this track plays at, with an unauthored value read as full level.
+        /// The gain this track plays at. Zero is silent.
         /// </summary>
         /// <remarks>
-        /// Zero means <i>unset</i>, not silent — the same defensive shape <see cref="AmbienceTrack.EffectiveVolume"/>
-        /// uses. Silencing a track is what removing it, or clearing its clip, is for.
+        /// The same single-read-point rule <see cref="AmbienceTrack.EffectiveVolume"/> documents, including
+        /// why a <c>struct</c> field cannot default to full.
         /// </remarks>
-        public float EffectiveVolume => volume <= 0f ? 1f : volume;
+        public float EffectiveVolume => volume;
     }
 }

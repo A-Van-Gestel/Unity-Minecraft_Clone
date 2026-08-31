@@ -708,15 +708,19 @@ namespace Editor.Validation.SoundEngine
         /// <summary>Builds one authored music track with an environment.</summary>
         /// <param name="clip">The track's clip.</param>
         /// <param name="environment">Where it may play.</param>
-        /// <returns>The track, at full weight and unset volume.</returns>
+        /// <returns>The track, at full weight and full trim.</returns>
         private static MusicTrack Environment(AudioClip clip, MusicEnvironment environment) =>
-            new MusicTrack { clip = clip, weight = 1f, environment = environment };
+            new MusicTrack { clip = clip, weight = 1f, environment = environment, volume = 1f };
 
         /// <summary>Builds one authored music track.</summary>
         /// <param name="clip">The track's clip.</param>
         /// <param name="weight">Its share relative to the rest of its pool.</param>
-        /// <returns>The track, at unset volume.</returns>
+        /// <returns>The track, at full trim.</returns>
+        /// <remarks>
+        /// The trim is stated because <c>MusicTrack</c> is a struct: 0 is silent, and an omitted volume
+        /// would give every selection scenario an inaudible pool.
+        /// </remarks>
         private static MusicTrack Music(AudioClip clip, float weight) =>
-            new MusicTrack { clip = clip, weight = weight };
+            new MusicTrack { clip = clip, weight = weight, volume = 1f };
     }
 }

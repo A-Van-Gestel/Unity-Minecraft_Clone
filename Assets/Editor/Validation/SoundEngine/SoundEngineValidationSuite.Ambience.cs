@@ -4,6 +4,7 @@ using Data;
 using Data.WorldTypes;
 using Jobs.Helpers;
 using Editor.Validation.Framework;
+using UnityEditor;
 using UnityEngine;
 
 namespace Editor.Validation.SoundEngine
@@ -75,9 +76,98 @@ namespace Editor.Validation.SoundEngine
                 RunTrackDistribution));
             scenarios.Add(new Scenario("Bed Source Volume Folds In Every Gain That Governs A Bed",
                 RunBedSourceVolume));
-            scenarios.Add(new Scenario("An Unauthored Track Volume Plays At Full Level", RunTrackVolumeDefault));
+            scenarios.Add(new Scenario("A Track Trim Passes Through, And Zero Is Silent", RunTrackVolumeDefault));
             scenarios.Add(new Scenario("Bed Mix Carries Each Track's Volume And Merges Them By Weight",
                 RunBedMixVolumes));
+            scenarios.Add(new Scenario("Every Database Trim Passes Zero Through As Silence",
+                RunDatabaseTrimsArePassThrough));
+        }
+
+        /// <summary>
+        /// The three pack-wide trims on <see cref="AmbienceDatabase"/> report what is authored, including a
+        /// zero, rather than reading zero as "unset" and playing at full level.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This is the only gate that can fail. The shipped asset authors all three above zero, so removing
+        /// the sentinels changed no observable behaviour today — the defect they caused was a slider whose
+        /// 0 end played at full, and nothing on the real asset exercises it.
+        /// </para>
+        /// <para>
+        /// Driven through <see cref="SerializedObject"/> because the backing fields are private
+        /// <c>[SerializeField]</c>s: reaching them any other way would test a copy rather than the property
+        /// the runtime actually reads.
+        /// </para>
+        /// </remarks>
+        private static bool RunDatabaseTrimsArePassThrough()
+        {
+            const string scenario = "Every Database Trim Passes Zero Through As Silence";
+
+            AmbienceDatabase database = ScriptableObject.CreateInstance<AmbienceDatabase>();
+            try
+            {
+                if (!TrySetTrims(database, 0f, scenario, out string failure)) return FailSound(scenario, failure);
+
+                if (!ExactValue.Equal(database.CaveLoopVolume, 0f))
+                    return FailSound(scenario,
+                        $"a zero cave trim read as {database.CaveLoopVolume}; an unset-sentinel is back.");
+                if (!ExactValue.Equal(database.DefaultLoopVolume, 0f))
+                    return FailSound(scenario,
+                        $"a zero fallback trim read as {database.DefaultLoopVolume}; an unset-sentinel is back.");
+                if (!ExactValue.Equal(database.MusicVolume, 0f))
+                    return FailSound(scenario,
+                        $"a zero music trim read as {database.MusicVolume}; an unset-sentinel is back.");
+                if (!ExactValue.Equal(database.BedVolume, 0f))
+                    return FailSound(scenario,
+                        $"a zero bed trim read as {database.BedVolume}; it never had a sentinel to regain.");
+
+                // An authored value must still survive untouched — a property that returned a constant would
+                // pass every assertion above.
+                if (!TrySetTrims(database, FIXTURE_TRACK_VOLUME, scenario, out failure))
+                    return FailSound(scenario, failure);
+
+                if (!ExactValue.Equal(database.CaveLoopVolume, FIXTURE_TRACK_VOLUME) ||
+                    !ExactValue.Equal(database.DefaultLoopVolume, FIXTURE_TRACK_VOLUME) ||
+                    !ExactValue.Equal(database.MusicVolume, FIXTURE_TRACK_VOLUME) ||
+                    !ExactValue.Equal(database.BedVolume, FIXTURE_TRACK_VOLUME))
+                    return FailSound(scenario,
+                        $"an authored {FIXTURE_TRACK_VOLUME} did not survive the round trip.");
+
+                return true;
+            }
+            finally
+            {
+                Object.DestroyImmediate(database);
+            }
+        }
+
+        /// <summary>Writes every pack-wide trim on a database through its serialized backing fields.</summary>
+        /// <param name="database">The database to write into.</param>
+        /// <param name="value">The value to give all four trims.</param>
+        /// <param name="scenario">The calling scenario, for the failure message.</param>
+        /// <param name="failure">Receives why the write could not be made.</param>
+        /// <returns>False when a field is missing, which means it was renamed out from under this scenario.</returns>
+        private static bool TrySetTrims(AmbienceDatabase database, float value, string scenario,
+            out string failure)
+        {
+            failure = null;
+            SerializedObject serialized = new SerializedObject(database);
+            string[] fields = { "_caveLoopVolume", "_defaultLoopVolume", "_musicVolume", "_bedVolume" };
+
+            foreach (string field in fields)
+            {
+                SerializedProperty property = serialized.FindProperty(field);
+                if (property == null)
+                {
+                    failure = $"AmbienceDatabase has no field '{field}' — renamed without updating {scenario}.";
+                    return false;
+                }
+
+                property.floatValue = value;
+            }
+
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            return true;
         }
 
         /// <summary>
@@ -1005,8 +1095,18 @@ namespace Editor.Validation.SoundEngine
         /// <param name="high">Top of its altitude band, inclusive.</param>
         /// <param name="chance">Its weight relative to the biome's other eligible tracks.</param>
         /// <returns>The track.</returns>
+        /// <remarks>
+        /// The trim is stated, not left to the struct's zero: 0 is silent, so an omitted volume would hand
+        /// every scenario that only cares about selection an inaudible track.
+        /// </remarks>
         private static AmbienceTrack Track(AudioClip clip, float low, float high, float chance) =>
-            new AmbienceTrack { clip = clip, yRange = new Vector2(low, high), playChance = chance };
+            new AmbienceTrack
+            {
+                clip = clip,
+                yRange = new Vector2(low, high),
+                playChance = chance,
+                volume = 1f,
+            };
 
         /// <summary>Builds one authored ambience track carrying a content trim.</summary>
         /// <param name="clip">The loop the track plays.</param>
@@ -1324,27 +1424,34 @@ namespace Editor.Validation.SoundEngine
         }
 
         /// <summary>
-        /// The unset rule (S7): a track deserialized from an asset written before the volume field existed
-        /// holds 0, and must be heard at full level rather than not at all.
+        /// A track trim means what it says: zero is silent, and every value in between is passed through
+        /// untouched to the bed gain.
         /// </summary>
         /// <remarks>
-        /// The trap this whole feature had to step around. Ten authored tracks across six shipped assets
-        /// would have gone silent on the frame the field landed, and silence is the one failure that reports
-        /// nothing — the beds simply stop, and nothing in the console says why.
+        /// This baseline used to assert the opposite — that a zero trim played at <i>full</i> level, an
+        /// unset-sentinel guarding assets written before the volume field existed. No such asset survives
+        /// (every authored track is at 1) and both list drawers write 1 on insert, so the sentinel defended
+        /// nothing while making a deliberately silenced track impossible to express. It is the reversal
+        /// that makes this scenario worth keeping: re-adding the sentinel anywhere turns it red.
         /// </remarks>
         private static bool RunTrackVolumeDefault()
         {
-            const string scenario = "An Unauthored Track Volume Plays At Full Level";
+            const string scenario = "A Track Trim Passes Through, And Zero Is Silent";
 
-            AmbienceTrack unset = Track(MakeClips(1)[0], TRACK_BAND_LOW, TRACK_BAND_HIGH, 1f);
-            if (!ExactValue.Equal(unset.EffectiveVolume, 1f))
+            AmbienceTrack silent = TrackAt(MakeClips(1)[0], 1f, 0f);
+            if (!ExactValue.Equal(silent.EffectiveVolume, 0f))
                 return FailSound(scenario,
-                    $"an unauthored track read as {unset.EffectiveVolume}, not full level.");
+                    $"a zero trim read as {silent.EffectiveVolume}; an unset-sentinel is back.");
 
             AmbienceTrack authored = TrackAt(MakeClips(1)[0], 1f, FIXTURE_TRACK_VOLUME);
             if (!ExactValue.Equal(authored.EffectiveVolume, FIXTURE_TRACK_VOLUME))
                 return FailSound(scenario,
                     $"an authored {FIXTURE_TRACK_VOLUME} read back as {authored.EffectiveVolume}.");
+
+            MusicTrack silentMusic = new MusicTrack { clip = MakeClips(1)[0], weight = 1f, volume = 0f };
+            if (!ExactValue.Equal(silentMusic.EffectiveVolume, 0f))
+                return FailSound(scenario,
+                    $"a zero music trim read as {silentMusic.EffectiveVolume}; an unset-sentinel is back.");
 
             AudioClip loop = MakeClips(1)[0];
             BiomeBase[] biomes = BiomesWithVolumes(new[] { loop }, new[] { FIXTURE_TRACK_VOLUME });

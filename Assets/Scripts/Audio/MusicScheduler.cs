@@ -262,7 +262,7 @@ namespace Audio
         private void QueueTrack(AudioClip track, float volume)
         {
             _pendingTrack = track;
-            _pendingVolume = volume <= 0f ? 1f : volume;
+            _pendingVolume = volume;
             _stopping = false;
         }
 
