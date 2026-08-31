@@ -17,6 +17,75 @@ MonoBehaviour:
   _defaultLoop: {fileID: 8300000, guid: f8da20e74d48620449e7fd49c5dd04af, type: 3}
   _defaultLoopVolume: 1
   _bedVolume: 0.35
-  _globalMusicTracks: []
+  _globalMusicTracks:
+  - clip: {fileID: 8300000, guid: b7df13f241718324d897cc98ca955a97, type: 3}
+    weight: 1
+    volume: 1
+    environment: 1
+  - clip: {fileID: 8300000, guid: 316c36484214075478220c5eaa1d0fce, type: 3}
+    weight: 1
+    volume: 1
+    environment: 1
+  - clip: {fileID: 8300000, guid: 9d39f3a72d654674d8284b3e786b0462, type: 3}
+    weight: 1
+    volume: 1
+    environment: 1
+  - clip: {fileID: 8300000, guid: bb3807501b09d144a9aa693e9803454b, type: 3}
+    weight: 1
+    volume: 1
+    environment: 1
+  - clip: {fileID: 8300000, guid: f7846e3a67a26c54086da29cd50adc9b, type: 3}
+    weight: 1
+    volume: 1
+    environment: 1
+  - clip: {fileID: 8300000, guid: 84efcefd3df53c840906a21c1851b699, type: 3}
+    weight: 1
+    volume: 1
+    environment: 1
+  - clip: {fileID: 8300000, guid: 0fe8d92ce0d215146922151e0a4bc2aa, type: 3}
+    weight: 1
+    volume: 1
+    environment: 1
+  - clip: {fileID: 8300000, guid: 9c0d44c0b9eba314495665727484a7f4, type: 3}
+    weight: 1
+    volume: 1
+    environment: 1
+  - clip: {fileID: 8300000, guid: 97e9edf92f7901643810fd08688d9983, type: 3}
+    weight: 1
+    volume: 1
+    environment: 1
+  - clip: {fileID: 8300000, guid: 1b6d9ed14b7330b449afc1f1ae1781fa, type: 3}
+    weight: 1
+    volume: 1
+    environment: 1
+  - clip: {fileID: 8300000, guid: 6e64f14ec0566ce4ea2e4dedef6d7212, type: 3}
+    weight: 1
+    volume: 1
+    environment: 2
+  - clip: {fileID: 8300000, guid: f6a3dc3140debef4fb6d34ff9a712b95, type: 3}
+    weight: 1
+    volume: 1
+    environment: 1
+  - clip: {fileID: 8300000, guid: a727e6094e20e524d8d828950883e9d9, type: 3}
+    weight: 1
+    volume: 1
+    environment: 1
+  - clip: {fileID: 8300000, guid: 47a0574a73f17f2459aca691313a3b09, type: 3}
+    weight: 1
+    volume: 1
+    environment: 1
+  - clip: {fileID: 8300000, guid: 4c9370f50ce75fc49ace030702c2d36f, type: 3}
+    weight: 1
+    volume: 1
+    environment: 2
+  - clip: {fileID: 8300000, guid: bd8df7ff1fd3ddd47a5eb853b3cf3083, type: 3}
+    weight: 1
+    volume: 1
+    environment: 1
+  - clip: {fileID: 8300000, guid: db59872a55301c741a27bdfb26e72061, type: 3}
+    weight: 1
+    volume: 1
+    environment: 1
   _biomeMusicShare: 0.4
   _musicVolume: 1
+  _daylightWeightWhenDark: 0.25

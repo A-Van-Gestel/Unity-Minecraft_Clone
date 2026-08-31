@@ -398,3 +398,38 @@ MonoBehaviour:
     version: 
     notes: CC0 per the download's own license.txt; crediting is not required. Converted
       to mono OGG Vorbis.
+  - name: Cozy Tunes
+    author: Pizza Doggy
+    category: 6
+    licenseType: 10
+    customLicenseText: Pizza Doggy's Game Assets License (use in any game, commercial
+      or not; editing allowed; no reselling, redistributing or bundling the assets
+      on their own; attribution appreciated but not required)
+    url: https://pizzadoggy.itch.io/cozy-tunes
+    usageDescription: The background music pool.
+    sourceFiles:
+    - Chickens In The Meadow
+    - Cuddle Clouds
+    - Drifting Memories
+    - Evening Harmony
+    - Floating Dream
+    - Forgotten Biomes
+    - Gentle Breeze
+    - Golden Gleam
+    - Polar Lights
+    - Sheep
+    - Strange Worlds
+    - Sunlight Through Leaves
+    - Wanderer's Tale
+    - What Clouds Are Made Of
+    - Whispering Woods
+    - Wildflowers By The River
+    - Wind Over The Trees
+    projectFiles:
+    - Assets/Audio/Music/pizzadoggy_cozy_tunes/
+    version: 1.5.4
+    notes: 'The 17 tracks listed above, of the pack''s 18, imported as shipped OGG
+      Vorbis with no conversion. Stereo and streamed: music plays from a 2D source
+      where the stereo image is the point, and these are the longest clips in the
+      project. Attribution is not required by the licence; the entry exists because
+      the pack is not CC0 and its terms have to be recorded somewhere.'
