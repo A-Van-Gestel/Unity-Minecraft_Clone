@@ -1,8 +1,9 @@
 # Sound Engine Design
 
-**Version:** 1.12  
+**Version:** 1.14  
 **Date:** 2026-08-30  
-**Status:** **Partially implemented — S0, S1 and S2 shipped and confirmed in game.** The `SoundMaterial`
+**Status:** **Partially implemented — S0–S3 and S5–S8 shipped; all confirmed in game except S8, which is
+awaiting its listening pass.** The `SoundMaterial`
 channel, the shared `BlockSoundDatabase`, the BlockEditor dropdown and prefill, the volume settings, the
 pooled one-shot voices and the break / place / footstep triggers all exist; the `AudioMixer` is authored
 with its seven exposed volume parameters; two CC0 packs supply content, so all 13 sounding materials have
@@ -495,7 +496,8 @@ it (10 `S2` baselines); the audible result stays an in-game judgment.
 
 - **Biome ambience beds — a weighted mix, not a selection:** `BiomeBase` carries
   `AmbienceTrack[] ambientTracks` (since S6, §11 — it was a single `AudioClip ambientLoop` when S2 shipped)
-  and `AudioClip[] musicPool`; `AmbienceDirector` owns a roster of four bed sources, each running **its own
+  and `MusicTrack[] musicTracks` (since S8 — it was a bare `AudioClip[] musicPool` before);
+  `AmbienceDirector` owns a roster of four bed sources, each running **its own
   fade**, and drives every one of them from `BiomeWeights` (§6.2) rather than from a single chosen biome.
   Each contributing biome's bed targets its share of the mix, so standing on a shore keeps the ocean audible
   and quiet under the forest instead of switching between them one block apart. Gain is `√fade`, so two beds
@@ -545,11 +547,34 @@ it (10 `S2` baselines); the audible result stays an in-game judgment.
   test is a **threshold** (`SkylightAtHead <= caveMaxSkylight`, authored at 0) rather than a strict
   `== 0`, so an overhang or a one-block shaft does not disqualify a space that plainly reads as a cave,
   and it rides its own dwell filter so a cave mouth cannot flap the layer.
-- **Music scheduler:** deliberately simple — pick a track from the context's pool, play, then wait a
-  randomized silence gap; re-resolve the pool at each pick so biome changes influence the *next* track,
-  never interrupt the current one. The repeat guard compares the **clip**, not the index it sat at: the pool
-  changes with the biome, so an index carried across pools names a different track. It then steps to the
-  neighbouring index rather than re-rolling, since a re-roll can repeat — with a two-track pool, half the time.
+- **Music scheduler:** pick a track, play, then wait a randomized silence gap; re-resolve at each pick so
+  biome changes influence the *next* track, never interrupt the current one. The repeat guard compares the
+  **clip**, not an index: the candidate set changes with the biome, so an index carried across picks names a
+  different track.
+  <br>
+  **Two pools, added rather than swapped (S8).** A biome's `MusicTrack[] musicTracks` are offered
+  *alongside* `AmbienceDatabase._globalMusicTracks`, not instead of them — the original rule let a biome with
+  a single regional track shadow the entire global pool for as long as the player stood there. Selection is
+  **two rolls, not one roulette over the union**: `_biomeMusicShare` decides how often a pick prefers the
+  biome pool when it offers anything, and the per-track `weight` decides which track wins inside whichever
+  pool that roll chose. A union would make a biome track's share depend on the global pool's *size* — one
+  regional track beside eighteen global ones surfaces about one pick in nineteen — so every biome weight
+  would need re-tuning each time the global pool grew. The two rolls read different bit ranges of the same
+  hash, so the pool choice and the track choice do not move together. Independence from the *gap* is a
+  separate problem with a separate fix: `MusicResolution.PickHash` re-mixes the pick counter into its own
+  hash, because `NextGapSeconds` consumes bits 8–23 and no remaining slice is wide enough for a roulette.
+  Driving both decisions off one hash made the track a near-deterministic function of the silence before it,
+  which is now pinned by a baseline rather than merely asserted here.
+  <br>
+  Both schedulers **seed their pick counters randomly per session**. The hashes are pure functions of those
+  counters, so a counter starting at zero made every launch play the same tracks after the same gaps — and
+  the ambience layer hold the same beds for the same stretches.
+  <br>
+  The repeat guard spans **both** pools: a spent single-track biome pool falls through to the global one
+  rather than replaying itself, and a track is only ever repeated when nothing else is playable anywhere.
+  Each track carries its own `volume`, folded into the source by `MusicResolution.SourceVolume` with the
+  database's pack-wide `_musicVolume` and the category gain, so the Loudness tab can normalize music the way
+  it normalizes every other role.
 - **Wind in grass/trees:** v1 = a biome ambient loop whose volume is modulated by listener sky
   exposure (already in the context). An honest per-tree emitter version would be a `LEAVES`
   emitter kind in the §5.2 scan — deferred.
@@ -693,6 +718,8 @@ job and the managed query) and is seed-safe by construction.
 | **S3 — Fluid emitters** 🟡 | **Runtime shipped 2026-08-30.** `ChunkSection.emitterFluidCount` + `FluidBlockLookup` (the scan predicate), `FluidEmitterScanJob` (Burst, world-anchored bin grid), `FluidEmitterScanner` (section selection + snapshot + scheduling), the pure `FluidEmitterResolution` (vertical merge, ranking, slot assignment, gain) and `FluidEmitterDirector` (6 looping 3D sources on the `Fluids` group), content for all four kinds (§9), 20 suite baselines. Detail in §5.2. |   🟡   | S2 (director pattern) |
 | **S5 — Directional beds** ✅ | **Shipped 2026-08-29.** `FastNoiseLite.CellularCellData` carries each cell's offset alongside its distance; `BiomeSelection.SelectWeightsDirectional` turns that into a per-biome bearing in blocks; `AmbienceDirector` places each bed on its bearing at a fixed radius. Detail in §10. |   🟡   | S2 ✅              |
 | **S6 — Track pool** ✅     | **Shipped 2026-08-29.** `BiomeBase.ambientLoop` replaced by `AmbienceTrack[] ambientTracks` (clip + Y band + relative weight); the six Standard biome assets migrated; the pick is a weighted roulette re-rolled when the rest cycle wakes. Detail in §11. |   🟡   | S2 ✅              |
+| **S7 — Per-track gain** ✅ | **Shipped 2026-08-30.** `AmbienceTrack.volume` plus per-clip trims for the database's own two beds, composed by `AmbienceResolution.BedSourceVolume`; the Loudness tab writes the Ambient role. Detail in §12. |   🟢   | S2 ✅; S6 ✅        |
+| **S8 — Music pools** ✅   | **Shipped 2026-08-30.** `MusicTrack` (clip + weight + volume) replacing both bare `AudioClip[]` pools, the `MusicResolution` layer (biome-share pool roll, then a weighted roulette, with a cross-pool repeat guard), a fourth import profile, `/music`, and the first music content (§9). Detail in §13. |   🟡   | S2 ✅; S7 ✅        |
 | **S4 — Later**            | **Two-cell footstep sampling** ✅ (occupied cell + supporting cell, a non-solid occupant layered over the support — see the §5.1 note; shipped 2026-08-29). Still open: ungrounded/swimming steps (deferred — no swimming mechanic exists, `FLUID_BUGS.md` §02), v2 apply-site break/place hook (`VoxelModSource.Live` filter), hit/mining sounds, weather (RF-7), time-of-day (RF-1), `LEAVES` wind emitters.                                                                                                                                                                                                              |   —    | feature-gated     |
 
 S0+S1 alone deliver the largest perceived-quality jump (block feedback + footsteps) and validate
@@ -704,20 +731,22 @@ fading loops. The pattern S3 actually reuses is S2's: a director owning a source
 a pure, suite-pinnable resolution layer, and `AmbienceResolution.AdvanceFade`/`GainFromFade`
 themselves.
 
-**S2's remaining half is music content.** The bed layer is authored (§9); the scheduler is not, and finds an
-empty pool at every pick. Filling `AmbienceDatabase.DefaultMusicPool` and the per-biome `musicPool` fields
-touches no code — but the §9 policy makes music the slower half, since the candidate sources need per-pack
-licence clearance (and, for two of them, an email) where the ambience beds did not.
+**S2's music half closed on 2026-08-30 (S8, §13).** Both pools are authored and the scheduler plays from
+them. It did not, in the end, "touch no code": the per-track weights and gains this design wanted meant
+`MusicTrack` replacing the bare `AudioClip[]`, a `MusicResolution` layer, and scheduler plumbing — the shape
+S7 had already established for ambience. The §9 licence policy did make music the slower half, and the pack
+that landed came from outside the candidate list below, under its own non-CC0 terms.
 
 **Validation is built alongside, not after**: this is a core system, so each phase adds
 its baselines to a `Validate Sound Engine` editor suite in the established validation-suite style
 as the phase lands — S0 pins the resolution chain (material → group → clip pick, place→break
 fallback, prefill heuristic output), S1 pins trigger-site decisions (which material/event a given
 break/place/step resolves to — assertable without playing audio, extended by S4's two step baselines: the
-sampled cell pair and the occupant layering rule), S2 pins the ambience decisions — the cave dwell, bed and music-pool selection including both fallback
-holes, the bed roster's slot choice and per-source fade convergence, the constant-power gain identity, the duck,
-the submersion test and its log-space cutoff sweep, and the scheduler's gap and clip-based no-repeat pick
-(biome-query parity is pinned separately by `Validate Biome Selection`, §6.2) — S3 pins the
+sampled cell pair and the occupant layering rule), S2 pins the ambience decisions — the cave dwell, bed selection with its fallback holes,
+the bed roster's slot choice and per-source fade convergence, the constant-power gain identity, the duck,
+the submersion test and its log-space cutoff sweep, and the scheduler's gap
+(biome-query parity is pinned separately by `Validate Biome Selection`, §6.2; the music decisions moved to
+their own partial file under S8, §13) — S3 pins the
 scan/cluster output: the section-count differential (the incremental count against a full recount,
 across an edit sequence and a pool recycle), the managed/job-side sounding-test parity including its
 water/lava asymmetry, the grid's
@@ -788,8 +817,15 @@ beside it in the same download — `Iceland_Flows` (23 loops) and `São Miguel F
 for a richer water set, but they are **separately branded, outside the Essentials Series, and carry their own
 datasheet**, so §9's per-pack rule means each needs its own licence check before import.
 
-**No music content is imported yet.** The music sources below carry the heaviest verification burden, which is
-why the beds shipped ahead of them rather than waiting.
+**Music content landed 2026-08-30 (S8, §13):** [Pizza Doggy — Cozy Tunes](https://pizzadoggy.itch.io/cozy-tunes)
+v1.5.4, 18 OGG tracks under the pack's own licence — **not CC0**: use and modification in a game are
+permitted, redistributing or bundling the assets themselves is not, and attribution is appreciated but not
+required. Imported as shipped, no conversion. It came from outside the source list below, which is why the
+per-pack rule matters more than the source: the licence is a PDF in the download, and it is recorded verbatim
+in `CreditsDatabase` as `LicenseType.Custom` rather than approximated to a Creative Commons row.
+
+The music sources below carry the heaviest verification burden, which is why the beds shipped ahead of them
+rather than waiting; they remain the candidates for broadening the pool.
 
 **Shipped content (2026-08-28):** [Kenney — Impact Sounds](https://kenney.nl/assets/impact-sounds) v1.0,
 **CC0**, 75 of its 130 clips under `Assets/Audio/Blocks/kenney_impact/`, covering 12 of the 14 `SoundMaterial` groups
@@ -1085,16 +1121,93 @@ through clean. Three were mine, three predated S7:
 - Pre-existing: the `unmeasured` and `too short` substitute labels never had the volume column's width added
   when that column was introduced, leaving their audition buttons out of line with every other row.
 
-### Music: still deferred
+### Music: closed by S8
 
-`AmbienceDatabase.DefaultMusicPool` and `BiomeBase.musicPool` remain bare `AudioClip[]`, so a music track
-has nowhere to hold a volume without a type change, and `MusicScheduler` would have to carry it through its
-pick. §9 tracks the content; revisit S7-music once it lands, and not before — there is nothing to tune
-against.
+Deferred at filing because the pools were bare `AudioClip[]` with nowhere to hold a gain, and because no
+music content existed to tune against. **Both were resolved on 2026-08-30** — see §13. Every sounding role
+now carries a per-clip trim, so `AudioClipClaim.CategoryHasTrimField` admits all four and the Loudness tab
+writes them all.
+
+---
+
+## 13. S8 — Music pools ✅ *shipped 2026-08-30*
+
+**Status: shipped 2026-08-30.** Music gained the shape ambience already had — weighted, per-track-tunable
+pools — plus the project's first music content.
+
+### What shipped
+
+- **`MusicTrack`** (`{clip, weight, volume}`), replacing the bare `AudioClip[]` on both
+  `AmbienceDatabase._globalMusicTracks` and `BiomeBase.musicTracks`. Lossless: every pool was empty, so
+  there was nothing to migrate.
+- **`MusicResolution`**, a pure layer beside `AmbienceResolution` and `FluidEmitterResolution`: the
+  two-stage pick (pool roll by `_biomeMusicShare`, then a weighted roulette inside it), the cross-pool
+  repeat guard, and `SourceVolume`.
+- **`AmbienceDatabase._biomeMusicShare`** (0.4) and **`._musicVolume`** (1.0, unmatched — the pack has not
+  been level-matched against the rest of the mix yet).
+- **A fourth import profile**: `Assets/Audio/Music/` gets stereo + `Streaming` + Vorbis, the ambience
+  profile's shape with its own stamp.
+- **`/music`** — lists both pools with each weight's resolved share, and `next` / `stop` / `play <name>`.
+  Gaps run to eight minutes, so without it every by-ear check of a weight or a trim costs a silence.
+- **Six baselines** replacing the three that asserted the old replace-semantics (69 total).
+- **Content**: Pizza Doggy's *Cozy Tunes* v1.5.4, 18 OGG tracks, imported as shipped. Not CC0 — a custom
+  licence permitting use and modification but no redistribution of the assets themselves; attribution is
+  appreciated, not required. Recorded in `CreditsDatabase` as `LicenseType.Custom`.
+
+### Two defects the new baselines caught
+
+1. **A spent single-track biome pool repeated itself forever.** `TryPickFrom` fell back to "replay the last
+   track rather than go silent" *inside* the preferred pool, so the global pool was never reached. The
+   repeat allowance is now the last resort across **both** pools, not within one.
+2. **The cross-role claim rule quietly stopped being exercised.** Its fixture paired Music (gainless) with
+   Ambient; once music became writable the promotion it asserted no longer applied. Rewritten against `UI`,
+   which is genuinely gainless — the same class of stale-fixture problem the S7 review's prove-red found.
+
+### Authoring (reworked 2026-08-31)
+
+Music has its **own Sound Editor tab**, and both it and the Ambience tab were restructured around a **scope
+column**: one selectable list whose first row is `🌐 Global` and whose remaining rows are the biomes, with a
+single detail pane showing whichever is selected.
+
+The old shape put global content in a section stacked *above* the biome split. That holds only while the
+global content stays short — at eighteen tracks the section pushed the biome list and its detail pane past
+the bottom of the window, and both of that tab's scroll views were inside the panes it had displaced, so
+nothing below was reachable. Capping the section's height restored reachability and looked worse: a row
+clipped mid-height, and one scroll region directly above another.
+
+Making global content a *selection* removes the failure mode rather than bounding it — there is only ever one
+pane, so nothing can displace anything, and the two tabs now match the Blocks tab, which has always been
+list-left / detail-right. The tabs keep **separate** selections but resolve their `SerializedObject` at draw
+time, because a single editor rebound only on click points at the other tab's biome the moment you switch.
+
+The WorldGen Biome Editor's Audio sub-tab still shows a biome's beds *and* its music together: it answers
+"what should this biome sound like", where the split does not apply.
+
+### Not done
+
+Altitude bands or time-of-day gating for music, and a biome "exclusive" flag that would let a biome
+*replace* the global pool rather than add to it. Neither was asked for; both are additive later.
 
 ---
 
 ## Document History
+
+* **v1.14** - S8 review pass (2026-08-31). Three defects, all invisible until content existed. The pick
+  counters started at **zero**, and every hash downstream is pure, so each launch replayed the same tracks
+  after the same silences — true of the ambience rest cycle and bed rolls since S2 as well, and fixed in both.
+  The gap and the track were drawn from **one hash** whose bit ranges overlap by sixteen bits, so the gap
+  effectively chose the track; the v1.13 entry below asserted these rolls were independent, which was wrong,
+  and a baseline now enforces what the prose claims. Both `poolRoll` and the track roll divided by an
+  inclusive maximum, skipping the biome pool on 1 pick in 256 even at a share of 1. The lesson worth keeping:
+  a design doc that asserts a statistical property without a baseline behind it is a claim, not a fact.
+
+* **v1.13** - S8 music pools shipped (2026-08-30). The pool choice is a *ratio*, not a weight, and that is
+  the whole design: folding "how often does the biome win" into the track weights makes it depend on the
+  global pool's size, so importing a nineteenth global track silently halves every biome track's share. Two
+  rolls off different bit ranges of one hash keep the pool choice and the track choice independent. The
+  repeat guard had to be lifted OUT of the per-pool walk — inside it, a one-track biome pool always had an
+  answer and the global pool was unreachable, which the new baselines caught immediately. Music content
+  landed with it: 18 tracks under a custom (non-CC0) licence, imported at source quality.
 
 * **v1.12** - S7 shipped, ambience only (2026-08-30). The per-track gain is a *separate multiplicand*, not a
   weight: the mix's weights are renormalized to sum to 1, so a gain folded into one would be divided straight
