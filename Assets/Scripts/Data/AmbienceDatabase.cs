@@ -40,9 +40,21 @@ namespace Data
         private float _bedVolume = 0.35f;
 
         [Header("Music")]
-        [Tooltip("Tracks eligible when the biome authors no pool of its own.")]
+        [Tooltip("Tracks eligible everywhere. A biome's own tracks are offered ALONGSIDE these, not " +
+                 "instead of them.")]
         [SerializeField]
-        private AudioClip[] _defaultMusicPool;
+        private MusicTrack[] _globalMusicTracks;
+
+        [Tooltip("How often a pick prefers the listener's biome tracks, when that biome authors any. At 0 " +
+                 "the biome pool is never chosen; at 1 it is chosen whenever it has something to offer.")]
+        [Range(0f, 1f)]
+        [SerializeField]
+        private float _biomeMusicShare = 0.4f;
+
+        [Tooltip("Content trim applied to every music track, before the Music slider.")]
+        [Range(0f, 1f)]
+        [SerializeField]
+        private float _musicVolume = 1f;
 
         /// <summary>The underground ambience bed, or null when none is authored.</summary>
         public AudioClip CaveLoop => _caveLoop;
@@ -70,8 +82,29 @@ namespace Data
         /// </remarks>
         public float DefaultLoopVolume => _defaultLoopVolume <= 0f ? 1f : _defaultLoopVolume;
 
-        /// <summary>The music pool used when the biome authors none. May be null or empty.</summary>
-        public AudioClip[] DefaultMusicPool => _defaultMusicPool;
+        /// <summary>The tracks eligible in every biome. May be null or empty.</summary>
+        public MusicTrack[] GlobalMusicTracks => _globalMusicTracks;
+
+        /// <summary>
+        /// How often a pick prefers the biome's own tracks over the global pool, [0, 1].
+        /// </summary>
+        /// <remarks>
+        /// A ratio rather than a weight folded into the tracks themselves: a biome track's share must not
+        /// depend on how many global tracks happen to be imported, or every biome would need re-tuning each
+        /// time the global pool grew.
+        /// </remarks>
+        public float BiomeMusicShare => _biomeMusicShare;
+
+        /// <summary>
+        /// Content trim for music, applied before the category volume.
+        /// </summary>
+        /// <remarks>
+        /// The same content-versus-preference split <see cref="BedVolume"/> documents: how hot a pack was
+        /// mastered is a fact about the clips, and encoding it in the slider default would leave 100%
+        /// meaning "too loud". Unlike the beds this starts at 1 — the music pack has not been level-matched
+        /// against the rest of the mix yet.
+        /// </remarks>
+        public float MusicVolume => _musicVolume <= 0f ? 1f : _musicVolume;
 
         /// <summary>
         /// Content trim for the beds, applied before the category volume.

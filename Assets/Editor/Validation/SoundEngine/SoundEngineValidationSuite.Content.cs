@@ -34,6 +34,18 @@ namespace Editor.Validation.SoundEngine
         /// <summary>Folder the S3 emitter loops live under; everything in it must carry the emitter profile.</summary>
         private const string EMITTER_AUDIO_ROOT = "Assets/Audio/Emitters";
 
+        /// <summary>Where the music tracks live; the import-profile scenario reads every clip under it.</summary>
+        private const string MUSIC_AUDIO_ROOT = "Assets/Audio/Music";
+
+        /// <summary>
+        /// The marker <c>BlockAudioImportPostprocessor</c> writes into a music clip's <c>userData</c>.
+        /// </summary>
+        /// <remarks>
+        /// Duplicated from the postprocessor rather than referenced: its constant is private, and a baseline
+        /// that read the value under test from the code under test would agree with it by construction.
+        /// </remarks>
+        private const string MUSIC_IMPORT_STAMP = "musicAudioDefaults";
+
         /// <summary>Decibel tolerance for the volume-curve comparisons.</summary>
         private const float DECIBEL_TOLERANCE = 0.01f;
 
@@ -65,6 +77,7 @@ namespace Editor.Validation.SoundEngine
             scenarios.Add(new Scenario("Every Standard Biome Authors An Ambience Track", RunBiomeBedCensus));
             scenarios.Add(new Scenario("Every Fluid Emitter Kind Authors A Loop", RunEmitterCensus));
             scenarios.Add(new Scenario("Emitter Clips Import Mono And Compressed In Memory", RunEmitterImportProfile));
+            scenarios.Add(new Scenario("Music Clips Import Stereo And Streamed", RunMusicImportProfile));
             scenarios.Add(new Scenario("Sound Database Holds One Group Per Material", RunDatabaseSizing));
             scenarios.Add(new Scenario("Every Placeable Block Has An Authored Sound Material", RunMaterialCensus));
             scenarios.Add(new Scenario("Prefill Heuristic Classifies Its Fixture Palette", RunPrefillHeuristic));
@@ -127,14 +140,24 @@ namespace Editor.Validation.SoundEngine
                 return FailSound(scenario, "0.4 and 0.8 were reported as agreeing.");
 
             // A role with no gain field at all is never writable, however many entries it has.
-            AudioClipClaim music = new AudioClipClaim();
-            music.Add(AudioCategory.Music, 1f, false, "default music pool");
+            // A role with no per-clip gain. Every SOUNDING role carries one since the music pools became
+            // MusicTrack lists, so this uses UI: reserved, unclaimed by any database today, and the shape any
+            // future gainless role would have.
+            AudioClipClaim gainless = new AudioClipClaim();
+            gainless.Add(AudioCategory.UI, 1f, false, "interface sound");
 
-            if (music.IsWritable) return FailSound(scenario, "a music pool entry was reported as writable.");
-            if (music.HasAuthoredVolume)
-                return FailSound(scenario, "a music pool entry claimed to carry an authored gain.");
-            if (string.IsNullOrEmpty(music.BlockedReason))
+            if (gainless.IsWritable) return FailSound(scenario, "a gainless role's entry was reported writable.");
+            if (gainless.HasAuthoredVolume)
+                return FailSound(scenario, "a gainless entry claimed to carry an authored gain.");
+            // Naming the cause, not merely being non-empty: the reason is rendered verbatim in the table's
+            // tooltip, and it previously said "a music pool is a bare clip array" for every gainless role —
+            // which stopped being true of music and was never true of UI.
+            if (string.IsNullOrEmpty(gainless.BlockedReason))
                 return FailSound(scenario, "an unwritable claim gave no reason.");
+            if (!gainless.BlockedReason.Contains(nameof(AudioCategory.UI)))
+                return FailSound(scenario,
+                    $"a UI claim explained itself as '{gainless.BlockedReason}', which does not name the " +
+                    "role actually blocking it.");
 
             return true;
         }
@@ -144,17 +167,19 @@ namespace Editor.Validation.SoundEngine
         /// its gain, and is never written.
         /// </summary>
         /// <remarks>
-        /// Unreachable from the shipped content — there is no music yet — which is exactly why it is pinned
-        /// here rather than left to be discovered when §9's music lands. Each role normalizes against its own
+        /// Unreachable from the shipped content, which is exactly why it is pinned here rather than left to
+        /// be discovered by whoever first re-uses one clip in two roles. Each role normalizes against its own
         /// target, so such a clip has two different correct trims and Apply must not silently pick one.
         /// </remarks>
         private static bool RunClaimCrossRole()
         {
             const string scenario = "A Clip Claimed By Two Roles Is Judged By The Writable One And Never Written";
 
-            // Claimed by the gainless role FIRST, which is the order the databases are actually walked in.
+            // Claimed by a GAINLESS role first: the promotion rule exists so a clip is judged against the
+            // target of the role that actually owns its gain, not against whichever database was walked
+            // first. Music was that gainless role until its pools became MusicTrack lists.
             AudioClipClaim claim = new AudioClipClaim();
-            claim.Add(AudioCategory.Music, 1f, false, "default music pool");
+            claim.Add(AudioCategory.UI, 1f, false, "interface sound");
             claim.Add(AudioCategory.Ambient, 0.4f, true, "Forrest track");
 
             if (!claim.IsCrossRole) return FailSound(scenario, "two roles claiming one clip was not detected.");
@@ -193,12 +218,58 @@ namespace Editor.Validation.SoundEngine
             // Order-independent: the same two entries in the other order must reach the same verdict.
             AudioClipClaim reversed = new AudioClipClaim();
             reversed.Add(AudioCategory.Ambient, 0.4f, true, "Forrest track");
-            reversed.Add(AudioCategory.Music, 1f, false, "default music pool");
+            reversed.Add(AudioCategory.UI, 1f, false, "interface sound");
 
             if (!reversed.IsCrossRole || reversed.IsWritable || reversed.Category != AudioCategory.Ambient)
                 return FailSound(scenario,
                     $"claim order changed the verdict: crossRole={reversed.IsCrossRole}, " +
                     $"writable={reversed.IsWritable}, category={reversed.Category}.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// The music import profile: stereo, streamed, and stamped as such.
+        /// </summary>
+        /// <remarks>
+        /// <para>Music is the inverse of the emitter profile on both axes and it matters both ways. Forced to
+        /// mono a track loses the stereo image that is the entire point of a 2D source; decompressed on load
+        /// these are the longest clips in the project and each would hold megabytes of resident PCM.</para>
+        /// <para>This exists because the profile <b>silently failed to apply</b> on the pack's first import:
+        /// the clips landed with the block one-shot profile because the postprocessor had not recompiled yet,
+        /// and nothing anywhere reported it. The stamp is asserted too — it is what makes a reimport a no-op,
+        /// so a clip carrying the wrong stamp is a clip that will never be corrected by reimporting.</para>
+        /// </remarks>
+        private static bool RunMusicImportProfile()
+        {
+            const string scenario = "Music Clips Import Stereo And Streamed";
+
+            if (!AssetDatabase.IsValidFolder(MUSIC_AUDIO_ROOT))
+                return FailSound(scenario, $"'{MUSIC_AUDIO_ROOT}' does not exist — the music content is missing.");
+
+            string[] guids = AssetDatabase.FindAssets("t:AudioClip", new[] { MUSIC_AUDIO_ROOT });
+            if (guids == null || guids.Length == 0)
+                return FailSound(scenario, $"no clips under '{MUSIC_AUDIO_ROOT}'.");
+
+            foreach (string guid in guids)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (AssetImporter.GetAtPath(path) is not AudioImporter importer)
+                    return FailSound(scenario, $"'{path}' has no AudioImporter.");
+
+                if (importer.forceToMono)
+                    return FailSound(scenario, $"'{path}' is forced to mono — it loses its stereo image.");
+
+                AudioClipLoadType loadType = importer.defaultSampleSettings.loadType;
+                if (loadType != AudioClipLoadType.Streaming)
+                    return FailSound(scenario, $"'{path}' imports as {loadType}, not Streaming.");
+
+                if (importer.userData == null || !importer.userData.Contains(MUSIC_IMPORT_STAMP))
+                    return FailSound(scenario,
+                        $"'{path}' carries no '{MUSIC_IMPORT_STAMP}' stamp, so the postprocessor never " +
+                        "applied the music profile to it — and a reimport will not fix it, because the " +
+                        "stamp it does carry makes the postprocessor skip it.");
+            }
 
             return true;
         }

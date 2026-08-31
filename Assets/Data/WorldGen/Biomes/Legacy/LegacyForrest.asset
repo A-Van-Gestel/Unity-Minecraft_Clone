@@ -14,7 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   biomeName: Forrest
   ambientTracks: []
-  musicPool: []
+  musicTracks: []
   offset: 875465
   scale: 0.17
   terrainHeight: 60

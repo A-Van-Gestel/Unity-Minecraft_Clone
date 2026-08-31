@@ -27,10 +27,11 @@ namespace Editor.Libraries
 
         /// <summary>The role this clip is judged and displayed under.</summary>
         /// <remarks>
-        /// The first <b>writable</b> claiming role wins, falling back to the first role of any kind. A clip in
-        /// both a music pool and a biome's ambience tracks is therefore judged against the Ambient target —
-        /// the role that owns the only gain it has — rather than against whichever database happened to be
-        /// walked first. It is still not writable; see <see cref="IsCrossRole"/>.
+        /// The first <b>writable</b> claiming role wins, falling back to the first role of any kind, so a clip
+        /// is judged against the target of the role that actually owns its gain rather than against whichever
+        /// database happened to be walked first. Every <i>sounding</i> role carries a gain today, so the
+        /// promotion only fires for a clip claimed by a gainless one — <c>UI</c>, <c>Weather</c> or
+        /// <c>Master</c>. Such a clip is still not writable; see <see cref="IsCrossRole"/>.
         /// </remarks>
         public AudioCategory Category { get; private set; }
 
@@ -87,7 +88,7 @@ namespace Editor.Libraries
                     return $"it is claimed by more than one role ({Owners}), and each role " +
                            "normalizes against its own target";
                 if (!CategoryHasTrimField(Category))
-                    return "a music pool is a bare clip array, with nowhere to hold a gain";
+                    return $"the {Category} role carries no per-clip gain for a trim to be written to";
 
                 return WritableEntries == Entries
                     ? "no authored volume governs it"
@@ -129,11 +130,12 @@ namespace Editor.Libraries
         /// <param name="category">The role.</param>
         /// <returns>True when entries in this role carry a per-clip gain.</returns>
         /// <remarks>
-        /// Music carries none — a pool is a bare clip array — so its rows are measured and compared but never
-        /// written. Giving it one means a type change plus a pass through the scheduler that picks from it,
-        /// against no music content to tune.
+        /// Every sounding role now carries one. Music was the last holdout — its pools were bare
+        /// <c>AudioClip[]</c> with nowhere to put a gain — until <c>MusicTrack</c> gave it the same
+        /// clip/weight/volume shape the ambience tracks have.
         /// </remarks>
         public static bool CategoryHasTrimField(AudioCategory category) =>
-            category is AudioCategory.Blocks or AudioCategory.Fluids or AudioCategory.Ambient;
+            category is AudioCategory.Blocks or AudioCategory.Fluids or AudioCategory.Ambient
+                or AudioCategory.Music;
     }
 }

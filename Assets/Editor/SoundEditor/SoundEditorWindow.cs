@@ -34,7 +34,8 @@ namespace Editor.SoundEditor
         [SerializeField]
         private int _tabIndex;
 
-        private static readonly string[] s_tabLabels = { "🧱 Blocks", "🔊 Ambience", "💧 Emitters", "📊 Loudness" };
+        private static readonly string[] s_tabLabels =
+            { "🧱 Blocks", "🔊 Ambience", "🎵 Music", "💧 Emitters", "📊 Loudness" };
 
         /// <summary>Repaint pump that keeps the play/stop buttons honest while a clip is sounding.</summary>
         private EditorApplication.CallbackFunction _previewRepaint;
@@ -116,10 +117,14 @@ namespace Editor.SoundEditor
                     break;
 
                 case 2:
-                    DrawEmittersTab();
+                    DrawMusicTab();
                     break;
 
                 case 3:
+                    DrawEmittersTab();
+                    break;
+
+                case 4:
                     DrawLoudnessTab();
                     break;
             }

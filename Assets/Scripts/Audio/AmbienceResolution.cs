@@ -130,8 +130,10 @@ namespace Audio
             if (eligible == 0) return -1;
             if (eligible == 1) return lastEligible;
 
-            // The low 24 bits: a different range than NextGapSeconds and PickClipIndex read, so a roll and a
-            // music decision sharing a salt would still not move together.
+            // The low 24 bits. Note this OVERLAPS the range NextGapSeconds reads (bits 8-23), so it is not
+            // what keeps a roll independent of a gap — what does is that the two are handed different
+            // hashes: TrackHash(rollSalt, biomeIndex) here, ScheduleHash(restCounter) there. Never drive
+            // both off one hash and rely on the slicing.
             float roll = (hash & 0xFFFFFFu) / (float)0xFFFFFF;
 
             if (total <= 0f)
@@ -461,20 +463,6 @@ namespace Audio
         }
 
         /// <summary>
-        /// Selects the music pool for a context, falling back when the biome authors none.
-        /// </summary>
-        /// <param name="context">The sampled listener context.</param>
-        /// <param name="fallbackPool">The <c>AmbienceDatabase</c> global pool.</param>
-        /// <returns>The pool to pick the next track from; may be null or empty.</returns>
-        public static AudioClip[] SelectMusicPool(AudioContext context, AudioClip[] fallbackPool)
-        {
-            if (!context.HasBiome || context.Biome == null) return fallbackPool;
-
-            AudioClip[] pool = context.Biome.musicPool;
-            return pool is { Length: > 0 } ? pool : fallbackPool;
-        }
-
-        /// <summary>
         /// Advances one source's fade toward its target at the authored rate.
         /// </summary>
         /// <param name="currentFade">The source's fade position, [0, 1].</param>
@@ -724,64 +712,6 @@ namespace Audio
             // choice do not move in lockstep across successive picks.
             float t = ((hash >> 8) & 0xFFFF) / 65535f;
             return Mathf.Lerp(min, max, t);
-        }
-
-        /// <summary>
-        /// Picks the next music track, avoiding an immediate repeat.
-        /// </summary>
-        /// <param name="pool">The resolved track pool. Null, empty, or all-empty selects nothing.</param>
-        /// <param name="lastTrack">The clip played previously, or null when nothing has played yet.</param>
-        /// <param name="hash">A per-pick hash (see <see cref="ScheduleHash"/>).</param>
-        /// <returns>The index of a filled slot, or -1 when the pool holds no clip at all.</returns>
-        /// <remarks>
-        /// <para>
-        /// Compares the <b>clip</b>, not the index it sat at last time. The pool is re-resolved at every pick
-        /// and changes with the biome, so an index carried across pools names a different track — it would
-        /// suppress an innocent one and miss an actual repeat of a clip that merely moved position.
-        /// </para>
-        /// <para>
-        /// The guard steps to the neighbor rather than re-rolling: a re-roll can land on the same track
-        /// again, and with a two-track pool it does so half the time — exactly the pool size where hearing
-        /// the same track twice in a row is most obvious.
-        /// </para>
-        /// </remarks>
-        public static int PickTrackIndex(AudioClip[] pool, AudioClip lastTrack, uint hash)
-        {
-            if (pool == null || pool.Length == 0) return -1;
-
-            int filled = 0;
-            foreach (AudioClip clip in pool)
-            {
-                if (clip != null) filled++;
-            }
-
-            if (filled == 0) return -1;
-
-            int index = NextFilled(pool, (int)(hash % (uint)pool.Length));
-            if (filled > 1 && pool[index] == lastTrack) index = NextFilled(pool, (index + 1) % pool.Length);
-            return index;
-        }
-
-        /// <summary>
-        /// Walks forward from an index to the first slot holding a clip, wrapping.
-        /// </summary>
-        /// <param name="pool">The pool being read; must hold at least one non-null entry.</param>
-        /// <param name="from">Where to start looking, inclusive.</param>
-        /// <returns>The index of a filled slot.</returns>
-        /// <remarks>
-        /// Empty slots are ordinary: the pool editor appends one before the author assigns a clip, and a
-        /// half-filled pool is what an in-progress import looks like. Landing on one used to burn a whole
-        /// authored gap of silence, so the picker steps past them instead of resolving to nothing.
-        /// </remarks>
-        private static int NextFilled(AudioClip[] pool, int from)
-        {
-            for (int step = 0; step < pool.Length; step++)
-            {
-                int index = (from + step) % pool.Length;
-                if (pool[index] != null) return index;
-            }
-
-            return from;
         }
 
         /// <summary>

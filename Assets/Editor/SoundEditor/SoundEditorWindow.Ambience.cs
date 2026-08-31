@@ -26,7 +26,7 @@ namespace Editor.SoundEditor
         #region State
 
         private const string AMBIENCE_DATABASE_PATH = "Assets/Resources/Data/AmbienceDatabase.asset";
-        private const float BIOME_LIST_WIDTH = 200f;
+
 
         private AmbienceDatabase _ambience;
         private SerializedObject _ambienceSerialized;
@@ -64,11 +64,14 @@ namespace Editor.SoundEditor
             }
 
             _ambienceBiomes.Sort((a, b) => string.CompareOrdinal(a.name, b.name));
+            RebuildScopes();
 
-            _selectedBiomeIndex = _ambienceBiomes.Count > 0 ? 0 : -1;
-            _biomeSerialized = _selectedBiomeIndex >= 0
-                ? new SerializedObject(_ambienceBiomes[_selectedBiomeIndex])
-                : null;
+            // Both tabs open on the global scope. Index 0 is the global row, not the first biome, so the
+            // editors start unbound and are resolved at draw time by BindScope.
+            _selectedBiomeIndex = GLOBAL_SCOPE_INDEX;
+            _selectedMusicScopeIndex = GLOBAL_SCOPE_INDEX;
+            _biomeSerialized = null;
+            _musicBiomeSerialized = null;
         }
 
         #endregion
@@ -78,13 +81,34 @@ namespace Editor.SoundEditor
         /// <summary>Draws the Ambience tab: the shared database above, the per-biome tracks beside a biome list.</summary>
         private void DrawAmbienceTab()
         {
-            DrawAmbienceDatabase();
-            EditorUILayoutHelper.DrawSeparator();
-
             EditorGUILayout.BeginHorizontal();
-            DrawAmbienceBiomeList();
-            DrawSelectedBiomeAudio();
+
+            DrawScopeList(ref _selectedBiomeIndex, ref _biomeSearchText, ref _biomeListScrollPos,
+                biome =>
+                {
+                    int tracks = biome.ambientTracks?.Length ?? 0;
+
+                    // The count is the whole point of the column: a biome with no bed is the state that is
+                    // silent rather than wrong, so it has to be visible without selecting each one.
+                    return tracks == 0 ? "— fallback" : $"{tracks} track{(tracks == 1 ? "" : "s")}";
+                },
+                OnScopeChanged);
+
+            DrawAmbienceDetail();
             EditorGUILayout.EndHorizontal();
+        }
+
+        /// <summary>Draws whichever scope the column has selected: the database's beds, or one biome's.</summary>
+        private void DrawAmbienceDetail()
+        {
+            EditorGUILayout.BeginVertical();
+            _ambienceDetailScrollPos = EditorGUILayout.BeginScrollView(_ambienceDetailScrollPos);
+
+            if (IsGlobalScope(_selectedBiomeIndex)) DrawAmbienceDatabase();
+            else DrawSelectedBiomeAudio(BindScope(_selectedBiomeIndex, ref _biomeSerialized));
+
+            EditorGUILayout.EndScrollView();
+            EditorGUILayout.EndVertical();
         }
 
         /// <summary>Draws the project-level ambience content every biome falls back to.</summary>
@@ -99,11 +123,11 @@ namespace Editor.SoundEditor
 
             _ambienceSerialized.Update();
 
-            EditorUILayoutHelper.SectionHeader("Ambience Database");
+            EditorUILayoutHelper.SectionHeader("Global Ambience");
             EditorUILayoutHelper.SectionNote(
-                "Content no single biome owns. The <b>cave bed</b> fades in underground and ducks the biome " +
+                "Beds no single biome owns. The <b>cave bed</b> fades in underground and ducks the biome " +
                 "beds under it; the <b>fallback bed</b> covers a biome with no track of its own and any world " +
-                "whose generator answers no biome at all.");
+                "whose generator answers no biome at all. Music lives on its own tab.");
 
             EditorUILayoutHelper.SubHeader("Beds");
             EditorUILayoutHelper.BeginGroup();
@@ -118,12 +142,6 @@ namespace Editor.SoundEditor
                     "Content trim applied to every bed before the Ambient slider. A property of the pack's " +
                     "mastering, not a user preference."));
             EditorUILayoutHelper.EndGroup();
-
-            EditorGUILayout.Space();
-            EditorUILayoutHelper.SubHeader("Global Music Pool");
-            EditorUILayoutHelper.SectionNote(
-                "Tracks eligible when the biome authors no pool of its own.");
-            AmbienceTrackListDrawer.DrawClipArray(_ambienceSerialized.FindProperty("_defaultMusicPool"));
 
             if (_ambienceSerialized.ApplyModifiedProperties()) _dirty = true;
         }
@@ -151,64 +169,29 @@ namespace Editor.SoundEditor
             EditorGUILayout.EndHorizontal();
         }
 
-        /// <summary>Draws the biome selection column, annotated with each biome's authored track count.</summary>
-        private void DrawAmbienceBiomeList()
-        {
-            EditorGUILayout.BeginVertical(GUILayout.Width(BIOME_LIST_WIDTH));
-            EditorGUILayout.LabelField("Biomes", EditorStyles.boldLabel);
-
-            EditorGUIHelper.DrawSearchableSelectionList(
-                _ambienceBiomes,
-                ref _biomeSearchText,
-                ref _biomeListScrollPos,
-                ref _selectedBiomeIndex,
-                (biome, search) => string.IsNullOrEmpty(search) ||
-                                   biome.name.ToLower().Contains(search.ToLower()),
-                (rect, biome, _) =>
-                {
-                    int tracks = biome.ambientTracks?.Length ?? 0;
-
-                    // The count is the whole point of the column: a biome with no bed is the state that is
-                    // silent rather than wrong, so it has to be visible without selecting each one.
-                    string suffix = tracks == 0 ? "— fallback" : $"{tracks} track{(tracks == 1 ? "" : "s")}";
-                    GUI.Label(rect, $" {biome.name}   {suffix}", EditorStyles.toolbarButton);
-                },
-                index =>
-                {
-                    _biomeSerialized = new SerializedObject(_ambienceBiomes[index]);
-                    EditorAudioPreview.StopAll();
-                });
-
-            EditorGUILayout.EndVertical();
-        }
 
         /// <summary>Draws the selected biome's tracks and music pool.</summary>
-        private void DrawSelectedBiomeAudio()
+        /// <param name="biome">The selected biome's editor, or null when none resolved.</param>
+        private void DrawSelectedBiomeAudio(SerializedObject biome)
         {
-            EditorGUILayout.BeginVertical();
-            _ambienceDetailScrollPos = EditorGUILayout.BeginScrollView(_ambienceDetailScrollPos);
-
-            if (_biomeSerialized == null || _biomeSerialized.targetObject == null)
+            if (biome == null || biome.targetObject == null)
             {
                 EditorGUILayout.HelpBox("Select a biome to author its ambience.", MessageType.Info);
-                EditorGUILayout.EndScrollView();
-                EditorGUILayout.EndVertical();
                 return;
             }
 
-            _biomeSerialized.Update();
-            EditorUILayoutHelper.SectionHeader(_biomeSerialized.targetObject.name);
+            biome.Update();
+            EditorUILayoutHelper.SectionHeader(biome.targetObject.name);
 
+            // Music is authored on its own tab, so this pane passes null for it: the two are separate
+            // systems and the biome's music list belongs beside the global pool it competes with.
             AmbienceTrackListDrawer.DrawBiomeAudio(
-                _biomeSerialized.FindProperty("ambientTracks"),
-                _biomeSerialized.FindProperty("musicPool"),
+                biome.FindProperty("ambientTracks"),
+                null,
                 ref _ambiencePreviewY,
-                "This biome authors no ambience track, so it plays the fallback bed above.");
+                "This biome authors no ambience track, so it plays the Global scope's fallback bed.");
 
-            if (_biomeSerialized.ApplyModifiedProperties()) _dirty = true;
-
-            EditorGUILayout.EndScrollView();
-            EditorGUILayout.EndVertical();
+            if (biome.ApplyModifiedProperties()) _dirty = true;
         }
 
         #endregion

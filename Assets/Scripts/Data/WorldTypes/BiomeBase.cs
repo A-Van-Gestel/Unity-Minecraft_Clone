@@ -19,8 +19,9 @@ namespace Data.WorldTypes
                  "falls back to the AmbienceDatabase's default bed.")]
         public AmbienceTrack[] ambientTracks;
 
-        [Tooltip("Music tracks eligible while the listener is in this biome. Empty falls back to the " +
-                 "AmbienceDatabase's global pool.")]
-        public AudioClip[] musicPool;
+        [Tooltip("Music tracks offered ALONGSIDE the AmbienceDatabase's global pool while the listener is " +
+                 "in this biome, each with its own relative weight. How often a pick prefers these over the " +
+                 "global ones is the database's Biome Music Share.")]
+        public MusicTrack[] musicTracks;
     }
 }

@@ -18,7 +18,7 @@ MonoBehaviour:
     yRange: {x: 0, y: 128}
     playChance: 1
     volume: 1
-  musicPool: []
+  musicTracks: []
   debugPreviewColor: {r: 0.55, g: 0.55, b: 0.6, a: 1}
   biomeWeightNoiseConfig:
     seedOffset: -231

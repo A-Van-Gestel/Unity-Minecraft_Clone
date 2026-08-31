@@ -14,7 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   biomeName: Grasslands
   ambientTracks: []
-  musicPool: []
+  musicTracks: []
   offset: 250
   scale: 0.042
   terrainHeight: 42

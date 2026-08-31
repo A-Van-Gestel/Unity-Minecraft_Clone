@@ -14,7 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   biomeName: Desert
   ambientTracks: []
-  musicPool: []
+  musicTracks: []
   offset: 1250
   scale: 0.068
   terrainHeight: 10

@@ -14,7 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   biomeName: Mountain
   ambientTracks: []
-  musicPool: []
+  musicTracks: []
   offset: -231
   scale: 0.8
   terrainHeight: 110

@@ -642,7 +642,7 @@ namespace Editor.WorldTools
 
             AmbienceTrackListDrawer.DrawBiomeAudio(
                 _biomeSerializedObject.FindProperty("ambientTracks"),
-                _biomeSerializedObject.FindProperty("musicPool"),
+                _biomeSerializedObject.FindProperty("musicTracks"),
                 ref _beAudioPreviewY,
                 "This biome authors no ambience track, so it falls back to the AmbienceDatabase's default " +
                 "bed. That is a valid state, not an error — but it means the biome sounds like everywhere " +

@@ -586,7 +586,8 @@ namespace Editor.SoundEditor
         /// arrays sharing a single float — so a group is anchored on the <i>median</i> of its own clips and
         /// moves as a unit; per-clip correction is impossible without a schema change. Ambience carries one
         /// volume per track, so its mapping is per clip like the emitters', except that a clip several tracks
-        /// share takes the same trim in all of them. Music has no volume field at all and is reported only.</para>
+        /// share takes the same trim in all of them. Music works the same way since its pools became
+        /// <c>MusicTrack</c> lists — the global pool and every biome's are written per clip.</para>
         /// <para>Non-destructive: the audio files are untouched, the writes go through
         /// <see cref="Undo.RecordObject"/>, and nothing is saved until the toolbar's Save.</para>
         /// </remarks>
@@ -601,6 +602,7 @@ namespace Editor.SoundEditor
                 AudioCategory.Fluids => ApplyEmitterTrims(target),
                 AudioCategory.Blocks => ApplyBlockGroupTrims(target),
                 AudioCategory.Ambient => ApplyAmbienceTrims(target),
+                AudioCategory.Music => ApplyMusicTrims(target),
                 _ => 0,
             };
 
@@ -664,6 +666,102 @@ namespace Editor.SoundEditor
 
             if (written > 0) EditorUtility.SetDirty(_emitterDatabase);
             return written;
+        }
+
+        /// <summary>
+        /// Trims every music track — the global pool and each biome's — onto the target.
+        /// </summary>
+        /// <param name="target">The Music baseline.</param>
+        /// <returns>How many tracks were changed.</returns>
+        /// <remarks>
+        /// Per clip, like the ambience tracks and unlike the block groups: a music track carries its own
+        /// gain, so it is corrected exactly. A clip appearing in both the global pool and a biome's is
+        /// written in both — the trim comes from the file's loudness alone, so the same number is right
+        /// wherever the scheduler reaches it from.
+        /// </remarks>
+        private int ApplyMusicTrims(float target)
+        {
+            int written = 0;
+            Dictionary<string, AudioClipClaim> claims = BuildClaims();
+
+            if (_ambience != null && _ambience.GlobalMusicTracks != null)
+            {
+                SerializedObject serialized = _ambienceSerialized ?? new SerializedObject(_ambience);
+                serialized.Update();
+
+                SerializedProperty pool = serialized.FindProperty("_globalMusicTracks");
+                int inPool = 0;
+
+                for (int i = 0; pool != null && i < pool.arraySize; i++)
+                {
+                    SerializedProperty volume = pool.GetArrayElementAtIndex(i).FindPropertyRelative("volume");
+                    AudioClip clip = pool.GetArrayElementAtIndex(i).FindPropertyRelative("clip")
+                        ?.objectReferenceValue as AudioClip;
+
+                    if (volume == null || !TryTrimFor(claims, clip, target, volume.floatValue, out float trim))
+                        continue;
+
+                    volume.floatValue = trim;
+                    inPool++;
+                }
+
+                if (inPool > 0)
+                {
+                    serialized.ApplyModifiedProperties();
+                    written += inPool;
+                }
+            }
+
+            foreach (BiomeBase biome in _ambienceBiomes)
+            {
+                if (biome == null || biome.musicTracks == null) continue;
+
+                int inBiome = 0;
+                for (int i = 0; i < biome.musicTracks.Length; i++)
+                {
+                    if (!TryTrimFor(claims, biome.musicTracks[i].clip, target,
+                            biome.musicTracks[i].EffectiveVolume, out float trim))
+                        continue;
+
+                    if (inBiome == 0) Undo.RecordObject(biome, "Normalize music loudness");
+
+                    biome.musicTracks[i].volume = trim;
+                    inBiome++;
+                }
+
+                if (inBiome == 0) continue;
+
+                EditorUtility.SetDirty(biome);
+                written += inBiome;
+            }
+
+            return written;
+        }
+
+        /// <summary>
+        /// The trim to write for one clip, when it is writable, measured, and would actually move.
+        /// </summary>
+        /// <param name="claims">The claim map for the current databases.</param>
+        /// <param name="clip">The clip being trimmed.</param>
+        /// <param name="target">The role's baseline.</param>
+        /// <param name="current">The volume currently authored for it.</param>
+        /// <param name="trim">Receives the trim to write.</param>
+        /// <returns>False when nothing should be written.</returns>
+        private bool TryTrimFor(Dictionary<string, AudioClipClaim> claims, AudioClip clip, float target,
+            float current, out float trim)
+        {
+            trim = 1f;
+            if (clip == null) return false;
+
+            string path = AssetDatabase.GetAssetPath(clip);
+            if (!IsWritableClip(claims, path)) return false;
+            if (!TryFindMeasurement(path, out float lufs)) return false;
+            if (!TryComputeTrim(lufs, target, out trim)) return false;
+
+            // Against the effective value: an unauthored 0 plays at full level, so a trim of 1 for it is not
+            // a change and must not open an undo step.
+            float effective = current <= 0f ? 1f : current;
+            return !Mathf.Approximately(effective, trim);
         }
 
         /// <summary>
@@ -1147,11 +1245,10 @@ namespace Editor.SoundEditor
                 Claim(_ambience.DefaultLoop, AudioCategory.Ambient, _ambience.DefaultLoopVolume, true,
                     "fallback bed");
 
-                if (_ambience.DefaultMusicPool != null)
+                if (_ambience.GlobalMusicTracks != null)
                 {
-                    // Music has nowhere to hold a gain, so it claims a role without claiming writability.
-                    foreach (AudioClip clip in _ambience.DefaultMusicPool)
-                        Claim(clip, AudioCategory.Music, 1f, false, "default music pool");
+                    foreach (MusicTrack track in _ambience.GlobalMusicTracks)
+                        Claim(track.clip, AudioCategory.Music, track.EffectiveVolume, true, "global music");
                 }
             }
 
@@ -1166,9 +1263,9 @@ namespace Editor.SoundEditor
                             $"{biome.name} track");
                 }
 
-                if (biome.musicPool == null) continue;
-                foreach (AudioClip clip in biome.musicPool)
-                    Claim(clip, AudioCategory.Music, 1f, false, $"{biome.name} music");
+                if (biome.musicTracks == null) continue;
+                foreach (MusicTrack track in biome.musicTracks)
+                    Claim(track.clip, AudioCategory.Music, track.EffectiveVolume, true, $"{biome.name} music");
             }
 
             return claims;

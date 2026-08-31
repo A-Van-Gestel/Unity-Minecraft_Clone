@@ -16,8 +16,10 @@ namespace Editor.SoundEditor
     /// resident if decompressed. Fluid emitter loops (S3) are the third case and share neither: they play
     /// from 3D sources, so they must be mono like the one-shots, but they are long loops, so they are kept
     /// compressed in memory rather than decompressed. Streaming is wrong for them too — several emitters
-    /// can be audible at once, and each stream is a decoder the mix does not need. Both profiles were
-    /// previously applied by a one-off script, which silently stopped covering anything imported afterwards.
+    /// can be audible at once, and each stream is a decoder the mix does not need. Music is the fourth case
+    /// and shares the ambience profile: 2D, stereo, streamed — only one track is ever audible, and these are
+    /// the longest clips in the project. The block and ambience profiles were previously applied by a one-off
+    /// script, which silently stopped covering anything imported afterwards.
     /// </remarks>
     public class BlockAudioImportPostprocessor : AssetPostprocessor
     {
@@ -30,6 +32,9 @@ namespace Editor.SoundEditor
         /// <summary>Clips under this folder get the 3D looping-emitter profile (S3).</summary>
         private const string EMITTER_ROOT = "Assets/Audio/Emitters/";
 
+        /// <summary>Clips under this folder get the 2D streamed-music profile.</summary>
+        private const string MUSIC_ROOT = "Assets/Audio/Music/";
+
         /// <summary>Marks a one-shot clip as stamped, so later reimports leave manual overrides alone.</summary>
         private const string BLOCK_STAMP = "blockAudioDefaults";
 
@@ -39,6 +44,9 @@ namespace Editor.SoundEditor
 
         /// <summary>Marks a fluid emitter loop as stamped. Distinct from the other two for the same reason.</summary>
         private const string EMITTER_STAMP = "emitterAudioDefaults";
+
+        /// <summary>Marks a music track as stamped. Distinct from the other three for the same reason.</summary>
+        private const string MUSIC_STAMP = "musicAudioDefaults";
 
         /// <summary>
         /// Applies the profile the clip's folder calls for, before the clip is imported.
@@ -55,7 +63,10 @@ namespace Editor.SoundEditor
 
             bool isAmbience = assetPath.StartsWith(AMBIENCE_ROOT);
             bool isEmitter = assetPath.StartsWith(EMITTER_ROOT);
-            string stamp = isAmbience ? AMBIENCE_STAMP : isEmitter ? EMITTER_STAMP : BLOCK_STAMP;
+            bool isMusic = assetPath.StartsWith(MUSIC_ROOT);
+            string stamp = isAmbience ? AMBIENCE_STAMP :
+                isEmitter ? EMITTER_STAMP :
+                isMusic ? MUSIC_STAMP : BLOCK_STAMP;
 
             // Only stamp a clip the first time. Re-stamping on every reimport would silently revert a
             // deliberate per-clip override made in the inspector.
@@ -67,7 +78,17 @@ namespace Editor.SoundEditor
             AudioImporterSampleSettings settings = importer.defaultSampleSettings;
             settings.compressionFormat = AudioCompressionFormat.Vorbis;
 
-            if (isAmbience)
+            if (isMusic)
+            {
+                // The beds' profile, for the same reasons and one more: music plays from a 2D source where
+                // the stereo image is the whole point, and a multi-minute track is the largest thing in the
+                // project to hold as resident PCM. Streaming keeps one decoder alive for the single track
+                // that is playing, which is exactly the shape of this layer.
+                importer.forceToMono = false;
+                importer.loadInBackground = true;
+                settings.loadType = AudioClipLoadType.Streaming;
+            }
+            else if (isAmbience)
             {
                 // Streamed, not decompressed: a 30 s stereo loop costs megabytes of resident PCM, and a bed
                 // that fades in over seconds has no need for the sample to be ready on the same frame.

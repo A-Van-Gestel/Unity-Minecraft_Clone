@@ -54,7 +54,6 @@ namespace Editor.Validation.SoundEngine
             scenarios.Add(new Scenario("Underground Test Includes Its Threshold Level", RunUndergroundThreshold));
             scenarios.Add(new Scenario("A Head In A Fluid Cell Reads As Submerged", RunSubmergedTest));
             scenarios.Add(new Scenario("Ambience Falls Back When The Biome Authors No Bed", RunBedFallback));
-            scenarios.Add(new Scenario("Music Pool Falls Back When The Biome Authors None", RunPoolFallback));
             scenarios.Add(new Scenario("Complementary Bed Fades Hold Constant Power", RunBedGainCurve));
             scenarios.Add(new Scenario("Bed Fade Advances At The Authored Rate And Clamps", RunAdvanceFade));
             scenarios.Add(new Scenario("A Returning Bed Reclaims Its Own Still-Audible Source", RunBedSlotReclaim));
@@ -65,8 +64,6 @@ namespace Editor.Validation.SoundEngine
             scenarios.Add(new Scenario("Depth Below The Surface Silences The Biome Beds", RunDepthDuck));
             scenarios.Add(new Scenario("Submersion Cutoff Sweeps Monotonically In Log Space", RunLowPassSweep));
             scenarios.Add(new Scenario("Music Gap Stays Inside Its Authored Bounds", RunMusicGap));
-            scenarios.Add(new Scenario("Music Never Picks The Same Track Twice Running", RunTrackPick));
-            scenarios.Add(new Scenario("A Music Pool With Empty Slots Still Picks A Track", RunTrackPickHoles));
             scenarios.Add(new Scenario("Bed Mix Weights Every Nearby Biome And Normalizes", RunBedMix));
             scenarios.Add(new Scenario("A Mix Whose Contributors All Fall Under The Threshold Still Sounds",
                 RunBedMixAllSubThreshold));
@@ -236,42 +233,6 @@ namespace Editor.Validation.SoundEngine
             {
                 Object.DestroyImmediate(authored);
                 Object.DestroyImmediate(bare);
-            }
-        }
-
-        /// <summary>Music-pool selection, where an empty array must fall back exactly as a null one does.</summary>
-        private static bool RunPoolFallback()
-        {
-            const string scenario = "Music Pool Falls Back When The Biome Authors None";
-
-            AudioClip[] biomePool = MakeClips(2);
-            AudioClip[] fallbackPool = MakeClips(3);
-
-            StandardBiomeAttributes authored = ScriptableObject.CreateInstance<StandardBiomeAttributes>();
-            StandardBiomeAttributes empty = ScriptableObject.CreateInstance<StandardBiomeAttributes>();
-
-            try
-            {
-                authored.musicPool = biomePool;
-                empty.musicPool = System.Array.Empty<AudioClip>();
-
-                if (AmbienceResolution.SelectMusicPool(new AudioContext(0, authored, true, 15, false), fallbackPool) != biomePool)
-                    return FailSound(scenario, "an authored biome pool was not selected.");
-
-                // An empty array and a null one are the same authoring state — "this biome adds no music" —
-                // and a length check that only guards null would hand the scheduler a pool it can never pick from.
-                if (AmbienceResolution.SelectMusicPool(new AudioContext(0, empty, true, 15, false), fallbackPool) != fallbackPool)
-                    return FailSound(scenario, "an empty biome pool did not fall back to the global pool.");
-
-                if (AmbienceResolution.SelectMusicPool(new AudioContext(-1, authored, false, 15, false), fallbackPool) != fallbackPool)
-                    return FailSound(scenario, "a world with no biome answer did not fall back to the global pool.");
-
-                return true;
-            }
-            finally
-            {
-                Object.DestroyImmediate(authored);
-                Object.DestroyImmediate(empty);
             }
         }
 
@@ -1305,104 +1266,6 @@ namespace Editor.Validation.SoundEngine
                 return FailSound(scenario, "flipped while the current stretch still had time left.");
             if (Mathf.Abs(held - 9.5f) > AMBIENCE_EPSILON)
                 return FailSound(scenario, $"the remaining time went to {held} instead of 9.5.");
-
-            return true;
-        }
-
-        /// <summary>
-        /// A pool with empty slots must still play: the picker steps past them rather than resolving to
-        /// nothing.
-        /// </summary>
-        /// <remarks>
-        /// Half-filled pools are ordinary — the pool editor appends an empty slot before the author assigns
-        /// a clip, and an in-progress import looks the same. Resolving to nothing costs a whole authored gap
-        /// of silence per landing, so a two-slot pool with one clip would be quiet roughly half the time,
-        /// with nothing logged to say why.
-        /// </remarks>
-        private static bool RunTrackPickHoles()
-        {
-            const string scenario = "A Music Pool With Empty Slots Still Picks A Track";
-
-            AudioClip[] clips = MakeClips(2);
-
-            if (AmbienceResolution.PickTrackIndex(new AudioClip[] { null, null }, null, 0u) != -1)
-                return FailSound(scenario, "an all-empty pool did not report -1.");
-            if (AmbienceResolution.PickTrackIndex(new AudioClip[] { null }, null, 0u) != -1)
-                return FailSound(scenario, "a single empty slot did not report -1.");
-
-            AudioClip[] holed = { null, clips[0], null, null };
-            for (uint salt = 1; salt <= AMBIENCE_SWEEP_STEPS; salt++)
-            {
-                int index = AmbienceResolution.PickTrackIndex(holed, null, AmbienceResolution.ScheduleHash(salt));
-                if (index != 1)
-                    return FailSound(scenario, $"a pool holding one clip at index 1 answered {index}.");
-            }
-
-            // With one clip left, repeating it is the only answer there is — and still better than silence.
-            if (AmbienceResolution.PickTrackIndex(holed, clips[0], 0u) != 1)
-                return FailSound(scenario, "a pool with a single remaining clip refused to repeat it.");
-
-            // Two clips among holes: every pick must be one of them, and never the one just played.
-            AudioClip[] sparse = { clips[0], null, null, clips[1], null };
-            AudioClip last = null;
-
-            for (uint salt = 1; salt <= AMBIENCE_SWEEP_STEPS; salt++)
-            {
-                int index = AmbienceResolution.PickTrackIndex(sparse, last, AmbienceResolution.ScheduleHash(salt));
-                if ((uint)index >= (uint)sparse.Length || sparse[index] == null)
-                    return FailSound(scenario, $"a sparse pool answered empty slot {index}.");
-                if (sparse[index] == last)
-                    return FailSound(scenario, "a sparse pool repeated a track back to back.");
-
-                last = sparse[index];
-            }
-
-            return true;
-        }
-
-        /// <summary>Track selection: always in range, never an immediate repeat, and empty pools say so.</summary>
-        private static bool RunTrackPick()
-        {
-            const string scenario = "Music Never Picks The Same Track Twice Running";
-
-            if (AmbienceResolution.PickTrackIndex(null, null, 0u) != -1)
-                return FailSound(scenario, "a null pool did not report -1.");
-            if (AmbienceResolution.PickTrackIndex(System.Array.Empty<AudioClip>(), null, 0u) != -1)
-                return FailSound(scenario, "an empty pool did not report -1.");
-
-            AudioClip[] single = MakeClips(1);
-            if (AmbienceResolution.PickTrackIndex(single, single[0], 0u) != 0)
-                return FailSound(scenario, "a single-track pool did not return its only track.");
-
-            for (int count = 2; count <= 8; count++)
-            {
-                AudioClip[] pool = MakeClips(count);
-                AudioClip last = null;
-
-                for (uint salt = 1; salt <= AMBIENCE_SWEEP_STEPS; salt++)
-                {
-                    int index = AmbienceResolution.PickTrackIndex(pool, last, AmbienceResolution.ScheduleHash(salt));
-                    if ((uint)index >= (uint)count)
-                        return FailSound(scenario, $"pool of {count} produced index {index}.");
-                    if (pool[index] == last)
-                        return FailSound(scenario, $"pool of {count} repeated track {index} back to back.");
-                    last = pool[index];
-                }
-            }
-
-            // The guard must survive the pool changing underneath it, which is the normal case: the pool is
-            // re-resolved at every pick and follows the biome. An index-based guard compares a position in the
-            // old pool against whatever track now sits at that position in the new one.
-            AudioClip[] poolA = MakeClips(4);
-            AudioClip[] poolB = { MakeClips(1)[0], poolA[2], MakeClips(1)[0], MakeClips(1)[0] };
-
-            for (uint salt = 1; salt <= AMBIENCE_SWEEP_STEPS; salt++)
-            {
-                int carried = AmbienceResolution.PickTrackIndex(poolB, poolA[2], AmbienceResolution.ScheduleHash(salt));
-                if (poolB[carried] == poolA[2])
-                    return FailSound(scenario,
-                        "repeated the previous track after the pool changed — the guard compares positions, not clips.");
-            }
 
             return true;
         }

@@ -6,8 +6,8 @@ using UnityEngine;
 namespace Editor.Libraries
 {
     /// <summary>
-    /// Draws an authored ambience track list (<see cref="AmbienceTrack"/>) and its music pool, with in-place
-    /// auditioning and a live read-out of what the runtime would actually pick.
+    /// Draws an authored ambience track list (<see cref="AmbienceTrack"/>) and a biome's music tracks, with
+    /// in-place auditioning and a live read-out of what the runtime would actually pick.
     /// </summary>
     /// <remarks>
     /// Shared rather than owned by one window because two surfaces answer different questions about the same
@@ -35,10 +35,10 @@ namespace Editor.Libraries
         /// Draws the full ambience block for one biome: its tracks, the roll preview, and its music pool.
         /// </summary>
         /// <param name="tracks">The <c>ambientTracks</c> array property. Null draws nothing.</param>
-        /// <param name="musicPool">The <c>musicPool</c> array property, or null to omit that section.</param>
+        /// <param name="musicTracks">The <c>musicTracks</c> array property, or null to omit that section.</param>
         /// <param name="previewY">The altitude the roll preview reports at; updated in place.</param>
         /// <param name="fallbackNote">Shown when no track is authored, naming what the runtime falls back to.</param>
-        public static void DrawBiomeAudio(SerializedProperty tracks, SerializedProperty musicPool,
+        public static void DrawBiomeAudio(SerializedProperty tracks, SerializedProperty musicTracks,
             ref int previewY, string fallbackNote)
         {
             if (tracks == null) return;
@@ -56,16 +56,87 @@ namespace Editor.Libraries
             else
                 DrawRollPreview(tracks, ref previewY);
 
-            if (musicPool == null) return;
+            if (musicTracks == null) return;
 
             EditorGUILayout.Space();
-            EditorUILayoutHelper.SubHeader("Music Pool");
+            EditorUILayoutHelper.SubHeader("Biome Music");
             EditorUILayoutHelper.SectionNote(
-                "Tracks eligible while the listener is in this biome. Empty falls back to the " +
-                "<b>AmbienceDatabase</b>'s global pool. The scheduler re-resolves the pool at every pick, so a " +
-                "change here influences the <i>next</i> track and never interrupts the current one.");
+                "Tracks offered <b>alongside</b> the <b>AmbienceDatabase</b>'s global pool while the listener " +
+                "is in this biome — not instead of it. How often a pick prefers these is the database's " +
+                "<b>Biome Music Share</b>; the weights below only decide which of <i>these</i> wins once that " +
+                "roll has chosen this pool. The scheduler re-resolves at every pick, so a change here " +
+                "influences the <i>next</i> track and never interrupts the current one.");
 
-            DrawClipArray(musicPool);
+            DrawMusicTrackList(musicTracks);
+        }
+
+        /// <summary>
+        /// Draws an authored <see cref="MusicTrack"/> list: clip, relative weight and content trim per row.
+        /// </summary>
+        /// <param name="tracks">The <c>musicTracks</c> / <c>_globalMusicTracks</c> array property.</param>
+        /// <remarks>
+        /// Shared by the global pool and every biome pool, because the two are the same shape and are rolled
+        /// by the same weighted walk — only which pool a pick reaches for differs.
+        /// </remarks>
+        public static void DrawMusicTrackList(SerializedProperty tracks)
+        {
+            if (tracks == null) return;
+
+            for (int i = 0; i < tracks.arraySize; i++)
+            {
+                SerializedProperty element = tracks.GetArrayElementAtIndex(i);
+                SerializedProperty clip = element.FindPropertyRelative("clip");
+                SerializedProperty weight = element.FindPropertyRelative("weight");
+                SerializedProperty volume = element.FindPropertyRelative("volume");
+                if (clip == null) continue;
+
+                EditorUILayoutHelper.BeginGroup();
+
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.PropertyField(clip, new GUIContent($"Track {i}",
+                    "The track this entry plays. An entry with no clip is skipped entirely."));
+
+                EditorGUIHelper.PlayStopButton(clip.objectReferenceValue as AudioClip,
+                    "Audition this track.", PLAY_BUTTON_WIDTH);
+
+                bool remove = GUILayout.Button(new GUIContent("✕", "Remove this track."),
+                    GUILayout.Width(REMOVE_BUTTON_WIDTH));
+
+                EditorGUILayout.EndHorizontal();
+
+                if (weight != null)
+                    EditorGUILayout.PropertyField(weight, new GUIContent("Weight",
+                        "Share relative to the other tracks in THIS pool. A 0.25 beside a 1.0 is heard " +
+                        "roughly one pick in five. All-zero weights fall back to an even pick."));
+
+                if (volume != null)
+                    EditorGUILayout.PropertyField(volume, new GUIContent("Volume",
+                        "Content trim for this track, multiplied into the music gain. 0 means unset and " +
+                        "plays at full level — the Sound Editor's Loudness tab writes this field."));
+
+                EditorUILayoutHelper.EndGroup();
+
+                if (!remove) continue;
+
+                tracks.DeleteArrayElementAtIndex(i);
+                return;
+            }
+
+            if (!GUILayout.Button(new GUIContent("+ Add Track",
+                    "Append a track at full weight and unset volume."))) return;
+
+            int index = tracks.arraySize;
+            tracks.InsertArrayElementAtIndex(index);
+
+            SerializedProperty added = tracks.GetArrayElementAtIndex(index);
+            SerializedProperty addedClip = added.FindPropertyRelative("clip");
+            SerializedProperty addedWeight = added.FindPropertyRelative("weight");
+            SerializedProperty addedVolume = added.FindPropertyRelative("volume");
+
+            // Inserting copies the previous element, which would silently duplicate a track.
+            if (addedClip != null) addedClip.objectReferenceValue = null;
+            if (addedWeight != null) addedWeight.floatValue = 1f;
+            if (addedVolume != null) addedVolume.floatValue = 1f;
         }
 
         /// <summary>
@@ -278,41 +349,6 @@ namespace Editor.Libraries
             }
 
             return authored;
-        }
-
-        /// <summary>
-        /// Draws an <see cref="AudioClip"/> array with per-entry auditioning.
-        /// </summary>
-        /// <param name="clips">The array property to draw.</param>
-        public static void DrawClipArray(SerializedProperty clips)
-        {
-            if (clips == null) return;
-
-            for (int i = 0; i < clips.arraySize; i++)
-            {
-                SerializedProperty element = clips.GetArrayElementAtIndex(i);
-
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(element, new GUIContent($"Track {i}"));
-
-                EditorGUIHelper.PlayStopButton(element.objectReferenceValue as AudioClip,
-                    "Audition this clip.", PLAY_BUTTON_WIDTH);
-
-                bool remove = GUILayout.Button(new GUIContent("✕", "Remove this entry."),
-                    GUILayout.Width(REMOVE_BUTTON_WIDTH));
-                EditorGUILayout.EndHorizontal();
-
-                if (!remove) continue;
-
-                clips.DeleteArrayElementAtIndex(i);
-                return;
-            }
-
-            if (!GUILayout.Button(new GUIContent("+ Add Clip", "Append an empty slot to the pool."))) return;
-
-            clips.InsertArrayElementAtIndex(clips.arraySize);
-            SerializedProperty added = clips.GetArrayElementAtIndex(clips.arraySize - 1);
-            added.objectReferenceValue = null;
         }
     }
 }
