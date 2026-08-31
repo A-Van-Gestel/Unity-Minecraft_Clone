@@ -246,6 +246,18 @@ namespace Audio
             _mixDirections = new Vector2[BED_VOICE_COUNT];
             _bedBearings = new Vector2[BED_VOICE_COUNT];
 
+            // Both counters are seeded randomly rather than started at zero. ScheduleHash and TrackHash are
+            // pure functions of them, so a fixed start made every session hold the same bed track for the
+            // same stretches and go quiet at the same moments — a repetition the ear finds long before it
+            // finds the reason.
+            //
+            // Deliberately NOT UnityEngine.Random: World seeds that global stream with the world seed and
+            // generation draws from it, and Awake ordering between us and World is undefined — taking values
+            // from it here would make a seeded world generate differently depending on component order.
+            uint seed = unchecked((uint)System.Guid.NewGuid().GetHashCode());
+            _restCounter = seed;
+            _rollSalt = seed;
+
             // Seeded with a full audible stretch rather than zero, or the cycle would flip to resting on its
             // very first tick and the world would open in silence.
             _restRemaining = AmbienceResolution.NextGapSeconds(
