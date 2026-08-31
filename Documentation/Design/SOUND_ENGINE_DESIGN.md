@@ -1,6 +1,6 @@
 # Sound Engine Design
 
-**Version:** 1.17  
+**Version:** 1.18  
 **Date:** 2026-08-31  
 **Status:** **Partially implemented — S0–S3, S5–S8, S10 and S11 shipped; all confirmed in game except S8
 and S10, which are awaiting their listening pass.** The `SoundMaterial`
@@ -1120,7 +1120,8 @@ Measured role medians at filing (143 comparable clips of 199; the remainder are 
 1. **A new serialized float defaults to 0, not 1.** Answered twice over: `EffectiveVolume` reads 0 as
    *unset* — the same defensive shape `EmitterSoundEntry.audibleRadius` uses — **and** the shipped assets
    were migrated to carry `volume: 1` explicitly, so the Loudness tab shows an authored number rather than
-   an inferred one. The migration is **7 tracks across 6 Standard biome assets**, not the 10 assets this
+   an inferred one. ⛔ **The first of those two answers was removed on 2026-08-31 — see §17.** The migration
+   below is what made it redundant. The migration is **7 tracks across 6 Standard biome assets**, not the 10 assets this
    section estimated while scoping: the 4 Legacy biomes carry `ambientTracks: []`.
 2. **A clip can be governed by several entries.** `Wind_Calm` is the database fallback bed *and* Desert's
    *and* Mountain's track. The tab's claim map accumulated per clip instead of last-writer-wins, and the
@@ -1356,10 +1357,14 @@ most exposed material was the one entering and leaving hardest.
   reports the queued track and the live fade position.
 - **`PauseMenuController` fades `AudioListener.volume`** over 0.4 s before saving and leaving the world.
   Every layer owns its own fade, but none of them survives the scene teardown, so the only lever that can
-  carry all of them off together is the one above them all. Restored to full afterwards —
-  `AudioListener.volume` is global state that outlives the scene, and leaving it down would open the main
-  menu, and every world entered from it, in silence.
-- **Four suite baselines** (76 total): the composed gain now asserts the fade term *and* that it is the only
+  carry all of them off together is the one above them all. **Raising it again belongs to the next scene**,
+  not to the coroutine: `AudioSettingsController.Start` sets it, in both scenes. Restoring it inline —
+  which is how this shipped — put every still-live source back to full for the remainder of the frame, the
+  cut the fade exists to remove, only later; and it left the value at whatever the last quit set while
+  domain reload is disabled, so a quit to desktop could open the next editor session silent.
+  Escape is ignored while the fade runs (`PauseMenuController.IsQuitting`), because the coroutine outlives
+  the pause panel and would otherwise hand back a world that is already saving.
+- **Four suite baselines** (78 total): the composed gain now asserts the fade term *and* that it is the only
   curved one, plus the curve's decibel spacing and exact zero, the tail ramp, and the short-clip clamp.
 
 ### Why the two least interesting-looking assertions are the load-bearing ones
@@ -1519,8 +1524,97 @@ needs a per-event trim and a loudness model that understands it. Landing volume 
 fall distance — no fall-distance signal is read anywhere today.
 
 
+---
+
+## 17. Review pass ✅ *shipped and confirmed in game 2026-08-31*
+
+A `/code-review` over the unpushed branch returned five findings. Four were real and are fixed here; the
+fifth was not a defect and is recorded below so it is not re-raised.
+
+**Confirmed in game 2026-08-31**, on the four checks the suite cannot make: quitting to the main menu leaves
+it audible, re-entering a world is audible, quitting to desktop in the editor and pressing Play again is
+audible — the domain-reload leak — and Escape during the fade no longer resumes the world.
+
+### The unset-sentinel rule is gone: zero is silent
+
+Five properties read a zero trim as *full level* — `AmbienceDatabase.CaveLoopVolume`, `DefaultLoopVolume`
+and `MusicVolume`, plus `AmbienceTrack.EffectiveVolume` and `MusicTrack.EffectiveVolume` — with two further
+copies of the same test in the Loudness tab and a third in `MusicScheduler.QueueTrack`.
+
+The defect this caused is small and exact: **`Music Volume` and `Bed Volume` are adjacent `[Range(0,1)]`
+sliders in the same window, and dragging one to zero silenced the beds while dragging the other played music
+at full.** `MusicVolume`'s own docstring claimed parity with `BedVolume`, which never had the sentinel.
+
+It was removed everywhere rather than made consistent the other way, because the migration it defended is
+finished: **no authored track anywhere holds `volume: 0`** — every one is exactly 1 — and both list drawers
+write `1f` on insert (`AmbienceTrackListDrawer:148` and `:222`). The sentinel was defending nothing while
+making "silence this one clip" impossible to express.
+
+`QueueTrack` is the reason a partial fix would have been cosmetic: it re-applied the same zero-to-one
+inflation a second time, so a zero music trim would still have played at full with all five properties fixed.
+The two Loudness mirrors had to move in lockstep for the opposite reason — comparing a proposed trim against
+the *effective* value made writing `1` onto a zeroed field look like a no-op, which would have left a
+silenced clip unfixable from the tab that is supposed to fix trims.
+
+> ⚠️ **A struct cannot carry a default.** `AmbienceTrack` and `MusicTrack` are structs, so `volume` cannot be
+> initialized to 1 in the type, and an omitted trim now means **silent**. Authoring is covered by the two
+> drawers; the shipped assets are covered by the content census, which fails any track below
+> `MIN_SHIPPED_BED_VOLUME`. Code that builds a track by hand must state its trim — the suite fixtures now do.
+
+Pinned by a new baseline, **"Every Database Trim Passes Zero Through As Silence"**, which drives the private
+backing fields through `SerializedObject` and is the only gate that can fail: the shipped asset authors all
+four trims above zero, so removing the sentinels changed no observable behaviour today. The older
+`"An Unauthored Track Volume Plays At Full Level"` baseline asserted precisely the opposite and was rewritten
+into `"A Track Trim Passes Through, And Zero Is Silent"` — a baseline reversing its meaning is the honest
+record of a rule reversing.
+
+### Quitting: the fade is no longer undone before the teardown it covers
+
+`FadeOutAndQuit` restored `AudioListener.volume` immediately after the save and *before* `LoadScene` /
+`Quit`, both of which defer to end of frame — so every still-live source snapped back to full for the
+remainder of that frame. Ownership moved to `AudioSettingsController.Start`, which runs in both scenes. That
+also closes a second hole: the value is engine state that survives play sessions while domain reload is
+disabled, so a quit-to-desktop left the next editor session at whatever volume the last quit ended on.
+
+Escape during the fade used to resume the world — the coroutine lives on `PauseMenuContainer`, not on the
+`PauseMenu` panel it deactivates, so closing the panel never stopped it, and the quit completed underneath a
+player who had asked to keep playing. `WorldUIManager` now skips its close branch while
+`PauseMenuController.IsQuitting`; a save is already in flight and letting it finish is the safe resolution.
+
+Neither has a suite gate — UI glue owns no suite — so both are in-game checks, and the listener one is the
+sharper of the two: a fix that moves a global's ownership fails as *total silence*, not as a blip. Both were
+run, including the play-session one, which is the check that would have caught the ownership move landing in
+a scene that lacks the controller.
+
+### `/music` no longer prints an unsampled context as a reading
+
+The `Light:` row gated only its first term on `HasContext` and then read `Context.Underground` / `Night`
+unguarded, printing `daylight (underground False, night False)` — indistinguishable from a real reading —
+before the first `SampleContext`. It now prints `not sampled yet`. Small, but this command exists to separate
+"the context says daylight" from "the authoring has no dark track", and a fabricated row answers neither.
+
+### Not a defect: `PlayerFootsteps.Awake`
+
+The review flagged `Awake` dereferencing `_body` without the null check `Update` carries. It is not a bug:
+the class is `[RequireComponent(typeof(VoxelRigidbody))]`, so the component is guaranteed present at `Awake`.
+The `Update` guard is not redundant either — it covers the *different* case of the rigidbody being destroyed
+after `Awake`, when `_body` becomes Unity-fake-null. The two guards cover two lifetimes. Left alone
+deliberately.
+
+
 ## Document History
 
+* **v1.18** - Review pass (2026-08-31). Four fixes off a `/code-review` of the unpushed branch, in §17. The
+  one worth remembering: five properties read a zero content trim as *full level*, so `Music Volume` and
+  `Bed Volume` — adjacent sliders in one window — did opposite things at 0. The sentinel was defending a
+  finished migration (no authored track holds 0; both drawers write 1 on insert) while making a deliberately
+  silenced clip inexpressible. Removing it from three of the five would have been cosmetic:
+  `MusicScheduler.QueueTrack` re-inflated 0 to 1 a second time. §12's trap 1 is left frozen with a pointer,
+  since the sentinel *was* the shipped answer then. Also: the quit fade no longer restores the listener
+  before the teardown it covers (ownership moved to `AudioSettingsController.Start`, which also fixes a
+  play-session leak under disabled domain reload), Escape can no longer resume a world that is already
+  quitting, and `/music` reports an unsampled context as unsampled. Suite 77 → 78. **All four confirmed in
+  game the same day.**
 * **v1.17** - S11 gait and jump footsteps (2026-08-31). Footfalls gained a gait and jump dimension: `Sprint`,
   `JumpStart` and `JumpLand` resolve against their own clip arrays and fall back to `stepClips`, so a pack
   shipping one walk family per material stays fully wired. Two findings are the ones to keep. `SoundManager`
@@ -1727,7 +1821,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-31 (S11 gait and jump footsteps shipped and confirmed in game)  
+**Last Updated:** 2026-08-31 (review pass shipped and confirmed in game: unset-trim sentinel removed, quit-fade ownership moved)  
 **Next Review:** when S2's music content or S7 (per-track ambience gain, §12) is scheduled. S2's runtime and its ambience beds are done and
 need no further design work — what remains is a music pool under §9. S3's runtime is done too: the fluid-presence flag it
 was waiting on is now `ChunkSection.emitterFluidCount`, and the scan reads a main-thread voxel snapshot rather than the
