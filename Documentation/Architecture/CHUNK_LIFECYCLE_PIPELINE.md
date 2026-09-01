@@ -766,7 +766,8 @@ If the chunk is not added to `_meshBuildQueue` (e.g., because `chunk.isActive` w
 > `RequestChunkMeshRebuild` and tallies `MeshRequestTotal` against the two drop buckets
 > `MeshRequestNullDrops` / `MeshRequestInactiveDrops`, warning once with the offending coord and reporting
 > the ratio in the `[MP-1]` diagnostics dump. It is `[Conditional("UNITY_EDITOR")]` +
-> `[Conditional("DEBUG")]`, so the machinery compiles out of release builds entirely.
+> `[Conditional("UNITY_INCLUDE_INSTRUMENTATION")]`, so the machinery compiles out of Release-variant
+> builds entirely.
 >
 > This **measures** the population race; it does not close it. A dropped request is still dropped — the
 > probe only means a session that suffers one leaves evidence instead of a silently missing mesh. The

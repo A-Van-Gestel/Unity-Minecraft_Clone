@@ -214,13 +214,11 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     public int MeshMergeAttempts { get; private set; }
 
     /// <summary>MP-1/F1 probe: count a rebuild request left queued to retry against an in-flight mesh job (MP-3).</summary>
-    [Conditional("UNITY_EDITOR")]
-    [Conditional("DEBUG")]
+    [Conditional("UNITY_INCLUDE_INSTRUMENTATION")]
     private void CountMeshInFlightRetry() => MeshInFlightRetried++;
 
     /// <summary>MP-1/F1 denominator probe: count one <see cref="ScheduleMeshing"/> invocation.</summary>
-    [Conditional("UNITY_EDITOR")]
-    [Conditional("DEBUG")]
+    [Conditional("UNITY_INCLUDE_INSTRUMENTATION")]
     private void CountMeshScheduleAttempt() => MeshScheduleAttempts++;
 
     /// <summary>MP-1 probe: count one completed-mesh merge attempt, flagging the gone-chunk discard and
@@ -230,8 +228,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <param name="key">The completed job's chunk coord.</param>
     /// <param name="chunk">The chunk resolved at merge time, or null when it left the chunk map.</param>
     /// <param name="targetEpoch">The <see cref="MeshingJobData.TargetEpoch"/> captured at schedule time.</param>
-    [Conditional("UNITY_EDITOR")]
-    [Conditional("DEBUG")]
+    [Conditional("UNITY_INCLUDE_INSTRUMENTATION")]
     private void CountMeshMerge(ChunkCoord key, Chunk chunk, int targetEpoch)
     {
         MeshMergeAttempts++;
@@ -263,15 +260,13 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// exactly like the counter that reads it — see <see cref="_meshJobTargets"/>.</summary>
     /// <param name="key">The chunk coord the job is keyed on.</param>
     /// <param name="target">The chunk data the job's inputs were filled from.</param>
-    [Conditional("UNITY_EDITOR")]
-    [Conditional("DEBUG")]
+    [Conditional("UNITY_INCLUDE_INSTRUMENTATION")]
     private void TrackMeshJobTarget(ChunkCoord key, ChunkData target) => _meshJobTargets[key] = target;
 
     /// <summary>MP-4 probe: drop a completed job's recorded target, keeping <see cref="_meshJobTargets"/> on
     /// exactly the lifetime of the <see cref="MeshJobs"/> entry it describes.</summary>
     /// <param name="key">The chunk coord whose job entry is being removed.</param>
-    [Conditional("UNITY_EDITOR")]
-    [Conditional("DEBUG")]
+    [Conditional("UNITY_INCLUDE_INSTRUMENTATION")]
     private void UntrackMeshJobTarget(ChunkCoord key) => _meshJobTargets.Remove(key);
 
     #endregion

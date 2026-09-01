@@ -452,7 +452,7 @@ namespace Data
         /// <param name="loadedData">The chunk data object loaded from disk.</param>
         public void PopulateFromSave(ChunkData loadedData)
         {
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
             if (World.Instance.settings.enableSaveSystemDiagnosticLogs)
                 Debug.Log($"[PopulateFromSave] Starting for chunk {Position}");
 #endif
@@ -504,7 +504,7 @@ namespace Data
 
             IsPopulated = true;
 
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
             if (World.Instance.settings.enableSaveSystemDiagnosticLogs)
                 Debug.Log($"[PopulateFromSave] Completed for chunk {Position}");
 #endif
@@ -889,7 +889,7 @@ namespace Data
         /// <param name="x">Local X to validate.</param>
         /// <param name="y">Local Y to validate.</param>
         /// <param name="z">Local Z to validate.</param>
-        [Conditional("UNITY_EDITOR"), Conditional("DEBUG")]
+        [Conditional("UNITY_ENABLE_CHECKS")]
         private void AssertLocalPositionInChunk(int x, int y, int z)
         {
             if ((uint)x >= VoxelData.ChunkWidth ||

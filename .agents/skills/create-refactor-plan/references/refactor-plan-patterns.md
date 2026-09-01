@@ -137,7 +137,7 @@ linear reading — probe for these patterns:
 
 Plus, doc-level:
 
-- **Probe phase** (first, 🟢): `[Conditional("UNITY_EDITOR")]`+`DEBUG` counters and
+- **Probe phase** (first, 🟢): `[Conditional("UNITY_INCLUDE_INSTRUMENTATION")]` counters and
   warn-once logs; results recorded as dated **Amended** lines in the doc; later phases cite them.
 - **Universal regression gate stated once** in §"Phased implementation plan" preamble.
 - **Effort marks** 🟢/🟡/🔴; a "minimal standalone-value set" line; extension roadmap for v2+.

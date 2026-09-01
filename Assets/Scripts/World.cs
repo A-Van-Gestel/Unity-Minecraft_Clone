@@ -1115,8 +1115,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     }
 
     /// <summary>Increments the CP-1 load-arm fault counter (dev/editor builds only; compiled out in release).</summary>
-    [Conditional("UNITY_EDITOR")]
-    [Conditional("DEBUG")]
+    [Conditional("UNITY_INCLUDE_INSTRUMENTATION")]
     private static void CountLoadFault() => Interlocked.Increment(ref s_loadArmFaults);
 
     /// <summary>
@@ -1125,8 +1124,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// scan walk; <see cref="FinalizeStuckLoadingScan"/> reconciles it against the previous scan.
     /// </summary>
     /// <param name="cd">The chunk being scanned.</param>
-    [Conditional("UNITY_EDITOR")]
-    [Conditional("DEBUG")]
+    [Conditional("UNITY_INCLUDE_INSTRUMENTATION")]
     private void TrackStuckLoadingChunk(ChunkData cd)
     {
         if (cd.IsLoading && !cd.IsPopulated)
@@ -1139,8 +1137,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// intersection count is reported via <see cref="StuckLoadingChunks"/>. The current set then becomes
     /// the previous for the next scan.
     /// </summary>
-    [Conditional("UNITY_EDITOR")]
-    [Conditional("DEBUG")]
+    [Conditional("UNITY_INCLUDE_INSTRUMENTATION")]
     private void FinalizeStuckLoadingScan()
     {
         int stuck = 0;
@@ -1159,8 +1156,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// disabled — the fail-safe lighting scan (its normal host) does not run in that config. Reuses
     /// <see cref="FULL_LIGHT_SCAN_SECONDS"/> cadence and the same per-chunk/finalize helpers.
     /// </summary>
-    [Conditional("UNITY_EDITOR")]
-    [Conditional("DEBUG")]
+    [Conditional("UNITY_INCLUDE_INSTRUMENTATION")]
     private void ScanStuckLoadingChunksUnlit()
     {
         _fullLightScanTimer += Time.deltaTime;
@@ -1187,8 +1183,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// population and would only be noise in the violation count.</item>
     /// </list>
     /// </summary>
-    [Conditional("UNITY_EDITOR")]
-    [Conditional("DEBUG")]
+    [Conditional("UNITY_INCLUDE_INSTRUMENTATION")]
     private void ScanSkylightQueuePairing()
     {
         // Bracketed inside this [Conditional] method so release builds pay nothing for a phase that would
@@ -1253,7 +1248,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     private async Awaitable LoadOrGenerateChunkInner(ChunkCoord chunkCoord)
     {
         Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
         bool logSaveDiagnostics = settings.enableSaveSystemDiagnosticLogs;
 #endif
 
@@ -1294,7 +1289,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
             if (loaded != null)
             {
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
                 if (logSaveDiagnostics)
                     Debug.Log($"[LoadOrGenerateChunk] Chunk {chunkCoord} loaded successfully, calling PopulateFromSave");
 #endif
@@ -1321,7 +1316,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 // Apply Pending Mods (Trees, etc. that spilled over)
                 if (ModManager.TryGetModsForChunk(chunkCoord, out List<VoxelMod> pendingMods))
                 {
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
                     if (logSaveDiagnostics)
                         Debug.Log($"[LoadOrGenerateChunk] Applying {pendingMods.Count} pending mods to chunk {chunkCoord}");
 #endif
@@ -1338,7 +1333,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 // Restore lighting queues
                 if (LightingStateManager.TryGetAndRemove(chunkCoord, out HashSet<Vector2Int> localCols))
                 {
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
                     if (logSaveDiagnostics)
                         Debug.Log($"[LoadOrGenerateChunk] Restoring {localCols.Count} lighting columns for chunk {chunkCoord}");
 #endif
@@ -1374,7 +1369,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 if (settings.enableLighting &&
                     LightingStateManager.TryGetAndRemovePendingBlocklight(chunkCoord, out Dictionary<Vector3Int, LightingStateManager.PendingBlocklightMod> pendingBlocklight))
                 {
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
                     if (logSaveDiagnostics)
                         Debug.Log($"[LoadOrGenerateChunk] Replaying {pendingBlocklight.Count} pending blocklight mods for chunk {chunkCoord}");
 #endif
@@ -1401,14 +1396,14 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 // Check for initial lighting needs
                 if (data.NeedsInitialLighting)
                 {
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
                     if (logSaveDiagnostics)
                         Debug.Log($"[LoadOrGenerateChunk] Chunk {chunkCoord} needs initial lighting. Checking neighbors...");
 #endif
 
                     if (AreNeighborsDataReady(chunkCoord))
                     {
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
                         if (logSaveDiagnostics)
                             Debug.Log($"[LoadOrGenerateChunk] Neighbors ready - triggering lighting for {chunkCoord}");
 #endif
@@ -1424,7 +1419,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                     }
                     else
                     {
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
                         if (logSaveDiagnostics)
                             Debug.Log($"[LoadOrGenerateChunk] Neighbors not ready - deferring lighting for {chunkCoord}");
 #endif
@@ -1448,7 +1443,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 return;
             }
 
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
             if (logSaveDiagnostics)
                 Debug.Log($"[LoadOrGenerateChunk] Chunk {chunkCoord} not on disk, scheduling generation");
 #endif
@@ -2088,8 +2083,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// up only as gradually worsening render jitter, which is easy to miss and hard to attribute. Editor/development
     /// builds only, and latched, so a genuine breach reports once instead of every frame.
     /// </summary>
-    [Conditional("UNITY_EDITOR")]
-    [Conditional("DEBUG")]
+    [Conditional("UNITY_ENABLE_CHECKS")]
     private void AssertPlayerNearOrigin()
     {
         if (_hasReportedUnboundedPlayer) return;
@@ -2519,7 +2513,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
         // 4. Schedule lighting jobs from the ready set (only chunks whose gates can plausibly pass —
         //    parked chunks re-enter via promotion events or the fail-safe scan; see LightWorkScheduler).
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
         // CP-1: the stuck-IsLoading detector normally rides the fail-safe lighting scan below, which is
         // gated on enableLighting. When lighting is disabled that scan never runs, so drive the detector's
         // own ~1s walk here instead (dev/editor only; single walk either way).
@@ -3032,7 +3026,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// <returns>True if all neighbors are fully generated and lit; otherwise, false.</returns>
     public bool AreNeighborsReadyAndLit(ChunkCoord chunkCoord)
     {
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
         _gateCallsReadyAndLit++; // LP-6 probe.
 #endif
 
@@ -3064,7 +3058,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// <returns>The assembled facts.</returns>
     private NeighborReadinessDecision.NeighborFacts GatherNeighborFacts(ChunkCoord neighborCoord)
     {
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
         _neighborFactsGathered++; // LP-6 probe.
 #endif
 
@@ -3097,7 +3091,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// <returns>True if all neighbors have at minimum completed their initial lighting pass and are populated.</returns>
     public bool AreNeighborsMeshReady(ChunkCoord chunkCoord)
     {
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
         _gateCallsMeshReady++; // LP-6 probe.
 #endif
 
@@ -3147,7 +3141,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// <returns>True if all valid neighbors are fully populated with voxel data.</returns>
     public bool AreNeighborsDataReady(ChunkCoord coord)
     {
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
         _gateCallsDataReady++; // LP-6 probe.
 #endif
 
@@ -3365,7 +3359,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
     #region Benchmark / Test Substrate
 
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
     // Compiled only in the Editor and Development builds (the only contexts the benchmark/stress harnesses run in),
     // so this generation-pipeline-bypassing surface never ships in a release player. See FluidTickBenchmark.
 
@@ -3446,8 +3440,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// <summary>MP-1/F8 probe: tally a mesh-rebuild request and, when it is a dropped one, its
     /// null/inactive bucket — warning once so pipeline-doc §9.5's silent-drop risk is observable.</summary>
     /// <param name="chunk">The requested chunk (may be null or inactive — the drop cases).</param>
-    [Conditional("UNITY_EDITOR")]
-    [Conditional("DEBUG")]
+    [Conditional("UNITY_INCLUDE_INSTRUMENTATION")]
     private void CountMeshRequest([CanBeNull] Chunk chunk)
     {
         MeshRequestTotal++;

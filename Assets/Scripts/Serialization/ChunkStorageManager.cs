@@ -31,7 +31,7 @@ namespace Serialization
         /// <summary>Cumulative count of save attempts (initial or retry) that failed to reach disk (CP-1 probe; CP-6 routes each failure into the retry registry).</summary>
         public static long SavesFailed => Interlocked.Read(ref s_savesFailed);
 
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
         // CP-6/CP-3 test seams: upcoming save write attempts that throw / serializations that return
         // 0 bytes / chunk load reads that throw (dev-only fault injection).
         private static int s_injectedSaveFaults;
@@ -67,7 +67,7 @@ namespace Serialization
         public static void InjectTooLargeSaves(int count) => Interlocked.Exchange(ref s_injectedTooLargeSaves, count);
 #endif
 
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
         /// <summary>Atomically consumes one armed injection from <paramref name="counter"/> — the single
         /// decrement-and-clamp core shared by every dev-only seam. Clamps the disarmed counter back to 0
         /// without racing a concurrent re-arm: only restores 0 if the value is still the negative this
@@ -86,7 +86,7 @@ namespace Serialization
         /// <summary>Throws when the dev-only save fault injection is armed (no-op in release builds).</summary>
         private static void ThrowIfInjectedSaveFault()
         {
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
             if (TryConsumeInjection(ref s_injectedSaveFaults))
                 throw new IOException("[CP-6 TEST] Injected save fault");
 #endif
@@ -96,7 +96,7 @@ namespace Serialization
         /// injection is armed (no-op in release builds).</summary>
         private static void ThrowIfInjectedTooLargeSave()
         {
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
             if (TryConsumeInjection(ref s_injectedTooLargeSaves))
                 throw new ChunkTooLargeException("[CP-3 TEST] Injected too-large save");
 #endif
@@ -105,7 +105,7 @@ namespace Serialization
         /// <summary>Throws when the dev-only load fault injection is armed (no-op in release builds).</summary>
         private static void ThrowIfInjectedLoadFault()
         {
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
             if (TryConsumeInjection(ref s_injectedLoadFaults))
                 throw new IOException("[CP-3 TEST] Injected load fault");
 #endif
@@ -119,7 +119,7 @@ namespace Serialization
         /// <returns>The payload length, or 0 when the injection seam is armed.</returns>
         private static int SerializeWithInjection(ChunkData source, byte[] buffer, CompressionAlgorithm algorithm)
         {
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
             if (TryConsumeInjection(ref s_injectedZeroLengthSerializes)) return 0;
 #endif
             return ChunkSerializer.Serialize(source, buffer, algorithm);
@@ -132,7 +132,7 @@ namespace Serialization
             s_savesFired = 0;
             s_savesCompleted = 0;
             s_savesFailed = 0;
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
             s_injectedSaveFaults = 0;
             s_injectedZeroLengthSerializes = 0;
             s_injectedLoadFaults = 0;
@@ -179,7 +179,7 @@ namespace Serialization
             // below never returns pre-edit bytes. Runs synchronously on the caller (main) thread.
             FlushPendingRetryFor(chunkVoxelPos);
 
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
             bool logSaveDiagnostics = World.Instance.settings.enableSaveSystemDiagnosticLogs;
 #endif
             // Run I/O on background thread
@@ -195,7 +195,7 @@ namespace Serialization
                 (byte[] data, CompressionAlgorithm algorithm) = region.LoadChunkData(lx, lz);
                 if (data == null)
                 {
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
                     if (logSaveDiagnostics)
                         Debug.Log($"[LoadChunkAsync] Chunk at voxelPos {chunkVoxelPos} not on disk -> Will be generated");
 #endif
@@ -397,7 +397,7 @@ namespace Serialization
             // open, then release what remains loudly.
             ReleaseRegistryOnDispose();
 
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
             Debug.Log($"[ChunkStorageManager] Disposing {_regions.Count} region files...");
 #endif
             foreach (Lazy<RegionFile> lazyRegion in _regions.Values)
@@ -410,7 +410,7 @@ namespace Serialization
             }
 
             _regions.Clear();
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
             Debug.Log("[ChunkStorageManager] All regions disposed.");
 #endif
         }

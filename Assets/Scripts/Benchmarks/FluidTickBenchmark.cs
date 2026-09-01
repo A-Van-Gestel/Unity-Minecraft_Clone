@@ -1,4 +1,4 @@
-#if DEBUG
+#if UNITY_INCLUDE_INSTRUMENTATION
 using System;
 using System.Collections;
 using System.Collections.Generic;

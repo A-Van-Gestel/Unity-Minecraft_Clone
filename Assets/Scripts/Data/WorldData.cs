@@ -262,7 +262,7 @@ namespace Data
         /// </summary>
         /// <param name="x">The world-position X.</param>
         /// <param name="z">The world-position Z.</param>
-        [Conditional("UNITY_EDITOR"), Conditional("DEBUG")]
+        [Conditional("UNITY_ENABLE_CHECKS")]
         private static void AssertWithinFloatPrecision(float x, float z)
         {
             const float MAX_EXACT_INT_FLOAT = 1 << 24;
