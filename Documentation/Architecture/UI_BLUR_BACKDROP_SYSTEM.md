@@ -22,7 +22,7 @@ reading the serialized scene and by rendered-pixel measurement through the valid
 
 **Relationship to other documents:**
 
-- [`../Guides/SHADER_CONVENTIONS.md`](../Guides/SHADER_CONVENTIONS.md) — the `#pragma target 3.5` floor
+- [`../Guides/SHADER_CONVENTIONS.md`](../Guides/SHADER_CONVENTIONS.md) — the `#pragma target 4.5` floor
   and interpolator-counting rule this shader follows.
 - [`RUNTIME_UI_FACTORY.md`](RUNTIME_UI_FACTORY.md) — the shared UI builder that owns the
   material-instance lifecycle described in §5 for code-built screens.
@@ -82,7 +82,7 @@ locally-declared `Get2DClipping` rather than an include of the Built-in pipeline
 `_ClipRect` is compared against the **untransformed vertex position**, which is the canvas-space
 coordinate the UI feeds in — it is deliberately not transformed to world space.
 
-Interpolators: 3, or 4 with clipping enabled. `#pragma target 3.5`, the project floor.
+Interpolators: 3, or 4 with clipping enabled. `#pragma target 4.5`, the project floor.
 
 ---
 

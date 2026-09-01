@@ -65,7 +65,7 @@ demonstrated by mutation rather than argued.
 - [`LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md)
   — parent backlog. This doc takes over the "sun flare" bullet of its RF-2 §6 and **corrects** that
   bullet's cost estimate (§2). RF-3's shipped bloom is the consumer SN-2 feeds.
-- [`../Guides/SHADER_CONVENTIONS.md`](../Guides/SHADER_CONVENTIONS.md) — `#pragma target 3.5` floor
+- [`../Guides/SHADER_CONVENTIONS.md`](../Guides/SHADER_CONVENTIONS.md) — `#pragma target` floor
   and the interpolator-counting rule. §6 records that no phase here adds a varying.
 
 ---

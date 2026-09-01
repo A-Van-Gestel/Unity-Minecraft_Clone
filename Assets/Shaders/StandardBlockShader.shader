@@ -24,7 +24,7 @@ Shader "Minecraft/Blocks"
             HLSLPROGRAM
             #pragma vertex vertFunction
             #pragma fragment fragFunction
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma multi_compile _ DEBUG_LIGHTDATA
 
             #include "Includes/VoxelCommon.hlsl"

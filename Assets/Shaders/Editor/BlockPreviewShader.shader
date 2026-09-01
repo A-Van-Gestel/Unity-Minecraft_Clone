@@ -31,7 +31,7 @@ Shader "Hidden/Editor/BlockPreview"
             HLSLPROGRAM
             #pragma vertex vertFunction
             #pragma fragment fragFunction
-            #pragma target 3.5
+            #pragma target 4.5
 
             #include "../Includes/VoxelCommon.hlsl"
             #include "../Includes/VoxelLighting.hlsl"

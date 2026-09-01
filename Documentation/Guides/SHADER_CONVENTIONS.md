@@ -22,55 +22,81 @@ hardware below the line. The correct value is the **lowest tier that covers what
 
 This inverts the instinct that serves you well for package versions, where "latest" is usually right.
 
-### 1.1 The project floor is 3.5
+### 1.1 The project floor is 4.5
 
 Per Unity 6.6's [HLSL pragma target reference](https://docs.unity3d.com/6000.6/Documentation/Manual/SL-Pragma-target.html),
 the `interpolators` requirement appears at exactly two tiers — **everything above 3.5 inherits 3.5's
-guarantee unchanged**:
+guarantee unchanged**. So the column that decides a tier is not "how many interpolators" but **what
+hardware it excludes**:
 
-| Target  | Interpolators  | Also requires                                     | OpenGL ES support |
-|---------|----------------|---------------------------------------------------|-------------------|
-| 2.0     | 8              | —                                                 | all platforms     |
-| 2.5     | 8              | `derivatives`                                     | —                 |
-| 3.0     | **10**         | `samplelod fragcoord`                             | ES 3.0+           |
-| **3.5** | **15**         | `mrt4 integers 2darray instancing`                | **ES 3+**         |
-| 4.0     | 15 (no gain)   | `geometry`                                        | ES 3.1            |
-| 4.5     | 15 (no gain)   | `compute randomwrite msaatex`                     | **ES 3.1**        |
-| 5.0     | 15 (no gain)   | `compute randomwrite msaatex tesshw tessellation` | **ES 3.1 + AEP**  |
+| Target  | Interpolators | Also requires                                     | DirectX   | Desktop OpenGL | OpenGL ES |
+|---------|---------------|---------------------------------------------------|-----------|----------------|-----------|
+| 2.0     | 8             | —                                                 | all       | all            | all       |
+| 2.5     | 8             | `derivatives`                                     | FL9+      | 3.2+           | —         |
+| 3.0     | **10**        | `samplelod fragcoord`                             | FL10+     | 3.2+           | 3.0+      |
+| 3.5     | **15**        | `mrt4 integers 2darray instancing`                | FL10+     | 3.2+           | 3+        |
+| 4.0     | 15 (no gain)  | `geometry`                                        | FL10+     | 3.x            | 3.1       |
+| `gl4.1` | 15 (no gain)  | `cubearray tesshw tessellation msaatex`           | —         | 4.1            | —         |
+| **4.5** | 15 (no gain)  | `compute randomwrite msaatex`                     | **FL11+** | **4.3+**       | **3.1**   |
+| 4.6     | 15 (no gain)  | `cubearray tesshw tessellation msaatex`           | FL11+     | 4.1+           | 3.1 + AEP |
+| 5.0     | 15 (no gain)  | `compute randomwrite msaatex tesshw tessellation` | FL11+     | 4.3+           | 3.1 + AEP |
 
-**Declare `#pragma target 3.5` unless you have a specific, stated reason not to.** It is the tier that
-lifts the interpolator guarantee to 15, and its platform support list is **identical to 3.0's** — DX11
-feature level 10+, OpenGL 3.2+, OpenGL ES 3+, Vulkan, Metal. Adopting it costs no reach whatsoever.
+**Declare `#pragma target 4.5`.** As of 2026-09-01 all **12** project-owned shaders do — a new shader
+that departs from it should say why in a comment at the pragma.
 
 Omitting the directive is not neutral: Unity defaults to **2.5**, which guarantees only 8 interpolators.
 Declare it explicitly.
 
-As of 2026-08-14 **every project-owned shader declares 3.5** — a new shader that departs from it should
-say why in a comment at the pragma.
+**What the 4.5 floor costs, stated plainly.** It buys this project **nothing today**: no interpolators
+over 3.5 (§1.2), and no shader here uses `compute`, `randomwrite` or `msaatex`. What it does is raise the
+hardware floor from DX11 **feature level 10+** to **11+**, and desktop OpenGL from **3.2+** to **4.3+** —
+dropping the SubShader on GPUs Unity 6.6 still supports for Windows players ("DX10, DX11, DX12 or Vulkan
+capable GPUs") and on the Linux `OpenGLCore` path. It was adopted as one deliberate project-wide decision
+(§1.2), **not** derived from what the shaders use — so do not cite the floor as evidence that a shader
+needs those features.
 
-### 1.2 Do not raise above 3.5 for interpolators — it does not help
+### 1.2 Do not raise above 4.5 — no tier grants more interpolators
 
-4.5 and 5.0 grant **zero** additional interpolators over 3.5. Unity deliberately excludes `interpolators32`
-from its 5.0 definition "for broader compatibility" — if you genuinely need more than 15, the directive is
-`#pragma require interpolators32`, not a higher target.
+4.5, 4.6 and 5.0 all grant **zero** additional interpolators over 3.5. Unity deliberately excludes
+`interpolators32` from its 5.0 definition "for broader compatibility" — if you genuinely need more than 15,
+the directive is `#pragma require interpolators32`, not a higher target.
 
-Both also require OpenGL ES **3.1**, which contradicts this project's own Player Settings:
-
-- `openGLRequireES31: 0` and `openGLRequireES31AEP: 0`
-- Android `m_BuildTargetGraphicsAPIs` = **Vulkan** with **OpenGLES3 as the fallback**
-
-5.0 goes further, demanding ES 3.1 **+ AEP** (the Android Extension Pack — an extension bundle many ES 3.1
-devices never shipped) plus `tesshw`/`tessellation` that a vertex+fragment pass never uses. Unity strips
-`geometry` and `tessellation` at compile time when the shader defines no such stage, but **`tesshw`,
-`compute`, `randomwrite` and `msaatex` are not stripped** — the shader would advertise needing compute and
+4.6 and 5.0 demand ES 3.1 **+ AEP** (the Android Extension Pack — an extension bundle many ES 3.1 devices
+never shipped) plus `tesshw`/`tessellation` that a vertex+fragment pass never uses. Unity strips `geometry`
+and `tessellation` at compile time when the shader defines no such stage, but **`tesshw`, `compute`,
+`randomwrite` and `msaatex` are not stripped** — the shader would advertise needing compute and
 tessellation hardware in order to draw water.
 
-> **Unity 6.6 upgrade item.** Unity 6.6 drops OpenGL ES 3.0 support on Android; the minimum becomes ES 3.1.
-> At that point **4.5 becomes a coherent floor**, since its ES 3.1 requirement would match the platform
-> minimum rather than exceed it. It still buys no interpolators — the reason to take it would be
-> `compute`/`randomwrite` if a shader ever needs them. Treat it as **one deliberate project-wide decision**
-> (Player Settings `openGLRequireES31` + the Android API list + every shader's pragma moved together), not
-> something to arrive at one shader at a time.
+**Need a feature, not a tier.** When a shader genuinely requires a capability, name the capability instead
+of climbing tiers — `#pragma require` raises only that one requirement, where a target drags the DirectX
+feature level and desktop OpenGL version along with it:
+
+```hlsl
+#pragma require randomwrite   // UAV writes — not: #pragma target 5.0
+#pragma require compute       // structured buffers / atomics
+#pragma require msaatex       // Texture2DMS reads
+```
+
+> **Unity 6.6 upgrade item — EXECUTED 2026-09-01.** Unity 6.6 drops OpenGL ES 3.0 on Android (ES 1.0/1.1/
+> 2.0/3.0 are all unsupported; the player minimum is "OpenGL ES 3.1+, Vulkan"), so 4.5's ES 3.1 requirement
+> now matches the platform minimum rather than exceeding it. The floor was moved **3.5 → 4.5 across all 12
+> project-owned shaders in one commit**. The other two parts of the originally-planned change turned out to
+> carry **no behavioral weight**:
+>
+> - **`PlayerSettings.openGLRequireES31` is deprecated in 6.6** — *"OpenGL ES 3.1 is now the minimum
+>   supported version on Android. This setting has no effect."* The checkbox is gone from the Android
+>   Player Settings UI (only `Require ES3.1+AEP` and `Require ES3.2` remain), and the getter returns `true`
+>   regardless of the serialized value. `ProjectSettings.asset` carries `openGLRequireES31: 1` as a
+>   cosmetic marker only — **it is inert; do not cite it as evidence of anything.**
+> - **The Android graphics API list needed no change.** It is already `[Vulkan, OpenGLES3]` with
+>   `m_Automatic: 1`, and `OpenGLES3` is the only ES value in `GraphicsDeviceType` — there is no ES 3.1
+>   member. Unity 6.6: *"GLES3.1 is the minimum supported version when using OpenGLES3."*
+>
+> **Known cost, accepted.** The move was not driven by shader need — see §1.1. It trades DX11 FL10 and
+> desktop OpenGL 3.2–4.2 reach for nothing currently used, and **no gate available to this project can
+> detect that regression**: the dev machine is FL11+, so a clean local reimport proves only that FL11+
+> hardware is fine (cf. §1.3, where Unity likewise failed to enforce the interpolator cap on every platform
+> this project builds for). If a future build must reach FL10-era hardware, reverting is a one-line sweep.
 
 ### 1.3 Count your interpolators when adding a varying
 
@@ -110,7 +136,8 @@ does not.
 
 - `centroid` moves the sample to the centroid of the covered samples, always inside the primitive.
 - Both are **modifiers, not varyings** — they cost **zero** interpolators, so §1.3's budget is unaffected.
-- Both compile clean at `#pragma target 3.5` (verified on desktop D3D11, 2026-08-15; GLES3/Vulkan untested).
+- Both compile clean at the project floor (verified on desktop D3D11 at 3.5 on 2026-08-15, re-verified at
+  4.5 on 2026-09-01 — all 12 shaders reimported with zero shader messages; GLES3/Vulkan untested).
 
 **Audit as of 2026-08-15.** `VoxelV2F` marks `uv`, `color` **and** `lightData` centroid. Only `uv` is
 required by the table above; the other two are belt-and-braces at zero cost and are the configuration
@@ -133,6 +160,7 @@ primitive), so it lay latent for as long as the engine had no MSAA path.
 
 | Version | Date       | Changes                                                                                                                                                                             |
 |---------|------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1.3     | 2026-09-01 | **Moved the project floor 3.5 → 4.5** across all 12 project-owned shaders, executing the Unity 6.6 upgrade item filed in v1.0. Verified 6.6 drops OpenGL ES 3.0 on Android (player minimum is now "OpenGL ES 3.1+, Vulkan"), which removes the objection the item was waiting on. Two planned parts proved to be no-ops and were dropped: `openGLRequireES31` is **deprecated with no effect** in 6.6 (its getter returns `true` regardless, and the UI checkbox is gone), and the Android API list already reads `[Vulkan, OpenGLES3]` where `OpenGLES3` *is* ES 3.1+. Rebuilt §1.1's tier table around **DirectX feature level and desktop OpenGL version** — the columns the old table omitted, and the ones that actually price a tier — and recorded 4.5's accepted cost (DX11 FL10 and desktop GL 3.2–4.2 reach, for no capability currently used, with no gate able to detect the regression). Added the `#pragma require` escape hatch to §1.2 so a future compute/UAV need does not climb tiers. |
 | 1.2     | 2026-08-15 | **Corrected §1.4's trigger.** v1.1 stated the rule as "anything sampling a texture or driving lighting is not exempt", generalized from a single instance. A review-driven audit of the other shaders showed the real trigger is a **hard discontinuity across the primitive edge** — atlas UVs, packed bit fields, discriminators — while smooth ramps stay exempt whether or not they drive lighting. Added `nointerpolation` as the sibling modifier for flat/constant data and applied it to `LiquidCore.hlsl`'s `packedShoreMask`; recorded the per-shader audit so the next author does not re-derive it. |
 | 1.1     | 2026-08-15 | Added §1.4: shading inputs must be `centroid` now that `GS-4` made MSAA user-selectable. Written after 8x MSAA drew one-pixel wrong-block seams along every silhouette edge, worsening at low render scale; `uv`/`color`/`lightData` in `VoxelV2F` were marked centroid and the artifact went away. Costs no interpolators, so §1.3 is unaffected. |
 | 1.0     | 2026-08-14 | Initial guide: `#pragma target` floor of 3.5, why higher tiers do not help, the Unity 6.6 / 4.5 item, and the interpolator-counting rule. Extracted from `CODEBASE_IMPROVEMENTS.md` §1.4 after RF-3's liquid emissive read pushed `LiquidV2F` to 11 interpolators against a declared `target 3.0`. |

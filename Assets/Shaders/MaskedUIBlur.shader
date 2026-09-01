@@ -50,7 +50,7 @@ Shader "Custom/MaskedUIBlur"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
-            #pragma target 3.5
+            #pragma target 4.5
 
             // Enabled by RectMask2D and by Mask with "Show Mask Graphic" off, respectively.
             #pragma multi_compile_local __ UNITY_UI_CLIP_RECT
@@ -66,7 +66,7 @@ Shader "Custom/MaskedUIBlur"
             };
 
             // 3 interpolators, or 4 with clipping enabled — COLOR occupies a slot like a TEXCOORD
-            // (SHADER_CONVENTIONS.md 1.3). Well inside target 3.5's budget of 15.
+            // (SHADER_CONVENTIONS.md 1.3). Well inside the 15-interpolator budget.
             struct v2f
             {
                 float4 vertex : SV_POSITION;

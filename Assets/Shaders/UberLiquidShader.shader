@@ -65,7 +65,7 @@ Shader "Minecraft/UberLiquidShader"
             HLSLPROGRAM
             #pragma vertex vertFunction
             #pragma fragment fragFunction
-            #pragma target 3.5
+            #pragma target 4.5
             #pragma multi_compile _ _FLUID_QUALITY_LOW _FLUID_QUALITY_MED
             #pragma multi_compile _ _FLUID_REFRACTION_OFF
 
