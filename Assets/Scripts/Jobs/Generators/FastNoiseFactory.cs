@@ -1,5 +1,6 @@
 using Jobs.Data;
 using Libraries;
+using UnityEngine;
 
 namespace Jobs.Generators
 {
@@ -13,10 +14,23 @@ namespace Jobs.Generators
         /// Coordinate-pipeline precision applied to every instance this factory creates.
         /// Main-thread only. Defaults to <see cref="FastNoiseLite.CoordinatePrecision.Precise64"/>;
         /// <see cref="WorldJobManager"/> overrides it from the "Far Lands" world setting before
-        /// generator initialization (editor preview tools inherit the default).
+        /// generator initialization. Reset on every play-mode entry by <see cref="DomainReset"/>,
+        /// so editor preview tools always start from the default.
         /// </summary>
         public static FastNoiseLite.CoordinatePrecision GlobalCoordinatePrecision { get; set; }
             = FastNoiseLite.CoordinatePrecision.Precise64;
+
+        /// <summary>
+        /// Restores the default precision on play-mode entry.
+        /// The field initializer only runs on domain reload, which this project disables, so a
+        /// "Far Lands" session would otherwise leak Classic32 into the next run and into the
+        /// editor preview windows that read this property.
+        /// </summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void DomainReset()
+        {
+            GlobalCoordinatePrecision = FastNoiseLite.CoordinatePrecision.Precise64;
+        }
 
         /// <summary>
         /// Creates and configures a <see cref="FastNoiseLite"/> instance from a configuration struct.
