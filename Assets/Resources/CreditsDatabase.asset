@@ -30,24 +30,18 @@ MonoBehaviour:
     licenseType: 4
     customLicenseText: 
     url: https://github.com/RelativityMC/ScalableLux
-    usageDescription: Studied as a source of lighting optimization techniques - both
-      its TECHNICAL_DETAILS.md write-up and the implementation behind it - after
-      our own BFS flood-fill engine was already working.
+    usageDescription: Studied as a source of lighting optimization techniques - both its TECHNICAL_DETAILS.md write-up and the implementation behind it - after our own BFS flood-fill engine was already working.
     sourceFiles: []
     projectFiles: []
     version: 
-    notes: Our light engine was built independently, then measured against Starlight
-      to see which optimizations were worth adopting; the edge consistency check
-      and the max(1, opacity) attenuation formula came from it. The shared BFS flood-fill
-      core is convergence on the standard approach to voxel light propagation.
+    notes: Our light engine was built independently, then measured against Starlight to see which optimizations were worth adopting; the edge consistency check and the max(1, opacity) attenuation formula came from it. The shared BFS flood-fill core is convergence on the standard approach to voxel light propagation.
   - name: FastNoiseLite
     author: Auburn
     category: 0
     licenseType: 0
     customLicenseText: 
     url: https://github.com/Auburn/FastNoiseLite
-    usageDescription: Burst-compatible port of the v1.1 C# version used for high-performance
-      'Standard" terrain generation.
+    usageDescription: Burst-compatible port of the v1.1 C# version used for high-performance 'Standard" terrain generation.
     sourceFiles: []
     projectFiles:
     - Assets/Scripts/Libraries/FastNoiseLite.cs
@@ -82,8 +76,7 @@ MonoBehaviour:
     licenseType: 1
     customLicenseText: 
     url: https://github.com/ManlyMarco/FPSCounter
-    usageDescription: Implementation reference for the 'PerformanceMonitor' dual-hook
-      'Stopwatch' architecture and per-phase CPU timing methodology.
+    usageDescription: Implementation reference for the 'PerformanceMonitor' dual-hook 'Stopwatch' architecture and per-phase CPU timing methodology.
     sourceFiles: []
     projectFiles:
     - Assets/Scripts/PerformanceMonitor.cs
@@ -148,10 +141,7 @@ MonoBehaviour:
     - Assets/Editor/AtlasPacker/SourceTextures/014-oak_log_side.png
     - Assets/Textures/packed_texture_atlas.png
     version: 
-    notes: Offered by the author under GPL 2.0, GPL 3.0 or CC-BY-SA 3.0 (and later
-      versions of those). CC-BY-SA 3.0 is the one selected for this project - it
-      is the content licence of the three, so its share-alike attaches to the artwork
-      and the packed atlas rather than raising scope questions over the engine code.
+    notes: Offered by the author under GPL 2.0, GPL 3.0 or CC-BY-SA 3.0 (and later versions of those). CC-BY-SA 3.0 is the one selected for this project - it is the content licence of the three, so its share-alike attaches to the artwork and the packed atlas rather than raising scope questions over the engine code.
   - name: paramecij's tree trunks and stumps texture pack 1
     author: pare
     category: 1
@@ -172,8 +162,7 @@ MonoBehaviour:
     licenseType: 5
     customLicenseText: 
     url: https://opengameart.org/content/grass-2-0
-    usageDescription: Used for the grass blades block, packed into the block texture
-      atlas.
+    usageDescription: Used for the grass blades block, packed into the block texture atlas.
     sourceFiles: []
     projectFiles:
     - Assets/Editor/AtlasPacker/SourceTextures/255-grass_blades.png
@@ -186,9 +175,7 @@ MonoBehaviour:
     licenseType: 0
     customLicenseText: 
     url: https://github.com/TABmk/minecraft-blocks-render
-    usageDescription: Block Icons where originally generated using Minecraft Blocks
-      Render by TABmk. Now used as an implementation reference for the project's
-      own in-editor block icon renderer.
+    usageDescription: Block Icons where originally generated using Minecraft Blocks Render by TABmk. Now used as an implementation reference for the project's own in-editor block icon renderer.
     sourceFiles: []
     projectFiles: []
     version: 3
@@ -245,8 +232,7 @@ MonoBehaviour:
     licenseType: 9
     customLicenseText: 
     url: https://forum.unity3d.com/threads/simple-optimized-blur-shader.185327/#post-1267642
-    usageDescription: Implementation reference for own URP rendering pipeline compatible
-      Kawase UI Blur implementation.
+    usageDescription: Implementation reference for own URP rendering pipeline compatible Kawase UI Blur implementation.
     sourceFiles: []
     projectFiles:
     - Assets/Scripts/Rendering/UIBlurRendererFeature.cs
@@ -259,40 +245,31 @@ MonoBehaviour:
     licenseType: 9
     customLicenseText: 
     url: https://iquilezles.org/articles/warp/
-    usageDescription: Source of the domain warping technique used to distort 3D density
-      and cave noise coordinates, breaking up grid-aligned noise structure.
+    usageDescription: Source of the domain warping technique used to distort 3D density and cave noise coordinates, breaking up grid-aligned noise structure.
     sourceFiles: []
     projectFiles:
     - Assets/Scripts/Jobs/StandardChunkGenerationJob.cs
     version: 
-    notes: "Article (2002). Technique only \u2014 no code used. Applied as a single
-      DomainWarp() call per warp source rather than the article's recursive fbm(p
-      + fbm(p + fbm(p)))."
-  - name: 'GPU Gems 3, Chapter 1: Generating Complex Procedural Terrains Using the
-      GPU'
+    notes: "Article (2002). Technique only \u2014 no code used. Applied as a single DomainWarp() call per warp source rather than the article's recursive fbm(p + fbm(p + fbm(p)))."
+  - name: 'GPU Gems 3, Chapter 1: Generating Complex Procedural Terrains Using the GPU'
     author: Ryan Geiss (NVIDIA)
     category: 5
     licenseType: 9
     customLicenseText: 
     url: https://developer.nvidia.com/gpugems/gpugems3/part-i-geometry/chapter-1-generating-complex-procedural-terrains-using-gpu
-    usageDescription: "Source of the 3D density-function terrain model \u2014 positive
-      density is solid, negative is air, the zero-crossing is the surface \u2014
-      which replaced the 2D heightmap and enables overhangs, arches and caves."
+    usageDescription: "Source of the 3D density-function terrain model \u2014 positive density is solid, negative is air, the zero-crossing is the surface \u2014 which replaced the 2D heightmap and enables overhangs, arches and caves."
     sourceFiles: []
     projectFiles:
     - Assets/Scripts/Jobs/StandardChunkGenerationJob.cs
     version: 
-    notes: "Book chapter. Technique only \u2014 no code used. Evaluated in Burst
-      on the CPU rather than on the GPU, and restricted to the Dynamic Density Band
-      instead of the full volume."
+    notes: "Book chapter. Technique only \u2014 no code used. Evaluated in Burst on the CPU rather than on the GPU, and restricted to the Dynamic Density Band instead of the full volume."
   - name: Impact Sounds
     author: Kenney
     category: 6
     licenseType: 5
     customLicenseText: 
     url: https://kenney.nl/assets/impact-sounds
-    usageDescription: Block break, place and footstep one-shots, mapped to SoundMaterial
-      groups.
+    usageDescription: Block break, place and footstep one-shots, mapped to SoundMaterial groups.
     sourceFiles:
     - footstep_carpet
     - footstep_concrete
@@ -308,18 +285,14 @@ MonoBehaviour:
     projectFiles:
     - Assets/Audio/Blocks/kenney_impact/
     version: 1.0
-    notes: 55 of the pack's 130 clips, 5 variants per family, all actively referenced.
-      footstep_wood, impactGeneric_light, impactMining and impactSoft_heavy were
-      removed on 2026-08-31 once nothing referenced them; re-import from the pack
-      if a use appears. Crediting is not required by CC0.
+    notes: 55 of the pack's 130 clips, 5 variants per family, all actively referenced. footstep_wood, impactGeneric_light, impactMining and impactSoft_heavy were removed on 2026-08-31 once nothing referenced them; re-import from the pack if a use appears. Crediting is not required by CC0.
   - name: Essentials Series (Footsteps)
     author: NOX_SOUND
     category: 6
     licenseType: 5
     customLicenseText: 
     url: https://www.asoundeffect.com/sounddesigner/nox-sound/
-    usageDescription: Footstep, sprint and jump clips for every block sound material,
-      plus the break sounds for leaves, plants and liquids.
+    usageDescription: Footstep, sprint and jump clips for every block sound material, plus the break sounds for leaves, plants and liquids.
     sourceFiles:
     - Footsteps_DirtyGround_Walk
     - Footsteps_Walk_Grass_Mono
@@ -367,21 +340,14 @@ MonoBehaviour:
     projectFiles:
     - Assets/Audio/Blocks/nox_footsteps/
     version: 
-    notes: '361 of the pack''s clips, all actively referenced, converted from 24-bit/48kHz
-      WAV to OGG Vorbis. Mud_Walk was removed on 2026-08-31 - Dirt resolves to DirtyGround_Walk.
-      Walk_Grass_Mono ships 35 of 50 and Grass_Run 14 of 15: the rest were auditioned
-      out the same day as sounding like a leaf-strewn field rather than grass. The
-      excluded variants are listed in nox_footsteps/.curated, which convert_audio_pack.py
-      honours, so a re-import cannot recreate them. License stated in the pack''s
-      Essentials_Series_README.pdf: ''All these sounds are under CC0 license.'''
+    notes: '361 of the pack''s clips, all actively referenced, converted from 24-bit/48kHz WAV to OGG Vorbis. Mud_Walk was removed on 2026-08-31 - Dirt resolves to DirtyGround_Walk. Walk_Grass_Mono ships 35 of 50 and Grass_Run 14 of 15: the rest were auditioned out the same day as sounding like a leaf-strewn field rather than grass. The excluded variants are listed in nox_footsteps/.curated, which convert_audio_pack.py honours, so a re-import cannot recreate them. License stated in the pack''s Essentials_Series_README.pdf: ''All these sounds are under CC0 license.'''
   - name: Essentials Series (Nature)
     author: NOX_SOUND
     category: 6
     licenseType: 5
     customLicenseText: 
     url: https://www.asoundeffect.com/sounddesigner/nox-sound/
-    usageDescription: Biome ambience beds, the underground cave bed, and the S3 water
-      emitter loops.
+    usageDescription: Biome ambience beds, the underground cave bed, and the S3 water emitter loops.
     sourceFiles:
     - Ambiance_Cave_Dark_Loop_Stereo
     - Ambiance_Wind_Calm_Loop_Stereo
@@ -395,11 +361,7 @@ MonoBehaviour:
     - Assets/Audio/Ambience/nox_nature/
     - Assets/Audio/Emitters/nox_nature/
     version: 
-    notes: '8 of the pack''s 18 loops, converted from 24-bit/48kHz stereo WAV to
-      OGG Vorbis. The six beds stay stereo (2D sources); the two emitter loops are
-      downmixed to mono, because a stereo clip does not spatialize on the 3D source
-      an emitter plays from. Same Essentials Series README as the footsteps pack:
-      ''All these sounds are under CC0 license.'''
+    notes: '8 of the pack''s 18 loops, converted from 24-bit/48kHz stereo WAV to OGG Vorbis. The six beds stay stereo (2D sources); the two emitter loops are downmixed to mono, because a stereo clip does not spatialize on the 3D source an emitter plays from. Same Essentials Series README as the footsteps pack: ''All these sounds are under CC0 license.'''
   - name: Lava loop
     author: Audionautics
     category: 6
@@ -412,8 +374,7 @@ MonoBehaviour:
     projectFiles:
     - Assets/Audio/Emitters/audionautics_freesound/
     version: 
-    notes: 'Attribution required: "Lava loop.wav by Audionautics -- https://freesound.org/s/133901/
-      -- License: Attribution 3.0". Converted to mono OGG Vorbis.'
+    notes: 'Attribution required: "Lava loop.wav by Audionautics -- https://freesound.org/s/133901/ -- License: Attribution 3.0". Converted to mono OGG Vorbis.'
   - name: Lava Loop 4
     author: Fission9
     category: 6
@@ -426,15 +387,12 @@ MonoBehaviour:
     projectFiles:
     - Assets/Audio/Emitters/fission9_freesound/
     version: 
-    notes: CC0 per the download's own license.txt; crediting is not required. Converted
-      to mono OGG Vorbis.
+    notes: CC0 per the download's own license.txt; crediting is not required. Converted to mono OGG Vorbis.
   - name: Cozy Tunes
     author: Pizza Doggy
     category: 6
     licenseType: 10
-    customLicenseText: Pizza Doggy's Game Assets License (use in any game, commercial
-      or not; editing allowed; no reselling, redistributing or bundling the assets
-      on their own; attribution appreciated but not required)
+    customLicenseText: Pizza Doggy's Game Assets License (use in any game, commercial or not; editing allowed; no reselling, redistributing or bundling the assets on their own; attribution appreciated but not required)
     url: https://pizzadoggy.itch.io/cozy-tunes
     usageDescription: The background music pool.
     sourceFiles:
@@ -458,8 +416,4 @@ MonoBehaviour:
     projectFiles:
     - Assets/Audio/Music/pizzadoggy_cozy_tunes/
     version: 1.5.4
-    notes: 'The 17 tracks listed above, of the pack''s 18, imported as shipped OGG
-      Vorbis with no conversion. Stereo and streamed: music plays from a 2D source
-      where the stereo image is the point, and these are the longest clips in the
-      project. Attribution is not required by the licence; the entry exists because
-      the pack is not CC0 and its terms have to be recorded somewhere.'
+    notes: 'The 17 tracks listed above, of the pack''s 18, imported as shipped OGG Vorbis with no conversion. Stereo and streamed: music plays from a 2D source where the stereo image is the point, and these are the longest clips in the project. Attribution is not required by the licence; the entry exists because the pack is not CC0 and its terms have to be recorded somewhere.'

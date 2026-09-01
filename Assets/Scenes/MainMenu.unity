@@ -709,6 +709,8 @@ MonoBehaviour:
   m_FlexibleWidth: -1
   m_FlexibleHeight: 1
   m_LayoutPriority: 1
+  m_MaxWidth: -1
+  m_MaxHeight: -1
 --- !u!114 &351743553
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -888,6 +890,8 @@ MonoBehaviour:
   m_FlexibleWidth: -1
   m_FlexibleHeight: 0
   m_LayoutPriority: 1
+  m_MaxWidth: -1
+  m_MaxHeight: -1
 --- !u!114 &394331282
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1138,6 +1142,8 @@ MonoBehaviour:
   m_FlexibleWidth: -1
   m_FlexibleHeight: 0
   m_LayoutPriority: 1
+  m_MaxWidth: -1
+  m_MaxHeight: -1
 --- !u!114 &470716694
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1673,6 +1679,8 @@ MonoBehaviour:
   m_FlexibleWidth: -1
   m_FlexibleHeight: 1
   m_LayoutPriority: 1
+  m_MaxWidth: -1
+  m_MaxHeight: -1
 --- !u!114 &1242583406
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1693,21 +1701,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "<b><size=120%>Libraries & Algorithms</size></b>\n\n  <link=\"https://github.com/Cysharp/NativeCompressions\"><u><b>NativeCompressions</b></u></link>
-    by Cysharp\n    License: MIT\n    Usage: High-performance native LZ4 bindings
-    for Chunk Serialization.\n    Version: 0.6.0\n\n  <link=\"https://github.com/RelativityMC/ScalableLux\"><u><b>Starlight
-    / ScalableLux</b></u></link> by RelativityMC\n    License: LGPL 3.0\n    Usage:
-    Reference implementation for the BFS flood-fill lighting propagation and optimization
-    details.\n\n  <b>FastNoiseLite</b> by Auburn\n    License: MIT\n    Usage: Burst-compatible
-    port of the v1.1 C# version used for high-performance 'Standard\" terrain generation.\n   
-    Version: 1.1\n    Notes: Burst port by Project Developer\n\n  <b>Perlin Noise</b>
-    by Unity Technologies\n    License: Proprietary\n    Usage: Used via 'Mathf.PerlinNoise'
-    for 'Legacy' world terrain generation.\n\n  <link=\"https://discussions.unity.com/t/how-to-generate-a-grid-from-the-center/171186/2\"><u><b>Spiral
-    Loop</b></u></link> by Unity Discussions\n    License: Not Applicable\n    Usage:
-    Math logic for chunk loading iteration in a Spiral Loop.\n\n  <link=\"https://github.com/ManlyMarco/FPSCounter\"><u><b>FPSCounter</b></u></link>
-    by ManlyMarco\n    License: Apache 2.0\n    Usage: Implementation reference for
-    the 'PerformanceMonitor' dual-hook 'Stopwatch' architecture and per-phase CPU
-    timing methodology."
+  m_text: "<b><size=120%>Libraries & Algorithms</size></b>\n\n  <link=\"https://github.com/Cysharp/NativeCompressions\"><u><b>NativeCompressions</b></u></link> by Cysharp\n    License: MIT\n    Usage: High-performance native LZ4 bindings for Chunk Serialization.\n    Version: 0.6.0\n\n  <link=\"https://github.com/RelativityMC/ScalableLux\"><u><b>Starlight / ScalableLux</b></u></link> by RelativityMC\n    License: LGPL 3.0\n    Usage: Reference implementation for the BFS flood-fill lighting propagation and optimization details.\n\n  <b>FastNoiseLite</b> by Auburn\n    License: MIT\n    Usage: Burst-compatible port of the v1.1 C# version used for high-performance 'Standard\" terrain generation.\n    Version: 1.1\n    Notes: Burst port by Project Developer\n\n  <b>Perlin Noise</b> by Unity Technologies\n    License: Proprietary\n    Usage: Used via 'Mathf.PerlinNoise' for 'Legacy' world terrain generation.\n\n  <link=\"https://discussions.unity.com/t/how-to-generate-a-grid-from-the-center/171186/2\"><u><b>Spiral Loop</b></u></link> by Unity Discussions\n    License: Not Applicable\n    Usage: Math logic for chunk loading iteration in a Spiral Loop.\n\n  <link=\"https://github.com/ManlyMarco/FPSCounter\"><u><b>FPSCounter</b></u></link> by ManlyMarco\n    License: Apache 2.0\n    Usage: Implementation reference for the 'PerformanceMonitor' dual-hook 'Stopwatch' architecture and per-phase CPU timing methodology."
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 0628f761daa7d3842bf7ac95b8b62674, type: 2}
   m_sharedMaterial: {fileID: 2190747550536846853, guid: 0628f761daa7d3842bf7ac95b8b62674, type: 2}
@@ -1757,7 +1751,7 @@ MonoBehaviour:
   m_linkedTextComponent: {fileID: 0}
   parentLinkedComponent: {fileID: 0}
   m_enableKerning: 1
-  m_ActiveFontFeatures: 6e72656b
+  m_ActiveFontFeatures: 6e72656bu
   m_enableExtraPadding: 0
   checkPaddingRequired: 0
   m_isRichText: 1
@@ -2041,7 +2035,7 @@ MonoBehaviour:
   m_linkedTextComponent: {fileID: 0}
   parentLinkedComponent: {fileID: 0}
   m_enableKerning: 1
-  m_ActiveFontFeatures: 6e72656b
+  m_ActiveFontFeatures: 6e72656bu
   m_enableExtraPadding: 0
   checkPaddingRequired: 0
   m_isRichText: 1
@@ -2178,7 +2172,7 @@ MonoBehaviour:
   m_linkedTextComponent: {fileID: 0}
   parentLinkedComponent: {fileID: 0}
   m_enableKerning: 1
-  m_ActiveFontFeatures: 6e72656b
+  m_ActiveFontFeatures: 6e72656bu
   m_enableExtraPadding: 0
   checkPaddingRequired: 0
   m_isRichText: 1
@@ -2661,6 +2655,8 @@ MonoBehaviour:
   m_FlexibleWidth: -1
   m_FlexibleHeight: -1
   m_LayoutPriority: 1
+  m_MaxWidth: -1
+  m_MaxHeight: -1
 --- !u!114 &1545912005
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2731,7 +2727,7 @@ MonoBehaviour:
   m_linkedTextComponent: {fileID: 0}
   parentLinkedComponent: {fileID: 0}
   m_enableKerning: 1
-  m_ActiveFontFeatures: 6e72656b
+  m_ActiveFontFeatures: 6e72656bu
   m_enableExtraPadding: 0
   checkPaddingRequired: 0
   m_isRichText: 1

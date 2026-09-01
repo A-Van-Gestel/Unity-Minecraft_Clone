@@ -24,7 +24,7 @@ MonoBehaviour:
       uv: {x: 1, y: 0.5}
     - position: {x: 1, y: 0, z: 0}
       uv: {x: 1, y: 0}
-    triangles: 000000000100000003000000030000000100000002000000
+    triangles: 000000000100000003000000030000000100000002000000i
   - direction: Front
     vertData:
     - position: {x: 0, y: 0, z: 1}
@@ -35,7 +35,7 @@ MonoBehaviour:
       uv: {x: 1, y: 0.5}
     - position: {x: 1, y: 0, z: 1}
       uv: {x: 1, y: 0}
-    triangles: 000000000300000001000000010000000300000002000000
+    triangles: 000000000300000001000000010000000300000002000000i
   - direction: Top
     vertData:
     - position: {x: 0, y: 0.5, z: 0}
@@ -46,7 +46,7 @@ MonoBehaviour:
       uv: {x: 1, y: 1}
     - position: {x: 1, y: 0.5, z: 0}
       uv: {x: 1, y: 0}
-    triangles: 000000000100000003000000030000000100000002000000
+    triangles: 000000000100000003000000030000000100000002000000i
   - direction: Bottom
     vertData:
     - position: {x: 0, y: 0, z: 0}
@@ -57,7 +57,7 @@ MonoBehaviour:
       uv: {x: 1, y: 1}
     - position: {x: 1, y: 0, z: 0}
       uv: {x: 1, y: 0}
-    triangles: 000000000300000001000000010000000300000002000000
+    triangles: 000000000300000001000000010000000300000002000000i
   - direction: Left
     vertData:
     - position: {x: 0, y: 0, z: 0}
@@ -68,7 +68,7 @@ MonoBehaviour:
       uv: {x: 1, y: 0.5}
     - position: {x: 0, y: 0, z: 1}
       uv: {x: 1, y: 0}
-    triangles: 000000000300000001000000010000000300000002000000
+    triangles: 000000000300000001000000010000000300000002000000i
   - direction: Right
     vertData:
     - position: {x: 1, y: 0, z: 0}
@@ -79,4 +79,4 @@ MonoBehaviour:
       uv: {x: 1, y: 0.5}
     - position: {x: 1, y: 0, z: 1}
       uv: {x: 1, y: 0}
-    triangles: 000000000100000003000000030000000100000002000000
+    triangles: 000000000100000003000000030000000100000002000000i

@@ -12575,15 +12575,15 @@ MonoBehaviour:
   m_FontFeatureTable:
     m_MultipleSubstitutionRecords: []
     m_LigatureSubstitutionRecords:
-    - m_ComponentGlyphIDs: 41000000d40000005d040000
+    - m_ComponentGlyphIDs: 41000000d40000005d040000u
       m_LigatureGlyphID: 1340
-    - m_ComponentGlyphIDs: c600000077040000
+    - m_ComponentGlyphIDs: c600000077040000u
       m_LigatureGlyphID: 202
-    - m_ComponentGlyphIDs: 3a00000077040000
+    - m_ComponentGlyphIDs: 3a00000077040000u
       m_LigatureGlyphID: 62
-    - m_ComponentGlyphIDs: 00050000cd000000
+    - m_ComponentGlyphIDs: 00050000cd000000u
       m_LigatureGlyphID: 207
-    - m_ComponentGlyphIDs: fa040000cd000000
+    - m_ComponentGlyphIDs: fa040000cd000000u
       m_LigatureGlyphID: 207
     m_GlyphPairAdjustmentRecords: []
     m_MarkToBaseAdjustmentRecords:
