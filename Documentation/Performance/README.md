@@ -154,22 +154,27 @@ This is a capture-comparability axis, not just a project setting. Measured on 60
 | Instrumented | Y / N | – / – | ✓ / ✓ | ✓ / ✓ |
 | **Release** (default) | **Y** / N | – / – | **–** / – | ✓ / – |
 
-> **⚠ Unresolved conflict — do not treat the `Release`+dev row as settled.** The table above is
-> measured from `CompilationPipeline.GetAssemblies(AssembliesType.Player)`. Unity's 6.6 manual
+> **✅ Resolved 2026-09-01 — the manual is wrong for 6000.6.0f1; the table above stands.** Unity's
+> 6.6 manual
 > ([`managed-code-variants.html`](https://docs.unity3d.com/6000.6/Documentation/Manual/managed-code-variants.html))
-> states that "for the time being the Development Build option still defines `UNITY_ASSERTIONS`
-> **and `UNITY_INCLUDE_INSTRUMENTATION`**". The measurement agrees on `UNITY_ASSERTIONS` but shows
-> `UNITY_INCLUDE_INSTRUMENTATION` **absent**. The API does model a dev overlay (it adds
-> `ENABLE_PROFILER` and `DEBUG`), so this is not simply the query ignoring the flag. **Only an
-> actual player build settles it.** Two IL2CPP builds were made on 2026-09-01 — production
-> (`Release` variant, non-development) and profiler (`Checked` variant, development) — and
-> **neither covers the disputed cell**, which is `Release` variant *with* Development Build. The
-> `Windows - Development` profile is exactly that combination, so one build from it would settle
-> this: check whether a gated literal such as `[PopulateFromSave] Starting for chunk ` appears in
-> its `global-metadata.dat` (method described under "Verifying gating in a built player" below).
-> Either way the manual
-> calls the overlay "subject to change" and says to set the variant explicitly, so the guidance
-> below is unaffected: state the variant, and set `Checked` for captures.
+> claims that "for the time being the Development Build option still defines `UNITY_ASSERTIONS`
+> **and `UNITY_INCLUDE_INSTRUMENTATION`**". Settled by building the disputed cell — a Development
+> Build at the `Release` variant (`Windows - Development` profile) — and probing its
+> `global-metadata.dat` against production and profiler builds:
+>
+> | probe | PROD (Release, non-dev) | **DEV (Release, dev)** | PROFILE (Checked, dev) |
+> |---|---|---|---|
+> | ungated control ×2 | YES | **YES** | YES |
+> | `UNITY_INCLUDE_INSTRUMENTATION` content ×4 | no | **no** | YES |
+> | `UNITY_ENABLE_CHECKS` content ×2 | no | **no** | YES |
+>
+> The DEV build is genuinely a Development Build — its `boot.config` carries the
+> `player-connection-mode=Listen` block that PROD lacks entirely — and the ungated controls are
+> present in all three, so the negatives are real rather than a broken search. **A Development
+> Build at the `Release` variant therefore carries neither symbol.** Do not rely on the Development
+> Build checkbox for instrumentation; set the variant. (`UNITY_ASSERTIONS` is still only
+> API-measured as present at `Release`+dev — our three `Debug.Assert` calls are `#if UNITY_EDITOR`,
+> so no build-level probe was available for that one symbol.)
 
 The manual also confirms the historical equivalence directly: **before 6.6, Development Build
 produced "the equivalent of the Checked managed code variant"** — which is why `Checked` is the
