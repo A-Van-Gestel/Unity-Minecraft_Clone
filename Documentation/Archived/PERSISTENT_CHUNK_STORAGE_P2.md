@@ -2,7 +2,7 @@
 
 **Version:** 1.2  
 **Date:** 2026-06-22  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > **Archived:** 2026-07-26.
 > **Reason — Layer 1 shipped; Layer 2 is shelved, not pending.** **Layer 1 (the worker-thread gather) is

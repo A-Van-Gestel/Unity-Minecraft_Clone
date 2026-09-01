@@ -3,7 +3,7 @@
 **Version:** 1.8  
 **Date:** 2026-07-20  
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > The backlog for making the **cloud layer feel alive** — slow shape evolution, a volumetric
 > quality tier, cloud shadows, and an infinite non-repeating pattern. Ranked internally

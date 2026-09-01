@@ -79,7 +79,7 @@ vd ≥ 8 and dominant from vd ≥ 15.** Per-phase status is in §7.
 > its own terms but ran the pre-FP-9b route; its numbers are **not** continued by FP-10, which reproduces the
 > curve's shape rather than extending its values.  
 
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > A telemetry layer that answers **one question the existing benchmark cannot**: when chunks appear
 > sluggishly during sustained high-speed flight, is the pipeline **admission-bound** (P-4 budgets and the

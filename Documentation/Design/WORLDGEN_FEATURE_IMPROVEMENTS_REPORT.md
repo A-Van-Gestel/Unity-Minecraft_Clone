@@ -6,7 +6,7 @@
 border) shipped 2026-07-13/17** and the combined ranked TF/RF roadmap lives at the end of this document.
 Several items here are *deliberately* seed-breaking — acceptable while the Standard world type is WIP;
 see §"Seed-stability note".  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > The master backlog for **terrain & world-generation features and design changes** in the
 > VoxelEngine — the feature-and-design counterpart to

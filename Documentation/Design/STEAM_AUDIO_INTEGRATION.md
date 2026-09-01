@@ -5,7 +5,7 @@
 **Status:** **Draft — far-horizon (sound engine v3+).** Not scheduled, and gated on the base sound
 engine (S0–S3) shipping first — which has not started. SDK specifics MUST be re-verified against the
 then-current Steam Audio release before any implementation work; see §8.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > **Draft** exploration of integrating Valve's **Steam Audio** SDK as the v3+ acoustics extension
 > of the sound engine: HRTF binaural spatialization, physically-based occlusion & transmission,

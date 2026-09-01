@@ -6,7 +6,7 @@
 in-game confirmed, and its rollback flags were retired in the 2026-07-23 cleanup, so the parallel Y-band halo
 tick is now the **only** tick path. Promoted from `Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md` 2026-07-26 and
 restructured to describe the system as built; the phase-by-phase execution record is preserved in **Appendix A**.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > How **active-voxel block behaviors** (fluids and grass) are stored, ticked, and drained in the voxel engine.
 > **The pivotal decision: the tick's read+emit half is fully Burst-compiled and parallel across chunks, while

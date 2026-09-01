@@ -6,7 +6,7 @@
 [`WORLD_SCALING_IMPLEMENTATION.md`](WORLD_SCALING_IMPLEMENTATION.md); §3.2's floor-div audit shipped as
 `WS-1`+`VQ-1`. This document remains the **"what breaks per tier"** reference, and Tiers A and C are
 still unbuilt.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > Architectural analysis of what it takes to scale the world beyond its current hard-coded bounds,
 > in three tiers of increasing ambition:

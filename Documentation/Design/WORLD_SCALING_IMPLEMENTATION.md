@@ -4,7 +4,7 @@
 **Date:** 2026-07-20  
 **Status:** **Tier B COMPLETE. WS-2 + WS-3 SHIPPED (2026-07-13) — XZ fully unbounded, both signs. WS-4a + WS-4b + WS-4c SHIPPED (2026-07-17/18, all in-game confirmed) — far travel is stable, saved player position chunk-relative (level.dat v13), `/teleport` live. The v2 noise rider is SHIPPED + IN-GAME CONFIRMED (2026-07-20, terrain normal even at the ±2³¹ integer-limit world border — FNL `Precise64` double coordinate pipeline behind the global "Far Lands" setting, default precise): generation is artifact-free to the world edge with the classic float
 pipeline preserved bit-identically as the opt-in Far Lands mode. The world-scaling track is fully closed. OQ-1..7 all resolved in code.**  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > The decided execution path for scaling the world horizontally. Analysis (`WORLD_SCALING_ANALYSIS.md`)
 > says *what breaks per tier*; this doc says *how we ship it*. **Single most important decision:

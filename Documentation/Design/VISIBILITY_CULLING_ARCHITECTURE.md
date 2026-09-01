@@ -5,7 +5,7 @@
 **Status:** **Proposed design — not implemented.** Phases 0 **and 0.5** are complete — the §7.3 renderer
 ownership split, the last hard prerequisite, shipped 2026-07-25 as MP-5 — but the culler itself
 (Phases 1–3: connectivity masks, BFS traversal, integration) is unbuilt.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > How to stop rendering sealed-off underground geometry that frustum culling cannot reject. **The
 > pivotal decision: cull by asking "can air flow from the camera to this section?" — a per-section

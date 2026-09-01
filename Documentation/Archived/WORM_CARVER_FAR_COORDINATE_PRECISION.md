@@ -26,7 +26,7 @@
 generate correctly with the fix to the ±2³¹ world border, Classic32 "Far Lands" path preserved).
 The §9 open questions were all resolved by the user before implementation; their answers are
 recorded inline in §9 and drove §5's verdict (Option A, Precise64-gated).  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > The v2 noise rider (shipped 2026-07-20) made `FastNoiseLite` exact to ±2³¹, but the worm
 > carver was deliberately deferred: **its worm positions are absolute-world `float3`s, so the

@@ -2,7 +2,7 @@
 
 **Version:** 1.1  
 **Date:** 2026-06-27  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > **Status: Implemented (2026-06-27); player-build verified + reference re-anchored (2026-06-28) —
 > stays in `Design/` pending its final calibration pass.** A

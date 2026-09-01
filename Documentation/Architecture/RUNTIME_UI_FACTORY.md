@@ -3,7 +3,7 @@
 **Version:** 2.0  
 **Date:** 2026-08-15  
 **Status:** **Implemented (Stable)** — RUF-1…RUF-3 all shipped and confirmed in game 2026-08-15.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > A shared factory for UI hierarchies this project builds **in code** rather than in a scene or prefab,
 > extracted from the benchmark HUD builder and reused by the command console. **The pivotal decision:

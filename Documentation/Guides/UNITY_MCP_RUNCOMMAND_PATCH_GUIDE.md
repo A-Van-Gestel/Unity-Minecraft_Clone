@@ -41,7 +41,7 @@ freshly emitted image (containing the user's `CommandScript`) is therefore never
 `GetType("...CommandScript")` returns null, and the tool reports "failed to start" with the emit
 diagnostics swallowed.
 
-The bug appeared with the Unity 6.5 upgrade (`63473df`) and hardened across editor patches
+The bug appeared with the Unity 6.6 upgrade (`63473df`) and hardened across editor patches
 (worked on 6000.5.0f1 as late as 2026-06-21, deterministic failure on 6000.5.2f1). It is a
 package↔editor incompatibility — **not** related to this project's builtin-package trimming, and
 **not** relay drift (`~/.unity/relay` matches the bundled 1.0.12-build.91).

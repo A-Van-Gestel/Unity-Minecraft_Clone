@@ -82,7 +82,7 @@ rejections below are on merit, not on install friction, except where noted.
 | **ZString**           | ❌ Rejected — already solved | Its Unity headline (zero-alloc TMP text) is already achieved by `StringBuilderFormat` + `TMP.SetText(StringBuilder)` (`DebugScreen.cs:316-350`). Its struct-builder/`ArrayPool` win is nil against long-lived `StringBuilder` fields. Residual idea → `TP-2`. |
 | **ZLinq**             | ❌ Rejected — rule is cheaper | Only 8 files import `System.Linq`, mostly editor/migration code where perf is irrelevant. The CLAUDE.md "no LINQ in hot paths" rule already covers the runtime. Residual idea → `TP-3`.                                                                        |
 | **NativeMemoryArray** | ❌ Rejected — wrong layer     | Explicitly managed-side only, so it cannot cross into `Assets/Scripts/Jobs/`; Unity.Collections 6.5 already provides Burst-native containers. The 2 GB `Array.MaxLength` ceiling it exists to break is not one we approach. Residual idea → `TP-1`.            |
-| **UniTask**           | ❌ Rejected — no fit          | Our async surface is genuine background-thread IO (`Task.Run`), where `UniTask.RunOnThreadPool` is just `Task.Run`. Its core value (replacing coroutines, awaiting `AsyncOperation`) does not apply — heavy work runs on Jobs. Unity 6.5 ships `Awaitable` for the rest. Residual idea → `TP-4`. |
+| **UniTask**           | ❌ Rejected — no fit          | Our async surface is genuine background-thread IO (`Task.Run`), where `UniTask.RunOnThreadPool` is just `Task.Run`. Its core value (replacing coroutines, awaiting `AsyncOperation`) does not apply — heavy work runs on Jobs. Unity 6.6 ships `Awaitable` for the rest. Residual idea → `TP-4`. |
 | **ZLogger**           | ❌ Rejected — breaks tooling  | Routes logs away from `UnityEngine.Debug.Log`. The entire diagnostic workflow depends on that sink: the `voxel-debugging` instrument-then-read loop, `Unity_ReadConsole`, and tailing `<project>/Logs/Editor.log`. Redirecting 317+ call sites would silently break all of it. Residual idea → `TP-7`. |
 | **R3**                | ❌ Rejected *for now*         | Only 5 classes hold events (`SettingsManager`, `CommandEngine`, `PerformanceMonitor`, `World`, `ChunkData`) — not a subscription-leak problem worth an Rx runtime. **Reconsider if** the settings/HUD binding layer grows past ~5 more bindings. Residual ideas → `TP-5`, `TP-6`. |
 | **Kokuban**           | ❌ Rejected — already solved  | Unity's console renders rich-text tags, not ANSI escapes, so it does nothing in-editor; the validation runner already colorizes its summary. Only `-batchmode` stdout is a real niche. Residual idea → `TP-8`.                                                |
@@ -150,7 +150,7 @@ unchanged so no call site moves.
 
 - ⚠️ **Verify availability first.** The project targets *.NET Framework* API Compatibility
   (CLAUDE.md); confirm `double.TryFormat(Span<char>, out int, ReadOnlySpan<char>, IFormatProvider)`
-  resolves under that profile in Unity 6.5 before committing to this approach. If it does not,
+  resolves under that profile in Unity 6.6 before committing to this approach. If it does not,
   the fallback is to keep the current arithmetic and simply document the rounding mode honestly in
   the docstring — the cheaper half of the fix, and worth doing regardless.
 - `MeasureFixedWidth` collapses into "format once, measure the written span, pad, append" — which

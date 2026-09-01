@@ -3,7 +3,7 @@
 **Version:** 1.3  
 **Date:** 2026-08-24  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > Open **non-performance** improvement items for the VoxelEngine codebase — API modernization and
 > dependency hygiene. Each finding lists affected files, a recommendation, and an **Impact Analysis**

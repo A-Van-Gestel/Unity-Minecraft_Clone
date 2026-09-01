@@ -3,7 +3,7 @@
 **Version:** 1.10  
 **Date:** 2026-08-15  
 **Status:** **Implemented (Stable)** — RF-2 phases 1 and 2, the `Distance Fog` setting, the richer sun/moon discs, and the Sky Editor are shipped and confirmed (2026-08-11, discs and tool 2026-08-12). Guarded by the `Validate Sky` suite (**15** baselines, model only) and `Validate Sky Render` (**11** baselines on rendered pixels) — see §7. Promoted from [`../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](../Design/LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md), whose RF-2 entry now carries only the deferred remainder.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > The procedural sky: a zenith/horizon gradient, a sun and moon on **real celestial arcs** driven by a
 > small C# simulation, a star field that rides the same celestial sphere, and distance fog that conceals

@@ -3,7 +3,7 @@
 **Version:** 1.6  
 **Date:** 2026-08-15  
 **Status:** **Implemented.** SN-0, SN-1 and **SN-4** shipped and confirmed in game 2026-08-15. **SN-2 was built, judged in game and reverted in full (§7.3)**, taking SN-3 with it — and **SN-4 (§7.4) delivers what SN-2 was for**, in the shader.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > Turning the sun from a flat disc into a body seen through air. **Three phases shipped** — an
 > **angular aureole** around the disc (SN-0), **per-channel extinction** so it reddens as it sets

@@ -3,7 +3,7 @@
 **Version:** 1.5  
 **Date:** 2026-07-20  
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production), URP 17.5
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production), URP 17.5
 
 > The backlog for **volumetric and ray-traced rendering effects** — volumetric fog/god rays,
 > volumetric water, colored light transmission through tinted voxels, voxel-traced GI and

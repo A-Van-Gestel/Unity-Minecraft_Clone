@@ -5,7 +5,7 @@
 **Status:** **Implemented (Stable)** — the producer (`UIBlurRendererFeature`) and the consumer shader
 (`Custom/MaskedUIBlur`) both ship. The consumer's UI contract was completed in `36b74204` (UI_BUGS #06)
 and is guarded by the `Validate UI Blur Render` suite (**5** baselines on rendered pixels) — see §7.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > Frosted-glass backdrops for UI panels: one Kawase blur of the screen per frame, published as the
 > global `_UIBlurTexture`, sampled by any UI `Image` whose material is `Custom/MaskedUIBlur`. **The

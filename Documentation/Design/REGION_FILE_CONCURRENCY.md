@@ -4,7 +4,7 @@
 **Date:** 2026-07-26  
 **Status:** **Proposed design — not implemented.** `RegionFile` still serializes *all* I/O behind one
 exclusive lock; none of the strategies below has been built.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > Why `RegionFile`'s single global lock is a load-path bottleneck, and the options for relaxing it
 > without risking save corruption. **The recommended direction (§Conclusion): split the read and write

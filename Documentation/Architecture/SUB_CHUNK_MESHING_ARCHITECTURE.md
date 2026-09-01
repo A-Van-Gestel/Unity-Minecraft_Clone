@@ -1,7 +1,7 @@
 # Sub-Chunk (Section) Meshing Architecture
 
 **Status:** Implemented (Active)  
-**Target Engine:** Unity 6.5 (Mono for dev; IL2CPP for production)  
+**Target Engine:** Unity 6.6 (Mono for dev; IL2CPP for production)  
 **Context:** The engine renders the world using 16x16x16 `ChunkSection` GameObjects instead of monolithic columns.  
 **Audited:** 2026-08-17, at commit `aad0527c` (branch `feat/world-scaling`). Verified in code, not assumed:
 `SectionRenderer.cs`, `Chunk.cs`, `WorldJobManager.cs` (`ScheduleMeshing` / `ProcessMeshJobs`),

@@ -8,7 +8,7 @@ row in the master summary table; their detail sections live in
 A **⏸️** row is analyzed but deliberately not implemented — its detail section **stays here** (it is not
 complete, so it is not archived) and carries a dated verdict block explaining what would change the
 decision.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > The single master backlog for **all open runtime performance improvements** in the VoxelEngine.
 > Every finding shows, at a glance: the affected system, implementation effort, regression risk,

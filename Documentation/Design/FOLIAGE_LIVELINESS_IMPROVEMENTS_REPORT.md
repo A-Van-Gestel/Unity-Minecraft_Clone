@@ -8,7 +8,7 @@ traveling-wave sway model** (v1.2), both 2026-07-19, **FL-4 per-voxel cross-mesh
 **FL-4b** per-block authoring follow-up (v1.3/v1.4, 2026-08-27), all verified in the running editor —
 FL-1/FL-2/FL-4 in-game, FL-4b's authoring path end-to-end through the BlockEditor. The "What exists
 today" table below is the substrate every remaining flora item (FL-8, FL-3, FL-5) builds on.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > The master backlog for making the **grass / foliage layer feel alive** in the VoxelEngine —
 > wind sway (vertex animation), per-voxel visual variation, flora variety, ambient and

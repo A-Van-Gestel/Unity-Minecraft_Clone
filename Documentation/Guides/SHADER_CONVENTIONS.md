@@ -24,7 +24,7 @@ This inverts the instinct that serves you well for package versions, where "late
 
 ### 1.1 The project floor is 3.5
 
-Per Unity 6.5's [HLSL pragma target reference](https://docs.unity3d.com/6000.5/Documentation/Manual/SL-Pragma-target.html),
+Per Unity 6.6's [HLSL pragma target reference](https://docs.unity3d.com/6000.6/Documentation/Manual/SL-Pragma-target.html),
 the `interpolators` requirement appears at exactly two tiers — **everything above 3.5 inherits 3.5's
 guarantee unchanged**:
 

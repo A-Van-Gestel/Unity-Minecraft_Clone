@@ -12,7 +12,7 @@ still true; the pipeline simply no longer operates against it at vd 32.
 ⚠️ **Read §3's inferences as history, not as current state** — the 6.28 figures they build on describe the
 pre-P9-2 engine (see §3.3b's closing note). The remaining levers (C, A′) are **optional and need
 re-ranking**, not scheduling: see the Next Review note at the foot of this document.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > The chunk pipeline delivers a near-constant 5 658–6 803 chunks per 30 s phase from view distance 10
 > to 32, in **both** legs of the P-8 A/B, while requests grow 4.4×. This document identifies the

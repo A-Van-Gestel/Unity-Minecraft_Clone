@@ -3,7 +3,7 @@
 **Version:** 1.0  
 **Date:** 2026-08-10  
 **Status:** **Proposed design — not implemented.**  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > The project has **no pause**. Opening the pause menu blocks input and unlocks the cursor; the
 > world keeps generating chunks, flowing fluids, and ticking blocks behind it. Nothing writes

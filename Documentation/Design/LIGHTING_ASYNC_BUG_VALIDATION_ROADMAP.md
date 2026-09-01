@@ -2,7 +2,7 @@
 
 **Version:** 1.0  
 **Date:** 2026-07-03  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > **Status:** In progress — **AS-1 CLOSED 2026-07-04** (Bugs 13 + 14 both reproduced, fixed, confirmed
 > in-game, and archived — see §3 outcome). **§10 harness-hardening HF-1/HF-2/HF-3 DONE 2026-07-05**

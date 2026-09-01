@@ -6,7 +6,7 @@
 in the codebase, and chunks still store raw global `ushort` IDs. Before implementation starts, re-verify
 the items listed under *Re-verify first* below — the serialization layer has moved since this was
 drafted.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production, Burst/DOTS Compatible)  
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production, Burst/DOTS Compatible)  
 **Context:** Voxel Engine Serialization & Data Architecture
 
 > Decouple save files from `BlockDatabase` array order by giving each chunk a **local palette** mapping

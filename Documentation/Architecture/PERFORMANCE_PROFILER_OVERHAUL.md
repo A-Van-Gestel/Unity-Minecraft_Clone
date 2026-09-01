@@ -1,7 +1,7 @@
 # Design Document: Production-Ready Performance Profiler
 
 **Version:** 2.1 (Implemented)  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)  
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)  
 **Context:** Replaced the Voxel Engine's `DebugScreen.cs` performance metrics with a custom `Stopwatch`-based `PerformanceMonitor`.  
 **Partially re-verified:** 2026-08-17, at commit `aad0527c` (branch `feat/world-scaling`) — a **targeted**
 edit, not a whole-doc audit. Only §3.4, §3.5 and §6 were re-derived from code (`PerformanceMonitor.cs`'s

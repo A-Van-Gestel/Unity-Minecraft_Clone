@@ -11,7 +11,7 @@ roadmap is closed, and the two open serialization bugs it found (`§04`, `§08`)
 `NS-3` is 🟡 **slice 1 shipped (2026-08-22)** — 6 baselines, grown scenario-wise from here.
 `NS-2`, `NS-6` and `NS-8`…`NS-11` remain proposals.
 Existing-coverage counts are re-verified against a real `Validate All` run each time they are touched.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > Which systems currently have **no validation suite** and deserve one, ranked most → least
 > important by the severity of the failure class each suite would guard and by how many queued

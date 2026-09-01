@@ -3,7 +3,7 @@
 **Version:** 1.13  
 **Date:** 2026-07-26  
 **Status:** **Implemented (Stable)** — the v1 arc (CMD-0..3), **CMD-4 relative `~` coordinates** (§8.2), and **CMD-5 tab autocomplete + PowerShell-style inline ghost suggestion** (§8.3) are all shipped and in-game confirmed; **`/wind`** (§8.4) shipped + in-game confirmed 2026-08-10. Guarded by the `Validate Command Console` suite (**56** baselines; see [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md) for live aggregate counts). Promoted from `Design/` 2026-07-26. §7 and §8.1–§8.3 are retained as **as-built records**; §8's table is the live extension roadmap — the remaining v2/v3+ rows (selectable/copyable output, chat, entity selectors, permissions) are deferred wishes, each owed a design pass when it becomes concrete.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > An in-game command console (Minecraft-chat-style: `T` opens a left-anchored panel with
 > scrollable history and a text input; commands like `/teleport @player X Y Z`). **The pivotal

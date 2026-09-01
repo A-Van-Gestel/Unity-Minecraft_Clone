@@ -10,7 +10,7 @@ evidence. §6 records the result and the redirected order.
 family are shipped — §3.1/§3.2 + recommendation 3 (2026-07-21) and §3.4/§3.5 + the §5.3 draw rider
 (2026-07-23). **§2 and §4 remain open**, and §5.3 was later *superseded* when MP-6 deleted the stage it
 budgeted. Per-finding status is recorded in "Implemented" blocks inline.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > Findings from a code-level performance review of the chunk generation → lighting → meshing pipeline,
 > focused on two observed symptoms: (1) a cascading memory/FPS failure when the player outruns

@@ -9,7 +9,7 @@ tooling (`/teleport` = CMD-2, 2026-07-18). The v2 noise rider is **shipped + in-
 (terrain normal even at the ±2³¹ edge) — see the extension roadmap and `WORLD_SCALING_IMPLEMENTATION.md` §6.
 (Lighting Bug 19 — the far-lands lighting crash logged there — was fixed
 independently 2026-07-19 via integer column routing, in-game confirmed and archived as `_FIXED_BUGS.md` #24.)  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > The far-travel precision phase of the world-scaling track. Unity render space and voxel world
 > space — identical today — become two spaces related by a periodically re-anchored

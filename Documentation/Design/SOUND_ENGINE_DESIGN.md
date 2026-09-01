@@ -31,7 +31,7 @@ the way it already does Blocks and Fluids; music is deliberately excluded until 
 in, out at its tail, and across every interruption, and quitting to the main menu fades the whole listener
 down before the scene is torn down — music was the only sounding layer without an envelope. The suite stands
 at 76 baselines. The remainder of S4 is still outstanding.  
-**Target:** Unity 6.5 (Mono for dev; IL2CPP for production)
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > Design for the VoxelEngine's audio system: block sounds (break / place / step), fluid and
 > ambient loop emitters, world-layer ambience & music, and the mixer/settings plumbing that ties
