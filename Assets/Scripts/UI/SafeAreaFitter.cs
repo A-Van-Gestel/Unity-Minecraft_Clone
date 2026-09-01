@@ -6,7 +6,7 @@ namespace UI
     /// Applies the device's safe area to the RectTransform.
     /// </summary>
     [RequireComponent(typeof(RectTransform))]
-    public class SafeArea : MonoBehaviour
+    public class SafeAreaFitter : MonoBehaviour
     {
         private RectTransform _rectTransform;
         private Rect _lastSafeArea = new Rect(0, 0, 0, 0);

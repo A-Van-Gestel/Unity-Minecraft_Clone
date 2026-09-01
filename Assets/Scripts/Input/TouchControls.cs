@@ -382,7 +382,7 @@ namespace Input
             _controlsRoot.transform.SetParent(canvasObj.transform, false);
             _controlsRootRect = _controlsRoot.AddComponent<RectTransform>();
             StretchFull(_controlsRootRect);
-            _controlsRoot.AddComponent<SafeArea>();
+            _controlsRoot.AddComponent<SafeAreaFitter>();
 
             BuildJoystick(_controlsRootRect);
             BuildActionButtons(_controlsRootRect);
@@ -392,7 +392,7 @@ namespace Input
             _persistentRoot.transform.SetParent(canvasObj.transform, false);
             RectTransform persistentRect = _persistentRoot.AddComponent<RectTransform>();
             StretchFull(persistentRect);
-            _persistentRoot.AddComponent<SafeArea>();
+            _persistentRoot.AddComponent<SafeAreaFitter>();
 
             BuildTopButtons(persistentRect);
 
