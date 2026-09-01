@@ -559,7 +559,7 @@ namespace Physics
         }
 
         // In development builds, we use LateUpdate to draw the debug lines continuously if toggled on
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
+#if DEBUG
         private void LateUpdate()
         {
             if (showBoundingBox)

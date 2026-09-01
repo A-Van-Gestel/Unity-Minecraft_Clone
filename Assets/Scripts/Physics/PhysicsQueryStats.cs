@@ -61,13 +61,13 @@ namespace Physics
 
         /// <summary>Records one physics tick that ran collision resolution.</summary>
         [System.Diagnostics.Conditional("UNITY_EDITOR")]
-        [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+        [System.Diagnostics.Conditional("DEBUG")]
         public static void CountTick() => Ticks++;
 
         /// <summary>Records what one sweep's own scan range would have cost before the gather existed.</summary>
         /// <param name="cellsInSweepRange">Cells in this sweep's own floor-range.</param>
         [System.Diagnostics.Conditional("UNITY_EDITOR")]
-        [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+        [System.Diagnostics.Conditional("DEBUG")]
         public static void CountCounterfactual(int cellsInSweepRange)
         {
             CellsScannedIfUngathered += cellsInSweepRange;
@@ -76,7 +76,7 @@ namespace Physics
         /// <summary>Records one gather pass.</summary>
         /// <param name="cellsScanned">Grid positions the pass looked up.</param>
         [System.Diagnostics.Conditional("UNITY_EDITOR")]
-        [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+        [System.Diagnostics.Conditional("DEBUG")]
         public static void CountGather(int cellsScanned)
         {
             Gathers++;
@@ -86,7 +86,7 @@ namespace Physics
         /// <summary>Records one direct scan.</summary>
         /// <param name="cellsScanned">Grid positions the scan looked up.</param>
         [System.Diagnostics.Conditional("UNITY_EDITOR")]
-        [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+        [System.Diagnostics.Conditional("DEBUG")]
         public static void CountDirectScan(int cellsScanned)
         {
             CellsScannedDirectly += cellsScanned;
@@ -95,7 +95,7 @@ namespace Physics
         /// <summary>Records one solver sweep.</summary>
         /// <param name="fellBack">True when the gathered buffer could not answer it.</param>
         [System.Diagnostics.Conditional("UNITY_EDITOR")]
-        [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+        [System.Diagnostics.Conditional("DEBUG")]
         public static void CountSweep(bool fellBack)
         {
             SweepQueries++;

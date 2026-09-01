@@ -217,7 +217,7 @@ ShiftThresholdChunks`. One frame, main thread, allocation-free (`World.ShiftOrig
       snapping it would undo the anti-flash pre-position.
 3. The `_LiquidNoiseOrigin` shader global follows automatically — `AnchorOrigin` pairs it with `SetOrigin` (§4.6),
    so a re-anchor cannot land without it.
-4. `AssertPlayerNearOrigin` (`UNITY_EDITOR`/`DEVELOPMENT_BUILD`, `[Conditional]`, latched): player Unity-space XZ ≤
+4. `AssertPlayerNearOrigin` (`UNITY_EDITOR`/`DEBUG`, `[Conditional]`, latched): player Unity-space XZ ≤
    `(ShiftThresholdChunks + 4) × 16` = 1088 units — turns a missed shift or a drifted site into one loud error
    instead of far-out jitter (§6 false-green guard). It runs *after* the trigger, where a working shift leaves the
    player ≤ 64 chunks (1040 units) out, so it cannot false-positive.

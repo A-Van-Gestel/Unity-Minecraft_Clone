@@ -435,7 +435,7 @@ namespace Benchmarks
 
         private static readonly List<PipelinePhaseMetrics> s_completedPhases = new List<PipelinePhaseMetrics>(16);
 
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
+#if DEBUG
         // Diagnostic latches for the two RecordPassStop asserts — readonly (never reassigned, so UDR0002
         // does not apply) but their CONTENTS are session state, so DomainReset clears them like s_traces.
         private static readonly bool[,] s_capabilityWarned = new bool[PassCount, StopReasonCount];
@@ -503,7 +503,7 @@ namespace Benchmarks
             s_frameWindowCursor = 0;
             s_pendingFrame = default;
 
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
+#if DEBUG
             // Re-arm the diagnostic latches: a divergence already reported in a previous run must be
             // reported again in the next, or a repeat capture would run silently on a known-bad matrix.
             Array.Clear(s_capabilityWarned, 0, s_capabilityWarned.Length);
@@ -893,7 +893,7 @@ namespace Benchmarks
             // which a pass "stopped" for a reason that is really an absence of data.
             if (reason == PassStopReason.NotRun) return;
 
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
+#if DEBUG
             // §7.1 v2 weights each reason by which passes can express it, so a stale capability declaration
             // silently mis-weights every verdict. FP-7b was exactly that failure — a pass documented as
             // ceiling-only had carried a quota stop for two captures. Assert the declaration against what

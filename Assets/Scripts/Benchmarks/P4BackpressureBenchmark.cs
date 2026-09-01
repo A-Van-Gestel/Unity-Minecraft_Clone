@@ -62,7 +62,7 @@ namespace Benchmarks
         private bool _abortRun;
         private CommandEngine _engine;
 
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
+#if DEBUG
         /// <summary>Spawns the harness once per play session (zero scene edits, dev builds only).</summary>
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()

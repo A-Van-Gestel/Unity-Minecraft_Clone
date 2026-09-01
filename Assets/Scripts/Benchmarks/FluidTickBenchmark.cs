@@ -1,4 +1,4 @@
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
+#if DEBUG
 using System;
 using System.Collections;
 using System.Collections.Generic;
