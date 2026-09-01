@@ -140,6 +140,55 @@ Those captures' **measurements remain valid** — they always ran the real produ
 only the header misdescribed it. Per the append-only rule the affected files are left untouched. But
 a capture whose *reasoning* leaned on either line (e.g. discounting a result as pessimistic because
 "safety checks were on") needs its conclusion revisited even though its numbers stand.
+#### Managed Code Variant governs instrumentation (from 2026-09-01, Unity 6.6)
+
+Unity 6.6 deprecates `DEVELOPMENT_BUILD` and moves diagnostic gating to a **Managed Code Variant**
+Player Setting (`Debug` / `Checked` / `Instrumented` / `Release`), settable **per build profile**.
+**It defaults to `Release`, and it is independent of the Development Build checkbox.**
+
+This is a capture-comparability axis, not just a project setting. Measured on 6000.6.0f1:
+
+| variant | dev build | `UNITY_ENABLE_CHECKS` | `UNITY_INCLUDE_INSTRUMENTATION` | `ENABLE_PROFILER` |
+|---|---|---|---|---|
+| Checked | Y / N | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ |
+| Instrumented | Y / N | – / – | ✓ / ✓ | ✓ / ✓ |
+| **Release** (default) | **Y** / N | – / – | **–** / – | ✓ / – |
+
+> **⚠ Unresolved conflict — do not treat the `Release`+dev row as settled.** The table above is
+> measured from `CompilationPipeline.GetAssemblies(AssembliesType.Player)`. Unity's 6.6 manual
+> ([`managed-code-variants.html`](https://docs.unity3d.com/6000.6/Documentation/Manual/managed-code-variants.html))
+> states that "for the time being the Development Build option still defines `UNITY_ASSERTIONS`
+> **and `UNITY_INCLUDE_INSTRUMENTATION`**". The measurement agrees on `UNITY_ASSERTIONS` but shows
+> `UNITY_INCLUDE_INSTRUMENTATION` **absent**. The API does model a dev overlay (it adds
+> `ENABLE_PROFILER` and `DEBUG`), so this is not simply the query ignoring the flag. **Only an
+> actual player build settles it** — no build was made when this was written. Either way the manual
+> calls the overlay "subject to change" and says to set the variant explicitly, so the guidance
+> below is unaffected: state the variant, and set `Checked` for captures.
+
+The manual also confirms the historical equivalence directly: **before 6.6, Development Build
+produced "the equivalent of the Checked managed code variant"** — which is why `Checked` is the
+setting that reproduces pre-6.6 capture conditions.
+
+Unity's own packages moved onto these symbols, so **a Development Build at the default `Release`
+variant may silently lose URP diagnostics that pre-6.6 Development Builds had for free** — most
+importantly for this folder, Render Graph profiling samplers and URP's per-pass
+`ScriptableRenderPass.profilingSampler` (both gated by `UNITY_INCLUDE_INSTRUMENTATION`). The
+project's own `ProfilerMarker`s survive, because `ENABLE_PROFILER` is still defined for
+`Release` + Development.
+
+**Consequence:** a capture taken on 6.6+ at the `Release` variant is **not** comparable to any
+pre-6.6 capture in this folder at the render-pass level — the earlier ones carry per-pass GPU/CPU
+breakdowns the newer one cannot produce. Engine-side markers still compare.
+
+**Therefore, from this date every capture header must state the Managed Code Variant**, alongside
+backend and IL2CPP configuration. To reproduce pre-6.6 Development Build behavior, set the variant
+to **`Checked`** — preferably as a per-profile override on a dedicated capture build profile rather
+than by flipping the global setting, since production Master builds must stay on `Release`.
+
+This project's own diagnostics were migrated off `DEVELOPMENT_BUILD` on the same date: assertions
+to `UNITY_ENABLE_CHECKS`, telemetry/counters to `UNITY_INCLUDE_INSTRUMENTATION`. So the engine
+counters a capture reads are themselves variant-gated now.
+
 - Captures from before a system's API stabilized are often not directly comparable to later ones. Note this explicitly in the file.
 
 ### Why superseded captures stay here

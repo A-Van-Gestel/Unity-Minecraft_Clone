@@ -65,6 +65,15 @@ first as its own commit.
   shippable capture is an **IL2CPP Development Build, Burst on** — and the user runs player
   builds, so ask for the capture rather than simulating it.
 - **Never compare across machines or backends.** Same machine, same backend, same session.
+- **State the Managed Code Variant (Unity 6.6+).** It is a Player Setting (`Debug`/`Checked`/
+  `Instrumented`/`Release`), settable per build profile, **defaulting to `Release`**, and it is
+  independent of the Development Build checkbox. At `Release` a Development Build carries **no**
+  `UNITY_INCLUDE_INSTRUMENTATION`, so URP's per-pass `ScriptableRenderPass.profilingSampler` and
+  Render Graph samplers are absent, and this project's own telemetry counters (migrated onto that
+  symbol) compile out. Use **`Checked`** to reproduce pre-6.6 Development Build behavior, and
+  record the variant in the capture header — a capture at `Release` is not comparable to a pre-6.6
+  one at the render-pass level. Full matrix: `Documentation/Performance/README.md` §"Managed Code
+  Variant governs instrumentation".
 
 ## Step 3 — Write the report
 
