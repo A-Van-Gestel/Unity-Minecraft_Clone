@@ -70,7 +70,8 @@ first as its own commit.
   independent of the Development Build checkbox. At `Release` a Development Build carries **no**
   `UNITY_INCLUDE_INSTRUMENTATION`, so URP's per-pass `ScriptableRenderPass.profilingSampler` and
   Render Graph samplers are absent, and this project's own telemetry counters (migrated onto that
-  symbol) compile out. Use **`Checked`** to reproduce pre-6.6 Development Build behavior, and
+  symbol) compile out. Use **`Checked`** to reproduce pre-6.6 Development Build behavior — the
+  **`Windows - Profiler` build profile already pins it**, so capture from that profile — and
   record the variant in the capture header — a capture at `Release` is not comparable to a pre-6.6
   one at the render-pass level. Full matrix: `Documentation/Performance/README.md` §"Managed Code
   Variant governs instrumentation".

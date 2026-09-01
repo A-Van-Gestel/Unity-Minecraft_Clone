@@ -161,7 +161,13 @@ This is a capture-comparability axis, not just a project setting. Measured on 60
 > **and `UNITY_INCLUDE_INSTRUMENTATION`**". The measurement agrees on `UNITY_ASSERTIONS` but shows
 > `UNITY_INCLUDE_INSTRUMENTATION` **absent**. The API does model a dev overlay (it adds
 > `ENABLE_PROFILER` and `DEBUG`), so this is not simply the query ignoring the flag. **Only an
-> actual player build settles it** — no build was made when this was written. Either way the manual
+> actual player build settles it.** Two IL2CPP builds were made on 2026-09-01 — production
+> (`Release` variant, non-development) and profiler (`Checked` variant, development) — and
+> **neither covers the disputed cell**, which is `Release` variant *with* Development Build. The
+> `Windows - Development` profile is exactly that combination, so one build from it would settle
+> this: check whether a gated literal such as `[PopulateFromSave] Starting for chunk ` appears in
+> its `global-metadata.dat` (method described under "Verifying gating in a built player" below).
+> Either way the manual
 > calls the overlay "subject to change" and says to set the variant explicitly, so the guidance
 > below is unaffected: state the variant, and set `Checked` for captures.
 
@@ -182,14 +188,51 @@ breakdowns the newer one cannot produce. Engine-side markers still compare.
 
 **Therefore, from this date every capture header must state the Managed Code Variant**, alongside
 backend and IL2CPP configuration. To reproduce pre-6.6 Development Build behavior, set the variant
-to **`Checked`** — preferably as a per-profile override on a dedicated capture build profile rather
-than by flipping the global setting, since production Master builds must stay on `Release`.
+to **`Checked`**. **The `Windows - Profiler` build profile already pins this** (committed
+2026-09-01) via a per-profile Player Settings override, so capturing from that profile needs no
+setup. Prefer that over flipping the global setting — production Master builds must stay on
+`Release`, and the global is shared. Note a profile override is a full copy of Player settings, not
+a diff, and it can only be created through the Build Profiles window.
 
 This project's own diagnostics were migrated off `DEVELOPMENT_BUILD` on the same date: assertions
 to `UNITY_ENABLE_CHECKS`, telemetry/counters to `UNITY_INCLUDE_INSTRUMENTATION`. So the engine
 counters a capture reads are themselves variant-gated now.
 
 - Captures from before a system's API stabilized are often not directly comparable to later ones. Note this explicitly in the file.
+
+### Verifying gating in a built player
+
+Editor validation suites **cannot** check `#if` / `[Conditional]` gating: the editor defines `DEBUG`,
+`UNITY_ENABLE_CHECKS` and `UNITY_INCLUDE_INSTRUMENTATION` under every variant, so gated code always
+compiles in there and a suite run is identical before and after a gating change. Only a player build
+settles it.
+
+IL2CPP bakes string literals and method names into
+`<Build>/<Product>_Data/il2cpp_data/Metadata/global-metadata.dat`. Byte-search two builds that differ
+only in the gate:
+
+```python
+blob = open(metadata_path, "rb").read()
+def hit(s): return s.encode("utf-8") in blob or s.encode("utf-16-le") in blob
+```
+
+**Always include an ungated control string** present in both builds — without it, an all-negative
+result is indistinguishable from a broken search. Verified 2026-09-01 across the production and
+profiler builds: gated literals read `no`/`YES` while controls read `YES`/`YES`, with metadata sizes
+7.83 MB vs 8.77 MB.
+
+Two traps when picking probes:
+
+- **Editor/test-only methods are stripped from both builds**, so their absence proves nothing.
+- **`[Conditional]` removes call sites, not the method.** A `[Conditional]` method on a MonoBehaviour
+  can survive stripping and **ship its body and message text in a Release player** — confirmed for
+  `AssertPlayerNearOrigin`, whose `[WS-4] Player is at Unity` string is in the production binary
+  though it is never invoked. A plain class's `[Conditional]` method *was* stripped. So "compiles out
+  entirely" is true of the *calls*, not necessarily the method: zero runtime cost, but the text ships.
+
+`<Data>/globalgamemanagers` also carries the `bundleVersion` a build actually baked — the
+authoritative answer when a capture header cites a version (the `.exe` VersionInfo reports only the
+Unity version).
 
 ### Why superseded captures stay here
 
