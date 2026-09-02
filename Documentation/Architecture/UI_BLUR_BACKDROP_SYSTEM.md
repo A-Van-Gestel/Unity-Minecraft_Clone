@@ -30,6 +30,8 @@ reading the serialized scene and by rendered-pixel measurement through the valid
   against the producer; **#06** was the consumer's missing UI contract, fixed here.
 - [`DATA_DRIVEN_SETTINGS_UI.md`](DATA_DRIVEN_SETTINGS_UI.md) — the settings menu, one of the five
   blurred panels.
+- [`TOAST_NOTIFICATION_SYSTEM.md`](TOAST_NOTIFICATION_SYSTEM.md) — a consumer that works around §8's
+  stacking limit by policy, dropping its cards to a flat backdrop while a full-screen panel is up.
 
 ---
 
@@ -178,6 +180,7 @@ Three more are built in code on their own canvases, each with its own material i
 | Benchmark HUD                  | **-10**               | `0.7`   | below the scene canvas, so full-screen menus cover it     |
 | Benchmark results overlay      | 200                   | `0.15`  | terminal modal, deliberately above everything             |
 | `ConsoleUI` panel              | 100                   | `0.415` | matches the scene panels; covers the toolbar's left edge  |
+| `ToastCard` backdrops          | 250                   | `0.606`–`0.620` | one material instance per `ToastVariant`; drops to a flat colour while a full-screen menu is up (§8) |
 
 The HUD's negative order is load-bearing rather than cosmetic: at a positive order its opaque panel
 punched a hole back to the un-blurred world over the paused screen (UI_BUGS #06).

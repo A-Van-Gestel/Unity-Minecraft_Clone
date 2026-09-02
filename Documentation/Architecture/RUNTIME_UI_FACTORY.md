@@ -26,6 +26,8 @@ shipped state, §5 the shipped phases, and §4 the resolution of the console/too
   its §4 authoring rules are binding on every panel built here.
 - [`COMMAND_CONSOLE_SYSTEM.md`](COMMAND_CONSOLE_SYSTEM.md) — the console whose view is the second
   consumer.
+- [`TOAST_NOTIFICATION_SYSTEM.md`](TOAST_NOTIFICATION_SYSTEM.md) — the third consumer; its canvas,
+  its per-variant blur materials and its state-dependent backdrop are the §2 toast rows.
 - [`../Bugs/_FIXED_BUGS.md`](../Bugs/_FIXED_BUGS.md) — UI_BUGS **#06**, whose remaining benchmark-HUD
   symptom was closed by §5 phase RUF-2.
 

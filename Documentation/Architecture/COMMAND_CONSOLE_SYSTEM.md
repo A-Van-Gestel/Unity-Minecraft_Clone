@@ -571,7 +571,7 @@ rewritten — and left as-is rather than widening a four-implementer interface.
 ### 8.5 `/toast` — toast-surface test cards ✅ (implemented + in-game confirmed 2026-09-02)
 
 A dev instrument rather than a player feature, shipped with the toast system
-([`../Design/TOAST_NOTIFICATION_SYSTEM.md`](../Design/TOAST_NOTIFICATION_SYSTEM.md) TN-5). Raises N
+([`TOAST_NOTIFICATION_SYSTEM.md`](TOAST_NOTIFICATION_SYSTEM.md) TN-5). Raises N
 cards so the stack's non-overlap, its independent timers and its mid-stack gap closure can be seen
 without waiting on a real consumer.
 

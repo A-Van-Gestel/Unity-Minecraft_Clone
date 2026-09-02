@@ -1,8 +1,8 @@
 # Toast Notification System Design
 
-**Version:** 1.4  
+**Version:** 1.5  
 **Date:** 2026-09-02  
-**Status:** Implemented — TN-0…TN-9 shipped and in-game confirmed 2026-09-02.  
+**Status:** ⛔ **Superseded 2026-09-02 by [`../Architecture/TOAST_NOTIFICATION_SYSTEM.md`](../Architecture/TOAST_NOTIFICATION_SYSTEM.md)** — TN-0…TN-9 all shipped and in-game confirmed. This document is frozen: it remains the dated record of intent, and the Architecture doc describes the code as it stands.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > A general in-game toast card system — a corner-anchored, non-overlapping stack of transient
@@ -496,6 +496,10 @@ rather than project logic, and a suite that asserted it would be testing `Vertic
 
 ## Document History
 
+* **v1.5** - **Promoted 2026-09-02.** Superseded by `Architecture/TOAST_NOTIFICATION_SYSTEM.md`,
+  which carries the current-state description and the TN-0…TN-9 ID index. This document is frozen
+  from here: its phases and their dated statuses stay as the record of intent, and it receives no
+  further edits.
 * **v1.4** - **Backdrop suppression narrowed to full-screen menus (2026-09-02).** The fallback was
   keyed to `WorldUIManager.InUI`, which is also true for the console and the creative inventory — so
   opening the console flattened every card for no reason, visible as the frost dropping out. Only the
@@ -535,4 +539,4 @@ rather than project logic, and a suite that asserted it would be testing `Vertic
 ---
 
 **Last Updated:** 2026-09-02  
-**Next Review:** when the toast system is promoted to an Architecture doc (due — last phase complete)
+**Next Review:** none — frozen on promotion.
