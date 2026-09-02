@@ -90,8 +90,8 @@ namespace UI.Toast
         /// </remarks>
         private Material[] _blurMaterials;
 
-        /// <summary>Whether a menu was open on the previous frame, so the swap runs only on a change.</summary>
-        private bool _wasInUI;
+        /// <summary>Whether blur was suppressed last frame, so the swap runs only on a change.</summary>
+        private bool _wasBlurSuppressed;
 
         /// <summary>Cards that have finished and can be re-shown, shared across every anchor.</summary>
         private readonly Stack<ToastCard> _free = new Stack<ToastCard>();
@@ -142,26 +142,45 @@ namespace UI.Toast
         }
 
         /// <summary>
-        /// Swaps every live card between the frosted and flat backdrops as menus open and close.
+        /// Swaps every live card between the frosted and flat backdrops as full-screen panels come and go.
         /// </summary>
         /// <remarks>
-        /// Polled rather than event-driven because <see cref="WorldUIManager.InUI"/> publishes no change
-        /// event, and adding one would put a toast concern into the class that owns the whole UI-state
-        /// policy. A bool compare per frame costs nothing, and the swap itself runs only on the transition.
+        /// Polled rather than event-driven because the UI state publishes no change event, and adding one
+        /// would put a toast concern into the class that owns the whole UI-state policy. A bool compare per
+        /// frame costs nothing, and the swap itself runs only on the transition.
         /// </remarks>
         private void Update()
         {
-            bool inUI = WorldUIManager.Instance != null && WorldUIManager.Instance.InUI;
-            if (inUI == _wasInUI) return;
+            bool suppressed = IsBlurSuppressed;
+            if (suppressed == _wasBlurSuppressed) return;
 
-            _wasInUI = inUI;
+            _wasBlurSuppressed = suppressed;
             ApplyBackdropForUIState();
         }
+
+        /// <summary>
+        /// Whether a full-screen blurred panel is on screen, which is when a frosted card must go flat.
+        /// </summary>
+        /// <remarks>
+        /// Keyed to the pause menu rather than to the broader "some UI is open" state, because only the
+        /// pause-menu family is full-screen: its panel, the settings menu and the help menu all stretch
+        /// edge to edge, and the flag stays true across all three. Every other blurred surface is a bounded
+        /// panel nowhere near the default anchor — the inventory is centred, the toolbar bottom-center, the
+        /// console bottom-left — so suppressing for those cost the frost and bought nothing.
+        /// <para>
+        /// The limit that leaves — a card anchored to a corner a bounded blurred panel <i>does</i> occupy,
+        /// such as a bottom-left toast raised while the console is open — is the blur system's inability to
+        /// stack panels, not a policy gap here. It is recorded in UI_BLUR_BACKDROP_SYSTEM.md §8, and the
+        /// real fix is a second capture point rather than a wider condition in this class.
+        /// </para>
+        /// </remarks>
+        private static bool IsBlurSuppressed =>
+            WorldUIManager.Instance != null && WorldUIManager.Instance.IsPauseMenuOpen;
 
         /// <summary>Re-points every live card's backdrop at the material its own variant allows right now.</summary>
         /// <remarks>
         /// Resolved per card rather than once for the sweep: cards of different variants can be on screen
-        /// together, and each needs its own tint back when the menu closes.
+        /// together, and each needs its own tint back when the pause menu closes.
         /// </remarks>
         private void ApplyBackdropForUIState()
         {
@@ -183,7 +202,7 @@ namespace UI.Toast
         }
 
         /// <summary>
-        /// A variant's blur material while nothing is open, or null — the flat fallback — while a menu is.
+        /// A variant's blur material, or null — the flat fallback — while blur is suppressed.
         /// </summary>
         /// <param name="variant">The variant whose material is wanted.</param>
         /// <returns>The tinted blur material, or null to force the card's flat color.</returns>
@@ -191,11 +210,12 @@ namespace UI.Toast
         /// A blurred panel replaces the UI beneath it rather than compositing over it
         /// (UI_BLUR_BACKDROP_SYSTEM.md §4.2), and this canvas sorts above every menu, so a frosted card
         /// over the dimmed pause screen would paint un-dimmed world — `UI_BUGS #06`'s symptom. Cards stay
-        /// visible either way; only the backdrop changes.
+        /// visible either way; only the backdrop changes. See <see cref="IsBlurSuppressed"/> for why that
+        /// is scoped to the pause menu rather than to any open UI.
         /// </remarks>
         private Material BackdropMaterialFor(ToastVariant variant)
         {
-            if (WorldUIManager.Instance != null && WorldUIManager.Instance.InUI) return null;
+            if (IsBlurSuppressed) return null;
 
             int index = (int)variant;
             return (uint)index < (uint)_blurMaterials.Length ? _blurMaterials[index] : null;
@@ -233,7 +253,7 @@ namespace UI.Toast
         /// <param name="request">What to show.</param>
         private void Spawn(AnchorStack stack, in ToastRequest request)
         {
-            // Resolved per spawn, not captured once: a card raised while a menu is open must start flat,
+            // Resolved per spawn, not captured once: a card raised while blur is suppressed must start flat,
             // and a pooled card still carries whichever variant and backdrop it wore when it was retired.
             ToastStyle style = ToastStyles.For(request.Variant);
             Material backdrop = BackdropMaterialFor(request.Variant);

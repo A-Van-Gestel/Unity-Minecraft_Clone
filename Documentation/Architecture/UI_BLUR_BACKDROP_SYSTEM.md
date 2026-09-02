@@ -222,6 +222,14 @@ Two properties of the harness are load-bearing:
   against the producer; its acceptance test needs a matched capture at two resolutions.
 - **Panels cannot blur each other.** Fixing this needs a second capture point after the overlay
   canvases draw, which no design currently proposes.
+
+  Consumers work around it by *policy* rather than by compositing, and the workarounds are only as
+  good as the overlap they anticipate. `ToastManager` drops its cards to a flat backdrop whenever a
+  full-screen blurred panel is up (`WorldUIManager.IsPauseMenuOpen`), which covers the default
+  top-right anchor. It does **not** cover a card anchored to a corner a *bounded* blurred panel
+  occupies — a bottom-left toast raised while the console panel is open still paints un-dimmed world
+  over it, observed 2026-09-02. Widening the policy per anchor would mean every consumer re-deriving
+  an overlap test against every other blurred rect; the real fix is the second capture point.
 - **No blurred graphic may sit inside a `Mask` without the stencil state Unity supplies.** The shader
   now declares the properties, but nothing exercises this path in the project today.
 

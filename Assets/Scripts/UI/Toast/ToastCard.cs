@@ -77,8 +77,8 @@ namespace UI.Toast
 
         /// <summary>
         /// The flat color this card paints when blur is unavailable or suppressed, from its variant's
-        /// style. Held because <see cref="SetBackdrop"/> is re-called mid-life by the manager's menu swap
-        /// and must not fall back to a neutral color on a warning card.
+        /// style. Held because <see cref="SetBackdrop"/> is re-called mid-life by the manager's backdrop
+        /// swap and must not fall back to a neutral color on a warning card.
         /// </summary>
         private Color _flatBackdrop;
 
@@ -153,7 +153,7 @@ namespace UI.Toast
         /// <param name="blurInstance">The shared blur material, or null to force the flat fallback.</param>
         /// <remarks>
         /// Re-callable at any point in a card's life, because the manager swaps every live card to the flat
-        /// backdrop while a menu is open: a blurred panel does not composite over the UI beneath it, it
+        /// backdrop while a full-screen panel is up: a blurred panel does not composite over the UI beneath it, it
         /// replaces it (UI_BLUR_BACKDROP_SYSTEM.md §4.2), so a frosted card at this canvas's sorting order
         /// would paint un-dimmed world over a dimmed pause screen.
         /// </remarks>
