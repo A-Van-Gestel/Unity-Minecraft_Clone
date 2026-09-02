@@ -78,8 +78,32 @@ namespace UI.Toast
         [SerializeField]
         private ToastAnchor _defaultAnchor = ToastAnchor.TopRight;
 
+        /// <summary>
+        /// The card blur tint, matching the console and the scene panels so every frosted surface reads as
+        /// the same glass.
+        /// </summary>
+        /// <remarks>
+        /// A material property, so Unity gamma-converts it on upload — the same 0.415 set through
+        /// <c>Image.color</c> would not be converted (UI_BLUR_BACKDROP_SYSTEM.md §4.3).
+        /// </remarks>
+        private static readonly Color s_cardBlurTint = new Color(0.415f, 0.415f, 0.415f, 1f);
+
         /// <summary>One stack per corner, indexed by <see cref="AnchorIndex"/>.</summary>
         private AnchorStack[] _stacks;
+
+        /// <summary>
+        /// The one blur material every card shares. Owned here and destroyed in <see cref="OnDestroy"/>.
+        /// </summary>
+        /// <remarks>
+        /// Allocated once for the manager rather than per card, because cards are pooled and built lazily:
+        /// an instance created in <see cref="ToastCard.Create"/> would leak one material per card the
+        /// session ever needed. Null when the blur shader cannot be found, which the card renders as its
+        /// flat fallback.
+        /// </remarks>
+        private Material _blurMaterial;
+
+        /// <summary>Whether a menu was open on the previous frame, so the swap runs only on a change.</summary>
+        private bool _wasInUI;
 
         /// <summary>Cards that have finished and can be re-shown, shared across every anchor.</summary>
         private readonly Stack<ToastCard> _free = new Stack<ToastCard>();
@@ -112,13 +136,57 @@ namespace UI.Toast
             RuntimeUIFactory.ConfigureCanvas(gameObject, SORT_ORDER);
             gameObject.AddComponent<UIScaleController>();
 
+            _blurMaterial = RuntimeUIFactory.CreateBlurMaterialInstance(s_cardBlurTint);
+
             BuildAnchorContainers();
         }
 
         private void OnDestroy()
         {
             if (Instance == this) Instance = null;
+
+            if (_blurMaterial != null) Destroy(_blurMaterial);
         }
+
+        /// <summary>
+        /// Swaps every live card between the frosted and flat backdrops as menus open and close.
+        /// </summary>
+        /// <remarks>
+        /// Polled rather than event-driven because <see cref="WorldUIManager.InUI"/> publishes no change
+        /// event, and adding one would put a toast concern into the class that owns the whole UI-state
+        /// policy. A bool compare per frame costs nothing, and the swap itself runs only on the transition.
+        /// </remarks>
+        private void Update()
+        {
+            bool inUI = WorldUIManager.Instance != null && WorldUIManager.Instance.InUI;
+            if (inUI == _wasInUI) return;
+
+            _wasInUI = inUI;
+            ApplyBackdropForUIState();
+        }
+
+        /// <summary>Re-points every live card's backdrop at the material the current UI state allows.</summary>
+        private void ApplyBackdropForUIState()
+        {
+            Material backdrop = CurrentBackdropMaterial;
+
+            foreach (AnchorStack stack in _stacks)
+            {
+                foreach (ToastCard card in stack.Live) card.SetBackdrop(backdrop);
+            }
+        }
+
+        /// <summary>
+        /// The blur material while nothing is open, or null — the flat fallback — while a menu is.
+        /// </summary>
+        /// <remarks>
+        /// A blurred panel replaces the UI beneath it rather than compositing over it
+        /// (UI_BLUR_BACKDROP_SYSTEM.md §4.2), and this canvas sorts above every menu, so a frosted card
+        /// over the dimmed pause screen would paint un-dimmed world — `UI_BUGS #06`'s symptom. Cards stay
+        /// visible either way; only the backdrop changes.
+        /// </remarks>
+        private Material CurrentBackdropMaterial =>
+            WorldUIManager.Instance != null && WorldUIManager.Instance.InUI ? null : _blurMaterial;
 
         /// <summary>
         /// Raises a toast. Safe to call when no manager exists — toasts are a feedback layer and must never
@@ -152,7 +220,15 @@ namespace UI.Toast
         /// <param name="request">What to show.</param>
         private void Spawn(AnchorStack stack, in ToastRequest request)
         {
-            ToastCard card = _free.Count > 0 ? _free.Pop() : ToastCard.Create(stack.Container);
+            // Resolved per spawn, not captured once: a card raised while a menu is open must start flat,
+            // and a pooled card still carries whichever backdrop it wore when it was last retired.
+            Material backdrop = CurrentBackdropMaterial;
+
+            ToastCard card = _free.Count > 0
+                ? _free.Pop()
+                : ToastCard.Create(stack.Container, backdrop);
+
+            card.SetBackdrop(backdrop);
             card.transform.SetParent(stack.Container, false);
 
             stack.Live.Add(card);

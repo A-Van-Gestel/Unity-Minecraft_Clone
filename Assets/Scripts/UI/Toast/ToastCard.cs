@@ -17,9 +17,10 @@ namespace UI.Toast
     /// itself: the parent's <see cref="VerticalLayoutGroup"/> then closes the gap as a normal rebuild, which
     /// is what makes a card expiring in the <i>middle</i> of the stack slide shut instead of snapping.
     /// <para>
-    /// The backdrop is a flat translucent <see cref="Image"/> and deliberately never uses the blur helpers:
-    /// the blur texture is captured at <c>AfterRenderingTransparents</c>, before any overlay canvas draws,
-    /// so a blurred card on the toast canvas would paint un-dimmed world over a dimmed pause screen.
+    /// The backdrop is frosted glass, sharing <see cref="ToastManager"/>'s single blur material instance —
+    /// the card never allocates one of its own, because cards are pooled and a per-card instance would leak
+    /// one material per toast ever shown. When the blur shader is unavailable the factory paints
+    /// <see cref="s_backdropFallback"/> instead, so the card still reads as a card.
     /// </para>
     /// </remarks>
     public class ToastCard : MonoBehaviour
@@ -50,13 +51,16 @@ namespace UI.Toast
         /// <summary>Seconds the card takes to fade and shrink away.</summary>
         private const float EXIT_SECONDS = 0.3f;
 
-        private static readonly Color s_backdrop = new Color(0.05f, 0.05f, 0.06f, 0.82f);
+        /// <summary>Flat backdrop painted when the blur shader is unavailable, matching the console's.</summary>
+        private static readonly Color s_backdropFallback = new Color(0f, 0f, 0f, 0.55f);
+
         private static readonly Color s_titleColor = new Color(0.96f, 0.96f, 0.96f, 1f);
         private static readonly Color s_subtitleColor = new Color(0.72f, 0.74f, 0.78f, 1f);
 
         #endregion
 
         private RectTransform _rect;
+        private Image _backdrop;
         private CanvasGroup _group;
         private LayoutElement _layout;
         private GameObject _iconObject;
@@ -70,29 +74,33 @@ namespace UI.Toast
         /// Builds a card hierarchy under <paramref name="parent"/>, inactive and ready to be shown.
         /// </summary>
         /// <param name="parent">The anchor container to parent under.</param>
+        /// <param name="blurInstance">
+        /// The manager's shared blur material, or null to paint the flat fallback.
+        /// </param>
         /// <returns>The created card.</returns>
         /// <remarks>
         /// Construction lives here rather than on the manager so the manager owns only stacking, pooling and
         /// the request queue — a second card style becomes a second builder, not a branch in the manager.
         /// </remarks>
-        public static ToastCard Create(Transform parent)
+        public static ToastCard Create(Transform parent, Material blurInstance)
         {
             GameObject root = new GameObject("ToastCard", typeof(RectTransform));
             root.transform.SetParent(parent, false);
 
             ToastCard card = root.AddComponent<ToastCard>();
-            card.Build();
+            card.Build(blurInstance);
             root.SetActive(false);
             return card;
         }
 
         /// <summary>Builds this card components and children. Called once, by <see cref="Create"/>.</summary>
-        private void Build()
+        /// <param name="blurInstance">The shared blur material, or null for the flat fallback.</param>
+        private void Build(Material blurInstance)
         {
             _rect = (RectTransform)transform;
 
-            Image backdrop = gameObject.AddComponent<Image>();
-            backdrop.color = s_backdrop;
+            _backdrop = gameObject.AddComponent<Image>();
+            SetBackdrop(blurInstance);
 
             // Clips the text while the card shrinks on exit; without it the content overflows the
             // collapsing rect and the card appears to slide under its neighbor rather than close.
@@ -120,6 +128,23 @@ namespace UI.Toast
 
             BuildIcon();
             BuildTextColumn();
+        }
+
+        /// <summary>
+        /// Points this card's backdrop at the shared blur material, or paints the flat fallback.
+        /// </summary>
+        /// <param name="blurInstance">The shared blur material, or null to force the flat fallback.</param>
+        /// <remarks>
+        /// Re-callable at any point in a card's life, because the manager swaps every live card to the flat
+        /// backdrop while a menu is open: a blurred panel does not composite over the UI beneath it, it
+        /// replaces it (UI_BLUR_BACKDROP_SYSTEM.md §4.2), so a frosted card at this canvas's sorting order
+        /// would paint un-dimmed world over a dimmed pause screen.
+        /// </remarks>
+        public void SetBackdrop(Material blurInstance)
+        {
+            // The helper encodes the blur doc's authoring rules — vertex color stays opaque white, tint
+            // lives on the material — so no call site has to remember them.
+            RuntimeUIFactory.ApplyBlurBackground(_backdrop, blurInstance, s_backdropFallback);
         }
 
         /// <summary>Builds the square icon slot. Deactivated — and so skipped by layout — when unused.</summary>

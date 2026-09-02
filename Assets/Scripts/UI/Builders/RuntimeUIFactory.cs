@@ -109,6 +109,19 @@ namespace UI.Builders
         /// <param name="blurInstance">The blur material instance, or null to force the fallback.</param>
         /// <param name="fallbackColor">Flat color painted when no blur material is available.</param>
         /// <returns>True when the blur material was applied; false when the flat fallback was used.</returns>
+        /// <remarks>
+        /// <b>A blurred panel cannot draw over other UI.</b> The blur is captured before any overlay canvas
+        /// draws, so a blurred graphic does not composite over what is beneath it — it replaces it with a
+        /// hole back to the pre-UI frame (UI_BLUR_BACKDROP_SYSTEM.md §4.2). Frosting a panel on a canvas
+        /// that can appear above another blurred or dimmed panel therefore paints un-dimmed world over it,
+        /// which is `UI_BUGS #06`'s symptom.
+        /// <para>
+        /// Where that can happen, pass <c>null</c> for <paramref name="blurInstance"/> while it does: the
+        /// flat fallback composites normally. This method is safe to re-call at any point in a graphic's
+        /// life, which is what makes the swap possible — <c>ToastManager</c> is the worked example, driving
+        /// every live card between frosted and flat as menus open and close.
+        /// </para>
+        /// </remarks>
         public static bool ApplyBlurBackground(Image image, Material blurInstance, Color fallbackColor)
         {
             if (blurInstance == null)

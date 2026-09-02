@@ -1,6 +1,6 @@
 # Toast Notification System Design
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-09-02  
 **Status:** Implemented — TN-0…TN-8 shipped and in-game confirmed 2026-09-02.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -26,8 +26,8 @@ canvas inventory in `RUNTIME_UI_FACTORY.md` §2 and the full `UI_BUGS #06` entry
   code-built-UI factory this system is the third consumer of; its §2 canvas inventory gains a row
   when this ships.
 - [`../Architecture/UI_BLUR_BACKDROP_SYSTEM.md`](../Architecture/UI_BLUR_BACKDROP_SYSTEM.md) — §4's
-  authoring rules and §8's single-capture limitation are why the toast card is **not** blurred
-  (§3.4).
+  authoring rules and §4.2's "a blurred panel replaces the UI beneath it" are why the frosted card
+  falls back to a flat backdrop while a menu is open (§3.4's reversal note).
 - [`../Architecture/COMMAND_CONSOLE_SYSTEM.md`](../Architecture/COMMAND_CONSOLE_SYSTEM.md) — the
   console that hosts the `/toast` verification command, and the precedent for building a whole UI
   hierarchy in code.
@@ -162,7 +162,7 @@ The deferral also postpones a real cost: `MusicMetadataLibrary.asset` lives unde
 therefore ship whether or not a toast is ever shown, and want an import size budget when they are
 authored.
 
-### 3.4 Layering: always on top, and never blurred
+### 3.4 Layering: always on top, frosted except over menus
 
 **Locked by the user**, overriding the recommendation below. Recorded in full because the
 recommendation had a specific bug behind it.
@@ -191,6 +191,15 @@ Accepted consequences, stated plainly: a toast can cover the F3 performance pane
 corner, and toasts draw over the pause menu.
 
 ---
+
+> **Reversed 2026-09-02 — the card IS frosted, with a state-dependent fallback.** Point 3 above was
+> right about the compositing and wrong about the conclusion. The card now shares `ToastManager`'s
+> single blur material instance, and the manager swaps every live card to the flat translucent
+> backdrop while `WorldUIManager.InUI` is true, swapping back when the menu closes. That keeps both
+> properties this section argued were in conflict: frosted glass in normal play, and always-visible
+> cards that never paint un-dimmed world over a dimmed menu. Cards stay visible in both states —
+> only the backdrop material changes. The `#06` symptom is avoided by *never letting a blurred card
+> overlap a blurred panel*, rather than by refusing blur outright.
 
 ## 4. Data model & architecture
 
@@ -347,7 +356,7 @@ Nothing blocks this design — every system it touches is shipped and stable.
 | **TN-1 — Sound Editor authoring** | New section in `SoundEditorWindow.Music.cs`: one row per entry, plus a "Sync from pools" button appending rows for any clip in a pool with no entry. Editor assembly. | 🟡     | TN-0         | ✅ 2026-09-02 |
 | **TN-2 — Toast contract**         | `ToastAnchor` enum + `ToastRequest` struct in `Assets/Scripts/UI/Toast/`.                                                                              | 🟢     | —            | ✅ 2026-09-02 |
 | **TN-3 — ToastManager**           | Singleton + `DomainReset`; own canvas at `sortingOrder 250` via `RuntimeUIFactory`, plus `UIScaleController`; per-anchor `VerticalLayoutGroup` containers; card free-list and overflow queue; static `Show(in ToastRequest)`. Spawned by `WorldUIManager.Awake`. | 🟡     | TN-2         | ✅ 2026-09-02 |
-| **TN-4 — ToastCard**              | Card view + lifetime: unscaled `WaitForSecondsRealtime` timer, shrink-and-fade exit, `blocksRaycasts = false` / `interactable = false`, flat translucent backdrop (**no blur** — §3.4), collapsing icon slot. | 🟡     | TN-3         | ✅ 2026-09-02 |
+| **TN-4 — ToastCard**              | Card view + lifetime: unscaled `WaitForSecondsRealtime` timer, shrink-and-fade exit, `blocksRaycasts = false` / `interactable = false`, frosted backdrop from the manager's shared blur material with a flat fallback while a menu is open (§3.4), collapsing icon slot. | 🟡     | TN-3         | ✅ 2026-09-02 |
 | **TN-5 — `/toast` dev command**   | Console command spawning N test cards with staggered durations. The verification instrument for TN-3/TN-4, not a player feature.                       | 🟢     | TN-4         | ✅ 2026-09-02 |
 | **TN-6 — `TrackStarted` event**   | Widen `MusicScheduler`'s pending state to carry the full `MusicTrack`; raise `public event Action<MusicTrack> TrackStarted` in `StartPending()`.       | 🟢     | —            | ✅ 2026-09-02 |
 | **TN-7 — Now-playing presenter**  | `NowPlayingToastPresenter`: subscribes in `Start`, unsubscribes in `OnDestroy`, resolves metadata, falls back to `clip.name`, formats the request.     | 🟢     | TN-0, 4, 6   | ✅ 2026-09-02 |
@@ -428,7 +437,7 @@ rather than project logic, and a suite that asserted it would be testing `Vertic
 | A `ToastCard.prefab` beside `TooltipPanel.prefab`      | Needs a scene-wired manager reference and drags prefab/`.meta` churn into every visual tweak. Code-built follows the `ConsoleUI` precedent instead (§3.2).      | 2026-09-02 |
 | Suppressing toasts while `WorldUIManager.InUI`         | Recommended on the `UI_BUGS #06` precedent; **overridden by the user** in favour of always-visible. Made safe by non-interactive cards, not by suppression (§3.4). | 2026-09-02 |
 | Offsetting the stack below the F3 performance panel    | Same override. The overlap with `DebugScreen`'s top-right panel is accepted (§3.4).                                                                             | 2026-09-02 |
-| A blur backdrop on the toast card                      | `_UIBlurTexture` is captured before any overlay canvas draws, so a blurred card at `sortingOrder 250` would paint un-dimmed world over a dimmed pause screen — `UI_BUGS #06`'s stacking symptom, reproduced (§3.4). Flat translucent `Image` instead. | 2026-09-02 |
+| A blur backdrop on the toast card                      | ~~`_UIBlurTexture` is captured before any overlay canvas draws, so a blurred card at `sortingOrder 250` would paint un-dimmed world over a dimmed pause screen — `UI_BUGS #06`'s stacking symptom, reproduced (§3.4). Flat translucent `Image` instead.~~ **Reversed 2026-09-02.** Frosted glass is the intended treatment for every UI surface in this project, so "no blur here" was never an acceptable resting state. The compositing analysis above holds — the all-or-nothing conclusion drawn from it did not. Shipped frosted, with the manager swapping live cards to the flat backdrop while `WorldUIManager.InUI` is true — see §3.4's reversal note. | 2026-09-02 |
 | Hand-rolled stack offset math                          | `VerticalLayoutGroup` + `ContentSizeFitter` handles non-overlap, variable card heights and mid-stack gap closure for free; hand-rolled math would re-derive all three and get wrapped titles wrong (§4.3). | 2026-09-02 |
 | A `static` `TrackStarted` event                        | Would need its own domain-reload handling for the subscriber list. The codebase's instance-event-on-singleton convention avoids it (§4.4).                      | 2026-09-02 |
 | `event Action<MusicTrack> TrackStarted` (this doc's §4.4) | **Reversed at implementation.** Shipped as `Action<AudioClip>`. The presenter keys the library by clip and reads none of `MusicTrack`'s other fields, while carrying the struct required widening the scheduler's pending state — rippling into `QueueTrack`, `ForcePick` (returns `AudioClip`, read by `/music next`), `DiagPendingTrack` (read by the `/music` readout) and `ForceTrack`, which holds no `MusicTrack` at all and would have had to fabricate a weight and environment. The clip alone made TN-6 a three-line addition that touches no existing state. | 2026-09-02 |
@@ -439,6 +448,14 @@ rather than project logic, and a suite that asserted it would be testing `Vertic
 
 * **v1.1** - **TN-0…TN-8 shipped + in-game CONFIRMED 2026-09-02** — all nine §7 rows flipped ✅.
   `TrackStarted` shipped as `Action<AudioClip>` rather than `Action<MusicTrack>`, so the scheduler's
+* **v1.2** - **Toast cards are frosted glass (2026-09-02).** §3.4's blur ban reversed — frosted
+  glass is the intended treatment for every UI surface here, so the ban was a wrong reading of the
+  constraint rather than a scope choice. The card shares one manager-owned blur material and the
+  manager swaps live cards to the flat backdrop while `WorldUIManager.InUI` is true, so §4.2's
+  "a blurred panel replaces the UI beneath it" is honoured without giving up always-visible cards.
+  §9's blur row struck through with the reason. Note the enter/exit `CanvasGroup` fade still sweeps
+  alpha, which per blur doc §4.1 briefly bleeds sharp screen — a ~0.2–0.3 s transition artifact,
+  accepted.
   pending state was never widened (§4.4 note, §9 row). Metadata authoring landed in the Music tab's
   **Global scope** rather than a tab of its own, with a "Sync from pools" button that prefills the
   artist from `CreditsDatabase`'s folder-scoped `author`. Two gate corrections recorded in §7:
