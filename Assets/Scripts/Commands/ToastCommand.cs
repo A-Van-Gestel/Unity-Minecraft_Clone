@@ -36,6 +36,32 @@ namespace Commands
         /// <summary>Spacing between successive expiry ranks, in seconds.</summary>
         private const float DWELL_STEP_SECONDS = 1.5f;
 
+        /// <summary>Sub-command that raises the icon-glyph shortlist.</summary>
+        private const string GLYPH_PROBE_KEYWORD = "glyphs";
+
+        /// <summary>Seconds each glyph candidate stays up. Short, because eight of them queue through.</summary>
+        private const float GLYPH_PROBE_DWELL_SECONDS = 2.5f;
+
+        /// <summary>
+        /// The icon-glyph shortlist: every candidate Monocraft reports a character-table entry for.
+        /// </summary>
+        /// <remarks>
+        /// <c>U+26A0 WARNING SIGN</c> — the obvious mark for a warning — is <b>absent</b> from the atlas, so
+        /// the warning glyph has to be chosen from substitutes. Measured 2026-09-02 against
+        /// <c>Assets/Fonts/Monocraft/Monocraft.asset</c>.
+        /// </remarks>
+        private static readonly (string Glyph, string Label)[] s_glyphCandidates =
+        {
+            ("!", "U+0021 EXCLAMATION (warning)"),
+            ("‼", "U+203C DOUBLE EXCLAMATION (warning)"),
+            ("▲", "U+25B2 BLACK UP TRIANGLE (warning)"),
+            ("⚡", "U+26A1 HIGH VOLTAGE (warning)"),
+            ("×", "U+00D7 MULTIPLICATION SIGN (error)"),
+            ("✘", "U+2718 HEAVY BALLOT X (error)"),
+            ("❌", "U+274C CROSS MARK (error)"),
+            ("X", "U+0058 LATIN CAPITAL X (error)"),
+        };
+
         /// <inheritdoc/>
         public string Name => "toast";
 
@@ -43,7 +69,7 @@ namespace Commands
         public string[] Aliases => s_noAliases;
 
         /// <inheritdoc/>
-        public string Usage => "/toast [count] [topright|topleft|bottomright|bottomleft]";
+        public string Usage => "/toast [count] [topright|topleft|bottomright|bottomleft] [info|warning|error] | /toast glyphs";
 
         /// <inheritdoc/>
         public CommandResult Execute(CommandContext ctx, CommandArgs args)
@@ -53,6 +79,7 @@ namespace Commands
 
             int count = DEFAULT_COUNT;
             ToastAnchor anchor = ToastAnchor.None;
+            ToastVariant variant = ToastVariant.Info;
 
             for (int i = 0; i < args.Count; i++)
             {
@@ -67,8 +94,19 @@ namespace Commands
                     continue;
                 }
 
-                if (!TryParseAnchor(token.Text, out anchor))
-                    return CommandResult.Error($"Unknown anchor '{token.Text}'. Usage: {Usage}");
+                if (string.Equals(token.Text, GLYPH_PROBE_KEYWORD, StringComparison.OrdinalIgnoreCase))
+                    return ShowGlyphProbe(anchor);
+
+                // Anchor and variant are both bare words, so each token is offered to both parsers and the
+                // order they are typed in does not matter.
+                if (TryParseAnchor(token.Text, out ToastAnchor parsedAnchor))
+                {
+                    anchor = parsedAnchor;
+                    continue;
+                }
+
+                if (!TryParseVariant(token.Text, out variant))
+                    return CommandResult.Error($"Unknown anchor or variant '{token.Text}'. Usage: {Usage}");
             }
 
             for (int i = 0; i < count; i++)
@@ -80,7 +118,8 @@ namespace Commands
                     $"Dismisses after {dwell:0.0}s",
                     null,
                     dwell,
-                    anchor));
+                    anchor,
+                    variant));
             }
 
             string where = anchor == ToastAnchor.None ? "the default anchor" : anchor.ToString();
@@ -112,6 +151,65 @@ namespace Commands
             1 => 0,
             _ => index,
         };
+
+        /// <summary>Parses a variant name, case-insensitively.</summary>
+        /// <param name="text">The token text to match.</param>
+        /// <param name="variant">Receives the parsed variant.</param>
+        /// <returns>True when the text named a variant.</returns>
+        private static bool TryParseVariant(string text, out ToastVariant variant)
+        {
+            switch (text.ToLowerInvariant())
+            {
+                case "info":
+                    variant = ToastVariant.Info;
+                    return true;
+                case "warning":
+                case "warn":
+                    variant = ToastVariant.Warning;
+                    return true;
+                case "error":
+                case "err":
+                    variant = ToastVariant.Error;
+                    return true;
+                default:
+                    variant = ToastVariant.Info;
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// Raises one card per candidate icon glyph, so the shortlist can be judged at real icon size.
+        /// </summary>
+        /// <param name="anchor">Where to raise them.</param>
+        /// <returns>What was raised.</returns>
+        /// <remarks>
+        /// The project font's atlas is <b>static</b>, so a codepoint it lacks renders as a blank box with no
+        /// fallback — and a font can equally carry a table entry whose glyph is empty. Neither case is
+        /// visible from <c>HasCharacter</c>, which is why a shortlist is looked at rather than trusted.
+        /// <para>
+        /// Kept after the warning/error defaults were chosen, for two reasons: a new variant needs the same
+        /// eyeball test before its glyph can be trusted, and this is the only caller that exercises
+        /// <see cref="ToastRequest.Glyph"/>, the per-request override.
+        /// </para>
+        /// </remarks>
+        private static CommandResult ShowGlyphProbe(ToastAnchor anchor)
+        {
+            foreach ((string glyph, string label) in s_glyphCandidates)
+            {
+                ToastManager.Show(new ToastRequest(
+                    label,
+                    $"glyph: {glyph}",
+                    null,
+                    GLYPH_PROBE_DWELL_SECONDS,
+                    anchor,
+                    ToastVariant.Info,
+                    glyph));
+            }
+
+            return CommandResult.Info(
+                $"Raised {s_glyphCandidates.Length} glyph candidates, {GLYPH_PROBE_DWELL_SECONDS:0.0}s each. " +
+                "A blank icon slot means the font has no real glyph for that codepoint.");
+        }
 
         /// <summary>Parses an anchor name, case-insensitively.</summary>
         /// <param name="text">The token text to match.</param>

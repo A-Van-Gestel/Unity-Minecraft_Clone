@@ -33,9 +33,6 @@ namespace UI.Toast
         /// <summary>Vertical gap between stacked cards.</summary>
         private const float CARD_SPACING = 8f;
 
-        /// <summary>Seconds a card dwells when the request does not ask for a duration of its own.</summary>
-        private const float DEFAULT_DWELL_SECONDS = 4.5f;
-
         /// <summary>How many cards one anchor shows at once. Further requests wait for a slot.</summary>
         private const int MAX_CARDS_PER_ANCHOR = 3;
 
@@ -78,29 +75,20 @@ namespace UI.Toast
         [SerializeField]
         private ToastAnchor _defaultAnchor = ToastAnchor.TopRight;
 
-        /// <summary>
-        /// The card blur tint, matching the console and the scene panels so every frosted surface reads as
-        /// the same glass.
-        /// </summary>
-        /// <remarks>
-        /// A material property, so Unity gamma-converts it on upload — the same 0.415 set through
-        /// <c>Image.color</c> would not be converted (UI_BLUR_BACKDROP_SYSTEM.md §4.3).
-        /// </remarks>
-        private static readonly Color s_cardBlurTint = new Color(0.415f, 0.415f, 0.415f, 1f);
-
         /// <summary>One stack per corner, indexed by <see cref="AnchorIndex"/>.</summary>
         private AnchorStack[] _stacks;
 
         /// <summary>
-        /// The one blur material every card shares. Owned here and destroyed in <see cref="OnDestroy"/>.
+        /// One blur material per <see cref="ToastVariant"/>, indexed by its enum value. Owned here and
+        /// destroyed in <see cref="OnDestroy"/>.
         /// </summary>
         /// <remarks>
-        /// Allocated once for the manager rather than per card, because cards are pooled and built lazily:
-        /// an instance created in <see cref="ToastCard.Create"/> would leak one material per card the
-        /// session ever needed. Null when the blur shader cannot be found, which the card renders as its
-        /// flat fallback.
+        /// Per variant rather than per card: a variant needs its own tint, but cards are pooled and built
+        /// lazily, so an instance created in <see cref="ToastCard.Create"/> would leak one material per card
+        /// the session ever needed. Entries are null when the blur shader cannot be found, which each card
+        /// renders as its variant's flat color.
         /// </remarks>
-        private Material _blurMaterial;
+        private Material[] _blurMaterials;
 
         /// <summary>Whether a menu was open on the previous frame, so the swap runs only on a change.</summary>
         private bool _wasInUI;
@@ -136,7 +124,7 @@ namespace UI.Toast
             RuntimeUIFactory.ConfigureCanvas(gameObject, SORT_ORDER);
             gameObject.AddComponent<UIScaleController>();
 
-            _blurMaterial = RuntimeUIFactory.CreateBlurMaterialInstance(s_cardBlurTint);
+            BuildVariantMaterials();
 
             BuildAnchorContainers();
         }
@@ -145,7 +133,12 @@ namespace UI.Toast
         {
             if (Instance == this) Instance = null;
 
-            if (_blurMaterial != null) Destroy(_blurMaterial);
+            if (_blurMaterials == null) return;
+
+            foreach (Material material in _blurMaterials)
+            {
+                if (material != null) Destroy(material);
+            }
         }
 
         /// <summary>
@@ -165,28 +158,48 @@ namespace UI.Toast
             ApplyBackdropForUIState();
         }
 
-        /// <summary>Re-points every live card's backdrop at the material the current UI state allows.</summary>
+        /// <summary>Re-points every live card's backdrop at the material its own variant allows right now.</summary>
+        /// <remarks>
+        /// Resolved per card rather than once for the sweep: cards of different variants can be on screen
+        /// together, and each needs its own tint back when the menu closes.
+        /// </remarks>
         private void ApplyBackdropForUIState()
         {
-            Material backdrop = CurrentBackdropMaterial;
-
             foreach (AnchorStack stack in _stacks)
             {
-                foreach (ToastCard card in stack.Live) card.SetBackdrop(backdrop);
+                foreach (ToastCard card in stack.Live) card.SetBackdrop(BackdropMaterialFor(card.Variant));
             }
         }
 
+        /// <summary>Builds one tinted blur material per variant.</summary>
+        private void BuildVariantMaterials()
+        {
+            int count = System.Enum.GetValues(typeof(ToastVariant)).Length;
+            _blurMaterials = new Material[count];
+
+            for (int i = 0; i < count; i++)
+                _blurMaterials[i] = RuntimeUIFactory.CreateBlurMaterialInstance(
+                    ToastStyles.For((ToastVariant)i).BlurTint);
+        }
+
         /// <summary>
-        /// The blur material while nothing is open, or null — the flat fallback — while a menu is.
+        /// A variant's blur material while nothing is open, or null — the flat fallback — while a menu is.
         /// </summary>
+        /// <param name="variant">The variant whose material is wanted.</param>
+        /// <returns>The tinted blur material, or null to force the card's flat color.</returns>
         /// <remarks>
         /// A blurred panel replaces the UI beneath it rather than compositing over it
         /// (UI_BLUR_BACKDROP_SYSTEM.md §4.2), and this canvas sorts above every menu, so a frosted card
         /// over the dimmed pause screen would paint un-dimmed world — `UI_BUGS #06`'s symptom. Cards stay
         /// visible either way; only the backdrop changes.
         /// </remarks>
-        private Material CurrentBackdropMaterial =>
-            WorldUIManager.Instance != null && WorldUIManager.Instance.InUI ? null : _blurMaterial;
+        private Material BackdropMaterialFor(ToastVariant variant)
+        {
+            if (WorldUIManager.Instance != null && WorldUIManager.Instance.InUI) return null;
+
+            int index = (int)variant;
+            return (uint)index < (uint)_blurMaterials.Length ? _blurMaterials[index] : null;
+        }
 
         /// <summary>
         /// Raises a toast. Safe to call when no manager exists — toasts are a feedback layer and must never
@@ -221,20 +234,22 @@ namespace UI.Toast
         private void Spawn(AnchorStack stack, in ToastRequest request)
         {
             // Resolved per spawn, not captured once: a card raised while a menu is open must start flat,
-            // and a pooled card still carries whichever backdrop it wore when it was last retired.
-            Material backdrop = CurrentBackdropMaterial;
+            // and a pooled card still carries whichever variant and backdrop it wore when it was retired.
+            ToastStyle style = ToastStyles.For(request.Variant);
+            Material backdrop = BackdropMaterialFor(request.Variant);
 
             ToastCard card = _free.Count > 0
                 ? _free.Pop()
-                : ToastCard.Create(stack.Container, backdrop);
+                : ToastCard.Create(stack.Container, backdrop, in style);
 
-            card.SetBackdrop(backdrop);
             card.transform.SetParent(stack.Container, false);
 
             stack.Live.Add(card);
 
-            float dwell = request.DwellSeconds > 0f ? request.DwellSeconds : DEFAULT_DWELL_SECONDS;
-            card.Show(in request, dwell, OnCardFinished);
+            // The variant's dwell, not a manager-wide one: an alert has to outlast a neutral notice because
+            // it arrives unprompted.
+            float dwell = request.DwellSeconds > 0f ? request.DwellSeconds : style.DefaultDwellSeconds;
+            card.Show(in request, dwell, in style, backdrop, OnCardFinished);
         }
 
         /// <summary>

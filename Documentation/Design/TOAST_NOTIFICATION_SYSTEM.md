@@ -1,8 +1,8 @@
 # Toast Notification System Design
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** 2026-09-02  
-**Status:** Implemented — TN-0…TN-8 shipped and in-game confirmed 2026-09-02.  
+**Status:** Implemented — TN-0…TN-9 shipped and in-game confirmed 2026-09-02.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > A general in-game toast card system — a corner-anchored, non-overlapping stack of transient
@@ -58,7 +58,8 @@ canvas inventory in `RUNTIME_UI_FACTORY.md` §2 and the full `UI_BUGS #06` entry
 - **Authored cover art.** The field, the layout slot and the null-collapse behaviour all ship; the
   sprites do not (§3.3). Authoring them later needs no code change.
 - **Toast variants** (achievement / warning / error styling) — one visual style in v1. Planned as a
-  **v2 extension**, see §7's extension roadmap.
+  **v2 extension**, see §7's extension roadmap. *(Warning and Error shipped 2026-09-02 as TN-9, §3.5;
+  achievement stays deferred until something raises one.)*
 - **Localization.** No localization system exists in this project; strings are authored English on
   the metadata asset. Not a rejection — there is nothing to integrate with yet.
 - **Reading metadata from the audio files.** Unity's `AudioClip` exposes no ID3 or container
@@ -200,6 +201,52 @@ corner, and toasts draw over the pause menu.
 > cards that never paint un-dimmed world over a dimmed menu. Cards stay visible in both states —
 > only the backdrop material changes. The `#06` symptom is avoided by *never letting a blurred card
 > overlap a blurred panel*, rather than by refusing blur outright.
+
+### 3.5 Variants and the style table
+
+Shipped 2026-09-02 as the first half of §7's v2 extension row. `ToastRequest` carries a
+`ToastVariant`, and `ToastStyles.For(variant)` returns the one value that decides how the card looks:
+accent colour, fallback icon glyph, blur tint, flat backdrop, and default dwell.
+
+| Variant   | Accent    | Glyph | Default dwell | Notes                                              |
+|-----------|-----------|:-----:|:-------------:|----------------------------------------------------|
+| `Info`    | `#F5F5F5` |  none | 4.5 s         | The default. Icon slot collapses unless a consumer supplies a sprite or glyph. |
+| `Warning` | `#FFC24B` |  `!`  | 7 s           | U+0021.                                            |
+| `Error`   | `#FF6060` |  `×`  | 7 s           | U+00D7.                                            |
+
+**Accent colours are the console's.** `Warning` and `Error` are parsed from
+`ConsoleTextFormatter.WarningColor` / `.ErrorColor` rather than written again, so the two surfaces
+cannot drift on what a warning looks like. That class is deliberately free of Unity types — its
+colours are TMP hex strings — which is why they are parsed once into `Color` instead of shared as
+values.
+
+**Alerts dwell longer than notices.** 7 s against `Info`'s 4.5 s, because a warning arrives
+unprompted and reports something the player did not ask about, so it has to survive not being looked
+at immediately. A request that names its own duration still wins.
+
+**The backdrop is tinted, not just the text.** Each variant owns a blur material instance tinted
+`Lerp(neutral, accent, 0.35)` and a flat fallback `Lerp(black, accent, 0.18)`. Both tint strengths
+are deliberately low: `_MultiplyColor` multiplies the blurred world, and a saturated tint turns the
+whole card into a colour cast the text then has to fight. The manager therefore owns **one material
+per variant**, resolved **per card** during the menu swap (§3.4) — cards of different variants can
+be on screen together, and each needs its own tint back when the menu closes.
+
+#### Icon glyphs and what the font actually has
+
+The icon slot resolves **sprite → request glyph → variant glyph → collapsed**, so a variant's mark is
+a default rather than a fixture.
+
+`⚠` **U+26A0 WARNING SIGN is not in the project font.** `Monocraft` (`Assets/Fonts/Monocraft/`,
+1475 glyphs) has `atlasPopulationMode = Static` and no fallback assets, so a missing codepoint
+renders as a blank box and nothing supplies it at runtime. Measured 2026-09-02:
+
+| Present | Absent |
+|---------|--------|
+| `!` U+0021 · `×` U+00D7 · `X` U+0058 · `‼` U+203C · `▲` U+25B2 · `⚡` U+26A1 · `✘` U+2718 · `❌` U+274C | `⚠` U+26A0 · `✕` U+2715 · `✖` U+2716 · `✗` U+2717 · `❗` U+2757 |
+
+All eight present glyphs were confirmed to render (none blank) — a character-table entry can point at
+an empty glyph, which `HasCharacter` cannot tell you, so `/toast glyphs` raises the shortlist at real
+icon size to be judged by eye. `!` and `×` were chosen for legibility at 44 px.
 
 ---
 
@@ -363,6 +410,7 @@ Nothing blocks this design — every system it touches is shipped and stable.
 | **TN-6 — `TrackStarted` event**   | Widen `MusicScheduler`'s pending state to carry the full `MusicTrack`; raise `public event Action<MusicTrack> TrackStarted` in `StartPending()`.       | 🟢     | —            | ✅ 2026-09-02 |
 | **TN-7 — Now-playing presenter**  | `NowPlayingToastPresenter`: subscribes in `Start`, unsubscribes in `OnDestroy`, resolves metadata, falls back to `clip.name`, formats the request.     | 🟢     | TN-0, 4, 6   | ✅ 2026-09-02 |
 | **TN-8 — Settings toggle**        | `showNowPlayingToasts` — one attributed `public bool` on `SettingsManager`, Audio tab, after the volume sliders.                                       | 🟢     | TN-7         | ✅ 2026-09-02 |
+| **TN-9 — Variants**               | `ToastVariant` + `ToastStyle`/`ToastStyles` table; `Variant` and `Glyph` on `ToastRequest`; per-variant blur material on the manager; glyph slot beside the sprite slot on the card; `/toast [variant]` and `/toast glyphs`. Warning + Error only (§3.5). | 🟡     | TN-4, TN-5   | ✅ 2026-09-02 |
 Status: `—` not started · `In progress` · `✅ YYYY-MM-DD` complete (dated at in-game confirmation) ·
 `⏸️ YYYY-MM-DD` deliberately not implemented · `⛔ Superseded YYYY-MM-DD — <by what>`.
 
@@ -411,7 +459,7 @@ rather than project logic, and a suite that asserted it would be testing `Vertic
 
 | Version | Extension                                                                                                                                  |
 |---------|----------------------------------------------------------------------------------------------------------------------------------------------|
-| **v2**  | Toast variants — achievement / warning / error styling, selected per request. The API already takes them; only a style table is missing.     |
+| **v2**  | Toast variants — ✅ **Warning + Error shipped 2026-09-02** (TN-9, §3.5). Achievement deferred until a consumer exists. Note the row's original claim that "the API already takes them" was wrong: `ToastRequest` had no variant field, so the contract change was part of the work. |
 | **v2**  | Authored cover art for the existing music pool, with an import size budget (§3.3).                                                          |
 | **v3+** | Interactive toasts (click to dismiss or act). Requires re-taking raycasts, so it must resolve §3.4's input rule first — gets its own design. |
 | **v3+** | A main-menu toast host, if the main menu ever gains music or notifications.                                                                  |
@@ -448,6 +496,13 @@ rather than project logic, and a suite that asserted it would be testing `Vertic
 
 ## Document History
 
+* **v1.3** - **Toast variants shipped (TN-9, 2026-09-02)** — Warning and Error only; achievement
+  deferred. New §3.5 records the style table, the accent colours shared with `ConsoleTextFormatter`,
+  the tinted-backdrop consequence (one blur material per variant, resolved per card during the menu
+  swap) and the 7 s alert dwell. **`⚠` U+26A0 is not in Monocraft** and its atlas is static, so the
+  warning mark is `!` and the error mark is `×`, both chosen by eye from a shortlist rendered at icon
+  size; §3.5 carries the measured coverage table. Corrected the v2 roadmap row, which claimed the
+  API already took a variant — `ToastRequest` had no such field.
 * **v1.2** - **Toast cards are frosted glass (2026-09-02).** §3.4's blur ban reversed — frosted
   glass is the intended treatment for every UI surface here, so the ban was a wrong reading of the
   constraint rather than a scope choice. The card shares one manager-owned blur material and the
