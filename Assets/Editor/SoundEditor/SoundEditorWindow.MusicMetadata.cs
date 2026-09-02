@@ -9,7 +9,7 @@ namespace Editor.SoundEditor
 {
     /// <summary>
     /// <see cref="SoundEditorWindow"/> — the song-metadata section of the Music tab: one row per song
-    /// carrying the title, artist and cover art a "now playing" card shows.
+    /// carrying one song's title, artist and cover art.
     /// </summary>
     /// <remarks>
     /// Part of the Global scope rather than a tab of its own, because the library is project-level content

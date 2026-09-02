@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Data
 {
     /// <summary>
-    /// Display metadata for one music track: what a "now playing" card shows.
+    /// Display metadata for one music track: its title, its artist, and its cover art.
     /// </summary>
     /// <remarks>
     /// Keyed by <see cref="clip"/> reference rather than by name, because the clip name is already the

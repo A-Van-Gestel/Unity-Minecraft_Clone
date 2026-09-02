@@ -118,8 +118,8 @@ namespace UI.Builders
         /// <para>
         /// Where that can happen, pass <c>null</c> for <paramref name="blurInstance"/> while it does: the
         /// flat fallback composites normally. This method is safe to re-call at any point in a graphic's
-        /// life, which is what makes the swap possible — <c>ToastManager</c> is the worked example, driving
-        /// every live card between frosted and flat as menus open and close.
+        /// life, which is what makes that swap possible: a caller can move a graphic between frosted and
+        /// flat as the UI state around it changes.
         /// </para>
         /// </remarks>
         public static bool ApplyBlurBackground(Image image, Material blurInstance, Color fallbackColor)
