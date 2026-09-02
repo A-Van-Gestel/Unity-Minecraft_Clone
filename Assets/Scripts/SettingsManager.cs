@@ -412,6 +412,16 @@ public class Settings
              TooltipTags.DefaultColorStart + "1.00" + TooltipTags.DefaultColorEnd)]
     public float uiVolume = 1f;
 
+    /// <summary>
+    /// If true, a card naming the song appears when a music track starts.
+    /// </summary>
+    [SettingField(SettingsTab.Audio, Label = "Now Playing Toasts", Order = 6)]
+    [Tooltip("Shows a card in the top-right corner naming the track when music starts.\n\n" +
+             TooltipTags.BulletOptionStart + "If true" + TooltipTags.BulletOptionEnd + "A card appears for a few seconds with the song title and artist.\n" +
+             TooltipTags.BulletOptionStart + "If false" + TooltipTags.BulletOptionEnd + "Music plays with no on-screen notice.\n\n" +
+             TooltipTags.DefaultColorStart + "On" + TooltipTags.DefaultColorEnd)]
+    public bool showNowPlayingToasts = true;
+
     #endregion
 
     #region World Tab

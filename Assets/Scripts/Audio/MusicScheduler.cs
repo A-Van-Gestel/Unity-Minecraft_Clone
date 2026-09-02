@@ -91,6 +91,23 @@ namespace Audio
         /// <summary>The live scheduler, for the console readout. Null outside play mode.</summary>
         public static MusicScheduler Instance { get; private set; }
 
+        /// <summary>
+        /// Raised as a track becomes audible, carrying the clip that started.
+        /// </summary>
+        /// <remarks>
+        /// Raised from <see cref="StartPending"/>, the single point where a clip reaches
+        /// <see cref="AudioSource.Play"/> — so a scheduled pick, <c>/music next</c> and
+        /// <c>/music play</c> are all covered by one raise rather than three.
+        /// <para>
+        /// The clip alone, not the <see cref="MusicTrack"/>: a subscriber wants to identify the song, and the
+        /// entry's weight and environment describe the pool it was drawn from rather than the song itself —
+        /// <see cref="ForceTrack"/> has no entry to hand over at all. An instance event on the singleton,
+        /// matching the codebase's convention; a static one would need its own domain-reload handling for
+        /// the subscriber list.
+        /// </para>
+        /// </remarks>
+        public event System.Action<AudioClip> TrackStarted;
+
         /// <summary>The clip currently playing, or null during a gap.</summary>
         public AudioClip DiagCurrentTrack => _source != null && _source.isPlaying ? _source.clip : null;
 
@@ -246,6 +263,10 @@ namespace Audio
             _stopping = false;
             _source.volume = 0f;
             _source.Play();
+
+            // After Play, so a subscriber that reads the scheduler's diagnostics sees the track it was just
+            // told about rather than the one it replaced.
+            TrackStarted?.Invoke(_lastTrack);
             return true;
         }
 

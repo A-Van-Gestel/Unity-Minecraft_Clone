@@ -1,8 +1,8 @@
 # Toast Notification System Design
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-09-02  
-**Status:** Proposed design — not implemented.  
+**Status:** Implemented — TN-0…TN-8 shipped and in-game confirmed 2026-09-02.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > A general in-game toast card system — a corner-anchored, non-overlapping stack of transient
@@ -89,7 +89,7 @@ canvas inventory in `RUNTIME_UI_FACTORY.md` §2 and the full `UI_BUGS #06` entry
 | Canvas sorting orders           | Benchmark HUD `-10`, scene UI canvas `0`, console `100`, benchmark results `200` (`RUNTIME_UI_FACTORY.md` §2). No slot above 200 is claimed.                    |
 | `UIScaleController.cs`          | `[RequireComponent(CanvasScaler)]`; `Awake` applies the saved UI scale and it subscribes to `SettingsManager.OnSettingChanged`. It scales **its own** canvas, so any code-built canvas can opt in by adding the component. `ConsoleUI` does not. |
 | `DebugScreen.cs:252`            | `_topRightText` (the performance panel) is active in both `Performance` and `Full` modes, and `CurrentMode` defaults to `Full`. Anchored top-right — a direct collision with the default toast position. |
-| `SettingsManager.cs`            | A `public bool` with `[SettingField(SettingsTab.Audio, …)]` auto-generates a Toggle (`SettingsUIGenerator.cs:624`). Audio tab holds volume sliders at `Order` 0–4. |
+| `SettingsManager.cs`            | A `public bool` with `[SettingField(SettingsTab.Audio, …)]` auto-generates a Toggle (`SettingsUIGenerator.cs:624`). Audio tab holds **six** volume sliders at `Order` 0–5 (Master, Music, Ambient, Block, Fluid, UI), so the toggle lands at `Order` 6. |
 | Event conventions               | Instance `public event Action<T>` on singletons (`World.TeleportHoldEnded`, `PerformanceMonitor.OnMetricsSampled`, `BiomeTracker.BiomeChanged`, `CommandEngine.LineAppended`); one static (`SettingsManager.OnSettingChanged`). |
 | Prior art                       | No toast or notification document exists anywhere in `Documentation/`. This is a cold start.                                                                    |
 
@@ -127,8 +127,9 @@ Keyed by reference rather than by clip name deliberately: `MusicCommand.TryFind`
 `clip.name`, and a name-keyed library would silently lose its metadata the moment an asset is
 renamed. An object reference survives renames and moves.
 
-The asset lives at `Assets/Resources/Data/MusicMetadataLibrary.asset` beside the three existing
-databases, and is wired as a `private [SerializeField]` on `SoundManager` next to `_ambience` —
+The asset lives at `Assets/Resources/Data/MusicMetadataLibrary.asset` beside the databases already
+there (`AmbienceDatabase`, `BlockDatabase`, `BlockSoundDatabase`, `EmitterSoundDatabase`, plus
+`BuildStamp`), and is wired as a `private [SerializeField]` on `SoundManager` next to `_ambience` —
 scene-wired, **not** `Resources.Load`, matching how `AmbienceDatabase` is reached today.
 
 #### Option C — parse "Artist - Title" from the clip name (rejected)
@@ -282,6 +283,11 @@ and `/music play <name>` are all covered by one raise. Reaching that point with 
 requires widening the pending state from `(_pendingTrack, _pendingVolume)` to carry the full
 `MusicTrack`, since `QueueTrack` currently discards it.
 
+> **Shipped differently.** The payload is `AudioClip`, not `MusicTrack`, and the pending state was
+> never widened — see §9's row for why the widening was rejected once its blast radius was read.
+> The rest of this section (single raise site, instance event, `Start`/`OnDestroy` subscription)
+> shipped as written.
+
 An instance event on the singleton, matching `World.TeleportHoldEnded` and
 `PerformanceMonitor.OnMetricsSampled` — not a static, which would need its own domain-reload
 handling for subscriber lists.
@@ -337,16 +343,15 @@ Nothing blocks this design — every system it touches is shipped and stable.
 
 | Phase                             | Scope                                                                                                                                                | Effort | Depends on   | Status |
 |-----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|--------------|--------|
-| **TN-0 — Metadata library**       | `MusicMetadata` + `MusicMetadataLibrary` in `Assets/Scripts/Data/`; asset at `Assets/Resources/Data/`; `[SerializeField]` + property on `SoundManager`; lazy dictionary. | 🟢     | —            | —      |
-| **TN-1 — Sound Editor authoring** | New section in `SoundEditorWindow.Music.cs`: one row per entry, plus a "Sync from pools" button appending rows for any clip in a pool with no entry. Editor assembly. | 🟡     | TN-0         | —      |
-| **TN-2 — Toast contract**         | `ToastAnchor` enum + `ToastRequest` struct in `Assets/Scripts/UI/Toast/`.                                                                              | 🟢     | —            | —      |
-| **TN-3 — ToastManager**           | Singleton + `DomainReset`; own canvas at `sortingOrder 250` via `RuntimeUIFactory`, plus `UIScaleController`; per-anchor `VerticalLayoutGroup` containers; card free-list and overflow queue; static `Show(in ToastRequest)`. Spawned by `WorldUIManager.Awake`. | 🟡     | TN-2         | —      |
-| **TN-4 — ToastCard**              | Card view + lifetime: unscaled `WaitForSecondsRealtime` timer, shrink-and-fade exit, `blocksRaycasts = false` / `interactable = false`, flat translucent backdrop (**no blur** — §3.4), collapsing icon slot. | 🟡     | TN-3         | —      |
-| **TN-5 — `/toast` dev command**   | Console command spawning N test cards with staggered durations. The verification instrument for TN-3/TN-4, not a player feature.                       | 🟢     | TN-4         | —      |
-| **TN-6 — `TrackStarted` event**   | Widen `MusicScheduler`'s pending state to carry the full `MusicTrack`; raise `public event Action<MusicTrack> TrackStarted` in `StartPending()`.       | 🟢     | —            | —      |
-| **TN-7 — Now-playing presenter**  | `NowPlayingToastPresenter`: subscribes in `Start`, unsubscribes in `OnDestroy`, resolves metadata, falls back to `clip.name`, formats the request.     | 🟢     | TN-0, 4, 6   | —      |
-| **TN-8 — Settings toggle**        | `showNowPlayingToasts` — one attributed `public bool` on `SettingsManager`, Audio tab, after the volume sliders.                                       | 🟢     | TN-7         | —      |
-
+| **TN-0 — Metadata library**       | `MusicMetadata` + `MusicMetadataLibrary` in `Assets/Scripts/Data/`; asset at `Assets/Resources/Data/`; `[SerializeField]` + property on `SoundManager`; lazy dictionary. | 🟢     | —            | ✅ 2026-09-02 |
+| **TN-1 — Sound Editor authoring** | New section in `SoundEditorWindow.Music.cs`: one row per entry, plus a "Sync from pools" button appending rows for any clip in a pool with no entry. Editor assembly. | 🟡     | TN-0         | ✅ 2026-09-02 |
+| **TN-2 — Toast contract**         | `ToastAnchor` enum + `ToastRequest` struct in `Assets/Scripts/UI/Toast/`.                                                                              | 🟢     | —            | ✅ 2026-09-02 |
+| **TN-3 — ToastManager**           | Singleton + `DomainReset`; own canvas at `sortingOrder 250` via `RuntimeUIFactory`, plus `UIScaleController`; per-anchor `VerticalLayoutGroup` containers; card free-list and overflow queue; static `Show(in ToastRequest)`. Spawned by `WorldUIManager.Awake`. | 🟡     | TN-2         | ✅ 2026-09-02 |
+| **TN-4 — ToastCard**              | Card view + lifetime: unscaled `WaitForSecondsRealtime` timer, shrink-and-fade exit, `blocksRaycasts = false` / `interactable = false`, flat translucent backdrop (**no blur** — §3.4), collapsing icon slot. | 🟡     | TN-3         | ✅ 2026-09-02 |
+| **TN-5 — `/toast` dev command**   | Console command spawning N test cards with staggered durations. The verification instrument for TN-3/TN-4, not a player feature.                       | 🟢     | TN-4         | ✅ 2026-09-02 |
+| **TN-6 — `TrackStarted` event**   | Widen `MusicScheduler`'s pending state to carry the full `MusicTrack`; raise `public event Action<MusicTrack> TrackStarted` in `StartPending()`.       | 🟢     | —            | ✅ 2026-09-02 |
+| **TN-7 — Now-playing presenter**  | `NowPlayingToastPresenter`: subscribes in `Start`, unsubscribes in `OnDestroy`, resolves metadata, falls back to `clip.name`, formats the request.     | 🟢     | TN-0, 4, 6   | ✅ 2026-09-02 |
+| **TN-8 — Settings toggle**        | `showNowPlayingToasts` — one attributed `public bool` on `SettingsManager`, Audio tab, after the volume sliders.                                       | 🟢     | TN-7         | ✅ 2026-09-02 |
 Status: `—` not started · `In progress` · `✅ YYYY-MM-DD` complete (dated at in-game confirmation) ·
 `⏸️ YYYY-MM-DD` deliberately not implemented · `⛔ Superseded YYYY-MM-DD — <by what>`.
 
@@ -374,8 +379,18 @@ The two gates that matter are behavioural:
   not a usable gate — gaps run 3 to 8 minutes.
 
 `lint_files` runs on every new file (the UDR0004/UDR0005 domain-reload analyzers catch exactly the
-static-state class this design introduces), and the existing `Validate Sound Engine` suite must stay
-green through TN-6's change to the scheduler's pending state.
+static-state class this design introduces).
+
+**Two gate corrections found during execution (2026-09-02):**
+
+- **TN-5 must bump `ConsoleCommandInstaller.InstalledCommandCount`** (17 → 18) and re-run
+  `Minecraft Clone/Dev/Validate Command Console`. The constant is asserted in three places by that
+  suite's B32 count-floor, so registering `/toast` without the bump reds it. Not anticipated here.
+- **`Validate Sound Engine` cannot observe TN-6.** Every one of its music scenarios exercises the
+  pure `MusicResolution` layer; **no scenario touches `MusicScheduler`**, so it would stay green
+  through an arbitrarily broken change to the scheduler. Keeping it green is a regression guard on
+  the *rest* of the sound engine, never a verification of the trigger seam — `/music play <name>`
+  in game is the only gate that reaches it.
 
 **No new validation suite is proposed.** The stacking behaviour is a Unity layout-system outcome
 rather than project logic, and a suite that asserted it would be testing `VerticalLayoutGroup`. See
@@ -416,14 +431,24 @@ rather than project logic, and a suite that asserted it would be testing `Vertic
 | A blur backdrop on the toast card                      | `_UIBlurTexture` is captured before any overlay canvas draws, so a blurred card at `sortingOrder 250` would paint un-dimmed world over a dimmed pause screen — `UI_BUGS #06`'s stacking symptom, reproduced (§3.4). Flat translucent `Image` instead. | 2026-09-02 |
 | Hand-rolled stack offset math                          | `VerticalLayoutGroup` + `ContentSizeFitter` handles non-overlap, variable card heights and mid-stack gap closure for free; hand-rolled math would re-derive all three and get wrapped titles wrong (§4.3). | 2026-09-02 |
 | A `static` `TrackStarted` event                        | Would need its own domain-reload handling for the subscriber list. The codebase's instance-event-on-singleton convention avoids it (§4.4).                      | 2026-09-02 |
+| `event Action<MusicTrack> TrackStarted` (this doc's §4.4) | **Reversed at implementation.** Shipped as `Action<AudioClip>`. The presenter keys the library by clip and reads none of `MusicTrack`'s other fields, while carrying the struct required widening the scheduler's pending state — rippling into `QueueTrack`, `ForcePick` (returns `AudioClip`, read by `/music next`), `DiagPendingTrack` (read by the `/music` readout) and `ForceTrack`, which holds no `MusicTrack` at all and would have had to fabricate a weight and environment. The clip alone made TN-6 a three-line addition that touches no existing state. | 2026-09-02 |
 
 ---
 
 ## Document History
 
+* **v1.1** - **TN-0…TN-8 shipped + in-game CONFIRMED 2026-09-02** — all nine §7 rows flipped ✅.
+  `TrackStarted` shipped as `Action<AudioClip>` rather than `Action<MusicTrack>`, so the scheduler's
+  pending state was never widened (§4.4 note, §9 row). Metadata authoring landed in the Music tab's
+  **Global scope** rather than a tab of its own, with a "Sync from pools" button that prefills the
+  artist from `CreditsDatabase`'s folder-scoped `author`. Two gate corrections recorded in §7:
+  TN-5 must bump `InstalledCommandCount` (17→18) for the B32 count-floor, and `Validate Sound
+  Engine` structurally cannot observe TN-6. Sound Engine suite 78→79 with a new metadata census
+  (proved red on an empty library). Three §2 drift items corrected (Audio `Order` 0–5 not 0–4;
+  the `Assets/Resources/Data/` asset count; the TN-6 gate claim).
 * **v1.0** - Initial design
 
 ---
 
 **Last Updated:** 2026-09-02  
-**Next Review:** when TN-0 or TN-2 starts
+**Next Review:** when the toast system is promoted to an Architecture doc (due — last phase complete)

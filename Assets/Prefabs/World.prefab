@@ -74,6 +74,7 @@ MonoBehaviour:
     blockVolume: 1
     fluidVolume: 1
     uiVolume: 1
+    showNowPlayingToasts: 1
     enableLighting: 1
     enableCaves: 1
     enableLodes: 1
