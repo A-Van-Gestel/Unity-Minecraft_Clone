@@ -164,13 +164,15 @@ authored.
 
 ### 3.4 Layering: always on top, frosted except over menus
 
-**Locked by the user**, overriding the recommendation below. Recorded in full because the
-recommendation had a specific bug behind it.
+**Decided: always visible, above everything** — canvas `sortingOrder = 250`, above the benchmark
+results modal at 200. The alternative is recorded in full below because it had a specific bug
+behind it, not because it was close.
 
-The recommendation was to suppress toasts while `WorldUIManager.InUI` is true and to offset the
-stack below the F3 performance panel, citing `UI_BUGS #06` — where the benchmark HUD appeared to
-float above the pause menu. The user chose **always visible, above everything**: canvas
-`sortingOrder = 250`, above the benchmark results modal at 200.
+The alternative was to suppress toasts while `WorldUIManager.InUI` is true and to offset the stack
+below the F3 performance panel, citing `UI_BUGS #06` — where the benchmark HUD appeared to float
+above the pause menu. It was rejected because a notification that hides exactly when the player has
+opened a menu is not a notification surface; the `#06` risk is answered by making cards
+non-interactive (point 1 below) rather than by hiding them.
 
 Two things make this safe, and one makes it a hard constraint on the card's appearance:
 
@@ -190,8 +192,6 @@ Two things make this safe, and one makes it a hard constraint on the card's appe
 Accepted consequences, stated plainly: a toast can cover the F3 performance panel's top-right
 corner, and toasts draw over the pause menu.
 
----
-
 > **Reversed 2026-09-02 — the card IS frosted, with a state-dependent fallback.** Point 3 above was
 > right about the compositing and wrong about the conclusion. The card now shares `ToastManager`'s
 > single blur material instance, and the manager swaps every live card to the flat translucent
@@ -200,6 +200,8 @@ corner, and toasts draw over the pause menu.
 > cards that never paint un-dimmed world over a dimmed menu. Cards stay visible in both states —
 > only the backdrop material changes. The `#06` symptom is avoided by *never letting a blurred card
 > overlap a blurred panel*, rather than by refusing blur outright.
+
+---
 
 ## 4. Data model & architecture
 
@@ -435,7 +437,7 @@ rather than project logic, and a suite that asserted it would be testing `Vertic
 | `title` / `artist` / `cover` fields on `MusicTrack`     | Duplicates a song's metadata once per pool it appears in, and mixes display data into a scheduling struct. Also widens a struct serialized inside `AmbienceDatabase.asset` and every biome asset (§3.1). | 2026-09-02 |
 | Parsing `"Artist - Title"` from the clip filename      | Makes filenames a load-bearing contract, breaks on any rename or on a title containing a dash, and offers no path to cover art (§3.1).                          | 2026-09-02 |
 | A `ToastCard.prefab` beside `TooltipPanel.prefab`      | Needs a scene-wired manager reference and drags prefab/`.meta` churn into every visual tweak. Code-built follows the `ConsoleUI` precedent instead (§3.2).      | 2026-09-02 |
-| Suppressing toasts while `WorldUIManager.InUI`         | Recommended on the `UI_BUGS #06` precedent; **overridden by the user** in favour of always-visible. Made safe by non-interactive cards, not by suppression (§3.4). | 2026-09-02 |
+| Suppressing toasts while `WorldUIManager.InUI`         | Proposed on the `UI_BUGS #06` precedent; **rejected** in favour of always-visible — a surface that hides whenever a menu opens is not a notification surface. Made safe by non-interactive cards, not by suppression (§3.4). | 2026-09-02 |
 | Offsetting the stack below the F3 performance panel    | Same override. The overlap with `DebugScreen`'s top-right panel is accepted (§3.4).                                                                             | 2026-09-02 |
 | A blur backdrop on the toast card                      | ~~`_UIBlurTexture` is captured before any overlay canvas draws, so a blurred card at `sortingOrder 250` would paint un-dimmed world over a dimmed pause screen — `UI_BUGS #06`'s stacking symptom, reproduced (§3.4). Flat translucent `Image` instead.~~ **Reversed 2026-09-02.** Frosted glass is the intended treatment for every UI surface in this project, so "no blur here" was never an acceptable resting state. The compositing analysis above holds — the all-or-nothing conclusion drawn from it did not. Shipped frosted, with the manager swapping live cards to the flat backdrop while `WorldUIManager.InUI` is true — see §3.4's reversal note. | 2026-09-02 |
 | Hand-rolled stack offset math                          | `VerticalLayoutGroup` + `ContentSizeFitter` handles non-overlap, variable card heights and mid-stack gap closure for free; hand-rolled math would re-derive all three and get wrapped titles wrong (§4.3). | 2026-09-02 |
@@ -446,8 +448,6 @@ rather than project logic, and a suite that asserted it would be testing `Vertic
 
 ## Document History
 
-* **v1.1** - **TN-0…TN-8 shipped + in-game CONFIRMED 2026-09-02** — all nine §7 rows flipped ✅.
-  `TrackStarted` shipped as `Action<AudioClip>` rather than `Action<MusicTrack>`, so the scheduler's
 * **v1.2** - **Toast cards are frosted glass (2026-09-02).** §3.4's blur ban reversed — frosted
   glass is the intended treatment for every UI surface here, so the ban was a wrong reading of the
   constraint rather than a scope choice. The card shares one manager-owned blur material and the
@@ -456,6 +456,8 @@ rather than project logic, and a suite that asserted it would be testing `Vertic
   §9's blur row struck through with the reason. Note the enter/exit `CanvasGroup` fade still sweeps
   alpha, which per blur doc §4.1 briefly bleeds sharp screen — a ~0.2–0.3 s transition artifact,
   accepted.
+* **v1.1** - **TN-0…TN-8 shipped + in-game CONFIRMED 2026-09-02** — all nine §7 rows flipped ✅.
+  `TrackStarted` shipped as `Action<AudioClip>` rather than `Action<MusicTrack>`, so the scheduler's
   pending state was never widened (§4.4 note, §9 row). Metadata authoring landed in the Music tab's
   **Global scope** rather than a tab of its own, with a "Sync from pools" button that prefills the
   artist from `CreditsDatabase`'s folder-scoped `author`. Two gate corrections recorded in §7:
