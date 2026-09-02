@@ -97,6 +97,10 @@ namespace Editor.SoundEditor
                 _ambienceSerialized.FindProperty("_globalMusicTracks"));
 
             if (_ambienceSerialized.ApplyModifiedProperties()) _dirty = true;
+
+            // Project-level content like the two gains above it, not per-pool: a song's title and artist are
+            // properties of the song, so they are authored once here rather than per biome.
+            DrawMusicMetadata();
         }
 
         /// <summary>Draws one biome's own music tracks.</summary>

@@ -30,6 +30,7 @@ namespace Editor.Validation.SoundEngine
         private const string BLOCK_DATABASE_PATH = "Assets/Resources/Data/BlockDatabase.asset";
         private const string SOUND_DATABASE_PATH = "Assets/Resources/Data/BlockSoundDatabase.asset";
         private const string EMITTER_DATABASE_PATH = "Assets/Resources/Data/EmitterSoundDatabase.asset";
+        private const string AMBIENCE_DATABASE_PATH = "Assets/Resources/Data/AmbienceDatabase.asset";
 
         /// <summary>Folder the S3 emitter loops live under; everything in it must carry the emitter profile.</summary>
         private const string EMITTER_AUDIO_ROOT = "Assets/Audio/Emitters";
@@ -78,6 +79,7 @@ namespace Editor.Validation.SoundEngine
             scenarios.Add(new Scenario("Every Fluid Emitter Kind Authors A Loop", RunEmitterCensus));
             scenarios.Add(new Scenario("Emitter Clips Import Mono And Compressed In Memory", RunEmitterImportProfile));
             scenarios.Add(new Scenario("Music Clips Import Stereo And Streamed", RunMusicImportProfile));
+            scenarios.Add(new Scenario("Every Pooled Music Clip Has A Metadata Entry", RunMusicMetadataCensus));
             scenarios.Add(new Scenario("Sound Database Holds One Group Per Material", RunDatabaseSizing));
             scenarios.Add(new Scenario("Every Placeable Block Has An Authored Sound Material", RunMaterialCensus));
             scenarios.Add(new Scenario("Prefill Heuristic Classifies Its Fixture Palette", RunPrefillHeuristic));
@@ -274,10 +276,121 @@ namespace Editor.Validation.SoundEngine
         }
 
         /// <summary>
+        /// Every clip offered by the global pool or a biome pool has a song-metadata entry, and every entry
+        /// names a clip some pool actually offers.
+        /// </summary>
+        /// <returns>True when the library and the pools agree.</returns>
+        /// <remarks>
+        /// A census against the shipped assets, for the failure the fallback hides: a clip with no entry
+        /// still shows a card, just captioned with its file name — so a track added to a pool and never given
+        /// metadata degrades silently and looks deliberate. The reverse direction is checked too, because an
+        /// entry for a clip no pool offers is dead authoring that will never be seen.
+        /// <para>
+        /// A missing library is a pass, not a failure: the metadata layer is optional by design and the whole
+        /// music system works without it. What must not happen is a library that exists and is incomplete.
+        /// </para>
+        /// <para>
+        /// The library is found <b>by type, not by path</b>. A path lookup returns null the moment the asset
+        /// is moved or renamed, and this scenario reads null as "no library authored" — so relocating it
+        /// would silently turn the census into a vacuous pass while every card in game fell back to the
+        /// asset name. Searching by type is what <see cref="CensusDatabaseBedVolumes"/> already does, and it
+        /// asserts every library in the project rather than one hardcoded location.
+        /// </para>
+        /// </remarks>
+        private static bool RunMusicMetadataCensus()
+        {
+            const string scenario = "Every Pooled Music Clip Has A Metadata Entry";
+
+            string[] libraryGuids = AssetDatabase.FindAssets("t:MusicMetadataLibrary");
+            if (libraryGuids == null || libraryGuids.Length == 0) return true;
+
+            AmbienceDatabase database = AssetDatabase.LoadAssetAtPath<AmbienceDatabase>(AMBIENCE_DATABASE_PATH);
+            if (database == null)
+                return FailSound(scenario, $"no AmbienceDatabase at '{AMBIENCE_DATABASE_PATH}'.");
+
+            HashSet<AudioClip> pooled = new HashSet<AudioClip>();
+            CollectPoolClips(pooled, database.GlobalMusicTracks);
+
+            string[] guids = AssetDatabase.FindAssets("t:StandardBiomeAttributes");
+            foreach (string guid in guids ?? Array.Empty<string>())
+            {
+                BiomeBase biome = AssetDatabase.LoadAssetAtPath<BiomeBase>(AssetDatabase.GUIDToAssetPath(guid));
+                if (biome != null) CollectPoolClips(pooled, biome.musicTracks);
+            }
+
+            foreach (string libraryGuid in libraryGuids)
+            {
+                string libraryPath = AssetDatabase.GUIDToAssetPath(libraryGuid);
+                MusicMetadataLibrary library =
+                    AssetDatabase.LoadAssetAtPath<MusicMetadataLibrary>(libraryPath);
+                if (library == null)
+                    return FailSound(scenario, $"'{libraryPath}' did not load as a metadata library.");
+
+                if (!CensusOneLibrary(scenario, library, libraryPath, pooled)) return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Checks one library against the pooled clips, in both directions.
+        /// </summary>
+        /// <param name="scenario">The calling scenario's name, for the failure message.</param>
+        /// <param name="library">The library to check.</param>
+        /// <param name="libraryPath">Where it lives, so a failure names which library is wrong.</param>
+        /// <param name="pooled">Every clip some pool offers.</param>
+        /// <returns>True when the library and the pools agree.</returns>
+        private static bool CensusOneLibrary(string scenario, MusicMetadataLibrary library,
+            string libraryPath, HashSet<AudioClip> pooled)
+        {
+            HashSet<AudioClip> described = new HashSet<AudioClip>();
+            foreach (MusicMetadata entry in library.Entries ?? Array.Empty<MusicMetadata>())
+            {
+                if (!entry.IsValid)
+                    return FailSound(scenario, $"'{libraryPath}' holds an entry with no clip.");
+
+                if (!described.Add(entry.clip))
+                    return FailSound(scenario,
+                        $"'{entry.clip.name}' has two entries in '{libraryPath}'; the second is ignored " +
+                        "at runtime.");
+
+                if (!pooled.Contains(entry.clip))
+                    return FailSound(scenario,
+                        $"'{entry.clip.name}' has metadata in '{libraryPath}' but is offered by no pool — " +
+                        "the entry is dead.");
+            }
+
+            foreach (AudioClip clip in pooled)
+            {
+                if (!described.Contains(clip))
+                    return FailSound(scenario,
+                        $"'{clip.name}' is offered by a pool but has no entry in '{libraryPath}', so its " +
+                        "card would silently fall back to the asset name. Run the Sound Editor's " +
+                        "'Sync from pools'.");
+            }
+
+            return true;
+        }
+
+        /// <summary>Adds one pool's playable clips to a set.</summary>
+        /// <param name="into">Receives the clips.</param>
+        /// <param name="tracks">The pool to read. Null contributes nothing.</param>
+        private static void CollectPoolClips(HashSet<AudioClip> into, MusicTrack[] tracks)
+        {
+            if (tracks == null) return;
+
+            foreach (MusicTrack track in tracks)
+            {
+                if (track.IsPlayable) into.Add(track.clip);
+            }
+        }
+
+        /// <summary>
         /// The census over authored biome beds: every Standard biome must offer at least one playable
         /// ambience track, and every track must carry a clip, a band that can actually be reached, and a
         /// gain that can actually be heard.
         /// </summary>
+        /// <returns>True when every shipped biome authors a reachable, audible bed.</returns>
         /// <remarks>
         /// The one scenario that reads the shipped biome assets. Everything else in the ambience half runs on
         /// fixtures built in memory, so a change that emptied <c>ambientTracks</c> on all six assets — the

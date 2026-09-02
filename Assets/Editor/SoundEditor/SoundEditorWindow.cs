@@ -90,6 +90,7 @@ namespace Editor.SoundEditor
             BuildFamilyIndex();
             BuildBlockUsage();
             ReloadAmbience();
+            ReloadMusicMetadata();
             ReloadEmitters();
             _dirty = false;
         }

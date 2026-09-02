@@ -1741,6 +1741,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Audio.SoundManager
   _blockSounds: {fileID: 11400000, guid: 7bb2797a3c62f1b48b74b58950734b13, type: 2}
   _ambience: {fileID: 11400000, guid: fa19c4dae1167d149a69085f26e51fe8, type: 2}
+  _musicMetadata: {fileID: 11400000, guid: 222c544f18d13fe4f859645d12b98b3b, type: 2}
   _mixer: {fileID: 24100000, guid: 06f869aadb3bc9347b4c686bb85bb7a9, type: 2}
   _blocksGroup: {fileID: -4932264678354281645, guid: 06f869aadb3bc9347b4c686bb85bb7a9, type: 2}
   _voiceCount: 24

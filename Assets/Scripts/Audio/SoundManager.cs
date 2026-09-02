@@ -45,6 +45,11 @@ namespace Audio
         [SerializeField]
         private AmbienceDatabase _ambience;
 
+        [Tooltip("Title, artist and cover art per song, shared by every pool that offers the clip. " +
+                 "Optional: without one, a now-playing card falls back to the clip's asset name.")]
+        [SerializeField]
+        private MusicMetadataLibrary _musicMetadata;
+
         [Header("Mixer")]
         [Tooltip("The game's audio mixer. Optional: without one, category volumes are applied directly to each source.")]
         [SerializeField]
@@ -194,6 +199,16 @@ namespace Audio
         /// not have.
         /// </remarks>
         public AmbienceDatabase Ambience => _ambience;
+
+        /// <summary>
+        /// Per-song display metadata for the now-playing card, or null when no library is assigned.
+        /// </summary>
+        /// <remarks>
+        /// Reached through this manager for the same reason <see cref="Ambience"/> is — one scene-wired slot
+        /// rather than one per consumer. Null is a supported state, not a misconfiguration: the card falls
+        /// back to the clip's asset name, so the music layer works with no library authored at all.
+        /// </remarks>
+        public MusicMetadataLibrary MusicMetadata => _musicMetadata;
 
         /// <summary>
         /// The active world type's biome assets, indexed by biome index, or null when no world is loaded.
