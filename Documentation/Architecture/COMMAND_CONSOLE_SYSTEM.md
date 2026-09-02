@@ -568,10 +568,40 @@ not the subcommand, so `/wind vector`'s Z slot shares index 2 with `/wind set`'s
 inherits its compass candidates. Harmless — they share no common prefix, so the text is never
 rewritten — and left as-is rather than widening a four-implementer interface.
 
+### 8.5 `/toast` — toast-surface test cards ✅ (implemented + in-game confirmed 2026-09-02)
+
+A dev instrument rather than a player feature, shipped with the toast system
+([`../Design/TOAST_NOTIFICATION_SYSTEM.md`](../Design/TOAST_NOTIFICATION_SYSTEM.md) TN-5). Raises N
+cards so the stack's non-overlap, its independent timers and its mid-stack gap closure can be seen
+without waiting on a real consumer.
+
+| Form                                   | Behavior                                                                          |
+|----------------------------------------|-----------------------------------------------------------------------------------|
+| `/toast`                               | Three cards at the manager's default anchor                                       |
+| `/toast <count>`                       | 1…`ToastManager.AnchorCapacity` cards (cap + queue depth); above that is rejected  |
+| `/toast <count> <anchor>`              | `topright` \| `topleft` \| `bottomright` \| `bottomleft`                           |
+
+**The dwell schedule is deliberately non-monotonic.** `ExpiryRank` swaps the first two ranks so the
+*second* card expires first. With dwells that simply grow with the index, FIFO admission makes the
+oldest card both the first to expire and the topmost, so every exit is "top card leaves" and the
+mid-stack case — the one thing this command exists to demonstrate — never occurs at any count. The
+swap is load-bearing; do not simplify it back to `BASE + i * STEP`.
+
+**Count bound comes from the manager.** `MAX_COUNT = ToastManager.AnchorCapacity`
+(`MAX_CARDS_PER_ANCHOR + MAX_QUEUED_PER_ANCHOR`), so the reply can never claim to have raised cards
+that `ShowInternal` silently dropped.
+
+**Registration.** Like every built-in, via `ConsoleCommandInstaller.RegisterAll`; adding it moved
+`InstalledCommandCount` to **18**, which the B32 count-floor baseline asserts in three places.
+
 ---
 
 ## Document History
 
+* **v1.16** - **`/toast` in-game CONFIRMED 2026-09-02** — new §8.5 for the toast-surface test
+  command shipped with TN-5. `InstalledCommandCount` 17→18 (B32 count-floor asserts it in three
+  places); Command Console suite stays 57/57. Records why the dwell schedule is non-monotonic: a
+  monotonic stagger can never produce the mid-stack expiry the command exists to demonstrate.
 * **v1.15** - **`/wind` in-game CONFIRMED 2026-08-10** (all four forms verified by hand), plus two
   feedback changes: the 20 blocks/s speed cap was **removed** (float range is the only limit; only a
   negative speed is rejected — an arbitrary maximum was a dev tool second-guessing its user), and the

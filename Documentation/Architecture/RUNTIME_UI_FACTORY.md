@@ -65,12 +65,16 @@ shipped state, §5 the shipped phases, and §4 the resolution of the console/too
 | Benchmark results canvas         | `sortingOrder = 200`; a terminal modal, deliberately above everything.                                                               |
 | `FluidStressController.cs:147`   | Calls `CreateResultsScreen` with **no** blur material — the null-fallback path is live in production, not dead defensive code.       |
 | `ConsoleUI`                      | Hosts its canvas on its own GameObject via `ConfigureCanvas` at `sortingOrder = 100`; panel backdrop goes through `ApplyBlurBackground`. |
+| `TouchControls.cs:371`           | Sets `sortingOrder = 90` directly on its own canvas — above the scene UI, below the console.                                        |
+| `ToastManager` canvas            | `sortingOrder = 250` via `ConfigureCanvas` — above the benchmark results modal (200), so toasts draw over every screen including the pause menu. Safe only because every card sets `blocksRaycasts = false`. Adds `UIScaleController`, so cards honour the UI Scale setting. Cards use a **flat translucent `Image`, never `ApplyBlurBackground`** (see below). |
 | Console panel rect               | x 12–692, y 12–452 at a fixed 1920x1080 reference.                                                                                  |
 | `Toolbar` rect                   | 218x26 at scale 3, bottom-centre, y 5 → spans x ≈ 633–1287, y ≈ 15–93 in reference pixels.                                           |
 
 **The console/toolbar overlap is real: ~59 reference px** at the default UI scale — see §5's RUF-3
-note for how it is resolved. `UIScaleController` rescales only the scene canvas, not the console's own, so the overlap
-varies with UI scale rather than being fixed (it disappears at Small).
+note for how it is resolved. `UIScaleController` scales whichever canvas it is attached to, and
+`ConsoleUI` never adds it, so the console's own canvas is left unscaled and the overlap varies with
+UI scale rather than being fixed (it disappears at Small). `ToastManager` does add the component,
+which is what makes the toast canvas the code-built surface that follows the setting.
 
 Canvas scaler match differs by screen and is deliberate: the benchmark canvases use `0.5` (balanced),
 the console uses `0` (width-matched) because it is anchored to the bottom-left corner and height

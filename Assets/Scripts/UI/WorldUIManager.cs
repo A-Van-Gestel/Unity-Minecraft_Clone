@@ -1,4 +1,5 @@
 using Commands;
+using UI.Toast;
 using UnityEngine;
 
 namespace UI
@@ -127,6 +128,11 @@ namespace UI
                 GameObject consoleObj = new GameObject("Console");
                 consoleObj.transform.SetParent(transform, false);
                 _console = consoleObj.AddComponent<ConsoleUI>();
+
+                // Spawn the toast surface the same way — its own overlay canvas, built in code.
+                GameObject toastObj = new GameObject("Toasts");
+                toastObj.transform.SetParent(transform, false);
+                toastObj.AddComponent<ToastManager>();
             }
             else
             {

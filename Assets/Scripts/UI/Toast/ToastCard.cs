@@ -1,0 +1,277 @@
+using System;
+using System.Collections;
+using TMPro;
+using UI.Builders;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace UI.Toast
+{
+    /// <summary>
+    /// One toast card: the view (icon, title, subtitle over a flat translucent backdrop) and the lifetime
+    /// that fades it in, holds it, and shrinks it back out again.
+    /// </summary>
+    /// <remarks>
+    /// Built in code and pooled by <see cref="ToastManager"/> — never instantiated per toast. The card
+    /// drives its own exit by shrinking its <see cref="LayoutElement"/> height to zero rather than removing
+    /// itself: the parent's <see cref="VerticalLayoutGroup"/> then closes the gap as a normal rebuild, which
+    /// is what makes a card expiring in the <i>middle</i> of the stack slide shut instead of snapping.
+    /// <para>
+    /// The backdrop is a flat translucent <see cref="Image"/> and deliberately never uses the blur helpers:
+    /// the blur texture is captured at <c>AfterRenderingTransparents</c>, before any overlay canvas draws,
+    /// so a blurred card on the toast canvas would paint un-dimmed world over a dimmed pause screen.
+    /// </para>
+    /// </remarks>
+    public class ToastCard : MonoBehaviour
+    {
+        #region Style constants
+
+        /// <summary>Card width in canvas reference pixels. The stack container sizes itself to this.</summary>
+        private const float CARD_WIDTH = 340f;
+
+        /// <summary>Inner padding on all four sides.</summary>
+        private const int CARD_PADDING = 12;
+
+        /// <summary>Gap between the icon slot and the text column.</summary>
+        private const float ICON_GAP = 10f;
+
+        /// <summary>Square edge of the icon slot. Collapses entirely when no sprite is supplied.</summary>
+        private const float ICON_SIZE = 44f;
+
+        /// <summary>Gap between the title and the subtitle.</summary>
+        private const float TEXT_SPACING = 2f;
+
+        private const float TITLE_FONT_SIZE = 21f;
+        private const float SUBTITLE_FONT_SIZE = 16f;
+
+        /// <summary>Seconds the card takes to fade in.</summary>
+        private const float ENTER_SECONDS = 0.22f;
+
+        /// <summary>Seconds the card takes to fade and shrink away.</summary>
+        private const float EXIT_SECONDS = 0.3f;
+
+        private static readonly Color s_backdrop = new Color(0.05f, 0.05f, 0.06f, 0.82f);
+        private static readonly Color s_titleColor = new Color(0.96f, 0.96f, 0.96f, 1f);
+        private static readonly Color s_subtitleColor = new Color(0.72f, 0.74f, 0.78f, 1f);
+
+        #endregion
+
+        private RectTransform _rect;
+        private CanvasGroup _group;
+        private LayoutElement _layout;
+        private GameObject _iconObject;
+        private Image _iconImage;
+        private TextMeshProUGUI _titleText;
+        private TextMeshProUGUI _subtitleText;
+        private Coroutine _lifetime;
+        private Action<ToastCard> _onFinished;
+
+        /// <summary>
+        /// Builds a card hierarchy under <paramref name="parent"/>, inactive and ready to be shown.
+        /// </summary>
+        /// <param name="parent">The anchor container to parent under.</param>
+        /// <returns>The created card.</returns>
+        /// <remarks>
+        /// Construction lives here rather than on the manager so the manager owns only stacking, pooling and
+        /// the request queue — a second card style becomes a second builder, not a branch in the manager.
+        /// </remarks>
+        public static ToastCard Create(Transform parent)
+        {
+            GameObject root = new GameObject("ToastCard", typeof(RectTransform));
+            root.transform.SetParent(parent, false);
+
+            ToastCard card = root.AddComponent<ToastCard>();
+            card.Build();
+            root.SetActive(false);
+            return card;
+        }
+
+        /// <summary>Builds this card components and children. Called once, by <see cref="Create"/>.</summary>
+        private void Build()
+        {
+            _rect = (RectTransform)transform;
+
+            Image backdrop = gameObject.AddComponent<Image>();
+            backdrop.color = s_backdrop;
+
+            // Clips the text while the card shrinks on exit; without it the content overflows the
+            // collapsing rect and the card appears to slide under its neighbor rather than close.
+            gameObject.AddComponent<RectMask2D>();
+
+            _group = gameObject.AddComponent<CanvasGroup>();
+
+            // The TooltipManager rule, and here a correctness requirement rather than a flicker guard: the
+            // toast canvas sorts above every menu, so a card that took raycasts could eat a click on the
+            // pause menu underneath it.
+            _group.blocksRaycasts = false;
+            _group.interactable = false;
+
+            HorizontalLayoutGroup row = gameObject.AddComponent<HorizontalLayoutGroup>();
+            row.padding = new RectOffset(CARD_PADDING, CARD_PADDING, CARD_PADDING, CARD_PADDING);
+            row.spacing = ICON_GAP;
+            row.childAlignment = TextAnchor.MiddleLeft;
+            row.childControlWidth = true;
+            row.childControlHeight = true;
+            row.childForceExpandWidth = false;
+            row.childForceExpandHeight = false;
+
+            _layout = gameObject.AddComponent<LayoutElement>();
+            _layout.preferredWidth = CARD_WIDTH;
+
+            BuildIcon();
+            BuildTextColumn();
+        }
+
+        /// <summary>Builds the square icon slot. Deactivated — and so skipped by layout — when unused.</summary>
+        private void BuildIcon()
+        {
+            _iconObject = new GameObject("Icon", typeof(RectTransform));
+            _iconObject.transform.SetParent(transform, false);
+
+            _iconImage = _iconObject.AddComponent<Image>();
+            _iconImage.preserveAspect = true;
+
+            LayoutElement iconLayout = _iconObject.AddComponent<LayoutElement>();
+            iconLayout.preferredWidth = ICON_SIZE;
+            iconLayout.preferredHeight = ICON_SIZE;
+            iconLayout.flexibleWidth = 0f;
+        }
+
+        /// <summary>Builds the title/subtitle column that takes whatever width the icon slot leaves.</summary>
+        private void BuildTextColumn()
+        {
+            GameObject column = new GameObject("Text", typeof(RectTransform));
+            column.transform.SetParent(transform, false);
+
+            VerticalLayoutGroup columnLayout = column.AddComponent<VerticalLayoutGroup>();
+            columnLayout.spacing = TEXT_SPACING;
+            columnLayout.childAlignment = TextAnchor.MiddleLeft;
+            columnLayout.childControlWidth = true;
+            columnLayout.childControlHeight = true;
+            columnLayout.childForceExpandWidth = true;
+            columnLayout.childForceExpandHeight = false;
+
+            // Flexible rather than a computed width: the column takes whatever the icon slot leaves, so a
+            // collapsed icon widens the text instead of leaving a hole.
+            LayoutElement columnElement = column.AddComponent<LayoutElement>();
+            columnElement.flexibleWidth = 1f;
+
+            _titleText = CreateLabel("Title", column.transform, TITLE_FONT_SIZE, s_titleColor,
+                FontStyles.Bold);
+            _subtitleText = CreateLabel("Subtitle", column.transform, SUBTITLE_FONT_SIZE, s_subtitleColor,
+                FontStyles.Normal);
+        }
+
+        /// <summary>Creates one wrapped TMP label inside the text column.</summary>
+        /// <param name="name">Name for the created GameObject.</param>
+        /// <param name="parent">Transform to parent under.</param>
+        /// <param name="fontSize">Font size in reference pixels.</param>
+        /// <param name="color">Text color.</param>
+        /// <param name="style">Font style.</param>
+        /// <returns>The created text component.</returns>
+        /// <remarks>
+        /// Built through <see cref="RuntimeUIFactory.CreateTMPText"/> rather than by hand, so a future
+        /// factory-wide text change — a default font asset, a different wrapping mode — reaches the toast
+        /// cards along with the console and the benchmark UI. The factory already wraps rather than
+        /// truncates, which is what lets a wrapped title make the card taller and move every card below it
+        /// by exactly that much. Only the weight and the height-from-content are added here.
+        /// </remarks>
+        private static TextMeshProUGUI CreateLabel(string name, Transform parent, float fontSize, Color color,
+            FontStyles style)
+        {
+            GameObject obj = RuntimeUIFactory.CreateTMPText(name, parent, fontSize,
+                TextAlignmentOptions.MidlineLeft, color);
+
+            TextMeshProUGUI text = obj.GetComponent<TextMeshProUGUI>();
+            text.fontStyle = style;
+
+            ContentSizeFitter fitter = obj.AddComponent<ContentSizeFitter>();
+            fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            return text;
+        }
+
+        /// <summary>
+        /// Fills this card from a request and starts its lifetime.
+        /// </summary>
+        /// <param name="request">What the card shows.</param>
+        /// <param name="dwellSeconds">Seconds to hold before the exit animation.</param>
+        /// <param name="onFinished">Invoked once the card has finished its exit and is free to reuse.</param>
+        public void Show(in ToastRequest request, float dwellSeconds, Action<ToastCard> onFinished)
+        {
+            _onFinished = onFinished;
+
+            _titleText.text = request.Title;
+
+            bool hasSubtitle = !string.IsNullOrWhiteSpace(request.Subtitle);
+            _subtitleText.text = hasSubtitle ? request.Subtitle : string.Empty;
+            _subtitleText.gameObject.SetActive(hasSubtitle);
+
+            bool hasIcon = request.Icon != null;
+            _iconImage.sprite = request.Icon;
+            _iconObject.SetActive(hasIcon);
+
+            // Back to content-driven height: a pooled card still carries the zeroed height its last exit
+            // drove, and would otherwise re-enter the stack collapsed.
+            _layout.preferredHeight = -1f;
+            _layout.minHeight = -1f;
+
+            _group.alpha = 0f;
+            gameObject.SetActive(true);
+            transform.SetAsLastSibling();
+
+            // Sized before the first frame is drawn, so the card never flashes at its previous height.
+            LayoutRebuilder.ForceRebuildLayoutImmediate(_rect);
+
+            if (_lifetime != null) StopCoroutine(_lifetime);
+            _lifetime = StartCoroutine(LifetimeRoutine(dwellSeconds));
+        }
+
+        /// <summary>Fades in, holds for the dwell, then shrinks and fades out.</summary>
+        /// <param name="dwellSeconds">Seconds to hold at full opacity.</param>
+        /// <remarks>
+        /// Unscaled throughout, matching the tooltip auto-hide and the music scheduler timing: a toast must
+        /// dismiss itself whatever the time scale is doing.
+        /// </remarks>
+        private IEnumerator LifetimeRoutine(float dwellSeconds)
+        {
+            for (float elapsed = 0f; elapsed < ENTER_SECONDS; elapsed += Time.unscaledDeltaTime)
+            {
+                _group.alpha = Mathf.Clamp01(elapsed / ENTER_SECONDS);
+                yield return null;
+            }
+
+            _group.alpha = 1f;
+            yield return new WaitForSecondsRealtime(dwellSeconds);
+
+            // Both heights are driven, not just the preferred one: the card own layout group reports a
+            // minimum from its content, and the parent would honor that floor and stop the collapse short.
+            float startHeight = _rect.rect.height;
+            for (float elapsed = 0f; elapsed < EXIT_SECONDS; elapsed += Time.unscaledDeltaTime)
+            {
+                float t = Mathf.Clamp01(elapsed / EXIT_SECONDS);
+                float height = Mathf.Lerp(startHeight, 0f, t);
+
+                _layout.preferredHeight = height;
+                _layout.minHeight = height;
+                _group.alpha = 1f - t;
+                yield return null;
+            }
+
+            _lifetime = null;
+            Retire();
+        }
+
+        /// <summary>Hides the card and hands it back to the manager free-list.</summary>
+        private void Retire()
+        {
+            _group.alpha = 0f;
+            gameObject.SetActive(false);
+
+            Action<ToastCard> finished = _onFinished;
+            _onFinished = null;
+            finished?.Invoke(this);
+        }
+    }
+}
