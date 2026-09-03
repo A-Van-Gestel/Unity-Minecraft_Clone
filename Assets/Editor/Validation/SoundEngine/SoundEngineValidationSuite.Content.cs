@@ -650,9 +650,10 @@ namespace Editor.Validation.SoundEngine
             if (AudioVolumes.GetLinear(AudioCategory.Blocks) > 0.0001f)
                 return FailSound(scenario, "a zeroed master slider did not silence the block category.");
 
-            // Left as the shipped defaults rather than the fixture's values: this static table is process-wide,
-            // and a later suite in a Validate All run would otherwise inherit a half-muted mixer.
-            AudioVolumes.Apply(new Settings());
+            // The table is process-wide and reaches the live mixer, so the fixture must not outlive the
+            // scenario. Restored from the persisted settings the way the settings menu itself does: class
+            // defaults would leave a play-mode run sounding at values the menu no longer shows.
+            AudioVolumes.Apply(SettingsManager.LoadSettings());
             return true;
         }
 
@@ -726,7 +727,7 @@ namespace Editor.Validation.SoundEngine
             finally
             {
                 // The same process-wide restore RunCategoryVolumes documents.
-                AudioVolumes.Apply(new Settings());
+                AudioVolumes.Apply(SettingsManager.LoadSettings());
             }
 
             return true;
