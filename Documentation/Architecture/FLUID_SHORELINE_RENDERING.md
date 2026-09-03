@@ -206,6 +206,7 @@ list above as the specification of what was useful.
 | File                                        | Responsibility                                                           |
 |---------------------------------------------|--------------------------------------------------------------------------|
 | `Assets/Scripts/Helpers/VoxelMeshHelper.cs` | `GenerateFluidMeshData` — wall mask encoding, push direction computation |
+| `Assets/Scripts/Jobs/BurstData/BurstFluidFlowUtility.cs` | `CalculateSymmetricCornerFlow` + its wall/fluid neighbor tests — the corner flow derivative, shared with `Physics.FluidContactResolver` |
 | `Assets/Shaders/UberLiquidShader.shader`    | `GetShoreData` — per-pixel wall distance, gradient, and push             |
 
 ---

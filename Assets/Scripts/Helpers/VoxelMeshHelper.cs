@@ -1009,10 +1009,10 @@ namespace Helpers
             OptionalVoxelState centerState = new OptionalVoxelState(new VoxelState(packedData));
 
             // Calculate 4 distinct corner flow vectors for bilinear interpolation across the top face
-            Vector2 flow_bl = CalculateSymmetricCornerFlow(n_SW, n_S, n_W, centerState, props.FluidType, in templates, in blockTypes);
-            Vector2 flow_tl = CalculateSymmetricCornerFlow(n_W, centerState, n_NW, n_N, props.FluidType, in templates, in blockTypes);
-            Vector2 flow_br = CalculateSymmetricCornerFlow(n_S, n_SE, centerState, n_E, props.FluidType, in templates, in blockTypes);
-            Vector2 flow_tr = CalculateSymmetricCornerFlow(centerState, n_E, n_N, n_NE, props.FluidType, in templates, in blockTypes);
+            Vector2 flow_bl = BurstFluidFlowUtility.CalculateSymmetricCornerFlow(n_SW, n_S, n_W, centerState, props.FluidType, in templates, in blockTypes);
+            Vector2 flow_tl = BurstFluidFlowUtility.CalculateSymmetricCornerFlow(n_W, centerState, n_NW, n_N, props.FluidType, in templates, in blockTypes);
+            Vector2 flow_br = BurstFluidFlowUtility.CalculateSymmetricCornerFlow(n_S, n_SE, centerState, n_E, props.FluidType, in templates, in blockTypes);
+            Vector2 flow_tr = BurstFluidFlowUtility.CalculateSymmetricCornerFlow(centerState, n_E, n_N, n_NE, props.FluidType, in templates, in blockTypes);
 
             // Shore push directions — symmetric 4-block neighborhood matching flow corners above.
             CalculateSymmetricCornerShorePush(n_SW, n_S, n_W, centerState, in blockTypes, out Vector2 shore_push_bl);
@@ -1077,15 +1077,15 @@ namespace Helpers
                 // v.color.a = unused (light moved to TexCoord1)
                 // v.uv.xy   = localFlowVector
                 // v.uv.zw   = shorePush (normalized direction for displacement)
-                bool wallN = IsSolidWall(n_N, in blockTypes);
-                bool wallS = IsSolidWall(n_S, in blockTypes);
-                bool wallE = IsSolidWall(n_E, in blockTypes);
-                bool wallW = IsSolidWall(n_W, in blockTypes);
+                bool wallN = BurstFluidFlowUtility.IsSolidWall(n_N, in blockTypes);
+                bool wallS = BurstFluidFlowUtility.IsSolidWall(n_S, in blockTypes);
+                bool wallE = BurstFluidFlowUtility.IsSolidWall(n_E, in blockTypes);
+                bool wallW = BurstFluidFlowUtility.IsSolidWall(n_W, in blockTypes);
                 // Diagonal corners only matter if not already covered by two adjacent cardinal walls
-                bool diagNE = !wallN && !wallE && IsSolidWall(n_NE, in blockTypes);
-                bool diagNW = !wallN && !wallW && IsSolidWall(n_NW, in blockTypes);
-                bool diagSE = !wallS && !wallE && IsSolidWall(n_SE, in blockTypes);
-                bool diagSW = !wallS && !wallW && IsSolidWall(n_SW, in blockTypes);
+                bool diagNE = !wallN && !wallE && BurstFluidFlowUtility.IsSolidWall(n_NE, in blockTypes);
+                bool diagNW = !wallN && !wallW && BurstFluidFlowUtility.IsSolidWall(n_NW, in blockTypes);
+                bool diagSE = !wallS && !wallE && BurstFluidFlowUtility.IsSolidWall(n_SE, in blockTypes);
+                bool diagSW = !wallS && !wallW && BurstFluidFlowUtility.IsSolidWall(n_SW, in blockTypes);
 
                 int shoreMaskSum =
                     (wallN ? 1 : 0) + (wallS ? 2 : 0) + (wallE ? 4 : 0) + (wallW ? 8 : 0) +
@@ -1403,137 +1403,9 @@ namespace Helpers
         }
 
         /// <summary>
-        /// Calculates a discrete 2D flow-direction vector for a specific corner of a fluid block symmetrically.
-        /// By evaluating the 4 blocks that share this corner together, it guarantees mathematically identical
-        /// flow vectors across chunk and block boundaries, eliminating UV seams.
-        /// </summary>
-        /// <param name="b00">The block at local (-x, -z) of the corner.</param>
-        /// <param name="b10">The block at local (+x, -z) of the corner.</param>
-        /// <param name="b01">The block at local (-x, +z) of the corner.</param>
-        /// <param name="b11">The block at local (+x, +z) of the corner.</param>
-        /// <param name="fluidType">The fluid type being evaluated.</param>
-        /// <param name="templates">The pre-computed height templates for this fluid type.</param>
-        /// <param name="blockTypes">The global block types data array.</param>
-        /// <returns>A 2D vector representing the XZ flow direction at this corner.</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static Vector2 CalculateSymmetricCornerFlow(
-            OptionalVoxelState b00, OptionalVoxelState b10,
-            OptionalVoxelState b01, OptionalVoxelState b11,
-            FluidType fluidType,
-            in NativeArray<float> templates, in NativeArray<BlockTypeJobData> blockTypes)
-        {
-            bool w00 = IsSolidWall(b00, in blockTypes);
-            bool w10 = IsSolidWall(b10, in blockTypes);
-            bool w01 = IsSolidWall(b01, in blockTypes);
-            bool w11 = IsSolidWall(b11, in blockTypes);
-
-            // Accessibility guard: a non-wall, non-fluid block (e.g., air) is only included
-            // if at least one of its two grid-adjacent neighbors is matching fluid. This prevents
-            // isolated non-fluid blocks (diagonal air behind two walls) from creating artificial
-            // pull gradients, while preserving the natural pull toward waterfall edges and drops
-            // where the air IS accessible from the fluid surface.
-            bool f00 = IsMatchingFluid(b00, fluidType, in blockTypes);
-            bool f10 = IsMatchingFluid(b10, fluidType, in blockTypes);
-            bool f01 = IsMatchingFluid(b01, fluidType, in blockTypes);
-            bool f11 = IsMatchingFluid(b11, fluidType, in blockTypes);
-
-            // b00 adjacent to b10, b01 — inaccessible if neither is fluid
-            if (!w00 && !f00 && !f10 && !f01) w00 = true;
-            // b10 adjacent to b00, b11 — inaccessible if neither is fluid
-            if (!w10 && !f10 && !f00 && !f11) w10 = true;
-            // b01 adjacent to b00, b11 — inaccessible if neither is fluid
-            if (!w01 && !f01 && !f00 && !f11) w01 = true;
-            // b11 adjacent to b10, b01 — inaccessible if neither is fluid
-            if (!w11 && !f11 && !f10 && !f01) w11 = true;
-
-            float h00 = w00 ? 0 : GetEffectiveFluidHeight(b00, fluidType, templates, blockTypes);
-            float h10 = w10 ? 0 : GetEffectiveFluidHeight(b10, fluidType, templates, blockTypes);
-            float h01 = w01 ? 0 : GetEffectiveFluidHeight(b01, fluidType, templates, blockTypes);
-            float h11 = w11 ? 0 : GetEffectiveFluidHeight(b11, fluidType, templates, blockTypes);
-
-            float dx = 0f;
-            int dx_count = 0;
-            // Only calculate the X derivative if the fluid actually exists across the boundary.
-            // This prevents walls from creating artificial slopes that pull flow backward!
-            if (!w01 && !w11)
-            {
-                dx += h11 - h01;
-                dx_count++;
-            }
-
-            if (!w00 && !w10)
-            {
-                dx += h10 - h00;
-                dx_count++;
-            }
-
-            if (dx_count > 0) dx /= dx_count;
-
-            float dz = 0f;
-            int dz_count = 0;
-            // Only calculate the Z derivative if the fluid actually exists across the boundary.
-            if (!w10 && !w11)
-            {
-                dz += h11 - h10;
-                dz_count++;
-            }
-
-            if (!w00 && !w01)
-            {
-                dz += h01 - h00;
-                dz_count++;
-            }
-
-            if (dz_count > 0) dz /= dz_count;
-
-            Vector2 cornerFlow = new Vector2(dx, dz);
-            float sqrMag = cornerFlow.sqrMagnitude;
-
-            if (sqrMag < 0.0001f) return Vector2.zero;
-
-            // Get the pure normalized direction
-            float mag = math.sqrt(sqrMag);
-            Vector2 dir = cornerFlow / mag;
-
-            // Apply a smooth speed curve to the magnitude.
-            // Gentle slopes (mag 0.25) get boosted to a standard speed of 1.0.
-            // Steep drops/waterfalls (mag 1.0+) get boosted to 1.5.
-            float speed = math.smoothstep(0.0f, 0.25f, mag) + math.smoothstep(0.8f, 1.2f, mag) * 0.5f;
-
-            return dir * speed;
-        }
-
-        /// <summary>
-        /// Determines the effective visual height of a neighboring block for fluid smoothing and flow calculations.
-        /// Treats solid obstacles as high walls (2.0) and open drops as strong pulls (-1.0).
-        /// </summary>
-        /// <param name="neighbor">The neighbor voxel state to evaluate.</param>
-        /// <param name="centerFluidType">The fluid type of the center block (Water/Lava).</param>
-        /// <param name="templates">The pre-computed height templates for this fluid type.</param>
-        /// <param name="blockTypes">The global block types data array.</param>
-        /// <returns>The effective relative height of the neighbor.</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static float GetEffectiveFluidHeight(OptionalVoxelState neighbor, FluidType centerFluidType, in NativeArray<float> templates, in NativeArray<BlockTypeJobData> blockTypes)
-        {
-            if (!neighbor.HasValue) return 0f; // Neutral chunk edge
-
-            BlockTypeJobData nbProps = blockTypes[neighbor.State.ID];
-
-            // Solid obstacle
-            if (nbProps.IsSolid && !nbProps.IsTransparentForMesh) return 2.0f; // Represents a solid wall (higher than fluid 1.0)
-
-            // Open Drop / Pit
-            if (nbProps.FluidType == FluidType.None && !nbProps.IsSolid) return -1.0f; // Massive pull
-
-            // Same fluid type
-            if (nbProps.FluidType == centerFluidType) return templates[neighbor.State.FluidLevel];
-
-            return 0f;
-        }
-
-        /// <summary>
         /// Computes the shore push direction for a shared fluid mesh corner,
-        /// using the identical 4-block neighborhood pattern as <see cref="CalculateSymmetricCornerFlow"/>.
+        /// using the identical 4-block neighborhood pattern as
+        /// <see cref="BurstFluidFlowUtility.CalculateSymmetricCornerFlow"/>.
         /// <para>
         /// Returns a normalized XZ direction pointing away from the wall(s), used for
         /// the shore push displacement effect. The shore gradient itself is computed
@@ -1561,10 +1433,10 @@ namespace Helpers
             in NativeArray<BlockTypeJobData> blockTypes,
             out Vector2 shorePush)
         {
-            bool s00 = IsSolidWall(b00, in blockTypes); // (-x, -z) = SW
-            bool s10 = IsSolidWall(b10, in blockTypes); // (+x, -z) = SE
-            bool s01 = IsSolidWall(b01, in blockTypes); // (-x, +z) = NW
-            bool s11 = IsSolidWall(b11, in blockTypes); // (+x, +z) = NE
+            bool s00 = BurstFluidFlowUtility.IsSolidWall(b00, in blockTypes); // (-x, -z) = SW
+            bool s10 = BurstFluidFlowUtility.IsSolidWall(b10, in blockTypes); // (+x, -z) = SE
+            bool s01 = BurstFluidFlowUtility.IsSolidWall(b01, in blockTypes); // (-x, +z) = NW
+            bool s11 = BurstFluidFlowUtility.IsSolidWall(b11, in blockTypes); // (+x, +z) = NE
 
             // Accessibility guard: if a NON-FLUID, non-wall block is enclosed by walls on both
             // grid-adjacent edges, promote it to wall status. This prevents diagonal air (e.g., SW)
@@ -1620,23 +1492,6 @@ namespace Helpers
             // Normalize the push vector so it only encodes direction, not magnitude.
             float len = math.sqrt(x_push * x_push + z_push * z_push);
             shorePush = len > 0.001f ? new Vector2(x_push / len, z_push / len) : Vector2.zero;
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static bool IsSolidWall(OptionalVoxelState state, in NativeArray<BlockTypeJobData> blockTypes)
-        {
-            return state.HasValue && blockTypes[state.State.ID].IsSolid && blockTypes[state.State.ID].FluidType == FluidType.None;
-        }
-
-        /// <summary>
-        /// Returns true if the given voxel contains the same type of fluid as the center block.
-        /// Used by <see cref="CalculateSymmetricCornerFlow"/> to restrict derivative computation
-        /// to same-type fluid blocks, preventing air and walls from creating artificial gradients.
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static bool IsMatchingFluid(OptionalVoxelState state, FluidType fluidType, in NativeArray<BlockTypeJobData> blockTypes)
-        {
-            return state.HasValue && blockTypes[state.State.ID].FluidType == fluidType;
         }
 
         /// <summary>
