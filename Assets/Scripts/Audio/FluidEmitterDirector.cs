@@ -369,7 +369,7 @@ namespace Audio
         /// <param name="deltaTime">Unscaled seconds since the last frame.</param>
         private void AdvanceSources(SoundManager manager, float deltaTime)
         {
-            float categoryGain = _fluidsGroup == null ? AudioVolumes.GetLinear(AudioCategory.Fluids) : 1f;
+            float categoryGain = AudioVolumes.CategoryGain(_fluidsGroup, AudioCategory.Fluids);
 
             for (int i = 0; i < EMITTER_VOICE_COUNT; i++)
             {
@@ -383,7 +383,7 @@ namespace Audio
                     math.distance(_lastListenerVoxel, _voxelPositions[i]) > AudibleRadiusOf(_kinds[i]))
                     _targets[i] = 0f;
 
-                _fades[i] = AmbienceResolution.AdvanceFade(_fades[i], _targets[i], deltaTime, _fadeSeconds);
+                _fades[i] = AudioFade.Advance(_fades[i], _targets[i], deltaTime, _fadeSeconds);
 
                 if (_fades[i] <= SILENT_FADE && _targets[i] <= SILENT_FADE)
                 {
@@ -464,7 +464,7 @@ namespace Audio
             EmitterSoundEntry entry = _emitterSounds.Get(kind);
             if (entry == null || entry.loop == null) return null;
 
-            trim = entry.volume;
+            trim = entry.EffectiveVolume;
             return entry.loop;
         }
 

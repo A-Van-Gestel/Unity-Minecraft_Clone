@@ -90,7 +90,7 @@ namespace Editor.Validation.SoundEngine
         /// <remarks>
         /// <para>
         /// This is the only gate that can fail. The shipped asset authors all three above zero, so removing
-        /// the sentinels changed no observable behaviour today — the defect they caused was a slider whose
+        /// the sentinels changed no observable behavior today — the defect they caused was a slider whose
         /// 0 end played at full, and nothing on the real asset exercises it.
         /// </para>
         /// <para>
@@ -387,7 +387,7 @@ namespace Editor.Validation.SoundEngine
             float fade = 0f;
             for (int i = 0; i < 12; i++)
             {
-                fade = AmbienceResolution.AdvanceFade(fade, 1f, step, fadeSeconds);
+                fade = AudioFade.Advance(fade, 1f, step, fadeSeconds);
                 if (fade >= 1f)
                     return FailSound(scenario,
                         $"reached full after {(i + 1) * step:0.00}s, before the {fadeSeconds}s fade.");
@@ -406,19 +406,19 @@ namespace Editor.Validation.SoundEngine
                 return FailSound(scenario, $"a falling fade needed {downTicks} ticks to reach silence.");
 
             // At the target, further ticks must not carry it past.
-            if (!ExactValue.Equal(AmbienceResolution.AdvanceFade(1f, 1f, step, fadeSeconds), 1f))
+            if (!ExactValue.Equal(AudioFade.Advance(1f, 1f, step, fadeSeconds), 1f))
                 return FailSound(scenario, "overshot its target.");
 
             // A returning bed resumes from where it was rather than restarting — the whole point of a
             // per-source fade, and the case a shared crossfade timer cannot express.
-            float resumed = AmbienceResolution.AdvanceFade(0.6f, 1f, step, fadeSeconds);
+            float resumed = AudioFade.Advance(0.6f, 1f, step, fadeSeconds);
             if (resumed <= 0.6f) return FailSound(scenario, "a partly-faded source did not resume upward.");
 
-            if (!ExactValue.Equal(AmbienceResolution.AdvanceFade(0.4f, 1f, step, 0f), 1f))
+            if (!ExactValue.Equal(AudioFade.Advance(0.4f, 1f, step, 0f), 1f))
                 return FailSound(scenario, "a zero-length fade did not snap to its target.");
-            if (!ExactValue.Equal(AmbienceResolution.AdvanceFade(0.4f, 1f, -5f, fadeSeconds), 0.4f))
+            if (!ExactValue.Equal(AudioFade.Advance(0.4f, 1f, -5f, fadeSeconds), 0.4f))
                 return FailSound(scenario, "a negative delta moved the fade.");
-            if (!ExactValue.IsZero(AmbienceResolution.AdvanceFade(0.05f, -3f, step, fadeSeconds)))
+            if (!ExactValue.IsZero(AudioFade.Advance(0.05f, -3f, step, fadeSeconds)))
                 return FailSound(scenario, "an out-of-range target was not clamped to silence.");
 
             return true;
@@ -441,7 +441,7 @@ namespace Editor.Validation.SoundEngine
 
             for (int i = 1; i <= FADE_CONVERGENCE_TICK_BUDGET; i++)
             {
-                fade = AmbienceResolution.AdvanceFade(fade, target, step, fadeSeconds);
+                fade = AudioFade.Advance(fade, target, step, fadeSeconds);
                 if (!ExactValue.Equal(fade, target)) continue;
 
                 ticksBeyondDuration = Mathf.Max(0, i - onTime);

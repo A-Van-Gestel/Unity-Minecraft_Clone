@@ -13,9 +13,14 @@ namespace Data
     /// the array could not serve: a pool with no weights cannot say that one track is a rarity, and a clip
     /// with no gain of its own cannot be normalized against the rest of the role — the Loudness tab measured
     /// music and then had nowhere to write.
+    /// <para>
+    /// The clip-and-trim shape it shares with <see cref="AmbienceTrack"/> is exposed as
+    /// <see cref="IAuthoredGain"/> and deliberately not extracted into a base type: a class base could
+    /// initialize <see cref="volume"/> to 1, which is the unset sentinel §17 removed.
+    /// </para>
     /// </remarks>
     [Serializable]
-    public struct MusicTrack
+    public struct MusicTrack : IAuthoredGain
     {
         [Tooltip("The track to play. A track with no clip is skipped.")]
         public AudioClip clip;
@@ -36,6 +41,9 @@ namespace Data
                  "dark rather than excluded; Dark plays only underground or at night. Caves and night are " +
                  "one context — a track written for a cave suits the surface after dark.")]
         public MusicEnvironment environment;
+
+        /// <summary>The track this entry plays, or null when none is authored.</summary>
+        public AudioClip Clip => clip;
 
         /// <summary>Whether this track can actually be played.</summary>
         public bool IsPlayable => clip != null;

@@ -187,7 +187,7 @@ namespace Audio
             AdvanceFade(deltaTime);
 
             // The category gain joins here only while no mixer group is routing this source.
-            float categoryGain = _musicGroup == null ? AudioVolumes.GetLinear(AudioCategory.Music) : 1f;
+            float categoryGain = AudioVolumes.CategoryGain(_musicGroup, AudioCategory.Music);
             _source.volume = MusicResolution.SourceVolume(_fade, _trackVolume, PoolVolume(manager), categoryGain);
             manager.ApplySubmersionFilter(_filter);
 
@@ -235,7 +235,7 @@ namespace Audio
                 ? 0f
                 : MusicResolution.TailFadeTarget(_source.time, clip.length, fadeSeconds);
 
-            _fade = AmbienceResolution.AdvanceFade(_fade, target, deltaTime, fadeSeconds);
+            _fade = AudioFade.Advance(_fade, target, deltaTime, fadeSeconds);
 
             // Released only once the fade has actually arrived, which is the difference between this and the
             // Stop() it replaced. The natural end needs no release: the source runs out on its own with the

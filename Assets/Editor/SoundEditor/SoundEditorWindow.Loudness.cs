@@ -1210,12 +1210,27 @@ namespace Editor.SoundEditor
                 claim.Add(category, volume, writable, owner);
             }
 
+            // Every authored entry that carries its own gain reaches Claim the same way, through
+            // IAuthoredGain — the owner label and the role stay per-source because the interface describes
+            // the entry, not where it was found.
+            //
+            // Generic over the entry rather than taking an IAuthoredGain parameter: two of the three
+            // implementers are structs, and an interface-typed parameter would box each one
+            // (GENERAL_OPTIMIZATION_GUIDE.md §4). A constraint dispatches without allocating, which is how
+            // INeighborGates and IBlockObstruction are consumed.
+            void ClaimEntry<TEntry>(TEntry entry, AudioCategory category, string owner)
+                where TEntry : IAuthoredGain =>
+                Claim(entry.Clip, category, entry.EffectiveVolume, true, owner);
+
             if (_emitterDatabase != null)
             {
                 foreach (FluidEmitterKind kind in (FluidEmitterKind[])System.Enum.GetValues(typeof(FluidEmitterKind)))
                 {
+                    // Nullable because the lookup can miss, not because an authored gain can be absent —
+                    // so the guard lives here rather than inside ClaimEntry, where it would read as a
+                    // property of every entry kind.
                     EmitterSoundEntry entry = _emitterDatabase.Get(kind);
-                    Claim(entry?.loop, AudioCategory.Fluids, entry?.volume ?? 1f, true, $"{kind} emitter");
+                    if (entry != null) ClaimEntry(entry, AudioCategory.Fluids, $"{kind} emitter");
                 }
             }
 
@@ -1246,7 +1261,7 @@ namespace Editor.SoundEditor
                 if (_ambience.GlobalMusicTracks != null)
                 {
                     foreach (MusicTrack track in _ambience.GlobalMusicTracks)
-                        Claim(track.clip, AudioCategory.Music, track.EffectiveVolume, true, "global music");
+                        ClaimEntry(track, AudioCategory.Music, "global music");
                 }
             }
 
@@ -1257,13 +1272,12 @@ namespace Editor.SoundEditor
                 if (biome.ambientTracks != null)
                 {
                     foreach (AmbienceTrack track in biome.ambientTracks)
-                        Claim(track.clip, AudioCategory.Ambient, track.EffectiveVolume, true,
-                            $"{biome.name} track");
+                        ClaimEntry(track, AudioCategory.Ambient, $"{biome.name} track");
                 }
 
                 if (biome.musicTracks == null) continue;
                 foreach (MusicTrack track in biome.musicTracks)
-                    Claim(track.clip, AudioCategory.Music, track.EffectiveVolume, true, $"{biome.name} music");
+                    ClaimEntry(track, AudioCategory.Music, $"{biome.name} music");
             }
 
             return claims;

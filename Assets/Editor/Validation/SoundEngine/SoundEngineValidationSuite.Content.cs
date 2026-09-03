@@ -13,6 +13,7 @@ using Editor.Validation.Framework;
 using UI.Enums;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Audio;
 
 namespace Editor.Validation.SoundEngine
 {
@@ -85,6 +86,7 @@ namespace Editor.Validation.SoundEngine
             scenarios.Add(new Scenario("Prefill Heuristic Classifies Its Fixture Palette", RunPrefillHeuristic));
             scenarios.Add(new Scenario("Volume Sliders Convert To The Mixer Decibel Curve", RunVolumeCurve));
             scenarios.Add(new Scenario("Category Volumes Fold In The Master Slider", RunCategoryVolumes));
+            scenarios.Add(new Scenario("Category Gain Defers To A Routed Mixer Group", RunRoutedCategoryGain));
             scenarios.Add(new Scenario("Audio Settings Tab Is In The Generator's Tab Order", RunSettingsTabOrder));
             scenarios.Add(new Scenario("Loudness Meter Output Parses To Its Summary Values", RunLoudnessParse));
             scenarios.Add(new Scenario("Normalization Never Raises A Clip Toward The Target", RunLoudnessTrim));
@@ -655,6 +657,82 @@ namespace Editor.Validation.SoundEngine
         }
 
         /// <summary>
+        /// A source routed through a mixer group must not fold the category slider in a second time.
+        /// </summary>
+        /// <returns>True when the gain defers to a group and falls back without one.</returns>
+        /// <remarks>
+        /// The rule the four audio layers share, and the one place it can be asserted: each layer reads its
+        /// own serialized group field, so the double-application this catches would be inaudible until the
+        /// slider left 100% — and would then read as content mastered low rather than as a bug.
+        /// <para>
+        /// A real <see cref="AudioMixerGroup"/> from the project, not a null-versus-null comparison: the whole
+        /// branch is about a non-null group, so a scenario that could not find one would pass by testing
+        /// nothing. Missing mixers therefore fail rather than skip.
+        /// </para>
+        /// </remarks>
+        private static bool RunRoutedCategoryGain()
+        {
+            const string scenario = "Category Gain Defers To A Routed Mixer Group";
+
+            string[] guids = AssetDatabase.FindAssets("t:AudioMixer");
+            AudioMixerGroup group = null;
+            foreach (string guid in guids ?? Array.Empty<string>())
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                foreach (UnityEngine.Object asset in AssetDatabase.LoadAllAssetsAtPath(path))
+                {
+                    if (asset is not AudioMixerGroup candidate) continue;
+
+                    group = candidate;
+                    break;
+                }
+
+                if (group != null) break;
+            }
+
+            if (group == null)
+                return FailSound(scenario, "no AudioMixerGroup exists in the project, so the routed branch " +
+                                           "cannot be exercised at all.");
+
+            Settings settings = new Settings
+            {
+                masterVolume = 1f,
+                musicVolume = 0.5f,
+                ambientVolume = 0.5f,
+                blockVolume = 0.5f,
+                fluidVolume = 0.5f,
+                uiVolume = 0.5f,
+            };
+            AudioVolumes.Apply(settings);
+
+            try
+            {
+                foreach (AudioCategory category in (AudioCategory[])Enum.GetValues(typeof(AudioCategory)))
+                {
+                    float routed = AudioVolumes.CategoryGain(group, category);
+                    if (!Mathf.Approximately(routed, 1f))
+                        return FailSound(scenario, $"{category} routed through a mixer group returned " +
+                                                   $"{routed}, expected 1 — the group already carries it.");
+
+                    // Against the fixture's own numbers, not against GetLinear: the unrouted arm IS
+                    // GetLinear, so comparing the two would agree by construction no matter what either
+                    // one returned. Master is its own slider; every other category is 0.5 x master 1.
+                    float expected = category == AudioCategory.Master ? 1f : 0.5f;
+                    float unrouted = AudioVolumes.CategoryGain(null, category);
+                    if (!Mathf.Approximately(unrouted, expected))
+                        return FailSound(scenario, $"{category} unrouted returned {unrouted}, expected {expected}.");
+                }
+            }
+            finally
+            {
+                // The same process-wide restore RunCategoryVolumes documents.
+                AudioVolumes.Apply(new Settings());
+            }
+
+            return true;
+        }
+
+        /// <summary>
         /// Every <see cref="SettingsTab"/> value must appear in the generator's tab-order array, or the tab is
         /// silently dropped from the settings menu at runtime. Reflection is the only way in: the array is
         /// private, and the runtime check that mirrors it only fires with a live UI.
@@ -707,8 +785,9 @@ namespace Editor.Validation.SoundEngine
                     return FailSound(scenario, $"{kind} has no entry.");
                 if (entry.loop == null)
                     return FailSound(scenario, $"{kind} authors no loop — that emitter is silent in game.");
-                if (entry.volume <= 0f)
-                    return FailSound(scenario, $"{kind} is authored at volume {entry.volume}, which is silence.");
+                if (entry.EffectiveVolume <= 0f)
+                    return FailSound(scenario, $"{kind} is authored at volume {entry.EffectiveVolume}, which is " +
+                                               "silence.");
             }
 
             return true;

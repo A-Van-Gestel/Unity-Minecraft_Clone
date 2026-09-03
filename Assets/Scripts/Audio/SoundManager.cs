@@ -308,7 +308,7 @@ namespace Audio
             // The group's own volume is content, so it is folded in per source rather than left to a shared
             // mixer channel; the category gain joins it only while no mixer group is routing this voice.
             voice.volume = Mathf.Clamp01(group.volume * volumeScale) *
-                           (_blocksGroup == null ? AudioVolumes.GetLinear(AudioCategory.Blocks) : 1f);
+                           AudioVolumes.CategoryGain(_blocksGroup, AudioCategory.Blocks);
             voice.Play();
         }
 
@@ -454,11 +454,8 @@ namespace Audio
         private void AdvanceSubmersion()
         {
             float target = HasContext && Context.Submerged ? 1f : 0f;
-            float step = _submergedFadeSeconds <= 0f
-                ? 1f
-                : Time.unscaledDeltaTime / _submergedFadeSeconds;
-
-            _submergedWeight = Mathf.MoveTowards(_submergedWeight, target, step);
+            _submergedWeight = AudioFade.Advance(_submergedWeight, target, Time.unscaledDeltaTime,
+                _submergedFadeSeconds);
             LowPassCutoffHertz = AmbienceResolution.LowPassCutoff(_dryCutoffHertz, _wetCutoffHertz, _submergedWeight);
 
             if (_voiceFilters == null) return;

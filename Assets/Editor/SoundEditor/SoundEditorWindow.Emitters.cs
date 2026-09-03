@@ -138,7 +138,7 @@ namespace Editor.SoundEditor
             {
                 EmitterSoundEntry entry = _emitterDatabase.Get(kind);
 
-                if (entry?.loop == null || entry.volume <= 0f)
+                if (entry?.loop == null || entry.EffectiveVolume <= 0f)
                 {
                     silent++;
                     firstProblem ??= $"{kind} is silent in game";

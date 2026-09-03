@@ -1,5 +1,6 @@
 using System;
 using Data.Enums;
+using Helpers;
 using UnityEngine;
 
 namespace Data
@@ -27,14 +28,7 @@ namespace Data
         /// </summary>
         /// <param name="material">The block's sound material.</param>
         /// <returns>The group to play from, or null when the material is out of the asset's range.</returns>
-        public BlockSoundGroup Get(SoundMaterial material)
-        {
-            // Guarded rather than indexed: an asset authored before an appended enum value would otherwise
-            // throw from a trigger site on the main thread, silencing far more than the one missing group.
-            int index = (byte)material;
-            if (_groups == null || (uint)index >= (uint)_groups.Length) return null;
-            return _groups[index];
-        }
+        public BlockSoundGroup Get(SoundMaterial material) => EnumIndexedEntries.Get(_groups, (byte)material);
 
         /// <summary>
         /// Replaces the group array. Editor-only entry point for the authoring inspector.
@@ -49,16 +43,7 @@ namespace Data
         /// Also runs from <c>OnEnable</c>, not <c>OnValidate</c> alone: a freshly created asset never gets an
         /// <c>OnValidate</c> pass, and would otherwise sit at zero groups — silent, and silently so.
         /// </remarks>
-        private void EnsureSized()
-        {
-            if (_groups != null && _groups.Length == MaterialCount) return;
-
-            BlockSoundGroup[] resized = new BlockSoundGroup[MaterialCount];
-            int carry = _groups == null ? 0 : Mathf.Min(_groups.Length, MaterialCount);
-            for (int i = 0; i < carry; i++) resized[i] = _groups[i];
-            for (int i = carry; i < MaterialCount; i++) resized[i] = new BlockSoundGroup();
-            _groups = resized;
-        }
+        private void EnsureSized() => EnumIndexedEntries.EnsureSized(ref _groups, MaterialCount);
 
         private void OnEnable() => EnsureSized();
 

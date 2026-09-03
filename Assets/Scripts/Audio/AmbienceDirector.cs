@@ -390,7 +390,7 @@ namespace Audio
             AmbienceDatabase ambience = manager.Ambience;
             AudioClip caveLoop = ambience != null ? ambience.CaveLoop : null;
             float target = _undergroundCommitted && caveLoop != null ? 1f : 0f;
-            _caveFade = AmbienceResolution.AdvanceFade(_caveFade, target, deltaTime, _caveFadeSeconds);
+            _caveFade = AudioFade.Advance(_caveFade, target, deltaTime, _caveFadeSeconds);
 
             if (_caveFade > SILENT_FADE && _caveSource.clip != caveLoop)
             {
@@ -498,7 +498,7 @@ namespace Audio
                 // being re-aimed at nothing, so it recedes from where it was last heard.
                 if (!placed) PlaceBed(i, _bedBearings[i], listener, deltaTime);
 
-                _bedFades[i] = AmbienceResolution.AdvanceFade(_bedFades[i], target, deltaTime, _fadeSeconds);
+                _bedFades[i] = AudioFade.Advance(_bedFades[i], target, deltaTime, _fadeSeconds);
 
                 if (_bedFades[i] <= SILENT_FADE && target <= SILENT_FADE)
                 {
@@ -647,8 +647,7 @@ namespace Audio
         /// </summary>
         /// <returns>The Ambient gain when no mixer group routes these sources, otherwise 1.</returns>
         /// <remarks>The same mixer-optional arrangement the one-shot voices use.</remarks>
-        private float CategoryGain() =>
-            _ambientGroup == null ? AudioVolumes.GetLinear(AudioCategory.Ambient) : 1f;
+        private float CategoryGain() => AudioVolumes.CategoryGain(_ambientGroup, AudioCategory.Ambient);
 
         /// <summary>
         /// Creates one 2D looping source as a child of this component.

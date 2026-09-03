@@ -84,6 +84,20 @@ namespace Audio
         }
 
         /// <summary>
+        /// The category gain a source must fold in itself, given the mixer group it is routed through.
+        /// </summary>
+        /// <param name="group">The mixer group the source outputs to, or null when it is unrouted.</param>
+        /// <param name="category">The category the source belongs to.</param>
+        /// <returns><see cref="GetLinear"/> for an unrouted source; 1 when a group already carries the gain.</returns>
+        /// <remarks>
+        /// One rule in one place because applying it twice is inaudible until it is not: a routed source that
+        /// also multiplied by the slider would sit at the square of it, quiet in a way that looks like content
+        /// mastered low rather than like a bug.
+        /// </remarks>
+        public static float CategoryGain(AudioMixerGroup group, AudioCategory category) =>
+            group == null ? GetLinear(category) : 1f;
+
+        /// <summary>
         /// Converts a linear 0–1 slider value to decibels for a mixer parameter.
         /// </summary>
         /// <param name="linear">The slider value; values at or below zero map to silence.</param>

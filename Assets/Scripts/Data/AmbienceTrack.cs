@@ -11,9 +11,14 @@ namespace Data
     /// Replaces the single <c>BiomeBase.ambientLoop</c> rather than sitting beside it. Two fields describing
     /// one thing would need a precedence rule every future reader has to learn, and the old field would
     /// linger as a trap for anyone authoring a biome.
+    /// <para>
+    /// The clip-and-trim shape it shares with <see cref="MusicTrack"/> is exposed as
+    /// <see cref="IAuthoredGain"/> and deliberately not extracted into a base type: a class base could
+    /// initialize <see cref="volume"/> to 1, which is the unset sentinel §17 removed.
+    /// </para>
     /// </remarks>
     [Serializable]
-    public struct AmbienceTrack
+    public struct AmbienceTrack : IAuthoredGain
     {
         [Tooltip("The loop to play. A track with no clip is skipped.")]
         public AudioClip clip;
@@ -32,6 +37,9 @@ namespace Data
                  "the others without touching the Ambient slider. 0 is silent.")]
         [Range(0, 1)]
         public float volume;
+
+        /// <summary>The loop this track plays, or null when none is authored.</summary>
+        public AudioClip Clip => clip;
 
         /// <summary>
         /// The gain this track contributes to the bed. Zero is silent.

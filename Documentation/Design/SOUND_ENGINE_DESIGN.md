@@ -1,7 +1,7 @@
 # Sound Engine Design
 
-**Version:** 1.18  
-**Date:** 2026-08-31  
+**Version:** 1.19  
+**Date:** 2026-09-02  
 **Status:** **Partially implemented — S0–S3, S5–S8, S10 and S11 shipped; all confirmed in game except S8
 and S10, which are awaiting their listening pass.** The `SoundMaterial`
 channel, the shared `BlockSoundDatabase`, the BlockEditor dropdown and prefill, the volume settings, the
@@ -10,7 +10,7 @@ with its seven exposed volume parameters; two CC0 packs supply content, so all 1
 break and step clips. Footsteps sample two cells, so wading and cross-mesh flora sound, and carry a gait and
 jump dimension — sprinting, taking off and landing each have their own clips, falling back to the plain step
 where a pack authors none (§5.1, §16). The
-`Validate Sound Engine` suite guards the resolution chain and the ambience decisions (77 baselines).
+`Validate Sound Engine` suite guards the resolution chain and the ambience decisions (80 baselines).
 **S2's runtime shipped on 2026-08-29** — `AudioContext`, the `AmbienceResolution` decision layer, the
 `AmbienceDirector` bed pair with its cave layer, the `MusicScheduler` and the underwater low-pass — on top of
 the §6.2 managed biome query, which shipped the same day and is guarded by its own `Validate Biome Selection`
@@ -29,7 +29,7 @@ Per-kind volume trims are still all 1.0 and have not been balanced against each 
 2026-08-30** (§12): ambience beds carry a per-track gain, so the Loudness tab can normalize the Ambient role
 the way it already does Blocks and Fluids; music is deliberately excluded until it has content. **S10 shipped on 2026-08-31** (§15): music now fades
 in, out at its tail, and across every interruption, and quitting to the main menu fades the whole listener
-down before the scene is torn down — music was the only sounding layer without an envelope. The suite stands
+down before the scene is torn down — music was the only sounding layer without an envelope. The suite stood
 at 76 baselines. The remainder of S4 is still outstanding.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
@@ -758,7 +758,7 @@ the whole data model; S2 and S3 are independent of each other and can land in ei
 **S3 depends on S2, not S1.** The phase table originally listed "S1 (pool infra)", but S1's voice
 roster is a fixed set of short one-shots with stealing — the wrong lifetime model for long-lived
 fading loops. The pattern S3 actually reuses is S2's: a director owning a source roster on top of
-a pure, suite-pinnable resolution layer, and `AmbienceResolution.AdvanceFade`/`GainFromFade`
+a pure, suite-pinnable resolution layer, and `AudioFade.Advance`/`AmbienceResolution.GainFromFade`
 themselves.
 
 **S2's music half closed on 2026-08-30 (S8, §13).** Both pools are authored and the scheduler plays from
@@ -1340,7 +1340,8 @@ most exposed material was the one entering and leaving hardest.
   moves is expressed as a *target* for. The opening fade-in, the tail, a console stop and a queued
   replacement are not independent: a stop arriving during a fade-in has to continue down from wherever the
   fade had reached, and a second timer would have to guess that level. The position never jumps; only the
-  target varies. The advance itself is `AmbienceResolution.AdvanceFade`, unchanged and shared.
+  target varies. The advance itself is `AudioFade.Advance`, shared with the ambience beds and the
+  submersion filter.
 - **`MusicResolution.GainFromFade`** — a **decibel-linear** curve across a `FadeFloorDecibels` (−60 dB)
   travel, returning an exact zero at the bottom. Deliberately *not* the equal-power `√` curve
   `AmbienceResolution.GainFromFade` uses, for the reason the cave bed already avoids it (§5.3): equal power
@@ -1604,6 +1605,20 @@ deliberately.
 
 ## Document History
 
+* **v1.19** - Shared-gain extraction (2026-09-02). No behavioral change; three duplications collapsed.
+  The mixer-group rule (`group == null ? GetLinear(category) : 1f`) existed in four copies across
+  `SoundManager`, `AmbienceDirector`, `FluidEmitterDirector` and `MusicScheduler` and is now
+  `AudioVolumes.CategoryGain`, with the first baseline over its routed branch — the double-application it
+  guards is inaudible until the slider leaves 100%, then reads as content mastered low. The fade
+  integrator moved out of `AmbienceResolution` (a class named for one of its four consumers) into
+  `AudioFade.Advance`, absorbing the copy `SoundManager.AdvanceSubmersion` had hand-rolled;
+  `GainFromFade` deliberately stayed put, since `MusicResolution` declines it on purpose and three
+  `<see cref>` comments read as "not the ambience one". The two enum-indexed sound databases share
+  `EnumIndexedEntries` for their `Get`/`EnsureSized` bodies — plain statics, so no serialized field moved
+  and no `.asset` changed. `IAuthoredGain` exposes the clip-and-trim pair on `AmbienceTrack`,
+  `MusicTrack` and `EmitterSoundEntry` for the Loudness tab's claim walk; it is deliberately **not** a
+  base type, because a class base could default `volume` to 1 — the sentinel §17 removed — and reaching
+  a struct entry through it boxes, so it is editor-side only. Suite 79 → 80.
 * **v1.18** - Review pass (2026-08-31). Four fixes off a `/code-review` of the unpushed branch, in §17. The
   one worth remembering: five properties read a zero content trim as *full level*, so `Music Volume` and
   `Bed Volume` — adjacent sliders in one window — did opposite things at 0. The sentinel was defending a
