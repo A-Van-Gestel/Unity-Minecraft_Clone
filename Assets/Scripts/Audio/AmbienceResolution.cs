@@ -77,10 +77,13 @@ namespace Audio
         /// <param name="headBlockId">The block in the cell the listener's head occupies.</param>
         /// <returns>True when that block is a fluid of any type.</returns>
         /// <remarks>
-        /// Read from the voxel rather than from a contact state: <c>Assets/Scripts/Physics/</c> computes no
-        /// liquid contact of any kind, and inventing one for a 4 Hz query would put an audio feature inside
-        /// the solver's hot path. The consequence is that submersion is decided per cell, so a head just
-        /// under a partly-filled surface reads dry until it enters the cell below.
+        /// Read from the voxel rather than from a contact state, and deliberately still so. Since 2026-09-03
+        /// the solver <i>does</i> compute a liquid contact (<see cref="Physics.VoxelRigidbody.FluidContact"/>,
+        /// for buoyancy and flow push), but it answers a different question at a different rate: the whole
+        /// body's waterline every fixed step, versus this layer's head cell four times a second. Routing the
+        /// audio through it would tie the ambience to the player's collider and to physics timing for no gain.
+        /// The consequence is unchanged: submersion is decided per cell, so a head just under a partly-filled
+        /// surface reads dry until it enters the cell below.
         /// </remarks>
         public static bool IsSubmerged(BlockType[] blockTypes, ushort headBlockId)
         {

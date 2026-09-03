@@ -4893,6 +4893,157 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     }
 
     /// <summary>
+    /// Resolves what fluid, if any, a body's AABB is sitting in — the waterline, the current, and the
+    /// authored coefficients of the fluid responsible (<c>FLUID_BUGS</c> #14 / #02).
+    /// </summary>
+    /// <param name="bodyAABB">The body's <b>Unity-space</b> AABB.</param>
+    /// <param name="contact">The resolved contact; <c>default</c> (no fluid) when the body is in air.</param>
+    /// <remarks>
+    /// The mirror image of <see cref="GatherPhysicsCells"/>: same scan shape, same WS-4 origin offset, same
+    /// <c>TryGetVoxel</c> fast path, keeping exactly the cells that method discards. A separate pass because
+    /// the collision gather's envelope carries step-height head-room that is meaningless for buoyancy.
+    /// <para>
+    /// The scan covers only the cells the body overlaps; the eight neighbors a flow vector needs are read on
+    /// demand around the winning cell (<see cref="FluidNeighbor"/>) once the waterline is decided.
+    /// </para>
+    /// </remarks>
+    public void GatherFluidContact(Bounds bodyAABB, out FluidContact contact)
+    {
+        contact = default;
+
+        // FixedUpdate can outlive a world unload by a frame. Guarded on IsDisposed, not on the arrays'
+        // IsCreated, which stays true after disposal — see JobDataManager.Dispose's remarks.
+        if (FluidVertexTemplates == null || FluidVertexTemplates.IsDisposed) return;
+        if (JobDataManager == null || JobDataManager.IsDisposed) return;
+
+        NativeArray<BlockTypeJobData> blockTypes = JobDataManager.BlockTypesJobData;
+
+        Vector3Int minVoxel = new Vector3Int(
+            Mathf.FloorToInt(bodyAABB.min.x),
+            Mathf.FloorToInt(bodyAABB.min.y),
+            Mathf.FloorToInt(bodyAABB.min.z));
+        Vector3Int maxVoxel = new Vector3Int(
+            Mathf.FloorToInt(bodyAABB.max.x),
+            Mathf.FloorToInt(bodyAABB.max.y),
+            Mathf.FloorToInt(bodyAABB.max.z));
+
+        int originX = WorldOrigin.OriginVoxel.x;
+        int originZ = WorldOrigin.OriginVoxel.z;
+
+        // The highest fluid surface overlapping the body sets the waterline; the cell that owns it also
+        // supplies the fluid type, the authored coefficients and the flow sample.
+        float bestSurfaceY = float.NegativeInfinity;
+        Vector3Int bestCell = default;
+        VoxelState bestVoxel = default;
+        bool found = false;
+
+        for (int x = minVoxel.x; x <= maxVoxel.x; x++)
+        {
+            for (int y = minVoxel.y; y <= maxVoxel.y; y++)
+            {
+                for (int z = minVoxel.z; z <= maxVoxel.z; z++)
+                {
+                    if (!worldData.TryGetVoxel(x + originX, y, z + originZ, out VoxelState voxel)) continue;
+
+                    BlockType props = voxel.Properties;
+                    if (props == null || props.fluidType == FluidType.None) continue;
+
+                    NativeArray<float> templates = TemplatesFor(props.fluidType);
+                    float surfaceY = y + FluidContactResolver.SurfaceHeight(voxel.FluidLevel, in templates);
+
+                    // A cell whose surface sits at or below the feet is not submerging anything.
+                    if (surfaceY <= bodyAABB.min.y || surfaceY <= bestSurfaceY) continue;
+
+                    bestSurfaceY = surfaceY;
+                    bestCell = new Vector3Int(x, y, z);
+                    bestVoxel = voxel;
+                    found = true;
+                }
+            }
+        }
+
+        if (!found) return;
+
+        BlockType fluid = bestVoxel.Properties;
+        NativeArray<float> fluidTemplates = TemplatesFor(fluid.fluidType);
+        bool isFalling = BurstVoxelDataBitMapping.IsFluidFalling(bestVoxel.FluidLevel);
+
+        // A falling column has no horizontal current: the surface derivative would return the renderer's
+        // outward scroll, which walls the column off. Its downward pull is applied as a vertical-momentum
+        // target instead, on the axis a swimmer can fight.
+        if (isFalling)
+        {
+            contact = BuildContact(fluid, Vector3.zero, bestSurfaceY, bodyAABB, isFalling: true);
+            return;
+        }
+
+        Vector2 flow = FluidContactResolver.ResolveFlow(
+            new OptionalVoxelState(bestVoxel),
+            FluidNeighbor(bestCell, 0, 1, originX, originZ),
+            FluidNeighbor(bestCell, 0, -1, originX, originZ),
+            FluidNeighbor(bestCell, 1, 0, originX, originZ),
+            FluidNeighbor(bestCell, -1, 0, originX, originZ),
+            FluidNeighbor(bestCell, 1, 1, originX, originZ),
+            FluidNeighbor(bestCell, -1, 1, originX, originZ),
+            FluidNeighbor(bestCell, 1, -1, originX, originZ),
+            FluidNeighbor(bestCell, -1, -1, originX, originZ),
+            fluid.fluidType, in fluidTemplates, in blockTypes);
+
+        contact = BuildContact(fluid, new Vector3(flow.x, 0f, flow.y), bestSurfaceY, bodyAABB, isFalling: false);
+    }
+
+    /// <summary>Assembles a contact from a resolved current and the fluid's authored coefficients.</summary>
+    /// <param name="fluid">The block at the waterline.</param>
+    /// <param name="flowDirection">The resolved current, in Unity space.</param>
+    /// <param name="surfaceY">Unity-space Y of the fluid surface.</param>
+    /// <param name="bodyAABB">The body's Unity-space AABB.</param>
+    /// <param name="isFalling">Whether the waterline fluid is a falling column.</param>
+    /// <returns>The assembled contact.</returns>
+    private static FluidContact BuildContact(BlockType fluid, Vector3 flowDirection, float surfaceY,
+        Bounds bodyAABB, bool isFalling)
+    {
+        return new FluidContact
+        {
+            Type = fluid.fluidType,
+            SubmergedFraction = FluidContactResolver.SubmergedFraction(surfaceY, bodyAABB.min.y,
+                bodyAABB.max.y - bodyAABB.min.y),
+            FlowDirection = flowDirection,
+            IsFalling = isFalling,
+            Buoyancy = fluid.buoyancy,
+            VerticalDrag = fluid.verticalDrag,
+            SubmergedSpeedMultiplier = fluid.submergedSpeedMultiplier,
+            SwimAscendSpeed = fluid.swimAscendSpeed,
+            PushStrength = fluid.pushStrength,
+        };
+    }
+
+    /// <summary>Reads one horizontal neighbor of a fluid cell for the flow derivative.</summary>
+    /// <param name="cell">The Unity-space cell being sampled around.</param>
+    /// <param name="dx">Offset on X, in cells.</param>
+    /// <param name="dz">Offset on Z, in cells.</param>
+    /// <param name="originX">The WS-4 voxel-space X origin.</param>
+    /// <param name="originZ">The WS-4 voxel-space Z origin.</param>
+    /// <returns>The neighbor's state, or a value-less state when it is out of world or unloaded —
+    /// which the flow derivative already treats as a neutral edge.</returns>
+    private OptionalVoxelState FluidNeighbor(Vector3Int cell, int dx, int dz, int originX, int originZ)
+    {
+        return worldData.TryGetVoxel(cell.x + dx + originX, cell.y, cell.z + dz + originZ,
+            out VoxelState neighbor)
+            ? new OptionalVoxelState(neighbor)
+            : default;
+    }
+
+    /// <summary>Picks the vertex-height template matching a fluid type, as the meshing job does.</summary>
+    /// <param name="fluidType">The fluid whose template is wanted.</param>
+    /// <returns>The 16-entry height template.</returns>
+    private NativeArray<float> TemplatesFor(FluidType fluidType)
+    {
+        return fluidType == FluidType.WaterLike
+            ? FluidVertexTemplates.WaterVertexTemplates
+            : FluidVertexTemplates.LavaVertexTemplates;
+    }
+
+    /// <summary>
     /// Retrieves the full state of a voxel at a given <b>voxel-space</b> cell.
     /// </summary>
     /// <param name="voxelCell">The voxel-space cell.</param>

@@ -86,6 +86,33 @@ namespace Data
         [Range(0f, 1f)]
         public float spreadChance = 1.0f;
 
+        [Tooltip("How strongly this fluid lifts a body inside it, as a fraction of gravity that gets cancelled.\n" +
+                 "0 = no support (the body falls as if in air), 1 = exactly cancels gravity (neutral float), " +
+                 "above 1 pushes the body up to the surface.\nScaled by how much of the body is actually under the surface.")]
+        [Range(0f, 2f)]
+        public float buoyancy = 0.55f;
+
+        [Tooltip("How quickly vertical speed bleeds off inside this fluid, per second.\n" +
+                 "Higher values settle a body to a slow, steady sink or rise instead of letting it keep accelerating.")]
+        [Range(0f, 30f)]
+        public float verticalDrag = 6f;
+
+        [Tooltip("Horizontal movement speed multiplier while fully submerged. 1 = moves at the normal walking speed, " +
+                 "lower values wade/swim slower. Scaled by submersion, so wading ankle-deep barely slows the player.")]
+        [Range(0.1f, 1f)]
+        public float submergedSpeedMultiplier = 0.5f;
+
+        [Tooltip("How hard flowing fluid pushes a body along the current, in meters per second at full flow.\n" +
+                 "Zero makes the fluid still — bodies float but are never carried.")]
+        [Range(0f, 10f)]
+        public float pushStrength = 1.4f;
+
+        [Tooltip("Vertical speed a swim stroke reaches inside this fluid, in meters per second (jump swims up, " +
+                 "crouch swims down).\nScaled by submersion, so a body near the surface strokes weakly and settles " +
+                 "at the waterline instead of launching clear of it.")]
+        [Range(0f, 10f)]
+        public float swimAscendSpeed = 0.9f;
+
         [Header("Lighting Properties")]
         [Tooltip("How many light levels will be blocked by this block.")]
         [Range(0, 15)]
