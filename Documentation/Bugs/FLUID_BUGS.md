@@ -6,16 +6,20 @@ This document outlines **open** bugs related to fluid behavior and simulation. R
 
 ---
 
-## 02. No player effect
+## 02. No player effect — ⚠️ PARTIALLY IMPLEMENTED
 
-**Severity:** Missing Feature  
-**Files:** `Player.cs`, `PlayerInteraction.cs`
+**Severity:** Missing Feature (visual only)  
+**Files:** `Player.cs`, `Physics/VoxelRigidbody.cs`, `World.GatherFluidContact`
 
-Fluid voxels do not currently affect the player:
+The physics half shipped 2026-09-03 (with **#14**, in-game confirmed) — fluid now slows the player,
+floats them, carries them on its current, and lets them swim up, down and out onto a bank. Tuned per
+fluid in `BlockDatabase.asset`; guarded by `Minecraft Clone/Dev/Validate Physics Solver` `B27`-`B44`.
 
-- Player can walk through fluid without slowing down
-- No buoyancy / swimming simulation
-- No on-screen visual to indicate submersion
+**Still open — the third bullet only:**
+
+- No on-screen visual to indicate submersion (overlay/tint while the eye line is under the surface).
+
+Lava is authored a first pass thicker than water, but a proper lava feel pass has not been done.
 
 ---
 
@@ -67,13 +71,24 @@ This entry is therefore blocked on a system that does not exist yet, not on flui
 
 ---
 
-## 14. Missing Entity Pushing & Buoyancy — ⚠️ MISSING FEATURE
+## 14. Missing Entity Pushing & Buoyancy — ⚠️ PARTIALLY IMPLEMENTED
 
-**Severity:** Missing Feature (Physics)  
-**Files:** `Player.cs`, `Physics/VoxelRigidbody.cs`, `Entity` base classes
+**Severity:** Missing Feature (Physics) — blocked on the item-entity system for the remainder  
+**Files:** `Physics/VoxelRigidbody.cs`, `Physics/FluidContact.cs`, `Physics/FluidContactResolver.cs`, `World.GatherFluidContact`, `Jobs/BurstData/BurstFluidFlowUtility.cs`
 
 Flowing liquids in Minecraft apply a physical pushing force to any entities (players, mobs, dropped items) caught inside them, moving them in the direction of the flow vector. Additionally, dropped items float upwards to the surface of water (buoyancy).
-Our custom `VoxelRigidbody` physics do not currently query fluid flow vectors or apply buoyancy.
+
+**Shipped 2026-09-03, in-game confirmed:** `VoxelRigidbody` resolves a `FluidContact` once per
+`FixedUpdate` and applies buoyancy, vertical and horizontal drag, and the flow push. The flow vector
+is not a second implementation — `VoxelMeshHelper`'s corner-flow core moved to
+`Jobs.BurstData.BurstFluidFlowUtility` and both meshing and physics call it, so the current a body
+feels is the one the shader draws (negated: the meshing vector is a UV scroll offset pointing
+upstream). A falling column pushes **down** rather than forwarding that outward vector. Guarded by
+`B27`-`B44`; the design decisions are recorded in `SUB_VOXEL_COLLISION_SYSTEM.md` §7 + revision history.
+
+**Still open:** the *entity* half. There are no mobs and no dropped items — the engine has no
+item-entity system at all, so `VoxelRigidbody`'s only consumer is the player. Dropped-item buoyancy
+stays blocked on the same system as **#13**, and this entry must not be archived until it exists.
 
 ---
 
