@@ -2,6 +2,10 @@
 
 This document describes the algorithm and techniques used to render the foam shoreline effect where fluid surfaces meet solid walls. The system spans the C# mesher (`VoxelMeshHelper.cs`) and the HLSL shader (`UberLiquidShader.shader`).
 
+**Relationship to other documents:**
+
+- [`../Design/UNDERWATER_AND_SUBMERSION_RENDERING.md`](../Design/UNDERWATER_AND_SUBMERSION_RENDERING.md) — how the same liquid shader is seen from *inside* a fluid body, plus the screen-space submersion overlay. It changes this shader's `Cull` state (`UW-1`) and nothing about the vertex-channel contract below.
+
 ---
 
 ## Overview

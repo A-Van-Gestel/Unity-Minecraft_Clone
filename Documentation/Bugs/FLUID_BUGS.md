@@ -19,7 +19,13 @@ fluid in `BlockDatabase.asset`; guarded by `Minecraft Clone/Dev/Validate Physics
 
 - No on-screen visual to indicate submersion (overlay/tint while the eye line is under the surface).
 
-Lava is authored a first pass thicker than water, but a proper lava feel pass has not been done.
+Designed in [`../Design/UNDERWATER_AND_SUBMERSION_RENDERING.md`](../Design/UNDERWATER_AND_SUBMERSION_RENDERING.md)
+(`UW-0`…`UW-6`), which scopes three defects under that one sentence: the liquid pass never renders
+from *inside* a fluid body (`Cull Back`), there is no screen-space medium, and there is no waterline
+when the eye sits at the surface. Not implemented.
+
+Lava is authored a first pass thicker than water, but a proper lava feel pass has not been done —
+`UW-6` owns it.
 
 ---
 
