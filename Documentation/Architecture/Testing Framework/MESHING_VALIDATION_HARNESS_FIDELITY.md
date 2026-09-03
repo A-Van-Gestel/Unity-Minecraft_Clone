@@ -231,7 +231,15 @@ The lighting suite already closed its half of this loop: A1 routes harness input
     - **B21 — fill-faithful repeat of B19** (20 verts; culled). **Flips red if the halo/slab substrate under-copies or mis-indexes the border plane** — the actual substrate guard.
 - **Scope note:** the 4 *diagonal* neighbor maps do not feed culling. They were long described here as feeding
   "only smooth-lighting AO" — **that is wrong, corrected 2026-07-26 (MP-7)**: they also drive **fluid corner geometry**. `GenerateFluidMeshData` unpacks them as `n_NE/n_SE/n_SW/n_NW` and feeds them to
-  `GetSmoothedCornerHeight` and `CalculateSymmetricCornerFlow` (`VoxelMeshHelper.cs:746`, `764–780`), **unconditionally — independent of `SmoothLightingQuality`**. So a diagonal fault moves fluid surface vertices, not just shading, and is observable by a geometry oracle without any corner-light oracle. Their fill-faithful analog is still a follow-up; their *routing* is guarded by **B38** (see MH-12).
+  `GetSmoothedCornerHeight` (still in `VoxelMeshHelper`) and `CalculateSymmetricCornerFlow` (moved to `Jobs.BurstData.BurstFluidFlowUtility` on 2026-09-03, so physics can share it), **unconditionally — independent of `SmoothLightingQuality`**. So a diagonal fault moves fluid surface vertices, not just shading, and is observable by a geometry oracle without any corner-light oracle. Their fill-faithful analog is still a follow-up; their *routing* is guarded by **B38** (see MH-12).
+- ⚠️ **B38 names the flow function but does not observe it.** Its assertion sums emitted vertex **Y**, which
+  comes from `GetSmoothedCornerHeight` alone; the flow derivative reaches the GPU through the UV stream
+  (`uv.xy`) and nothing read it. Measured 2026-09-03 by prove-red: transposing the flow vector's two
+  components left **all 59** then-existing meshing baselines green. Closed by **B64/B65**
+  (`MeshingValidationSuite.FluidFlow.cs`), which sum `uv.xy` over top-face vertices and pin the vector's
+  axis, sign, mirror antisymmetry, its vanishing on a flat field and its growth with slope — the same
+  transposition now reddens exactly those two. They assert *properties*, not a transcription of the
+  derivative or its smoothstep speed curve, so retuning the curve leaves them green.
 - **Effort:** 🟡 medium (the fill wiring is the bulk; the baseline reuses B19's geometry).
 
 #### MH-12 — Neighbor maps could be permuted without any baseline noticing · **CLOSED (2026-07-26)** — cardinals B37, diagonals B38
